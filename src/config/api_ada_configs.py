@@ -5,7 +5,7 @@ import time
 
 from packaging.version import Version
 
-NEWEST_VER = "0.2.1"  # 当前支持的最新版本
+NEWEST_VER = "0.2.2"  # 当前支持的最新版本
 
 @dataclass
 class APIProvider:
