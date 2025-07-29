@@ -234,6 +234,7 @@ model_max_output_length = 800 # 模型单次返回的最大token数
 
 [model.utils] # 在麦麦的一些组件中使用的模型，例如表情包模块，取名模块，关系模块，是麦麦必须的模型
 model_name = "siliconflow-deepseek-v3"  # 对应 model_config.toml 中的模型名称
+# model_names = ["siliconflow-deepseek-v3", "siliconflow-deepseek-r1"] #(可选) 支持多个模型名称,实现跨provider模型重试
 temperature = 0.2  # 模型温度，新V3建议0.1-0.3
 max_tokens = 800   # 最大输出token数
 

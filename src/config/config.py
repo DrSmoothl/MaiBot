@@ -166,8 +166,10 @@ def _models(parent: Dict, config: ModuleConfig):
         capabilities = model.get("capabilities", [])
 
         if name in config.models:  # 查重
-            logger.error(f"重复的模型名称: {name}，请检查配置文件。")
-            raise KeyError(f"重复的模型名称: {name}，请检查配置文件。")
+            logger.error(f"重复的模型名称: '{name}'，请检查配置文件。")
+            logger.error(f"重复位置：模型标识符 '{model_identifier}' 与已存在的模型名称冲突。")
+            logger.error(f"解决方案：请为模型 '{model_identifier}' 设置一个唯一的 name 字段，或删除重复的模型配置。")
+            raise KeyError(f"重复的模型名称: '{name}'，每个模型的 name 字段必须唯一，请检查配置文件。")
 
         if model_identifier and api_provider:
             # 检查API提供商是否存在

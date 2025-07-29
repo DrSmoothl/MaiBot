@@ -1,5 +1,5 @@
 [inner]
-version = "0.2.1"
+version = "0.2.2"
 
 # 配置文件版本号迭代规则同bot_config.toml
 # 
@@ -59,7 +59,7 @@ api_keys = [                            # API Key列表（多个key支持错误�
     "sk-your-third-key-here"
 ]
 # 向后兼容：如果只有一个key，也可以使用单个key字段
-#key = "******"                         # API Key （可选，默认为None）
+#api_key = "******"                         # API Key （可选，默认为None）
 client_type = "openai"                  # 请求客户端（可选，默认值为"openai"，使用gimini等Google系模型时请配置为"gemini"）
 
 [[api_providers]] # 特殊：Google的Gimini使用特殊API，与OpenAI格式不兼容，需要配置client为"gemini"
@@ -76,7 +76,7 @@ client_type = "gemini"
 name = "SiliconFlow"
 base_url = "https://api.siliconflow.cn/v1"
 # 单个key的示例（向后兼容）
-key = "******"
+api_key = "******"
 #
 #[[api_providers]]
 #name = "LocalHost"

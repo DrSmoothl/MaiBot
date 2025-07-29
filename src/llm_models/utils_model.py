@@ -128,15 +128,39 @@ class LLMRequest:
         初始化LLM请求实例
         Args:
             model: 模型配置字典，兼容旧格式和新格式
+                  支持单模型: {"model_name": "xxx"}
+                  或多模型: {"model_names": ["xxx", "yyy"]}
             **kwargs: 额外参数
         """
-        logger.debug(f"🔍 [模型初始化] 开始初始化模型: {model.get('model_name', model.get('name', 'Unknown'))}")
+        # 支持多模型配置
+        self.model_names: list[str] = []
+        self.current_model_index: int = 0
+        
+        # 解析模型名称配置
+        if "model_names" in model and isinstance(model["model_names"], list):
+            # 新的多模型配置
+            self.model_names = model["model_names"]
+            logger.debug(f"🔍 [模型初始化] 使用多模型配置: {self.model_names}")
+        elif "model_name" in model:
+            # 单模型配置（向后兼容）
+            self.model_names = [model["model_name"]]
+            logger.debug(f"🔍 [模型初始化] 使用单模型配置: {model['model_name']}")
+        elif "name" in model:
+            # 旧格式兼容
+            self.model_names = [model["name"]]
+            logger.debug(f"🔍 [模型初始化] 使用旧格式模型配置: {model['name']}")
+        else:
+            raise ValueError("模型配置必须包含 model_name、model_names 或 name 字段")
+        
+        if not self.model_names:
+            raise ValueError("模型列表不能为空")
+        
+        # 当前使用的模型名称
+        self.model_name: str = self.model_names[0]
+        
+        logger.debug(f"🔍 [模型初始化] 开始初始化模型: {self.model_name}")
         logger.debug(f"🔍 [模型初始化] 输入的模型配置: {model}")
         logger.debug(f"🔍 [模型初始化] 额外参数: {kwargs}")
-        
-        # 兼容新旧模型配置格式
-        # 新格式使用 model_name，旧格式使用 name
-        self.model_name: str = model.get("model_name", model.get("name", ""))
         
         # 如果传入的配置不完整，自动从全局配置中获取完整配置
         if not all(key in model for key in ["task_type", "capabilities"]):
@@ -370,6 +394,77 @@ class LLMRequest:
             logger.warning(f"⚠️ [配置查找] 从已解析配置获取模型配置时出错: {str(e)}")
             return None
 
+    def _switch_to_next_model(self) -> bool:
+        """
+        切换到下一个可用的模型
+        Returns:
+            bool: 是否成功切换到下一个模型
+        """
+        if len(self.model_names) <= 1:
+            logger.warning("⚠️ [模型切换] 只有一个模型，无法切换")
+            return False
+        
+        # 尝试下一个模型
+        self.current_model_index = (self.current_model_index + 1) % len(self.model_names)
+        old_model = self.model_name
+        self.model_name = self.model_names[self.current_model_index]
+        
+        logger.info(f"🔄 [模型切换] 从 {old_model} 切换到 {self.model_name}")
+        
+        # 重新初始化请求处理器
+        if NEW_ARCHITECTURE_AVAILABLE and ModelManager_class is not None:
+            try:
+                # 获取新模型的完整配置
+                if (full_model_config := self._get_full_model_config(self.model_name)):
+                    # 确定新模型的任务名称
+                    task_name = self._determine_task_name(full_model_config)
+                    
+                    # 延迟初始化ModelManager
+                    global model_manager, _request_handler_cache
+                    if model_manager is None:
+                        from src.config.config import model_config
+                        model_manager = ModelManager_class(model_config)
+                    
+                    # 构建新的缓存键
+                    cache_key = (self.model_name, task_name)
+                    
+                    # 检查是否已有缓存的请求处理器
+                    if cache_key in _request_handler_cache:
+                        self.request_handler = _request_handler_cache[cache_key]
+                        logger.debug(f"🚀 [模型切换] 从缓存获取请求处理器: {cache_key}")
+                    else:
+                        # 使用新架构获取模型请求处理器
+                        self.request_handler = model_manager[task_name]
+                        _request_handler_cache[cache_key] = self.request_handler
+                        logger.debug(f"🔧 [模型切换] 创建并缓存请求处理器: {cache_key}")
+                    
+                    self.use_new_architecture = True
+                    logger.info(f"✅ [模型切换] 成功切换到模型 {self.model_name}")
+                    return True
+                else:
+                    logger.error(f"❌ [模型切换] 无法获取模型 {self.model_name} 的配置")
+                    return False
+            except Exception as e:
+                logger.error(f"❌ [模型切换] 切换到模型 {self.model_name} 时出错: {str(e)}")
+                return False
+        else:
+            logger.warning("⚠️ [模型切换] 新架构不可用，模型切换功能受限")
+            return False
+
+    def _has_more_models(self) -> bool:
+        """
+        检查是否还有其他可用的模型
+        Returns:
+            bool: 是否还有其他模型可以尝试
+        """
+        return len(self.model_names) > 1
+
+    def _reset_model_index(self):
+        """重置模型索引到第一个模型"""
+        self.current_model_index = 0
+        self.model_name = self.model_names[0]
+        logger.debug(f"🔄 [模型重置] 重置到第一个模型: {self.model_name}")
+
     @staticmethod
     def _init_database():
         """初始化数据库集合"""
@@ -449,14 +544,58 @@ class LLMRequest:
         reasoning = match[1].strip() if match else ""
         return content, reasoning
 
-    def _handle_model_exception(self, e: Exception, operation: str) -> None:
+    def _handle_model_exception(self, e: Exception, operation: str, auto_switch: bool = True) -> bool:
         """
         统一的模型异常处理方法
         根据异常类型提供更精确的错误信息和处理策略
+        支持自动模型切换
         
         Args:
             e: 捕获的异常
             operation: 操作类型（用于日志记录）
+            auto_switch: 是否启用自动模型切换
+        Returns:
+            bool: 是否成功切换到下一个模型（如果启用了自动切换）
+        """
+        operation_desc = {
+            "image": "图片响应生成",
+            "voice": "语音识别", 
+            "text": "文本响应生成",
+            "embedding": "向量嵌入获取"
+        }
+        
+        op_name = operation_desc.get(operation, operation)
+        error_str = str(e)
+        
+        # 判断是否为可重试的错误（可以尝试切换模型）
+        retryable_errors = [
+            "401", "403",  # 认证错误
+            "429",         # 频率限制
+            "500", "503",  # 服务器错误
+            "timeout", "超时",  # 超时错误
+            "network", "网络", "连接",  # 网络错误
+        ]
+        
+        is_retryable = any(err in error_str.lower() for err in retryable_errors)
+        
+        logger.error(f"模型 {self.model_name} {op_name}失败: {str(e)}")
+        
+        # 如果错误可重试且启用了自动切换且有其他模型可用
+        if auto_switch and is_retryable and self._has_more_models():
+            logger.warning("⚠️ [模型切换] 检测到可重试错误，尝试切换模型...")
+            if self._switch_to_next_model():
+                logger.info(f"✅ [模型切换] 已切换到模型 {self.model_name}，可以重试请求")
+                return True
+            else:
+                logger.error("❌ [模型切换] 模型切换失败")
+        
+        # 如果无法切换或不需要切换，抛出原始异常
+        self._handle_model_exception_no_switch(e, operation)
+        return False
+
+    def _handle_model_exception_no_switch(self, e: Exception, operation: str) -> None:
+        """
+        不进行模型切换的异常处理（原始方法）
         """
         operation_desc = {
             "image": "图片响应生成",
@@ -525,7 +664,16 @@ class LLMRequest:
     async def generate_response_for_image(self, prompt: str, image_base64: str, image_format: str) -> Tuple:
         """
         根据输入的提示和图片生成模型的异步响应
-        使用新架构的模型请求处理器
+        使用新架构的模型请求处理器，支持自动模型切换
+        """
+        return await self._execute_with_retry(
+            self._generate_response_for_image_internal,
+            prompt, image_base64, image_format
+        )
+    
+    async def _generate_response_for_image_internal(self, prompt: str, image_base64: str, image_format: str) -> Tuple:
+        """
+        内部图片响应生成方法
         """
         if not self.use_new_architecture:
             raise RuntimeError(
@@ -540,59 +688,107 @@ class LLMRequest:
         if MessageBuilder is None:
             raise RuntimeError("MessageBuilder不可用，请检查新架构配置")
             
-        try:
-            # 构建包含图片的消息
-            message_builder = MessageBuilder()
-            message_builder.add_text_content(prompt).add_image_content(
-                image_format=image_format,
-                image_base64=image_base64
+        # 构建包含图片的消息
+        message_builder = MessageBuilder()
+        message_builder.add_text_content(prompt).add_image_content(
+            image_format=image_format,
+            image_base64=image_base64
+        )
+        messages = [message_builder.build()]
+        
+        # 使用新架构发送请求（只传递支持的参数）
+        response = await self.request_handler.get_response(  # type: ignore
+            messages=messages,
+            tool_options=None,
+            response_format=None
+        )
+        
+        # 新架构返回的是 APIResponse 对象，直接提取内容
+        content = response.content or ""
+        reasoning_content = response.reasoning_content or ""
+        tool_calls = response.tool_calls
+        
+        # 从内容中提取<think>标签的推理内容（向后兼容）
+        if not reasoning_content and content:
+            content, extracted_reasoning = self._extract_reasoning(content)
+            reasoning_content = extracted_reasoning
+        
+        # 记录token使用情况
+        if response.usage:
+            self._record_usage(
+                prompt_tokens=response.usage.prompt_tokens or 0,
+                completion_tokens=response.usage.completion_tokens or 0,
+                total_tokens=response.usage.total_tokens or 0,
+                user_id="system",
+                request_type=self.request_type,
+                endpoint="/chat/completions"
             )
-            messages = [message_builder.build()]
-            
-            # 使用新架构发送请求（只传递支持的参数）
-            response = await self.request_handler.get_response(  # type: ignore
-                messages=messages,
-                tool_options=None,
-                response_format=None
-            )
-            
-            # 新架构返回的是 APIResponse 对象，直接提取内容
-            content = response.content or ""
-            reasoning_content = response.reasoning_content or ""
-            tool_calls = response.tool_calls
-            
-            # 从内容中提取<think>标签的推理内容（向后兼容）
-            if not reasoning_content and content:
-                content, extracted_reasoning = self._extract_reasoning(content)
-                reasoning_content = extracted_reasoning
-            
-            # 记录token使用情况
-            if response.usage:
-                self._record_usage(
-                    prompt_tokens=response.usage.prompt_tokens or 0,
-                    completion_tokens=response.usage.completion_tokens or 0,
-                    total_tokens=response.usage.total_tokens or 0,
-                    user_id="system",
-                    request_type=self.request_type,
-                    endpoint="/chat/completions"
-                )
-            
-            # 返回格式兼容旧版本
-            if tool_calls:
-                return content, reasoning_content, tool_calls
-            else:
-                return content, reasoning_content
-            
-        except Exception as e:
-            self._handle_model_exception(e, "image")
-            # 这行代码永远不会执行，因为_handle_model_exception总是抛出异常
-            # 但是为了满足类型检查的要求，我们添加一个不可达的返回语句
-            return "", ""  # pragma: no cover
+        
+        # 返回格式兼容旧版本
+        if tool_calls:
+            return content, reasoning_content, tool_calls
+        else:
+            return content, reasoning_content
+
+    async def _execute_with_retry(self, method, *args, **kwargs):
+        """
+        执行方法并在失败时自动重试不同的模型
+        
+        Args:
+            method: 要执行的方法
+            *args: 方法参数
+            **kwargs: 方法关键字参数
+        Returns:
+            方法执行结果
+        """
+        max_retries = len(self.model_names)  # 最多重试模型数量次
+        original_model_index = self.current_model_index
+        
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"🔄 [重试机制] 第 {attempt + 1}/{max_retries} 次尝试，使用模型: {self.model_name}")
+                result = await method(*args, **kwargs)
+                
+                # 成功时重置模型索引到第一个模型（可选）
+                if attempt > 0:
+                    logger.info(f"✅ [重试成功] 使用模型 {self.model_name} 成功完成请求")
+                
+                return result
+                
+            except Exception as e:
+                logger.warning(f"⚠️ [重试机制] 第 {attempt + 1} 次尝试失败: {str(e)}")
+                
+                # 如果不是最后一次尝试，尝试切换模型
+                if attempt < max_retries - 1:
+                    if self._handle_model_exception(e, "retry", auto_switch=True):
+                        continue  # 成功切换，继续下一次尝试
+                    else:
+                        # 切换失败，直接抛出异常
+                        break
+                else:
+                    # 最后一次尝试，不尝试切换
+                    logger.error("❌ [重试失败] 所有模型都尝试失败")
+                    # 恢复到原始模型
+                    self.current_model_index = original_model_index
+                    self.model_name = self.model_names[self.current_model_index]
+                    self._handle_model_exception(e, "retry", auto_switch=False)
+        
+        # 如果所有尝试都失败了，抛出最后的异常
+        raise RuntimeError(f"所有 {len(self.model_names)} 个模型都无法完成请求")
 
     async def generate_response_for_voice(self, voice_bytes: bytes) -> Tuple:
         """
         根据输入的语音文件生成模型的异步响应
-        使用新架构的模型请求处理器
+        使用新架构的模型请求处理器，支持自动模型切换
+        """
+        return await self._execute_with_retry(
+            self._generate_response_for_voice_internal,
+            voice_bytes
+        )
+    
+    async def _generate_response_for_voice_internal(self, voice_bytes: bytes) -> Tuple:
+        """
+        内部语音识别方法
         """
         if not self.use_new_architecture:
             raise RuntimeError(
@@ -604,27 +800,30 @@ class LLMRequest:
                 f"模型 {self.model_name} 请求处理器未初始化，无法处理语音请求"
             )
             
-        try:
-            # 构建语音识别请求参数
-            # 注意：新架构中的语音识别可能使用不同的方法
-            # 这里先使用get_response方法，可能需要根据实际API调整
-            response = await self.request_handler.get_response(  # type: ignore
-                messages=[],  # 语音识别可能不需要消息
-                tool_options=None
-            )
-            
-            # 新架构返回的是 APIResponse 对象，直接提取文本内容
-            return (response.content,) if response.content else ("",)
-            
-        except Exception as e:
-            self._handle_model_exception(e, "voice")
-            # 不可达的返回语句，仅用于满足类型检查
-            return ("",)  # pragma: no cover
+        # 构建语音识别请求参数
+        # 注意：新架构中的语音识别可能使用不同的方法
+        # 这里先使用get_response方法，可能需要根据实际API调整
+        response = await self.request_handler.get_response(  # type: ignore
+            messages=[],  # 语音识别可能不需要消息
+            tool_options=None
+        )
+        
+        # 新架构返回的是 APIResponse 对象，直接提取文本内容
+        return (response.content,) if response.content else ("",)
 
     async def generate_response_async(self, prompt: str, **kwargs) -> Union[str, Tuple]:
         """
         异步方式根据输入的提示生成模型的响应
-        使用新架构的模型请求处理器，如无法使用则抛出错误
+        使用新架构的模型请求处理器，支持自动模型切换
+        """
+        return await self._execute_with_retry(
+            self._generate_response_async_internal,
+            prompt, **kwargs
+        )
+    
+    async def _generate_response_async_internal(self, prompt: str, **kwargs) -> Union[str, Tuple]:
+        """
+        内部文本响应生成方法
         """
         if not self.use_new_architecture:
             raise RuntimeError(
@@ -639,50 +838,45 @@ class LLMRequest:
         if MessageBuilder is None:
             raise RuntimeError("MessageBuilder不可用，请检查新架构配置")
         
-        try:
-            # 构建消息
-            message_builder = MessageBuilder()
-            message_builder.add_text_content(prompt)
-            messages = [message_builder.build()]
-            
-            # 使用新架构发送请求（只传递支持的参数）
-            response = await self.request_handler.get_response(  # type: ignore
-                messages=messages,
-                tool_options=None,
-                response_format=None
+        # 构建消息
+        message_builder = MessageBuilder()
+        message_builder.add_text_content(prompt)
+        messages = [message_builder.build()]
+        
+        # 使用新架构发送请求（只传递支持的参数）
+        response = await self.request_handler.get_response(  # type: ignore
+            messages=messages,
+            tool_options=None,
+            response_format=None
+        )
+        
+        # 新架构返回的是 APIResponse 对象，直接提取内容
+        content = response.content or ""
+        reasoning_content = response.reasoning_content or ""
+        tool_calls = response.tool_calls
+        
+        # 从内容中提取<think>标签的推理内容（向后兼容）
+        if not reasoning_content and content:
+            content, extracted_reasoning = self._extract_reasoning(content)
+            reasoning_content = extracted_reasoning
+        
+        # 记录token使用情况
+        if response.usage:
+            self._record_usage(
+                prompt_tokens=response.usage.prompt_tokens or 0,
+                completion_tokens=response.usage.completion_tokens or 0,
+                total_tokens=response.usage.total_tokens or 0,
+                user_id="system",
+                request_type=self.request_type,
+                endpoint="/chat/completions"
             )
-            
-            # 新架构返回的是 APIResponse 对象，直接提取内容
-            content = response.content or ""
-            reasoning_content = response.reasoning_content or ""
-            tool_calls = response.tool_calls
-            
-            # 从内容中提取<think>标签的推理内容（向后兼容）
-            if not reasoning_content and content:
-                content, extracted_reasoning = self._extract_reasoning(content)
-                reasoning_content = extracted_reasoning
-            
-            # 记录token使用情况
-            if response.usage:
-                self._record_usage(
-                    prompt_tokens=response.usage.prompt_tokens or 0,
-                    completion_tokens=response.usage.completion_tokens or 0,
-                    total_tokens=response.usage.total_tokens or 0,
-                    user_id="system",
-                    request_type=self.request_type,
-                    endpoint="/chat/completions"
-                )
-            
-            # 返回格式兼容旧版本
-            if tool_calls:
-                return content, (reasoning_content, self.model_name, tool_calls)
-            else:
-                return content, (reasoning_content, self.model_name)
-            
-        except Exception as e:
-            self._handle_model_exception(e, "text")
-            # 不可达的返回语句，仅用于满足类型检查
-            return "", ("", self.model_name)  # pragma: no cover
+        
+        # 返回格式兼容旧版本
+        # 返回格式兼容旧版本
+        if tool_calls:
+            return content, (reasoning_content, self.model_name, tool_calls)
+        else:
+            return content, (reasoning_content, self.model_name)
 
     async def get_embedding(self, text: str) -> Union[list, None]:
         """
@@ -694,6 +888,14 @@ class LLMRequest:
 
         Returns:
             list: embedding向量，如果失败则返回None
+        """
+        return await self._execute_with_retry(
+            self._get_embedding_internal, text
+        )
+
+    async def _get_embedding_internal(self, text: str) -> Union[list, None]:
+        """
+        内部embedding获取方法
         """
         if not text:
             logger.debug("该消息没有长度，不再发送获取embedding向量的请求")
@@ -707,40 +909,29 @@ class LLMRequest:
             logger.warning(f"模型 {self.model_name} 请求处理器未初始化，embedding请求将被跳过")
             return None
 
-        try:
-            # 构建embedding请求参数
-            # 使用新架构的get_embedding方法
-            response = await self.request_handler.get_embedding(text)  # type: ignore
+        # 构建embedding请求参数
+        # 使用新架构的get_embedding方法
+        response = await self.request_handler.get_embedding(text)  # type: ignore
+        
+        # 新架构返回的是 APIResponse 对象，直接提取embedding
+        if response.embedding:
+            embedding = response.embedding
             
-            # 新架构返回的是 APIResponse 对象，直接提取embedding
-            if response.embedding:
-                embedding = response.embedding
-                
-                # 记录token使用情况
-                if response.usage:
-                    self._record_usage(
-                        prompt_tokens=response.usage.prompt_tokens or 0,
-                        completion_tokens=response.usage.completion_tokens or 0,
-                        total_tokens=response.usage.total_tokens or 0,
-                        user_id="system",
-                        request_type=self.request_type,
-                        endpoint="/embeddings"
-                    )
-                
-                return embedding
-            else:
-                logger.warning(f"模型 {self.model_name} 返回的embedding响应为空")
-                return None
+            # 记录token使用情况
+            if response.usage:
+                self._record_usage(
+                    prompt_tokens=response.usage.prompt_tokens or 0,
+                    completion_tokens=response.usage.completion_tokens or 0,
+                    total_tokens=response.usage.total_tokens or 0,
+                    user_id="system",
+                    request_type=self.request_type,
+                    endpoint="/embeddings"
+                )
             
-        except Exception as e:
-            # 对于embedding请求，我们记录错误但不抛出异常，而是返回None
-            # 这是为了保持与原有行为的兼容性
-            try:
-                self._handle_model_exception(e, "embedding")
-            except RuntimeError:
-                # 捕获_handle_model_exception抛出的RuntimeError，转换为警告日志
-                logger.warning(f"模型 {self.model_name} embedding请求失败，返回None: {str(e)}")
-                return None
+            return embedding
+        else:
+            logger.warning(f"模型 {self.model_name} 返回的embedding响应为空")
+            return None
 
 
 def compress_base64_image_by_scale(base64_data: str, target_size: int = int(0.8 * 1024 * 1024)) -> str:
