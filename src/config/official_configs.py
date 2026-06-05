@@ -3667,6 +3667,15 @@ class DebugConfig(ConfigBase):
     )
     """是否记录 Planner 完整请求体和完整回复体，默认关闭"""
 
+    keep_prompt_preview_json_base64: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "image",
+        },
+    )
+    """是否在 Prompt 预览 JSON 中保留内联 base64 图片，默认关闭以减少日志体积"""
+
     enable_llm_cache_stats: bool = Field(
         default=False,
         json_schema_extra={

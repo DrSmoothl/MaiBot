@@ -1,3 +1,6 @@
+import json
+
+from src.maisaka.display import prompt_cli_renderer as prompt_cli_renderer_module
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
 
@@ -45,6 +48,11 @@ def test_prompt_html_keeps_openai_mixed_content_part_order() -> None:
 
 def test_prompt_preview_metadata_is_written_to_text_and_html(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(PromptPreviewLogger, "_BASE_DIR", tmp_path)
+    monkeypatch.setattr(
+        PromptPreviewLogger,
+        "_get_max_preview_groups_per_chat",
+        classmethod(lambda cls: 256),
+    )
 
     preview_access = PromptCLIVisualizer.build_prompt_preview_access(
         [{"role": "user", "content": "你好"}],
@@ -69,8 +77,88 @@ def test_prompt_preview_metadata_is_written_to_text_and_html(tmp_path, monkeypat
     assert "123.46 ms" in viewer_html
 
 
+def test_prompt_preview_json_uses_image_reference_by_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(PromptPreviewLogger, "_BASE_DIR", tmp_path / "prompt")
+    monkeypatch.setattr(prompt_cli_renderer_module, "DATA_HTML_IMAGE_DIR", tmp_path / "html_imgs")
+    monkeypatch.setattr(
+        PromptPreviewLogger,
+        "_get_max_preview_groups_per_chat",
+        classmethod(lambda cls: 256),
+    )
+    monkeypatch.setattr(
+        PromptCLIVisualizer,
+        "_should_keep_prompt_preview_json_base64",
+        staticmethod(lambda: False),
+    )
+
+    preview_access = PromptCLIVisualizer.build_prompt_preview_access(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "第一段"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{PNG_1X1_BASE64}"},
+                    },
+                    {"type": "text", "text": "第二段"},
+                ],
+            }
+        ],
+        category="planner",
+        chat_id="qq_group_10000",
+        request_kind="planner",
+        selection_reason="测试选择原因",
+    )
+
+    payload = json.loads(preview_access.structured_path.read_text(encoding="utf-8"))
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    image_part = payload["messages"][0]["content"][1]
+
+    assert payload["schema_version"] == 2
+    assert PNG_1X1_BASE64 not in payload_text
+    assert "data:image" not in payload_text
+    assert image_part["image_reference"]["base64_omitted"] is True
+    assert image_part["image_reference"]["image_available"] is True
+    assert "image_path" in image_part["image_reference"]
+    assert "image_uri" in image_part["image_reference"]
+    assert image_part["image_url"]["url"] == image_part["image_reference"]["image_uri"]
+
+
+def test_prompt_preview_json_can_keep_image_base64_when_enabled(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(PromptPreviewLogger, "_BASE_DIR", tmp_path / "prompt")
+    monkeypatch.setattr(prompt_cli_renderer_module, "DATA_HTML_IMAGE_DIR", tmp_path / "html_imgs")
+    monkeypatch.setattr(
+        PromptPreviewLogger,
+        "_get_max_preview_groups_per_chat",
+        classmethod(lambda cls: 256),
+    )
+    monkeypatch.setattr(
+        PromptCLIVisualizer,
+        "_should_keep_prompt_preview_json_base64",
+        staticmethod(lambda: True),
+    )
+
+    preview_access = PromptCLIVisualizer.build_prompt_preview_access(
+        [{"role": "user", "content": [("png", PNG_1X1_BASE64)]}],
+        category="planner",
+        chat_id="qq_group_10000",
+        request_kind="planner",
+        selection_reason="测试选择原因",
+    )
+
+    payload_text = preview_access.structured_path.read_text(encoding="utf-8")
+
+    assert PNG_1X1_BASE64 in payload_text
+
+
 def test_prompt_preview_logger_writes_navigation_into_html_files(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(PromptPreviewLogger, "_BASE_DIR", tmp_path)
+    monkeypatch.setattr(
+        PromptPreviewLogger,
+        "_get_max_preview_groups_per_chat",
+        classmethod(lambda cls: 256),
+    )
     stems = iter(["1700000000000", "1700000000001", "1700000000002"])
     monkeypatch.setattr(
         PromptPreviewLogger,

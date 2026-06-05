@@ -459,8 +459,102 @@ class PromptCLIVisualizer:
             sections.append(json.dumps(detail_payload, ensure_ascii=False, indent=2, default=str))
         return "\n\n".join(sections).strip()
 
+    @staticmethod
+    def _should_keep_prompt_preview_json_base64() -> bool:
+        try:
+            from src.config.config import global_config
+
+            return bool(global_config.debug.keep_prompt_preview_json_base64)
+        except Exception:
+            return False
+
     @classmethod
-    def _build_structured_message_payload(cls, messages: list[Any]) -> list[dict[str, Any]]:
+    def _build_structured_image_reference(cls, image_format: str, image_base64: str) -> dict[str, Any]:
+        """构建结构化 JSON 中的图片引用，避免默认写入大块 base64。"""
+
+        normalized_format = cls._normalize_image_format(image_format) or "bin"
+        approx_size = max(0, len(image_base64) * 3 // 4)
+        payload: dict[str, Any] = {
+            "type": "image",
+            "image_format": normalized_format,
+            "size_bytes": approx_size,
+            "base64_omitted": True,
+        }
+
+        path_result = cls._build_image_file_link(normalized_format, image_base64)
+        if path_result is None:
+            payload["image_available"] = False
+            return payload
+
+        file_uri, file_path = path_result
+        payload.update(
+            {
+                "image_available": True,
+                "image_path": build_display_path(file_path),
+                "image_uri": file_uri,
+            }
+        )
+        return payload
+
+    @classmethod
+    def _build_structured_image_content_part(
+        cls,
+        item: dict[str, Any],
+        image_format: str,
+        image_base64: str,
+    ) -> dict[str, Any]:
+        sanitized_item = {
+            key: cls._sanitize_structured_value(value, keep_base64=False)
+            for key, value in item.items()
+            if key not in {"base64", "image_base64", "image_url"}
+        }
+        image_reference = cls._build_structured_image_reference(image_format, image_base64)
+        image_uri = image_reference.get("image_uri")
+        if isinstance(image_uri, str) and image_uri:
+            sanitized_item["image_url"] = {"url": image_uri}
+
+        sanitized_item.update(
+            {
+                "image_format": image_reference["image_format"],
+                "image_reference": image_reference,
+            }
+        )
+        return sanitized_item
+
+    @classmethod
+    def _sanitize_structured_value(cls, value: Any, *, keep_base64: bool) -> Any:
+        if keep_base64:
+            return value
+
+        if isinstance(value, str):
+            image_pair = cls._extract_data_url_image(value)
+            if image_pair is None:
+                return value
+            image_format, image_base64 = image_pair
+            return cls._build_structured_image_reference(image_format, image_base64)
+
+        image_pair = cls._extract_image_pair(value)
+        if image_pair is not None:
+            image_format, image_base64 = image_pair
+            return cls._build_structured_image_reference(image_format, image_base64)
+
+        if isinstance(value, dict):
+            image_dict_pair = cls._extract_image_dict_pair(value)
+            if image_dict_pair is not None:
+                image_format, image_base64 = image_dict_pair
+                return cls._build_structured_image_content_part(value, image_format, image_base64)
+            return {
+                key: cls._sanitize_structured_value(item, keep_base64=False)
+                for key, item in value.items()
+            }
+
+        if isinstance(value, list):
+            return [cls._sanitize_structured_value(item, keep_base64=False) for item in value]
+
+        return value
+
+    @classmethod
+    def _build_structured_message_payload(cls, messages: list[Any], *, keep_base64: bool) -> list[dict[str, Any]]:
         """构建 WebUI 可直接解析的 Prompt 消息结构。"""
 
         structured_messages: list[dict[str, Any]] = []
@@ -480,14 +574,18 @@ class PromptCLIVisualizer:
             structured_message: dict[str, Any] = {
                 "index": index,
                 "role": role,
-                "content": content,
+                "content": cls._sanitize_structured_value(content, keep_base64=keep_base64),
                 "content_text": cls._serialize_message_content_for_dump(content),
             }
             if tool_call_id:
                 structured_message["tool_call_id"] = str(tool_call_id)
             if tool_calls:
                 structured_message["tool_calls"] = [
-                    cls.format_tool_call_for_display(tool_call) for tool_call in tool_calls
+                    cls._sanitize_structured_value(
+                        cls.format_tool_call_for_display(tool_call),
+                        keep_base64=keep_base64,
+                    )
+                    for tool_call in tool_calls
                 ]
             structured_messages.append(structured_message)
 
@@ -499,16 +597,21 @@ class PromptCLIVisualizer:
         output_content: Any | None,
         output_title: str,
         output_tool_calls: list[Any] | None,
+        keep_base64: bool,
     ) -> dict[str, Any] | None:
         normalized_tool_calls = [
-            cls.format_tool_call_for_display(tool_call) for tool_call in (output_tool_calls or [])
+            cls._sanitize_structured_value(
+                cls.format_tool_call_for_display(tool_call),
+                keep_base64=keep_base64,
+            )
+            for tool_call in (output_tool_calls or [])
         ]
         if output_content in (None, "", []) and not normalized_tool_calls:
             return None
 
         payload: dict[str, Any] = {
             "title": output_title,
-            "content": output_content,
+            "content": cls._sanitize_structured_value(output_content, keep_base64=keep_base64),
             "content_text": cls._serialize_message_content_for_dump(output_content),
         }
         if normalized_tool_calls:
@@ -528,18 +631,24 @@ class PromptCLIVisualizer:
         output_tool_calls: list[Any] | None,
         metadata: Mapping[str, Any] | None,
         text_dump: str,
+        keep_base64: bool,
     ) -> dict[str, Any]:
         """构建 Prompt 预览 JSON，供 WebUI 稳定解析展示。"""
 
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "request": {
                 "kind": request_kind,
                 "selection_reason": selection_reason,
             },
             "metadata": cls._normalize_preview_metadata(metadata),
-            "messages": cls._build_structured_message_payload(messages),
-            "output": cls._build_structured_output_payload(output_content, output_title, output_tool_calls),
+            "messages": cls._build_structured_message_payload(messages, keep_base64=keep_base64),
+            "output": cls._build_structured_output_payload(
+                output_content,
+                output_title,
+                output_tool_calls,
+                keep_base64,
+            ),
             "tool_definitions": tool_definitions or [],
             "text_dump": text_dump,
         }
@@ -686,6 +795,7 @@ class PromptCLIVisualizer:
             output_tool_calls=output_tool_calls,
             metadata=metadata,
         )
+        keep_json_base64 = cls._should_keep_prompt_preview_json_base64()
         structured_preview_text = json.dumps(
             cls._build_structured_preview_payload(
                 messages,
@@ -697,6 +807,7 @@ class PromptCLIVisualizer:
                 output_tool_calls=output_tool_calls,
                 metadata=metadata,
                 text_dump=prompt_dump_text,
+                keep_base64=keep_json_base64,
             ),
             ensure_ascii=False,
             indent=2,
@@ -1359,6 +1470,7 @@ class PromptCLIVisualizer:
             output_dump_text = cls._serialize_message_content_for_dump(output_content)
             text_content = f"[{output_title}]\n\n{output_dump_text}\n\n{'=' * 80}\n\n{content}"
         text_content = cls._prepend_preview_metadata_dump(text_content, metadata)
+        keep_json_base64 = cls._should_keep_prompt_preview_json_base64()
         structured_preview_text = json.dumps(
             cls._build_structured_preview_payload(
                 [],
@@ -1370,6 +1482,7 @@ class PromptCLIVisualizer:
                 output_tool_calls=output_tool_calls,
                 metadata=metadata,
                 text_dump=text_content,
+                keep_base64=keep_json_base64,
             ),
             ensure_ascii=False,
             indent=2,

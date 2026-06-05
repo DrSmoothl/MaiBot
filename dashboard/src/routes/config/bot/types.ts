@@ -187,6 +187,7 @@ export interface DebugConfig {
   show_memory_prompt: boolean
   show_planner_prompt: boolean
   show_lpmm_paragraph: boolean
+  keep_prompt_preview_json_base64: boolean
 }
 
 export interface MaimMessageConfig {
