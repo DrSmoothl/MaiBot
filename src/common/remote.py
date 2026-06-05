@@ -181,8 +181,8 @@ class TelemetryHeartBeatTask(AsyncTask):
 
 
 class TelemetryStatsUploadTask(AsyncTask):
-    STATS_UPLOAD_INTERVAL = 3637
-    MAX_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
+    STATS_UPLOAD_INTERVAL = 11451
+    MAX_LOOKBACK_SECONDS = 14 * 24 * 60 * 60
     RETRY_DELAYS = (5, 15, 45)
     CURSOR_KEY = "telemetry_stats_cursor"
 
