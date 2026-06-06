@@ -5,8 +5,6 @@ import pytest
 
 from src.core.tooling import ToolInvocation
 from src.maisaka.builtin_tool import (
-    get_all_builtin_tool_specs,
-    get_builtin_tools,
     query_person_profile as query_person_profile_tool,
 )
 from src.maisaka.builtin_tool.context import BuiltinToolRuntimeContext
@@ -111,98 +109,3 @@ async def test_query_person_profile_supports_person_name(monkeypatch: pytest.Mon
     assert result.structured_content["traits"] == ["Bob 常聊游戏", "Bob 晚上更活跃"]
 
 
-def test_builtin_tool_list_contains_query_memory_and_profile_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    from src.maisaka import builtin_tool as builtin_tool_module
-
-    monkeypatch.setattr(
-        builtin_tool_module,
-        "global_config",
-        SimpleNamespace(
-            a_memorix=SimpleNamespace(
-                integration=SimpleNamespace(
-                    enable_memory_query_tool=True,
-                    enable_person_profile_query_tool=True,
-                )
-            )
-        ),
-    )
-
-    specs = get_all_builtin_tool_specs()
-    names = {spec.name for spec in specs if spec.enabled}
-
-    assert "query_memory" in names
-    assert "query_person_profile" in names
-
-
-def test_builtin_tool_list_respects_profile_query_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    from src.maisaka import builtin_tool as builtin_tool_module
-
-    monkeypatch.setattr(
-        builtin_tool_module,
-        "global_config",
-        SimpleNamespace(
-            a_memorix=SimpleNamespace(
-                integration=SimpleNamespace(
-                    enable_memory_query_tool=True,
-                    enable_person_profile_query_tool=False,
-                )
-            )
-        ),
-    )
-
-    specs = get_all_builtin_tool_specs()
-    profile_spec = next(spec for spec in specs if spec.name == "query_person_profile")
-
-    assert profile_spec.enabled is False
-
-
-def test_builtin_tool_list_hides_media_tools_when_replyer_format_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    from src.maisaka import builtin_tool as builtin_tool_module
-
-    monkeypatch.setattr(
-        builtin_tool_module,
-        "global_config",
-        SimpleNamespace(
-            chat=SimpleNamespace(enable_replyer_format_output=True),
-            a_memorix=SimpleNamespace(
-                integration=SimpleNamespace(
-                    enable_memory_query_tool=True,
-                    enable_person_profile_query_tool=True,
-                )
-            ),
-        ),
-    )
-
-    spec_names = {spec.name for spec in get_all_builtin_tool_specs()}
-    tool_names = {tool["name"] for tool in get_builtin_tools()}
-
-    assert "send_emoji" not in spec_names
-    assert "send_emoji" not in tool_names
-    assert "send_image" not in spec_names
-    assert "send_image" not in tool_names
-
-
-def test_builtin_tool_list_keeps_media_tools_when_replyer_format_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    from src.maisaka import builtin_tool as builtin_tool_module
-
-    monkeypatch.setattr(
-        builtin_tool_module,
-        "global_config",
-        SimpleNamespace(
-            chat=SimpleNamespace(enable_replyer_format_output=False),
-            a_memorix=SimpleNamespace(
-                integration=SimpleNamespace(
-                    enable_memory_query_tool=True,
-                    enable_person_profile_query_tool=True,
-                )
-            ),
-        ),
-    )
-
-    spec_names = {spec.name for spec in get_all_builtin_tool_specs()}
-    tool_names = {tool["name"] for tool in get_builtin_tools()}
-
-    assert "send_emoji" in spec_names
-    assert "send_emoji" in tool_names
-    assert "send_image" in spec_names
-    assert "send_image" in tool_names

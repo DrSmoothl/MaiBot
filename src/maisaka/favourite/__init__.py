@@ -1,1 +1,0 @@
-"""Favourite content storage helpers."""
