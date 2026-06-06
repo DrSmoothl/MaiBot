@@ -8,7 +8,7 @@ import json
 
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
 from src.common.database.database import get_db_session
-from src.common.database.database_model import BehaviorPattern
+from src.common.database.database_model import BehaviorExperiencePath
 from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
 from src.config.config import global_config
@@ -228,14 +228,14 @@ class BehaviorPatternConsolidator:
         )
 
     @staticmethod
-    def _load_session_patterns(session_id: str) -> list[BehaviorPattern]:
+    def _load_session_patterns(session_id: str) -> list[BehaviorExperiencePath]:
         try:
             with get_db_session(auto_commit=False) as session:
                 statement = (
-                    select(BehaviorPattern)
-                    .where(BehaviorPattern.session_id == session_id)
-                    .where(BehaviorPattern.enabled.is_(True))  # type: ignore[attr-defined]
-                    .order_by(BehaviorPattern.update_time.desc())  # type: ignore[attr-defined]
+                    select(BehaviorExperiencePath)
+                    .where(BehaviorExperiencePath.session_id == session_id)
+                    .where(BehaviorExperiencePath.enabled.is_(True))  # type: ignore[attr-defined]
+                    .order_by(BehaviorExperiencePath.update_time.desc())  # type: ignore[attr-defined]
                     .limit(MAX_CONSOLIDATION_PATTERNS)
                 )
                 patterns = list(session.exec(statement).all())
@@ -247,14 +247,14 @@ class BehaviorPatternConsolidator:
             return []
 
     @staticmethod
-    def _build_pattern_payload(patterns: Sequence[BehaviorPattern]) -> list[dict[str, Any]]:
+    def _build_pattern_payload(patterns: Sequence[BehaviorExperiencePath]) -> list[dict[str, Any]]:
         return [
             behavior_pattern_to_dict(pattern)
             for pattern in patterns
             if pattern.id is not None and pattern.enabled and pattern.trigger and pattern.action and pattern.outcome
         ]
 
-    def _build_consolidation_messages(self, patterns: Sequence[BehaviorPattern]) -> list[Message]:
+    def _build_consolidation_messages(self, patterns: Sequence[BehaviorExperiencePath]) -> list[Message]:
         behavior_patterns = json.dumps(
             self._build_pattern_payload(patterns),
             ensure_ascii=False,
@@ -275,7 +275,7 @@ class BehaviorPatternConsolidator:
     @staticmethod
     def _filter_suggestions_for_patterns(
         suggestions: list[BehaviorConsolidationSuggestion],
-        patterns: Sequence[BehaviorPattern],
+        patterns: Sequence[BehaviorExperiencePath],
     ) -> list[BehaviorConsolidationSuggestion]:
         valid_ids = {int(pattern.id) for pattern in patterns if pattern.id is not None and pattern.enabled}
         filtered_suggestions: list[BehaviorConsolidationSuggestion] = []

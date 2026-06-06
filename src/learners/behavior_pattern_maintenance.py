@@ -9,7 +9,7 @@ import json
 import time
 
 from src.common.database.database import get_db_session
-from src.common.database.database_model import BehaviorPattern
+from src.common.database.database_model import BehaviorExperiencePath
 from src.common.logger import get_logger
 
 from .behavior_pattern_store import (
@@ -17,6 +17,7 @@ from .behavior_pattern_store import (
     FEEDBACK_HISTORY_LIMIT,
     MAX_BEHAVIOR_SCORE,
     MIN_BEHAVIOR_SCORE,
+    behavior_pattern_to_dict,
 )
 
 logger = get_logger("behavior_pattern_maintenance")
@@ -113,8 +114,8 @@ class BehaviorPatternMaintenanceService:
 
         try:
             with get_db_session() as session:
-                statement = select(BehaviorPattern).where(
-                    BehaviorPattern.session_id.in_(target_session_ids)  # type: ignore[attr-defined]
+                statement = select(BehaviorExperiencePath).where(
+                    BehaviorExperiencePath.session_id.in_(target_session_ids)  # type: ignore[attr-defined]
                 )
                 patterns = list(session.exec(statement).all())
                 result = BehaviorPatternMaintenanceResult(
@@ -185,9 +186,11 @@ class BehaviorPatternMaintenanceService:
         merge_time = now or datetime.now()
         try:
             with get_db_session() as session:
-                statement = select(BehaviorPattern).where(BehaviorPattern.session_id == normalized_session_id)
+                statement = select(BehaviorExperiencePath).where(
+                    BehaviorExperiencePath.session_id == normalized_session_id
+                )
                 patterns = list(session.exec(statement).all())
-                pattern_by_id = {pattern.id: pattern for pattern in patterns if pattern.id is not None}
+                pattern_by_id = {path.id: path for path in patterns if path.id is not None}
                 used_pattern_ids: set[int] = set()
                 touched_pattern_ids: list[int] = []
                 merged_count = 0
@@ -208,7 +211,7 @@ class BehaviorPatternMaintenanceService:
                     if keeper is None or not keeper.enabled:
                         continue
 
-                    duplicates: list[BehaviorPattern] = []
+                    duplicates: list[BehaviorExperiencePath] = []
                     for merge_id in merge_ids:
                         duplicate = pattern_by_id.get(merge_id)
                         if duplicate is None or not duplicate.enabled:
@@ -308,7 +311,7 @@ class BehaviorPatternMaintenanceService:
         return max(0, (now - timestamp).days)
 
     @staticmethod
-    def _latest_activity_time(pattern: BehaviorPattern) -> datetime:
+    def _latest_activity_time(pattern: BehaviorExperiencePath) -> datetime:
         timestamps = [
             timestamp
             for timestamp in [pattern.last_active_time, pattern.last_feedback_time, pattern.create_time]
@@ -316,7 +319,7 @@ class BehaviorPatternMaintenanceService:
         ]
         return max(timestamps) if timestamps else datetime.now()
 
-    def _last_maintenance_time(self, pattern: BehaviorPattern) -> Optional[datetime]:
+    def _last_maintenance_time(self, pattern: BehaviorExperiencePath) -> Optional[datetime]:
         feedback_items = self._load_json_list(pattern.feedback_list)
         maintenance_times: list[datetime] = []
         for feedback_item in feedback_items:
@@ -335,7 +338,7 @@ class BehaviorPatternMaintenanceService:
 
     def _append_maintenance_event(
         self,
-        pattern: BehaviorPattern,
+        pattern: BehaviorExperiencePath,
         *,
         now: datetime,
         score_delta: float,
@@ -364,7 +367,7 @@ class BehaviorPatternMaintenanceService:
         decayed: bool = False
         disabled: bool = False
 
-    def _apply_decay(self, pattern: BehaviorPattern, *, now: datetime) -> _DecayResult:
+    def _apply_decay(self, pattern: BehaviorExperiencePath, *, now: datetime) -> _DecayResult:
         last_maintenance_time = self._last_maintenance_time(pattern)
         if last_maintenance_time is not None and self._days_since(now, last_maintenance_time) < DECAY_COOLDOWN_DAYS:
             return self._DecayResult()
@@ -401,7 +404,7 @@ class BehaviorPatternMaintenanceService:
         return self._DecayResult(decayed=decayed, disabled=disabled)
 
     @staticmethod
-    def _calculate_decay(pattern: BehaviorPattern, *, inactive_days: int) -> tuple[float, str]:
+    def _calculate_decay(pattern: BehaviorExperiencePath, *, inactive_days: int) -> tuple[float, str]:
         count = int(pattern.count or 0)
         activation_count = int(pattern.activation_count or 0)
         success_count = int(pattern.success_count or 0)
@@ -421,7 +424,7 @@ class BehaviorPatternMaintenanceService:
         return 0.0, ""
 
     @staticmethod
-    def _should_disable(pattern: BehaviorPattern, *, inactive_days: int) -> bool:
+    def _should_disable(pattern: BehaviorExperiencePath, *, inactive_days: int) -> bool:
         score = float(pattern.score or 0.0)
         count = int(pattern.count or 0)
         activation_count = int(pattern.activation_count or 0)
@@ -439,13 +442,13 @@ class BehaviorPatternMaintenanceService:
     def _merge_similar_patterns(
         self,
         *,
-        session_patterns: list[BehaviorPattern],
+        session_patterns: list[BehaviorExperiencePath],
         now: datetime,
         touched_pattern_ids: list[int],
     ) -> int:
         merged_count = 0
         merged_pattern_ids: set[int] = set()
-        patterns_by_session_id: dict[str, list[BehaviorPattern]] = {}
+        patterns_by_session_id: dict[str, list[BehaviorExperiencePath]] = {}
         for pattern in session_patterns:
             if pattern.id is None or not pattern.enabled:
                 continue
@@ -487,12 +490,23 @@ class BehaviorPatternMaintenanceService:
             return 0.0
         return difflib.SequenceMatcher(None, normalized_left, normalized_right).ratio()
 
-    def _should_merge(self, left_pattern: BehaviorPattern, right_pattern: BehaviorPattern) -> bool:
-        trigger_similarity = self._text_similarity(left_pattern.trigger, right_pattern.trigger)
-        action_similarity = self._text_similarity(left_pattern.action, right_pattern.action)
+    @staticmethod
+    def _path_payload(path: BehaviorExperiencePath) -> dict[str, str]:
+        payload = behavior_pattern_to_dict(path)
+        return {
+            "trigger": str(payload.get("trigger") or ""),
+            "action": str(payload.get("action") or ""),
+            "outcome": str(payload.get("outcome") or ""),
+        }
+
+    def _should_merge(self, left_pattern: BehaviorExperiencePath, right_pattern: BehaviorExperiencePath) -> bool:
+        left_payload = self._path_payload(left_pattern)
+        right_payload = self._path_payload(right_pattern)
+        trigger_similarity = self._text_similarity(left_payload["trigger"], right_payload["trigger"])
+        action_similarity = self._text_similarity(left_payload["action"], right_payload["action"])
         combined_similarity = self._text_similarity(
-            f"{left_pattern.trigger}\n{left_pattern.action}",
-            f"{right_pattern.trigger}\n{right_pattern.action}",
+            f"{left_payload['trigger']}\n{left_payload['action']}",
+            f"{right_payload['trigger']}\n{right_payload['action']}",
         )
         return (
             trigger_similarity >= MERGE_TRIGGER_MIN_SIMILARITY
@@ -501,7 +515,7 @@ class BehaviorPatternMaintenanceService:
         )
 
     @staticmethod
-    def _keeper_rank(pattern: BehaviorPattern) -> tuple[float, int, int, int, int, datetime]:
+    def _keeper_rank(pattern: BehaviorExperiencePath) -> tuple[float, int, int, int, int, datetime]:
         return (
             float(pattern.score or 0.0),
             int(pattern.success_count or 0) - int(pattern.failure_count or 0),
@@ -513,17 +527,17 @@ class BehaviorPatternMaintenanceService:
 
     def _choose_keeper(
         self,
-        left_pattern: BehaviorPattern,
-        right_pattern: BehaviorPattern,
-    ) -> tuple[BehaviorPattern, BehaviorPattern]:
+        left_pattern: BehaviorExperiencePath,
+        right_pattern: BehaviorExperiencePath,
+    ) -> tuple[BehaviorExperiencePath, BehaviorExperiencePath]:
         if self._keeper_rank(left_pattern) >= self._keeper_rank(right_pattern):
             return left_pattern, right_pattern
         return right_pattern, left_pattern
 
     def _merge_into_keeper(
         self,
-        keeper: BehaviorPattern,
-        duplicate: BehaviorPattern,
+        keeper: BehaviorExperiencePath,
+        duplicate: BehaviorExperiencePath,
         *,
         now: datetime,
     ) -> None:
@@ -539,7 +553,6 @@ class BehaviorPatternMaintenanceService:
         keeper.activation_count = int(keeper.activation_count or 0) + int(duplicate.activation_count or 0)
         keeper.success_count = int(keeper.success_count or 0) + int(duplicate.success_count or 0)
         keeper.failure_count = int(keeper.failure_count or 0) + int(duplicate.failure_count or 0)
-        keeper.outcome = self._merge_outcomes(keeper.outcome, duplicate.outcome)
         keeper.evidence_list = self._merge_json_histories(
             keeper.evidence_list,
             duplicate.evidence_list,
@@ -576,21 +589,13 @@ class BehaviorPatternMaintenanceService:
 
     def _apply_merge_group_summary(
         self,
-        keeper: BehaviorPattern,
+        keeper: BehaviorExperiencePath,
         merge_group: BehaviorPatternMergeGroup,
     ) -> None:
-        trigger = self._normalize_text(merge_group.trigger, max_length=160)
-        action = self._normalize_text(merge_group.action, max_length=240)
-        outcome = self._normalize_text(merge_group.outcome, max_length=240)
-        if trigger:
-            keeper.trigger = trigger
-        if action:
-            keeper.action = action
-        if outcome:
-            keeper.outcome = outcome
+        del keeper, merge_group
 
     @staticmethod
-    def _pattern_weight(pattern: BehaviorPattern) -> float:
+    def _pattern_weight(pattern: BehaviorExperiencePath) -> float:
         return max(
             1.0,
             float(pattern.count or 0)

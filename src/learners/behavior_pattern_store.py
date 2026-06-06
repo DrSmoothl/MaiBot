@@ -1,14 +1,27 @@
 from datetime import datetime
 from typing import Any, Optional, Sequence
 
-from sqlmodel import select
+from sqlmodel import Session, select
 
 import difflib
 import json
 
 from src.common.database.database import get_db_session
-from src.common.database.database_model import BehaviorPattern
+from src.common.database.database_model import (
+    BehaviorActionNode,
+    BehaviorExperiencePath,
+    BehaviorOutcomeNode,
+    BehaviorSceneNode,
+)
 from src.common.logger import get_logger
+
+from .behavior_scenario import BehaviorScenarioProfile
+from .behavior_scene_graph_store import (
+    apply_behavior_scene_feedback,
+    link_behavior_experience_to_scene_graph,
+    mark_behavior_scene_links_selected,
+    upsert_behavior_graph_refs,
+)
 
 logger = get_logger("behavior_pattern_store")
 
@@ -78,84 +91,140 @@ def _build_evidence_item(
     }
 
 
-def _pattern_similarity(pattern: BehaviorPattern, trigger: str, action: str) -> float:
-    source_text = f"{pattern.trigger}\n{pattern.action}".strip()
+def _path_texts_from_session(
+    session: Session,
+    path: BehaviorExperiencePath,
+) -> tuple[str, str, str]:
+    scene_node = session.get(BehaviorSceneNode, path.start_scene_node_id)
+    action_node = session.get(BehaviorActionNode, path.action_node_id)
+    outcome_node = session.get(BehaviorOutcomeNode, path.outcome_node_id)
+    trigger = scene_node.name if scene_node is not None else ""
+    action = action_node.action if action_node is not None else ""
+    outcome = outcome_node.outcome if outcome_node is not None else ""
+    return trigger, action, outcome
+
+
+def _path_similarity(
+    session: Session,
+    path: BehaviorExperiencePath,
+    trigger: str,
+    action: str,
+) -> float:
+    path_trigger, path_action, _ = _path_texts_from_session(session, path)
+    source_text = f"{path_trigger}\n{path_action}".strip()
     target_text = f"{trigger}\n{action}".strip()
     if not source_text or not target_text:
         return 0.0
     return difflib.SequenceMatcher(None, source_text, target_text).ratio()
 
 
-def behavior_pattern_to_dict(pattern: BehaviorPattern) -> dict[str, Any]:
+def _path_to_dict_from_session(
+    session: Session,
+    path: BehaviorExperiencePath,
+) -> dict[str, Any]:
+    trigger, action, outcome = _path_texts_from_session(session, path)
     return {
-        "id": pattern.id,
-        "trigger": pattern.trigger,
-        "action": pattern.action,
-        "outcome": pattern.outcome,
-        "count": pattern.count,
-        "activation_count": pattern.activation_count,
-        "success_count": pattern.success_count,
-        "failure_count": pattern.failure_count,
-        "score": pattern.score,
-        "enabled": pattern.enabled,
-        "session_id": pattern.session_id,
-        "last_active_time": pattern.last_active_time.isoformat() if pattern.last_active_time else "",
-        "last_feedback_time": pattern.last_feedback_time.isoformat() if pattern.last_feedback_time else "",
+        "id": path.id,
+        "trigger": trigger,
+        "action": action,
+        "outcome": outcome,
+        "start_scene_node_id": path.start_scene_node_id,
+        "action_node_id": path.action_node_id,
+        "outcome_node_id": path.outcome_node_id,
+        "count": path.count,
+        "activation_count": path.activation_count,
+        "success_count": path.success_count,
+        "failure_count": path.failure_count,
+        "score": path.score,
+        "enabled": path.enabled,
+        "session_id": path.session_id,
+        "last_active_time": path.last_active_time.isoformat() if path.last_active_time else "",
+        "last_feedback_time": path.last_feedback_time.isoformat() if path.last_feedback_time else "",
     }
 
 
-def find_similar_behavior_pattern(
+def behavior_experience_to_dict(path: BehaviorExperiencePath) -> dict[str, Any]:
+    if path.id is None:
+        return {
+            "id": None,
+            "trigger": "",
+            "action": "",
+            "outcome": "",
+            "count": path.count,
+            "activation_count": path.activation_count,
+            "success_count": path.success_count,
+            "failure_count": path.failure_count,
+            "score": path.score,
+            "enabled": path.enabled,
+            "session_id": path.session_id,
+            "last_active_time": path.last_active_time.isoformat() if path.last_active_time else "",
+            "last_feedback_time": path.last_feedback_time.isoformat() if path.last_feedback_time else "",
+        }
+
+    try:
+        with get_db_session(auto_commit=False) as session:
+            attached_path = session.get(BehaviorExperiencePath, path.id)
+            if attached_path is None:
+                return {}
+            return _path_to_dict_from_session(session, attached_path)
+    except Exception as exc:
+        logger.error(f"读取行为经验路径文本失败: id={path.id} error={exc}")
+        return {}
+
+
+def find_similar_behavior_experience(
     *,
     trigger: str,
     action: str,
     session_id: str,
     similarity_threshold: float = 0.76,
-) -> Optional[tuple[BehaviorPattern, float]]:
-    normalized_trigger = _normalize_text(trigger, max_length=160)
+) -> Optional[tuple[BehaviorExperiencePath, float]]:
+    normalized_trigger = _normalize_text(trigger, max_length=180)
     normalized_action = _normalize_text(action, max_length=240)
     if not normalized_trigger or not normalized_action:
         return None
 
     try:
         with get_db_session(auto_commit=False) as session:
-            statement = select(BehaviorPattern).where(BehaviorPattern.session_id == session_id)
-            patterns = session.exec(statement).all()
-            best_pattern: Optional[BehaviorPattern] = None
+            statement = select(BehaviorExperiencePath).where(BehaviorExperiencePath.session_id == session_id)
+            paths = session.exec(statement).all()
+            best_path: Optional[BehaviorExperiencePath] = None
             best_similarity = 0.0
-            for pattern in patterns:
-                similarity = _pattern_similarity(pattern, normalized_trigger, normalized_action)
+            for path in paths:
+                similarity = _path_similarity(session, path, normalized_trigger, normalized_action)
                 if similarity > similarity_threshold and similarity > best_similarity:
-                    best_pattern = pattern
+                    best_path = path
                     best_similarity = similarity
-            if best_pattern is None:
+            if best_path is None:
                 return None
-            return best_pattern, best_similarity
+            session.expunge(best_path)
+            return best_path, best_similarity
     except Exception as exc:
-        logger.error(f"查找相似行为表现失败: {exc}")
+        logger.error(f"查找相似行为经验路径失败: {exc}")
         return None
 
 
-def upsert_behavior_pattern(
+def upsert_behavior_experience(
     *,
     trigger: str,
     action: str,
     outcome: str,
     source_ids: Sequence[str],
     session_id: str,
-) -> Optional[BehaviorPattern]:
-    normalized_trigger = _normalize_text(trigger, max_length=160)
+    scenario_profile: BehaviorScenarioProfile,
+    scene_start: str,
+) -> Optional[BehaviorExperiencePath]:
+    normalized_trigger = _normalize_text(trigger, max_length=180)
     normalized_action = _normalize_text(action, max_length=240)
-    normalized_outcome = _normalize_text(outcome, max_length=200)
+    normalized_outcome = _normalize_text(outcome, max_length=240)
     normalized_source_ids = _normalize_source_ids(source_ids)
     if not normalized_trigger or not normalized_action or not normalized_outcome:
+        logger.warning(
+            "跳过写入行为经验路径：归一化后字段为空 "
+            f"trigger={normalized_trigger!r} action={normalized_action!r} outcome={normalized_outcome!r}"
+        )
         return None
 
-    similar_result = find_similar_behavior_pattern(
-        trigger=normalized_trigger,
-        action=normalized_action,
-        session_id=session_id,
-    )
-    similar_pattern_id = similar_result[0].id if similar_result is not None else None
     now = datetime.now()
     evidence_item = _build_evidence_item(
         trigger=normalized_trigger,
@@ -166,113 +235,142 @@ def upsert_behavior_pattern(
 
     try:
         with get_db_session() as session:
-            if similar_pattern_id is not None:
-                pattern = session.get(BehaviorPattern, similar_pattern_id)
-                if pattern is None:
-                    return None
-                evidence_items = _load_json_list(pattern.evidence_list)
-                evidence_items.append(evidence_item)
-                pattern.evidence_list = _dump_json_list(evidence_items[-EVIDENCE_HISTORY_LIMIT:])
-                pattern.count += 1
-                pattern.last_active_time = now
-                pattern.update_time = now
-                if normalized_outcome and normalized_outcome not in pattern.outcome:
-                    pattern.outcome = normalized_outcome
-                session.add(pattern)
-                session.flush()
-                session.refresh(pattern)
-                session.expunge(pattern)
-                return pattern
-
-            pattern = BehaviorPattern(
-                trigger=normalized_trigger,
+            graph_refs = upsert_behavior_graph_refs(
+                session=session,
+                session_id=session_id,
+                profile=scenario_profile,
+                scene_start=scene_start,
                 action=normalized_action,
                 outcome=normalized_outcome,
-                evidence_list=_dump_json_list([evidence_item]),
-                feedback_list=_dump_json_list([]),
-                count=1,
-                activation_count=0,
-                success_count=0,
-                failure_count=0,
-                score=0.0,
-                enabled=True,
-                session_id=session_id,
-                last_active_time=now,
-                create_time=now,
-                update_time=now,
             )
-            session.add(pattern)
+            if graph_refs is None:
+                logger.warning(
+                    "跳过写入行为经验路径：场景图引用生成失败 "
+                    f"session_id={session_id} action={normalized_action} outcome={normalized_outcome}"
+                )
+                return None
+
+            statement = (
+                select(BehaviorExperiencePath)
+                .where(BehaviorExperiencePath.session_id == session_id)
+                .where(BehaviorExperiencePath.start_scene_node_id == graph_refs.start_scene_node_id)
+                .where(BehaviorExperiencePath.action_node_id == graph_refs.action_node_id)
+                .where(BehaviorExperiencePath.outcome_node_id == graph_refs.outcome_node_id)
+            )
+            path = session.exec(statement).first()
+            if path is None:
+                path = BehaviorExperiencePath(
+                    session_id=session_id,
+                    start_scene_node_id=graph_refs.start_scene_node_id,
+                    action_node_id=graph_refs.action_node_id,
+                    outcome_node_id=graph_refs.outcome_node_id,
+                    evidence_list=_dump_json_list([evidence_item]),
+                    feedback_list=_dump_json_list([]),
+                    count=1,
+                    activation_count=0,
+                    success_count=0,
+                    failure_count=0,
+                    score=0.0,
+                    enabled=True,
+                    last_active_time=now,
+                    create_time=now,
+                    update_time=now,
+                )
+            else:
+                evidence_items = _load_json_list(path.evidence_list)
+                evidence_items.append(evidence_item)
+                path.evidence_list = _dump_json_list(evidence_items[-EVIDENCE_HISTORY_LIMIT:])
+                path.count += 1
+                path.last_active_time = now
+                path.update_time = now
+
+            session.add(path)
             session.flush()
-            session.refresh(pattern)
-            session.expunge(pattern)
-            return pattern
+            session.refresh(path)
+            if path.id is not None:
+                link_behavior_experience_to_scene_graph(
+                    session=session,
+                    experience_path_id=path.id,
+                    session_id=session_id,
+                    refs=graph_refs,
+                )
+            session.expunge(path)
+            return path
     except Exception as exc:
-        logger.error(f"写入行为表现失败: {exc}")
+        logger.exception(
+            "写入行为经验路径失败: "
+            f"session_id={session_id} trigger={normalized_trigger} "
+            f"action={normalized_action} outcome={normalized_outcome} "
+            f"source_ids={normalized_source_ids} error={exc}"
+        )
         return None
 
 
-def list_behavior_patterns_for_sessions(
+def list_behavior_experiences_for_sessions(
     *,
     session_ids: set[str],
     include_global: bool = False,
     min_score: float = -4.0,
-) -> list[BehaviorPattern]:
+) -> list[BehaviorExperiencePath]:
     try:
         with get_db_session(auto_commit=False) as session:
-            statement = select(BehaviorPattern).where(BehaviorPattern.enabled.is_(True))  # type: ignore[attr-defined]
-            statement = statement.where(BehaviorPattern.score >= min_score)
+            statement = select(BehaviorExperiencePath).where(BehaviorExperiencePath.enabled.is_(True))  # type: ignore[attr-defined]
+            statement = statement.where(BehaviorExperiencePath.score >= min_score)
             if include_global:
                 pass
             elif session_ids:
                 statement = statement.where(
-                    (BehaviorPattern.session_id.in_(session_ids))  # type: ignore[attr-defined]
-                    | (BehaviorPattern.session_id.is_(None))  # type: ignore[attr-defined]
+                    (BehaviorExperiencePath.session_id.in_(session_ids))  # type: ignore[attr-defined]
+                    | (BehaviorExperiencePath.session_id.is_(None))  # type: ignore[attr-defined]
                 )
             else:
-                statement = statement.where(BehaviorPattern.session_id.is_(None))  # type: ignore[attr-defined]
-            patterns = session.exec(statement).all()
-            for pattern in patterns:
-                session.expunge(pattern)
-            return list(patterns)
+                statement = statement.where(BehaviorExperiencePath.session_id.is_(None))  # type: ignore[attr-defined]
+            paths = session.exec(statement).all()
+            for path in paths:
+                session.expunge(path)
+            return list(paths)
     except Exception as exc:
-        logger.error(f"读取行为表现候选失败: {exc}")
+        logger.error(f"读取行为经验路径候选失败: {exc}")
         return []
 
 
-def get_behavior_pattern(pattern_id: int) -> Optional[BehaviorPattern]:
-    if pattern_id <= 0:
+def get_behavior_experience(path_id: int) -> Optional[BehaviorExperiencePath]:
+    if path_id <= 0:
         return None
     try:
         with get_db_session(auto_commit=False) as session:
-            pattern = session.get(BehaviorPattern, pattern_id)
-            if pattern is not None:
-                session.expunge(pattern)
-            return pattern
+            path = session.get(BehaviorExperiencePath, path_id)
+            if path is not None:
+                session.expunge(path)
+            return path
     except Exception as exc:
-        logger.error(f"读取行为表现失败: id={pattern_id} error={exc}")
+        logger.error(f"读取行为经验路径失败: id={path_id} error={exc}")
         return None
 
 
-def mark_behavior_pattern_selected(pattern_id: int) -> Optional[BehaviorPattern]:
-    if pattern_id <= 0:
+def mark_behavior_experience_selected(path_id: int) -> Optional[BehaviorExperiencePath]:
+    if path_id <= 0:
         return None
     now = datetime.now()
     try:
         with get_db_session() as session:
-            pattern = session.get(BehaviorPattern, pattern_id)
-            if pattern is None:
+            path = session.get(BehaviorExperiencePath, path_id)
+            if path is None:
                 return None
-            pattern.activation_count += 1
-            pattern.last_active_time = now
-            pattern.update_time = now
-            session.add(pattern)
+            path.activation_count += 1
+            path.last_active_time = now
+            path.update_time = now
+            session.add(path)
             session.flush()
-            session.refresh(pattern)
-            session.expunge(pattern)
-            return pattern
+            session.refresh(path)
+            session.expunge(path)
+            selected_path = path
     except Exception as exc:
-        logger.error(f"更新行为表现激活状态失败: id={pattern_id} error={exc}")
+        logger.error(f"更新行为经验路径激活状态失败: id={path_id} error={exc}")
         return None
+
+    mark_behavior_scene_links_selected(path_id)
+    return selected_path
 
 
 def apply_behavior_feedback(
@@ -283,7 +381,7 @@ def apply_behavior_feedback(
     reason: str,
     outcome: str,
     session_id: str,
-) -> Optional[BehaviorPattern]:
+) -> Optional[BehaviorExperiencePath]:
     normalized_status = str(status or "").strip().lower()
     normalized_reason = _normalize_text(reason, max_length=300)
     normalized_outcome = _normalize_text(outcome, max_length=240)
@@ -291,11 +389,11 @@ def apply_behavior_feedback(
 
     try:
         with get_db_session() as session:
-            pattern = session.get(BehaviorPattern, pattern_id)
-            if pattern is None:
+            path = session.get(BehaviorExperiencePath, pattern_id)
+            if path is None:
                 return None
 
-            feedback_items = _load_json_list(pattern.feedback_list)
+            feedback_items = _load_json_list(path.feedback_list)
             feedback_items.append(
                 {
                     "score_delta": float(score_delta),
@@ -306,24 +404,38 @@ def apply_behavior_feedback(
                     "created_at": now.isoformat(timespec="seconds"),
                 }
             )
-            pattern.feedback_list = _dump_json_list(feedback_items[-FEEDBACK_HISTORY_LIMIT:])
-            pattern.score = _clamp_score(float(pattern.score or 0.0) + float(score_delta))
-            pattern.last_feedback_time = now
-            pattern.update_time = now
+            path.feedback_list = _dump_json_list(feedback_items[-FEEDBACK_HISTORY_LIMIT:])
+            path.score = _clamp_score(float(path.score or 0.0) + float(score_delta))
+            path.last_feedback_time = now
+            path.update_time = now
             if normalized_status in POSITIVE_FEEDBACK_STATUSES:
-                pattern.success_count += 1
+                path.success_count += 1
             elif normalized_status in NEGATIVE_FEEDBACK_STATUSES:
-                pattern.failure_count += 1
-            if normalized_outcome:
-                pattern.outcome = normalized_outcome
-            if pattern.score <= MIN_BEHAVIOR_SCORE and pattern.failure_count >= 3:
-                pattern.enabled = False
+                path.failure_count += 1
+            if path.score <= MIN_BEHAVIOR_SCORE and path.failure_count >= 3:
+                path.enabled = False
 
-            session.add(pattern)
+            session.add(path)
             session.flush()
-            session.refresh(pattern)
-            session.expunge(pattern)
-            return pattern
+            session.refresh(path)
+            session.expunge(path)
+            feedback_path = path
     except Exception as exc:
-        logger.error(f"写入行为表现反馈失败: id={pattern_id} error={exc}")
+        logger.error(f"写入行为经验路径反馈失败: id={pattern_id} error={exc}")
         return None
+
+    apply_behavior_scene_feedback(
+        experience_path_id=pattern_id,
+        score_delta=score_delta,
+        status=normalized_status,
+    )
+    return feedback_path
+
+
+# 兼容旧调用命名；运行时实体已经是 BehaviorExperiencePath。
+behavior_pattern_to_dict = behavior_experience_to_dict
+find_similar_behavior_pattern = find_similar_behavior_experience
+upsert_behavior_pattern = upsert_behavior_experience
+list_behavior_patterns_for_sessions = list_behavior_experiences_for_sessions
+get_behavior_pattern = get_behavior_experience
+mark_behavior_pattern_selected = mark_behavior_experience_selected

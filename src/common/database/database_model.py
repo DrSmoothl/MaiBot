@@ -248,23 +248,6 @@ class HighFrequencyTerm(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, nullable=False))
 
 
-class CommandRecord(SQLModel, table=True):
-    """记录命令执行情况"""
-
-    __tablename__ = "command_records"  # type: ignore
-
-    id: Optional[int] = Field(default=None, primary_key=True)  # 自增主键
-
-    # 元信息
-    timestamp: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))  # 记录时间戳
-    session_id: str = Field(index=True, max_length=255)  # 对应的 ChatSession session_id
-
-    # 调用信息
-    command_name: str = Field(index=True, max_length=255)  # 命令名称
-    command_data: Optional[str] = Field(default=None)  # 命令数据，JSON格式存储
-    command_result: Optional[str] = Field(default=None)  # 命令执行结果
-
-
 class OnlineTime(SQLModel, table=True):
     """
     用于存储在线时长记录的模型。
@@ -307,20 +290,30 @@ class Expression(SQLModel, table=True):
     )  # 最后修改者，标记用户或AI，为空表示暂无修改来源
 
 
-class BehaviorPattern(SQLModel, table=True):
-    """用于存储可复用的行为表现模式。"""
+class BehaviorExperiencePath(SQLModel, table=True):
+    """可反馈的行为经验路径：场景节点 -> 行为动作节点 -> 结果节点。"""
 
-    __tablename__ = "behavior_patterns"  # type: ignore
+    __tablename__ = "behavior_experience_paths"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "start_scene_node_id",
+            "action_node_id",
+            "outcome_node_id",
+            name="uq_behavior_experience_path_scope_scene_action_outcome",
+        ),
+        Index("ix_behavior_experience_paths_session_enabled", "session_id", "enabled"),
+        Index("ix_behavior_experience_paths_action", "action_node_id"),
+        Index("ix_behavior_experience_paths_outcome", "outcome_node_id"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-
-    trigger: str = Field(sa_column=Column(Text, nullable=False))
-    action: str = Field(sa_column=Column(Text, nullable=False))
-    outcome: str = Field(sa_column=Column(Text, nullable=False))
-
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    start_scene_node_id: int = Field(index=True)
+    action_node_id: int = Field(index=True)
+    outcome_node_id: int = Field(index=True)
     evidence_list: str = Field(default="[]", sa_column=Column(Text, nullable=False))
     feedback_list: str = Field(default="[]", sa_column=Column(Text, nullable=False))
-
     count: int = Field(default=0)
     activation_count: int = Field(default=0)
     success_count: int = Field(default=0)
@@ -332,7 +325,166 @@ class BehaviorPattern(SQLModel, table=True):
     last_feedback_time: Optional[datetime] = Field(default=None, sa_column=Column(DateTime, nullable=True))
     create_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime))
     update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorSceneNode(SQLModel, table=True):
+    """行为表现的场景节点，用于组织场景和行为之间的关联图。"""
+
+    __tablename__ = "behavior_scene_nodes"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint("session_id", "node_kind", "normalized_name", name="uq_behavior_scene_node_scope_kind_name"),
+        Index("ix_behavior_scene_nodes_session_kind", "session_id", "node_kind"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
     session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    node_kind: str = Field(default="scene", max_length=40)
+    name: str = Field(sa_column=Column(Text, nullable=False))
+    normalized_name: str = Field(sa_column=Column(Text, nullable=False))
+    source_count: int = Field(default=0)
+    score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorSceneEdge(SQLModel, table=True):
+    """行为场景图中的场景关联边。"""
+
+    __tablename__ = "behavior_scene_edges"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "source_scene_id",
+            "target_scene_id",
+            "edge_type",
+            name="uq_behavior_scene_edge_scope_source_target_type",
+        ),
+        Index("ix_behavior_scene_edges_session_type", "session_id", "edge_type"),
+        Index("ix_behavior_scene_edges_source", "source_scene_id"),
+        Index("ix_behavior_scene_edges_target", "target_scene_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    source_scene_id: int = Field(index=True)
+    target_scene_id: int = Field(index=True)
+    edge_type: str = Field(default="co_occurs", max_length=40)
+    weight: float = Field(default=1.0, sa_column=Column(Float, nullable=False, server_default="1"))
+    count: int = Field(default=0)
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorExperienceSceneLink(SQLModel, table=True):
+    """行为经验路径与场景节点之间的加权链接。"""
+
+    __tablename__ = "behavior_experience_scene_links"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint(
+            "behavior_experience_path_id",
+            "scene_node_id",
+            "link_role",
+            name="uq_behavior_experience_scene_link_path_node_role",
+        ),
+        Index("ix_behavior_experience_scene_links_session_role", "session_id", "link_role"),
+        Index("ix_behavior_experience_scene_links_node", "scene_node_id"),
+        Index("ix_behavior_experience_scene_links_path", "behavior_experience_path_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    behavior_experience_path_id: int = Field(index=True)
+    scene_node_id: int = Field(index=True)
+    link_role: str = Field(default="start", max_length=40)
+    weight: float = Field(default=1.0, sa_column=Column(Float, nullable=False, server_default="1"))
+    count: int = Field(default=0)
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorActionNode(SQLModel, table=True):
+    """行为动作节点，用于复用跨场景的行为策略。"""
+
+    __tablename__ = "behavior_action_nodes"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint("session_id", "normalized_action", name="uq_behavior_action_node_scope_action"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    action: str = Field(sa_column=Column(Text, nullable=False))
+    normalized_action: str = Field(sa_column=Column(Text, nullable=False))
+    source_count: int = Field(default=0)
+    score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorOutcomeNode(SQLModel, table=True):
+    """行为结果节点，用于记录行为通常导向的对话结果。"""
+
+    __tablename__ = "behavior_outcome_nodes"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint("session_id", "normalized_outcome", name="uq_behavior_outcome_node_scope_outcome"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    outcome: str = Field(sa_column=Column(Text, nullable=False))
+    normalized_outcome: str = Field(sa_column=Column(Text, nullable=False))
+    source_count: int = Field(default=0)
+    score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorSceneActionEdge(SQLModel, table=True):
+    """场景节点到行为动作节点的强化边。"""
+
+    __tablename__ = "behavior_scene_action_edges"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "scene_node_id",
+            "action_node_id",
+            "behavior_experience_path_id",
+            name="uq_behavior_scene_action_edge_scope_scene_action_path",
+        ),
+        Index("ix_behavior_scene_action_edges_scene", "scene_node_id"),
+        Index("ix_behavior_scene_action_edges_action", "action_node_id"),
+        Index("ix_behavior_scene_action_edges_path", "behavior_experience_path_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    scene_node_id: int = Field(index=True)
+    action_node_id: int = Field(index=True)
+    behavior_experience_path_id: int = Field(index=True)
+    weight: float = Field(default=1.0, sa_column=Column(Float, nullable=False, server_default="1"))
+    count: int = Field(default=0)
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorActionOutcomeEdge(SQLModel, table=True):
+    """行为动作节点到结果节点的强化边。"""
+
+    __tablename__ = "behavior_action_outcome_edges"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "action_node_id",
+            "outcome_node_id",
+            "behavior_experience_path_id",
+            name="uq_behavior_action_outcome_edge_scope_action_outcome_path",
+        ),
+        Index("ix_behavior_action_outcome_edges_action", "action_node_id"),
+        Index("ix_behavior_action_outcome_edges_outcome", "outcome_node_id"),
+        Index("ix_behavior_action_outcome_edges_path", "behavior_experience_path_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    action_node_id: int = Field(index=True)
+    outcome_node_id: int = Field(index=True)
+    behavior_experience_path_id: int = Field(index=True)
+    weight: float = Field(default=1.0, sa_column=Column(Float, nullable=False, server_default="1"))
+    count: int = Field(default=0)
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
 
 
 class Jargon(SQLModel, table=True):

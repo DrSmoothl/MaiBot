@@ -63,12 +63,6 @@ _DATABASE_CLEANUP_TABLES: dict[str, dict[str, str]] = {
         "description": "内置工具和插件工具的调用过程记录。",
         "date_column": "timestamp",
     },
-    "command_records": {
-        "label": "命令调用记录",
-        "category": "调用与统计",
-        "description": "命令执行情况与结果记录。",
-        "date_column": "timestamp",
-    },
     "mai_messages": {
         "label": "消息记录",
         "category": "聊天历史",

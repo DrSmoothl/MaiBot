@@ -19,6 +19,7 @@ from .behavior_pattern_store import (
     list_behavior_patterns_for_sessions,
     mark_behavior_pattern_selected,
 )
+from .behavior_scene_graph_store import retrieve_behavior_scores_from_scene_graph
 from .behavior_scenario import BehaviorScenarioProfile, behavior_scenario_analyzer
 
 logger = get_logger("behavior_selector")
@@ -239,6 +240,62 @@ class BehaviorPatternSelector:
             )
         return selected_candidates
 
+    def _rank_candidates_by_scene_graph(
+        self,
+        candidates: list[dict[str, Any]],
+        *,
+        scene_graph_scores: dict[int, float],
+        context_text: str,
+        max_count: int,
+    ) -> list[dict[str, Any]]:
+        if not scene_graph_scores:
+            return []
+
+        graph_candidates: list[dict[str, Any]] = []
+        remaining_candidates: list[dict[str, Any]] = []
+        for candidate in candidates:
+            candidate_id = candidate.get("id")
+            if not isinstance(candidate_id, int):
+                continue
+            graph_score = scene_graph_scores.get(candidate_id)
+            if graph_score is None:
+                remaining_candidates.append(candidate)
+                continue
+            candidate = dict(candidate)
+            candidate["scene_graph_score"] = round(graph_score, 4)
+            graph_candidates.append(candidate)
+
+        if not graph_candidates:
+            return []
+
+        graph_candidates.sort(
+            key=lambda candidate: (
+                float(candidate.get("scene_graph_score") or 0.0),
+                self._candidate_weight(candidate),
+                int(candidate.get("success_count") or 0),
+                int(candidate.get("id") or 0),
+            ),
+            reverse=True,
+        )
+        selected_candidates = graph_candidates[:max_count]
+        if len(selected_candidates) >= max_count:
+            return selected_candidates
+
+        selected_ids = {int(candidate.get("id") or 0) for candidate in selected_candidates}
+        fill_candidates = [
+            candidate
+            for candidate in remaining_candidates
+            if int(candidate.get("id") or 0) not in selected_ids
+        ]
+        selected_candidates.extend(
+            self._rank_candidates_by_context(
+                fill_candidates,
+                context_text=context_text,
+                max_count=max_count - len(selected_candidates),
+            )
+        )
+        return selected_candidates
+
     def _load_behavior_candidates(
         self,
         session_id: str,
@@ -255,16 +312,36 @@ class BehaviorPatternSelector:
             session_ids=related_session_ids,
             include_global=has_global_share,
         )
-        candidates = [
-            behavior_pattern_to_dict(pattern)
-            for pattern in patterns
-            if pattern.id is not None and pattern.trigger and pattern.action and pattern.outcome
-        ]
+        candidates: list[dict[str, Any]] = []
+        for pattern in patterns:
+            if pattern.id is None:
+                continue
+            candidate = behavior_pattern_to_dict(pattern)
+            if not candidate:
+                continue
+            if not candidate.get("trigger") or not candidate.get("action") or not candidate.get("outcome"):
+                continue
+            candidates.append(candidate)
         retrieval_text = (
             scenario_profile.to_retrieval_text(context_text)
             if scenario_profile is not None and scenario_profile.has_signal
             else context_text
         )
+        if scenario_profile is not None and scenario_profile.has_signal:
+            scene_graph_scores = retrieve_behavior_scores_from_scene_graph(
+                session_ids=related_session_ids,
+                include_global=has_global_share,
+                profile=scenario_profile,
+            )
+            scene_graph_ranked_candidates = self._rank_candidates_by_scene_graph(
+                candidates,
+                scene_graph_scores=scene_graph_scores,
+                context_text=retrieval_text,
+                max_count=MAX_SELECTOR_CANDIDATES,
+            )
+            if scene_graph_ranked_candidates:
+                return scene_graph_ranked_candidates
+
         return self._rank_candidates_by_context(
             candidates,
             context_text=retrieval_text,
@@ -276,9 +353,10 @@ class BehaviorPatternSelector:
         preview_items: list[str] = []
         for candidate in candidates[:5]:
             preview_items.append(
-                "id={id}, score={score}, trigger={trigger!r}, action={action!r}".format(
+                "id={id}, score={score}, graph={graph}, trigger={trigger!r}, action={action!r}".format(
                     id=candidate.get("id"),
                     score=candidate.get("score"),
+                    graph=candidate.get("scene_graph_score"),
                     trigger=str(candidate.get("trigger") or "").strip(),
                     action=str(candidate.get("action") or "").strip(),
                 )

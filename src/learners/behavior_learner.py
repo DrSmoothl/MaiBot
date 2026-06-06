@@ -43,6 +43,36 @@ class BehaviorCandidate:
 
 
 @dataclass(frozen=True)
+class BehaviorParseDiagnostics:
+    """行为学习输出解析诊断信息。"""
+
+    normalized_response: str
+    parsed_item_count: int = 0
+    accepted_item_count: int = 0
+    invalid_item_count: int = 0
+    empty_output: bool = False
+    missing_scene_start: bool = False
+    parse_error: str = ""
+    non_list_output: bool = False
+
+
+@dataclass(frozen=True)
+class BehaviorParseResult:
+    """行为学习输出解析结果。"""
+
+    candidates: list[BehaviorCandidate]
+    diagnostics: BehaviorParseDiagnostics
+
+
+@dataclass(frozen=True)
+class BehaviorFilterResult:
+    """行为学习候选过滤结果。"""
+
+    candidates: list[BehaviorCandidate]
+    skipped_reasons: dict[str, int]
+
+
+@dataclass(frozen=True)
 class BehaviorLearningAcquireResult:
     """行为学习批次并发闸门的申请结果。"""
 
@@ -114,6 +144,15 @@ def _coerce_source_ids(raw_value: Any) -> list[str]:
     return source_ids
 
 
+def _compact_log_text(text: str, *, max_length: int = 1200) -> str:
+    """压缩长文本到适合日志展示的长度。"""
+
+    compacted_text = " ".join((text or "").split()).strip()
+    if len(compacted_text) <= max_length:
+        return compacted_text
+    return compacted_text[:max_length].rstrip() + "..."
+
+
 def _parse_behavior_item(raw_item: Any, *, scene_start: str) -> Optional[BehaviorCandidate]:
     if not isinstance(raw_item, dict):
         return None
@@ -127,31 +166,72 @@ def _parse_behavior_item(raw_item: Any, *, scene_start: str) -> Optional[Behavio
     return BehaviorCandidate(trigger=trigger, action=action, outcome=outcome, source_ids=source_ids)
 
 
-def parse_behavior_response(response: str, *, scene_start: str) -> list[BehaviorCandidate]:
-    """解析行为学习模型返回的 JSON。"""
+def parse_behavior_response_with_diagnostics(response: str, *, scene_start: str) -> BehaviorParseResult:
+    """解析行为学习模型返回的 JSON，并保留诊断信息供日志输出。"""
 
     normalized_response = _strip_json_code_fence(response or "")
     normalized_scene_start = scene_start.strip()
     if not normalized_response:
-        return []
+        return BehaviorParseResult(
+            candidates=[],
+            diagnostics=BehaviorParseDiagnostics(normalized_response="", empty_output=True),
+        )
     if not normalized_scene_start:
-        return []
+        return BehaviorParseResult(
+            candidates=[],
+            diagnostics=BehaviorParseDiagnostics(
+                normalized_response=normalized_response,
+                missing_scene_start=True,
+            ),
+        )
 
     try:
         parsed_response = json.loads(repair_json(normalized_response))
-    except Exception:
-        logger.warning(f"行为学习结果解析失败: {normalized_response!r}")
-        return []
+    except Exception as exc:
+        return BehaviorParseResult(
+            candidates=[],
+            diagnostics=BehaviorParseDiagnostics(
+                normalized_response=normalized_response,
+                parse_error=str(exc),
+            ),
+        )
 
     if not isinstance(parsed_response, list):
-        return []
+        return BehaviorParseResult(
+            candidates=[],
+            diagnostics=BehaviorParseDiagnostics(
+                normalized_response=normalized_response,
+                non_list_output=True,
+            ),
+        )
 
     candidates: list[BehaviorCandidate] = []
+    invalid_item_count = 0
     for raw_item in parsed_response:
         candidate = _parse_behavior_item(raw_item, scene_start=normalized_scene_start)
         if candidate is not None:
             candidates.append(candidate)
-    return candidates
+        else:
+            invalid_item_count += 1
+
+    return BehaviorParseResult(
+        candidates=candidates,
+        diagnostics=BehaviorParseDiagnostics(
+            normalized_response=normalized_response,
+            parsed_item_count=len(parsed_response),
+            accepted_item_count=len(candidates),
+            invalid_item_count=invalid_item_count,
+        ),
+    )
+
+
+def parse_behavior_response(response: str, *, scene_start: str) -> list[BehaviorCandidate]:
+    """解析行为学习模型返回的 JSON。"""
+
+    parse_result = parse_behavior_response_with_diagnostics(response, scene_start=scene_start)
+    if parse_result.diagnostics.parse_error:
+        logger.warning(f"行为学习结果解析失败: {parse_result.diagnostics.normalized_response!r}")
+    return parse_result.candidates
 
 
 class BehaviorLearner:
@@ -322,28 +402,66 @@ class BehaviorLearner:
             logger.error(f"学习行为表现失败: {exc}")
             return False
 
-        candidates = parse_behavior_response(response, scene_start=scene_start)
-        behavior_candidates = self._filter_behavior_candidates(candidates, pending_messages)
+        parse_result = parse_behavior_response_with_diagnostics(response, scene_start=scene_start)
+        self._log_parse_diagnostics(
+            learning_session_id=learning_session_id,
+            response=response,
+            parse_result=parse_result,
+        )
+
+        filter_result = self._filter_behavior_candidates(parse_result.candidates, pending_messages)
+        behavior_candidates = filter_result.candidates
+        logger.info(
+            f"{learning_session_id} 行为学习过滤概览: "
+            f"解析候选={len(parse_result.candidates)} "
+            f"有效候选={len(behavior_candidates)} "
+            f"跳过原因={filter_result.skipped_reasons}"
+        )
         if not behavior_candidates:
-            logger.debug(f"{learning_session_id} 行为学习未抽取到有效候选")
+            logger.info(
+                f"{learning_session_id} 行为学习未抽取到有效候选: "
+                f"模型输出预览={_compact_log_text(parse_result.diagnostics.normalized_response, max_length=1600)!r}"
+            )
             return False
 
         wrote_pattern = False
+        write_success_count = 0
+        write_failed_count = 0
         for candidate in behavior_candidates[:12]:
-            pattern = upsert_behavior_pattern(
+            logger.info(
+                f"{learning_session_id} 准备写入行为经验路径: "
+                f"action={candidate.action} outcome={candidate.outcome} source_ids={candidate.source_ids}"
+            )
+            path = upsert_behavior_pattern(
                 trigger=candidate.trigger,
                 action=candidate.action,
                 outcome=candidate.outcome,
                 source_ids=candidate.source_ids,
                 session_id=learning_session_id,
+                scenario_profile=scene_profile,
+                scene_start=scene_start,
             )
-            if pattern is None:
+            if path is None:
+                write_failed_count += 1
+                logger.warning(
+                    f"{learning_session_id} 行为经验路径写入未成功: "
+                    f"action={candidate.action} outcome={candidate.outcome} source_ids={candidate.source_ids}"
+                )
                 continue
             wrote_pattern = True
+            write_success_count += 1
             logger.info(
-                f"学习到行为表现 [ID: {pattern.id}]: "
+                f"学习到行为经验路径 [ID: {path.id}]: "
                 f"场景={candidate.trigger} 行为={candidate.action} 结果={candidate.outcome}"
             )
+
+        logger.info(
+            f"{learning_session_id} 行为学习写入概览: "
+            f"有效候选={len(behavior_candidates)} "
+            f"尝试写入={min(len(behavior_candidates), 12)} "
+            f"成功={write_success_count} "
+            f"失败={write_failed_count}"
+        )
 
         if wrote_pattern:
             maintenance_result = behavior_pattern_maintenance.maybe_maintain_session(
@@ -367,6 +485,36 @@ class BehaviorLearner:
                 )
 
         return wrote_pattern
+
+    def _log_parse_diagnostics(
+        self,
+        *,
+        learning_session_id: str,
+        response: str,
+        parse_result: BehaviorParseResult,
+    ) -> None:
+        """输出行为学习结果解析阶段的详细诊断日志。"""
+
+        diagnostics = parse_result.diagnostics
+        response_preview = _compact_log_text(diagnostics.normalized_response or response, max_length=1600)
+        logger.info(
+            f"{learning_session_id} 行为学习解析概览: "
+            f"原始长度={len(response or '')} "
+            f"规范化长度={len(diagnostics.normalized_response)} "
+            f"数组项={diagnostics.parsed_item_count} "
+            f"解析候选={diagnostics.accepted_item_count} "
+            f"无效项={diagnostics.invalid_item_count} "
+            f"空输出={diagnostics.empty_output} "
+            f"缺少场景={diagnostics.missing_scene_start} "
+            f"非数组={diagnostics.non_list_output} "
+            f"解析错误={diagnostics.parse_error or '无'} "
+            f"输出预览={response_preview!r}"
+        )
+        for index, candidate in enumerate(parse_result.candidates[:12], start=1):
+            logger.info(
+                f"{learning_session_id} 行为学习解析候选[{index}]: "
+                f"action={candidate.action} outcome={candidate.outcome} source_ids={candidate.source_ids}"
+            )
 
     async def _analyze_learning_scene(
         self,
@@ -558,12 +706,14 @@ class BehaviorLearner:
         self,
         candidates: list[BehaviorCandidate],
         messages: list["SessionMessage"],
-    ) -> list[BehaviorCandidate]:
+    ) -> BehaviorFilterResult:
         """过滤行为表现候选，确保来源行有效且内容可复用。"""
 
         filtered_candidates: list[BehaviorCandidate] = []
+        skipped_reasons: Counter[str] = Counter()
         for candidate in candidates:
             if "SELF" in candidate.trigger or "SELF" in candidate.action or "SELF" in candidate.outcome:
+                skipped_reasons["contains_self_literal"] += 1
                 logger.info(
                     f"跳过包含 SELF 字面量的行为表现："
                     f"trigger={candidate.trigger}, action={candidate.action}, outcome={candidate.outcome}"
@@ -581,7 +731,11 @@ class BehaviorLearner:
                 if source_id_str not in valid_source_ids:
                     valid_source_ids.append(source_id_str)
             if not valid_source_ids:
-                logger.debug(f"跳过来源无效的行为表现：{candidate}")
+                skipped_reasons["invalid_source_ids"] += 1
+                logger.info(
+                    f"跳过来源无效的行为表现: "
+                    f"action={candidate.action} outcome={candidate.outcome} source_ids={candidate.source_ids}"
+                )
                 continue
 
             has_source_text = any(
@@ -589,7 +743,11 @@ class BehaviorLearner:
                 for source_id in valid_source_ids
             )
             if not has_source_text:
-                logger.debug(f"跳过来源为空的行为表现：{candidate}")
+                skipped_reasons["empty_source_text"] += 1
+                logger.info(
+                    f"跳过来源为空的行为表现: "
+                    f"action={candidate.action} outcome={candidate.outcome} source_ids={valid_source_ids}"
+                )
                 continue
 
             filtered_candidates.append(
@@ -601,4 +759,7 @@ class BehaviorLearner:
                 )
             )
 
-        return filtered_candidates
+        return BehaviorFilterResult(
+            candidates=filtered_candidates,
+            skipped_reasons=dict(skipped_reasons),
+        )
