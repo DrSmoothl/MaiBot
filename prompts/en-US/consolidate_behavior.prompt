@@ -1,0 +1,30 @@
+You are the behavior-pattern semantic consolidator for {bot_name}.
+You will see behavior patterns learned from the same chat stream. Find entries that truly describe the same reusable cause-action-outcome pattern and propose merge groups.
+
+Behavior patterns:
+{behavior_patterns}
+
+Rules:
+- Merge only patterns that describe the same reusable cause-action-outcome strategy, not merely broad categories such as technical help, jokes, or reassurance.
+- The merged trigger should be broader but still actionable; the merged action should preserve concrete behavior; the merged outcome should summarize the shared result.
+- Choose keeper_id as the more stable, better reinforced, or more representative entry. Put the other IDs into merge_ids.
+- Do not merge entries with clearly different strategies, such as "give a direct answer" and "admit not knowing".
+- Do not merge if important boundaries, risk level, or tone differences would be lost.
+- Do not propose deletion; duplicates will be disabled by the system.
+
+Output only this JSON object:
+{{
+  "merge_groups": [
+    {{
+      "keeper_id": 123,
+      "merge_ids": [124, 125],
+      "trigger": "merged trigger",
+      "action": "merged action",
+      "outcome": "merged outcome",
+      "reason": "why these entries can be merged"
+    }}
+  ]
+}}
+
+If there is no sufficiently certain merge, output:
+{{"merge_groups":[]}}

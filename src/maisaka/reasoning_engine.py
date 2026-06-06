@@ -6,18 +6,28 @@ from datetime import datetime
 from html import escape
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
+from rich.panel import Panel
+
 import asyncio
 import difflib
 import json
+import random
 import time
 
 from src.chat.heart_flow.heartFC_utils import CycleDetail
 from src.chat.message_receive.message import SessionMessage
+from src.cli.console import console
 from src.common.data_models.message_component_data_model import EmojiComponent, ImageComponent, MessageSequence, TextComponent
 from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
+from src.learners.behavior_pattern_store import (
+    BEHAVIOR_REFERENCE_DISPLAY_PREFIX,
+    BEHAVIOR_REFERENCE_MAX_USES,
+    BEHAVIOR_REFERENCE_SOURCE,
+)
+from src.learners.behavior_selector import behavior_pattern_selector
 from src.llm_models.exceptions import ReqAbortException, RespNotOkException
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.services import database_service as database_api
@@ -30,6 +40,7 @@ from src.maisaka.builtin_tool import (
     is_builtin_tool_in_action_stage,
 )
 from .chat_loop_service import ChatResponse
+from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.visual.chat_history_refresher import (
     has_pending_image_recognition,
     log_pending_image_recognition_before_text_planner,
@@ -78,6 +89,24 @@ HISTORY_SILENT_TOOL_NAMES = {"finish"}
 HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
 TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
+BEHAVIOR_REFERENCE_SELECTION_PROBABILITY = 0.3
+BEHAVIOR_SELECTOR_CONTEXT_MESSAGE_LIMIT = 8
+BEHAVIOR_SELECTOR_CONTEXT_TEXT_LIMIT = 1800
+BEHAVIOR_SELECTOR_CONSTRAINT_TEXT = (
+    "【行为表现选择任务约束】\n"
+    "你现在不是主 planner，不要续写聊天、不要判断是否需要回复、不要总结群聊现状。\n"
+    "你只负责根据最新聊天上下文，从候选行为表现中选择 0 或 1 条给主 planner 参考。\n"
+    "如果没有自然匹配项，选择 null。\n"
+    '只能输出 JSON 对象：{"selected_id": 123, "reason": "..."} '
+    '或 {"selected_id": null, "reason": "..."}。'
+)
+BEHAVIOR_SCENARIO_CONSTRAINT_TEXT = (
+    "【行为表现情景分析任务约束】\n"
+    "你现在不是主 planner，不要续写聊天、不要判断是否需要回复、不要选择行为表现。\n"
+    "你只负责把当前上下文抽象成行为表现检索用的场景画像。\n"
+    "只能输出 JSON 对象，字段必须包含 summary、user_intent、conversation_phase、domain_tags、"
+    "behavior_needs、risk_flags、avoid_behaviors、retrieval_query、confidence。"
+)
 
 
 class MaisakaReasoningEngine:
@@ -167,6 +196,257 @@ class MaisakaReasoningEngine:
             tool_definitions=tool_definitions,
         )
 
+    async def _run_behavior_selector_sub_agent(self, system_prompt: str) -> str:
+        """运行行为表现选择子代理，并返回文本结果。"""
+
+        response = await self._runtime.run_sub_agent(
+            context_message_limit=self._runtime._max_context_size,
+            system_prompt=system_prompt,
+            request_kind="behavior_selector",
+            extra_messages=[
+                ReferenceMessage(
+                    content=BEHAVIOR_SELECTOR_CONSTRAINT_TEXT,
+                    timestamp=datetime.now(),
+                    reference_type=ReferenceMessageType.TOOL_HINT,
+                    remaining_uses_value=1,
+                    display_prefix="[行为表现选择约束]",
+                )
+            ],
+            interrupt_flag=None,
+            tool_definitions=[],
+        )
+        response_text = (response.content or "").strip()
+        self._log_behavior_selector_prompt_preview(
+            response,
+            output_content=response_text,
+        )
+        return response_text
+
+    async def _run_behavior_scenario_analyzer_sub_agent(self, system_prompt: str) -> str:
+        """运行行为表现情景分析子代理，并返回文本结果。"""
+
+        response = await self._runtime.run_sub_agent(
+            context_message_limit=self._runtime._max_context_size,
+            system_prompt=system_prompt,
+            request_kind="behavior_scenario_analyzer",
+            extra_messages=[
+                ReferenceMessage(
+                    content=BEHAVIOR_SCENARIO_CONSTRAINT_TEXT,
+                    timestamp=datetime.now(),
+                    reference_type=ReferenceMessageType.TOOL_HINT,
+                    remaining_uses_value=1,
+                    display_prefix="[行为表现情景分析约束]",
+                )
+            ],
+            interrupt_flag=None,
+            tool_definitions=[],
+        )
+        response_text = (response.content or "").strip()
+        self._log_behavior_scenario_prompt_preview(
+            response,
+            output_content=response_text,
+        )
+        return response_text
+
+    def _log_behavior_selector_prompt_preview(
+        self,
+        response: ChatResponse,
+        *,
+        output_content: str,
+    ) -> None:
+        """保存行为表现选择器 Prompt 预览，并在控制台输出查看入口。"""
+
+        try:
+            prompt_access_panel = PromptCLIVisualizer.build_prompt_access_panel(
+                response.request_messages,
+                category="behavior_selector",
+                chat_id=str(self._runtime.session_id or ""),
+                request_kind="behavior_selector",
+                selection_reason=(
+                    f"会话ID: {self._runtime.session_id}\n"
+                    f"会话名称: {self._runtime.session_name}\n"
+                    f"模型: {response.model_name or '未知'}\n"
+                    f"构建消息数: {response.built_message_count}\n"
+                    f"选中历史数: {response.selected_history_count}"
+                ),
+                output_content=output_content,
+                metadata={
+                    "model_name": response.model_name,
+                    "duration_ms": response.duration_ms,
+                    "prompt_tokens": response.prompt_tokens,
+                    "completion_tokens": response.completion_tokens,
+                    "total_tokens": response.total_tokens,
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"{self._runtime.log_prefix} 行为表现选择器 Prompt 预览保存失败: {exc}")
+            return
+
+        console.print(
+            Panel(
+                prompt_access_panel,
+                title=f"{self._runtime.log_prefix} 行为表现选择器请求预览",
+                border_style="bright_magenta",
+                padding=(0, 1),
+            )
+        )
+        logger.info(f"{self._runtime.log_prefix} 行为表现选择器请求预览已生成，已在控制台显示可点击链接")
+
+    def _log_behavior_scenario_prompt_preview(
+        self,
+        response: ChatResponse,
+        *,
+        output_content: str,
+    ) -> None:
+        """保存行为表现情景分析 Prompt 预览，并在控制台输出查看入口。"""
+
+        try:
+            prompt_access_panel = PromptCLIVisualizer.build_prompt_access_panel(
+                response.request_messages,
+                category="behavior_scenario_analyzer",
+                chat_id=str(self._runtime.session_id or ""),
+                request_kind="behavior_scenario_analyzer",
+                selection_reason=(
+                    f"会话ID: {self._runtime.session_id}\n"
+                    f"会话名称: {self._runtime.session_name}\n"
+                    f"模型: {response.model_name or '未知'}\n"
+                    f"构建消息数: {response.built_message_count}\n"
+                    f"选中历史数: {response.selected_history_count}"
+                ),
+                output_content=output_content,
+                metadata={
+                    "model_name": response.model_name,
+                    "duration_ms": response.duration_ms,
+                    "prompt_tokens": response.prompt_tokens,
+                    "completion_tokens": response.completion_tokens,
+                    "total_tokens": response.total_tokens,
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"{self._runtime.log_prefix} 行为表现情景分析 Prompt 预览保存失败: {exc}")
+            return
+
+        console.print(
+            Panel(
+                prompt_access_panel,
+                title=f"{self._runtime.log_prefix} 行为表现情景分析请求预览",
+                border_style="bright_magenta",
+                padding=(0, 1),
+            )
+        )
+        logger.info(f"{self._runtime.log_prefix} 行为表现情景分析请求预览已生成，已在控制台显示可点击链接")
+
+    def _has_active_behavior_reference(self) -> bool:
+        """判断当前历史中是否已有尚未过期的行为表现参考。"""
+
+        for message in self._runtime._chat_history:
+            if not isinstance(message, ReferenceMessage):
+                continue
+            if message.source != BEHAVIOR_REFERENCE_SOURCE:
+                continue
+            if message.remaining_uses_value is None or message.remaining_uses_value > 0:
+                return True
+        return False
+
+    def _insert_behavior_reference_message(self, reference_text: str) -> bool:
+        """将行为表现参考插入主循环历史。"""
+
+        normalized_text = reference_text.strip()
+        if not normalized_text:
+            return False
+
+        self._runtime._chat_history.append(
+            ReferenceMessage(
+                content=normalized_text,
+                timestamp=datetime.now(),
+                reference_type=ReferenceMessageType.BEHAVIOR_PATTERN,
+                remaining_uses_value=BEHAVIOR_REFERENCE_MAX_USES,
+                display_prefix=BEHAVIOR_REFERENCE_DISPLAY_PREFIX,
+            )
+        )
+        return True
+
+    @staticmethod
+    def _append_behavior_selector_context_item(
+        context_items: list[str],
+        *,
+        text: str,
+        seen_texts: set[str],
+    ) -> None:
+        normalized_text = " ".join(str(text or "").split()).strip()
+        if not normalized_text or normalized_text in seen_texts:
+            return
+        seen_texts.add(normalized_text)
+        context_items.append(normalized_text)
+
+    def _build_behavior_selector_context_text(
+        self,
+        *,
+        anchor_message: Optional[SessionMessage] = None,
+        source_messages: Optional[list[SessionMessage]] = None,
+    ) -> str:
+        """构造行为表现本地检索使用的最近上下文文本。"""
+
+        context_items: list[str] = []
+        seen_texts: set[str] = set()
+
+        for message in (source_messages or [])[-BEHAVIOR_SELECTOR_CONTEXT_MESSAGE_LIMIT:]:
+            self._append_behavior_selector_context_item(
+                context_items,
+                text=str(message.processed_plain_text or ""),
+                seen_texts=seen_texts,
+            )
+
+        if anchor_message is not None:
+            self._append_behavior_selector_context_item(
+                context_items,
+                text=str(anchor_message.processed_plain_text or ""),
+                seen_texts=seen_texts,
+            )
+
+        for history_message in reversed(self._runtime._chat_history):
+            if len(context_items) >= BEHAVIOR_SELECTOR_CONTEXT_MESSAGE_LIMIT:
+                break
+            if not isinstance(history_message, SessionBackedMessage):
+                continue
+            if history_message.source_kind not in {"user", "guided_reply", "outbound_send"}:
+                continue
+            self._append_behavior_selector_context_item(
+                context_items,
+                text=history_message.processed_plain_text,
+                seen_texts=seen_texts,
+            )
+
+        context_text = "\n".join(context_items[-BEHAVIOR_SELECTOR_CONTEXT_MESSAGE_LIMIT:])
+        if len(context_text) <= BEHAVIOR_SELECTOR_CONTEXT_TEXT_LIMIT:
+            return context_text
+        return context_text[-BEHAVIOR_SELECTOR_CONTEXT_TEXT_LIMIT:]
+
+    async def _select_behavior_reference_message(
+        self,
+        *,
+        anchor_message: Optional[SessionMessage] = None,
+        source_messages: Optional[list[SessionMessage]] = None,
+    ) -> None:
+        """在 planner 前并行挑选一条行为表现参考。"""
+
+        if self._has_active_behavior_reference():
+            return
+        if random.random() >= BEHAVIOR_REFERENCE_SELECTION_PROBABILITY:
+            return
+
+        selection = await behavior_pattern_selector.select_for_planner(
+            session_id=str(self._runtime.session_id or ""),
+            sub_agent_runner=lambda system_prompt: self._run_behavior_selector_sub_agent(system_prompt),
+            scenario_agent_runner=lambda system_prompt: self._run_behavior_scenario_analyzer_sub_agent(system_prompt),
+            context_text=self._build_behavior_selector_context_text(
+                anchor_message=anchor_message,
+                source_messages=source_messages,
+            ),
+        )
+        if selection.reference_text:
+            self._insert_behavior_reference_message(selection.reference_text)
+
     def _build_timing_gate_system_prompt(self) -> str:
         """构造 Timing Gate 子代理使用的系统提示词。"""
 
@@ -231,25 +511,42 @@ class MaisakaReasoningEngine:
         if deferred_tools_reminder:
             injected_messages.append(deferred_tools_reminder)
 
-        try:
-            heuristic_memory_message = await heuristic_memory_injector.build_injection_message(
-                session_id=str(self._runtime.session_id or ""),
-                anchor_message=anchor_message,
-            )
-        except Exception as exc:
-            logger.debug(f"{self._runtime.log_prefix} 启发式记忆自然拉起失败，已跳过: {exc}")
-            heuristic_memory_message = ""
+        async def build_heuristic_memory_message() -> str:
+            try:
+                return await heuristic_memory_injector.build_injection_message(
+                    session_id=str(self._runtime.session_id or ""),
+                    anchor_message=anchor_message,
+                )
+            except Exception as exc:
+                logger.debug(f"{self._runtime.log_prefix} 启发式记忆自然拉起失败，已跳过: {exc}")
+                return ""
+
+        async def build_profile_messages() -> list[str]:
+            try:
+                return await build_person_profile_injection_messages(
+                    anchor_message=anchor_message,
+                    pending_messages=source_messages,
+                )
+            except Exception as exc:
+                logger.debug(f"{self._runtime.log_prefix} 人物画像自动注入失败，已跳过: {exc}")
+                return []
+
+        async def select_behavior_reference() -> None:
+            try:
+                await self._select_behavior_reference_message(
+                    anchor_message=anchor_message,
+                    source_messages=source_messages,
+                )
+            except Exception as exc:
+                logger.debug(f"{self._runtime.log_prefix} 行为表现参考选择失败，已跳过: {exc}")
+
+        heuristic_memory_message, profile_messages, _ = await asyncio.gather(
+            build_heuristic_memory_message(),
+            build_profile_messages(),
+            select_behavior_reference(),
+        )
         if heuristic_memory_message:
             injected_messages.append(heuristic_memory_message)
-
-        try:
-            profile_messages = await build_person_profile_injection_messages(
-                anchor_message=anchor_message,
-                pending_messages=source_messages,
-            )
-        except Exception as exc:
-            logger.debug(f"{self._runtime.log_prefix} 人物画像自动注入失败，已跳过: {exc}")
-            profile_messages = []
         injected_messages.extend(profile_messages)
         return injected_messages
 

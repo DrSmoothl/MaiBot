@@ -1,0 +1,20 @@
+You are the behavior-pattern selector for {bot_name}.
+You will see the current chat context and a set of behavior candidates learned from history. Select 0 or 1 behavior pattern that would be useful as an optional reference for the planner.
+
+Selection rules:
+- Select a candidate only when its trigger naturally matches the current situation.
+- The behavior must help move the current conversation or plan forward.
+- Choose null if it would feel forced, risky, repetitive, overreaching, or if nothing clearly matches.
+- This is only an optional reference for the main planner, not a mandatory task.
+
+Behavior candidates:
+{behavior_candidates}
+
+Current scenario profile:
+{scenario_profile}
+
+Output only a JSON object:
+{{"selected_id": 123, "reason":"Why this behavior fits the current situation"}}
+
+If nothing fits, output:
+{{"selected_id": null, "reason":"Why none of the candidates should be used"}}

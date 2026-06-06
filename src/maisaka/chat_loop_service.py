@@ -62,6 +62,8 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "timing_gate": "timing_gate",
     "reply_effect_judge": "reply_effect_judge",
     "expression_selector": "expression_selector",
+    "behavior_selector": "behavior_selector",
+    "behavior_scenario_analyzer": "behavior_scenario_analyzer",
     "emotion": "emotion",
     "sub_agent": "sub_agent",
 }
@@ -1183,7 +1185,7 @@ class MaisakaChatLoopService:
             }
             filtered_history: List[LLMContextMessage] = []
             for message in selected_history:
-                if message.source == PLANNER_TOOL_HINT_SOURCE:
+                if message.source in {PLANNER_TOOL_HINT_SOURCE, "behavior_pattern"}:
                     continue
 
                 if isinstance(message, ToolResultMessage):
@@ -1229,7 +1231,11 @@ class MaisakaChatLoopService:
         ]
 
         if request_kind != "planner":
-            return selected_history
+            return [
+                message
+                for message in selected_history
+                if message.source != "behavior_pattern"
+            ]
 
         filtered_history: List[LLMContextMessage] = []
         for message in selected_history:
@@ -1263,7 +1269,7 @@ class MaisakaChatLoopService:
     def _resolve_enable_visual_message(request_kind: str) -> bool:
         if request_kind in {"planner", "timing_gate"}:
             return resolve_enable_visual_planner()
-        if request_kind in {"expression_selector", "reply_effect_judge"}:
+        if request_kind in {"expression_selector", "reply_effect_judge", "behavior_selector", "behavior_scenario_analyzer"}:
             return False
         return True
 

@@ -21,6 +21,8 @@ from .v12_to_v13 import migrate_v12_to_v13
 from .v13_to_v14 import migrate_v13_to_v14
 from .v14_to_v15 import migrate_v14_to_v15
 from .v15_to_v16 import migrate_v15_to_v16
+from .v16_to_v17 import migrate_v16_to_v17
+from .v17_to_v18 import migrate_v17_to_v18
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -39,7 +41,9 @@ V12_SCHEMA_VERSION = 12
 V13_SCHEMA_VERSION = 13
 V14_SCHEMA_VERSION = 14
 V15_SCHEMA_VERSION = 15
-LATEST_SCHEMA_VERSION = 16
+V16_SCHEMA_VERSION = 16
+V17_SCHEMA_VERSION = 17
+LATEST_SCHEMA_VERSION = 18
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -154,7 +158,93 @@ class LatestSchemaVersionDetector(BaseSchemaVersionDetector):
             return None
         if not snapshot.has_column("llm_usage", "prompt_cache_enabled"):
             return None
+        if not snapshot.has_table("behavior_patterns"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "trigger"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "action"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "outcome"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "score"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "enabled"):
+            return None
+        if not snapshot.has_table("high_frequency_terms"):
+            return None
+        if not snapshot.has_column("high_frequency_terms", "term"):
+            return None
+        if not snapshot.has_column("high_frequency_terms", "normalized_term"):
+            return None
+        if not snapshot.has_column("high_frequency_terms", "updated_at"):
+            return None
         return LATEST_SCHEMA_VERSION
+
+
+class V17SchemaVersionDetector(BaseSchemaVersionDetector):
+    """v17 schema 结构探测器。"""
+
+    @property
+    def name(self) -> str:
+        return "v17_schema_detector"
+
+    def detect_version(self, snapshot: DatabaseSchemaSnapshot) -> Optional[int]:
+        """检测数据库是否为 v17 结构。"""
+
+        if not _detect_v13_base_schema(snapshot):
+            return None
+        if not snapshot.has_column("mai_messages", "reply_frequency"):
+            return None
+        if not snapshot.has_column("llm_usage", "task_name"):
+            return None
+        if not snapshot.has_column("llm_usage", "prompt_cache_hit_tokens"):
+            return None
+        if not snapshot.has_column("llm_usage", "prompt_cache_miss_tokens"):
+            return None
+        if not snapshot.has_column("llm_usage", "prompt_cache_enabled"):
+            return None
+        if not snapshot.has_table("behavior_patterns"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "trigger"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "action"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "outcome"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "score"):
+            return None
+        if not snapshot.has_column("behavior_patterns", "enabled"):
+            return None
+        if snapshot.has_table("high_frequency_terms"):
+            return None
+        return V17_SCHEMA_VERSION
+
+
+class V16SchemaVersionDetector(BaseSchemaVersionDetector):
+    """v16 schema 结构探测器。"""
+
+    @property
+    def name(self) -> str:
+        return "v16_schema_detector"
+
+    def detect_version(self, snapshot: DatabaseSchemaSnapshot) -> Optional[int]:
+        """检测数据库是否为 v16 结构。"""
+
+        if not _detect_v13_base_schema(snapshot):
+            return None
+        if not snapshot.has_column("mai_messages", "reply_frequency"):
+            return None
+        if not snapshot.has_column("llm_usage", "task_name"):
+            return None
+        if not snapshot.has_column("llm_usage", "prompt_cache_hit_tokens"):
+            return None
+        if not snapshot.has_column("llm_usage", "prompt_cache_miss_tokens"):
+            return None
+        if not snapshot.has_column("llm_usage", "prompt_cache_enabled"):
+            return None
+        if snapshot.has_table("behavior_patterns"):
+            return None
+        return V16_SCHEMA_VERSION
 
 
 class V15SchemaVersionDetector(BaseSchemaVersionDetector):
@@ -673,6 +763,8 @@ def build_default_schema_version_detectors() -> List[BaseSchemaVersionDetector]:
 
     return [
         LatestSchemaVersionDetector(),
+        V17SchemaVersionDetector(),
+        V16SchemaVersionDetector(),
         V15SchemaVersionDetector(),
         V14SchemaVersionDetector(),
         V13SchemaVersionDetector(),
@@ -811,10 +903,24 @@ def build_default_migration_registry() -> MigrationRegistry:
             ),
             MigrationStep(
                 version_from=V15_SCHEMA_VERSION,
-                version_to=LATEST_SCHEMA_VERSION,
+                version_to=V16_SCHEMA_VERSION,
                 name="v15_to_v16",
                 description="为 LLM 使用记录增加当次请求是否启用 prompt cache 计费字段。",
                 handler=migrate_v15_to_v16,
+            ),
+            MigrationStep(
+                version_from=V16_SCHEMA_VERSION,
+                version_to=V17_SCHEMA_VERSION,
+                name="v16_to_v17",
+                description="新增行为表现模式表。",
+                handler=migrate_v16_to_v17,
+            ),
+            MigrationStep(
+                version_from=V17_SCHEMA_VERSION,
+                version_to=LATEST_SCHEMA_VERSION,
+                name="v17_to_v18",
+                description="新增高频词/词组词库表。",
+                handler=migrate_v17_to_v18,
             ),
         ]
     )

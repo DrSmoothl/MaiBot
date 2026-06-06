@@ -43,12 +43,16 @@ def process_chat_history_after_cycle(
 ) -> HistoryPostProcessResult:
     """在每轮结束后统一执行历史裁切与清理。"""
 
-    processed_history = [
-        message
-        for message in chat_history
-        if message.source not in FOCUS_WAKEUP_SOURCE_KINDS
-    ]
-    one_shot_removed_count = len(chat_history) - len(processed_history)
+    processed_history: list[LLMContextMessage] = []
+    one_shot_removed_count = 0
+    for message in chat_history:
+        if message.source in FOCUS_WAKEUP_SOURCE_KINDS:
+            one_shot_removed_count += 1
+            continue
+        if not message.consume_once():
+            one_shot_removed_count += 1
+            continue
+        processed_history.append(message)
     processed_history, normalized_removed_count, moved_tool_result_count = _normalize_history_structure(
         processed_history
     )

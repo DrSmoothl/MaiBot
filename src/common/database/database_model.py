@@ -225,6 +225,29 @@ class StatisticsModelHourly(SQLModel, table=True):
     time_cost_sq_sum: float = Field(default=0.0)
 
 
+class HighFrequencyTerm(SQLModel, table=True):
+    """高频词/词组词库。"""
+
+    __tablename__ = "high_frequency_terms"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint("normalized_term", name="uq_high_frequency_terms_normalized_term"),
+        Index("ix_high_frequency_terms_rank", "rank"),
+        Index("ix_high_frequency_terms_updated_at", "updated_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    term: str = Field(sa_column=Column(Text, nullable=False))
+    normalized_term: str = Field(sa_column=Column(Text, nullable=False))
+    term_type: str = Field(default="word", max_length=20)
+    rank: int = Field(default=0)
+    occurrence_count: int = Field(default=0)
+    message_count: int = Field(default=0)
+    frequency: float = Field(default=0.0)
+    message_frequency: float = Field(default=0.0)
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, nullable=False))
+    updated_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, nullable=False))
+
+
 class CommandRecord(SQLModel, table=True):
     """记录命令执行情况"""
 
@@ -282,6 +305,34 @@ class Expression(SQLModel, table=True):
     modified_by: Optional[ModifiedBy] = Field(
         default=None, sa_column=Column(SQLEnum(ModifiedBy), nullable=True)
     )  # 最后修改者，标记用户或AI，为空表示暂无修改来源
+
+
+class BehaviorPattern(SQLModel, table=True):
+    """用于存储可复用的行为表现模式。"""
+
+    __tablename__ = "behavior_patterns"  # type: ignore
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    trigger: str = Field(sa_column=Column(Text, nullable=False))
+    action: str = Field(sa_column=Column(Text, nullable=False))
+    outcome: str = Field(sa_column=Column(Text, nullable=False))
+
+    evidence_list: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    feedback_list: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+
+    count: int = Field(default=0)
+    activation_count: int = Field(default=0)
+    success_count: int = Field(default=0)
+    failure_count: int = Field(default=0)
+    score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
+    enabled: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, server_default="1"))
+
+    last_active_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+    last_feedback_time: Optional[datetime] = Field(default=None, sa_column=Column(DateTime, nullable=True))
+    create_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime))
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
 
 
 class Jargon(SQLModel, table=True):
