@@ -884,27 +884,6 @@ class ExperimentalConfig(ConfigBase):
     """Focus 模式下关注聊天超过该秒数没有进入循环时，会被其他聊天的新消息唤醒一次"""
 
 
-class FavouriteConfig(ConfigBase):
-    """麦麦收藏配置类"""
-
-    __ui_label__ = "收藏"
-    __ui_icon__ = "star"
-
-    isolate_by_chat: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "按聊天隔离收藏池",
-                "en_US": "Isolate favourites by chat",
-                "ja_JP": "チャットごとにお気に入りを分離",
-            },
-            "x-widget": "switch",
-            "x-icon": "folder-lock",
-        },
-    )
-    """是否按聊天流隔离 favourite 池；开启后保存到 data/favourite/<chat_id>，关闭后保存到 data/favourite/share。"""
-
-
 class MessageReceiveConfig(ConfigBase):
     """消息接收配置类"""
 

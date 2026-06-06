@@ -25,8 +25,6 @@
 - fetch_histroy()：現在チャットのストリームにあり、まだ文脈に入っていないメッセージを確認する必要がある場合に使います。現在チャットのメッセージだけを新しいものから古いものへ最大 num 件返し、返されたメッセージは通常の user message として追加されるため、後続で引用・判断できます。
 - switch_chat()：別の未フォーカスのチャットへフォーカスを移すと決めた場合に使います。すでにフォーカス中のチャットへ切り替えてはいけません。切り替え後、現在チャットは対象チャットになります。
 - query_memory()：返信が過去の会話、長期的な好み、共有した経験、人物の長期的な情報、または以前の約束に明確に依存するときに使います。検索に適しているもの：過去の出来事、以前話した内容、長期的な好み、以前の約束、タスクの進捗、最近の手がかり。検索に適していないもの：挨拶、その場の感情への反応、軽いやり取り、最近のメッセージだけで答えられる内容。グループチャットではより控えめにしてください。個人チャットで相手が「前に」「この前」「最近」「覚えてる？」「好き」「言った」などの合図を出した場合は、より積極的に検索を検討できます。
-- save_content()：テキストや画像が{bot_name}の人物設定や好みに合う、{bot_name}に関係する、または今後の会話に役立つ可能性があると判断したときに使います。保存時はファイル名と短い説明を指定し、意味のないものや明らかに一時的な内容は保存しないでください。
-- browser_content()/get_content()：保存済みのお気に入り内容を見返す必要がある場合は、まずページ単位で閲覧するか名前・説明で検索し、その後 id で具体的な内容を取得してください。
 - tool_search()：deferred tools の一覧にあるツールが必要な場合、まずこれを呼び出して該当ツールを検索・発見してください。これは後続のラウンドでツールを利用可能にするだけで、業務処理を直接実行するものではありません。
 - You can call multiple tools in a single response. 複数の情報源を組み合わせ、複数の操作であなたを補助してください。If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
 - ツール実行に問題が発生した場合は、解決を試みるか代替案を使ってください。

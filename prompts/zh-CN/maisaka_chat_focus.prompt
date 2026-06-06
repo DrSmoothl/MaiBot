@@ -26,8 +26,6 @@
 - fetch_histroy()：当你需要查看当前聊天流中尚未进入上下文的消息时使用。它只返回当前聊天的消息，并按从新到旧最多返回 num 条；返回消息会以普通 user message 形式加入上下文，便于后续引用和判断。
 - switch_chat()：当你决定把关注切到另一个未关注聊天时使用。不要切换到已经在关注的聊天；切换后当前聊天会变成目标聊天。
 - query_memory()：当回复明显依赖历史对话、长期偏好、共同经历、人物长期信息或之前约定时使用。适合检索：过去事件、之前聊过的内容、长期偏好、先前承诺、任务进展、近期线索；不适合检索：寒暄、即时情绪回应、轻松接话、只看最近消息就能回答的内容。群聊里更克制；私聊里如果对方提到“之前”“上次”“最近”“还记得吗”“我喜欢”“我说过”等类似的信号，可以更积极考虑检索。
-- save_content()：当你发现某段文本或图片符合{bot_name}的人设与喜好、与{bot_name}有关，或可能帮助后续聊天时使用；保存时提供文件名和简短描述，不要保存无意义或明显临时的内容。
-- browser_content()/get_content()：需要回看已收藏内容时，先分页浏览或按名称、描述搜索，再按 id 获取具体内容。
 - tool_search()：当你在deferred tools列表中需要其中某个工具时，先调用它来搜索并发现对应工具；它只负责让工具在后续轮次变为可用，不直接执行业务。
 - You can call multiple tools in a single response. 聚合不同的信息源，进行多种操作来辅助你。If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
 - 如果工具执行出现问题，尝试解决或使用替代方案。

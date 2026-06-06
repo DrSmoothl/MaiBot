@@ -11,8 +11,6 @@ from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 
 from .behavior_feedback import get_tool_spec as get_behavior_feedback_tool_spec
 from .behavior_feedback import handle_tool as handle_behavior_feedback_tool
-from .browser_content import get_tool_spec as get_browser_content_tool_spec
-from .browser_content import handle_tool as handle_browser_content_tool
 from .context import BuiltinToolRuntimeContext
 from .continue_tool import get_tool_spec as get_continue_tool_spec
 from .continue_tool import handle_tool as handle_continue_tool
@@ -20,8 +18,6 @@ from .finish import get_tool_spec as get_finish_tool_spec
 from .finish import handle_tool as handle_finish_tool
 from .fetch_histroy import get_tool_spec as get_fetch_histroy_tool_spec
 from .fetch_histroy import handle_tool as handle_fetch_histroy_tool
-from .get_content import get_tool_spec as get_get_content_tool_spec
-from .get_content import handle_tool as handle_get_content_tool
 from .no_action import get_tool_spec as get_no_action_tool_spec
 from .no_action import handle_tool as handle_no_action_tool
 from .query_jargon import get_tool_spec as get_query_jargon_tool_spec
@@ -32,8 +28,6 @@ from .query_person_profile import get_tool_spec as get_query_person_profile_tool
 from .query_person_profile import handle_tool as handle_query_person_profile_tool
 from .reply import get_tool_spec as get_reply_tool_spec
 from .reply import handle_tool as handle_reply_tool
-from .save_content import get_tool_spec as get_save_content_tool_spec
-from .save_content import handle_tool as handle_save_content_tool
 from .send_emoji import get_tool_spec as get_send_emoji_tool_spec
 from .send_emoji import handle_tool as handle_send_emoji_tool
 from .send_image import get_tool_spec as get_send_image_tool_spec
@@ -119,9 +113,6 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     ),
     BuiltinToolEntry("send_emoji", get_send_emoji_tool_spec, handle_send_emoji_tool, stage="action"),
     BuiltinToolEntry("send_image", get_send_image_tool_spec, handle_send_image_tool, stage="action"),
-    BuiltinToolEntry("save_content", get_save_content_tool_spec, handle_save_content_tool, stage="action"),
-    BuiltinToolEntry("browser_content", get_browser_content_tool_spec, handle_browser_content_tool, stage="action"),
-    BuiltinToolEntry("get_content", get_get_content_tool_spec, handle_get_content_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),
     BuiltinToolEntry(
         "fetch_histroy",
