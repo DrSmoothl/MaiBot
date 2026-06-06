@@ -762,7 +762,7 @@ class ChatConfig(ConfigBase):
     )
 
     enable_talk_value_rules: bool = Field(
-        default=True,
+        default=False,
         json_schema_extra={
             "label": {
                 "zh_CN": "启用动态发言频率规则",

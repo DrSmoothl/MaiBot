@@ -1,24 +1,23 @@
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Iterable, Literal, Sequence
 
-from sqlalchemy import and_, not_, or_
-from sqlmodel import col, delete, select
+from sqlmodel import select
 
 import jieba
 import re
 
-from src.chat.utils.utils import is_bot_self
 from src.common.database.database import get_db_session
-from src.common.database.database_model import HighFrequencyTerm, Messages
+from src.common.database.database_model import HighFrequencyTerm
+from src.common.data_models.message_component_data_model import TextComponent
+
+from src.maisaka.context.messages import SessionBackedMessage
 
 _URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 _CQ_CODE_RE = re.compile(r"\[CQ:[^\]]+\]")
-_REPLY_QUOTE_RE = re.compile(r"\[回复了[^\]]{0,2000}?的消息[:：][^\]]*\]", re.DOTALL)
-_INACCESSIBLE_REPLY_RE = re.compile(r"\[回复了[^\]]{0,200}?消息[，,][^\]]*?原消息[^\]]*?无法访问\]", re.DOTALL)
 _MENTION_RE = re.compile(r"@\S+")
-_MEDIA_HINT_RE = re.compile(r"\[(?:图片|表情|语音|视频|文件|转发|回复|image|emoji|voice|video|file)\]", re.IGNORECASE)
+_PLANNER_MESSAGE_PREFIX_RE = re.compile(r"^<message\b[^>]*>\s*", re.IGNORECASE)
 _TECH_TERM_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_+./#-]{1,})(?![A-Za-z0-9_])")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _LATIN_RE = re.compile(r"[a-zA-Z]")
@@ -196,66 +195,6 @@ class WordFrequencyItem:
     term_type: Literal["word", "phrase"] = "word"
 
 
-@dataclass(frozen=True)
-class WordFrequencyStatistics:
-    """最近消息词频统计结果。"""
-
-    generated_at: datetime
-    start_time: datetime
-    end_time: datetime
-    lookback_days: int
-    message_count: int
-    term_count: int
-    terms: list[WordFrequencyItem]
-
-
-async def get_recent_message_word_frequency(
-    *,
-    days: int = 30,
-    limit: int = 50,
-    min_count: int = 2,
-    text_only: bool = False,
-) -> WordFrequencyStatistics:
-    """统计最近一段时间内非 bot 消息的高频词和词组。"""
-
-    lookback_days = max(1, int(days))
-    end_time = datetime.now()
-    start_time = end_time - timedelta(days=lookback_days)
-    texts = _fetch_recent_non_bot_message_texts(start_time, end_time, text_only=text_only)
-
-    return build_message_word_frequency_statistics(
-        texts,
-        start_time=start_time,
-        end_time=end_time,
-        lookback_days=lookback_days,
-        limit=limit,
-        min_count=min_count,
-    )
-
-
-async def refresh_high_frequency_terms(
-    *,
-    days: int = 30,
-    limit: int = 1000,
-    min_count: int = 2,
-) -> int:
-    """重新统计最近非 bot 纯文本消息的高频词，并刷新高频词词库。"""
-
-    lookback_days = max(1, int(days))
-    end_time = datetime.now()
-    start_time = end_time - timedelta(days=lookback_days)
-    texts = _fetch_recent_non_bot_message_texts(start_time, end_time, text_only=True)
-    stats = build_message_word_frequency_statistics(
-        texts,
-        start_time=start_time,
-        end_time=end_time,
-        lookback_days=lookback_days,
-        limit=limit,
-        min_count=min_count,
-    )
-    return store_high_frequency_terms(stats)
-
-
 def update_high_frequency_terms_from_context_messages(
     context_messages: Sequence[object],
     *,
@@ -263,68 +202,34 @@ def update_high_frequency_terms_from_context_messages(
     min_count: int = 2,
     max_terms: int = 1000,
 ) -> int:
-    """从 Maisaka 裁切上下文消息批次中提取真实用户消息，并增量更新高频词词库。"""
+    """从 Maisaka 裁切上下文消息批次中提取格式化用户消息，并增量更新高频词词库。"""
 
-    source_messages = _extract_user_messages_from_context(context_messages)
-    return update_high_frequency_terms_from_messages(
-        source_messages,
+    texts = _extract_user_texts_from_context(context_messages)
+    if not texts:
+        return 0
+
+    terms = _build_message_word_frequency_terms(
+        texts,
         limit=limit,
         min_count=min_count,
+    )
+    if not terms:
+        return 0
+
+    return _merge_high_frequency_terms(
+        terms,
+        generated_at=datetime.now(),
         max_terms=max_terms,
     )
 
 
-def update_high_frequency_terms_from_messages(
-    messages: Iterable[object],
-    *,
-    limit: int = 1000,
-    min_count: int = 2,
-    max_terms: int = 1000,
-) -> int:
-    """从一批真实消息中增量更新高频词词库。"""
-
-    texts: list[str] = []
-    timestamps: list[datetime] = []
-    for message in messages:
-        if not _is_countable_user_text_message(message):
-            continue
-
-        text = str(getattr(message, "processed_plain_text", "") or "").strip()
-        if not text:
-            continue
-
-        texts.append(text)
-        timestamp = getattr(message, "timestamp", None)
-        if isinstance(timestamp, datetime):
-            timestamps.append(timestamp)
-
-    if not texts:
-        return 0
-
-    now = datetime.now()
-    start_time = min(timestamps) if timestamps else now
-    end_time = max(timestamps) if timestamps else now
-    stats = build_message_word_frequency_statistics(
-        texts,
-        start_time=start_time,
-        end_time=end_time,
-        lookback_days=0,
-        limit=limit,
-        min_count=min_count,
-    )
-    return merge_high_frequency_terms(stats, max_terms=max_terms)
-
-
-def build_message_word_frequency_statistics(
+def _build_message_word_frequency_terms(
     texts: Iterable[str],
     *,
-    start_time: datetime,
-    end_time: datetime,
-    lookback_days: int,
     limit: int = 50,
     min_count: int = 2,
-) -> WordFrequencyStatistics:
-    """从纯文本消息构建词频统计，便于接口和测试复用。"""
+) -> list[WordFrequencyItem]:
+    """从 Maisaka 文本组件内容构建词频统计。"""
 
     normalized_limit = max(1, int(limit))
     normalized_min_count = max(1, int(min_count))
@@ -361,50 +266,15 @@ def build_message_word_frequency_statistics(
         limit=normalized_limit,
     )
 
-    return WordFrequencyStatistics(
-        generated_at=datetime.now(),
-        start_time=start_time,
-        end_time=end_time,
-        lookback_days=lookback_days,
-        message_count=message_count,
-        term_count=total_term_count,
-        terms=terms,
-    )
+    return terms
 
 
-def store_high_frequency_terms(stats: WordFrequencyStatistics) -> int:
-    """将高频词统计结果写入 ``high_frequency_terms`` 词库表。"""
-
-    records: list[HighFrequencyTerm] = []
-    seen_terms: set[str] = set()
-    for item in stats.terms:
-        normalized_term = _normalize_term_for_match(item.term)
-        if not normalized_term or normalized_term in seen_terms:
-            continue
-        seen_terms.add(normalized_term)
-        records.append(
-            HighFrequencyTerm(
-                rank=len(records) + 1,
-                term=item.term,
-                normalized_term=normalized_term,
-                term_type=item.term_type,
-                occurrence_count=item.count,
-                message_count=item.message_count,
-                frequency=item.frequency,
-                message_frequency=item.message_frequency,
-                updated_at=stats.generated_at,
-            )
-        )
-
-    with get_db_session(auto_commit=False) as session:
-        session.exec(delete(HighFrequencyTerm))
-        session.add_all(records)
-        session.commit()
-
-    return len(records)
-
-
-def merge_high_frequency_terms(stats: WordFrequencyStatistics, *, max_terms: int = 1000) -> int:
+def _merge_high_frequency_terms(
+    terms: Sequence[WordFrequencyItem],
+    *,
+    generated_at: datetime,
+    max_terms: int = 1000,
+) -> int:
     """将一批统计结果合并进当前高频词词库，保持每个归一化词仅一行。"""
 
     max_term_count = max(1, int(max_terms))
@@ -413,7 +283,7 @@ def merge_high_frequency_terms(stats: WordFrequencyStatistics, *, max_terms: int
         records_by_term = {record.normalized_term: record for record in records if record.normalized_term}
         merged_count = 0
 
-        for item in stats.terms:
+        for item in terms:
             normalized_term = _normalize_term_for_match(item.term)
             if not normalized_term:
                 continue
@@ -426,8 +296,8 @@ def merge_high_frequency_terms(stats: WordFrequencyStatistics, *, max_terms: int
                     term_type=item.term_type,
                     occurrence_count=0,
                     message_count=0,
-                    created_at=stats.generated_at,
-                    updated_at=stats.generated_at,
+                    created_at=generated_at,
+                    updated_at=generated_at,
                 )
                 records.append(existing_record)
                 records_by_term[normalized_term] = existing_record
@@ -436,7 +306,7 @@ def merge_high_frequency_terms(stats: WordFrequencyStatistics, *, max_terms: int
             existing_record.term_type = item.term_type
             existing_record.occurrence_count += item.count
             existing_record.message_count += item.message_count
-            existing_record.updated_at = stats.generated_at
+            existing_record.updated_at = generated_at
             merged_count += 1
 
         kept_records, removed_records = _rerank_high_frequency_records(records, max_terms=max_term_count)
@@ -449,41 +319,9 @@ def merge_high_frequency_terms(stats: WordFrequencyStatistics, *, max_terms: int
     return merged_count
 
 
-def _fetch_recent_non_bot_message_texts(
-    start_time: datetime,
-    end_time: datetime,
-    *,
-    text_only: bool = False,
-) -> list[str]:
-    conditions = [
-        Messages.message_id != "notice",
-        col(Messages.processed_plain_text).is_not(None),
-        Messages.processed_plain_text != "",
-        Messages.timestamp >= start_time,
-        Messages.timestamp <= end_time,
-        Messages.is_notify == False,  # noqa: E712
-        Messages.is_command == False,  # noqa: E712
-    ]
-
-    bot_exclusion = _build_bot_exclusion_condition()
-    if bot_exclusion is not None:
-        conditions.append(bot_exclusion)
-    if text_only:
-        conditions.append(Messages.is_picture == False)  # noqa: E712
-        conditions.append(Messages.is_emoji == False)  # noqa: E712
-
-    with get_db_session(auto_commit=False) as session:
-        rows = session.exec(select(Messages.processed_plain_text).where(*conditions)).all()
-
-    return [text for text in rows if isinstance(text, str) and text.strip()]
-
-
-def _extract_user_messages_from_context(context_messages: Sequence[object]) -> list[object]:
-    from src.maisaka.context.messages import SessionBackedMessage
-
-    source_messages: list[object] = []
+def _extract_user_texts_from_context(context_messages: Sequence[object]) -> list[str]:
+    texts: list[str] = []
     seen_message_ids: set[str] = set()
-    seen_object_ids: set[int] = set()
 
     for context_message in context_messages:
         if not isinstance(context_message, SessionBackedMessage):
@@ -491,41 +329,35 @@ def _extract_user_messages_from_context(context_messages: Sequence[object]) -> l
         if context_message.source_kind != "user":
             continue
 
-        original_message = context_message.original_message
-        if original_message is None:
-            continue
-
-        message_id = str(getattr(original_message, "message_id", "") or "").strip()
+        message_id = str(context_message.message_id or "").strip()
         if message_id:
             if message_id in seen_message_ids:
                 continue
             seen_message_ids.add(message_id)
-        else:
-            object_id = id(original_message)
-            if object_id in seen_object_ids:
-                continue
-            seen_object_ids.add(object_id)
 
-        source_messages.append(original_message)
+        text = _extract_text_from_maisaka_components(context_message.raw_message.components)
+        if not text:
+            continue
 
-    return source_messages
+        texts.append(text)
+
+    return texts
 
 
-def _is_countable_user_text_message(message: object) -> bool:
-    if str(getattr(message, "message_id", "") or "").strip() == "notice":
-        return False
-    if bool(getattr(message, "is_notify", False)) or bool(getattr(message, "is_command", False)):
-        return False
-    if bool(getattr(message, "is_picture", False)) or bool(getattr(message, "is_emoji", False)):
-        return False
+def _extract_text_from_maisaka_components(components: Sequence[object]) -> str:
+    text_parts: list[str] = []
+    is_first_text_component = True
+    for component in components:
+        if not isinstance(component, TextComponent):
+            continue
 
-    user_info = getattr(getattr(message, "message_info", None), "user_info", None)
-    user_id = str(getattr(user_info, "user_id", "") or "").strip()
-    platform = str(getattr(message, "platform", "") or "").strip()
-    if user_id and is_bot_self(platform, user_id):
-        return False
-
-    return bool(str(getattr(message, "processed_plain_text", "") or "").strip())
+        text = component.text
+        if is_first_text_component:
+            text = _PLANNER_MESSAGE_PREFIX_RE.sub("", text, count=1)
+            is_first_text_component = False
+        if text.strip():
+            text_parts.append(text)
+    return " ".join(" ".join(text_parts).split()).strip()
 
 
 def _rerank_high_frequency_records(
@@ -564,32 +396,8 @@ def _normalize_term_for_match(value: object) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
-def _build_bot_exclusion_condition():
-    from src.chat.utils.utils import get_all_bot_accounts, get_bot_account
-
-    bot_accounts = get_all_bot_accounts()
-    exclusion_conditions = []
-    if bot_accounts:
-        exclusion_conditions.append(
-            or_(
-                *[
-                    and_(Messages.platform == platform_name, Messages.user_id == account)
-                    for platform_name, account in bot_accounts.items()
-                ]
-            )
-        )
-
-    # 兼容旧数据：历史机器人消息可能在所有平台上都使用 QQ 账号作为 user_id 存储。
-    if qq_fallback := get_bot_account("qq"):
-        exclusion_conditions.append(Messages.user_id == qq_fallback)
-
-    if not exclusion_conditions:
-        return None
-    return not_(or_(*exclusion_conditions))
-
-
 def _tokenize_meaningful_terms(text: str) -> list[str]:
-    cleaned_text = _normalize_text(text)
+    cleaned_text = _remove_tokenization_noise(text)
     terms: list[str] = []
 
     for raw_token in jieba.cut(cleaned_text):
@@ -607,13 +415,10 @@ def _tokenize_meaningful_terms(text: str) -> list[str]:
     return terms
 
 
-def _normalize_text(text: str) -> str:
+def _remove_tokenization_noise(text: str) -> str:
     without_urls = _URL_RE.sub(" ", text)
     without_codes = _CQ_CODE_RE.sub(" ", without_urls)
-    without_failed_replies = _INACCESSIBLE_REPLY_RE.sub(" ", without_codes)
-    without_reply_quotes = _REPLY_QUOTE_RE.sub(" ", without_failed_replies)
-    without_mentions = _MENTION_RE.sub(" ", without_reply_quotes)
-    return _MEDIA_HINT_RE.sub(" ", without_mentions)
+    return _MENTION_RE.sub(" ", without_codes)
 
 
 def _normalize_token(raw_token: str) -> str:

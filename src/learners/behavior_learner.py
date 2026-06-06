@@ -19,6 +19,7 @@ from src.services.llm_service import LLMServiceClient
 from .behavior_pattern_consolidator import behavior_pattern_consolidator
 from .behavior_pattern_maintenance import behavior_pattern_maintenance
 from .behavior_pattern_store import upsert_behavior_pattern
+from .behavior_scenario import BehaviorScenarioProfile, behavior_scenario_analyzer
 
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
@@ -28,11 +29,12 @@ if TYPE_CHECKING:
 logger = get_logger("behavior_learner")
 
 behavior_learn_model = LLMServiceClient(task_name="learner", request_type="behavior.learner")
+behavior_scene_model = LLMServiceClient(task_name="learner", request_type="behavior.scene_analyzer")
 
 
 @dataclass(frozen=True)
 class BehaviorCandidate:
-    """从聊天历史中抽取出的起因-行为-结果候选。"""
+    """从聊天历史中抽取出的场景-行为-结果候选。"""
 
     trigger: str
     action: str
@@ -112,29 +114,27 @@ def _coerce_source_ids(raw_value: Any) -> list[str]:
     return source_ids
 
 
-def _parse_behavior_item(raw_item: Any) -> Optional[BehaviorCandidate]:
+def _parse_behavior_item(raw_item: Any, *, scene_start: str) -> Optional[BehaviorCandidate]:
     if not isinstance(raw_item, dict):
         return None
 
-    trigger = str(raw_item.get("trigger") or raw_item.get("cause") or raw_item.get("起因") or "").strip()
-    action = str(raw_item.get("action") or raw_item.get("behavior") or raw_item.get("行为") or "").strip()
-    outcome = str(raw_item.get("outcome") or raw_item.get("result") or raw_item.get("结果") or "").strip()
-    source_ids = _coerce_source_ids(
-        raw_item.get("source_ids")
-        or raw_item.get("source_id")
-        or raw_item.get("evidence_source_ids")
-        or raw_item.get("来源")
-    )
+    action = str(raw_item.get("action") or "").strip()
+    outcome = str(raw_item.get("outcome") or "").strip()
+    source_ids = _coerce_source_ids(raw_item.get("source_ids"))
+    trigger = scene_start.strip()
     if not trigger or not action or not outcome:
         return None
     return BehaviorCandidate(trigger=trigger, action=action, outcome=outcome, source_ids=source_ids)
 
 
-def parse_behavior_response(response: str) -> list[BehaviorCandidate]:
+def parse_behavior_response(response: str, *, scene_start: str) -> list[BehaviorCandidate]:
     """解析行为学习模型返回的 JSON。"""
 
     normalized_response = _strip_json_code_fence(response or "")
+    normalized_scene_start = scene_start.strip()
     if not normalized_response:
+        return []
+    if not normalized_scene_start:
         return []
 
     try:
@@ -143,25 +143,12 @@ def parse_behavior_response(response: str) -> list[BehaviorCandidate]:
         logger.warning(f"行为学习结果解析失败: {normalized_response!r}")
         return []
 
-    if isinstance(parsed_response, dict):
-        raw_items = (
-            parsed_response.get("behaviors")
-            or parsed_response.get("behavior_patterns")
-            or parsed_response.get("patterns")
-            or parsed_response.get("items")
-            or []
-        )
-    else:
-        raw_items = parsed_response
-
-    if isinstance(raw_items, dict):
-        raw_items = [raw_items]
-    if not isinstance(raw_items, list):
+    if not isinstance(parsed_response, list):
         return []
 
     candidates: list[BehaviorCandidate] = []
-    for raw_item in raw_items:
-        candidate = _parse_behavior_item(raw_item)
+    for raw_item in parsed_response:
+        candidate = _parse_behavior_item(raw_item, scene_start=normalized_scene_start)
         if candidate is not None:
             candidates.append(candidate)
     return candidates
@@ -301,10 +288,21 @@ class BehaviorLearner:
     ) -> bool:
         """执行已经获得并发闸门的行为学习批次。"""
 
+        scene_profile = await self._analyze_learning_scene(
+            pending_messages,
+            learning_session_id=learning_session_id,
+        )
+        scene_start = scene_profile.to_learning_start_text()
+        if not scene_start:
+            logger.debug(f"{learning_session_id} 行为学习未形成可用场景画像，跳过本批次")
+            return False
+
         prompt = load_prompt(
             "learn_behavior",
             bot_name=global_config.bot.nickname,
             chat_str="聊天记录将在后续多条 user message 中给出；请以每条消息中的 source_id 作为来源行编号。",
+            scene_profile=scene_profile.to_prompt_text(),
+            scene_start=scene_start,
         )
 
         try:
@@ -324,7 +322,7 @@ class BehaviorLearner:
             logger.error(f"学习行为表现失败: {exc}")
             return False
 
-        candidates = parse_behavior_response(response)
+        candidates = parse_behavior_response(response, scene_start=scene_start)
         behavior_candidates = self._filter_behavior_candidates(candidates, pending_messages)
         if not behavior_candidates:
             logger.debug(f"{learning_session_id} 行为学习未抽取到有效候选")
@@ -344,7 +342,7 @@ class BehaviorLearner:
             wrote_pattern = True
             logger.info(
                 f"学习到行为表现 [ID: {pattern.id}]: "
-                f"起因={candidate.trigger} 行为={candidate.action} 结果={candidate.outcome}"
+                f"场景={candidate.trigger} 行为={candidate.action} 结果={candidate.outcome}"
             )
 
         if wrote_pattern:
@@ -369,6 +367,63 @@ class BehaviorLearner:
                 )
 
         return wrote_pattern
+
+    async def _analyze_learning_scene(
+        self,
+        messages: list["SessionMessage"],
+        *,
+        learning_session_id: str,
+    ) -> BehaviorScenarioProfile:
+        """在行为学习前，用同一套场景画像语言确定本批次的 start。"""
+
+        context_text = await self._build_learning_context_text(messages)
+        if not context_text:
+            return BehaviorScenarioProfile()
+
+        async def run_scene_prompt(prompt: str) -> str:
+            generation_result = await behavior_scene_model.generate_response(
+                prompt,
+                options=LLMGenerationOptions(temperature=0.2),
+            )
+            response = generation_result.response or ""
+            self._log_learning_scene_preview(
+                prompt,
+                session_id=learning_session_id,
+                source_message_count=len(messages),
+                output_content=response,
+            )
+            return response
+
+        return await behavior_scenario_analyzer.analyze(
+            context_text=context_text,
+            sub_agent_runner=run_scene_prompt,
+        )
+
+    async def _build_learning_context_text(self, messages: list["SessionMessage"]) -> str:
+        """构建场景分析用的紧凑学习窗口文本。"""
+
+        context_lines: list[str] = []
+        for index, message in enumerate(messages, start=1):
+            await message.process()
+            user_info = message.message_info.user_info
+            speaker_kind = "SELF" if is_bot_self(message.platform, user_info.user_id) else "USER"
+            content = " ".join((message.processed_plain_text or "").split()).strip()
+            if not content:
+                content = "[空消息]"
+            if len(content) > 300:
+                content = content[:300].rstrip() + "..."
+            context_lines.append(
+                "\n".join(
+                    [
+                        f"[source_id:{index}]",
+                        f"[speaker:{speaker_kind}]",
+                        f"[time:{message.timestamp.strftime('%H:%M:%S')}]",
+                        "[content]",
+                        content,
+                    ]
+                )
+            )
+        return "\n\n".join(context_lines).strip()
 
     async def _build_multi_learning_messages(
         self,
@@ -422,6 +477,46 @@ class BehaviorLearner:
             .build()
         )
         return learning_messages
+
+    def _log_learning_scene_preview(
+        self,
+        prompt: str,
+        *,
+        session_id: str,
+        source_message_count: int,
+        output_content: str,
+    ) -> None:
+        """保存行为学习前的场景画像请求预览。"""
+
+        try:
+            preview_access = PromptCLIVisualizer.build_prompt_preview_access(
+                [
+                    MessageBuilder()
+                    .set_role(RoleType.User)
+                    .add_text_content(prompt)
+                    .build()
+                ],
+                category="behavior_scenario_analyzer",
+                chat_id=session_id,
+                request_kind="behavior_scenario_analyzer",
+                selection_reason=(
+                    f"会话ID: {session_id}\n"
+                    f"Learner会话ID: {self.session_id}\n"
+                    f"来源: behavior_learning_scene\n"
+                    f"真实聊天消息数: {source_message_count}"
+                ),
+                output_content=output_content,
+            )
+        except Exception as exc:
+            logger.warning(f"{self.session_id} 行为学习场景画像预览保存失败: {exc}")
+            return
+
+        logger.info(
+            f"{self.session_id} 行为学习场景画像预览已生成: "
+            f"WebUI={preview_access.viewer_web_uri} "
+            f"HTML={preview_access.viewer_path} "
+            f"JSON={preview_access.dump_path}"
+        )
 
     def _log_learning_context_preview(
         self,

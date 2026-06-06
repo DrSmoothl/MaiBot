@@ -77,6 +77,26 @@ class BehaviorScenarioProfile:
             indent=2,
         )
 
+    def to_learning_start_text(self, *, max_length: int = 150) -> str:
+        """将场景画像压缩成可写入行为模式 trigger 的统一 start。"""
+
+        if not self.has_signal:
+            return ""
+
+        parts = [
+            self.summary,
+            self.user_intent,
+            self.conversation_phase,
+            "、".join(self.domain_tags[:3]),
+            "、".join(self.behavior_needs[:3]),
+        ]
+        scene_start = "；".join(part for part in parts if str(part or "").strip()).strip()
+        if not scene_start:
+            scene_start = self.retrieval_query.strip()
+        if len(scene_start) <= max_length:
+            return scene_start
+        return scene_start[:max_length].rstrip()
+
 
 def _strip_json_code_fence(raw_response: str) -> str:
     normalized_response = raw_response.strip()

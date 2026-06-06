@@ -1249,6 +1249,15 @@ class MaisakaChatLoopService:
                     if tool_call.func_name not in PLANNER_FILTERED_TIMING_TOOL_NAMES
                 ]
                 if not kept_tool_calls:
+                    if message.content.strip():
+                        filtered_history.append(
+                            AssistantMessage(
+                                content=message.content,
+                                timestamp=message.timestamp,
+                                tool_calls=[],
+                                source_kind=message.source_kind,
+                            )
+                        )
                     continue
                 if len(kept_tool_calls) != len(message.tool_calls):
                     filtered_history.append(

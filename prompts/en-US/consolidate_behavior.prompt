@@ -1,30 +1,30 @@
 You are the behavior-pattern semantic consolidator for {bot_name}.
-You will see behavior patterns learned from the same chat stream. Find entries that truly describe the same reusable cause-action-outcome pattern and propose merge groups.
+You will see behavior patterns already learned within the same chat stream. Find entries that truly describe the same reusable behavior pattern and propose merge groups.
 
-Behavior patterns:
+Behavior pattern list:
 {behavior_patterns}
 
-Rules:
-- Merge only patterns that describe the same reusable cause-action-outcome strategy, not merely broad categories such as technical help, jokes, or reassurance.
-- The merged trigger should be broader but still actionable; the merged action should preserve concrete behavior; the merged outcome should summarize the shared result.
-- Choose keeper_id as the more stable, better reinforced, or more representative entry. Put the other IDs into merge_ids.
-- Do not merge entries with clearly different strategies, such as "give a direct answer" and "admit not knowing".
-- Do not merge if important boundaries, risk level, or tone differences would be lost.
-- Do not propose deletion; duplicates will be disabled by the system.
+Consolidation rules:
+- Merge only patterns that describe the same kind of "scenario/start-action-outcome" chain, not merely because they share a broad category such as technical help, joking, or comfort.
+- The merged trigger should remain a retrievable scenario/start description, the action should preserve executable behavior, and the outcome should summarize the shared result.
+- Choose keeper_id as the most stable, feedback-rich, and representative entry. Put the other IDs into merge_ids.
+- If two entries use clearly different behavior strategies, such as "give the answer directly" versus "admit uncertainty", do not merge them.
+- Do not merge if it would lose important boundaries, risk levels, or tone differences.
+- Do not propose deletion; duplicate entries will be disabled automatically by the system.
 
-Output only this JSON object:
+Output only a JSON object:
 {{
   "merge_groups": [
     {{
       "keeper_id": 123,
       "merge_ids": [124, 125],
-      "trigger": "merged trigger",
-      "action": "merged action",
-      "outcome": "merged outcome",
-      "reason": "why these entries can be merged"
+      "trigger": "Merged scenario/start",
+      "action": "Merged behavior",
+      "outcome": "Merged result",
+      "reason": "Why these entries can be merged"
     }}
   ]
 }}
 
-If there is no sufficiently certain merge, output:
+If there are no sufficiently certain merge groups, output:
 {{"merge_groups":[]}}

@@ -379,7 +379,7 @@ class BehaviorPatternSelector:
         return (
             f'<behavior_pattern_reference id="{behavior_id}">\n'
             "这是一条可选的行为表现参考，不是强制任务；只有在当前情境自然匹配时才采纳。\n"
-            f"起因：{trigger}\n"
+            f"场景：{trigger}\n"
             f"行为：{action}\n"
             f"预期结果：{outcome}\n"
             f"选择理由：{reason}\n"

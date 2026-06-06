@@ -1,25 +1,26 @@
 You are the behavior-scenario analyzer for {bot_name}.
-You will see recent chat context. Abstract the current situation into a scenario profile that can be used to retrieve behavior patterns.
+You will see recent chat context, or one behavior-learning window. Abstract it into a unified scenario profile that can be used to retrieve, learn, and select behavior patterns.
 
-Recent context:
+Context:
 {context_text}
 
-Rules:
-- Do not continue the chat, decide whether to reply, or make a planner decision.
-- Describe only the information relevant to which behavior pattern should be used.
-- Focus on cause, user intent, conversation phase, needed behavior strategy, and risks to avoid.
-- retrieval_query should read like a search query, with keywords and semantic phrases that can match historical trigger/action/outcome fields.
-- If the context has no clear scenario, still output JSON but use a lower confidence.
+Analysis rules:
+- Do not continue the chat, decide whether to reply, or make a plan for the planner.
+- Describe only the information related to "what behavior pattern should be used".
+- Focus on the scenario start, user intent, conversation phase, needed behavior strategies, and risks to avoid.
+- Write summary as a reusable scenario summary, not a one-off detail.
+- retrieval_query should read like a search query, containing keywords and semantic phrases that can match historical behavior trigger/action/outcome text.
+- If the context has no clear scenario, still output JSON, but use a lower confidence.
 
-Output only this JSON object:
+Output only a JSON object:
 {{
-  "summary": "one-sentence summary of the current scenario",
-  "user_intent": "the user's or group's main current intent",
-  "conversation_phase": "for example: initial help request / tried and failed / waiting for confirmation / joking interaction / boundary probing / insufficient information",
-  "domain_tags": ["technical configuration", "error triage"],
-  "behavior_needs": ["ask for key details", "give concrete check points"],
+  "summary": "One-sentence summary of the current scenario",
+  "user_intent": "The current main intent of the user or group chat",
+  "conversation_phase": "For example: initial help request / tried and failed / waiting for confirmation / playful interaction / boundary probing / insufficient information",
+  "domain_tags": ["technical configuration", "error troubleshooting"],
+  "behavior_needs": ["ask for key details", "provide concrete checks"],
   "risk_flags": ["insufficient information", "avoid fabrication"],
-  "avoid_behaviors": ["jumping to conclusions", "unrelated joking"],
-  "retrieval_query": "someone reports a feature failure or configuration not taking effect; ask for logs, config items, trigger conditions, and provide executable troubleshooting steps",
+  "avoid_behaviors": ["jumping to conclusions", "starting unrelated jokes"],
+  "retrieval_query": "Someone reports a feature anomaly or ineffective configuration and needs log checks, configuration items, trigger conditions, and actionable troubleshooting direction",
   "confidence": 0.82
 }}
