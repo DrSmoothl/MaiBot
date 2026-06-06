@@ -169,11 +169,25 @@ class MaisakaHeartFlowChatting:
         return max(0.0, float(global_config.chat.timing_gate_non_continue_cooldown_seconds))
 
     @property
+    def _enable_expression_use(self) -> bool:
+        """返回当前会话实时生效的表达使用开关。"""
+
+        enable_use, _ = ExpressionConfigUtils.get_expression_config_for_chat(self.session_id)
+        return enable_use
+
+    @property
     def _enable_expression_learning(self) -> bool:
         """返回当前会话实时生效的表达学习开关。"""
 
         _, enable_learning = ExpressionConfigUtils.get_expression_config_for_chat(self.session_id)
         return enable_learning
+
+    @property
+    def _enable_jargon_use(self) -> bool:
+        """返回当前会话实时生效的黑话使用开关。"""
+
+        enable_use, _ = JargonConfigUtils.get_jargon_config_for_chat(self.session_id)
+        return enable_use
 
     @property
     def _enable_jargon_learning(self) -> bool:

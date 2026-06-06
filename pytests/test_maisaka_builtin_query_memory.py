@@ -36,6 +36,34 @@ def _build_invocation(arguments: Dict[str, Any]) -> ToolInvocation:
     )
 
 
+def test_memory_search_result_to_text_keeps_default_truncation() -> None:
+    content = "长记忆" * 60
+    result = MemorySearchResult(hits=[MemoryHit(content=content)])
+
+    text = result.to_text()
+
+    assert text.startswith("1. ")
+    assert text.endswith("...")
+    assert len(text.removeprefix("1. ").removesuffix("...")) == 160
+
+
+def test_memory_search_result_to_text_can_disable_truncation() -> None:
+    content = "长记忆" * 60
+    result = MemorySearchResult(hits=[MemoryHit(content=content)])
+
+    text = result.to_text(truncate_content=False)
+
+    assert text == f"1. {content}"
+
+
+def test_memory_search_result_to_text_uses_custom_truncation_limit() -> None:
+    result = MemorySearchResult(hits=[MemoryHit(content="abcdef")])
+
+    text = result.to_text(max_content_chars=3)
+
+    assert text == "1. abc..."
+
+
 @pytest.fixture(autouse=True)
 def _patch_maisaka_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -245,3 +273,63 @@ async def test_query_memory_no_hit_returns_readable_message(monkeypatch: pytest.
     assert "未找到匹配的长期记忆" in result.content
     assert isinstance(result.structured_content, dict)
     assert result.structured_content["query"] == "不存在的记忆"
+
+
+@pytest.mark.asyncio
+async def test_query_memory_success_content_keeps_full_hit(monkeypatch: pytest.MonkeyPatch) -> None:
+    long_content = "开头" + ("详细记忆" * 80) + "末尾关键细节"
+
+    async def fake_search(query: str, **kwargs: Any) -> MemorySearchResult:
+        _ = query
+        _ = kwargs
+        return MemorySearchResult(
+            summary="检索摘要",
+            hits=[
+                MemoryHit(
+                    content=long_content,
+                    score=0.9,
+                    hit_type="episode",
+                    title="长记忆",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(query_memory_tool.memory_service, "search", fake_search)
+    monkeypatch.setattr(query_memory_tool, "resolve_person_id_for_memory", lambda **kwargs: "")
+
+    result = await query_memory_tool.handle_tool(
+        _build_tool_ctx(),
+        _build_invocation({"query": "长记忆", "mode": "episode"}),
+    )
+
+    assert result.success is True
+    assert "末尾关键细节" in result.content
+    assert isinstance(result.structured_content, dict)
+    assert result.structured_content["hits"][0]["content"] == long_content
+    assert "replyer_memory_reference" in result.metadata
+    assert query_memory_tool.REPLYER_MEMORY_REFERENCE_MARKER in result.metadata["replyer_memory_reference"]
+    assert "末尾关键细节" in result.metadata["replyer_memory_reference"]
+
+
+@pytest.mark.asyncio
+async def test_query_memory_does_not_build_replyer_reference_for_empty_hit_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_search(query: str, **kwargs: Any) -> MemorySearchResult:
+        _ = query
+        _ = kwargs
+        return MemorySearchResult(
+            summary="检索摘要",
+            hits=[MemoryHit(content="  ", score=0.9)],
+        )
+
+    monkeypatch.setattr(query_memory_tool.memory_service, "search", fake_search)
+    monkeypatch.setattr(query_memory_tool, "resolve_person_id_for_memory", lambda **kwargs: "")
+
+    result = await query_memory_tool.handle_tool(
+        _build_tool_ctx(),
+        _build_invocation({"query": "空内容命中"}),
+    )
+
+    assert result.success is True
+    assert "replyer_memory_reference" not in result.metadata

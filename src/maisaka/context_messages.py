@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from io import BytesIO
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 import base64
 
 from PIL import Image as PILImage
@@ -666,6 +666,7 @@ class ToolResultMessage(LLMContextMessage):
     tool_call_id: str
     tool_name: str = ""
     success: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def role(self) -> str:

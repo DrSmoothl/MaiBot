@@ -1,19 +1,23 @@
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Callable
 
 import inspect
 
-import pytest
 from rich.panel import Panel
 from rich.text import Text
 
+import pytest
+
 from src.chat.replyer import maisaka_generator as replyer_module
+from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.common.data_models.reply_generation_data_models import (
     GenerationMetrics,
     LLMCompletionResult,
     ReplyGenerationResult,
 )
 from src.core.tooling import ToolExecutionResult, ToolInvocation
+from src.maisaka.context_messages import SessionBackedMessage, ToolResultMessage
 from src.maisaka.builtin_tool.context import BuiltinToolRuntimeContext
 from src.maisaka.builtin_tool import reply as reply_tool_module
 from src.maisaka.builtin_tool import send_emoji as send_emoji_tool_module
@@ -21,6 +25,58 @@ from src.maisaka.monitor_events import emit_planner_finalized
 from src.maisaka.reasoning_engine import MaisakaReasoningEngine
 from src.maisaka import runtime as runtime_module
 from src.maisaka.runtime import MaisakaHeartFlowChatting
+
+
+def _build_reply_tool_ctx(chat_history: list[Any]) -> BuiltinToolRuntimeContext:
+    target_message = SimpleNamespace(
+        message_id="msg-1",
+        message_info=SimpleNamespace(
+            user_info=SimpleNamespace(
+                user_cardname="测试用户",
+                user_nickname="测试用户",
+                user_id="user-1",
+            )
+        ),
+    )
+    runtime = SimpleNamespace(
+        find_source_message_by_id=lambda message_id: target_message if message_id == "msg-1" else None,
+        log_prefix="[test]",
+        chat_stream=SimpleNamespace(platform=reply_tool_module.CLI_PLATFORM_NAME),
+        session_id="session-1",
+        _chat_history=chat_history,
+        _clear_force_continue_until_reply=lambda: None,
+        _record_reply_sent=lambda: None,
+        run_sub_agent=None,
+    )
+    engine = SimpleNamespace(_get_runtime_manager=lambda: None)
+    return BuiltinToolRuntimeContext(engine=engine, runtime=runtime)
+
+
+def _build_reply_target_history_message() -> SessionBackedMessage:
+    return SessionBackedMessage(
+        raw_message=MessageSequence([TextComponent("[测试用户] 问一下长记忆")]),
+        visible_text="[测试用户] 问一下长记忆",
+        timestamp=datetime.now(),
+        message_id="msg-1",
+        source_kind="user",
+    )
+
+
+def _build_memory_tool_result(
+    reference: str,
+    *,
+    call_id: str = "call-memory",
+    tool_name: str = "query_memory",
+    success: bool = True,
+) -> ToolResultMessage:
+    return ToolResultMessage(
+        content="工具历史内容",
+        timestamp=datetime.now(),
+        tool_call_id=call_id,
+        tool_name=tool_name,
+        success=success,
+        metadata={"replyer_memory_reference": reference},
+    )
 
 
 def test_runtime_maps_expression_config_flags_to_correct_fields(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,26 +369,27 @@ def test_legacy_replyer_builds_message_sequence_like_multimodal() -> None:
     legacy_generator = replyer_module.MaisakaReplyGenerator(
         chat_stream=None,
         request_type="test_legacy",
+        load_prompt_func=lambda *args, **kwargs: "legacy prompt",
         enable_visual_message=False,
     )
-    legacy_prompt_loader = replyer_module.load_prompt
-    replyer_module.load_prompt = lambda *args, **kwargs: "legacy prompt"
-
-    try:
-        session_message = replyer_module.SessionBackedMessage(
-            raw_message=SimpleNamespace(),
-            visible_text="[Alice]你好\n[Bob]在吗",
-            timestamp=replyer_module.datetime.now(),
-            source_kind="user",
-        )
-        request_messages = legacy_generator._build_request_messages(
-            chat_history=[session_message],
-            reply_message=None,
-            reply_reason="测试原因",
-            stream_id="session-legacy",
-        )
-    finally:
-        replyer_module.load_prompt = legacy_prompt_loader
+    alice_message = SessionBackedMessage(
+        raw_message=MessageSequence([TextComponent("[Alice]你好")]),
+        visible_text="[Alice]你好",
+        timestamp=datetime.now(),
+        source_kind="user",
+    )
+    bob_message = SessionBackedMessage(
+        raw_message=MessageSequence([TextComponent("[Bob]在吗")]),
+        visible_text="[Bob]在吗",
+        timestamp=datetime.now(),
+        source_kind="user",
+    )
+    request_messages = legacy_generator._build_request_messages(
+        chat_history=[alice_message, bob_message],
+        reply_message=None,
+        reply_reason="测试原因",
+        stream_id="session-legacy",
+    )
 
     assert len(request_messages) == 4
     assert request_messages[0].role.value == "system"
@@ -456,6 +513,157 @@ async def test_reply_tool_merges_heuristic_memory_reference(monkeypatch: pytest.
     assert result.success is True
     assert "已有参考" in captured["reference_info"]
     assert "启发式记忆-内部参考" in captured["reference_info"]
+
+
+@pytest.mark.asyncio
+async def test_reply_tool_merges_query_memory_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    fake_reply_result = ReplyGenerationResult(
+        success=True,
+        completion=LLMCompletionResult(response_text="测试回复"),
+        metrics=GenerationMetrics(overall_ms=11.5),
+        monitor_detail={},
+    )
+
+    class _FakeReplyer:
+        async def generate_reply_with_context(self, **kwargs: Any) -> tuple[bool, ReplyGenerationResult]:
+            captured.update(kwargs)
+            return True, fake_reply_result
+
+    memory_reference = (
+        f"{reply_tool_module.REPLYER_MEMORY_REFERENCE_MARKER}\n"
+        "查询：长记忆\n"
+        "命中：1 条\n"
+        "1. 完整记忆末尾关键细节"
+    )
+    chat_history = [
+        _build_reply_target_history_message(),
+        ToolResultMessage(
+            content="工具历史内容",
+            timestamp=datetime.now(),
+            tool_call_id="call-memory",
+            tool_name="query_memory",
+            success=True,
+            metadata={"replyer_memory_reference": memory_reference},
+        ),
+    ]
+
+    monkeypatch.setattr(reply_tool_module.replyer_manager, "get_replyer", lambda **kwargs: _FakeReplyer())
+    monkeypatch.setattr(reply_tool_module, "render_cli_message", lambda text: text)
+    monkeypatch.setattr(
+        reply_tool_module,
+        "merge_heuristic_memory_reference_for_replyer",
+        lambda **kwargs: kwargs["reference_info"],
+    )
+
+    result = await reply_tool_module.handle_tool(
+        _build_reply_tool_ctx(chat_history),
+        ToolInvocation(
+            tool_name="reply",
+            arguments={"msg_id": "msg-1", "reference_info": "已有参考"},
+        ),
+    )
+
+    assert result.success is True
+    assert "已有参考" in captured["reference_info"]
+    assert reply_tool_module.REPLYER_MEMORY_REFERENCE_MARKER in captured["reference_info"]
+    assert "完整记忆末尾关键细节" in captured["reference_info"]
+
+
+def test_merge_query_memory_reference_skips_when_no_memory() -> None:
+    reference_info = reply_tool_module._merge_query_memory_reference_for_replyer(
+        reference_info="已有参考",
+        chat_history=[_build_reply_target_history_message()],
+        target_message_id="msg-1",
+    )
+
+    assert reference_info == "已有参考"
+
+
+def test_merge_query_memory_reference_skips_existing_marker() -> None:
+    existing = f"已有参考\n\n{reply_tool_module.REPLYER_MEMORY_REFERENCE_MARKER}\n1. 已有记忆"
+    memory_reference = f"{reply_tool_module.REPLYER_MEMORY_REFERENCE_MARKER}\n1. 新记忆"
+    reference_info = reply_tool_module._merge_query_memory_reference_for_replyer(
+        reference_info=existing,
+        chat_history=[
+            _build_reply_target_history_message(),
+            ToolResultMessage(
+                content="工具历史内容",
+                timestamp=datetime.now(),
+                tool_call_id="call-memory",
+                tool_name="query_memory",
+                success=True,
+                metadata={"replyer_memory_reference": memory_reference},
+            ),
+        ],
+        target_message_id="msg-1",
+    )
+
+    assert reference_info == existing
+    assert "新记忆" not in reference_info
+
+
+def test_merge_query_memory_reference_skips_target_before_current_message() -> None:
+    memory_reference = f"{reply_tool_module.REPLYER_MEMORY_REFERENCE_MARKER}\n1. 旧记忆"
+    reference_info = reply_tool_module._merge_query_memory_reference_for_replyer(
+        reference_info="已有参考",
+        chat_history=[
+            _build_memory_tool_result(memory_reference),
+            _build_reply_target_history_message(),
+        ],
+        target_message_id="msg-1",
+    )
+
+    assert reference_info == "已有参考"
+
+
+def test_merge_query_memory_reference_skips_unusable_tool_results() -> None:
+    memory_reference = f"{reply_tool_module.REPLYER_MEMORY_REFERENCE_MARKER}\n1. 不应注入"
+    reference_info = reply_tool_module._merge_query_memory_reference_for_replyer(
+        reference_info="已有参考",
+        chat_history=[
+            _build_reply_target_history_message(),
+            _build_memory_tool_result(memory_reference, success=False),
+            _build_memory_tool_result(memory_reference, call_id="call-other", tool_name="query_jargon"),
+            ToolResultMessage(
+                content="工具历史内容",
+                timestamp=datetime.now(),
+                tool_call_id="call-empty",
+                tool_name="query_memory",
+                success=True,
+                metadata={},
+            ),
+        ],
+        target_message_id="msg-1",
+    )
+
+    assert reference_info == "已有参考"
+
+
+def test_merge_query_memory_reference_deduplicates_identical_references() -> None:
+    memory_reference = f"{reply_tool_module.REPLYER_MEMORY_REFERENCE_MARKER}\n1. 重复记忆"
+    reference_info = reply_tool_module._merge_query_memory_reference_for_replyer(
+        reference_info="已有参考",
+        chat_history=[
+            _build_reply_target_history_message(),
+            _build_memory_tool_result(memory_reference, call_id="call-memory-1"),
+            _build_memory_tool_result(memory_reference, call_id="call-memory-2"),
+        ],
+        target_message_id="msg-1",
+    )
+
+    assert reference_info.count("重复记忆") == 1
+
+
+def test_merge_query_memory_reference_skips_when_target_message_missing() -> None:
+    memory_reference = f"{reply_tool_module.REPLYER_MEMORY_REFERENCE_MARKER}\n1. 不应注入"
+    reference_info = reply_tool_module._merge_query_memory_reference_for_replyer(
+        reference_info="已有参考",
+        chat_history=[_build_memory_tool_result(memory_reference)],
+        target_message_id="missing-msg",
+    )
+
+    assert reference_info == "已有参考"
 
 
 @pytest.mark.asyncio
