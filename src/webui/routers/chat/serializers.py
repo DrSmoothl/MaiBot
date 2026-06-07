@@ -1,6 +1,5 @@
 """提供 WebUI 聊天路由使用的消息序列化能力。"""
 
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import base64
@@ -19,6 +18,7 @@ from src.common.data_models.message_component_data_model import (
     TextComponent,
     VoiceComponent,
 )
+from src.common.utils.image_path import resolve_stored_image_path
 
 
 def serialize_message_sequence(message_sequence: MessageSequence) -> List[Dict[str, Any]]:
@@ -178,7 +178,7 @@ def _load_cached_binary_data(
         if image_record is None or image_record.no_file_flag:
             return b"", default_mime_type
 
-        image_path = Path(image_record.full_path)
+        image_path = resolve_stored_image_path(image_record.full_path)
         if not image_path.is_file():
             return b"", default_mime_type
 

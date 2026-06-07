@@ -12,6 +12,7 @@ import asyncio
 from src.common.database.database import get_db_session
 from src.common.database.database_model import Images, ImageType
 from src.common.logger import get_logger
+from src.common.utils.image_path import StoredImagePathError, resolve_stored_image_path
 
 logger = get_logger("image_cache_cleanup")
 
@@ -74,8 +75,8 @@ def _resolve_path(path_text: str | None) -> Path | None:
     if not path_text:
         return None
     try:
-        return Path(path_text).resolve()
-    except (OSError, RuntimeError):
+        return resolve_stored_image_path(path_text)
+    except (OSError, RuntimeError, StoredImagePathError):
         return None
 
 

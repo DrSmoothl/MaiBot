@@ -23,6 +23,11 @@ import time
 from src.common.database.database import engine, get_db_session
 from src.common.database.database_model import Images, ImageType
 from src.common.logger import get_logger
+from src.common.utils.image_path import (
+    StoredImagePathError,
+    resolve_stored_image_path,
+    stored_image_paths_equal,
+)
 from src.config.config import MMC_VERSION
 from src.webui.dependencies import require_auth
 
@@ -485,8 +490,8 @@ def _resolve_cache_image_file(target: CacheImageTarget, relative_path: str) -> P
 
 def _paths_equal(left: str, right: Path) -> bool:
     try:
-        return Path(left).resolve() == right.resolve()
-    except (OSError, RuntimeError):
+        return stored_image_paths_equal(left, right)
+    except (OSError, RuntimeError, StoredImagePathError):
         return False
 
 
@@ -498,8 +503,8 @@ def _get_image_records_by_path(image_type: ImageType) -> dict[Path, list[Images]
 
     for record in records:
         try:
-            record_path = Path(record.full_path).resolve()
-        except (OSError, RuntimeError):
+            record_path = resolve_stored_image_path(record.full_path)
+        except (OSError, RuntimeError, StoredImagePathError):
             continue
         records_by_path.setdefault(record_path, []).append(record)
     return records_by_path

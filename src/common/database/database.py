@@ -8,6 +8,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel, Session, create_engine
 
+from src.common.database.image_path_migration import normalize_image_storage_paths
 from src.common.database.migrations import create_database_migration_bootstrapper
 from src.common.logger import get_logger
 
@@ -85,6 +86,7 @@ def initialize_database() -> None:
     )
     SQLModel.metadata.create_all(engine)
     _migration_bootstrapper.finalize_database(migration_state)
+    normalize_image_storage_paths(engine)
     _db_initialized = True
 
 

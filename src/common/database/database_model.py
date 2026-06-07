@@ -110,7 +110,7 @@ class Images(SQLModel, table=True):
     # 元信息
     image_hash: str = Field(index=True, max_length=255)  # 图片哈希，使用sha256哈希值，亦作为图片唯一ID
     description: str  # 图片的描述
-    full_path: str = Field(max_length=1024)  # 文件的完整路径 (包括文件名)
+    full_path: str = Field(max_length=1024)  # 项目内相对路径 (包括文件名)
     image_type: ImageType = Field(sa_column=Column(SQLEnum(ImageType)), default=ImageType.EMOJI)
     """图片类型，例如 'emoji' 或 'image'"""
 
