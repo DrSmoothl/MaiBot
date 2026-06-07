@@ -40,7 +40,7 @@ from src.maisaka.context.messages import (
     ToolResultMessage,
     build_llm_message_from_context,
 )
-from src.maisaka.context.history import drop_orphan_tool_results, normalize_tool_result_order
+from src.maisaka.context.history import normalize_tool_call_result_pairs
 from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.focus import focus_mode_manager
@@ -1149,8 +1149,7 @@ class MaisakaChatLoopService:
             return [], "实际发送 0 条消息（tool 0 条，普通消息 0 条）"
 
         selected_history = [filtered_history[index] for index in selected_indices]
-        selected_history, _ = drop_orphan_tool_results(selected_history)
-        selected_history, _ = normalize_tool_result_order(selected_history)
+        selected_history, _ = normalize_tool_call_result_pairs(selected_history)
         tool_message_count = sum(1 for message in selected_history if isinstance(message, ToolResultMessage))
         normal_message_count = len(selected_history) - tool_message_count
         pinned_message_count = sum(1 for message in selected_history if is_mid_term_memory_message(message))

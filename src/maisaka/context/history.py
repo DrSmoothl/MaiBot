@@ -117,6 +117,103 @@ def drop_orphan_tool_results(
     return filtered_history, removed_count
 
 
+def normalize_tool_call_result_pairs(
+    chat_history: list[LLMContextMessage],
+) -> tuple[list[LLMContextMessage], dict[str, int]]:
+    """统一清理并排序工具调用与工具结果，保证发送给模型的工具协议配对完整。"""
+
+    processed_history, orphan_tool_result_count = drop_orphan_tool_results(chat_history)
+    processed_history, unanswered_tool_call_count = drop_unanswered_tool_calls(processed_history)
+    processed_history, moved_tool_result_count = normalize_tool_result_order(processed_history)
+    return processed_history, {
+        "orphan_tool_results": orphan_tool_result_count,
+        "unanswered_tool_calls": unanswered_tool_call_count,
+        "moved_tool_results": moved_tool_result_count,
+    }
+
+
+def drop_unanswered_tool_calls(
+    chat_history: list[LLMContextMessage],
+) -> tuple[list[LLMContextMessage], int]:
+    """移除缺少对应工具结果的 assistant tool_call，避免破坏模型请求协议。"""
+
+    if not chat_history:
+        return chat_history, 0
+
+    answered_tool_call_ids = {
+        message.tool_call_id
+        for message in chat_history
+        if isinstance(message, ToolResultMessage) and message.tool_call_id
+    }
+    if not answered_tool_call_ids:
+        return _drop_all_tool_calls_without_results(chat_history)
+
+    filtered_history: list[LLMContextMessage] = []
+    removed_count = 0
+    for message in chat_history:
+        if not isinstance(message, AssistantMessage) or not message.tool_calls:
+            filtered_history.append(message)
+            continue
+
+        kept_tool_calls = [
+            tool_call
+            for tool_call in message.tool_calls
+            if tool_call.call_id in answered_tool_call_ids
+        ]
+        removed_count += len(message.tool_calls) - len(kept_tool_calls)
+        if kept_tool_calls:
+            if len(kept_tool_calls) == len(message.tool_calls):
+                filtered_history.append(message)
+            else:
+                filtered_history.append(
+                    AssistantMessage(
+                        content=message.content,
+                        timestamp=message.timestamp,
+                        tool_calls=kept_tool_calls,
+                        source_kind=message.source_kind,
+                    )
+                )
+            continue
+
+        if message.content.strip():
+            filtered_history.append(
+                AssistantMessage(
+                    content=message.content,
+                    timestamp=message.timestamp,
+                    tool_calls=[],
+                    source_kind=message.source_kind,
+                )
+            )
+
+    return filtered_history, removed_count
+
+
+def _drop_all_tool_calls_without_results(
+    chat_history: list[LLMContextMessage],
+) -> tuple[list[LLMContextMessage], int]:
+    """处理窗口内完全没有 tool result 的快捷路径。"""
+
+    filtered_history: list[LLMContextMessage] = []
+    removed_count = 0
+    for message in chat_history:
+        if not isinstance(message, AssistantMessage) or not message.tool_calls:
+            filtered_history.append(message)
+            continue
+
+        removed_count += len(message.tool_calls)
+        if message.content.strip():
+            filtered_history.append(
+                AssistantMessage(
+                    content=message.content,
+                    timestamp=message.timestamp,
+                    tool_calls=[],
+                    source_kind=message.source_kind,
+                )
+            )
+
+    return filtered_history, removed_count
+
+
 def _collect_available_tool_call_ids(chat_history: list[LLMContextMessage]) -> set[str]:
     """收集仍保留原始 assistant tool_calls 的工具调用 ID。"""
 

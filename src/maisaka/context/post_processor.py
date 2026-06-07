@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from json import dumps, loads
 from math import ceil
 
-from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
-
+from .history import drop_leading_orphan_tool_results, normalize_tool_call_result_pairs
 from .messages import (
     AssistantMessage,
     ComplexSessionMessage,
@@ -14,7 +13,7 @@ from .messages import (
     SessionBackedMessage,
     ToolResultMessage,
 )
-from .history import drop_leading_orphan_tool_results, drop_orphan_tool_results, normalize_tool_result_order
+from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.maisaka.memory.mid_term import is_mid_term_memory_message
 
 TRIM_TARGET_RATIO = 1.0
@@ -258,13 +257,17 @@ def _normalize_history_structure(
 ) -> tuple[list[LLMContextMessage], int, int]:
     """规范化历史消息结构，保证工具调用链符合 LLM 消息协议。"""
 
-    processed_history, orphan_removed_count = drop_orphan_tool_results(chat_history)
-    processed_history, moved_tool_result_count = normalize_tool_result_order(processed_history)
+    processed_history, normalize_stats = normalize_tool_call_result_pairs(chat_history)
     processed_history, leading_orphan_removed_count = drop_leading_orphan_tool_results(processed_history)
+    removed_count = (
+        normalize_stats["orphan_tool_results"]
+        + normalize_stats["unanswered_tool_calls"]
+        + leading_orphan_removed_count
+    )
     return (
         processed_history,
-        orphan_removed_count + leading_orphan_removed_count,
-        moved_tool_result_count,
+        removed_count,
+        normalize_stats["moved_tool_results"],
     )
 
 
