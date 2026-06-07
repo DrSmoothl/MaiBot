@@ -7,6 +7,13 @@ import { PluginCard } from './PluginCard'
 
 const SURPRISE_PLUGIN_COUNT = 4
 const SURPRISE_CANDIDATE_LIMIT = 20
+const FRESHNESS_BOOST_WEIGHT = 4
+const FRESHNESS_BOOST_WINDOW_DAYS = 120
+const LAUNCH_BOOST_WEIGHT = 12
+const LAUNCH_BOOST_FULL_HOURS = 24
+const LAUNCH_BOOST_DECAY_HOURS = 48
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+const MS_PER_HOUR = 60 * 60 * 1000
 
 interface MarketplaceTabProps {
   plugins: PluginInfo[]
@@ -53,6 +60,48 @@ function getPluginFreshness(plugin: PluginInfo): number {
   }
 
   return plugin.marketplace_order ?? 0
+}
+
+function getFreshnessBoost(plugin: PluginInfo, maxMarketplaceOrder: number, now: number): number {
+  const publishedTime = parsePluginTime(plugin.published_at)
+  const updatedTime = parsePluginTime(plugin.updated_at)
+  const pluginTime = publishedTime > 0 ? publishedTime : updatedTime
+
+  if (pluginTime > 0) {
+    const ageDays = Math.max(0, (now - pluginTime) / MS_PER_DAY)
+    if (ageDays >= FRESHNESS_BOOST_WINDOW_DAYS) {
+      return 0
+    }
+
+    return (1 - ageDays / FRESHNESS_BOOST_WINDOW_DAYS) * FRESHNESS_BOOST_WEIGHT
+  }
+
+  if (maxMarketplaceOrder <= 0) {
+    return 0
+  }
+
+  return ((plugin.marketplace_order ?? 0) / maxMarketplaceOrder) * FRESHNESS_BOOST_WEIGHT
+}
+
+function getLaunchBoost(plugin: PluginInfo, now: number): number {
+  const publishedTime = parsePluginTime(plugin.published_at)
+  const updatedTime = parsePluginTime(plugin.updated_at)
+  const pluginTime = publishedTime > 0 ? publishedTime : updatedTime
+
+  if (pluginTime <= 0) {
+    return 0
+  }
+
+  const ageHours = Math.max(0, (now - pluginTime) / MS_PER_HOUR)
+  if (ageHours <= LAUNCH_BOOST_FULL_HOURS) {
+    return LAUNCH_BOOST_WEIGHT
+  }
+  if (ageHours >= LAUNCH_BOOST_DECAY_HOURS) {
+    return 0
+  }
+
+  const decayProgress = (ageHours - LAUNCH_BOOST_FULL_HOURS) / (LAUNCH_BOOST_DECAY_HOURS - LAUNCH_BOOST_FULL_HOURS)
+  return (1 - decayProgress) * LAUNCH_BOOST_WEIGHT
 }
 
 function getStableRandomRank(seed: string, plugin: PluginInfo): number {
@@ -126,7 +175,7 @@ export function MarketplaceTab({
     return statsIds.map((id) => pluginStats[id]).find(Boolean)
   }
 
-  const getSortValue = (plugin: PluginInfo): number => {
+  const getSortValue = (plugin: PluginInfo, maxMarketplaceOrder: number, now: number): number => {
     const stats = getPluginStats(plugin)
 
     if (sortBy === 'default') {
@@ -138,6 +187,11 @@ export function MarketplaceTab({
       return Math.log10(downloads + 1) * 4
         + Math.log10(likes + 1) * 3
         + rating * Math.log10(ratingCount + 2) * 2
+        + getLaunchBoost(plugin, now)
+        + getFreshnessBoost(plugin, maxMarketplaceOrder, now)
+    }
+    if (sortBy === 'latest') {
+      return getPluginFreshness(plugin)
     }
     if (sortBy === 'downloads') {
       return stats?.downloads ?? plugin.downloads ?? 0
@@ -152,7 +206,7 @@ export function MarketplaceTab({
     return 0
   }
 
-  const filteredPlugins = plugins.filter(plugin => {
+  const matchedPlugins = plugins.filter(plugin => {
     // 跳过没有 manifest 的插件
     if (!plugin.manifest) {
       console.warn('[过滤] 跳过无 manifest 的插件:', plugin.id)
@@ -183,10 +237,21 @@ export function MarketplaceTab({
       checkPluginCompatibility(plugin)
     
     return matchesSearch && matchesType && matchesCompatibility
-  }).sort((left, right) => {
-    const valueDiff = getSortValue(right) - getSortValue(left)
+  })
+  const maxMarketplaceOrder = matchedPlugins.reduce(
+    (maxOrder, plugin) => Math.max(maxOrder, plugin.marketplace_order ?? 0),
+    0
+  )
+  const now = Date.now()
+  const filteredPlugins = matchedPlugins.sort((left, right) => {
+    const valueDiff = getSortValue(right, maxMarketplaceOrder, now) - getSortValue(left, maxMarketplaceOrder, now)
     if (valueDiff !== 0) {
       return valueDiff
+    }
+
+    const freshnessDiff = getPluginFreshness(right) - getPluginFreshness(left)
+    if (freshnessDiff !== 0) {
+      return freshnessDiff
     }
 
     return (left.manifest?.name || left.id).localeCompare(right.manifest?.name || right.id)

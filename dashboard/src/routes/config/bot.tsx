@@ -78,21 +78,11 @@ const TAB_ORDER = [
   'log',
 ]
 
-/** 默认展示的主配置栏目 */
-const DEFAULT_VISIBLE_TAB_IDS = new Set([
-  'bot',
-  'chat',
-  'experimental',
-  'expression',
-  'a_memorix',
-  'visual',
-])
-
 // ==================== Tab 分组类型与构建 ====================
 interface TabGroup {
   id: string
   label: string
-  icon: string
+  advanced: boolean
   sections: string[]
 }
 
@@ -117,7 +107,7 @@ function buildTabGroupsFromSchema(schema: ConfigSchema): TabGroup[] {
     }
 
     if (!fieldSchema.uiParent) {
-      return fieldSchema.uiLabel && fieldSchema.uiIcon ? fieldName : null
+      return fieldSchema.uiLabel ? fieldName : null
     }
 
     visited.add(fieldName)
@@ -125,11 +115,11 @@ function buildTabGroupsFromSchema(schema: ConfigSchema): TabGroup[] {
   }
 
   for (const [fieldName, fieldSchema] of nestedEntries) {
-    if (fieldSchema.uiLabel && fieldSchema.uiIcon && !fieldSchema.uiParent) {
+    if (fieldSchema.uiLabel && !fieldSchema.uiParent) {
       hosts.set(fieldName, {
         id: fieldName,
         label: fieldSchema.uiLabel,
-        icon: fieldSchema.uiIcon || '',
+        advanced: Boolean(fieldSchema.uiAdvanced),
         sections: [fieldName],
       })
     }
@@ -1016,18 +1006,14 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     return null
   }
 
-  const visibleTabGroups = expanded
-    ? tabGroups
-    : tabGroups.filter((tab) => DEFAULT_VISIBLE_TAB_IDS.has(tab.id))
-  const hasCollapsibleTabs = tabGroups.some((tab) => !DEFAULT_VISIBLE_TAB_IDS.has(tab.id))
-  const firstExpandedTabId = visibleTabGroups.find(
-    (tab) => !DEFAULT_VISIBLE_TAB_IDS.has(tab.id)
-  )?.id
+  const visibleTabGroups = expanded ? tabGroups : tabGroups.filter((tab) => !tab.advanced)
+  const hasCollapsibleTabs = tabGroups.some((tab) => tab.advanced)
+  const firstExpandedTabId = visibleTabGroups.find((tab) => tab.advanced)?.id
 
   const toggleExpanded = () => {
     setExpanded((current) => {
-      if (current && !DEFAULT_VISIBLE_TAB_IDS.has(activeTab)) {
-        const firstDefaultTab = tabGroups.find((tab) => DEFAULT_VISIBLE_TAB_IDS.has(tab.id))
+      if (current && tabGroups.find((tab) => tab.id === activeTab)?.advanced) {
+        const firstDefaultTab = tabGroups.find((tab) => !tab.advanced)
         setActiveTab(firstDefaultTab?.id ?? tabGroups[0]?.id ?? '')
       }
       return !current
@@ -1085,7 +1071,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
       <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:overflow-x-visible sm:px-0 sm:pb-0">
         <TabsList className="flex h-auto w-max min-w-full flex-nowrap justify-start gap-1 p-1 transition-all duration-300 ease-out sm:w-full sm:flex-wrap">
           {visibleTabGroups.map((tab) => {
-            const isExpandedOnlyTab = !DEFAULT_VISIBLE_TAB_IDS.has(tab.id)
+            const isExpandedOnlyTab = tab.advanced
             return (
               <Fragment key={tab.id}>
                 {tab.id === firstExpandedTabId && (

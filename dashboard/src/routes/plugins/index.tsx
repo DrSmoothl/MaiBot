@@ -117,6 +117,62 @@ function PluginsPageContent() {
     return statsMap
   }
 
+  const mergeInstalledPluginInfo = (
+    marketPlugins: PluginInfo[],
+    installed: InstalledPlugin[]
+  ): PluginInfo[] => {
+    const mergedData = marketPlugins.map(plugin => {
+      const isInstalled = checkPluginInstalled(plugin.id, installed)
+      const installedVersion = getInstalledPluginVersion(plugin.id, installed)
+
+      return {
+        ...plugin,
+        installed: isInstalled,
+        installed_version: installedVersion
+      }
+    })
+
+    for (const installedPlugin of installed) {
+      const existsInMarket = mergedData.some(p => p.id === installedPlugin.id)
+      if (!existsInMarket && installedPlugin.manifest) {
+        const urls = installedPlugin.manifest.urls as PluginInfo['manifest']['urls'] | undefined
+        // 添加本地安装但不在市场的插件
+        mergedData.push({
+          id: installedPlugin.id,
+          manifest: {
+            manifest_version: installedPlugin.manifest.manifest_version || 1,
+            id: installedPlugin.manifest.id || installedPlugin.id,
+            name: installedPlugin.manifest.name,
+            version: installedPlugin.manifest.version,
+            description: installedPlugin.manifest.description || '',
+            author: installedPlugin.manifest.author,
+            license: installedPlugin.manifest.license || 'Unknown',
+            host_application: installedPlugin.manifest.host_application,
+            homepage_url: installedPlugin.manifest.homepage_url || urls?.homepage,
+            repository_url: installedPlugin.manifest.repository_url || urls?.repository,
+            urls,
+            keywords: installedPlugin.manifest.keywords || [],
+            plugin_type: installedPlugin.manifest.plugin_type || 'extension',
+            display: installedPlugin.manifest.display,
+            default_locale: (installedPlugin.manifest.default_locale as string) || 'zh-CN',
+            locales_path: installedPlugin.manifest.locales_path as string | undefined,
+          },
+          downloads: 0,
+          rating: 0,
+          review_count: 0,
+          installed: true,
+          installed_version: installedPlugin.manifest.version,
+          source: 'local',
+          stats_ids: [installedPlugin.manifest.id].filter(Boolean) as string[],
+          published_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+    }
+
+    return mergedData
+  }
+
   // 统一管理 WebSocket 和数据加载
   useEffect(() => {
     let unsubscribeProgress: (() => Promise<void>) | null = null
@@ -133,8 +189,7 @@ function PluginsPageContent() {
         setLoading(false)
       }
 
-      // 1. 先连接 WebSocket（异步获取 token）
-      unsubscribeProgress = await connectPluginProgressWebSocket(
+      const progressSubscription = connectPluginProgressWebSocket(
         (progress) => {
           if (isUnmounted) return
           
@@ -163,151 +218,115 @@ function PluginsPageContent() {
           }
         }
       )
-
-      // 2. 检查 Git 状态
-      if (!isUnmounted) {
-        const statusResult = await checkGitStatus()
-        if (!statusResult.success) {
-          toast({
-            title: 'Git 状态检查失败',
-            description: statusResult.error,
-            variant: 'destructive',
-          })
-          setGitStatus({ installed: false, error: statusResult.error })
-        } else {
-          setGitStatus(statusResult.data)
-          
-          if (!statusResult.data.installed) {
-            toast({
-              title: 'Git 未安装',
-              description: statusResult.data.error || '请先安装 Git 才能使用插件安装功能',
-              variant: 'destructive',
-            })
+        .then((unsubscribe) => {
+          if (isUnmounted) {
+            void unsubscribe()
+            return unsubscribe
           }
-        }
-      }
 
-      // 3. 获取麦麦版本
-      if (!isUnmounted) {
-        const versionResult = await getMaimaiVersion()
-        if (!versionResult.success) {
-          toast({
-            title: '版本获取失败',
-            description: versionResult.error,
-            variant: 'destructive',
-          })
-        } else {
-          setMaimaiVersion(versionResult.data)
-        }
-      }
-      // 4. 加载插件列表（包含已安装信息）
+          unsubscribeProgress = unsubscribe
+          return unsubscribe
+        })
+        .catch((error) => {
+          console.error('WebSocket subscribe error:', error)
+          return null
+        })
+
+      // 并发加载互不依赖的数据，避免 Git 检查、版本读取、市场清单和本地扫描串行拖慢页面。
       if (!isUnmounted) {
         try {
           if (!cachedPluginList?.length) {
             setLoading(true)
           }
           setError(null)
-          const apiResult = await fetchPluginList({ forceRefresh: Boolean(cachedPluginList?.length) })
-          if (!apiResult.success) {
-            if (!isUnmounted) {
-              setError(apiResult.error)
-              toast({
-                title: '加载失败',
-                description: apiResult.error,
-                variant: 'destructive',
-              })
-            }
+          const [
+            statusResult,
+            versionResult,
+            apiResult,
+            installedResult,
+          ] = await Promise.all([
+            checkGitStatus(),
+            getMaimaiVersion(),
+            fetchPluginList(),
+            getInstalledPlugins(),
+          ])
+          if (isUnmounted) {
             return
           }
-          const data = apiResult.data
-          
-          if (!isUnmounted) {
-            // 获取已安装插件列表
-            const installedResult = await getInstalledPlugins()
-            if (!installedResult.success) {
+
+          if (!statusResult.success) {
+            toast({
+              title: 'Git 状态检查失败',
+              description: statusResult.error,
+              variant: 'destructive',
+            })
+            setGitStatus({ installed: false, error: statusResult.error })
+          } else {
+            setGitStatus(statusResult.data)
+
+            if (!statusResult.data.installed) {
               toast({
-                title: '获取已安装插件失败',
-                description: installedResult.error,
+                title: 'Git 未安装',
+                description: statusResult.data.error || '请先安装 Git 才能使用插件安装功能',
                 variant: 'destructive',
               })
-              return
             }
-            const installed = installedResult.data
-            setInstalledPlugins(installed)
-            
-            // 将已安装信息合并到插件数据中
-            const mergedData = data.map(plugin => {
-              const isInstalled = checkPluginInstalled(plugin.id, installed)
-              const installedVersion = getInstalledPluginVersion(plugin.id, installed)
-              
-              return {
-                ...plugin,
-                installed: isInstalled,
-                installed_version: installedVersion
+          }
+
+          if (!versionResult.success) {
+            toast({
+              title: '版本获取失败',
+              description: versionResult.error,
+              variant: 'destructive',
+            })
+          } else {
+            setMaimaiVersion(versionResult.data)
+          }
+
+          if (!apiResult.success) {
+            setError(apiResult.error)
+            toast({
+              title: '加载失败',
+              description: apiResult.error,
+              variant: 'destructive',
+            })
+            return
+          }
+
+          if (!installedResult.success) {
+            toast({
+              title: '获取已安装插件失败',
+              description: installedResult.error,
+              variant: 'destructive',
+            })
+          }
+
+          const installed = installedResult.success ? installedResult.data : []
+          setInstalledPlugins(installed)
+          const mergedData = mergeInstalledPluginInfo(apiResult.data, installed)
+
+          if (cachedStatsSummary) {
+            setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary))
+          }
+          setPlugins(mergedData)
+
+          getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
+            .then((statsSummary) => {
+              if (!isUnmounted) {
+                setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
               }
             })
-          
-            
-            // 添加本地安装但不在市场的插件
-            for (const installedPlugin of installed) {
-              const existsInMarket = mergedData.some(p => p.id === installedPlugin.id)
-              if (!existsInMarket && installedPlugin.manifest) {
-                const urls = installedPlugin.manifest.urls as PluginInfo['manifest']['urls'] | undefined
-                // 添加本地插件到列表
-                mergedData.push({
-                  id: installedPlugin.id,
-                  manifest: {
-                    manifest_version: installedPlugin.manifest.manifest_version || 1,
-                    id: installedPlugin.manifest.id || installedPlugin.id,
-                    name: installedPlugin.manifest.name,
-                    version: installedPlugin.manifest.version,
-                    description: installedPlugin.manifest.description || '',
-                    author: installedPlugin.manifest.author,
-                    license: installedPlugin.manifest.license || 'Unknown',
-                    host_application: installedPlugin.manifest.host_application,
-                    homepage_url: installedPlugin.manifest.homepage_url || urls?.homepage,
-                    repository_url: installedPlugin.manifest.repository_url || urls?.repository,
-                    urls,
-                    keywords: installedPlugin.manifest.keywords || [],
-                    plugin_type: installedPlugin.manifest.plugin_type || 'extension',
-                    display: installedPlugin.manifest.display,
-                    default_locale: (installedPlugin.manifest.default_locale as string) || 'zh-CN',
-                    locales_path: installedPlugin.manifest.locales_path as string | undefined,
-                  },
-                  downloads: 0,
-                  rating: 0,
-                  review_count: 0,
-                  installed: true,
-                  installed_version: installedPlugin.manifest.version,
-                  source: 'local',
-                  stats_ids: [installedPlugin.manifest.id].filter(Boolean) as string[],
-                  published_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                })
-              }
-            }
-            
-            if (cachedStatsSummary) {
-              setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary))
-            }
-            setPlugins(mergedData)
-
-            getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
-              .then((statsSummary) => {
-                if (!isUnmounted) {
-                  setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
-                }
-              })
-              .catch((statsError) => {
-                console.warn('刷新插件统计失败:', statsError)
-              })
-          }
+            .catch((statsError) => {
+              console.warn('刷新插件统计失败:', statsError)
+            })
         } finally {
           if (!isUnmounted) {
             setLoading(false)
           }
         }
       }
+
+      void progressSubscription
     }
 
     init()
@@ -510,7 +529,7 @@ function PluginsPageContent() {
       })
       
       // 重新加载已安装插件列表
-      const installedResult = await getInstalledPlugins()
+      const installedResult = await getInstalledPlugins({ forceRefresh: true })
       if (!installedResult.success) {
         toast({
           title: '获取已安装插件失败',
@@ -569,7 +588,7 @@ function PluginsPageContent() {
       })
       
       // 重新加载已安装插件列表
-      const installedResult = await getInstalledPlugins()
+      const installedResult = await getInstalledPlugins({ forceRefresh: true })
       if (!installedResult.success) {
         toast({
           title: '获取已安装插件失败',
@@ -649,7 +668,7 @@ function PluginsPageContent() {
       })
       
       // 重新加载已安装插件列表
-      const installedResult = await getInstalledPlugins()
+      const installedResult = await getInstalledPlugins({ forceRefresh: true })
       if (!installedResult.success) {
         toast({
           title: '获取已安装插件失败',
@@ -802,6 +821,7 @@ function PluginsPageContent() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="default">推荐排序</SelectItem>
+                <SelectItem value="latest">最新上架</SelectItem>
                 <SelectItem value="downloads">下载最多</SelectItem>
                 <SelectItem value="likes">点赞最多</SelectItem>
                 <SelectItem value="rating">评分最高</SelectItem>
