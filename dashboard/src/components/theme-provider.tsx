@@ -110,10 +110,7 @@ export function ThemeProvider({
         return
       }
 
-      const configData = (result.data as Record<string, unknown>).config as
-        | Record<string, unknown>
-        | undefined
-      const webuiConfig = configData?.webui as Record<string, unknown> | undefined
+      const webuiConfig = result.data.webui as Record<string, unknown> | undefined
       if (!webuiConfig || !('webui_style' in webuiConfig)) {
         return
       }

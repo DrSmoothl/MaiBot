@@ -7,7 +7,7 @@ import { BackgroundLayer } from '@/components/background-layer'
 
 import { LogoArea } from './LogoArea'
 import { NavItem } from './NavItem'
-import { menuSections } from './constants'
+import { useMenuSections } from './use-menu-sections'
 
 interface SidebarProps {
   sidebarOpen: boolean
@@ -25,6 +25,7 @@ export function Sidebar({
   const { t } = useTranslation()
   const { config: sidebarBg, inheritedFrom } = useBackground('sidebar')
   const inheritsPageBackground = inheritedFrom === 'page'
+  const menuSections = useMenuSections()
 
   return (
     <aside

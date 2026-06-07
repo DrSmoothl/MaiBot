@@ -1,6 +1,7 @@
 # raise RuntimeError("System Not Ready")
 from pathlib import Path
 from rich.traceback import install
+from typing import TypeVar
 
 import asyncio
 import hashlib
@@ -31,6 +32,7 @@ logger = get_logger("main")
 
 # 定义重启退出码
 RESTART_EXIT_CODE = 42
+_RunResultT = TypeVar("_RunResultT")
 # print("-----------------------------------------")
 # print("\n\n\n\n\n")
 # print(t("startup.dev_branch_warning"))
@@ -234,9 +236,35 @@ def _cancel_main_task(main_loop: asyncio.AbstractEventLoop | None, main_task: as
 
     main_task.cancel()
     try:
-        main_loop.run_until_complete(main_task)
+        _run_until_complete(main_loop, main_task)
     except asyncio.CancelledError:
         pass
+
+
+def _is_windows_proactor_cancel_race(error: BaseException) -> bool:
+    """判断是否为 Windows Proactor 在连接取消时产生的事件循环内部竞态。"""
+    if sys.platform != "win32" or not isinstance(error, asyncio.InvalidStateError):
+        return False
+
+    return any(
+        frame.f_code.co_filename.replace("\\", "/").lower().endswith("/asyncio/windows_events.py")
+        for frame, _ in traceback.walk_tb(error.__traceback__)
+    )
+
+
+def _run_until_complete(
+    main_loop: asyncio.AbstractEventLoop,
+    future: asyncio.Future[_RunResultT],
+) -> _RunResultT:
+    """运行 Future；在 Windows Proactor 瞬时状态竞争时继续驱动事件循环。"""
+    while not future.done():
+        try:
+            main_loop.run_until_complete(future)
+        except asyncio.InvalidStateError as e:
+            if not _is_windows_proactor_cancel_race(e):
+                raise
+            logger.debug("忽略 Windows Proactor 瞬时 InvalidStateError，继续运行事件循环。", exc_info=True)
+    return future.result()
 
 
 def _run_graceful_shutdown(
@@ -248,7 +276,8 @@ def _run_graceful_shutdown(
         return False
 
     try:
-        main_loop.run_until_complete(graceful_shutdown(main_system))
+        shutdown_task = main_loop.create_task(graceful_shutdown(main_system))
+        _run_until_complete(main_loop, shutdown_task)
         return True
     except KeyboardInterrupt:
         _print_interrupt_exit_notice()
@@ -389,11 +418,12 @@ if __name__ == "__main__":
 
         try:
             # 执行初始化和任务调度
-            loop.run_until_complete(main_system.initialize())
+            initialize_task = loop.create_task(main_system.initialize())
+            _run_until_complete(loop, initialize_task)
             # Schedule tasks returns a future that runs forever.
             # We can run console_input_loop concurrently.
             main_tasks = loop.create_task(main_system.schedule_tasks())
-            loop.run_until_complete(main_tasks)
+            _run_until_complete(loop, main_tasks)
 
         except KeyboardInterrupt:
             try:

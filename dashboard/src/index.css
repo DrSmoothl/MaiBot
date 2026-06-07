@@ -773,6 +773,13 @@
   font-weight: 700;
 }
 
+:root[data-dashboard-style='future-retro'] [data-plugin-market-count-badge='true'] {
+  border: var(--retro-stroke) solid var(--retro-line) !important;
+  background: var(--retro-recessed) !important;
+  color: var(--retro-ink) !important;
+  font-weight: 400;
+}
+
 :root[data-dashboard-style='future-retro'] [data-dashboard-status-dot='true'] {
   border: 1px solid var(--retro-line) !important;
   border-radius: 1px !important;

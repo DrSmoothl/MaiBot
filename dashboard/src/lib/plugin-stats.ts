@@ -17,6 +17,8 @@ export interface PluginStatsData {
   plugin_id: string
   likes: number
   dislikes: number
+  liked?: boolean
+  disliked?: boolean
   downloads: number
   rating: number
   rating_count: number
@@ -105,6 +107,19 @@ function normalizePluginStatsResponse(data: unknown, pluginId: string): PluginSt
     rating_count: Number(stats.rating_count ?? 0),
     recent_ratings: Array.isArray(stats.recent_ratings) ? stats.recent_ratings : undefined,
   }
+}
+
+function getReadableError(data: unknown, fallback: string): string {
+  if (!data || typeof data !== 'object') {
+    return fallback
+  }
+
+  const error = (data as { error?: unknown }).error
+  if (typeof error !== 'string' || !error.trim()) {
+    return fallback
+  }
+
+  return /[�閹缂鐠]/.test(error) ? fallback : error
 }
 
 function readPluginStatsSummaryStorageCache(): PluginStatsSummaryStorageCache | null {
@@ -326,11 +341,11 @@ export async function likePlugin(pluginId: string, userId?: string): Promise<Vot
     const data = await response.json()
     
     if (response.status === 429) {
-      return { success: false, error: '閹垮秳缍旀潻鍥︾艾妫版垹绠掗敍宀冾嚞缁嬪秴鎮楅崘宥堢槸' }
+      return { success: false, error: '点赞过于频繁，请稍后再试' }
     }
     
     if (!response.ok) {
-      return { success: false, error: data.error || '閻愮绂愭径杈Е' }
+      return { success: false, error: getReadableError(data, '点赞失败') }
     }
     
     const result: VoteStatsResponse = { success: true, ...data }
@@ -341,7 +356,7 @@ export async function likePlugin(pluginId: string, userId?: string): Promise<Vot
     return result
   } catch (error) {
     console.error('Error liking plugin:', error)
-    return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
+    return { success: false, error: '网络请求失败' }
   }
 }
 
@@ -363,11 +378,11 @@ export async function dislikePlugin(pluginId: string, userId?: string): Promise<
     const data = await response.json()
     
     if (response.status === 429) {
-      return { success: false, error: '閹垮秳缍旀潻鍥︾艾妫版垹绠掗敍宀冾嚞缁嬪秴鎮楅崘宥堢槸' }
+      return { success: false, error: '操作过于频繁，请稍后再试' }
     }
     
     if (!response.ok) {
-      return { success: false, error: data.error || '閻愮淇径杈Е' }
+      return { success: false, error: getReadableError(data, '点踩失败') }
     }
     
     const result: VoteStatsResponse = { success: true, ...data }
@@ -378,7 +393,7 @@ export async function dislikePlugin(pluginId: string, userId?: string): Promise<
     return result
   } catch (error) {
     console.error('Error disliking plugin:', error)
-    return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
+    return { success: false, error: '网络请求失败' }
   }
 }
 

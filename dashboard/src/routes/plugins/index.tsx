@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
-import { AlertCircle, AlertTriangle, CheckCircle2, Info, Loader2, Search, Settings2 } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowUpDown, CheckCircle2, Filter, Info, Loader2, Search, Settings2 } from 'lucide-react'
 
 import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
@@ -31,6 +31,7 @@ import {
 import {
   getCachedPluginStatsSummary,
   getPluginStatsSummary,
+  likePlugin,
   recordPluginDownload,
   type PluginStatsData,
 } from '@/lib/plugin-stats'
@@ -39,6 +40,8 @@ import { InstallDialog } from './InstallDialog'
 import { MarketplaceTab } from './MarketplaceTab'
 import type { GitStatus, MaimaiVersion, MarketplaceSortKey, PluginInfo, PluginLoadProgress } from './types'
 import { getPluginType, PLUGIN_TYPE_OPTIONS } from './types'
+
+const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
 
 // 主导出组件：包装 RestartProvider
 export function PluginsPage() {
@@ -58,7 +61,9 @@ function PluginsPageContent() {
   const [searchQuery, setSearchQuery] = useState('')
   const [pluginTypeFilter, setPluginTypeFilter] = useState('all')
   const [marketplaceSortBy, setMarketplaceSortBy] = useState<MarketplaceSortKey>('default')
-  const [showCompatibleOnly, setShowCompatibleOnly] = useState(true)  // 默认只显示兼容的
+  const [showCompatibleOnly] = useState(
+    () => localStorage.getItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY) !== 'false'
+  )
   const [hideInstalledPlugins, setHideInstalledPlugins] = useState(true)
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -68,6 +73,7 @@ function PluginsPageContent() {
   const [maimaiVersion, setMaimaiVersion] = useState<MaimaiVersion | null>(null)
   const [, setInstalledPlugins] = useState<InstalledPlugin[]>([])
   const [pluginStats, setPluginStats] = useState<Record<string, PluginStatsData>>({})
+  const [likingPluginIds, setLikingPluginIds] = useState<Set<string>>(() => new Set())
   
   // 安装对话框状态
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
@@ -202,7 +208,7 @@ function PluginsPageContent() {
                 setLoadProgress(null)
               }
             }, 2000)
-          } else if (progress.stage === 'error') {
+          } else if (progress.stage === 'error' && progress.operation === 'fetch') {
             setLoading(false)
             setError(progress.error || '加载失败')
           }
@@ -494,6 +500,66 @@ function PluginsPageContent() {
     setInstallDialogOpen(open)
     if (!open) {
       setInstallingPlugin(null)
+    }
+  }
+
+  const handleLike = async (plugin: PluginInfo) => {
+    const pluginId = plugin.manifest?.id || plugin.id
+    if (likingPluginIds.has(pluginId)) {
+      return
+    }
+
+    setLikingPluginIds((currentIds) => {
+      const nextIds = new Set(currentIds)
+      nextIds.add(pluginId)
+      return nextIds
+    })
+
+    try {
+      const result = await likePlugin(pluginId)
+
+      if (!result.success) {
+        toast({
+          title: '点赞失败',
+          description: result.error || '无法提交点赞',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      setPluginStats((currentStats) => {
+        const currentPluginStats = currentStats[pluginId] ?? currentStats[plugin.id] ?? {
+          plugin_id: pluginId,
+          likes: 0,
+          dislikes: 0,
+          downloads: plugin.downloads ?? 0,
+          rating: plugin.rating ?? 0,
+          rating_count: 0,
+        }
+        const nextPluginStats: PluginStatsData = {
+          ...currentPluginStats,
+          plugin_id: pluginId,
+          likes: Number(result.likes ?? currentPluginStats.likes),
+          dislikes: Number(result.dislikes ?? currentPluginStats.dislikes),
+          liked: result.liked,
+          disliked: result.disliked,
+        }
+        const nextStats = { ...currentStats }
+        const statsIds = [pluginId, plugin.id, plugin.manifest?.id, currentPluginStats.plugin_id]
+          .filter((id): id is string => Boolean(id))
+
+        for (const statsId of statsIds) {
+          nextStats[statsId] = nextPluginStats
+        }
+
+        return nextStats
+      })
+    } finally {
+      setLikingPluginIds((currentIds) => {
+        const nextIds = new Set(currentIds)
+        nextIds.delete(pluginId)
+        return nextIds
+      })
     }
   }
 
@@ -846,8 +912,15 @@ function PluginsPageContent() {
 
             {/* 类型筛选 */}
             <Select value={pluginTypeFilter} onValueChange={setPluginTypeFilter}>
-              <SelectTrigger className="w-full sm:w-[200px]">
-                <SelectValue placeholder="选择类型" />
+              <SelectTrigger
+                aria-label="类型筛选"
+                title="类型筛选"
+                className="w-full justify-center gap-1 px-2 sm:w-12"
+              >
+                <Filter className="h-4 w-4" />
+                <span className="sr-only">
+                  <SelectValue placeholder="选择类型" />
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部类型</SelectItem>
@@ -862,8 +935,15 @@ function PluginsPageContent() {
               value={marketplaceSortBy}
               onValueChange={(value) => setMarketplaceSortBy(value as MarketplaceSortKey)}
             >
-              <SelectTrigger className="w-full sm:w-[160px]">
-                <SelectValue placeholder="排序" />
+              <SelectTrigger
+                aria-label="排序"
+                title="排序"
+                className="w-full justify-center gap-1 px-2 sm:w-12"
+              >
+                <ArrowUpDown className="h-4 w-4" />
+                <span className="sr-only">
+                  <SelectValue placeholder="排序" />
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="default">推荐排序</SelectItem>
@@ -874,32 +954,26 @@ function PluginsPageContent() {
               </SelectContent>
             </Select>
 
-            <Badge variant="secondary" className="h-9 px-3 text-sm font-normal">
+            <Badge
+              variant="outline"
+              data-plugin-market-count-badge="true"
+              className="h-9 border-input bg-transparent px-3 text-sm font-normal"
+            >
               全部插件 {getFilteredPluginCount()}
             </Badge>
 
             <Button
+              type="button"
               variant="outline"
               className="w-full sm:ml-auto sm:w-auto"
               onClick={() => navigate({ to: '/plugin-mirrors' })}
             >
               <Settings2 className="h-4 w-4 mr-2" />
-              配置镜像源
+              设置
             </Button>
 
             {/* 兼容性筛选 */}
             <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-2 sm:w-auto sm:min-w-fit">
-              <Checkbox
-                id="compatible-only"
-                checked={showCompatibleOnly}
-                onCheckedChange={(checked) => setShowCompatibleOnly(checked === true)}
-              />
-              <label
-                htmlFor="compatible-only"
-                className="cursor-pointer text-sm font-medium leading-none whitespace-nowrap peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-              >
-                仅显示当前版本
-              </label>
               <Checkbox
                 id="hide-installed-plugins"
                 checked={hideInstalledPlugins}
@@ -928,7 +1002,10 @@ function PluginsPageContent() {
         </Card>
 
         {/* 加载错误显示 */}
-        {loadProgress && loadProgress.stage === 'error' && loadProgress.error && (
+        {loadProgress
+          && loadProgress.operation === 'fetch'
+          && loadProgress.stage === 'error'
+          && loadProgress.error && (
           <Card className="border-destructive bg-destructive/10">
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -974,7 +1051,9 @@ function PluginsPageContent() {
             maimaiVersion={maimaiVersion}
             pluginStats={pluginStats}
             loadProgress={loadProgress}
+            likingPluginIds={likingPluginIds}
             onInstall={openInstallDialog}
+            onLike={handleLike}
             onUpdate={handleUpdate}
             onUninstall={handleUninstall}
             checkPluginCompatibility={checkPluginCompatibility}

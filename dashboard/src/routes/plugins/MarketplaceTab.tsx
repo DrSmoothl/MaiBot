@@ -14,6 +14,13 @@ const LAUNCH_BOOST_DECAY_HOURS = 48
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const MS_PER_HOUR = 60 * 60 * 1000
 
+interface MarketplaceScoreBasis {
+  maxDownloadScore: number
+  maxLikeScore: number
+  maxRatingScore: number
+  maxMarketplaceOrder: number
+}
+
 interface MarketplaceTabProps {
   plugins: PluginInfo[]
   searchQuery: string
@@ -25,7 +32,9 @@ interface MarketplaceTabProps {
   maimaiVersion: MaimaiVersion | null
   pluginStats: Record<string, PluginStatsData>
   loadProgress: PluginLoadProgress | null
+  likingPluginIds: Set<string>
   onInstall: (plugin: PluginInfo) => void
+  onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
   onUninstall: (plugin: PluginInfo) => void
   checkPluginCompatibility: (plugin: PluginInfo) => boolean
@@ -103,6 +112,14 @@ function getLaunchBoost(plugin: PluginInfo, now: number): number {
   return (1 - decayProgress) * LAUNCH_BOOST_WEIGHT
 }
 
+function normalizeScore(value: number, maxValue: number, weight: number): number {
+  if (maxValue <= 0) {
+    return 0
+  }
+
+  return (value / maxValue) * weight
+}
+
 function getStableRandomRank(seed: string, plugin: PluginInfo): number {
   const value = `${seed}:${getPluginIdentity(plugin)}`
   let hash = 2166136261
@@ -154,7 +171,9 @@ export function MarketplaceTab({
   maimaiVersion,
   pluginStats,
   loadProgress,
+  likingPluginIds,
   onInstall,
+  onLike,
   onUpdate,
   onUninstall,
   checkPluginCompatibility,
@@ -174,7 +193,7 @@ export function MarketplaceTab({
     return statsIds.map((id) => pluginStats[id]).find(Boolean)
   }
 
-  const getSortValue = (plugin: PluginInfo, maxMarketplaceOrder: number, now: number): number => {
+  const getSortValue = (plugin: PluginInfo, scoreBasis: MarketplaceScoreBasis, now: number): number => {
     const stats = getPluginStats(plugin)
 
     if (sortBy === 'default') {
@@ -182,12 +201,15 @@ export function MarketplaceTab({
       const likes = stats?.likes ?? 0
       const rating = stats?.rating ?? plugin.rating ?? 0
       const ratingCount = stats?.rating_count ?? 0
+      const downloadScore = Math.log10(downloads + 1)
+      const likeScore = Math.log10(likes + 1)
+      const ratingScore = rating * Math.log10(ratingCount + 2)
 
-      return Math.log10(downloads + 1) * 4
-        + Math.log10(likes + 1) * 3
-        + rating * Math.log10(ratingCount + 2) * 2
+      return normalizeScore(downloadScore, scoreBasis.maxDownloadScore, 4)
+        + normalizeScore(likeScore, scoreBasis.maxLikeScore, 3)
+        + normalizeScore(ratingScore, scoreBasis.maxRatingScore, 2)
         + getLaunchBoost(plugin, now)
-        + getFreshnessBoost(plugin, maxMarketplaceOrder, now)
+        + getFreshnessBoost(plugin, scoreBasis.maxMarketplaceOrder, now)
     }
     if (sortBy === 'latest') {
       return getPluginFreshness(plugin)
@@ -237,13 +259,31 @@ export function MarketplaceTab({
     
     return matchesSearch && matchesType && matchesCompatibility
   })
-  const maxMarketplaceOrder = matchedPlugins.reduce(
-    (maxOrder, plugin) => Math.max(maxOrder, plugin.marketplace_order ?? 0),
-    0
+  const scoreBasis = matchedPlugins.reduce<MarketplaceScoreBasis>(
+    (basis, plugin) => {
+      const stats = getPluginStats(plugin)
+      const downloads = stats?.downloads ?? plugin.downloads ?? 0
+      const likes = stats?.likes ?? 0
+      const rating = stats?.rating ?? plugin.rating ?? 0
+      const ratingCount = stats?.rating_count ?? 0
+
+      return {
+        maxDownloadScore: Math.max(basis.maxDownloadScore, Math.log10(downloads + 1)),
+        maxLikeScore: Math.max(basis.maxLikeScore, Math.log10(likes + 1)),
+        maxRatingScore: Math.max(basis.maxRatingScore, rating * Math.log10(ratingCount + 2)),
+        maxMarketplaceOrder: Math.max(basis.maxMarketplaceOrder, plugin.marketplace_order ?? 0),
+      }
+    },
+    {
+      maxDownloadScore: 0,
+      maxLikeScore: 0,
+      maxRatingScore: 0,
+      maxMarketplaceOrder: 0,
+    }
   )
   const now = Date.now()
   const filteredPlugins = matchedPlugins.sort((left, right) => {
-    const valueDiff = getSortValue(right, maxMarketplaceOrder, now) - getSortValue(left, maxMarketplaceOrder, now)
+    const valueDiff = getSortValue(right, scoreBasis, now) - getSortValue(left, scoreBasis, now)
     if (valueDiff !== 0) {
       return valueDiff
     }
@@ -268,7 +308,9 @@ export function MarketplaceTab({
       maimaiVersion={maimaiVersion}
       pluginStats={pluginStats}
       loadProgress={loadProgress}
+      likingPluginIds={likingPluginIds}
       onInstall={onInstall}
+      onLike={onLike}
       onUpdate={onUpdate}
       onUninstall={onUninstall}
       checkPluginCompatibility={checkPluginCompatibility}

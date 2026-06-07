@@ -404,7 +404,7 @@ function BotConfigPageContent() {
         setLoading(false)
         return
       }
-      parseAndSetConfig((result.data as Record<string, unknown>).config as Record<string, unknown>)
+      parseAndSetConfig(result.data)
       if (schemaResult.success && schemaResult.data) {
         setConfigSchema((schemaResult.data as unknown as Record<string, unknown>).schema as ConfigSchema)
       }
@@ -585,7 +585,7 @@ function BotConfigPageContent() {
           })
           return
         }
-        parseAndSetConfig((result.data as Record<string, unknown>).config as Record<string, unknown>)
+        parseAndSetConfig(result.data)
         setHasUnsavedChanges(false)
       } catch (error) {
         console.error('加载配置失败:', error)
