@@ -486,6 +486,17 @@ function PluginsPageContent() {
     setInstallDialogOpen(true)
   }
 
+  const handleInstallDialogOpenChange = (open: boolean) => {
+    if (!open && loadProgress?.operation === 'install' && loadProgress.stage === 'loading') {
+      return
+    }
+
+    setInstallDialogOpen(open)
+    if (!open) {
+      setInstallingPlugin(null)
+    }
+  }
+
   // 安装插件处理
   const handleInstall = async (branch: string) => {
     if (!installingPlugin) return
@@ -499,8 +510,16 @@ function PluginsPageContent() {
     }
 
     try {
-      setInstallDialogOpen(false)
-      
+      setLoadProgress({
+        operation: 'install',
+        stage: 'loading',
+        progress: 0,
+        message: `正在准备安装 ${installingPlugin.manifest.name}`,
+        plugin_id: installingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 0,
+      })
+
       const installResult = await installPlugin(
         installingPlugin.id,
         installingPlugin.manifest.repository_url || installingPlugin.manifest.urls?.repository || '',
@@ -508,6 +527,16 @@ function PluginsPageContent() {
       )
       
       if (!installResult.success) {
+        setLoadProgress({
+          operation: 'install',
+          stage: 'error',
+          progress: 0,
+          message: installResult.error || '安装失败',
+          error: installResult.error || '安装失败',
+          plugin_id: installingPlugin.id,
+          total_plugins: 1,
+          loaded_plugins: 0,
+        })
         toast({
           title: '安装失败',
           description: installResult.error,
@@ -526,6 +555,15 @@ function PluginsPageContent() {
       toast({
         title: '安装成功',
         description: `${installingPlugin.manifest.name} 已成功安装`,
+      })
+      setLoadProgress({
+        operation: 'install',
+        stage: 'success',
+        progress: 100,
+        message: `${installingPlugin.manifest.name} 已成功安装`,
+        plugin_id: installingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 1,
       })
       
       // 重新加载已安装插件列表
@@ -558,13 +596,22 @@ function PluginsPageContent() {
         })
       )
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      setLoadProgress({
+        operation: 'install',
+        stage: 'error',
+        progress: 0,
+        message: errorMessage,
+        error: errorMessage,
+        plugin_id: installingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 0,
+      })
       toast({
         title: '安装失败',
-        description: error instanceof Error ? error.message : '未知错误',
+        description: errorMessage,
         variant: 'destructive',
       })
-    } finally {
-      setInstallingPlugin(null)
     }
   }
 
@@ -728,15 +775,14 @@ function PluginsPageContent() {
     <ScrollArea className="h-full">
       <div className="space-y-6 p-4 sm:p-6">
         {/* 标题 */}
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div
+          data-plugin-market-header="true"
+          className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4"
+        >
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">插件市场</h1>
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={() => navigate({ to: '/plugin-mirrors' })}>
-              <Settings2 className="h-4 w-4 mr-2" />
-              配置镜像源
-            </Button>
+            <h1 data-plugin-market-title="true" className="text-2xl sm:text-3xl font-bold">
+              插件市场
+            </h1>
           </div>
         </div>
 
@@ -831,6 +877,15 @@ function PluginsPageContent() {
             <Badge variant="secondary" className="h-9 px-3 text-sm font-normal">
               全部插件 {getFilteredPluginCount()}
             </Badge>
+
+            <Button
+              variant="outline"
+              className="w-full sm:ml-auto sm:w-auto"
+              onClick={() => navigate({ to: '/plugin-mirrors' })}
+            >
+              <Settings2 className="h-4 w-4 mr-2" />
+              配置镜像源
+            </Button>
 
             {/* 兼容性筛选 */}
             <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-2 sm:w-auto sm:min-w-fit">
@@ -933,7 +988,8 @@ function PluginsPageContent() {
         <InstallDialog
           open={installDialogOpen}
           plugin={installingPlugin}
-          onOpenChange={setInstallDialogOpen}
+          loadProgress={loadProgress}
+          onOpenChange={handleInstallDialogOpenChange}
           onInstall={handleInstall}
         />
 

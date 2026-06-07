@@ -1128,12 +1128,27 @@ function PluginConfigPageContent() {
   const isPluginLoadFailed = (plugin: InstalledPlugin) => !isPluginDisabled(plugin) && !isPluginLoadSuccess(plugin)
   const installedCount = plugins.length
   const disabledCount = plugins.filter(isPluginDisabled).length
-  const enabledCount = installedCount - disabledCount
   const loadSuccessCount = plugins.filter(isPluginLoadSuccess).length
   const loadFailedCount = plugins.filter(isPluginLoadFailed).length
-  const loadTotalCount = loadSuccessCount + loadFailedCount
-  const loadSuccessPercent = loadTotalCount > 0 ? (loadSuccessCount / loadTotalCount) * 100 : 0
-  const loadFailedPercent = loadTotalCount > 0 ? (loadFailedCount / loadTotalCount) * 100 : 0
+  const enabledCount = loadSuccessCount
+  const getPluginStatusBarClassName = (plugin: InstalledPlugin) => {
+    if (isPluginDisabled(plugin)) {
+      return 'bg-muted-foreground/45'
+    }
+    if (isPluginLoadFailed(plugin)) {
+      return 'bg-red-500'
+    }
+    return 'bg-emerald-500'
+  }
+  const getPluginStatusLabel = (plugin: InstalledPlugin) => {
+    if (isPluginDisabled(plugin)) {
+      return '已禁用'
+    }
+    if (isPluginLoadFailed(plugin)) {
+      return '启动失败'
+    }
+    return '已启用'
+  }
   const getPluginStatusMeta = (plugin: InstalledPlugin) => {
     if (isPluginDisabled(plugin)) {
       return { dotClassName: 'bg-muted-foreground/45', label: '已禁用' }
@@ -1331,25 +1346,46 @@ function PluginConfigPageContent() {
         {/* 统计信息 */}
         <Card>
           <CardContent className="space-y-3 p-4">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-              <span className="flex items-center gap-2">
-                <Package className="h-4 w-4 text-muted-foreground" />
-                已安装 <strong>{installedCount}</strong> 个插件
-              </span>
-              <span>已启用 <strong className="text-emerald-600">{enabledCount}</strong> 个</span>
-              <span>已禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个</span>
-            </div>
             <div
-              className="flex items-center gap-3 border-t pt-3 text-sm"
-              aria-label={`加载成功 ${loadSuccessCount} 个，加载失败 ${loadFailedCount} 个`}
+              className="space-y-2"
+              aria-label={`已安装 ${installedCount} 个插件，已启用 ${enabledCount} 个，已禁用 ${disabledCount} 个，启动失败 ${loadFailedCount} 个`}
             >
-              <span className="sr-only">加载成功 {loadSuccessCount} 个，加载失败 {loadFailedCount} 个</span>
-              <strong className="w-8 text-right text-emerald-600">{loadSuccessCount}</strong>
-              <div className="flex h-3 min-w-28 flex-1 overflow-hidden bg-muted" aria-hidden="true">
-                <div className="bg-emerald-500" style={{ width: `${loadSuccessPercent}%` }} />
-                <div className="bg-red-500" style={{ width: `${loadFailedPercent}%` }} />
+              <span className="sr-only">
+                已启用 {enabledCount} 个，已禁用 {disabledCount} 个，启动失败 {loadFailedCount} 个
+              </span>
+              <div className="flex h-3 w-full overflow-hidden bg-muted" aria-hidden="true">
+                {plugins.length > 0 ? (
+                  plugins.map((plugin, index) => (
+                    <div
+                      key={`${plugin.id}-${index}`}
+                      className={`min-w-0 flex-1 ${getPluginStatusBarClassName(plugin)} ${
+                        index < plugins.length - 1 ? 'border-r border-background' : ''
+                      }`}
+                      title={`${plugin.manifest.name}：${getPluginStatusLabel(plugin)}`}
+                    />
+                  ))
+                ) : (
+                  <div className="h-full flex-1 bg-muted-foreground/20" />
+                )}
               </div>
-              <strong className="w-8 text-red-600">{loadFailedCount}</strong>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Package className="h-3.5 w-3.5" />
+                  已安装 <strong className="text-foreground">{installedCount}</strong> 个插件
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  启用 <strong className="text-emerald-600">{enabledCount}</strong> 个
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground/45" />
+                  禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-red-500" />
+                  启动失败 <strong className="text-red-600">{loadFailedCount}</strong> 个
+                </span>
+              </div>
             </div>
           </CardContent>
         </Card>

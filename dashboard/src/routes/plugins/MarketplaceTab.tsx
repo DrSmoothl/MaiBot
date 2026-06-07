@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import { Sparkles } from 'lucide-react'
 
 import type { GitStatus, MaimaiVersion, MarketplaceSortKey, PluginInfo, PluginLoadProgress, PluginStatsData } from './types'
 import { getPluginType } from './types'
@@ -283,10 +282,6 @@ export function MarketplaceTab({
     <div className="space-y-6">
       {surprisePlugins.length > 0 && (
         <section className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <h2 className="text-base font-semibold">惊喜随意</h2>
-          </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {surprisePlugins.map(renderPluginCard)}
           </div>

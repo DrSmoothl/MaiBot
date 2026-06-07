@@ -1,25 +1,50 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Download } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Download, Loader2 } from 'lucide-react'
 
-import type { PluginInfo } from './types'
+import type { PluginInfo, PluginLoadProgress } from './types'
 
 interface InstallDialogProps {
   open: boolean
   plugin: PluginInfo | null
+  loadProgress: PluginLoadProgress | null
   onOpenChange: (open: boolean) => void
   onInstall: (branch: string) => void
 }
 
-export function InstallDialog({ open, plugin, onOpenChange, onInstall }: InstallDialogProps) {
+export function InstallDialog({ open, plugin, loadProgress, onOpenChange, onInstall }: InstallDialogProps) {
   const [selectedBranch, setSelectedBranch] = useState('main')
   const [customBranch, setCustomBranch] = useState('')
   const [branchInputMode, setBranchInputMode] = useState<'preset' | 'custom'>('preset')
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
+  const installProgress = loadProgress?.operation === 'install' && loadProgress.plugin_id === plugin?.id
+    ? loadProgress
+    : null
+  const [lastInstallProgress, setLastInstallProgress] = useState<PluginLoadProgress | null>(null)
+  const displayedProgress = installProgress ?? lastInstallProgress
+  const isInstalling = displayedProgress?.stage === 'loading'
+  const installFinished = displayedProgress?.stage === 'success' || displayedProgress?.stage === 'error'
+
+  useEffect(() => {
+    if (installProgress) {
+      setLastInstallProgress(installProgress)
+    }
+  }, [installProgress])
+
+  useEffect(() => {
+    if (!open) {
+      setLastInstallProgress(null)
+    }
+  }, [open])
+
+  useEffect(() => {
+    setLastInstallProgress(null)
+  }, [plugin?.id])
 
   const handleInstall = () => {
     const branch = branchInputMode === 'custom' ? customBranch : selectedBranch
@@ -29,12 +54,16 @@ export function InstallDialog({ open, plugin, onOpenChange, onInstall }: Install
     }
 
     onInstall(branch)
-    onOpenChange(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen && isInstalling) {
+        return
+      }
+      onOpenChange(nextOpen)
+    }}>
+      <DialogContent preventOutsideClose={isInstalling} hideCloseButton={isInstalling}>
         <DialogHeader>
           <DialogTitle>安装插件</DialogTitle>
           <DialogDescription>
@@ -127,19 +156,87 @@ export function InstallDialog({ open, plugin, onOpenChange, onInstall }: Install
               将从默认分支 (main) 安装插件
             </p>
           )}
+
+          {displayedProgress && (
+            <div className={`space-y-3 rounded-lg border p-3 ${
+              displayedProgress.stage === 'success'
+                ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20'
+                : displayedProgress.stage === 'error'
+                  ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
+                  : 'bg-muted/50'
+            }`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  {displayedProgress.stage === 'loading' ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                  ) : displayedProgress.stage === 'success' ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+                  )}
+                  <span className={`text-sm font-medium ${
+                    displayedProgress.stage === 'success'
+                      ? 'text-green-700 dark:text-green-300'
+                      : displayedProgress.stage === 'error'
+                        ? 'text-red-700 dark:text-red-300'
+                        : ''
+                  }`}>
+                    {displayedProgress.stage === 'loading' && '正在安装'}
+                    {displayedProgress.stage === 'success' && '安装完成'}
+                    {displayedProgress.stage === 'error' && '安装失败'}
+                  </span>
+                </div>
+                {displayedProgress.stage !== 'error' && (
+                  <span className={`shrink-0 text-sm font-medium ${
+                    displayedProgress.stage === 'success' ? 'text-green-700 dark:text-green-300' : ''
+                  }`}>
+                    {displayedProgress.progress}%
+                  </span>
+                )}
+              </div>
+              {displayedProgress.stage !== 'error' && (
+                <Progress
+                  value={displayedProgress.progress}
+                  className={`h-2 ${displayedProgress.stage === 'success' ? '[&>div]:bg-green-500' : ''}`}
+                />
+              )}
+              <p className={`break-words text-sm ${
+                displayedProgress.stage === 'success'
+                  ? 'text-green-600 dark:text-green-400'
+                  : displayedProgress.stage === 'error'
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'text-muted-foreground'
+              }`}>
+                {displayedProgress.stage === 'error'
+                  ? (displayedProgress.error || displayedProgress.message || '操作失败')
+                  : displayedProgress.message}
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                <div>插件 ID：{displayedProgress.plugin_id || plugin?.id}</div>
+                <div>分支：{branchInputMode === 'custom' ? customBranch : selectedBranch}</div>
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
+            disabled={isInstalling}
           >
-            取消
+            {installFinished ? '关闭' : '取消'}
           </Button>
-          <Button onClick={handleInstall}>
-            <Download className="h-4 w-4 mr-2" />
-            安装
-          </Button>
+          {!installFinished && (
+            <Button onClick={handleInstall} disabled={isInstalling}>
+              {isInstalling ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              {isInstalling ? '安装中' : '安装'}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
