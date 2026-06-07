@@ -211,7 +211,7 @@ async def handle_tool(
                     stream_id=tool_ctx.runtime.session_id,
                     processed_plain_text=segment,
                     set_reply=segment_set_quote,
-                    reply_message=target_message if segment_set_quote else None,
+                    reply_message=target_message,
                     selected_expressions=reply_result.selected_expression_ids or None,
                     typing=index > 0,
                     sync_to_maisaka_history=True,
