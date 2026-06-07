@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   Settings,
+  AlertCircle,
   Package,
   ArrowUp,
   RefreshCw,

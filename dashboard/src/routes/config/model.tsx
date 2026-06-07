@@ -24,7 +24,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import {
   Select,
@@ -873,10 +872,11 @@ function ModelConfigPageContent() {
   const handleConfirmDeleteProviderImpact = async () => {
     try {
       const savingFlag = deleteConfirmState.context === 'auto' ? setAutoSaving : setSaving
+      const saveContext = deleteConfirmState.context === 'auto' ? 'auto' : 'manual'
       savingFlag(true)
       await saveProviders(
         deleteConfirmState.pendingProviders,
-        deleteConfirmState.context,
+        saveContext,
         deleteConfirmState.affectedModels
       )
       toast({

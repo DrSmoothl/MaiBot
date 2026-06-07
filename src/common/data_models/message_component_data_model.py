@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from maim_message import Seg, UserInfo, MessageBase, BaseMessageInfo
+from maim_message import BaseMessageInfo, MessageBase, Seg, UserInfo
 from pathlib import Path
 from sqlmodel import select
-from typing import Optional, List, Union, Dict, Any
+from typing import Any, Dict, List, Optional, Union
 
 import asyncio
-import hashlib
 import base64
+import hashlib
 
 from src.common.logger import get_logger
 
@@ -412,6 +412,8 @@ class MessageSequence:
             )
         elif item_type == "reply":
             return ReplyComponent(target_message_id=item["data"])
+        elif item_type == "dict":
+            return DictComponent(data=item.get("data") or {})
         elif item_type == "forward":
             forward_components = []
             for fc in item["data"]:
