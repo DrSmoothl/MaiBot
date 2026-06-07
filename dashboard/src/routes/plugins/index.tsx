@@ -59,7 +59,7 @@ function PluginsPageContent() {
   const [pluginTypeFilter, setPluginTypeFilter] = useState('all')
   const [marketplaceSortBy, setMarketplaceSortBy] = useState<MarketplaceSortKey>('default')
   const [showCompatibleOnly, setShowCompatibleOnly] = useState(true)  // 默认只显示兼容的
-  const [hideInstalledPlugins, setHideInstalledPlugins] = useState(false)
+  const [hideInstalledPlugins, setHideInstalledPlugins] = useState(true)
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
