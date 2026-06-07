@@ -290,11 +290,16 @@ def parse_behavior_scenario_segments_response(response: str) -> list[BehaviorSce
 class BehaviorScenarioAnalyzer:
     """用 LLM 将最近上下文抽象成行为选择所需的场景画像。"""
 
+    @staticmethod
+    def _context_placeholder_text() -> str:
+        return "上下文已作为后续多条消息提供；请只分析这些消息，不要把本句当作聊天内容。"
+
     async def analyze(
         self,
         *,
         context_text: str,
         sub_agent_runner: Optional[ScenarioAgentRunner],
+        include_context_in_prompt: bool = True,
     ) -> BehaviorScenarioProfile:
         if sub_agent_runner is None:
             return BehaviorScenarioProfile()
@@ -305,7 +310,7 @@ class BehaviorScenarioAnalyzer:
         prompt = load_prompt(
             "behavior_scene_analyze",
             bot_name=global_config.bot.nickname,
-            context_text=normalized_context,
+            context_text=normalized_context if include_context_in_prompt else self._context_placeholder_text(),
         )
         try:
             raw_response = await sub_agent_runner(prompt)

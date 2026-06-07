@@ -62,7 +62,6 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "timing_gate": "timing_gate",
     "reply_effect_judge": "reply_effect_judge",
     "expression_selector": "expression_selector",
-    "behavior_selector": "behavior_selector",
     "behavior_scenario_analyzer": "behavior_scenario_analyzer",
     "emotion": "emotion",
     "sub_agent": "sub_agent",
@@ -1277,7 +1276,7 @@ class MaisakaChatLoopService:
     def _resolve_enable_visual_message(request_kind: str) -> bool:
         if request_kind in {"planner", "timing_gate"}:
             return resolve_enable_visual_planner()
-        if request_kind in {"expression_selector", "reply_effect_judge", "behavior_selector", "behavior_scenario_analyzer"}:
+        if request_kind in {"expression_selector", "reply_effect_judge", "behavior_scenario_analyzer"}:
             return False
         return True
 

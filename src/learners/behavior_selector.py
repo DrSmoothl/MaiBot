@@ -1,15 +1,10 @@
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
-from json_repair import repair_json
-
-import json
-import random
 import re
 
 from src.common.logger import get_logger
-from src.common.prompt_i18n import load_prompt
 from src.common.utils.utils_config import BehaviorConfigUtils, ChatConfigUtils
 from src.config.config import global_config
 
@@ -24,20 +19,19 @@ from .behavior_scenario import BehaviorScenarioProfile, behavior_scenario_analyz
 
 logger = get_logger("behavior_selector")
 
-SubAgentRunner = Callable[[str], Awaitable[str]]
+ScenarioAgentRunner = Callable[[str], Awaitable[str]]
 MAX_SELECTOR_CANDIDATES = 12
 CONTEXT_RETRIEVAL_MIN_SCORE = 0.03
 MAX_CONTEXT_RETRIEVAL_TERMS = 240
 
 
 @dataclass
-class BehaviorPatternSelectionResult:
-    """planner 侧行为表现选择结果。"""
+class BehaviorPatternRetrievalResult:
+    """planner 侧行为表现召回结果。"""
 
     reference_text: str = ""
-    selected_behavior_id: Optional[int] = None
-    selected_behavior: Optional[dict[str, Any]] = None
-    selection_reason: str = ""
+    behaviors: list[dict[str, Any]] = field(default_factory=list)
+    scenario_profile: BehaviorScenarioProfile = field(default_factory=BehaviorScenarioProfile)
 
 
 class BehaviorPatternSelector:
@@ -98,35 +92,6 @@ class BehaviorPatternSelector:
             0.2,
             1.0 + count * 0.15 + score * 0.7 + success_count * 0.4 - failure_count * 0.6 - activation_count * 0.03,
         )
-
-    def _weighted_sample_candidates(
-        self,
-        candidates: list[dict[str, Any]],
-        max_count: int,
-    ) -> list[dict[str, Any]]:
-        if len(candidates) <= max_count:
-            return list(candidates)
-
-        remaining_candidates = list(candidates)
-        selected_candidates: list[dict[str, Any]] = []
-        for _ in range(max_count):
-            weights = [self._candidate_weight(candidate) for candidate in remaining_candidates]
-            total_weight = sum(weights)
-            if total_weight <= 0:
-                selected_candidates.append(remaining_candidates.pop(random.randrange(len(remaining_candidates))))
-                continue
-
-            threshold = random.uniform(0, total_weight)
-            cumulative_weight = 0.0
-            selected_index = len(remaining_candidates) - 1
-            for index, weight in enumerate(weights):
-                cumulative_weight += weight
-                if cumulative_weight >= threshold:
-                    selected_index = index
-                    break
-            selected_candidates.append(remaining_candidates.pop(selected_index))
-
-        return selected_candidates
 
     @staticmethod
     def _normalize_retrieval_text(text: str) -> str:
@@ -192,9 +157,6 @@ class BehaviorPatternSelector:
         context_text: str,
         max_count: int,
     ) -> list[dict[str, Any]]:
-        if len(candidates) <= max_count:
-            return list(candidates)
-
         scored_candidates: list[tuple[float, float, dict[str, Any]]] = []
         for candidate in candidates:
             relevance_score = self._context_relevance_score(candidate, context_text)
@@ -202,7 +164,7 @@ class BehaviorPatternSelector:
 
         best_relevance = max((score for score, _, _ in scored_candidates), default=0.0)
         if best_relevance < CONTEXT_RETRIEVAL_MIN_SCORE:
-            return self._weighted_sample_candidates(candidates, max_count)
+            return []
 
         scored_candidates.sort(
             key=lambda item: (
@@ -214,30 +176,15 @@ class BehaviorPatternSelector:
             reverse=True,
         )
         selected_candidates: list[dict[str, Any]] = []
-        selected_ids: set[int] = set()
         for relevance_score, _, candidate in scored_candidates:
             if relevance_score < CONTEXT_RETRIEVAL_MIN_SCORE and selected_candidates:
                 break
-            candidate_id = int(candidate.get("id") or 0)
             candidate = dict(candidate)
             candidate["context_match_score"] = round(relevance_score, 4)
             selected_candidates.append(candidate)
-            selected_ids.add(candidate_id)
             if len(selected_candidates) >= max_count:
                 return selected_candidates
 
-        remaining_candidates = [
-            candidate
-            for _, _, candidate in scored_candidates
-            if int(candidate.get("id") or 0) not in selected_ids
-        ]
-        if remaining_candidates:
-            selected_candidates.extend(
-                self._weighted_sample_candidates(
-                    remaining_candidates,
-                    max_count - len(selected_candidates),
-                )
-            )
         return selected_candidates
 
     def _rank_candidates_by_scene_graph(
@@ -301,7 +248,8 @@ class BehaviorPatternSelector:
         session_id: str,
         *,
         context_text: str = "",
-        scenario_profile: Optional[BehaviorScenarioProfile] = None,
+        scenario_profile: BehaviorScenarioProfile | None = None,
+        max_count: int = MAX_SELECTOR_CANDIDATES,
     ) -> list[dict[str, Any]]:
         related_session_ids, has_global_share = self._resolve_behavior_group_scope(session_id)
         behavior_pattern_maintenance.maybe_maintain_session(
@@ -337,7 +285,7 @@ class BehaviorPatternSelector:
                 candidates,
                 scene_graph_scores=scene_graph_scores,
                 context_text=retrieval_text,
-                max_count=MAX_SELECTOR_CANDIDATES,
+                max_count=max_count,
             )
             if scene_graph_ranked_candidates:
                 return scene_graph_ranked_candidates
@@ -345,209 +293,117 @@ class BehaviorPatternSelector:
         return self._rank_candidates_by_context(
             candidates,
             context_text=retrieval_text,
-            max_count=MAX_SELECTOR_CANDIDATES,
+            max_count=max_count,
         )
 
     @staticmethod
-    def _format_candidate_preview(candidates: list[dict[str, Any]]) -> str:
-        preview_items: list[str] = []
-        for candidate in candidates[:5]:
-            preview_items.append(
-                "id={id}, score={score}, graph={graph}, trigger={trigger!r}, action={action!r}".format(
-                    id=candidate.get("id"),
-                    score=candidate.get("score"),
-                    graph=candidate.get("scene_graph_score"),
-                    trigger=str(candidate.get("trigger") or "").strip(),
-                    action=str(candidate.get("action") or "").strip(),
-                )
+    def _build_group_reference_text(
+        *,
+        behaviors: list[dict[str, Any]],
+        scenario_profile: BehaviorScenarioProfile,
+    ) -> str:
+        reference_items: list[str] = []
+        for index, behavior in enumerate(behaviors, start=1):
+            behavior_id = behavior.get("id")
+            trigger = str(behavior.get("trigger") or "").strip()
+            action = str(behavior.get("action") or "").strip()
+            outcome = str(behavior.get("outcome") or "").strip()
+            scene_graph_score = behavior.get("scene_graph_score")
+            context_match_score = behavior.get("context_match_score")
+            score_parts = []
+            if scene_graph_score is not None:
+                score_parts.append(f"scene_graph_score={scene_graph_score}")
+            if context_match_score is not None:
+                score_parts.append(f"context_match_score={context_match_score}")
+            score_text = f"\n匹配分数：{', '.join(score_parts)}" if score_parts else ""
+            reference_items.append(
+                f"{index}. <behavior_pattern_reference id=\"{behavior_id}\">\n"
+                f"场景：{trigger}\n"
+                f"行为：{action}\n"
+                f"预期结果：{outcome}"
+                f"{score_text}\n"
+                "</behavior_pattern_reference>"
             )
-        return "; ".join(preview_items)
 
-    def _build_selector_prompt(
-        self,
-        candidates: list[dict[str, Any]],
-        *,
-        scenario_profile: Optional[BehaviorScenarioProfile] = None,
-    ) -> str:
-        behavior_candidates = json.dumps(candidates, ensure_ascii=False, indent=2)
-        return load_prompt(
-            "behavior_select",
-            bot_name=global_config.bot.nickname,
-            behavior_candidates=behavior_candidates,
-            scenario_profile=(
-                scenario_profile.to_prompt_text()
-                if scenario_profile is not None and scenario_profile.has_signal
-                else "无可用场景画像。"
-            ),
+        scenario_text = (
+            scenario_profile.to_prompt_text()
+            if scenario_profile.has_signal
+            else "无可用场景画像。"
         )
-
-    @staticmethod
-    def _is_json_object_response(raw_response: str) -> bool:
-        if not raw_response.strip():
-            return False
-        try:
-            parsed_result = json.loads(repair_json(raw_response))
-        except Exception:
-            return False
-        return isinstance(parsed_result, dict)
-
-    @staticmethod
-    def _build_json_retry_prompt(
-        *,
-        original_prompt: str,
-        raw_response: str,
-    ) -> str:
         return (
-            "你刚才没有按要求输出 JSON。请重新完成同一个行为表现选择任务。\n"
-            "必须只输出一个 JSON 对象，不要解释、不要 Markdown、不要项目符号。\n"
-            '格式只能是 {"selected_id": 123, "reason": "..."} 或 {"selected_id": null, "reason": "..."}。\n\n'
-            f"原始任务：\n{original_prompt}\n\n"
-            f"你刚才的非 JSON 输出：\n{raw_response.strip()}"
+            "<behavior_pattern_reference_group>\n"
+            "以下是基于本轮 planner 已裁切上下文召回的行为表现参考，不是强制任务；"
+            "只有在当前情境自然匹配时才采纳。\n"
+            f"当前场景画像：\n{scenario_text}\n\n"
+            "候选行为表现：\n"
+            f"{chr(10).join(reference_items)}\n\n"
+            "如果你采纳、尝试、放弃或发现无法继续其中任一行为表现，请调用 behavior_feedback，"
+            "并填写对应 behavior_id、status、score、reason、outcome。\n"
+            "</behavior_pattern_reference_group>"
         )
 
-    @staticmethod
-    def _parse_selection_response(
-        raw_response: str,
-        candidates: list[dict[str, Any]],
-    ) -> tuple[Optional[int], str]:
-        if not raw_response.strip():
-            return None, ""
-
-        try:
-            parsed_result = json.loads(repair_json(raw_response))
-        except Exception:
-            logger.warning(f"行为表现选择结果解析失败: {raw_response!r}")
-            return None, ""
-
-        if not isinstance(parsed_result, dict):
-            return None, ""
-
-        reason = str(parsed_result.get("reason") or parsed_result.get("selection_reason") or "").strip()
-        raw_selected_id = parsed_result.get("selected_id", parsed_result.get("behavior_id"))
-        if raw_selected_id is None or str(raw_selected_id).strip().lower() in {"", "0", "null", "none"}:
-            return None, reason
-
-        try:
-            selected_id = int(raw_selected_id)
-        except (TypeError, ValueError):
-            return None, reason
-
-        candidate_ids = {
-            int(candidate["id"])
-            for candidate in candidates
-            if isinstance(candidate.get("id"), int)
-        }
-        if selected_id not in candidate_ids:
-            logger.debug(f"行为表现选择结果不在候选中: selected_id={selected_id}, candidate_ids={candidate_ids}")
-            return None, reason
-        return selected_id, reason
-
-    @staticmethod
-    def _build_reference_text(
-        *,
-        behavior: dict[str, Any],
-        selection_reason: str,
-    ) -> str:
-        behavior_id = behavior.get("id")
-        trigger = str(behavior.get("trigger") or "").strip()
-        action = str(behavior.get("action") or "").strip()
-        outcome = str(behavior.get("outcome") or "").strip()
-        reason = selection_reason.strip() or "选择器认为它可能贴合当前情境。"
-
-        return (
-            f'<behavior_pattern_reference id="{behavior_id}">\n'
-            "这是一条可选的行为表现参考，不是强制任务；只有在当前情境自然匹配时才采纳。\n"
-            f"场景：{trigger}\n"
-            f"行为：{action}\n"
-            f"预期结果：{outcome}\n"
-            f"选择理由：{reason}\n"
-            "如果你采纳、尝试、放弃或发现无法继续，请调用 behavior_feedback；"
-            f"behavior_id={behavior_id}，并说明 status、score、reason、outcome。\n"
-            "</behavior_pattern_reference>"
-        )
-
-    async def select_for_planner(
+    async def retrieve_for_planner(
         self,
         *,
         session_id: str,
-        sub_agent_runner: Optional[SubAgentRunner],
-        scenario_agent_runner: Optional[SubAgentRunner] = None,
+        scenario_agent_runner: ScenarioAgentRunner | None = None,
         context_text: str = "",
-    ) -> BehaviorPatternSelectionResult:
+        include_context_in_prompt: bool = True,
+        max_count: int = 3,
+    ) -> BehaviorPatternRetrievalResult:
+        """基于裁切后的 planner 上下文召回行为表现，不再使用 LLM 做最终选择。"""
+
         if not session_id:
-            return BehaviorPatternSelectionResult()
+            return BehaviorPatternRetrievalResult()
         if not self._can_use_behaviors(session_id):
-            logger.debug(f"行为表现选择已跳过：当前会话未启用表达使用，session_id={session_id}")
-            return BehaviorPatternSelectionResult()
-        if sub_agent_runner is None:
-            logger.debug("行为表现选择已跳过：缺少子代理执行器")
-            return BehaviorPatternSelectionResult()
+            logger.debug(f"行为表现召回已跳过：当前会话未启用表达使用，session_id={session_id}")
+            return BehaviorPatternRetrievalResult()
 
         scenario_profile = await behavior_scenario_analyzer.analyze(
             context_text=context_text,
             sub_agent_runner=scenario_agent_runner,
+            include_context_in_prompt=include_context_in_prompt,
         )
         candidates = self._load_behavior_candidates(
             session_id,
             context_text=context_text,
             scenario_profile=scenario_profile,
+            max_count=max(1, min(3, int(max_count))),
         )
         if not candidates:
-            logger.debug(f"行为表现选择已跳过：本地候选为空，session_id={session_id}")
-            return BehaviorPatternSelectionResult()
+            logger.debug(f"行为表现召回未命中候选：session_id={session_id}")
+            return BehaviorPatternRetrievalResult(scenario_profile=scenario_profile)
 
-        selector_prompt = self._build_selector_prompt(
-            candidates,
+        selected_behaviors: list[dict[str, Any]] = []
+        for candidate in candidates[: max(1, min(3, int(max_count)))]:
+            candidate_id = int(candidate.get("id") or 0)
+            marked_pattern = mark_behavior_pattern_selected(candidate_id)
+            selected_behavior = (
+                behavior_pattern_to_dict(marked_pattern)
+                if marked_pattern is not None
+                else candidate
+            )
+            if selected_behavior:
+                for score_key in ("scene_graph_score", "context_match_score"):
+                    if score_key in candidate:
+                        selected_behavior[score_key] = candidate[score_key]
+                selected_behaviors.append(selected_behavior)
+
+        if not selected_behaviors:
+            return BehaviorPatternRetrievalResult(scenario_profile=scenario_profile)
+
+        reference_text = self._build_group_reference_text(
+            behaviors=selected_behaviors,
             scenario_profile=scenario_profile,
         )
-        try:
-            raw_response = await sub_agent_runner(selector_prompt)
-        except Exception as exc:
-            logger.debug(f"行为表现选择子代理执行失败，已跳过: {exc}")
-            return BehaviorPatternSelectionResult()
-
-        if raw_response.strip() and not self._is_json_object_response(raw_response):
-            retry_prompt = self._build_json_retry_prompt(
-                original_prompt=selector_prompt,
-                raw_response=raw_response,
-            )
-            try:
-                raw_response = await sub_agent_runner(retry_prompt)
-            except Exception as exc:
-                logger.debug(f"行为表现选择 JSON 重试失败，已跳过: {exc}")
-                return BehaviorPatternSelectionResult()
-
-        selected_id, selection_reason = self._parse_selection_response(raw_response, candidates)
-        if selected_id is None:
-            logger.debug(
-                f"行为表现选择器未选择候选：session_id={session_id} "
-                f"reason={selection_reason!r} 候选预览={self._format_candidate_preview(candidates)}"
-            )
-            return BehaviorPatternSelectionResult(selection_reason=selection_reason)
-
-        selected_pattern = mark_behavior_pattern_selected(selected_id)
-        selected_behavior = (
-            behavior_pattern_to_dict(selected_pattern)
-            if selected_pattern is not None
-            else next((candidate for candidate in candidates if candidate.get("id") == selected_id), None)
-        )
-        if selected_behavior is None:
-            return BehaviorPatternSelectionResult(selection_reason=selection_reason)
-
-        reference_text = self._build_reference_text(
-            behavior=selected_behavior,
-            selection_reason=selection_reason,
-        )
         logger.debug(
-            f"行为表现参考已选择：session_id={session_id} selected_id={selected_id} "
-            f"reason={selection_reason!r}"
+            f"行为表现参考已召回：session_id={session_id} "
+            f"ids={[behavior.get('id') for behavior in selected_behaviors]}"
         )
-        return BehaviorPatternSelectionResult(
+        return BehaviorPatternRetrievalResult(
             reference_text=reference_text,
-            selected_behavior_id=selected_id,
-            selected_behavior=selected_behavior,
-            selection_reason=selection_reason,
+            behaviors=selected_behaviors,
+            scenario_profile=scenario_profile,
         )
-
 
 behavior_pattern_selector = BehaviorPatternSelector()
