@@ -415,19 +415,29 @@ class ConfigManager:
         """
 
         normalized_scopes = self._normalize_changed_scopes(changed_scopes)
+        if not normalized_scopes:
+            logger.debug("配置热重载未命中有效范围，已跳过")
+            return True
+
         async with self._reload_lock:
             try:
-                global_config_new, global_updated = load_config_from_file(
-                    Config,
-                    self.bot_config_path,
-                    CONFIG_VERSION,
-                )
-                model_config_new, model_updated = load_config_from_file(
-                    ModelConfig,
-                    self.model_config_path,
-                    MODEL_CONFIG_VERSION,
-                    True,
-                )
+                global_config_new = self.global_config
+                model_config_new = self.model_config
+                global_updated = False
+                model_updated = False
+                if "bot" in normalized_scopes or global_config_new is None:
+                    global_config_new, global_updated = load_config_from_file(
+                        Config,
+                        self.bot_config_path,
+                        CONFIG_VERSION,
+                    )
+                if "model" in normalized_scopes or model_config_new is None:
+                    model_config_new, model_updated = load_config_from_file(
+                        ModelConfig,
+                        self.model_config_path,
+                        MODEL_CONFIG_VERSION,
+                        True,
+                    )
             except Exception as exc:
                 logger.error(t("config.reload_failed", error=exc))
                 return False
