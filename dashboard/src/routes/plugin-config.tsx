@@ -35,9 +35,7 @@ import {
 import {
   Settings,
   Package,
-  AlertCircle,
   ArrowUp,
-  CheckCircle2,
   RefreshCw,
   ChevronRight,
   ChevronDown,
@@ -1133,6 +1131,9 @@ function PluginConfigPageContent() {
   const enabledCount = installedCount - disabledCount
   const loadSuccessCount = plugins.filter(isPluginLoadSuccess).length
   const loadFailedCount = plugins.filter(isPluginLoadFailed).length
+  const loadTotalCount = loadSuccessCount + loadFailedCount
+  const loadSuccessPercent = loadTotalCount > 0 ? (loadSuccessCount / loadTotalCount) * 100 : 0
+  const loadFailedPercent = loadTotalCount > 0 ? (loadFailedCount / loadTotalCount) * 100 : 0
   const getPluginStatusMeta = (plugin: InstalledPlugin) => {
     if (isPluginDisabled(plugin)) {
       return { dotClassName: 'bg-muted-foreground/45', label: '已禁用' }
@@ -1320,9 +1321,10 @@ function PluginConfigPageContent() {
             variant="outline"
             size="sm"
             onClick={loadPlugins}
+            aria-label="刷新"
+            title="刷新"
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            刷新
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
         </div>
 
@@ -1337,15 +1339,17 @@ function PluginConfigPageContent() {
               <span>已启用 <strong className="text-emerald-600">{enabledCount}</strong> 个</span>
               <span>已禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个</span>
             </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-3 text-sm">
-              <span className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                加载成功 <strong className="text-emerald-600">{loadSuccessCount}</strong> 个
-              </span>
-              <span className="flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-600" />
-                加载失败 <strong className="text-red-600">{loadFailedCount}</strong> 个
-              </span>
+            <div
+              className="flex items-center gap-3 border-t pt-3 text-sm"
+              aria-label={`加载成功 ${loadSuccessCount} 个，加载失败 ${loadFailedCount} 个`}
+            >
+              <span className="sr-only">加载成功 {loadSuccessCount} 个，加载失败 {loadFailedCount} 个</span>
+              <strong className="w-8 text-right text-emerald-600">{loadSuccessCount}</strong>
+              <div className="flex h-3 min-w-28 flex-1 overflow-hidden bg-muted" aria-hidden="true">
+                <div className="bg-emerald-500" style={{ width: `${loadSuccessPercent}%` }} />
+                <div className="bg-red-500" style={{ width: `${loadFailedPercent}%` }} />
+              </div>
+              <strong className="w-8 text-red-600">{loadFailedCount}</strong>
             </div>
           </CardContent>
         </Card>

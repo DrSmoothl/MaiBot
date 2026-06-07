@@ -199,7 +199,11 @@ def _detect_v19_base_schema(snapshot: DatabaseSchemaSnapshot) -> bool:
         return False
     if not snapshot.has_table("behavior_action_nodes"):
         return False
+    if snapshot.has_column("behavior_action_nodes", "normalized_action"):
+        return False
     if not snapshot.has_table("behavior_outcome_nodes"):
+        return False
+    if snapshot.has_column("behavior_outcome_nodes", "normalized_outcome"):
         return False
     if not snapshot.has_table("behavior_scene_action_edges"):
         return False

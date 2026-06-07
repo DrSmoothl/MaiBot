@@ -686,7 +686,17 @@ class ModuleColoredConsoleRenderer:
         # 处理其他字段
         extras = []
         for key, value in event_dict.items():
-            if key not in ("timestamp", "level", "logger_name", "logger", "event", "module", "lineno", "pathname"):
+            if key not in (
+                "timestamp",
+                "level",
+                "logger_name",
+                "logger",
+                "event",
+                "module",
+                "lineno",
+                "pathname",
+                "exception",
+            ):
                 # 确保值也转换为字符串
                 if isinstance(value, (dict, list)):
                     try:
@@ -706,7 +716,12 @@ class ModuleColoredConsoleRenderer:
         if extras:
             parts.append(" ".join(extras))
 
-        return " ".join(parts)
+        rendered_message = " ".join(parts)
+        exception_text = event_dict.get("exception")
+        if exception_text:
+            return f"{rendered_message}\n{exception_text}"
+
+        return rendered_message
 
 
 # 配置标准logging以支持文件输出和压缩
@@ -736,6 +751,7 @@ def configure_structlog():
             convert_pathname_to_module,
             structlog.processors.StackInfoRenderer(),
             structlog.dev.set_exc_info,
+            structlog.processors.format_exc_info,
             structlog.processors.TimeStamper(fmt=get_timestamp_format(), utc=False),
             # 根据输出类型选择不同的渲染器
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,

@@ -36,7 +36,6 @@ class BotConfig(ConfigBase):
     """机器人配置类"""
 
     __ui_label__ = "基础"
-    __ui_icon__ = "bot"
 
     platform: str = Field(
         default="",
@@ -121,7 +120,6 @@ class PersonalityConfig(ConfigBase):
 
     __ui_parent__ = "bot"
     __ui_label__ = "人格"
-    __ui_icon__ = "user-circle"
 
     personality: str = Field(
         default="你是一个大二女大学生，现在正在上网和群友聊天。",
@@ -264,7 +262,6 @@ class VisualConfig(ConfigBase):
     """视觉配置类"""
 
     __ui_label__ = "视觉"
-    __ui_icon__ = "image"
 
     planner_mode: Literal["text", "multimodal", "auto"] = Field(
         default="auto",
@@ -443,7 +440,6 @@ class ChatConfig(ConfigBase):
     """聊天配置类"""
 
     __ui_label__ = "聊天"
-    __ui_icon__ = "message-square"
 
     talk_value: float = Field(
         default=1,
@@ -799,7 +795,21 @@ class ExperimentalConfig(ConfigBase):
     """实验性功能配置类"""
 
     __ui_label__ = "实验性功能"
-    __ui_icon__ = "flask-conical"
+    __ui_advanced__ = True
+
+    enable_behavior_learning: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用行为学习",
+                "en_US": "Enable behavior learning",
+                "ja_JP": "行動学習を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "brain-circuit",
+        },
+    )
+    """是否启用行为学习；关闭后不再从裁切历史中抽取和写入行为经验。"""
 
     enable_replyer_format_output: bool = Field(
         default=False,
@@ -888,7 +898,7 @@ class MessageReceiveConfig(ConfigBase):
     """消息接收配置类"""
 
     __ui_label__ = "消息接收"
-    __ui_icon__ = "message-square-text"
+    __ui_advanced__ = True
 
     image_parse_threshold: int = Field(
         default=5,
@@ -2682,8 +2692,7 @@ class AMemorixWebConfig(ConfigBase):
 class AMemorixConfig(ConfigBase):
     """长期记忆配置"""
 
-    __ui_label__ = "长期记忆"
-    __ui_icon__ = "brain"
+    __ui_label__ = "记忆"
 
     plugin: AMemorixPluginConfig = Field(
         default_factory=AMemorixPluginConfig,
@@ -2944,7 +2953,6 @@ class ExpressionConfig(ConfigBase):
     """表达配置类"""
 
     __ui_label__ = "学习"
-    __ui_icon__ = "pen-tool"
 
     expression_checked_only: bool = Field(
         default=True,
@@ -3046,7 +3054,6 @@ class JargonConfig(ConfigBase):
 
     __ui_parent__ = "expression"
     __ui_label__ = "黑话"
-    __ui_icon__ = "book-open"
 
     learning_list: list[LearningItem] = Field(
         default_factory=lambda: [
@@ -3089,7 +3096,7 @@ class VoiceConfig(ConfigBase):
     """语音识别配置类"""
 
     __ui_label__ = "语音"
-    __ui_icon__ = "mic"
+    __ui_advanced__ = True
 
     enable_asr: bool = Field(
         default=False,
@@ -3105,7 +3112,7 @@ class EmojiConfig(ConfigBase):
     """表情包配置类"""
 
     __ui_label__ = "表情"
-    __ui_icon__ = "smile"
+    __ui_advanced__ = True
 
     emoji_send_num: int = Field(
         default=25,
@@ -3294,7 +3301,7 @@ class ResponsePostProcessConfig(ConfigBase):
     """回复后处理配置类"""
 
     __ui_label__ = "后处理"
-    __ui_icon__ = "settings"
+    __ui_advanced__ = True
 
     enable_response_post_process: bool = Field(
         default=True,
@@ -3427,7 +3434,7 @@ class LogConfig(ConfigBase):
     """日志配置类"""
 
     __ui_label__ = "调试"
-    __ui_icon__ = "file-text"
+    __ui_advanced__ = True
 
     date_style: str = Field(
         default="m-d H:i:s",
@@ -3590,7 +3597,6 @@ class DebugConfig(ConfigBase):
 
     __ui_parent__ = "log"
     __ui_label__ = "其他"
-    __ui_icon__ = "more-horizontal"
 
     show_maisaka_thinking: bool = Field(
         default=True,
@@ -3811,7 +3817,6 @@ class LPMMKnowledgeConfig(ConfigBase):
     """LPMM知识库配置类"""
 
     __ui_label__ = "知识库"
-    __ui_icon__ = "book-open"
 
     enable: bool = Field(
         default=True,
@@ -3981,7 +3986,7 @@ class WebUIConfig(ConfigBase):
     """WebUI配置类"""
 
     __ui_label__ = "WebUI"
-    __ui_icon__ = "layout"
+    __ui_advanced__ = True
 
     enabled: bool = Field(
         default=True,
@@ -4511,7 +4516,7 @@ class PluginConfig(ConfigBase):
     """插件管理配置类"""
 
     __ui_label__ = "插件"
-    __ui_icon__ = "shield"
+    __ui_advanced__ = True
 
     permission: list[str] = Field(
         default_factory=list,
@@ -4656,7 +4661,6 @@ class PluginRuntimeConfig(ConfigBase):
 
     __ui_parent__ = "plugin"
     __ui_label__ = "运行时"
-    __ui_icon__ = "puzzle"
 
     enabled: bool = Field(
         default=True,

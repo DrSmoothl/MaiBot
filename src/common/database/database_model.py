@@ -404,13 +404,12 @@ class BehaviorActionNode(SQLModel, table=True):
 
     __tablename__ = "behavior_action_nodes"  # type: ignore
     __table_args__ = (
-        UniqueConstraint("session_id", "normalized_action", name="uq_behavior_action_node_scope_action"),
+        UniqueConstraint("session_id", "action", name="uq_behavior_action_node_scope_action"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
     action: str = Field(sa_column=Column(Text, nullable=False))
-    normalized_action: str = Field(sa_column=Column(Text, nullable=False))
     source_count: int = Field(default=0)
     score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
     update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
@@ -421,13 +420,12 @@ class BehaviorOutcomeNode(SQLModel, table=True):
 
     __tablename__ = "behavior_outcome_nodes"  # type: ignore
     __table_args__ = (
-        UniqueConstraint("session_id", "normalized_outcome", name="uq_behavior_outcome_node_scope_outcome"),
+        UniqueConstraint("session_id", "outcome", name="uq_behavior_outcome_node_scope_outcome"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
     outcome: str = Field(sa_column=Column(Text, nullable=False))
-    normalized_outcome: str = Field(sa_column=Column(Text, nullable=False))
     source_count: int = Field(default=0)
     score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
     update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))

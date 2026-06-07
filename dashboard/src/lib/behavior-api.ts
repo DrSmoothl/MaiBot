@@ -1,0 +1,151 @@
+import { fetchWithAuth } from './fetch-with-auth'
+
+const API_BASE = '/api/webui/behavior'
+
+export interface BehaviorChatInfo {
+  session_id: string
+  display_name: string
+  platform: string
+  chat_type: string
+  path_count: number
+  scene_count: number
+  last_active_time: string | null
+}
+
+export interface BehaviorPathItem {
+  id: number
+  session_id: string | null
+  chat_name: string
+  trigger: string
+  action: string
+  outcome: string
+  count: number
+  activation_count: number
+  success_count: number
+  failure_count: number
+  score: number
+  enabled: boolean
+  last_active_time: string | null
+  last_feedback_time: string | null
+  update_time: string | null
+}
+
+export interface BehaviorPathListResponse {
+  success: boolean
+  total: number
+  page: number
+  page_size: number
+  data: BehaviorPathItem[]
+}
+
+export interface BehaviorGraphNode {
+  id: number
+  kind: string
+  label: string
+  score: number
+  source_count: number
+}
+
+export interface BehaviorGraphEdge {
+  id: string
+  source: string
+  target: string
+  kind: string
+  weight: number
+  count: number
+}
+
+export interface BehaviorPathDetail {
+  path: BehaviorPathItem
+  evidence: unknown[]
+  feedback: unknown[]
+  nodes: BehaviorGraphNode[]
+  edges: BehaviorGraphEdge[]
+}
+
+export interface BehaviorDescriptor {
+  node_kind: string
+  name: string
+  weight: number
+}
+
+export interface BehaviorMatchedNode {
+  id: number | null
+  node_kind: string
+  name: string
+  source_count: number
+  node_score: number
+  match_score: number
+}
+
+export interface BehaviorRetrievalCandidate {
+  behavior_id: number
+  score: number
+  path: BehaviorPathItem | null
+}
+
+export interface BehaviorRetrievalDebugPayload {
+  descriptors: BehaviorDescriptor[]
+  matched_nodes: BehaviorMatchedNode[]
+  expanded_nodes: BehaviorMatchedNode[]
+  candidate_scores: Array<{ behavior_id: number; score: number }>
+  candidates: BehaviorRetrievalCandidate[]
+  error?: string
+}
+
+export interface BehaviorRetrievalDebugRequest {
+  session_id?: string
+  include_global: boolean
+  summary: string
+  user_intent: string
+  conversation_phase: string
+  domain_tags: string[]
+  behavior_needs: string[]
+  risk_flags: string[]
+  avoid_behaviors: string[]
+  retrieval_query: string
+  max_count: number
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(text || `请求失败：${response.status}`)
+  }
+  return response.json() as Promise<T>
+}
+
+export async function listBehaviorChats(): Promise<{ success: boolean; data: BehaviorChatInfo[] }> {
+  const response = await fetchWithAuth(`${API_BASE}/chats`)
+  return readJson(response)
+}
+
+export async function listBehaviorPaths(params: {
+  session_id?: string
+  search?: string
+  enabled?: string
+  page?: number
+  page_size?: number
+}): Promise<BehaviorPathListResponse> {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') query.set(key, String(value))
+  })
+  const response = await fetchWithAuth(`${API_BASE}/paths?${query.toString()}`)
+  return readJson(response)
+}
+
+export async function getBehaviorPathDetail(pathId: number): Promise<{ success: boolean; data: BehaviorPathDetail }> {
+  const response = await fetchWithAuth(`${API_BASE}/paths/${pathId}`)
+  return readJson(response)
+}
+
+export async function debugBehaviorRetrieval(
+  payload: BehaviorRetrievalDebugRequest
+): Promise<{ success: boolean; data: BehaviorRetrievalDebugPayload }> {
+  const response = await fetchWithAuth(`${API_BASE}/retrieval-debug`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return readJson(response)
+}

@@ -38,6 +38,7 @@ export interface ChatConfig {
 }
 
 export interface ExperimentalConfig {
+  enable_behavior_learning: boolean
   enable_replyer_format_output: boolean
   focus_mode: boolean
   focus_cool_time: number

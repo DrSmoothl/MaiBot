@@ -145,13 +145,12 @@ def _create_behavior_action_nodes_table(connection: Connection) -> None:
             id INTEGER NOT NULL,
             session_id VARCHAR(255),
             action TEXT NOT NULL,
-            normalized_action TEXT NOT NULL,
             source_count INTEGER NOT NULL DEFAULT 0,
             score FLOAT NOT NULL DEFAULT 0,
             update_time DATETIME NOT NULL,
             PRIMARY KEY (id),
             CONSTRAINT uq_behavior_action_node_scope_action
-                UNIQUE (session_id, normalized_action)
+                UNIQUE (session_id, action)
         )
         """
     )
@@ -170,13 +169,12 @@ def _create_behavior_outcome_nodes_table(connection: Connection) -> None:
             id INTEGER NOT NULL,
             session_id VARCHAR(255),
             outcome TEXT NOT NULL,
-            normalized_outcome TEXT NOT NULL,
             source_count INTEGER NOT NULL DEFAULT 0,
             score FLOAT NOT NULL DEFAULT 0,
             update_time DATETIME NOT NULL,
             PRIMARY KEY (id),
             CONSTRAINT uq_behavior_outcome_node_scope_outcome
-                UNIQUE (session_id, normalized_outcome)
+                UNIQUE (session_id, outcome)
         )
         """
     )

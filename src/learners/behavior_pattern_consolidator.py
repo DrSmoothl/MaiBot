@@ -248,11 +248,14 @@ class BehaviorPatternConsolidator:
 
     @staticmethod
     def _build_pattern_payload(patterns: Sequence[BehaviorExperiencePath]) -> list[dict[str, Any]]:
-        return [
-            behavior_pattern_to_dict(pattern)
-            for pattern in patterns
-            if pattern.id is not None and pattern.enabled and pattern.trigger and pattern.action and pattern.outcome
-        ]
+        payloads: list[dict[str, Any]] = []
+        for pattern in patterns:
+            if pattern.id is None or not pattern.enabled:
+                continue
+            payload = behavior_pattern_to_dict(pattern)
+            if payload.get("trigger") and payload.get("action") and payload.get("outcome"):
+                payloads.append(payload)
+        return payloads
 
     def _build_consolidation_messages(self, patterns: Sequence[BehaviorExperiencePath]) -> list[Message]:
         behavior_patterns = json.dumps(

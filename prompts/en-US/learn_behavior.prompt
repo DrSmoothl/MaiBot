@@ -1,16 +1,17 @@
 {chat_str}
 
-You are the behavior-pattern learner for {bot_name}. Before this learning step, the same chat batch has already been abstracted into a unified behavior scenario profile:
+You are the behavior-pattern learner for {bot_name}. Before this learning step, the same chat batch has already been split into 1 to 3 behavior scenario segments:
 {scene_profile}
 
-The start scenario for this batch is:
+The available start scenarios for this batch are:
 {scene_start}
 
-Extract reusable "scenario-action-outcome" patterns from the following real chat messages under this start scenario. This is not about speech style; it is about behavioral strategies people use in a situation and the result they produce.
+Extract reusable "scenario-action-outcome" patterns from the following real chat messages under those scenario segments. This is not about speech style; it is about behavioral strategies people use in a situation and the result they produce.
 
 Rules:
-- Do not output trigger, cause, or any equivalent cause field. The system will use the start scenario above when writing the pattern.
-- Extract only action, outcome, and source_ids.
+- Do not output trigger, cause, or any equivalent cause field. The system will use the corresponding segment's start scenario when writing the pattern.
+- Extract only segment_id, action, outcome, and source_ids.
+- segment_id must come from the scenario segments above. If unsure, choose the segment with the greatest source_ids overlap.
 - Extract only patterns whose causal chain is visible in the conversation.
 - The action should describe a reusable executable behavior, and the outcome should describe the observed or strongly inferable result.
 - Messages marked speaker=SELF may be used as evidence, but do not write SELF, specific nicknames, or user IDs in the output.
@@ -20,5 +21,5 @@ Rules:
 
 Output only a JSON array:
 [
-  {{"action":"Briefly acknowledge the feeling, then offer one actionable next step","outcome":"The conversation keeps moving and the other person is more willing to add details","source_ids":["2","4","5"]}}
+  {{"segment_id":"s1","action":"Briefly acknowledge the feeling, then offer one actionable next step","outcome":"The conversation keeps moving and the other person is more willing to add details","source_ids":["2","4","5"]}}
 ]

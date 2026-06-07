@@ -301,6 +301,103 @@ def retrieve_behavior_scores_from_scene_graph(
     return dict(sorted(behavior_scores.items(), key=lambda item: item[1], reverse=True)[:max_count])
 
 
+def debug_retrieve_behavior_scores_from_scene_graph(
+    *,
+    session_ids: set[str],
+    include_global: bool,
+    profile: BehaviorScenarioProfile,
+    max_count: int = MAX_SCENE_GRAPH_BEHAVIOR_IDS,
+) -> dict[str, Any]:
+    """返回行为场景图检索的中间过程，供 WebUI 浏览和调试。"""
+
+    descriptors = build_scene_descriptors(profile, scene_start=profile.to_learning_start_text())
+    if not descriptors:
+        return {
+            "descriptors": [],
+            "matched_nodes": [],
+            "expanded_nodes": [],
+            "candidate_scores": [],
+        }
+
+    try:
+        with get_db_session(auto_commit=False) as session:
+            nodes = _load_scoped_scene_nodes(session, session_ids=session_ids, include_global=include_global)
+            node_map = {node.id: node for node in nodes if node.id is not None}
+            active_node_scores = _score_scene_nodes(nodes, descriptors)
+            expanded_node_scores = _expand_scene_scores(
+                session,
+                active_node_scores=active_node_scores,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
+            behavior_scores = _score_behavior_links(
+                session,
+                node_scores=expanded_node_scores,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
+            path_scores = _score_behavior_paths(
+                session,
+                node_scores=expanded_node_scores,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
+            for experience_path_id, score in path_scores.items():
+                behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+
+        candidate_scores = sorted(behavior_scores.items(), key=lambda item: item[1], reverse=True)[:max_count]
+        return {
+            "descriptors": [
+                {"node_kind": descriptor.node_kind, "name": descriptor.name, "weight": descriptor.weight}
+                for descriptor in descriptors
+            ],
+            "matched_nodes": [
+                _debug_scene_node_payload(node_map.get(node_id), score)
+                for node_id, score in active_node_scores.items()
+            ],
+            "expanded_nodes": [
+                _debug_scene_node_payload(node_map.get(node_id), score)
+                for node_id, score in sorted(expanded_node_scores.items(), key=lambda item: item[1], reverse=True)
+            ],
+            "candidate_scores": [
+                {"behavior_id": experience_path_id, "score": round(score, 4)}
+                for experience_path_id, score in candidate_scores
+            ],
+        }
+    except Exception as exc:
+        logger.error(f"行为场景图调试检索失败: session_ids={session_ids} error={exc}")
+        return {
+            "descriptors": [
+                {"node_kind": descriptor.node_kind, "name": descriptor.name, "weight": descriptor.weight}
+                for descriptor in descriptors
+            ],
+            "matched_nodes": [],
+            "expanded_nodes": [],
+            "candidate_scores": [],
+            "error": str(exc),
+        }
+
+
+def _debug_scene_node_payload(node: Optional[BehaviorSceneNode], score: float) -> dict[str, Any]:
+    if node is None:
+        return {
+            "id": None,
+            "node_kind": "",
+            "name": "",
+            "source_count": 0,
+            "node_score": 0.0,
+            "match_score": round(score, 4),
+        }
+    return {
+        "id": node.id,
+        "node_kind": node.node_kind,
+        "name": node.name,
+        "source_count": node.source_count,
+        "node_score": round(float(node.score or 0.0), 4),
+        "match_score": round(score, 4),
+    }
+
+
 def mark_behavior_scene_links_selected(experience_path_id: int) -> None:
     """行为被选中后，提升相关场景链接的活跃度。"""
 
@@ -535,24 +632,22 @@ def _upsert_action_node(
     session_id: str,
     action: str,
 ) -> BehaviorActionNode:
-    normalized_action = _normalize_name(action, max_length=240)
+    normalized_action = _normalize_display_text(action, max_length=240)
     statement = (
         select(BehaviorActionNode)
         .where(BehaviorActionNode.session_id == session_id)
-        .where(BehaviorActionNode.normalized_action == normalized_action)
+        .where(BehaviorActionNode.action == normalized_action)
     )
     node = session.exec(statement).first()
     now = datetime.now()
     if node is None:
         node = BehaviorActionNode(
             session_id=session_id,
-            action=action,
-            normalized_action=normalized_action,
+            action=normalized_action,
             source_count=1,
             update_time=now,
         )
     else:
-        node.action = action
         node.source_count += 1
         node.update_time = now
     session.add(node)
@@ -566,24 +661,22 @@ def _upsert_outcome_node(
     session_id: str,
     outcome: str,
 ) -> BehaviorOutcomeNode:
-    normalized_outcome = _normalize_name(outcome, max_length=220)
+    normalized_outcome = _normalize_display_text(outcome, max_length=220)
     statement = (
         select(BehaviorOutcomeNode)
         .where(BehaviorOutcomeNode.session_id == session_id)
-        .where(BehaviorOutcomeNode.normalized_outcome == normalized_outcome)
+        .where(BehaviorOutcomeNode.outcome == normalized_outcome)
     )
     node = session.exec(statement).first()
     now = datetime.now()
     if node is None:
         node = BehaviorOutcomeNode(
             session_id=session_id,
-            outcome=outcome,
-            normalized_outcome=normalized_outcome,
+            outcome=normalized_outcome,
             source_count=1,
             update_time=now,
         )
     else:
-        node.outcome = outcome
         node.source_count += 1
         node.update_time = now
     session.add(node)
