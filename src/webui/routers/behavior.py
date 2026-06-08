@@ -64,6 +64,8 @@ class BehaviorPathItem(BaseModel):
     scene_cluster_tags: list[BehaviorClusterTag] = Field(default_factory=list)
     scene_cluster_source_count: int = 0
     scene_cluster_score: float = 0.0
+    actor_type: str = "other_user"
+    learning_type: str = "observed_behavior"
     action: str = ""
     outcome: str = ""
     count: int = 0
@@ -83,6 +85,27 @@ class BehaviorPathListResponse(BaseModel):
     page: int
     page_size: int
     data: list[BehaviorPathItem]
+
+
+class BehaviorClusterItem(BehaviorSceneClusterPayload):
+    session_id: Optional[str] = None
+    chat_name: str = ""
+    path_count: int = 0
+    enabled_path_count: int = 0
+    activation_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    observed_path_count: int = 0
+    self_reflection_path_count: int = 0
+    last_active_time: Optional[str] = None
+
+
+class BehaviorClusterListResponse(BaseModel):
+    success: bool = True
+    total: int
+    page: int
+    page_size: int
+    data: list[BehaviorClusterItem]
 
 
 class BehaviorNodePayload(BaseModel):
@@ -116,7 +139,6 @@ class BehaviorScenarioDebugRequest(BaseModel):
     domain_tags: list[str] = Field(default_factory=list)
     behavior_needs: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
-    avoid_behaviors: list[str] = Field(default_factory=list)
     retrieval_query: str = Field(default="")
     max_count: int = Field(default=20, ge=1, le=80)
 
@@ -272,7 +294,8 @@ async def list_behavior_paths(
                 for item in path_items
                 if normalized_search
                 in (
-                    f"{item.scene_cluster_name}\n{item.trigger}\n{item.action}\n{item.outcome}\n{item.chat_name}\n"
+                    f"{item.scene_cluster_name}\n{item.trigger}\n{item.action}\n{item.outcome}\n"
+                    f"{item.actor_type}\n{item.learning_type}\n{item.chat_name}\n"
                     + "\n".join(tag.tag for tag in item.scene_cluster_tags)
                 ).lower()
             ]
@@ -280,6 +303,42 @@ async def list_behavior_paths(
         start = (page - 1) * page_size
         data = path_items[start : start + page_size]
     return BehaviorPathListResponse(total=total, page=page, page_size=page_size, data=data)
+
+
+@router.get("/clusters", response_model=BehaviorClusterListResponse)
+async def list_behavior_clusters(
+    session_id: Annotated[Optional[str], Query()] = None,
+    search: Annotated[str, Query()] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=500)] = 20,
+) -> BehaviorClusterListResponse:
+    """分页列出行为场景簇，便于浏览 tag 概率分布。"""
+
+    normalized_search = " ".join(str(search or "").split()).strip().lower()
+    with get_db_session(auto_commit=False) as session:
+        statement = select(BehaviorSceneCluster)
+        if session_id is not None and session_id != "all":
+            if session_id == "__global__":
+                statement = statement.where(BehaviorSceneCluster.session_id.is_(None))  # type: ignore[attr-defined]
+            else:
+                statement = statement.where(BehaviorSceneCluster.session_id == session_id)
+
+        clusters = list(session.exec(statement.order_by(BehaviorSceneCluster.update_time.desc())).all())  # type: ignore[attr-defined]
+        cluster_items = _build_cluster_items(session, clusters)
+        if normalized_search:
+            cluster_items = [
+                item
+                for item in cluster_items
+                if normalized_search
+                in (
+                    f"{item.name}\n{item.chat_name}\n"
+                    + "\n".join(tag.tag for tag in item.tags)
+                ).lower()
+            ]
+        total = len(cluster_items)
+        start = (page - 1) * page_size
+        data = cluster_items[start : start + page_size]
+    return BehaviorClusterListResponse(total=total, page=page, page_size=page_size, data=data)
 
 
 @router.get("/paths/{path_id}", response_model=BehaviorPathDetailResponse)
@@ -351,7 +410,6 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
         domain_tags=request.domain_tags,
         behavior_needs=request.behavior_needs,
         risk_flags=request.risk_flags,
-        avoid_behaviors=request.avoid_behaviors,
         retrieval_query=request.retrieval_query,
         confidence=1.0,
     )
@@ -420,6 +478,8 @@ def _build_path_items(session: Any, paths: list[BehaviorExperiencePath]) -> list
                 scene_cluster_tags=cluster_payload.tags,
                 scene_cluster_source_count=cluster_payload.source_count,
                 scene_cluster_score=cluster_payload.score,
+                actor_type=str(path.actor_type or "other_user"),
+                learning_type=str(path.learning_type or "observed_behavior"),
                 action=action_nodes[path.action_node_id].action if path.action_node_id in action_nodes else "",
                 outcome=outcome_nodes[path.outcome_node_id].outcome if path.outcome_node_id in outcome_nodes else "",
                 count=int(path.count or 0),
@@ -462,6 +522,44 @@ def _enrich_debug_clusters(session: Any, matched_clusters: Any) -> list[dict[str
             }
         )
     return enriched_clusters
+
+
+def _build_cluster_items(session: Any, clusters: list[BehaviorSceneCluster]) -> list[BehaviorClusterItem]:
+    cluster_ids = {cluster.id for cluster in clusters if cluster.id is not None}
+    session_ids = {cluster.session_id for cluster in clusters if cluster.session_id}
+    paths_by_cluster_id: dict[int, list[BehaviorExperiencePath]] = {cluster_id: [] for cluster_id in cluster_ids}
+    if cluster_ids:
+        paths = session.exec(
+            select(BehaviorExperiencePath).where(col(BehaviorExperiencePath.scene_cluster_id).in_(cluster_ids))
+        ).all()
+        for path in paths:
+            paths_by_cluster_id.setdefault(path.scene_cluster_id, []).append(path)
+    chat_sessions = {
+        chat.session_id: chat
+        for chat in session.exec(select(ChatSession).where(col(ChatSession.session_id).in_(session_ids))).all()
+    }
+
+    items: list[BehaviorClusterItem] = []
+    for cluster in clusters:
+        cluster_payload = _cluster_payload(cluster)
+        cluster_paths = paths_by_cluster_id.get(cluster.id or 0, [])
+        last_active_time = max((path.last_active_time for path in cluster_paths if path.last_active_time), default=None)
+        items.append(
+            BehaviorClusterItem(
+                **cluster_payload.model_dump(),
+                session_id=cluster.session_id,
+                chat_name=_chat_display_name(chat_sessions.get(cluster.session_id), cluster.session_id),
+                path_count=len(cluster_paths),
+                enabled_path_count=sum(1 for path in cluster_paths if path.enabled),
+                activation_count=sum(int(path.activation_count or 0) for path in cluster_paths),
+                success_count=sum(int(path.success_count or 0) for path in cluster_paths),
+                failure_count=sum(int(path.failure_count or 0) for path in cluster_paths),
+                observed_path_count=sum(1 for path in cluster_paths if path.learning_type == "observed_behavior"),
+                self_reflection_path_count=sum(1 for path in cluster_paths if path.learning_type == "self_reflection"),
+                last_active_time=_isoformat(last_active_time),
+            )
+        )
+    return items
 
 
 def _load_scene_clusters(session: Any, scene_cluster_ids: set[int]) -> dict[int, BehaviorSceneCluster]:

@@ -300,10 +300,14 @@ class BehaviorExperiencePath(SQLModel, table=True):
             "scene_cluster_id",
             "action_node_id",
             "outcome_node_id",
-            name="uq_behavior_experience_path_scope_cluster_action_outcome",
+            "actor_type",
+            "learning_type",
+            name="uq_behavior_experience_path_scope_cluster_action_outcome_actor",
         ),
         Index("ix_behavior_experience_paths_session_enabled", "session_id", "enabled"),
         Index("ix_behavior_experience_paths_cluster", "scene_cluster_id"),
+        Index("ix_behavior_experience_paths_learning_type", "learning_type"),
+        Index("ix_behavior_experience_paths_actor_type", "actor_type"),
         Index("ix_behavior_experience_paths_action", "action_node_id"),
         Index("ix_behavior_experience_paths_outcome", "outcome_node_id"),
     )
@@ -313,6 +317,8 @@ class BehaviorExperiencePath(SQLModel, table=True):
     scene_cluster_id: int = Field(index=True)
     action_node_id: int = Field(index=True)
     outcome_node_id: int = Field(index=True)
+    actor_type: str = Field(default="other_user", max_length=40)
+    learning_type: str = Field(default="observed_behavior", max_length=40)
     evidence_list: str = Field(default="[]", sa_column=Column(Text, nullable=False))
     feedback_list: str = Field(default="[]", sa_column=Column(Text, nullable=False))
     count: int = Field(default=0)

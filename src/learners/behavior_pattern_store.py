@@ -27,6 +27,14 @@ logger = get_logger("behavior_pattern_store")
 
 BEHAVIOR_REFERENCE_SOURCE = "behavior_pattern"
 BEHAVIOR_REFERENCE_DISPLAY_PREFIX = "[行为表现参考]"
+ACTOR_OTHER_USER = "other_user"
+ACTOR_MAIBOT_SELF = "maibot_self"
+ACTOR_GROUP_COLLECTIVE = "group_collective"
+ACTOR_UNKNOWN = "unknown"
+LEARNING_OBSERVED = "observed_behavior"
+LEARNING_SELF_REFLECTION = "self_reflection"
+ALLOWED_ACTOR_TYPES = {ACTOR_OTHER_USER, ACTOR_MAIBOT_SELF, ACTOR_GROUP_COLLECTIVE, ACTOR_UNKNOWN}
+ALLOWED_LEARNING_TYPES = {LEARNING_OBSERVED, LEARNING_SELF_REFLECTION}
 EVIDENCE_HISTORY_LIMIT = 20
 FEEDBACK_HISTORY_LIMIT = 30
 MIN_BEHAVIOR_SCORE = -6.0
@@ -74,18 +82,40 @@ def _normalize_source_ids(source_ids: Sequence[str]) -> list[str]:
     return normalized_ids
 
 
+def _coerce_actor_type(actor_type: str) -> str:
+    normalized_actor_type = str(actor_type or "").strip().lower()
+    if normalized_actor_type in ALLOWED_ACTOR_TYPES:
+        return normalized_actor_type
+    return ACTOR_UNKNOWN
+
+
+def _coerce_learning_type(learning_type: str, *, actor_type: str) -> str:
+    normalized_learning_type = str(learning_type or "").strip().lower()
+    if normalized_learning_type in ALLOWED_LEARNING_TYPES:
+        return normalized_learning_type
+    return LEARNING_SELF_REFLECTION if actor_type == ACTOR_MAIBOT_SELF else LEARNING_OBSERVED
+
+
+def _is_self_reflection_path(path: BehaviorExperiencePath) -> bool:
+    return path.actor_type == ACTOR_MAIBOT_SELF and path.learning_type == LEARNING_SELF_REFLECTION
+
+
 def _build_evidence_item(
     *,
     trigger: str,
     action: str,
     outcome: str,
     source_ids: Sequence[str],
+    actor_type: str,
+    learning_type: str,
 ) -> dict[str, Any]:
     return {
         "trigger": trigger,
         "action": action,
         "outcome": outcome,
         "source_ids": _normalize_source_ids(source_ids),
+        "actor_type": actor_type,
+        "learning_type": learning_type,
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -130,6 +160,8 @@ def _path_to_dict_from_session(
         "scene_cluster_id": path.scene_cluster_id,
         "action_node_id": path.action_node_id,
         "outcome_node_id": path.outcome_node_id,
+        "actor_type": path.actor_type,
+        "learning_type": path.learning_type,
         "count": path.count,
         "activation_count": path.activation_count,
         "success_count": path.success_count,
@@ -149,6 +181,8 @@ def behavior_experience_to_dict(path: BehaviorExperiencePath) -> dict[str, Any]:
             "trigger": "",
             "action": "",
             "outcome": "",
+            "actor_type": path.actor_type,
+            "learning_type": path.learning_type,
             "count": path.count,
             "activation_count": path.activation_count,
             "success_count": path.success_count,
@@ -212,11 +246,15 @@ def upsert_behavior_experience(
     session_id: str,
     scenario_profile: BehaviorScenarioProfile,
     scene_start: str,
+    actor_type: str = ACTOR_OTHER_USER,
+    learning_type: str = LEARNING_OBSERVED,
 ) -> Optional[BehaviorExperiencePath]:
     normalized_trigger = _normalize_text(trigger, max_length=180)
     normalized_action = _normalize_text(action, max_length=240)
     normalized_outcome = _normalize_text(outcome, max_length=240)
     normalized_source_ids = _normalize_source_ids(source_ids)
+    normalized_actor_type = _coerce_actor_type(actor_type)
+    normalized_learning_type = _coerce_learning_type(learning_type, actor_type=normalized_actor_type)
     if not normalized_trigger or not normalized_action or not normalized_outcome:
         logger.warning(
             "跳过写入行为经验路径：归一化后字段为空 "
@@ -230,6 +268,8 @@ def upsert_behavior_experience(
         action=normalized_action,
         outcome=normalized_outcome,
         source_ids=normalized_source_ids,
+        actor_type=normalized_actor_type,
+        learning_type=normalized_learning_type,
     )
 
     try:
@@ -255,6 +295,8 @@ def upsert_behavior_experience(
                 .where(BehaviorExperiencePath.scene_cluster_id == graph_refs.scene_cluster_id)
                 .where(BehaviorExperiencePath.action_node_id == graph_refs.action_node_id)
                 .where(BehaviorExperiencePath.outcome_node_id == graph_refs.outcome_node_id)
+                .where(BehaviorExperiencePath.actor_type == normalized_actor_type)
+                .where(BehaviorExperiencePath.learning_type == normalized_learning_type)
             )
             path = session.exec(statement).first()
             if path is None:
@@ -263,6 +305,8 @@ def upsert_behavior_experience(
                     scene_cluster_id=graph_refs.scene_cluster_id,
                     action_node_id=graph_refs.action_node_id,
                     outcome_node_id=graph_refs.outcome_node_id,
+                    actor_type=normalized_actor_type,
+                    learning_type=normalized_learning_type,
                     evidence_list=_dump_json_list([evidence_item]),
                     feedback_list=_dump_json_list([]),
                     count=1,
@@ -390,6 +434,12 @@ def apply_behavior_feedback(
         with get_db_session() as session:
             path = session.get(BehaviorExperiencePath, pattern_id)
             if path is None:
+                return None
+            if not _is_self_reflection_path(path):
+                logger.info(
+                    "跳过行为反馈写入：该路径不是麦麦自身反馈路径 "
+                    f"id={pattern_id} actor_type={path.actor_type} learning_type={path.learning_type}"
+                )
                 return None
 
             feedback_items = _load_json_list(path.feedback_list)

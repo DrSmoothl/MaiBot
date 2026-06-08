@@ -88,9 +88,17 @@ class BehaviorPatternSelector:
         success_count = max(float(candidate.get("success_count") or 0.0), 0.0)
         failure_count = max(float(candidate.get("failure_count") or 0.0), 0.0)
         activation_count = max(float(candidate.get("activation_count") or 0.0), 0.0)
+        learning_type = str(candidate.get("learning_type") or "").strip()
+        self_feedback_bonus = 0.15 if learning_type == "self_reflection" else 0.0
         return max(
             0.2,
-            1.0 + count * 0.15 + score * 0.7 + success_count * 0.4 - failure_count * 0.6 - activation_count * 0.03,
+            1.0
+            + count * 0.15
+            + score * 0.7
+            + success_count * 0.4
+            - failure_count * 0.6
+            - activation_count * 0.03
+            + self_feedback_bonus,
         )
 
     @staticmethod
@@ -308,6 +316,14 @@ class BehaviorPatternSelector:
             trigger = str(behavior.get("trigger") or "").strip()
             action = str(behavior.get("action") or "").strip()
             outcome = str(behavior.get("outcome") or "").strip()
+            actor_type = str(behavior.get("actor_type") or "other_user").strip()
+            learning_type = str(behavior.get("learning_type") or "observed_behavior").strip()
+            if actor_type == "maibot_self" and learning_type == "self_reflection":
+                source_label = "麦麦自身反馈路径，用于参考过去自身行为与结果"
+            elif actor_type == "group_collective":
+                source_label = "群体观察学习路径，只作为人类互动模式参考"
+            else:
+                source_label = "他人观察学习路径，只作为人类互动模式参考"
             scene_graph_score = behavior.get("scene_graph_score")
             context_match_score = behavior.get("context_match_score")
             score_parts = []
@@ -318,6 +334,8 @@ class BehaviorPatternSelector:
             score_text = f"\n匹配分数：{', '.join(score_parts)}" if score_parts else ""
             reference_items.append(
                 f"{index}. <behavior_pattern_reference id=\"{behavior_id}\">\n"
+                f"路径类型：{source_label}\n"
+                f"actor_type={actor_type}, learning_type={learning_type}\n"
                 f"场景：{trigger}\n"
                 f"行为：{action}\n"
                 f"预期结果：{outcome}"
@@ -337,8 +355,7 @@ class BehaviorPatternSelector:
             f"当前场景画像：\n{scenario_text}\n\n"
             "候选行为表现：\n"
             f"{chr(10).join(reference_items)}\n\n"
-            "如果你采纳、尝试、放弃或发现无法继续其中任一行为表现，请调用 behavior_feedback，"
-            "并填写对应 behavior_id、status、score、reason、outcome。\n"
+            "观察学习路径用于理解他人或群体行为；自身反馈路径用于参考麦麦过去的自身行为与结果。\n"
             "</behavior_pattern_reference_group>"
         )
 

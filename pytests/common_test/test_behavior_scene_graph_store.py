@@ -7,6 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import pytest
 
 import src.learners.behavior_scene_graph_store as graph_store
+import src.learners.behavior_pattern_store as pattern_store
 import src.learners.behavior_selector as selector_module
 from src.common.database.database_model import (
     BehaviorActionNode,
@@ -18,8 +19,9 @@ from src.common.database.database_model import (
     BehaviorSceneCluster,
     BehaviorSceneNode,
 )
-from src.learners.behavior_scenario import BehaviorScenarioProfile
+from src.learners.behavior_scenario import BehaviorScenarioProfile, BehaviorScenarioSegment
 from src.learners.behavior_selector import BehaviorPatternSelector
+from src.learners.behavior_learner import parse_behavior_response_with_diagnostics
 
 
 @pytest.fixture(name="behavior_graph_engine")
@@ -42,6 +44,7 @@ def _patch_graph_session(monkeypatch: pytest.MonkeyPatch, engine) -> None:
                 session.commit()
 
     monkeypatch.setattr(graph_store, "get_db_session", fake_get_db_session)
+    monkeypatch.setattr(pattern_store, "get_db_session", fake_get_db_session)
 
 
 def _insert_behavior_experience_path(
@@ -107,6 +110,123 @@ def test_scene_cluster_distribution_uses_structured_tags() -> None:
     assert "domain:技术配置" in tags
     assert "need:追问关键细节" in tags
     assert 0.999 <= total_probability <= 1.001
+
+
+def test_behavior_scene_segment_prompt_payload_hides_scene_start() -> None:
+    segment = BehaviorScenarioSegment(segment_id="s1", title="测试场景", profile=_technical_config_profile())
+
+    payload = segment.to_prompt_payload()
+
+    assert "scene_start" not in payload
+    assert payload["profile"]["summary"]
+
+
+def test_behavior_learning_parser_keeps_actor_and_learning_type() -> None:
+    response = """
+    [
+      {
+        "segment_id": "s1",
+        "actor_type": "other_user",
+        "learning_type": "observed_behavior",
+        "action": "先表达共情，再提出一个可执行建议",
+        "outcome": "对方继续补充细节",
+        "source_ids": ["1", "2"]
+      },
+      {
+        "segment_id": "s1",
+        "actor_type": "maibot_self",
+        "learning_type": "self_reflection",
+        "action": "承认信息不足后追问关键配置",
+        "outcome": "对方补充配置，排查方向更明确",
+        "source_ids": ["3"]
+      }
+    ]
+    """
+
+    result = parse_behavior_response_with_diagnostics(response, scene_start="测试场景")
+
+    assert result.diagnostics.accepted_item_count == 2
+    assert result.candidates[0].actor_type == "other_user"
+    assert result.candidates[0].learning_type == "observed_behavior"
+    assert result.candidates[1].actor_type == "maibot_self"
+    assert result.candidates[1].learning_type == "self_reflection"
+
+
+def test_behavior_learning_parser_discards_items_missing_path_type() -> None:
+    response = """
+    [
+      {
+        "segment_id": "s1",
+        "action": "先表达共情，再提出一个可执行建议",
+        "outcome": "对方继续补充细节",
+        "source_ids": ["1", "2"]
+      },
+      {
+        "segment_id": "s1",
+        "actor_type": "maibot_self",
+        "action": "承认信息不足后追问关键配置",
+        "outcome": "对方补充配置，排查方向更明确",
+        "source_ids": ["3"]
+      }
+    ]
+    """
+
+    result = parse_behavior_response_with_diagnostics(response, scene_start="测试场景")
+
+    assert result.diagnostics.parsed_item_count == 2
+    assert result.diagnostics.accepted_item_count == 0
+    assert result.diagnostics.invalid_item_count == 2
+    assert result.candidates == []
+
+
+def test_behavior_store_keeps_observed_and_self_paths_separate(
+    monkeypatch: pytest.MonkeyPatch,
+    behavior_graph_engine,
+) -> None:
+    _patch_graph_session(monkeypatch, behavior_graph_engine)
+    profile = _technical_config_profile()
+    common_kwargs = {
+        "trigger": profile.to_learning_start_text(),
+        "action": "承认信息不足后追问关键配置",
+        "outcome": "对方补充配置，排查方向更明确",
+        "source_ids": ["1"],
+        "session_id": "session-a",
+        "scenario_profile": profile,
+        "scene_start": profile.to_learning_start_text(),
+    }
+
+    observed_path = pattern_store.upsert_behavior_experience(
+        **common_kwargs,
+        actor_type=pattern_store.ACTOR_OTHER_USER,
+        learning_type=pattern_store.LEARNING_OBSERVED,
+    )
+    self_path = pattern_store.upsert_behavior_experience(
+        **common_kwargs,
+        actor_type=pattern_store.ACTOR_MAIBOT_SELF,
+        learning_type=pattern_store.LEARNING_SELF_REFLECTION,
+    )
+
+    assert observed_path is not None
+    assert self_path is not None
+    assert observed_path.id != self_path.id
+    assert pattern_store.apply_behavior_feedback(
+        pattern_id=observed_path.id or 0,
+        score_delta=1.0,
+        status="success",
+        reason="观察路径不接受自身反馈",
+        outcome="",
+        session_id="session-a",
+    ) is None
+    feedback_path = pattern_store.apply_behavior_feedback(
+        pattern_id=self_path.id or 0,
+        score_delta=1.0,
+        status="success",
+        reason="自身路径可以反馈",
+        outcome="对话推进",
+        session_id="session-a",
+    )
+    assert feedback_path is not None
+    assert feedback_path.success_count == 1
 
 
 def test_behavior_paths_share_stable_cluster_start_scene(

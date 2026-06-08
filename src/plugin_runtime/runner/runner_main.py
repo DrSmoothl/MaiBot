@@ -546,43 +546,70 @@ class PluginRunner:
             return resp.payload
 
         ctx = PluginContext(plugin_id=plugin_id, rpc_call=_rpc_call)
-        self._ensure_context_llm_embed(ctx)
+        self._ensure_context_llm_helpers(ctx)
         cast(_ContextAwarePlugin, instance)._set_context(ctx)
         logger.debug(f"已为插件 {plugin_id} 注入 PluginContext")
 
     @staticmethod
-    def _ensure_context_llm_embed(ctx: Any) -> None:
-        """为旧版 SDK 的 LLM 代理补齐 embed 便捷方法。"""
+    def _ensure_context_llm_helpers(ctx: Any) -> None:
+        """为旧版 SDK 的 LLM 代理补齐新增便捷方法。"""
 
         llm_proxy = getattr(ctx, "llm", None)
-        if llm_proxy is None or hasattr(llm_proxy, "embed"):
+        if llm_proxy is None:
             return
 
-        async def _embed(
-            text: str | None = None,
-            texts: List[str] | None = None,
-            task_name: str = "",
+        if not hasattr(llm_proxy, "embed"):
+            async def _embed(
+                text: str | None = None,
+                texts: List[str] | None = None,
+                task_name: str = "",
+                model: str = "",
+                model_name: str = "",
+                max_concurrent: int | None = None,
+                **kwargs: Any,
+            ) -> Any:
+                payload: Dict[str, Any] = dict(kwargs)
+                if text is not None:
+                    payload["text"] = text
+                if texts is not None:
+                    payload["texts"] = texts
+                if task_name:
+                    payload["task_name"] = task_name
+                if model:
+                    payload["model"] = model
+                if model_name:
+                    payload["model_name"] = model_name
+                if max_concurrent is not None:
+                    payload["max_concurrent"] = max_concurrent
+                return await ctx.call_capability("llm.embed", **payload)
+
+            llm_proxy.embed = _embed
+
+        if hasattr(llm_proxy, "transcribe_audio"):
+            return
+
+        async def _transcribe_audio(
+            audio_base64: str = "",
+            voice_base64: str = "",
+            task_name: str = "voice",
             model: str = "",
             model_name: str = "",
-            max_concurrent: int | None = None,
             **kwargs: Any,
         ) -> Any:
             payload: Dict[str, Any] = dict(kwargs)
-            if text is not None:
-                payload["text"] = text
-            if texts is not None:
-                payload["texts"] = texts
+            if audio_base64:
+                payload["audio_base64"] = audio_base64
+            if voice_base64:
+                payload["voice_base64"] = voice_base64
             if task_name:
                 payload["task_name"] = task_name
             if model:
                 payload["model"] = model
             if model_name:
                 payload["model_name"] = model_name
-            if max_concurrent is not None:
-                payload["max_concurrent"] = max_concurrent
-            return await ctx.call_capability("llm.embed", **payload)
+            return await ctx.call_capability("llm.transcribe_audio", **payload)
 
-        llm_proxy.embed = _embed
+        llm_proxy.transcribe_audio = _transcribe_audio
 
     def _apply_plugin_config(self, meta: PluginMeta, config_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """在 Runner 侧为插件实例注入当前插件配置。

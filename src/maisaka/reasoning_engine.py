@@ -94,7 +94,7 @@ BEHAVIOR_SCENARIO_CONSTRAINT_TEXT = (
     "你现在不是主 planner，不要续写聊天、不要判断是否需要回复、不要选择行为表现。\n"
     "你只负责把当前上下文抽象成行为表现检索用的场景画像。\n"
     "只能输出 JSON 对象，字段必须包含 summary、user_intent、conversation_phase、domain_tags、"
-    "behavior_needs、risk_flags、avoid_behaviors、retrieval_query、confidence。"
+    "behavior_needs、risk_flags、retrieval_query、confidence。"
 )
 
 
@@ -210,6 +210,7 @@ class MaisakaReasoningEngine:
                 tool_definitions=[],
             )
         else:
+            filtered_context_messages = self._filter_behavior_scenario_context_messages(context_messages)
             sub_agent = MaisakaChatLoopService(
                 chat_system_prompt=system_prompt,
                 session_id=str(self._runtime.session_id or ""),
@@ -217,7 +218,7 @@ class MaisakaReasoningEngine:
                 model_task_name="planner",
             )
             response = await sub_agent.chat_loop_step(
-                [*context_messages, constraint_message],
+                [*filtered_context_messages, constraint_message],
                 request_kind="behavior_scenario_analyzer",
                 tool_definitions=[],
                 max_context_size=self._runtime._max_context_size,
@@ -228,6 +229,19 @@ class MaisakaReasoningEngine:
             output_content=response_text,
         )
         return response_text
+
+    @staticmethod
+    def _filter_behavior_scenario_context_messages(
+        context_messages: list[LLMContextMessage],
+    ) -> list[LLMContextMessage]:
+        """场景概括只看真实聊天消息，不混入参考、assistant 或工具历史。"""
+
+        allowed_source_kinds = {"user", "guided_reply", "outbound_send"}
+        return [
+            message
+            for message in context_messages
+            if isinstance(message, SessionBackedMessage) and message.source_kind in allowed_source_kinds
+        ]
 
     def _log_behavior_scenario_prompt_preview(
         self,
