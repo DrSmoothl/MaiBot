@@ -23,7 +23,7 @@ export function NavItem({ item, sidebarOpen, tooltipsEnabled, onMobileMenuClose 
     <>
       <div
         className={cn(
-          'flex items-center transition-all duration-300',
+          'flex min-w-0 items-center transition-all duration-300',
           sidebarOpen ? 'gap-3' : 'gap-3 lg:gap-0'
         )}
       >
@@ -36,9 +36,10 @@ export function NavItem({ item, sidebarOpen, tooltipsEnabled, onMobileMenuClose 
           className={cn(
             'text-base font-medium whitespace-nowrap transition-all duration-300',
             sidebarOpen
-              ? 'max-w-[200px] opacity-100'
+              ? 'min-w-0 max-w-[160px] overflow-hidden text-ellipsis opacity-100'
               : 'max-w-[200px] opacity-100 lg:max-w-0 lg:overflow-hidden lg:opacity-0'
           )}
+          title={t(item.label)}
         >
           {t(item.label)}
         </span>

@@ -8,7 +8,6 @@ Analysis rules:
 - Every segment must include source_ids referencing the source line numbers it covers. Segments may overlap a little, but do not force unrelated messages into the same segment.
 - Each profile should focus on the scenario start, user intent, conversation phase, needed behavior strategies, and scenario risk signals.
 - Write summary as a reusable scenario summary, not a one-off detail.
-- retrieval_query should read like a search query, containing keywords and semantic phrases that can match historical behavior trigger/action/outcome text.
 - If the context has no clear scenario, still output one low-confidence segment.
 
 Output only a JSON object:
@@ -25,7 +24,6 @@ Output only a JSON object:
         "domain_tags": ["technical configuration", "error troubleshooting"],
         "behavior_needs": ["ask for key details", "provide concrete checks"],
         "risk_flags": ["insufficient information", "avoid fabrication"],
-        "retrieval_query": "Someone reports a feature anomaly or ineffective configuration and needs log checks, configuration items, trigger conditions, and actionable troubleshooting direction",
         "confidence": 0.82
       }}
     }}

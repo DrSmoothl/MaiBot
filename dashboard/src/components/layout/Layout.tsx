@@ -19,7 +19,7 @@ import { isElectron } from '@/lib/runtime'
 import { cn } from '@/lib/utils'
 import { Header } from './Header'
 import { Sidebar } from './Sidebar'
-import type { LayoutProps } from './types'
+import type { LayoutProps, WorkspaceMode } from './types'
 import { useMenuSections } from './use-menu-sections'
 
 export function Layout({ children }: LayoutProps) {
@@ -38,6 +38,12 @@ export function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [tooltipsEnabled, setTooltipsEnabled] = useState(false) // 控制 tooltip 启用状态
+  const [visibleWorkspaceMode, setVisibleWorkspaceMode] = useState<WorkspaceMode>(workspaceMode)
+  const [visibleChildren, setVisibleChildren] = useState<LayoutProps['children']>(children)
+  const [pendingWorkspace, setPendingWorkspace] = useState<{
+    children: LayoutProps['children']
+    mode: WorkspaceMode
+  } | null>(null)
   const { theme, setTheme } = useTheme()
   const menuSections = useMenuSections()
 
@@ -67,6 +73,16 @@ export function Layout({ children }: LayoutProps) {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  useEffect(() => {
+    if (workspaceMode === visibleWorkspaceMode) {
+      setVisibleChildren(children)
+      setPendingWorkspace(null)
+      return
+    }
+
+    setPendingWorkspace({ children, mode: workspaceMode })
+  }, [children, visibleWorkspaceMode, workspaceMode])
   // 路由变更：焦点管理 + 屏幕阅读器播报 + document.title 更新
   useEffect(() => {
     // 构建 路径 -> 页面标题 的映射表（以当前语言 t() 翻译）
@@ -112,6 +128,9 @@ export function Layout({ children }: LayoutProps) {
 
   const actualTheme = getActualTheme()
   const { config: pageBg } = useBackground('page')
+  const isWorkspaceTransitioning = pendingWorkspace !== null
+  const visibleIsChatWorkspace = visibleWorkspaceMode === 'chat'
+  const visibleIsSettingsWorkspace = visibleWorkspaceMode === 'settings'
 
   // 认证检查中，显示加载状态
   if (checking) {
@@ -219,24 +238,38 @@ export function Layout({ children }: LayoutProps) {
                     : 'bg-transparent'
               )}
             >
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={workspaceMode}
-                  className={cn('relative z-10 min-w-0', isSettingsWorkspace ? 'h-full min-h-full' : 'h-full')}
-                  initial={{ opacity: 0, x: isChatWorkspace ? 32 : -32, filter: 'blur(6px)' }}
-                  animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
-                  exit={{ opacity: 0, x: isChatWorkspace ? -32 : 32, filter: 'blur(6px)' }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 320,
-                    damping: 34,
-                    mass: 0.7,
-                    opacity: { duration: 0.18 },
-                    filter: { duration: 0.22 },
-                  }}
-                >
-                  {children}
-                </motion.div>
+              <AnimatePresence
+                mode="wait"
+                initial={false}
+                onExitComplete={() => {
+                  if (!pendingWorkspace) {
+                    return
+                  }
+
+                  setVisibleWorkspaceMode(pendingWorkspace.mode)
+                  setVisibleChildren(pendingWorkspace.children)
+                  setPendingWorkspace(null)
+                }}
+              >
+                {!isWorkspaceTransitioning && (
+                  <motion.div
+                    key={visibleWorkspaceMode}
+                    className={cn('relative z-10 min-w-0', visibleIsSettingsWorkspace ? 'h-full min-h-full' : 'h-full')}
+                    initial={{ opacity: 0, x: visibleIsChatWorkspace ? 32 : -32, filter: 'blur(6px)' }}
+                    animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
+                    exit={{ opacity: 0, x: visibleIsChatWorkspace ? -32 : 32, filter: 'blur(6px)' }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 320,
+                      damping: 34,
+                      mass: 0.7,
+                      opacity: { duration: 0.18 },
+                      filter: { duration: 0.22 },
+                    }}
+                  >
+                    {visibleChildren}
+                  </motion.div>
+                )}
               </AnimatePresence>
             </main>
 

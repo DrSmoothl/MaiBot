@@ -25,7 +25,6 @@ class BehaviorScenarioProfile:
     domain_tags: list[str] = field(default_factory=list)
     behavior_needs: list[str] = field(default_factory=list)
     risk_flags: list[str] = field(default_factory=list)
-    retrieval_query: str = ""
     confidence: float = 0.0
 
     @property
@@ -38,7 +37,6 @@ class BehaviorScenarioProfile:
                 self.domain_tags,
                 self.behavior_needs,
                 self.risk_flags,
-                self.retrieval_query,
             ]
         )
 
@@ -50,7 +48,6 @@ class BehaviorScenarioProfile:
             " ".join(self.domain_tags),
             " ".join(self.behavior_needs),
             " ".join(self.risk_flags),
-            self.retrieval_query,
             context_text,
         ]
         return "\n".join(part for part in parts if str(part or "").strip())
@@ -66,7 +63,6 @@ class BehaviorScenarioProfile:
                 "domain_tags": self.domain_tags,
                 "behavior_needs": self.behavior_needs,
                 "risk_flags": self.risk_flags,
-                "retrieval_query": self.retrieval_query,
                 "confidence": self.confidence,
             },
             ensure_ascii=False,
@@ -87,8 +83,6 @@ class BehaviorScenarioProfile:
             "、".join(self.behavior_needs[:3]),
         ]
         scene_start = "；".join(part for part in parts if str(part or "").strip()).strip()
-        if not scene_start:
-            scene_start = self.retrieval_query.strip()
         if len(scene_start) <= max_length:
             return scene_start
         return scene_start[:max_length].rstrip()
@@ -119,7 +113,6 @@ class BehaviorScenarioSegment:
                 "domain_tags": self.profile.domain_tags,
                 "behavior_needs": self.profile.behavior_needs,
                 "risk_flags": self.profile.risk_flags,
-                "retrieval_query": self.profile.retrieval_query,
                 "confidence": self.profile.confidence,
             },
         }
@@ -195,7 +188,6 @@ def _profile_from_mapping(parsed_response: dict[str, Any]) -> BehaviorScenarioPr
         domain_tags=_coerce_string_list(parsed_response.get("domain_tags")),
         behavior_needs=_coerce_string_list(parsed_response.get("behavior_needs")),
         risk_flags=_coerce_string_list(parsed_response.get("risk_flags")),
-        retrieval_query=" ".join(str(parsed_response.get("retrieval_query") or "").split()).strip(),
         confidence=_coerce_float(parsed_response.get("confidence")),
     )
 

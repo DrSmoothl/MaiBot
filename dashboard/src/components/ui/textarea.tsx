@@ -2,6 +2,31 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+function getScrollContainers(element: HTMLElement) {
+  const containers: Array<{ element: HTMLElement; scrollLeft: number; scrollTop: number }> = []
+  let current = element.parentElement
+
+  while (current) {
+    if (current.scrollHeight > current.clientHeight || current.scrollWidth > current.clientWidth) {
+      containers.push({
+        element: current,
+        scrollLeft: current.scrollLeft,
+        scrollTop: current.scrollTop,
+      })
+    }
+    current = current.parentElement
+  }
+
+  return containers
+}
+
+function restoreScrollContainers(containers: Array<{ element: HTMLElement; scrollLeft: number; scrollTop: number }>) {
+  for (const container of containers) {
+    container.element.scrollTop = container.scrollTop
+    container.element.scrollLeft = container.scrollLeft
+  }
+}
+
 export interface TextareaProps extends React.ComponentProps<"textarea"> {
   /**
    * 是否启用自动高度调整
@@ -42,11 +67,16 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       const textarea = innerRef.current
       if (!textarea || !autoResize || hasFixedHeight) return
 
-      // 重置高度以获取真实的 scrollHeight
-      textarea.style.height = 'auto'
-      
+      const scrollContainers = getScrollContainers(textarea)
+
+      let scrollHeight = textarea.scrollHeight
+      if (scrollHeight < textarea.offsetHeight) {
+        // 内容变短时才临时重置高度，避免长文本输入时触发浏览器滚动锚定。
+        textarea.style.height = 'auto'
+        scrollHeight = textarea.scrollHeight
+      }
+
       // 计算新高度
-      const scrollHeight = textarea.scrollHeight
       let newHeight = Math.max(scrollHeight, minHeight)
       
       // 应用最大高度限制
@@ -62,6 +92,8 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       } else {
         textarea.style.overflowY = 'hidden'
       }
+
+      restoreScrollContainers(scrollContainers)
     }, [autoResize, hasFixedHeight, minHeight, maxHeight])
 
     // 监听 value 变化并调整高度

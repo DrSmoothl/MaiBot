@@ -741,6 +741,10 @@
   box-shadow: none !important;
 }
 
+:root[data-dashboard-style='future-retro'] [data-config-bot-tab-list='true'] {
+  padding: 0.375rem 0.25rem !important;
+}
+
 :root[data-dashboard-style='future-retro'] [data-dashboard-workspace-tabs='true'] {
   background: transparent !important;
   backdrop-filter: none !important;
@@ -758,7 +762,20 @@
 :root[data-dashboard-style='future-retro']
   [data-dashboard-tabs-trigger='true']
   + [data-dashboard-tabs-trigger='true'] {
-  border-left: 1px solid var(--retro-line);
+  position: relative;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-tabs-trigger='true']
+  + [data-dashboard-tabs-trigger='true']::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  width: 2px;
+  height: 1.65rem;
+  transform: translateY(-50%);
+  background: var(--retro-line);
 }
 
 :root[data-dashboard-style='future-retro']
@@ -962,8 +979,8 @@
 }
 
 :root[data-dashboard-style='future-retro'] *:focus-visible {
-  outline: 2px solid var(--retro-gold) !important;
-  outline-offset: 2px;
+  outline: none !important;
+  outline-offset: 0;
   box-shadow: none !important;
 }
 

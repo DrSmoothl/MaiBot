@@ -474,36 +474,6 @@ class BuiltinToolRuntimeContext:
         )
         self.runtime._chat_history.append(history_message)
 
-    def append_replyer_expression_annotation(
-        self,
-        *,
-        selected_expression_ids: Sequence[int],
-        expression_habits: str,
-    ) -> bool:
-        """将 replyer 本轮选中的表达方式作为内部 user 注解写入历史。"""
-
-        normalized_ids = [str(expression_id) for expression_id in selected_expression_ids if expression_id is not None]
-        expression_text = str(expression_habits or "").strip()
-        if expression_text.startswith("【表达习惯参考】"):
-            expression_text = expression_text.removeprefix("【表达习惯参考】").strip()
-        if not normalized_ids and not expression_text:
-            return False
-
-        note_lines = []
-        if expression_text:
-            note_lines.append(expression_text)
-
-        history_message = build_session_backed_text_message(
-            speaker_name="replyer表达注解",
-            text="\n".join(note_lines),
-            timestamp=datetime.now(),
-            source_kind="replyer_expression_annotation",
-            chat_id=getattr(self.runtime, "session_id", ""),
-            include_message_id=False,
-        )
-        self.runtime._chat_history.append(history_message)
-        return True
-
     def append_sent_message_to_chat_history(self, message: Any, *, source_kind: str = "guided_reply") -> bool:
         """将已发送消息写回 Maisaka 历史。"""
 

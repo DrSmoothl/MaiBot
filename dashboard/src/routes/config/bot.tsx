@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parse as parseToml } from 'smol-toml'
 
-import { AlertDescription, Alert } from '@/components/ui/alert'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -164,9 +164,6 @@ function BotConfigPageContent() {
   const [sourceCode, setSourceCode] = useState<string>('')
   const [hasTomlError, setHasTomlError] = useState(false)
   const [tomlErrorMessage, setTomlErrorMessage] = useState<string>('')
-  const [restartNoticeVisible, setRestartNoticeVisible] = useState(
-    () => localStorage.getItem('bot-config-restart-notice-dismissed') !== 'true'
-  )
   const { toast } = useToast()
   const { triggerRestart, isRestarting } = useRestart()
 
@@ -637,11 +634,6 @@ function BotConfigPageContent() {
     await triggerRestart()
   }
 
-  const dismissRestartNotice = () => {
-    localStorage.setItem('bot-config-restart-notice-dismissed', 'true')
-    setRestartNoticeVisible(false)
-  }
-
   const handleReloadFromFile = async () => {
     cancelPendingAutoSave()
     await loadConfig()
@@ -884,21 +876,6 @@ function BotConfigPageContent() {
           </div>
         </div>
 
-        {/* 重启提示 */}
-        {restartNoticeVisible && (
-          <Alert>
-            <Info className="h-4 w-4" />
-            <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>
-                配置更新后需要<strong>重启麦麦</strong>才能生效。你可以点击右上角的"保存并重启"按钮一键完成保存和重启。
-              </span>
-              <Button type="button" variant="outline" size="sm" onClick={dismissRestartNotice}>
-                我知道了
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
-
         {/* 源代码模式 */}
         {editMode === 'source' && (
           <div className="space-y-4">
@@ -994,6 +971,9 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
   const [expanded, setExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState(tabGroups[0]?.id ?? '')
   const [advancedVisible, setAdvancedVisible] = useState(false)
+  const [tabGuideVisible, setTabGuideVisible] = useState(
+    () => localStorage.getItem('bot-config-tabs-guide-dismissed') !== 'true'
+  )
 
   useEffect(() => {
     if (!tabGroups.some((tab) => tab.id === activeTab)) {
@@ -1005,7 +985,9 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     return null
   }
 
-  const visibleTabGroups = expanded ? tabGroups : tabGroups.filter((tab) => !tab.advanced)
+  const defaultTabGroups = tabGroups.filter((tab) => !tab.advanced)
+  const expandedTabGroups = tabGroups.filter((tab) => tab.advanced)
+  const visibleTabGroups = expanded ? [...defaultTabGroups, ...expandedTabGroups] : defaultTabGroups
   const hasCollapsibleTabs = tabGroups.some((tab) => tab.advanced)
   const firstExpandedTabId = visibleTabGroups.find((tab) => tab.advanced)?.id
 
@@ -1017,6 +999,11 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
       }
       return !current
     })
+  }
+
+  const dismissTabGuide = () => {
+    localStorage.setItem('bot-config-tabs-guide-dismissed', 'true')
+    setTabGuideVisible(false)
   }
 
   const renderTabContent = (tab: TabGroup) => {
@@ -1068,13 +1055,16 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
       <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:overflow-x-visible sm:px-0 sm:pb-0">
-        <TabsList className="flex h-auto w-max min-w-full flex-nowrap justify-start gap-1 p-1 transition-all duration-300 ease-out sm:w-full sm:flex-wrap">
+        <TabsList
+          data-config-bot-tab-list="true"
+          className="flex h-auto w-max min-w-full flex-nowrap items-center justify-start gap-1 px-1 py-1.5 transition-all duration-300 ease-out sm:w-full sm:flex-wrap"
+        >
           {visibleTabGroups.map((tab) => {
             const isExpandedOnlyTab = tab.advanced
             return (
               <Fragment key={tab.id}>
                 {tab.id === firstExpandedTabId && (
-                  <span className="mx-1 hidden h-6 w-px bg-border/80 transition-opacity duration-200 sm:block" />
+                  <span className="mx-1 hidden h-7 w-[2px] bg-border/90 transition-opacity duration-200 sm:block" />
                 )}
                 <TabsTrigger
                   value={tab.id}
@@ -1110,13 +1100,23 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             type="button"
             variant={advancedVisible ? 'default' : 'outline'}
             size="sm"
-            className="h-8 shrink-0 px-2 text-xs transition-all duration-200 ease-out sm:ml-auto sm:h-9 sm:px-3"
+            className="h-7 shrink-0 self-center px-2 text-xs leading-none transition-all duration-200 ease-out sm:ml-auto"
             onClick={() => setAdvancedVisible((current) => !current)}
           >
             高级设置
           </Button>
         </TabsList>
       </div>
+      {tabGuideVisible && (
+        <div className="mt-2 flex flex-col gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            点击“更多”展开隐藏配置栏目；点击“高级设置”显示高级配置项。
+          </span>
+          <Button type="button" variant="ghost" size="sm" className="h-6 self-start px-2 text-xs sm:self-center" onClick={dismissTabGuide}>
+            我知道了
+          </Button>
+        </div>
+      )}
       {tabGroups.map((tab) => (
         <TabsContent key={tab.id} value={tab.id} className="space-y-4 motion-safe:animate-[config-tab-content-enter_180ms_ease-out_both]">
           {renderTabContent(tab)}

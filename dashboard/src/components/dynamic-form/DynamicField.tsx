@@ -370,7 +370,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
   const renderSwitch = () => {
     const checked = Boolean(value)
     return (
-      <div className="flex min-w-0 items-center justify-between gap-4 py-2">
+      <div className="flex min-w-0 items-center justify-between gap-3 py-1.5">
         <div className="min-w-0 pr-4">
           {renderFieldHeader()}
         </div>
@@ -651,7 +651,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
   if (supportsInlineRight) {
     return (
       <div
-        className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center"
+        className="flex flex-col gap-1.5 py-1.5 sm:flex-row sm:items-center"
         style={{ '--field-input-width': schema['x-input-width'] ?? '12rem' } as React.CSSProperties}
       >
         <div className="min-w-0 sm:shrink-0">
@@ -665,7 +665,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
   }
 
   return (
-    <div className="min-w-0 space-y-2">
+    <div className="min-w-0 space-y-1.5">
       {renderFieldHeader()}
 
       {/* Input component */}

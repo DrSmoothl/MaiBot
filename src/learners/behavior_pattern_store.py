@@ -25,8 +25,6 @@ from .behavior_scene_graph_store import (
 
 logger = get_logger("behavior_pattern_store")
 
-BEHAVIOR_REFERENCE_SOURCE = "behavior_pattern"
-BEHAVIOR_REFERENCE_DISPLAY_PREFIX = "[行为表现参考]"
 ACTOR_OTHER_USER = "other_user"
 ACTOR_MAIBOT_SELF = "maibot_self"
 ACTOR_GROUP_COLLECTIVE = "group_collective"

@@ -34,7 +34,7 @@ type ExpressionRuleType = 'group' | 'private'
 interface ExpressionGroupTarget {
   platform: string
   item_id: string
-  type: ExpressionRuleType
+  rule_type: ExpressionRuleType
 }
 
 interface ExpressionGroupValue {
@@ -1093,7 +1093,7 @@ const normalizeExpressionTarget = (value: unknown): ExpressionGroupTarget => {
       typeof source.platform === 'string' ? source.platform.trim() : 'qq',
     item_id:
       typeof source.item_id === 'string' ? source.item_id.trim() : '',
-    type: normalizeExpressionRuleType(source.type ?? source.rule_type),
+    rule_type: normalizeExpressionRuleType(source.rule_type ?? source.type),
   }
 }
 
@@ -1120,13 +1120,13 @@ const normalizeExpressionGroups = (value: unknown): ExpressionGroupValue[] => {
 const createExpressionTarget = (): ExpressionGroupTarget => ({
   platform: 'qq',
   item_id: '',
-  type: 'group',
+  rule_type: 'group',
 })
 
 const formatExpressionTarget = (target: ExpressionGroupTarget): string => {
   const platform = target.platform.trim()
   const itemId = target.item_id.trim()
-  const rule = ruleTypeLabel(target.type)
+  const rule = ruleTypeLabel(target.rule_type)
   if (!platform && !itemId) return `全局 · ${rule}`
   if (!itemId) return `${platform} · ${rule}`
   return `${platform}:${itemId} · ${rule}`
@@ -1374,9 +1374,8 @@ export const BotPlatformsHook: FieldHookComponent = ({ onChange, value }) => {
             每行保存为 platform:account，例如 wx:114514。
           </p>
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={addRow}>
-          <Plus className="mr-2 h-4 w-4" />
-          添加平台
+        <Button type="button" size="icon" variant="outline" aria-label="添加平台" title="添加平台" onClick={addRow}>
+          <Plus className="h-4 w-4" />
         </Button>
       </div>
 
@@ -1599,14 +1598,14 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
         targets: group.targets.map((target) => ({
           platform: target.platform,
           item_id: target.item_id,
-          rule_type: target.type,
+          rule_type: target.rule_type,
         })),
       }))
     )
   }
 
   const addGroup = () => {
-    updateGroups([...groups, { targets: [] }])
+    updateGroups([...groups, { targets: [createExpressionTarget()] }])
   }
 
   const removeGroup = (groupIndex: number) => {
@@ -1760,10 +1759,10 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
                       <div className="space-y-0.5">
                         <Label className="text-[11px] leading-none text-muted-foreground">类型</Label>
                         <Select
-                          value={member.type}
+                          value={member.rule_type}
                           onValueChange={(nextRuleType) =>
                             updateMember(groupIndex, memberIndex, {
-                              type: normalizeExpressionRuleType(nextRuleType),
+                              rule_type: normalizeExpressionRuleType(nextRuleType),
                             })
                           }
                         >

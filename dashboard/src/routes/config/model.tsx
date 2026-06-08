@@ -163,9 +163,6 @@ function ModelConfigPageContent() {
   
   const [advancedModelSettingsVisible, setAdvancedModelSettingsVisible] = useState(false)
   const [advancedTaskSettingsVisible, setAdvancedTaskSettingsVisible] = useState(false)
-  const [restartNoticeVisible, setRestartNoticeVisible] = useState(
-    () => localStorage.getItem('model-config-restart-notice-dismissed') !== 'true'
-  )
   const [tourEntryVisible, setTourEntryVisible] = useState(
     () => localStorage.getItem('model-assignment-tour-entry-dismissed') !== 'true'
   )
@@ -316,11 +313,6 @@ function ModelConfigPageContent() {
       fetchModelsForProvider(editingModel.api_provider)
     }
   }, [editDialogOpen, editingModel?.api_provider, fetchModelsForProvider])
-
-  const dismissRestartNotice = () => {
-    localStorage.setItem('model-config-restart-notice-dismissed', 'true')
-    setRestartNoticeVisible(false)
-  }
 
   const dismissTourEntry = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
@@ -1149,21 +1141,6 @@ function ModelConfigPageContent() {
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-        {/* 重启提示 */}
-        {restartNoticeVisible && (
-          <Alert>
-            <Info className="h-4 w-4" />
-            <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>
-                配置更新后需要<strong>重启麦麦</strong>才能生效。保存配置后，请在需要时前往麦麦设置或系统入口重启。
-              </span>
-              <Button type="button" variant="outline" size="sm" onClick={dismissRestartNotice}>
-                我知道了
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
-        
         {/* 无效模型引用警告 */}
         {invalidModelRefs.length > 0 && (
           <Alert variant="destructive">

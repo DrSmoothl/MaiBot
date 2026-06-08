@@ -1,7 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  BrainCircuit,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -59,6 +58,8 @@ import {
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 20
+const DEFAULT_CLUSTER_PAGE_SIZE = 200
+const CLUSTER_PAGE_SIZE_OPTIONS = [200, 1000, 3000, 5000]
 
 type ActiveTab = 'paths' | 'clusters' | 'debug' | 'graph'
 
@@ -688,6 +689,7 @@ export function BehaviorLearningPage() {
   const [openSceneGroups, setOpenSceneGroups] = useState<Set<string>>(new Set())
   const [total, setTotal] = useState(0)
   const [clusterTotal, setClusterTotal] = useState(0)
+  const [clusterPageSize, setClusterPageSize] = useState(DEFAULT_CLUSTER_PAGE_SIZE)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
   const [clusterLoading, setClusterLoading] = useState(false)
@@ -703,7 +705,6 @@ export function BehaviorLearningPage() {
     domainTags: '',
     behaviorNeeds: '',
     riskFlags: '',
-    retrievalQuery: '',
   })
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -799,7 +800,7 @@ export function BehaviorLearningPage() {
         session_id: selectedSessionId,
         search,
         page: 1,
-        page_size: 100,
+        page_size: clusterPageSize,
       })
       setClusters(result.data)
       setClusterTotal(result.total)
@@ -810,7 +811,7 @@ export function BehaviorLearningPage() {
           search,
           enabled: 'all',
           page: 1,
-          page_size: 100,
+          page_size: clusterPageSize,
         })
         const fallbackClusters = buildClusterItemsFromPaths(fallbackResult.data)
         setClusters(fallbackClusters)
@@ -855,7 +856,6 @@ export function BehaviorLearningPage() {
         domain_tags: splitTags(debugForm.domainTags),
         behavior_needs: splitTags(debugForm.behaviorNeeds),
         risk_flags: splitTags(debugForm.riskFlags),
-        retrieval_query: debugForm.retrievalQuery,
         max_count: 20,
       })
       setDebugResult(result.data)
@@ -880,7 +880,7 @@ export function BehaviorLearningPage() {
 
   useEffect(() => {
     loadClusters()
-  }, [selectedSessionId])
+  }, [selectedSessionId, clusterPageSize])
 
   useEffect(() => {
     if (selectedPathId !== null) {
@@ -909,13 +909,7 @@ export function BehaviorLearningPage() {
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col gap-4 p-4 sm:p-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <div className="flex items-center gap-2">
-            <BrainCircuit className="h-5 w-5 text-primary" />
-            <h1 className="text-2xl font-semibold tracking-normal">行为学习</h1>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            浏览场景簇、行为分支、结果之间的经验路径和检索命中情况
-          </p>
+          <h1 className="text-2xl font-semibold tracking-normal">行为学习</h1>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Select
@@ -1035,6 +1029,18 @@ export function BehaviorLearningPage() {
               />
             </div>
             <Button onClick={applySearch}>搜索</Button>
+            <Select value={String(clusterPageSize)} onValueChange={(value) => setClusterPageSize(Number(value))}>
+              <SelectTrigger className="w-full sm:w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CLUSTER_PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size} 个
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <ClusterBrowserView
             clusters={clusters}
@@ -1061,9 +1067,6 @@ export function BehaviorLearningPage() {
             </Field>
             <Field label="行为需求">
               <Input value={debugForm.behaviorNeeds} onChange={(event) => setDebugForm({ ...debugForm, behaviorNeeds: event.target.value })} placeholder="用逗号分隔" />
-            </Field>
-            <Field label="检索查询">
-              <Textarea value={debugForm.retrievalQuery} onChange={(event) => setDebugForm({ ...debugForm, retrievalQuery: event.target.value })} />
             </Field>
             <Button className="w-full" onClick={runDebug} disabled={debugLoading}>
               {debugLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GitBranch className="mr-2 h-4 w-4" />}

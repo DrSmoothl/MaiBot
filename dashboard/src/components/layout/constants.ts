@@ -1,4 +1,4 @@
-import { Activity, Boxes, BrainCircuit, Database, FileText, Hash, Home, MessageSquare, Network, Package, ScrollText, Sliders, Smile, Sparkles } from 'lucide-react'
+import { Activity, Boxes, BrainCircuit, Database, FileText, Hash, Home, MessageSquare, Network, Package, ScrollText, Sliders, Smile } from 'lucide-react'
 
 import type { MenuSection } from './types'
 
@@ -16,7 +16,6 @@ export const menuSections: MenuSection[] = [
       { icon: FileText, label: 'sidebar.menu.botMainConfig', path: '/config/bot', searchDescription: 'search.items.botConfigDesc' },
       { icon: Boxes, label: 'sidebar.menu.modelManagement', path: '/config/model', searchDescription: 'search.items.modelDesc', tourId: 'sidebar-model-management' },
       { icon: ScrollText, label: 'sidebar.menu.promptManagement', path: '/config/prompts' },
-      { icon: Sparkles, label: 'sidebar.menu.promptGenerator', path: '/config/prompt-generator', searchDescription: 'search.items.promptGeneratorDesc' },
     ],
   },
   {

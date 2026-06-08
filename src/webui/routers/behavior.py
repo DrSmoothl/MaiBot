@@ -139,7 +139,6 @@ class BehaviorScenarioDebugRequest(BaseModel):
     domain_tags: list[str] = Field(default_factory=list)
     behavior_needs: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
-    retrieval_query: str = Field(default="")
     max_count: int = Field(default=20, ge=1, le=80)
 
 
@@ -310,7 +309,7 @@ async def list_behavior_clusters(
     session_id: Annotated[Optional[str], Query()] = None,
     search: Annotated[str, Query()] = "",
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=500)] = 20,
+    page_size: Annotated[int, Query(ge=1, le=5000)] = 20,
 ) -> BehaviorClusterListResponse:
     """分页列出行为场景簇，便于浏览 tag 概率分布。"""
 
@@ -410,7 +409,6 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
         domain_tags=request.domain_tags,
         behavior_needs=request.behavior_needs,
         risk_flags=request.risk_flags,
-        retrieval_query=request.retrieval_query,
         confidence=1.0,
     )
     debug_payload = debug_retrieve_behavior_scores_from_scene_graph(

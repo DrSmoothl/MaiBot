@@ -94,7 +94,6 @@ def _technical_config_profile() -> BehaviorScenarioProfile:
         conversation_phase="已尝试无效",
         domain_tags=["技术配置", "模型选择"],
         behavior_needs=["追问关键细节", "给出具体检查点"],
-        retrieval_query="配置不生效 继续排查 追问日志和配置项",
         confidence=0.86,
     )
 
@@ -241,7 +240,6 @@ def test_behavior_paths_share_stable_cluster_start_scene(
         conversation_phase="已尝试无效",
         domain_tags=["模型选择", "技术配置"],
         behavior_needs=["给出具体检查点", "追问关键细节"],
-        retrieval_query="模型配置 不生效 检查配置项",
         confidence=0.82,
     )
     first_path_id = _insert_behavior_experience_path(
@@ -404,3 +402,54 @@ def test_behavior_selector_prefers_scene_graph_scores(monkeypatch: pytest.Monkey
 
     assert candidates[0]["id"] == 2
     assert candidates[0]["scene_graph_score"] == 4.2
+
+
+def test_behavior_reference_text_hides_internal_metadata() -> None:
+    profile = BehaviorScenarioProfile(
+        summary="用户想替换当前模型服务商",
+        user_intent="寻找便宜的识图模型 API",
+        conversation_phase="配置咨询",
+        domain_tags=["模型配置", "识图模型"],
+        behavior_needs=["给出替换建议", "管理小模型预期"],
+        risk_flags=["需确认模型支持识图"],
+        confidence=0.85,
+    )
+    behaviors = [
+        {
+            "id": 1,
+            "trigger": "用户询问可替换模型",
+            "action": "给出具体供应商和模型建议",
+            "outcome": "用户获得切换方向",
+            "actor_type": "maibot_self",
+            "learning_type": "self_reflection",
+            "scene_graph_score": 1.6,
+            "context_match_score": 0.4,
+        },
+        {
+            "id": 2,
+            "trigger": "用户继续询问价格",
+            "action": "补充价格和能力边界",
+            "outcome": "用户理解取舍",
+            "actor_type": "other_user",
+            "learning_type": "observed_behavior",
+            "scene_graph_score": 1.2,
+        },
+    ]
+
+    reference_text = BehaviorPatternSelector._build_group_reference_text(
+        behaviors=behaviors,
+        scenario_profile=profile,
+    )
+
+    assert "优先级：高" in reference_text
+    assert "优先级：中" in reference_text
+    assert "场景摘要：用户想替换当前模型服务商" in reference_text
+    assert "当前需要：给出替换建议；管理小模型预期" in reference_text
+    assert "路径类型" not in reference_text
+    assert "actor_type" not in reference_text
+    assert "learning_type" not in reference_text
+    assert "匹配分数" not in reference_text
+    assert "scene_graph_score" not in reference_text
+    assert "context_match_score" not in reference_text
+    assert "domain_tags" not in reference_text
+    assert "confidence" not in reference_text

@@ -985,20 +985,20 @@ function PluginsPageContent() {
               >
                 排除已安装
               </label>
-              {isFetchingMarketplace && (
-                <div
-                  className="flex min-w-0 max-w-full items-center gap-2 rounded-md border bg-background/85 px-2 py-0.5 text-xs whitespace-nowrap shadow-sm backdrop-blur sm:max-w-80"
-                  aria-live="polite"
-                >
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
-                  <span className="shrink-0 font-medium">加载插件市场</span>
-                  <span className="min-w-0 truncate text-muted-foreground">
-                    {loadProgress.message || '正在获取插件清单'}
-                  </span>
-                </div>
-              )}
             </div>
           </div>
+          {isFetchingMarketplace && (
+            <div
+              className="mt-3 flex min-w-0 items-center gap-2 rounded-md border bg-background/85 px-3 py-2 text-xs shadow-sm backdrop-blur"
+              aria-live="polite"
+            >
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+              <span className="shrink-0 font-medium">加载插件市场</span>
+              <span className="min-w-0 truncate text-muted-foreground">
+                {loadProgress.message || '正在获取插件清单'}
+              </span>
+            </div>
+          )}
         </Card>
 
         {/* 加载错误显示 */}

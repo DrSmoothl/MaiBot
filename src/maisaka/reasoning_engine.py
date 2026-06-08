@@ -21,10 +21,6 @@ from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
-from src.learners.behavior_pattern_store import (
-    BEHAVIOR_REFERENCE_DISPLAY_PREFIX,
-    BEHAVIOR_REFERENCE_SOURCE,
-)
 from src.learners.behavior_selector import behavior_pattern_selector
 from src.llm_models.exceptions import ReqAbortException, RespNotOkException
 from src.llm_models.payload_content.tool_option import ToolCall
@@ -94,7 +90,7 @@ BEHAVIOR_SCENARIO_CONSTRAINT_TEXT = (
     "你现在不是主 planner，不要续写聊天、不要判断是否需要回复、不要选择行为表现。\n"
     "你只负责把当前上下文抽象成行为表现检索用的场景画像。\n"
     "只能输出 JSON 对象，字段必须包含 summary、user_intent、conversation_phase、domain_tags、"
-    "behavior_needs、risk_flags、retrieval_query、confidence。"
+    "behavior_needs、risk_flags、confidence。"
 )
 
 
@@ -294,7 +290,7 @@ class MaisakaReasoningEngine:
         retained_history: list[LLMContextMessage] = []
         removed_count = 0
         for message in target_history:
-            if isinstance(message, ReferenceMessage) and message.source == BEHAVIOR_REFERENCE_SOURCE:
+            if isinstance(message, ReferenceMessage) and message.source == "behavior_pattern":
                 removed_count += 1
                 continue
             retained_history.append(message)
@@ -319,7 +315,7 @@ class MaisakaReasoningEngine:
             timestamp=datetime.now(),
             reference_type=ReferenceMessageType.BEHAVIOR_PATTERN,
             remaining_uses_value=None,
-            display_prefix=BEHAVIOR_REFERENCE_DISPLAY_PREFIX,
+            display_prefix="[行为表现参考]",
         )
         if history is None:
             self._runtime._chat_history.append(message)

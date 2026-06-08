@@ -156,7 +156,6 @@ export interface BehaviorRetrievalDebugRequest {
   domain_tags: string[]
   behavior_needs: string[]
   risk_flags: string[]
-  retrieval_query: string
   max_count: number
 }
 

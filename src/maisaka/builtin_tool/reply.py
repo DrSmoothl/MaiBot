@@ -83,15 +83,6 @@ def _build_send_result(
     }
 
 
-def _get_selected_expression_habits(reply_result: ReplyGenerationResult) -> str:
-    """读取 replyer 本轮实际使用的表达方式说明。"""
-
-    extra = reply_result.metrics.extra
-    if not isinstance(extra, dict):
-        return ""
-    return str(extra.get("selected_expression_habits") or "").strip()
-
-
 async def handle_tool(
     tool_ctx: BuiltinToolRuntimeContext,
     invocation: ToolInvocation,
@@ -270,10 +261,6 @@ async def handle_tool(
 
     if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
-    tool_ctx.append_replyer_expression_annotation(
-        selected_expression_ids=reply_result.selected_expression_ids,
-        expression_habits=_get_selected_expression_habits(reply_result),
-    )
     reply_metadata["sent_message_ids"] = sent_message_ids
     reply_metadata["send_results"] = send_results
     track_reply_effect = getattr(tool_ctx.runtime, "track_reply_effect", None)

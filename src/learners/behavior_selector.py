@@ -37,6 +37,32 @@ class BehaviorPatternRetrievalResult:
 class BehaviorPatternSelector:
     """根据当前 planner 上下文挑选可选行为表现参考。"""
 
+    @staticmethod
+    def _build_compact_scenario_text(scenario_profile: BehaviorScenarioProfile) -> str:
+        if not scenario_profile.has_signal:
+            return "无可用场景画像。"
+
+        lines = []
+        if scenario_profile.summary:
+            lines.append(f"场景摘要：{scenario_profile.summary}")
+        if scenario_profile.user_intent:
+            lines.append(f"用户意图：{scenario_profile.user_intent}")
+        if scenario_profile.conversation_phase:
+            lines.append(f"对话阶段：{scenario_profile.conversation_phase}")
+        if scenario_profile.behavior_needs:
+            lines.append(f"当前需要：{'；'.join(scenario_profile.behavior_needs[:3])}")
+        if scenario_profile.risk_flags:
+            lines.append(f"注意边界：{'；'.join(scenario_profile.risk_flags[:2])}")
+        return "\n".join(lines) if lines else "无可用场景画像。"
+
+    @staticmethod
+    def _format_priority_label(index: int, total_count: int) -> str:
+        if index <= 1:
+            return "高"
+        if total_count <= 2 or index <= 2:
+            return "中"
+        return "低"
+
     def _can_use_behaviors(self, session_id: str) -> bool:
         try:
             use_behavior, _ = BehaviorConfigUtils.get_behavior_config_for_chat(session_id)
@@ -311,43 +337,23 @@ class BehaviorPatternSelector:
         scenario_profile: BehaviorScenarioProfile,
     ) -> str:
         reference_items: list[str] = []
+        total_count = len(behaviors)
         for index, behavior in enumerate(behaviors, start=1):
             behavior_id = behavior.get("id")
             trigger = str(behavior.get("trigger") or "").strip()
             action = str(behavior.get("action") or "").strip()
             outcome = str(behavior.get("outcome") or "").strip()
-            actor_type = str(behavior.get("actor_type") or "other_user").strip()
-            learning_type = str(behavior.get("learning_type") or "observed_behavior").strip()
-            if actor_type == "maibot_self" and learning_type == "self_reflection":
-                source_label = "麦麦自身反馈路径，用于参考过去自身行为与结果"
-            elif actor_type == "group_collective":
-                source_label = "群体观察学习路径，只作为人类互动模式参考"
-            else:
-                source_label = "他人观察学习路径，只作为人类互动模式参考"
-            scene_graph_score = behavior.get("scene_graph_score")
-            context_match_score = behavior.get("context_match_score")
-            score_parts = []
-            if scene_graph_score is not None:
-                score_parts.append(f"scene_graph_score={scene_graph_score}")
-            if context_match_score is not None:
-                score_parts.append(f"context_match_score={context_match_score}")
-            score_text = f"\n匹配分数：{', '.join(score_parts)}" if score_parts else ""
+            priority_label = BehaviorPatternSelector._format_priority_label(index, total_count)
             reference_items.append(
                 f"{index}. <behavior_pattern_reference id=\"{behavior_id}\">\n"
-                f"路径类型：{source_label}\n"
-                f"actor_type={actor_type}, learning_type={learning_type}\n"
-                f"场景：{trigger}\n"
+                f"优先级：{priority_label}\n"
+                f"适用场景：{trigger}\n"
                 f"行为：{action}\n"
-                f"预期结果：{outcome}"
-                f"{score_text}\n"
+                f"预期结果：{outcome}\n"
                 "</behavior_pattern_reference>"
             )
 
-        scenario_text = (
-            scenario_profile.to_prompt_text()
-            if scenario_profile.has_signal
-            else "无可用场景画像。"
-        )
+        scenario_text = BehaviorPatternSelector._build_compact_scenario_text(scenario_profile)
         return (
             "<behavior_pattern_reference_group>\n"
             "以下是基于本轮 planner 已裁切上下文召回的行为表现参考，不是强制任务；"
@@ -355,7 +361,6 @@ class BehaviorPatternSelector:
             f"当前场景画像：\n{scenario_text}\n\n"
             "候选行为表现：\n"
             f"{chr(10).join(reference_items)}\n\n"
-            "观察学习路径用于理解他人或群体行为；自身反馈路径用于参考麦麦过去的自身行为与结果。\n"
             "</behavior_pattern_reference_group>"
         )
 

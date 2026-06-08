@@ -47,8 +47,8 @@ export interface ExperimentalConfig {
 export interface TargetItem {
   platform: string
   item_id: string
-  type?: 'group' | 'private'
   rule_type?: 'group' | 'private'
+  type?: 'group' | 'private'
 }
 
 export interface LearningItem {
@@ -65,7 +65,8 @@ export interface LearningItem {
 
 export interface ChatStreamGroup {
   targets?: TargetItem[]
-  expression_groups: TargetItem[]
+  expression_groups?: TargetItem[]
+  jargon_groups?: TargetItem[]
 }
 
 export type ExpressionGroup = ChatStreamGroup
