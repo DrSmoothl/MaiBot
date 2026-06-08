@@ -270,16 +270,6 @@ export function EmojiManagementPage() {
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
-      <div className="mb-4 flex justify-end sm:mb-6">
-        <Button
-          onClick={() => setUploadDialogOpen(true)}
-          className="gap-2"
-        >
-          <Upload className="h-4 w-4" />
-          上传表情包
-        </Button>
-      </div>
-
       <ScrollArea className="flex-1">
         <div className="space-y-4 sm:space-y-6 pr-4">
           {/* 统计卡片 */}
@@ -454,6 +444,15 @@ export function EmojiManagementPage() {
                       className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`}
                     />
                     刷新
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    onClick={() => setUploadDialogOpen(true)}
+                    className="gap-2"
+                  >
+                    <Upload className="h-4 w-4" />
+                    上传表情包
                   </Button>
 
                   {selectedIds.size > 0 && (

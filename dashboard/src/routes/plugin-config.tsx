@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { DraftNumberInput } from '@/components/ui/draft-number-input'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,6 +17,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ListFieldEditor } from '@/components/ListFieldEditor'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { CodeEditor } from '@/components/CodeEditor'
+import { useTheme } from '@/components/use-theme'
 import { parse as parseToml } from 'smol-toml'
 import {
   Select,
@@ -34,9 +36,9 @@ import {
 } from '@/components/ui/dialog'
 import {
   Settings,
-  Package,
   AlertCircle,
-  CheckCircle2,
+  Package,
+  ArrowUp,
   RefreshCw,
   ChevronRight,
   ChevronDown,
@@ -52,11 +54,13 @@ import {
   RotateCw,
   Code2,
   Layout,
+  Trash2,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { RestartOverlay } from '@/components/restart-overlay'
 import {
+  fetchPluginList,
   getInstalledPlugins,
   getPluginConfigSchema,
   getPluginConfig,
@@ -65,12 +69,17 @@ import {
   updatePluginConfigRaw,
   resetPluginConfig,
   togglePlugin,
+  uninstallPlugin,
+  updatePlugin,
   type InstalledPlugin,
+  type PluginLoadProgress,
   type PluginConfigSchema,
   type ConfigFieldSchema,
   type ConfigSectionSchema,
   type ItemFieldDefinition,
 } from '@/lib/plugin-api'
+import type { PluginInfo } from '@/types/plugin'
+import { pluginProgressClient } from '@/lib/plugin-progress-client'
 import { PluginIcon } from './plugins/PluginIcon'
 import { getPluginTypeLabel } from './plugins/types'
 
@@ -979,6 +988,21 @@ function getInitialPluginConfigTarget(): { pluginId: string | null; tabId: strin
   }
 }
 
+function comparePluginVersions(currentVersion: string, latestVersion: string): number {
+  const currentParts = currentVersion.trim().split('.').map(part => Number.parseInt(part, 10) || 0)
+  const latestParts = latestVersion.trim().split('.').map(part => Number.parseInt(part, 10) || 0)
+  const maxLength = Math.max(currentParts.length, latestParts.length)
+
+  for (let index = 0; index < maxLength; index++) {
+    const currentPart = currentParts[index] || 0
+    const latestPart = latestParts[index] || 0
+    if (latestPart > currentPart) return 1
+    if (latestPart < currentPart) return -1
+  }
+
+  return 0
+}
+
 export function PluginConfigPage() {
   return (
     <RestartProvider>
@@ -990,12 +1014,23 @@ export function PluginConfigPage() {
 // 内部组件：实际内容
 function PluginConfigPageContent() {
   const { toast } = useToast()
+  const { themeConfig } = useTheme()
   const initialTarget = getInitialPluginConfigTarget()
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+  const [showUpdateOnly, setShowUpdateOnly] = useState(false)
   const [selectedPlugin, setSelectedPlugin] = useState<InstalledPlugin | null>(null)
   const [selectedPluginTab, setSelectedPluginTab] = useState<string | undefined>(initialTarget.tabId ?? undefined)
+  const [actingPluginId, setActingPluginId] = useState<string | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingPlugin, setDeletingPlugin] = useState<InstalledPlugin | null>(null)
+  const [deleteProgress, setDeleteProgress] = useState<PluginLoadProgress | null>(null)
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
+  const [updatingPlugin, setUpdatingPlugin] = useState<InstalledPlugin | null>(null)
+  const [updateProgress, setUpdateProgress] = useState<PluginLoadProgress | null>(null)
+  const [marketPluginsById, setMarketPluginsById] = useState<Record<string, PluginInfo>>({})
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
 
   const openPluginConfig = (plugin: InstalledPlugin, tabId?: string | null) => {
     setSelectedPlugin(plugin)
@@ -1044,10 +1079,73 @@ function PluginConfigPageContent() {
     }
   }
 
+  const checkPluginUpdates = async () => {
+    setCheckingUpdates(true)
+    try {
+      const marketResult = await fetchPluginList()
+      if (!marketResult.success) {
+        console.warn('加载插件市场版本信息失败:', marketResult.error)
+        setMarketPluginsById({})
+        return
+      }
+
+      const nextMarketPluginsById: Record<string, PluginInfo> = {}
+      for (const marketPlugin of marketResult.data) {
+        nextMarketPluginsById[marketPlugin.id] = marketPlugin
+        if (marketPlugin.manifest.id) {
+          nextMarketPluginsById[marketPlugin.manifest.id] = marketPlugin
+        }
+      }
+      setMarketPluginsById(nextMarketPluginsById)
+    } catch (error) {
+      console.warn('加载插件市场版本信息失败:', error)
+      setMarketPluginsById({})
+    } finally {
+      setCheckingUpdates(false)
+    }
+  }
+
   useEffect(() => {
     loadPlugins()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!loading) {
+      void checkPluginUpdates()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
+
+  useEffect(() => {
+    let unsubscribe: (() => Promise<void>) | null = null
+    let disposed = false
+
+    void pluginProgressClient.subscribe((progress) => {
+      if (disposed) {
+        return
+      }
+      if (progress.operation === 'uninstall' && deletingPlugin && progress.plugin_id === deletingPlugin.id) {
+        setDeleteProgress(progress)
+      }
+      if (progress.operation === 'update' && updatingPlugin && progress.plugin_id === updatingPlugin.id) {
+        setUpdateProgress(progress)
+      }
+    }).then((cleanup) => {
+      if (disposed) {
+        void cleanup()
+        return
+      }
+      unsubscribe = cleanup
+    })
+
+    return () => {
+      disposed = true
+      if (unsubscribe) {
+        void unsubscribe()
+      }
+    }
+  }, [deletingPlugin, updatingPlugin])
 
   // 过滤插件
   const filteredPlugins = plugins.filter(plugin => {
@@ -1072,9 +1170,32 @@ function PluginConfigPageContent() {
   const isPluginLoadFailed = (plugin: InstalledPlugin) => !isPluginDisabled(plugin) && !isPluginLoadSuccess(plugin)
   const installedCount = plugins.length
   const disabledCount = plugins.filter(isPluginDisabled).length
-  const enabledCount = installedCount - disabledCount
   const loadSuccessCount = plugins.filter(isPluginLoadSuccess).length
   const loadFailedCount = plugins.filter(isPluginLoadFailed).length
+  const enabledCount = loadSuccessCount
+  const loadTotalCount = loadSuccessCount + loadFailedCount
+  const loadSuccessPercent = loadTotalCount > 0 ? (loadSuccessCount / loadTotalCount) * 100 : 0
+  const loadFailedPercent = loadTotalCount > 0 ? (loadFailedCount / loadTotalCount) * 100 : 0
+  const isModernDashboardStyle = themeConfig.dashboardStyle === 'modern'
+  const isFutureRetroDashboardStyle = themeConfig.dashboardStyle === 'future-retro'
+  const getPluginStatusBarClassName = (plugin: InstalledPlugin) => {
+    if (isPluginDisabled(plugin)) {
+      return 'bg-muted-foreground/45'
+    }
+    if (isPluginLoadFailed(plugin)) {
+      return 'bg-red-500'
+    }
+    return 'bg-emerald-500'
+  }
+  const getPluginStatusLabel = (plugin: InstalledPlugin) => {
+    if (isPluginDisabled(plugin)) {
+      return '已禁用'
+    }
+    if (isPluginLoadFailed(plugin)) {
+      return '启动失败'
+    }
+    return '已启用'
+  }
   const getPluginStatusMeta = (plugin: InstalledPlugin) => {
     if (isPluginDisabled(plugin)) {
       return { dotClassName: 'bg-muted-foreground/45', label: '已禁用' }
@@ -1083,6 +1204,258 @@ function PluginConfigPageContent() {
       return { dotClassName: 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.16)]', label: '加载成功' }
     }
     return { dotClassName: 'bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.16)]', label: '加载失败' }
+  }
+  const getPluginRepositoryUrl = (plugin: InstalledPlugin): string | undefined => {
+    const marketPlugin = marketPluginsById[plugin.id] || (plugin.manifest.id ? marketPluginsById[plugin.manifest.id] : undefined)
+    const urls = plugin.manifest.urls as { repository?: string } | undefined
+    return plugin.manifest.repository_url || urls?.repository || marketPlugin?.manifest.repository_url || marketPlugin?.manifest.urls?.repository
+  }
+  const getPluginUpdateState = (plugin: InstalledPlugin): { canUpdate: boolean; hasUpdate: boolean; title?: string } => {
+    if (checkingUpdates) {
+      return { canUpdate: false, hasUpdate: false, title: '正在检查更新' }
+    }
+
+    const marketPlugin = marketPluginsById[plugin.id] || (plugin.manifest.id ? marketPluginsById[plugin.manifest.id] : undefined)
+    if (!marketPlugin) {
+      return { canUpdate: false, hasUpdate: false, title: '插件市场中没有找到该插件，无法判断新版本' }
+    }
+
+    if (!getPluginRepositoryUrl(plugin)) {
+      return { canUpdate: false, hasUpdate: false, title: '插件清单中没有仓库地址，无法更新/升级' }
+    }
+
+    const currentVersion = plugin.manifest.version
+    const latestVersion = marketPlugin.manifest.version
+    if (comparePluginVersions(currentVersion, latestVersion) <= 0) {
+      return { canUpdate: false, hasUpdate: false, title: '当前已是最新版本' }
+    }
+
+    return { canUpdate: true, hasUpdate: true, title: `发现新版本 v${latestVersion}` }
+  }
+  const visiblePlugins = showUpdateOnly
+    ? uniqueFilteredPlugins.filter((plugin) => getPluginUpdateState(plugin).hasUpdate)
+    : uniqueFilteredPlugins
+
+  const stopPluginActionEvent = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  const handleTogglePlugin = async (plugin: InstalledPlugin, event: React.MouseEvent<HTMLButtonElement>) => {
+    stopPluginActionEvent(event)
+    setActingPluginId(plugin.id)
+    try {
+      const toggleResult = await togglePlugin(plugin.id)
+      if (!toggleResult.success) {
+        toast({
+          title: '切换插件状态失败',
+          description: toggleResult.error,
+          variant: 'destructive'
+        })
+        return
+      }
+
+      toast({
+        title: toggleResult.data.enabled ? '插件已启动' : '插件已关闭',
+        description: toggleResult.data.message || `${plugin.manifest.name} 状态已更新`
+      })
+      await loadPlugins()
+    } catch (error) {
+      toast({
+        title: '切换插件状态失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive'
+      })
+    } finally {
+      setActingPluginId(null)
+    }
+  }
+
+  const openUpdatePluginDialog = (plugin: InstalledPlugin, event: React.MouseEvent<HTMLButtonElement>) => {
+    stopPluginActionEvent(event)
+    setUpdatingPlugin(plugin)
+    setUpdateProgress(null)
+    setUpdateDialogOpen(true)
+  }
+
+  const closeUpdatePluginDialog = () => {
+    if (updateProgress?.stage === 'loading') {
+      return
+    }
+    setUpdateDialogOpen(false)
+    setUpdatingPlugin(null)
+    setUpdateProgress(null)
+  }
+
+  const handleConfirmUpdatePlugin = async () => {
+    if (!updatingPlugin) return
+
+    const repositoryUrl = getPluginRepositoryUrl(updatingPlugin)
+    if (!repositoryUrl) {
+      setUpdateProgress({
+        operation: 'update',
+        stage: 'error',
+        progress: 0,
+        message: '插件清单中没有仓库地址，无法更新/升级',
+        error: '插件清单中没有仓库地址，无法更新/升级',
+        plugin_id: updatingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 0,
+      })
+      return
+    }
+
+    setActingPluginId(updatingPlugin.id)
+    setUpdateProgress({
+      operation: 'update',
+      stage: 'loading',
+      progress: 0,
+      message: `正在准备更新 ${updatingPlugin.manifest.name}`,
+      plugin_id: updatingPlugin.id,
+      total_plugins: 1,
+      loaded_plugins: 0,
+    })
+    try {
+      const updateResult = await updatePlugin(updatingPlugin.id, repositoryUrl, 'main')
+      if (!updateResult.success) {
+        setUpdateProgress({
+          operation: 'update',
+          stage: 'error',
+          progress: 0,
+          message: updateResult.error || '更新插件失败',
+          error: updateResult.error || '更新插件失败',
+          plugin_id: updatingPlugin.id,
+          total_plugins: 1,
+          loaded_plugins: 0,
+        })
+        toast({
+          title: '更新插件失败',
+          description: updateResult.error,
+          variant: 'destructive'
+        })
+        return
+      }
+
+      toast({
+        title: '更新插件成功',
+        description: `${updatingPlugin.manifest.name} 已完成更新/升级`
+      })
+      setUpdateProgress({
+        operation: 'update',
+        stage: 'success',
+        progress: 100,
+        message: `${updatingPlugin.manifest.name} 已完成更新/升级`,
+        plugin_id: updatingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 1,
+      })
+      await loadPlugins()
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      setUpdateProgress({
+        operation: 'update',
+        stage: 'error',
+        progress: 0,
+        message: errorMessage,
+        error: errorMessage,
+        plugin_id: updatingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 0,
+      })
+      toast({
+        title: '更新插件失败',
+        description: errorMessage,
+        variant: 'destructive'
+      })
+    } finally {
+      setActingPluginId(null)
+    }
+  }
+
+  const openDeletePluginDialog = (plugin: InstalledPlugin, event: React.MouseEvent<HTMLButtonElement>) => {
+    stopPluginActionEvent(event)
+    setDeletingPlugin(plugin)
+    setDeleteProgress(null)
+    setDeleteDialogOpen(true)
+  }
+
+  const closeDeletePluginDialog = () => {
+    if (deleteProgress?.stage === 'loading') {
+      return
+    }
+    setDeleteDialogOpen(false)
+    setDeletingPlugin(null)
+    setDeleteProgress(null)
+  }
+
+  const handleConfirmDeletePlugin = async () => {
+    if (!deletingPlugin) return
+
+    setActingPluginId(deletingPlugin.id)
+    setDeleteProgress({
+      operation: 'uninstall',
+      stage: 'loading',
+      progress: 0,
+      message: `正在准备删除 ${deletingPlugin.manifest.name}`,
+      plugin_id: deletingPlugin.id,
+      total_plugins: 1,
+      loaded_plugins: 0,
+    })
+    try {
+      const uninstallResult = await uninstallPlugin(deletingPlugin.id)
+      if (!uninstallResult.success) {
+        setDeleteProgress({
+          operation: 'uninstall',
+          stage: 'error',
+          progress: 0,
+          message: uninstallResult.error || '删除插件失败',
+          error: uninstallResult.error || '删除插件失败',
+          plugin_id: deletingPlugin.id,
+          total_plugins: 1,
+          loaded_plugins: 0,
+        })
+        toast({
+          title: '删除插件失败',
+          description: uninstallResult.error,
+          variant: 'destructive'
+        })
+        return
+      }
+
+      toast({
+        title: '删除插件成功',
+        description: `${deletingPlugin.manifest.name} 已删除`
+      })
+      setDeleteProgress({
+        operation: 'uninstall',
+        stage: 'success',
+        progress: 100,
+        message: `${deletingPlugin.manifest.name} 已删除`,
+        plugin_id: deletingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 1,
+      })
+      await loadPlugins()
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      setDeleteProgress({
+        operation: 'uninstall',
+        stage: 'error',
+        progress: 0,
+        message: errorMessage,
+        error: errorMessage,
+        plugin_id: deletingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 0,
+      })
+      toast({
+        title: '删除插件失败',
+        description: errorMessage,
+        variant: 'destructive'
+      })
+    } finally {
+      setActingPluginId(null)
+    }
   }
 
   // 如果选中了插件，显示配置编辑器
@@ -1106,128 +1479,434 @@ function PluginConfigPageContent() {
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-        {/* 标题 */}
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">插件配置</h1>
-            <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">
-              管理和配置已安装的插件
-            </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-0 flex-1 basis-72">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="搜索插件..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
           </div>
-          <Button variant="outline" size="sm" onClick={loadPlugins}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            刷新
+          <div
+            data-dashboard-input="true"
+            className="border-input flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-md border bg-transparent px-3 py-1 text-sm font-medium shadow-sm transition-colors"
+          >
+            <Label htmlFor="show-update-only" className="cursor-pointer text-sm font-medium">
+              有更新
+            </Label>
+            <Switch
+              id="show-update-only"
+              checked={showUpdateOnly}
+              disabled={checkingUpdates}
+              onCheckedChange={setShowUpdateOnly}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={loadPlugins}
+            aria-label="刷新"
+            title="刷新"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
         </div>
 
         {/* 统计信息 */}
-        <Card>
-          <CardContent className="space-y-3 p-4">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-              <span className="flex items-center gap-2">
-                <Package className="h-4 w-4 text-muted-foreground" />
-                已安装 <strong>{installedCount}</strong> 个插件
+        {isModernDashboardStyle ? (
+          <Card>
+            <CardContent className="space-y-3 p-4">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                <span className="flex items-center gap-2">
+                  <Package className="h-4 w-4 text-muted-foreground" />
+                  已安装 <strong>{installedCount}</strong> 个插件
+                </span>
+                <span>已启用 <strong className="text-emerald-600">{enabledCount}</strong> 个</span>
+                <span>已禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个</span>
+              </div>
+              <div
+                className="flex items-center gap-3 border-t pt-3 text-sm"
+                aria-label={`加载成功 ${loadSuccessCount} 个，加载失败 ${loadFailedCount} 个`}
+              >
+                <span className="sr-only">加载成功 {loadSuccessCount} 个，加载失败 {loadFailedCount} 个</span>
+                <strong className="w-8 text-right text-emerald-600">{loadSuccessCount}</strong>
+                <div className="flex h-3 min-w-28 flex-1 overflow-hidden bg-muted" aria-hidden="true">
+                  <div className="bg-emerald-500" style={{ width: `${loadSuccessPercent}%` }} />
+                  <div className="bg-red-500" style={{ width: `${loadFailedPercent}%` }} />
+                </div>
+                <strong className="w-8 text-red-600">{loadFailedCount}</strong>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            <div
+              className="space-y-2"
+              aria-label={`已安装 ${installedCount} 个插件，已启用 ${enabledCount} 个，已禁用 ${disabledCount} 个，启动失败 ${loadFailedCount} 个`}
+            >
+              <span className="sr-only">
+                已启用 {enabledCount} 个，已禁用 {disabledCount} 个，启动失败 {loadFailedCount} 个
               </span>
-              <span>已启用 <strong className="text-emerald-600">{enabledCount}</strong> 个</span>
-              <span>已禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个</span>
+              <div className="flex h-3 w-full overflow-hidden bg-muted" aria-hidden="true">
+                {plugins.length > 0 ? (
+                  plugins.map((plugin, index) => (
+                    <div
+                      key={`${plugin.id}-${index}`}
+                      className={`min-w-0 flex-1 ${getPluginStatusBarClassName(plugin)} ${
+                        index < plugins.length - 1 ? 'border-r border-background' : ''
+                      }`}
+                      title={`${plugin.manifest.name}：${getPluginStatusLabel(plugin)}`}
+                    />
+                  ))
+                ) : (
+                  <div className="h-full flex-1 bg-muted-foreground/20" />
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  插件 <strong className="text-foreground">{installedCount}</strong>个
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  启用 <strong className="text-emerald-600">{enabledCount}</strong> 个
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground/45" />
+                  禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-red-500" />
+                  启动失败 <strong className="text-red-600">{loadFailedCount}</strong> 个
+                </span>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-3 text-sm">
-              <span className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                加载成功 <strong className="text-emerald-600">{loadSuccessCount}</strong> 个
-              </span>
-              <span className="flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-600" />
-                加载失败 <strong className="text-red-600">{loadFailedCount}</strong> 个
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 搜索框 */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索插件..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
+          </div>
+        )}
 
         {/* 插件列表 */}
-        <Card>
-          <CardHeader>
-            <CardTitle>已安装的插件</CardTitle>
-            <CardDescription>点击插件查看和编辑配置</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
-            ) : uniqueFilteredPlugins.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 space-y-4">
-                <Package className="h-16 w-16 text-muted-foreground/50" />
-                <div className="text-center space-y-2">
-                  <p className="text-lg font-medium text-muted-foreground">
-                    {searchQuery ? '没有找到匹配的插件' : '暂无已安装的插件'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {searchQuery ? '尝试其他搜索关键词' : '前往插件市场安装插件'}
-                  </p>
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : visiblePlugins.length === 0 ? (
+          <div className="flex flex-col items-center justify-center space-y-4 py-12">
+            <Package className="h-16 w-16 text-muted-foreground/50" />
+            <div className="space-y-2 text-center">
+              <p className="text-lg font-medium text-muted-foreground">
+                {showUpdateOnly ? '暂无可更新插件' : searchQuery ? '没有找到匹配的插件' : '暂无已安装的插件'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {showUpdateOnly ? '当前已安装插件没有发现新版本' : searchQuery ? '尝试其他搜索关键词' : '前往插件市场安装插件'}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {visiblePlugins.map(plugin => {
+              const statusMeta = getPluginStatusMeta(plugin)
+              const pluginActing = actingPluginId === plugin.id
+              const pluginDisabled = isPluginDisabled(plugin)
+              const updateState = getPluginUpdateState(plugin)
+              return (
+              <div
+                key={plugin.id}
+                className={`relative flex min-h-32 cursor-pointer flex-col justify-between gap-4 p-5 transition-colors hover:bg-muted/50 sm:min-h-0 sm:flex-row sm:items-center sm:p-4 ${
+                  isFutureRetroDashboardStyle ? 'border-[3px] border-[#0b5a66]' : 'rounded-lg border'
+                } ${isPluginDisabled(plugin) ? 'opacity-70' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => openPluginConfig(plugin)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPluginConfig(plugin) } }}
+              >
+                <div className="flex min-w-0 items-start gap-3 sm:items-center">
+                  <span
+                    className={`mt-4 flex-shrink-0 sm:mt-0 ${
+                      isFutureRetroDashboardStyle ? 'h-12 w-2' : 'h-2.5 w-2.5 rounded-full'
+                    } ${statusMeta.dotClassName}`}
+                    title={statusMeta.label}
+                    aria-label={statusMeta.label}
+                  />
+                  <PluginIcon pluginId={plugin.id} manifest={plugin.manifest} installed className="h-12 w-12 sm:h-10 sm:w-10" />
+                  <div className="min-w-0 flex-1 space-y-2 sm:space-y-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <h3 className="min-w-0 break-words text-sm font-medium leading-snug sm:truncate sm:text-base">
+                        {plugin.manifest.name}
+                      </h3>
+                      <Badge variant="secondary" className="text-xs flex-shrink-0">
+                        v{plugin.manifest.version}
+                      </Badge>
+                      <Badge variant="outline" className="text-xs flex-shrink-0">
+                        {getPluginTypeLabel(plugin)}
+                      </Badge>
+                    </div>
+                    <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:truncate sm:leading-normal">
+                      {plugin.manifest.description || '暂无描述'}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 border-t pt-3 sm:flex sm:flex-shrink-0 sm:items-center sm:justify-end sm:border-t-0 sm:pt-0">
+                  <Button variant="ghost" size="sm" className="min-w-24 sm:min-w-0">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pluginActing}
+                    onClick={(event) => handleTogglePlugin(plugin, event)}
+                  >
+                    {pluginActing ? (
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Power className="mr-1 h-4 w-4" />
+                    )}
+                    {pluginDisabled ? '启动' : '关闭'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="relative h-9 w-9 p-0"
+                    disabled={pluginActing || !updateState.canUpdate}
+                    title={updateState.title}
+                    aria-label={updateState.title || '更新/升级'}
+                    onClick={(event) => openUpdatePluginDialog(plugin, event)}
+                  >
+                    {updateState.hasUpdate && (
+                      <span
+                        className="absolute -right-1 -top-1 h-3 w-3 rounded-sm bg-yellow-400 ring-2 ring-background"
+                        aria-hidden="true"
+                      />
+                    )}
+                    {pluginActing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : checkingUpdates ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowUp className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-9 w-9 p-0"
+                    disabled={pluginActing}
+                    title="删除"
+                    aria-label="删除"
+                    onClick={(event) => openDeletePluginDialog(plugin, event)}
+                  >
+                    {pluginActing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </div>
               </div>
-            ) : (
-              <div className="space-y-3">
-                {uniqueFilteredPlugins.map(plugin => {
-                  const statusMeta = getPluginStatusMeta(plugin)
-                  return (
-                  <div
-                    key={plugin.id}
-                    className={`flex min-h-32 cursor-pointer flex-col justify-between gap-4 rounded-lg border p-5 transition-colors hover:bg-muted/50 sm:min-h-0 sm:flex-row sm:items-center sm:p-4 ${isPluginDisabled(plugin) ? 'opacity-70' : ''}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => openPluginConfig(plugin)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPluginConfig(plugin) } }}
-                  >
-                    <div className="flex min-w-0 items-start gap-3 sm:items-center">
-                      <span
-                        className={`mt-4 h-2.5 w-2.5 flex-shrink-0 rounded-full sm:mt-0 ${statusMeta.dotClassName}`}
-                        title={statusMeta.label}
-                        aria-label={statusMeta.label}
-                      />
-                      <PluginIcon pluginId={plugin.id} manifest={plugin.manifest} installed className="h-12 w-12 sm:h-10 sm:w-10" />
-                      <div className="min-w-0 flex-1 space-y-2 sm:space-y-1">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <h3 className="min-w-0 break-words text-sm font-medium leading-snug sm:truncate sm:text-base">
-                            {plugin.manifest.name}
-                          </h3>
-                          <Badge variant="secondary" className="text-xs flex-shrink-0">
-                            v{plugin.manifest.version}
-                          </Badge>
-                          <Badge variant="outline" className="text-xs flex-shrink-0">
-                            {getPluginTypeLabel(plugin)}
-                          </Badge>
-                        </div>
-                        <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:truncate sm:leading-normal">
-                          {plugin.manifest.description || '暂无描述'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex flex-shrink-0 items-center justify-end gap-2 border-t pt-3 sm:border-t-0 sm:pt-0">
-                      <Button variant="ghost" size="sm" className="min-w-24 sm:min-w-0">
-                        <Settings className="h-4 w-4" />
-                      </Button>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
+              )
+            })}
+          </div>
+        )}
+
+        <Dialog open={updateDialogOpen} onOpenChange={(open) => {
+          if (!open) {
+            closeUpdatePluginDialog()
+            return
+          }
+          setUpdateDialogOpen(true)
+        }}>
+          <DialogContent preventOutsideClose={updateProgress?.stage === 'loading'} hideCloseButton={updateProgress?.stage === 'loading'}>
+            <DialogHeader>
+              <DialogTitle>确认更新插件</DialogTitle>
+              <DialogDescription>
+                {updatingPlugin
+                  ? `即将更新 ${updatingPlugin.manifest.name}。更新过程中请保持麦麦运行。`
+                  : '即将更新插件。更新过程中请保持麦麦运行。'}
+              </DialogDescription>
+            </DialogHeader>
+
+            {updateProgress && (
+              <div className={`space-y-3 border p-3 ${
+                updateProgress.stage === 'success'
+                  ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20'
+                  : updateProgress.stage === 'error'
+                    ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
+                    : 'bg-muted/50'
+              }`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {updateProgress.stage === 'loading' ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    ) : updateProgress.stage === 'success' ? (
+                      <Info className="h-4 w-4 shrink-0 text-green-600" />
+                    ) : (
+                      <Info className="h-4 w-4 shrink-0 text-red-600" />
+                    )}
+                    <span className={`text-sm font-medium ${
+                      updateProgress.stage === 'success'
+                        ? 'text-green-700 dark:text-green-300'
+                        : updateProgress.stage === 'error'
+                          ? 'text-red-700 dark:text-red-300'
+                          : ''
+                    }`}>
+                      {updateProgress.stage === 'loading' && '正在更新'}
+                      {updateProgress.stage === 'success' && '更新完成'}
+                      {updateProgress.stage === 'error' && '更新失败'}
+                    </span>
                   </div>
-                  )
-                })}
+                  {updateProgress.stage !== 'error' && (
+                    <span className={`shrink-0 text-sm font-medium ${
+                      updateProgress.stage === 'success' ? 'text-green-700 dark:text-green-300' : ''
+                    }`}>
+                      {updateProgress.progress}%
+                    </span>
+                  )}
+                </div>
+                {updateProgress.stage !== 'error' && (
+                  <Progress
+                    value={updateProgress.progress}
+                    className={`h-2 ${updateProgress.stage === 'success' ? '[&>div]:bg-green-500' : ''}`}
+                  />
+                )}
+                <p className={`break-words text-sm ${
+                  updateProgress.stage === 'success'
+                    ? 'text-green-600 dark:text-green-400'
+                    : updateProgress.stage === 'error'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-muted-foreground'
+                }`}>
+                  {updateProgress.stage === 'error'
+                    ? (updateProgress.error || updateProgress.message || '更新失败')
+                    : updateProgress.message}
+                </p>
               </div>
             )}
-          </CardContent>
-        </Card>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={closeUpdatePluginDialog}
+                disabled={updateProgress?.stage === 'loading'}
+              >
+                {updateProgress?.stage === 'success' || updateProgress?.stage === 'error' ? '关闭' : '取消'}
+              </Button>
+              {updateProgress?.stage !== 'success' && updateProgress?.stage !== 'error' && (
+                <Button
+                  onClick={handleConfirmUpdatePlugin}
+                  disabled={!updatingPlugin || updateProgress?.stage === 'loading'}
+                >
+                  {updateProgress?.stage === 'loading' ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowUp className="mr-2 h-4 w-4" />
+                  )}
+                  {updateProgress?.stage === 'loading' ? '更新中' : '确认更新'}
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
+          if (!open) {
+            closeDeletePluginDialog()
+            return
+          }
+          setDeleteDialogOpen(true)
+        }}>
+          <DialogContent preventOutsideClose={deleteProgress?.stage === 'loading'} hideCloseButton={deleteProgress?.stage === 'loading'}>
+            <DialogHeader>
+              <DialogTitle>确认删除插件</DialogTitle>
+              <DialogDescription>
+                {deletingPlugin
+                  ? `即将删除 ${deletingPlugin.manifest.name}。删除后可从插件市场重新安装。`
+                  : '即将删除插件。删除后可从插件市场重新安装。'}
+              </DialogDescription>
+            </DialogHeader>
+
+            {deleteProgress && (
+              <div className={`space-y-3 border p-3 ${
+                deleteProgress.stage === 'success'
+                  ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20'
+                  : deleteProgress.stage === 'error'
+                    ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
+                    : 'bg-muted/50'
+              }`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {deleteProgress.stage === 'loading' ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    ) : deleteProgress.stage === 'success' ? (
+                      <Info className="h-4 w-4 shrink-0 text-green-600" />
+                    ) : (
+                      <Info className="h-4 w-4 shrink-0 text-red-600" />
+                    )}
+                    <span className={`text-sm font-medium ${
+                      deleteProgress.stage === 'success'
+                        ? 'text-green-700 dark:text-green-300'
+                        : deleteProgress.stage === 'error'
+                          ? 'text-red-700 dark:text-red-300'
+                          : ''
+                    }`}>
+                      {deleteProgress.stage === 'loading' && '正在删除'}
+                      {deleteProgress.stage === 'success' && '删除完成'}
+                      {deleteProgress.stage === 'error' && '删除失败'}
+                    </span>
+                  </div>
+                  {deleteProgress.stage !== 'error' && (
+                    <span className={`shrink-0 text-sm font-medium ${
+                      deleteProgress.stage === 'success' ? 'text-green-700 dark:text-green-300' : ''
+                    }`}>
+                      {deleteProgress.progress}%
+                    </span>
+                  )}
+                </div>
+                {deleteProgress.stage !== 'error' && (
+                  <Progress
+                    value={deleteProgress.progress}
+                    className={`h-2 ${deleteProgress.stage === 'success' ? '[&>div]:bg-green-500' : ''}`}
+                  />
+                )}
+                <p className={`break-words text-sm ${
+                  deleteProgress.stage === 'success'
+                    ? 'text-green-600 dark:text-green-400'
+                    : deleteProgress.stage === 'error'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-muted-foreground'
+                }`}>
+                  {deleteProgress.stage === 'error'
+                    ? (deleteProgress.error || deleteProgress.message || '删除失败')
+                    : deleteProgress.message}
+                </p>
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={closeDeletePluginDialog}
+                disabled={deleteProgress?.stage === 'loading'}
+              >
+                {deleteProgress?.stage === 'success' || deleteProgress?.stage === 'error' ? '关闭' : '取消'}
+              </Button>
+              {deleteProgress?.stage !== 'success' && deleteProgress?.stage !== 'error' && (
+                <Button
+                  variant="destructive"
+                  onClick={handleConfirmDeletePlugin}
+                  disabled={!deletingPlugin || deleteProgress?.stage === 'loading'}
+                >
+                  {deleteProgress?.stage === 'loading' ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  {deleteProgress?.stage === 'loading' ? '删除中' : '确认删除'}
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </ScrollArea>
   )

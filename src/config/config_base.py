@@ -140,7 +140,7 @@ class ConfigBase(BaseModel, AttrDocBase):
     # UI 分组元数据：子类可覆盖以声明所属 Tab 分组
     __ui_parent__: ClassVar[str] = ""  # 父配置类在 Config 中的字段名，空表示独立 Tab
     __ui_label__: ClassVar[str] = ""  # Tab 显示名称（仅做 Tab 主人时使用），空则使用 classDoc
-    __ui_icon__: ClassVar[str] = ""  # Tab 图标名称（Lucide 图标名）
+    __ui_advanced__: ClassVar[bool] = False  # 是否默认收起到 WebUI 配置页的“更多”Tab 中
 
     @classmethod
     def from_dict(cls, attribute_data: AttributeData, data: dict[str, Any]):

@@ -1,9 +1,14 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { format } from 'date-fns'
+import { zhCN } from 'date-fns/locale'
+import { BrainCircuit, Calendar as CalendarIcon, ChevronDown, ChevronUp, Download, Filter, Pause, Play, Search, Terminal, Trash2, Type, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
+
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Calendar } from '@/components/ui/calendar'
+import { Card } from '@/components/ui/card'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   Select,
   SelectContent,
@@ -11,21 +16,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Slider } from '@/components/ui/slider'
-import { Card } from '@/components/ui/card'
-import { Calendar } from '@/components/ui/calendar'
+import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { BrainCircuit, Search, Download, Filter, Trash2, Pause, Play, Calendar as CalendarIcon, X, Type, ChevronDown, ChevronUp, Terminal } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Slider } from '@/components/ui/slider'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { logWebSocket, type LogEntry } from '@/lib/log-websocket'
-import { format } from 'date-fns'
-import { zhCN } from 'date-fns/locale'
+import { getSetting, setSetting } from '@/lib/settings-manager'
+import { cn } from '@/lib/utils'
+
 import { ReasoningProcessPage } from './reasoning-process'
 
 // 字号配置
 type FontSize = 'xs' | 'sm' | 'base'
 type LogLevelFilter = LogEntry['level'] | 'all'
+
+const LINE_SPACING_MAX = 12
+const LINE_SPACING_MIN = 0
+const COLUMN_WIDTH_EXTRA_MAX = 96
+const COLUMN_WIDTH_EXTRA_MIN = 0
 
 const fontSizeConfig: Record<FontSize, { label: string; rowHeight: number; class: string }> = {
   xs: { label: '小', rowHeight: 28, class: 'text-[10px] sm:text-xs' },
@@ -107,6 +115,18 @@ function formatLogLevel(level: LogEntry['level']) {
   return level.slice(0, 4)
 }
 
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function isFontSize(value: string): value is FontSize {
+  return value in fontSizeConfig
+}
+
+function isLogLevelFilter(value: string): value is LogLevelFilter {
+  return value === 'all' || value in levelPriority
+}
+
 interface LogTerminalPaneProps {
   toolbarContainerId: string
   toolbarVisible: boolean
@@ -115,15 +135,25 @@ interface LogTerminalPaneProps {
 function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPaneProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [levelFilter, setLevelFilter] = useState<LogLevelFilter>('INFO')
+  const [levelFilter, setLevelFilter] = useState<LogLevelFilter>(() => {
+    const savedLevelFilter = getSetting('logLevelFilter')
+    return isLogLevelFilter(savedLevelFilter) ? savedLevelFilter : 'INFO'
+  })
   const [moduleFilter, setModuleFilter] = useState<string>('all')
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined)
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined)
-  const [autoScroll, setAutoScroll] = useState(true)
+  const [autoScroll, setAutoScroll] = useState(() => getSetting('logAutoScroll'))
   const [connected, setConnected] = useState(false)
-  const [fontSize, setFontSize] = useState<FontSize>('xs') // 默认使用小字号以显示更多信息
-  const [lineSpacing, setLineSpacing] = useState(4) // 行间距，默认4px（紧凑）
-  const [columnWidthExtra, setColumnWidthExtra] = useState(0)
+  const [fontSize, setFontSize] = useState<FontSize>(() => {
+    const savedFontSize = getSetting('logFontSize')
+    return isFontSize(savedFontSize) ? savedFontSize : 'xs'
+  }) // 默认使用小字号以显示更多信息
+  const [lineSpacing, setLineSpacing] = useState(() =>
+    clampNumber(getSetting('logLineSpacing'), LINE_SPACING_MIN, LINE_SPACING_MAX)
+  ) // 行间距，默认4px（紧凑）
+  const [columnWidthExtra, setColumnWidthExtra] = useState(() =>
+    clampNumber(getSetting('logColumnWidthExtra'), COLUMN_WIDTH_EXTRA_MIN, COLUMN_WIDTH_EXTRA_MAX)
+  )
   const [filtersOpen, setFiltersOpen] = useState(false) // 控制折叠面板，默认折叠
   const [toolbarRoot, setToolbarRoot] = useState<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement>(null)
@@ -204,7 +234,31 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
 
   // 切换自动滚动
   const toggleAutoScroll = () => {
-    setAutoScroll(!autoScroll)
+    const nextAutoScroll = !autoScroll
+    setAutoScroll(nextAutoScroll)
+    setSetting('logAutoScroll', nextAutoScroll)
+  }
+
+  const handleLevelFilterChange = (level: LogLevelFilter) => {
+    setLevelFilter(level)
+    setSetting('logLevelFilter', level)
+  }
+
+  const handleFontSizeChange = (size: FontSize) => {
+    setFontSize(size)
+    setSetting('logFontSize', size)
+  }
+
+  const handleLineSpacingChange = ([value]: number[]) => {
+    const nextValue = clampNumber(value, LINE_SPACING_MIN, LINE_SPACING_MAX)
+    setLineSpacing(nextValue)
+    setSetting('logLineSpacing', nextValue)
+  }
+
+  const handleColumnWidthExtraChange = ([value]: number[]) => {
+    const nextValue = clampNumber(value, COLUMN_WIDTH_EXTRA_MIN, COLUMN_WIDTH_EXTRA_MAX)
+    setColumnWidthExtra(nextValue)
+    setSetting('logColumnWidthExtra', nextValue)
   }
 
   // 清除时间筛选
@@ -402,7 +456,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
         <CollapsibleContent className="w-full space-y-2 lg:max-w-[760px]">
                 {/* 级别和模块筛选 */}
                 <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-                  <Select value={levelFilter} onValueChange={(value) => setLevelFilter(value as LogLevelFilter)}>
+                  <Select value={levelFilter} onValueChange={(value) => handleLevelFilterChange(value as LogLevelFilter)}>
                     <SelectTrigger className="w-full sm:flex-1 h-8 text-xs">
                       <Filter className="h-3.5 w-3.5 mr-1.5" />
                       <SelectValue placeholder="最低级别" />
@@ -516,7 +570,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                           key={size}
                           variant={fontSize === size ? 'default' : 'outline'}
                           size="sm"
-                          onClick={() => setFontSize(size)}
+                          onClick={() => handleFontSizeChange(size)}
                           className="h-6 px-2 text-xs"
                         >
                           {fontSizeConfig[size].label}
@@ -530,9 +584,9 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                     <span className="text-xs text-muted-foreground whitespace-nowrap">行距</span>
                     <Slider
                       value={[lineSpacing]}
-                      onValueChange={([value]) => setLineSpacing(value)}
-                      min={0}
-                      max={12}
+                      onValueChange={handleLineSpacingChange}
+                      min={LINE_SPACING_MIN}
+                      max={LINE_SPACING_MAX}
                       step={2}
                       className="flex-1"
                     />
@@ -543,9 +597,9 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                     <span className="text-xs text-muted-foreground whitespace-nowrap">列宽</span>
                     <Slider
                       value={[columnWidthExtra]}
-                      onValueChange={([value]) => setColumnWidthExtra(value)}
-                      min={0}
-                      max={96}
+                      onValueChange={handleColumnWidthExtraChange}
+                      min={COLUMN_WIDTH_EXTRA_MIN}
+                      max={COLUMN_WIDTH_EXTRA_MAX}
                       step={8}
                       className="flex-1"
                     />
@@ -741,7 +795,11 @@ export function LogViewerPage({ defaultTab = 'terminal' }: LogViewerPageProps) {
         <LogTerminalPane toolbarContainerId={toolbarContainerId} toolbarVisible={activeTab === 'terminal'} />
       </TabsContent>
       <TabsContent value="reasoning" className="m-0 min-h-0 flex-1 overflow-hidden p-3 lg:p-4">
-        <ReasoningProcessPage embedded />
+        <ReasoningProcessPage
+          embedded
+          toolbarContainerId={toolbarContainerId}
+          toolbarVisible={activeTab === 'reasoning'}
+        />
       </TabsContent>
     </Tabs>
   )

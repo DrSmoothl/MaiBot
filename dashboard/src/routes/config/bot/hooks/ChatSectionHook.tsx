@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { DynamicField } from '@/components/dynamic-form'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,6 +30,7 @@ import {
 } from '@/components/ui/popover'
 import { Plus, Trash2, Eye, Clock } from 'lucide-react'
 import type { FieldHookComponent } from '@/lib/field-hooks'
+import type { ConfigSchema, FieldSchema } from '@/types/config-schema'
 import type { ChatConfig } from '../types'
 
 // 时间选择组件
@@ -253,16 +255,96 @@ const RulePreview = React.memo(function RulePreview({ rule }: { rule: { target: 
   )
 })
 
+const MANUAL_CHAT_FIELD_NAMES = new Set([
+  'talk_value',
+  'think_mode',
+  'mentioned_bot_reply',
+  'max_context_size',
+  'planner_smooth',
+  'plan_reply_log_max_per_chat',
+  'llm_quote',
+  'enable_talk_value_rules',
+  'talk_value_rules',
+])
+
+const resolveSchemaFields = (
+  schema: ConfigSchema | FieldSchema | undefined,
+  nestedSchema: ConfigSchema | undefined
+) => {
+  if (nestedSchema?.fields) {
+    return nestedSchema.fields
+  }
+
+  if (schema && 'fields' in schema) {
+    return schema.fields
+  }
+
+  return []
+}
+
+function MetadataAdvancedFields({
+  advancedVisible,
+  config,
+  fieldPath,
+  nestedSchema,
+  schema,
+  updateConfig,
+}: {
+  advancedVisible: boolean
+  config: Record<string, unknown>
+  fieldPath: string
+  nestedSchema?: ConfigSchema
+  schema?: ConfigSchema | FieldSchema
+  updateConfig: (updates: Record<string, unknown>) => void
+}) {
+  if (!advancedVisible) {
+    return null
+  }
+
+  const advancedFields = resolveSchemaFields(schema, nestedSchema).filter(
+    (field) => field.advanced && !MANUAL_CHAT_FIELD_NAMES.has(field.name)
+  )
+
+  if (advancedFields.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="border-t pt-4 space-y-4">
+      <h4 className="text-sm font-semibold text-sky-700 dark:text-sky-300">高级配置</h4>
+      <div className="grid gap-4">
+        {advancedFields.map((field) => (
+          <DynamicField
+            key={field.name}
+            fieldPath={`${fieldPath}.${field.name}`}
+            schema={field}
+            value={config[field.name]}
+            onChange={(nextValue) => updateConfig({ [field.name]: nextValue })}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /**
  * ChatSection as a Field Hook Component
  * This component replaces the entire 'chat' nested config section rendering
  */
-export const ChatSectionHook: FieldHookComponent = ({ value, onChange }) => {
+export const ChatSectionHook: FieldHookComponent = ({
+  value,
+  onChange,
+  fieldPath,
+  nestedSchema,
+  schema,
+  advancedVisible = false,
+}) => {
   // Cast value to ChatConfig (assuming it's the entire chat config object)
   const config = value as ChatConfig
+  const configRecord = config as unknown as Record<string, unknown>
 
   // Helper to update config
-  const updateConfig = (updates: Partial<ChatConfig>) => {
+  const updateConfig = (updates: Record<string, unknown>) => {
     if (onChange) {
       onChange({ ...config, ...updates })
     }
@@ -365,6 +447,15 @@ export const ChatSectionHook: FieldHookComponent = ({ value, onChange }) => {
               }
             />
           </div>
+
+          <MetadataAdvancedFields
+            advancedVisible={advancedVisible}
+            config={configRecord}
+            fieldPath={fieldPath}
+            nestedSchema={nestedSchema}
+            schema={schema}
+            updateConfig={updateConfig}
+          />
 
           <div className="grid gap-2">
             <Label htmlFor="planner_smooth">规划器平滑</Label>

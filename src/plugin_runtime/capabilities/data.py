@@ -16,9 +16,10 @@ logger = get_logger("plugin_runtime.integration")
 class RuntimeDataCapabilityMixin:
     @staticmethod
     def _serialize_emoji_payload(emoji: "MaiEmoji") -> Optional[Dict[str, str]]:
+        from src.common.utils.image_path import resolve_stored_image_path
         from src.common.utils.utils_image import ImageUtils
 
-        emoji_base64 = ImageUtils.image_path_to_base64(str(emoji.full_path))
+        emoji_base64 = ImageUtils.image_path_to_base64(str(resolve_stored_image_path(emoji.full_path)))
         if not emoji_base64:
             return None
 
@@ -628,7 +629,6 @@ class RuntimeDataCapabilityMixin:
             selected = random.sample(emojis_source, min(count, len(emojis_source)))
             emojis: List[Dict[str, str]] = []
             for emoji in selected:
-                emoji_manager.update_emoji_usage(emoji)
                 serialized = self._serialize_emoji_payload(emoji)
                 if serialized is not None:
                     if not serialized["emotion"]:

@@ -30,17 +30,23 @@ from src.config.official_configs import (
     BotConfig,
     ChatConfig,
     ChineseTypoConfig,
+    DatabaseConfig,
     DebugConfig,
     EmojiConfig,
     ExpressionConfig,
     JargonConfig,
     KeywordReactionConfig,
+    LogConfig,
     MaimMessageConfig,
+    MCPConfig,
     MessageReceiveConfig,
     PersonalityConfig,
+    PluginConfig,
+    PluginRuntimeConfig,
     ResponsePostProcessConfig,
     ResponseSplitterConfig,
     TelemetryConfig,
+    VisualConfig,
     VoiceConfig,
     WebUIConfig,
 )
@@ -1025,19 +1031,26 @@ async def get_config_section_schema(section_name: str):
     - bot: BotConfig
     - personality: PersonalityConfig
     - chat: ChatConfig
+    - visual: VisualConfig
     - message_receive: MessageReceiveConfig
     - emoji: EmojiConfig
     - expression: ExpressionConfig
+    - jargon: JargonConfig
     - keyword_reaction: KeywordReactionConfig
     - chinese_typo: ChineseTypoConfig
     - response_post_process: ResponsePostProcessConfig
     - response_splitter: ResponseSplitterConfig
     - telemetry: TelemetryConfig
+    - log: LogConfig
     - maim_message: MaimMessageConfig
     - webui: WebUIConfig
+    - database: DatabaseConfig
+    - mcp: MCPConfig
+    - plugin: PluginConfig
+    - plugin_runtime: PluginRuntimeConfig
+    - a_memorix: AMemorixConfig
     - debug: DebugConfig
     - voice: VoiceConfig
-    - jargon: JargonConfig
     - model_task_config: ModelTaskConfig
     - api_provider: APIProvider
     - model_info: ModelInfo
@@ -1046,6 +1059,7 @@ async def get_config_section_schema(section_name: str):
         "bot": BotConfig,
         "personality": PersonalityConfig,
         "chat": ChatConfig,
+        "visual": VisualConfig,
         "message_receive": MessageReceiveConfig,
         "emoji": EmojiConfig,
         "expression": ExpressionConfig,
@@ -1055,8 +1069,13 @@ async def get_config_section_schema(section_name: str):
         "response_post_process": ResponsePostProcessConfig,
         "response_splitter": ResponseSplitterConfig,
         "telemetry": TelemetryConfig,
+        "log": LogConfig,
         "maim_message": MaimMessageConfig,
         "webui": WebUIConfig,
+        "database": DatabaseConfig,
+        "mcp": MCPConfig,
+        "plugin": PluginConfig,
+        "plugin_runtime": PluginRuntimeConfig,
         "a_memorix": AMemorixConfig,
         "debug": DebugConfig,
         "voice": VoiceConfig,

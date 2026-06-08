@@ -24,7 +24,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import {
   Select,
@@ -49,7 +48,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Trash2, Save, Search, Info, Power, Check, ChevronsUpDown, RefreshCw, Loader2, GraduationCap, Share2, AlertTriangle, Settings, Zap } from 'lucide-react'
+import { Plus, Trash2, Save, Search, Info, Check, ChevronsUpDown, RefreshCw, Loader2, GraduationCap, Share2, AlertTriangle, Settings, Zap } from 'lucide-react'
 import {
   getModelConfig,
   getModelConfigCached,
@@ -193,7 +192,7 @@ function ModelConfigPageContent() {
   }>({})
   
   const { toast } = useToast()
-  const { triggerRestart, isRestarting } = useRestart()
+  const { isRestarting } = useRestart()
   
   // 自动保存 (使用 hook 封装的逻辑)
   const { clearTimers: clearAutoSaveTimers, initialLoadRef, resetSnapshots } = useModelAutoSave({
@@ -318,11 +317,6 @@ function ModelConfigPageContent() {
     }
   }, [editDialogOpen, editingModel?.api_provider, fetchModelsForProvider])
 
-  // 重启麦麦
-  const handleRestart = async () => {
-    await triggerRestart()
-  }
-
   const dismissRestartNotice = () => {
     localStorage.setItem('model-config-restart-notice-dismissed', 'true')
     setRestartNoticeVisible(false)
@@ -380,7 +374,7 @@ function ModelConfigPageContent() {
 
   const checkDeleteProviderImpact = useCallback(async (
     nextProviders: APIProvider[],
-    context: 'auto' | 'manual' | 'restart' = 'auto'
+    context: 'auto' | 'manual' = 'auto'
   ) => {
     const oldProviderNames = new Set(apiProviders.map((provider) => provider.name))
     const nextProviderNames = new Set(nextProviders.map((provider) => provider.name))
@@ -408,7 +402,7 @@ function ModelConfigPageContent() {
 
   const saveProviders = useCallback(async (
     nextProviders: APIProvider[],
-    context: 'auto' | 'manual' | 'restart' = 'auto',
+    context: 'auto' | 'manual' = 'auto',
     affectedModels: unknown[] = []
   ) => {
     const cleanedProviders = nextProviders.map(cleanProviderData)
@@ -442,9 +436,6 @@ function ModelConfigPageContent() {
     providersSnapshotRef.current = JSON.stringify(cleanedProviders)
     setHasUnsavedChanges(false)
 
-    if (context === 'restart') {
-      await handleRestart()
-    }
   }, [checkTaskConfigIssues, models, removeModelsForProviders, syncProviderState, taskConfig])
 
   const autoSaveProviders = useCallback(async (nextProviders: APIProvider[]) => {
@@ -542,58 +533,6 @@ function ModelConfigPageContent() {
       cleaned.max_tokens = model.max_tokens
     }
     return cleaned
-  }
-
-  // 保存并重启
-  const handleSaveAndRestart = async () => {
-    try {
-      setSaving(true)
-      clearAutoSaveTimers()
-      if (providerAutoSaveTimerRef.current) {
-        clearTimeout(providerAutoSaveTimerRef.current)
-      }
-      const resultGet = await getModelConfig()
-      if (!resultGet.success) {
-        toast({
-          title: '保存失败',
-          description: resultGet.error,
-          variant: 'destructive',
-        })
-        setSaving(false)
-        return
-      }
-      const config = unwrapModelConfig(resultGet.data)
-      // 清理每个模型中的 null 值
-      config.api_providers = apiProviders.map(cleanProviderData)
-      config.models = models.map(cleanModelForSave)
-      config.model_task_config = taskConfig
-      const resultUpdate = await updateModelConfig(config)
-      if (!resultUpdate.success) {
-        toast({
-          title: '保存失败',
-          description: resultUpdate.error,
-          variant: 'destructive',
-        })
-        setSaving(false)
-        return
-      }
-      resetSnapshots(config.models as ModelInfo[], taskConfig)
-      providersSnapshotRef.current = JSON.stringify(config.api_providers)
-      setHasUnsavedChanges(false)
-      toast({
-        title: '保存成功',
-        description: '正在重启麦麦...',
-      })
-      await handleRestart()
-    } catch (error) {
-      console.error('保存配置失败:', error)
-      toast({
-        title: '保存失败',
-        description: (error as Error).message,
-        variant: 'destructive',
-      })
-      setSaving(false)
-    }
   }
 
   // 保存配置（手动保存）
@@ -933,10 +872,11 @@ function ModelConfigPageContent() {
   const handleConfirmDeleteProviderImpact = async () => {
     try {
       const savingFlag = deleteConfirmState.context === 'auto' ? setAutoSaving : setSaving
+      const saveContext = deleteConfirmState.context === 'auto' ? 'auto' : 'manual'
       savingFlag(true)
       await saveProviders(
         deleteConfirmState.pendingProviders,
-        deleteConfirmState.context,
+        saveContext,
         deleteConfirmState.affectedModels
       )
       toast({
@@ -1209,74 +1149,13 @@ function ModelConfigPageContent() {
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-        {/* 页面标题 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">模型管理与分配</h1>
-            <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">添加模型并为模型分配功能</p>
-          </div>
-          <div className="flex gap-2 w-full sm:w-auto">
-            <SharePackDialog 
-              trigger={
-                <Button variant="outline" size="sm" className="flex-1 sm:flex-none">
-                  <Share2 className="mr-2 h-4 w-4" />
-                  分享配置
-                </Button>
-              }
-            />
-            <Button 
-              onClick={saveConfig} 
-              disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting} 
-              size="sm"
-              variant="outline"
-              className="flex-1 sm:flex-none sm:min-w-[120px]"
-            >
-              <Save className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
-              {saving ? '保存中...' : autoSaving ? '自动保存中...' : hasUnsavedChanges ? '保存配置' : '已保存'}
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button
-                  disabled={saving || autoSaving || isRestarting}
-                  size="sm"
-                  className="flex-1 sm:flex-none sm:min-w-[120px]"
-                >
-                  <Power className="mr-2 h-4 w-4" />
-                  {isRestarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启麦麦'}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>确认重启麦麦？</AlertDialogTitle>
-                  <AlertDialogDescription asChild>
-                    <div>
-                      <p>
-                        {hasUnsavedChanges 
-                          ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启麦麦使新配置生效。重启过程中麦麦将暂时离线。'
-                          : '即将重启麦麦主程序。重启过程中麦麦将暂时离线,配置将在重启后生效。'
-                        }
-                      </p>
-                    </div>
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}>
-                    {hasUnsavedChanges ? '保存并重启' : '确认重启'}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
-        </div>
-
         {/* 重启提示 */}
         {restartNoticeVisible && (
           <Alert>
             <Info className="h-4 w-4" />
             <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <span>
-                配置更新后需要<strong>重启麦麦</strong>才能生效。你可以点击右上角的"保存并重启"按钮一键完成保存和重启。
+                配置更新后需要<strong>重启麦麦</strong>才能生效。保存配置后，请在需要时前往麦麦设置或系统入口重启。
               </span>
               <Button type="button" variant="outline" size="sm" onClick={dismissRestartNotice}>
                 我知道了
@@ -1452,23 +1331,42 @@ function ModelConfigPageContent() {
 
           {/* 搜索框 */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative w-full sm:flex-1 sm:max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="搜索模型名称、标识符或提供商..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-1 sm:flex-row sm:items-center">
+              <div className="relative w-full sm:max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="搜索模型名称、标识符或提供商..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              {searchQuery && (
+                <p className="text-sm text-muted-foreground whitespace-nowrap">
+                  找到 {filteredModels.length} 个结果
+                </p>
+              )}
             </div>
-            {searchQuery && (
-              <p className="text-sm text-muted-foreground whitespace-nowrap">
-                找到 {filteredModels.length} 个结果
-              </p>
-            )}
 
           {/* 模型列表 - 移动端卡片视图 */}
             <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              <SharePackDialog 
+                trigger={
+                  <Button variant="outline" size="icon" className="w-full sm:h-8 sm:w-8" aria-label="分享配置">
+                    <Share2 className="h-4 w-4" />
+                  </Button>
+                }
+              />
+              <Button 
+                onClick={saveConfig} 
+                disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting} 
+                size="sm"
+                variant="outline"
+                className="w-full sm:w-auto sm:min-w-[120px]"
+              >
+                <Save className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
+                {saving ? '保存中...' : autoSaving ? '自动保存中...' : hasUnsavedChanges ? '保存配置' : '已保存'}
+              </Button>
               {selectedModels.size > 0 && (
                 <Button
                   onClick={openBatchDeleteDialog}

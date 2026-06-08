@@ -161,3 +161,57 @@ async def test_periodic_maintenance_scans_unregistered_records_before_integrity(
     assert events[0] == ("scan", "unregistered.png")
     assert events[1] == ("check", "")
     assert ("scan", "registered.png") not in events
+
+
+@pytest.mark.asyncio
+async def test_ensure_emoji_saved_rejects_oversized_collected_emoji(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(emoji_module.global_config.emoji, "max_emoji_size_mb", 0.000001)
+
+    manager = emoji_module.EmojiManager()
+    try:
+        with pytest.raises(ValueError, match="表情包大小超过收集上限"):
+            await manager.ensure_emoji_saved(b"oversized")
+    finally:
+        manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_periodic_maintenance_skips_oversized_collected_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(emoji_module, "EMOJI_DIR", tmp_path)
+    monkeypatch.setattr(emoji_module.global_config.emoji, "max_emoji_size_mb", 0.000001)
+    monkeypatch.setattr(emoji_module.global_config.emoji, "steal_emoji", True)
+    monkeypatch.setattr(emoji_module.global_config.emoji, "check_interval", 0)
+    monkeypatch.setattr(emoji_module.global_config.emoji, "max_reg_num", 10)
+    monkeypatch.setattr(emoji_module.global_config.emoji, "do_replace", False)
+    monkeypatch.setattr(emoji_module, "get_db_session", lambda: _Session(records=[]))
+
+    oversized_file = tmp_path / "oversized.png"
+    oversized_file.write_bytes(b"oversized")
+
+    events: list[str] = []
+    first_check = asyncio.Event()
+    manager = emoji_module.EmojiManager()
+
+    async def _register_emoji_by_filename(path: Path | str) -> emoji_module.EmojiRegisterStatus:
+        events.append(Path(path).name)
+        return "registered"
+
+    def _check_emoji_file_integrity() -> None:
+        first_check.set()
+
+    monkeypatch.setattr(manager, "register_emoji_by_filename", _register_emoji_by_filename)
+    monkeypatch.setattr(manager, "check_emoji_file_integrity", _check_emoji_file_integrity)
+
+    task = asyncio.create_task(manager.periodic_emoji_maintenance())
+    try:
+        await asyncio.wait_for(first_check.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        manager.shutdown()
+
+    assert events == []

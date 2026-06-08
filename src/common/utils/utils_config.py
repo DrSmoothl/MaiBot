@@ -66,6 +66,27 @@ class ExpressionConfigUtils:
         return next(iter(session_ids), None)
 
 
+class BehaviorConfigUtils:
+    @staticmethod
+    def get_behavior_config_for_chat(session_id: Optional[str] = None) -> tuple[bool, bool]:
+        """
+        根据聊天会话 ID 获取行为表现配置。
+
+        行为表现当前复用表达学习的聊天流作用域，但默认值明确保持开启；
+        没有任何匹配配置的新聊天流会自动启用行为表现调用，学习总开关由 experimental.enable_behavior_learning 控制。
+        """
+
+        enable_behavior_learning = bool(global_config.experimental.enable_behavior_learning)
+        config_item = ExpressionConfigUtils._find_expression_config_item(session_id)
+        if config_item is None:
+            return True, enable_behavior_learning
+
+        return (
+            config_item.use,
+            config_item.learn and enable_behavior_learning,
+        )
+
+
 class JargonConfigUtils:
     @staticmethod
     def _is_global_default_item(config_item) -> bool:

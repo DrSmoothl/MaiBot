@@ -4,6 +4,7 @@ from html import unescape
 from pathlib import Path
 from typing import Any
 import json
+import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/reasoning-process", tags=["reasoning-process"], depe
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_LOG_ROOT = (PROJECT_ROOT / "logs" / "maisaka_prompt").resolve()
-ALLOWED_SUFFIXES = {".txt", ".html"}
+ALLOWED_SUFFIXES = {".txt", ".html", ".json"}
 SESSION_CHAT_TYPES = ("group", "private")
 PROMPT_METADATA_MARKER = "[请求信息]"
 PROMPT_SEPARATOR = "=" * 80
@@ -64,6 +65,7 @@ class ReasoningPromptFile(BaseModel):
     timestamp: int | None = None
     text_path: str | None = None
     html_path: str | None = None
+    json_path: str | None = None
     output_preview: str | None = None
     action_preview: str | None = None
     model_name: str | None = None
@@ -291,9 +293,10 @@ def _get_chat_name_from_latest_message(session_id: str, db_session: Session) -> 
 
 def _get_chat_name_from_session_record(chat_session: Any | ChatSession) -> str:
     if chat_session.group_id:
-        return f"群聊{chat_session.group_id}"
+        return chat_session.group_name or f"群聊{chat_session.group_id}"
     if chat_session.user_id:
-        return f"用户{chat_session.user_id}的私聊"
+        private_name = chat_session.user_cardname or chat_session.user_nickname or f"用户{chat_session.user_id}"
+        return f"{private_name}的私聊"
     return chat_session.session_id
 
 
@@ -301,9 +304,71 @@ def _get_chat_display_name(chat_session: Any, db_session: Session) -> str:
     chat_manager = _get_chat_manager()
     if name := chat_manager.get_session_name(chat_session.session_id):
         return name
+    session_record_name = _get_chat_name_from_session_record(chat_session)
+    if session_record_name != chat_session.session_id:
+        return session_record_name
     if name := _get_chat_name_from_latest_message(chat_session.session_id, db_session):
         return name
-    return _get_chat_name_from_session_record(chat_session)
+    return session_record_name
+
+
+def _get_session_target_key(session: Any) -> tuple[str, str, str] | None:
+    platform = str(session.platform or "").strip()
+    if not platform:
+        return None
+
+    group_id = str(session.group_id or "").strip()
+    if group_id:
+        return platform, "group", group_id
+
+    user_id = str(session.user_id or "").strip()
+    if user_id:
+        return platform, "private", user_id
+
+    return None
+
+
+def _add_session_candidate(
+    candidates_by_key: dict[tuple[str, str, str], list[Any]],
+    seen_session_ids_by_key: dict[tuple[str, str, str], set[str]],
+    session: Any,
+) -> None:
+    key = _get_session_target_key(session)
+    if key is None or key not in candidates_by_key:
+        return
+
+    session_id = str(session.session_id or "").strip()
+    if not session_id or session_id in seen_session_ids_by_key[key]:
+        return
+
+    seen_session_ids_by_key[key].add(session_id)
+    candidates_by_key[key].append(session)
+
+
+def _load_session_candidates_by_target(
+    target_keys: set[tuple[str, str, str]],
+    db_session: Session,
+) -> dict[tuple[str, str, str], list[Any]]:
+    """批量加载日志目录可能对应的真实聊天流候选。"""
+
+    candidates_by_key: dict[tuple[str, str, str], list[Any]] = {key: [] for key in target_keys}
+    seen_session_ids_by_key: dict[tuple[str, str, str], set[str]] = {key: set() for key in target_keys}
+    if not target_keys:
+        return candidates_by_key
+
+    chat_manager = _get_chat_manager()
+    for session in chat_manager.sessions.values():
+        _add_session_candidate(candidates_by_key, seen_session_ids_by_key, session)
+
+    platforms = sorted({platform for platform, _chat_type, _target_id in target_keys})
+    if not platforms:
+        return candidates_by_key
+
+    statement = select(ChatSession).where(col(ChatSession.platform).in_(platforms))
+    for db_instance in db_session.exec(statement).all():
+        _add_session_candidate(candidates_by_key, seen_session_ids_by_key, db_instance)
+
+    return candidates_by_key
 
 
 def _fallback_session_display_name(name: str, parsed: tuple[str, str, str] | None) -> str:
@@ -412,13 +477,62 @@ def _extract_prompt_metadata_from_html(content: str) -> dict[str, object]:
     return _extract_prompt_metadata_from_text(plain_text)
 
 
+def _load_prompt_json(file_path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(file_path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _extract_prompt_metadata_from_json_payload(payload: dict[str, Any]) -> dict[str, object]:
+    raw_metadata = payload.get("metadata")
+    return _normalize_prompt_metadata(raw_metadata if isinstance(raw_metadata, dict) else {})
+
+
+def _decode_json_string_match(value: str) -> str:
+    try:
+        decoded = json.loads(f'"{value}"')
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return value
+    return decoded if isinstance(decoded, str) else value
+
+
+def _extract_prompt_metadata_from_json_head(file_path: Path, read_size: int = 8192) -> dict[str, object]:
+    """从 JSON 文件头部轻量提取列表页所需元数据。"""
+
+    try:
+        with file_path.open("r", encoding="utf-8", errors="replace") as file:
+            content = file.read(read_size)
+    except OSError:
+        return {}
+
+    raw_metadata: dict[str, Any] = {}
+    model_match = re.search(r'"(?:model_name|model)"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"', content)
+    if model_match:
+        raw_metadata["model_name"] = _decode_json_string_match(model_match.group("value"))
+
+    duration_match = re.search(r'"duration_ms"\s*:\s*(?P<value>-?\d+(?:\.\d+)?)', content)
+    if duration_match:
+        raw_metadata["duration_ms"] = duration_match.group("value")
+
+    return _normalize_prompt_metadata(raw_metadata)
+
+
 def _extract_prompt_metadata(file_path: Path) -> dict[str, object]:
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {}
 
-    if file_path.suffix.lower() == ".html":
+    suffix = file_path.suffix.lower()
+    if suffix == ".json":
+        try:
+            raw_payload = json.loads(content)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return _extract_prompt_metadata_from_json_payload(raw_payload if isinstance(raw_payload, dict) else {})
+    if suffix == ".html":
         return _extract_prompt_metadata_from_html(content)
     return _extract_prompt_metadata_from_text(content)
 
@@ -478,6 +592,36 @@ def _extract_output_text(file_path: Path) -> str | None:
     return _extract_output_text_from_content(content)
 
 
+def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | None:
+    output = payload.get("output")
+    if not isinstance(output, dict):
+        return None
+
+    output_text = str(output.get("content_text") or "").strip()
+    if output_text:
+        return " ".join(line.strip() for line in output_text.splitlines() if line.strip())
+
+    content = output.get("content")
+    if content in (None, "", []):
+        return None
+    if isinstance(content, str):
+        return " ".join(line.strip() for line in content.splitlines() if line.strip()) or None
+    return json.dumps(content, ensure_ascii=False, default=str)
+
+
+def _extract_output_preview_from_json(file_path: Path, max_chars: int = 160) -> str | None:
+    return _extract_output_preview_from_json_payload(_load_prompt_json(file_path), max_chars=max_chars)
+
+
+def _extract_output_preview_from_json_payload(payload: dict[str, Any], max_chars: int = 160) -> str | None:
+    normalized_output = _extract_output_text_from_json_payload(payload)
+    if not normalized_output:
+        return None
+    if len(normalized_output) <= max_chars:
+        return normalized_output
+    return f"{normalized_output[:max_chars].rstrip()}..."
+
+
 def _extract_output_preview(file_path: Path, max_chars: int = 160) -> str | None:
     """从新版 prompt 预览 txt 中提取输出结果摘要。"""
 
@@ -490,51 +634,44 @@ def _extract_output_preview(file_path: Path, max_chars: int = 160) -> str | None
     return f"{normalized_output[:max_chars].rstrip()}..."
 
 
-def _extract_action_names_from_output(output_text: str) -> list[str]:
-    """从输出结果中提取实际调用的动作名称。"""
+def _extract_action_names_from_tool_calls(raw_tool_calls: Any) -> list[str]:
+    """从结构化工具调用中提取动作名称。"""
 
-    marker = "工具调用:"
-    marker_index = output_text.find(marker)
-    if marker_index < 0:
-        return []
-
-    raw_tool_calls = output_text[marker_index + len(marker) :].strip()
-    if not raw_tool_calls:
-        return []
-
-    try:
-        parsed_tool_calls, _ = json.JSONDecoder().raw_decode(raw_tool_calls)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return []
-
-    if isinstance(parsed_tool_calls, dict):
-        parsed_tool_calls = [parsed_tool_calls]
-    if not isinstance(parsed_tool_calls, list):
+    if isinstance(raw_tool_calls, dict):
+        raw_tool_calls = [raw_tool_calls]
+    if not isinstance(raw_tool_calls, list):
         return []
 
     action_names: list[str] = []
-    for tool_call in parsed_tool_calls:
+    for tool_call in raw_tool_calls:
         if not isinstance(tool_call, dict):
             continue
-        action_name = str(tool_call.get("name") or "").strip()
+        function_info = tool_call.get("function")
+        action_name = ""
+        if isinstance(function_info, dict):
+            action_name = str(function_info.get("name") or "").strip()
+        if not action_name:
+            action_name = str(tool_call.get("name") or "").strip()
         if action_name:
             action_names.append(action_name)
     return action_names
 
 
-def _extract_action_preview(file_path: Path, max_actions: int = 4) -> str | None:
-    """从 prompt 预览 txt 中提取动作摘要。"""
+def _extract_action_preview_from_json(file_path: Path, max_actions: int = 4) -> str | None:
+    """从 prompt JSON 预览中提取动作摘要。"""
 
-    try:
-        content = file_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
+    return _extract_action_preview_from_json_payload(_load_prompt_json(file_path), max_actions=max_actions)
 
-    output_text = _extract_output_block_from_content(content)
-    if not output_text:
-        return None
 
-    action_names = _extract_action_names_from_output(output_text)
+def _extract_action_preview_from_json_payload(payload: dict[str, Any], max_actions: int = 4) -> str | None:
+    """从 prompt JSON payload 中提取动作摘要。"""
+
+    output = payload.get("output")
+    action_names: list[str] = []
+
+    if isinstance(output, dict):
+        action_names = _extract_action_names_from_tool_calls(output.get("tool_calls"))
+
     if not action_names:
         return None
 
@@ -561,15 +698,19 @@ def _matches_prompt_file_search(item: ReasoningPromptFile, normalized_search: st
     ):
         return True
 
-    if item.stage != "replyer" or not item.text_path:
+    if item.stage != "replyer" or not (item.json_path or item.text_path):
         return False
 
     try:
-        file_path = _resolve_prompt_log_path(item.text_path, {".txt"})
+        if item.json_path:
+            file_path = _resolve_prompt_log_path(item.json_path, {".json"})
+            output_text = _extract_output_text_from_json_payload(_load_prompt_json(file_path))
+        else:
+            file_path = _resolve_prompt_log_path(item.text_path or "", {".txt"})
+            output_text = _extract_output_text(file_path)
     except HTTPException:
         return False
 
-    output_text = _extract_output_text(file_path)
     return normalized_search in (output_text or "").casefold()
 
 
@@ -577,6 +718,7 @@ def _resolve_reasoning_session_info(
     name: str,
     *,
     configured_accounts: set[tuple[str, str]],
+    candidates_by_key: dict[tuple[str, str, str], list[Any]],
     db_session: Session,
 ) -> ReasoningPromptSessionInfo:
     parsed = _parse_session_directory_name(name)
@@ -584,12 +726,7 @@ def _resolve_reasoning_session_info(
         return ReasoningPromptSessionInfo(name=name, display_name=name)
 
     platform, chat_type, target_id = parsed
-    chat_manager = _get_chat_manager()
-    matched_sessions = chat_manager.resolve_sessions_by_target(
-        platform=platform,
-        target_id=target_id,
-        chat_type=chat_type,
-    )
+    matched_sessions = candidates_by_key.get((platform, chat_type, target_id), [])
     matched_session, matched_current_account = _select_current_account_session(matched_sessions, configured_accounts)
 
     if matched_session is None:
@@ -620,86 +757,175 @@ def _list_session_infos(stage: str, session_names: list[str] | None = None) -> l
         return []
 
     configured_accounts = _get_configured_platform_accounts()
+    parsed_session_names = {
+        name: parsed
+        for name in session_names
+        if (parsed := _parse_session_directory_name(name)) is not None
+    }
+    target_keys = set(parsed_session_names.values())
     with get_db_session(auto_commit=False) as db_session:
+        candidates_by_key = _load_session_candidates_by_target(target_keys, db_session)
         return [
             _resolve_reasoning_session_info(
                 name,
                 configured_accounts=configured_accounts,
+                candidates_by_key=candidates_by_key,
                 db_session=db_session,
             )
             for name in session_names
         ]
 
 
-def _collect_prompt_files(
+def _collect_prompt_file_records(
     stage: str,
     session: str,
     session_info_map: dict[str, ReasoningPromptSessionInfo],
-) -> list[ReasoningPromptFile]:
+) -> list[dict[str, object]]:
     session_dir = PROMPT_LOG_ROOT / stage / session
     if not session or not session_dir.is_dir():
         return []
 
     records: dict[tuple[str, str, str], dict[str, object]] = {}
 
-    for file_path in session_dir.iterdir():
-        if not file_path.is_file() or file_path.suffix.lower() not in ALLOWED_SUFFIXES:
-            continue
+    with os.scandir(session_dir) as entries:
+        for entry in entries:
+            if not entry.is_file():
+                continue
 
-        try:
-            relative_path = file_path.relative_to(PROMPT_LOG_ROOT)
-        except ValueError:
-            continue
+            file_path = session_dir / entry.name
+            file_suffix = file_path.suffix.lower()
+            if file_suffix not in ALLOWED_SUFFIXES:
+                continue
 
-        parts = relative_path.parts
-        if len(parts) < 3:
-            continue
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
 
-        stage_name, session_id = parts[0], parts[1]
-        stem = file_path.stem
-        key = (stage_name, session_id, stem)
-        stat = file_path.stat()
-        session_info = session_info_map.get(session_id)
+            try:
+                relative_path = file_path.relative_to(PROMPT_LOG_ROOT)
+            except ValueError:
+                continue
 
-        record = records.setdefault(
-            key,
-            {
-                "stage": stage_name,
-                "session_id": session_id,
-                "resolved_session_id": session_info.resolved_session_id if session_info else None,
-                "session_display_name": session_info.display_name if session_info else None,
-                "platform": session_info.platform if session_info else None,
-                "chat_type": session_info.chat_type if session_info else None,
-                "target_id": session_info.target_id if session_info else None,
-                "stem": stem,
-                "timestamp": int(stem) if stem.isdigit() else None,
-                "text_path": None,
-                "html_path": None,
-                "output_preview": None,
-                "action_preview": None,
-                "model_name": None,
-                "duration_ms": None,
-                "size": 0,
-                "modified_at": 0.0,
-            },
-        )
-        record["size"] = int(record["size"]) + stat.st_size
-        record["modified_at"] = max(float(record["modified_at"]), stat.st_mtime)
+            parts = relative_path.parts
+            if len(parts) < 3:
+                continue
 
-        if file_path.suffix.lower() == ".txt":
-            record["text_path"] = _relative_posix_path(file_path)
-            _merge_prompt_metadata(record, _extract_prompt_metadata(file_path))
-            if stage_name == "replyer":
-                record["output_preview"] = _extract_output_preview(file_path)
-            elif stage_name in {"planner", "timing_gate"}:
-                record["action_preview"] = _extract_action_preview(file_path)
-        elif file_path.suffix.lower() == ".html":
-            record["html_path"] = _relative_posix_path(file_path)
-            _merge_prompt_metadata(record, _extract_prompt_metadata(file_path))
+            stage_name, session_id = parts[0], parts[1]
+            stem = file_path.stem
+            key = (stage_name, session_id, stem)
+            session_info = session_info_map.get(session_id)
 
-    items = [ReasoningPromptFile(**record) for record in records.values()]
-    items.sort(key=lambda item: (item.modified_at, item.timestamp or 0), reverse=True)
+            record = records.setdefault(
+                key,
+                {
+                    "stage": stage_name,
+                    "session_id": session_id,
+                    "resolved_session_id": session_info.resolved_session_id if session_info else None,
+                    "session_display_name": session_info.display_name if session_info else None,
+                    "platform": session_info.platform if session_info else None,
+                    "chat_type": session_info.chat_type if session_info else None,
+                    "target_id": session_info.target_id if session_info else None,
+                    "stem": stem,
+                    "timestamp": int(stem) if stem.isdigit() else None,
+                    "text_path": None,
+                    "html_path": None,
+                    "json_path": None,
+                    "output_preview": None,
+                    "action_preview": None,
+                    "model_name": None,
+                    "duration_ms": None,
+                    "size": 0,
+                    "modified_at": 0.0,
+                },
+            )
+            record["size"] = int(record["size"]) + stat.st_size
+            record["modified_at"] = max(float(record["modified_at"]), stat.st_mtime)
+
+            if file_suffix == ".txt":
+                record["text_path"] = _relative_posix_path(file_path)
+            elif file_suffix == ".html":
+                record["html_path"] = _relative_posix_path(file_path)
+            elif file_suffix == ".json":
+                record["json_path"] = _relative_posix_path(file_path)
+
+    items = list(records.values())
+    items.sort(
+        key=lambda item: (
+            float(item["modified_at"]),
+            int(item["timestamp"]) if isinstance(item.get("timestamp"), int) else 0,
+        ),
+        reverse=True,
+    )
     return items
+
+
+def _resolve_record_file_path(record: dict[str, object], field_name: str, suffixes: set[str]) -> Path | None:
+    relative_path = record.get(field_name)
+    if not isinstance(relative_path, str) or not relative_path:
+        return None
+
+    try:
+        return _resolve_prompt_log_path(relative_path, suffixes)
+    except HTTPException:
+        return None
+
+
+def _hydrate_prompt_file_record(
+    record: dict[str, object],
+    *,
+    include_previews: bool = True,
+    include_action_preview: bool = False,
+) -> ReasoningPromptFile:
+    hydrated_record = dict(record)
+    stage_name = str(hydrated_record["stage"])
+    should_extract_action_preview = include_action_preview and stage_name in {"planner", "timing_gate"}
+
+    json_file_path = _resolve_record_file_path(hydrated_record, "json_path", {".json"})
+    if json_file_path is not None:
+        if include_previews or should_extract_action_preview:
+            json_payload = _load_prompt_json(json_file_path)
+            _merge_prompt_metadata(hydrated_record, _extract_prompt_metadata_from_json_payload(json_payload))
+            if stage_name == "replyer":
+                hydrated_record["output_preview"] = _extract_output_preview_from_json_payload(json_payload)
+            elif stage_name in {"planner", "timing_gate"}:
+                hydrated_record["action_preview"] = _extract_action_preview_from_json_payload(json_payload)
+        else:
+            _merge_prompt_metadata(hydrated_record, _extract_prompt_metadata_from_json_head(json_file_path))
+
+    metadata_missing = not hydrated_record.get("model_name") or hydrated_record.get("duration_ms") is None
+    preview_missing = (
+        (include_previews and stage_name == "replyer" and not hydrated_record.get("output_preview"))
+    )
+
+    text_file_path = _resolve_record_file_path(hydrated_record, "text_path", {".txt"})
+    if text_file_path is not None and (metadata_missing or preview_missing):
+        _merge_prompt_metadata(hydrated_record, _extract_prompt_metadata(text_file_path))
+        if stage_name == "replyer" and not hydrated_record.get("output_preview"):
+            hydrated_record["output_preview"] = _extract_output_preview(text_file_path)
+        metadata_missing = not hydrated_record.get("model_name") or hydrated_record.get("duration_ms") is None
+
+    html_file_path = _resolve_record_file_path(hydrated_record, "html_path", {".html"})
+    if html_file_path is not None and metadata_missing:
+        _merge_prompt_metadata(hydrated_record, _extract_prompt_metadata(html_file_path))
+
+    return ReasoningPromptFile(**hydrated_record)
+
+
+def _hydrate_prompt_file_records(
+    records: list[dict[str, object]],
+    *,
+    include_previews: bool = True,
+    include_action_preview: bool = False,
+) -> list[ReasoningPromptFile]:
+    return [
+        _hydrate_prompt_file_record(
+            record,
+            include_previews=include_previews,
+            include_action_preview=include_action_preview,
+        )
+        for record in records
+    ]
 
 
 @router.get("/stages", response_model=ReasoningPromptStagesResponse)
@@ -732,17 +958,27 @@ async def list_reasoning_prompt_files(
     # 下拉菜单需要展示全部会话的真实名称，不能只解析当前选中项。
     session_infos = _list_session_infos(selected_stage, sessions)
     session_info_map = {item.name: item for item in session_infos}
-    items = _collect_prompt_files(selected_stage, selected_session, session_info_map)
+    records = _collect_prompt_file_records(selected_stage, selected_session, session_info_map)
 
     if normalized_search:
+        items = _hydrate_prompt_file_records(records, include_previews=True)
         items = [item for item in items if _matches_prompt_file_search(item, normalized_search)]
-
-    total = len(items)
-    start = (page - 1) * page_size
-    end = start + page_size
+        total = len(items)
+        start = (page - 1) * page_size
+        end = start + page_size
+        items = items[start:end]
+    else:
+        total = len(records)
+        start = (page - 1) * page_size
+        end = start + page_size
+        items = _hydrate_prompt_file_records(
+            records[start:end],
+            include_previews=False,
+            include_action_preview=True,
+        )
 
     return ReasoningPromptListResponse(
-        items=items[start:end],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -756,9 +992,9 @@ async def list_reasoning_prompt_files(
 
 @router.get("/file", response_model=ReasoningPromptContentResponse)
 async def get_reasoning_prompt_file(path: str = Query(...)):
-    """读取推理过程 txt 日志内容。"""
+    """读取推理过程 txt/json 日志内容。"""
 
-    file_path = _resolve_prompt_log_path(path, {".txt"})
+    file_path = _resolve_prompt_log_path(path, {".txt", ".json"})
     stat = file_path.stat()
     metadata = _extract_prompt_metadata(file_path)
 
@@ -768,7 +1004,7 @@ async def get_reasoning_prompt_file(path: str = Query(...)):
         size=stat.st_size,
         modified_at=stat.st_mtime,
         model_name=metadata.get("model_name") if isinstance(metadata.get("model_name"), str) else None,
-        duration_ms=metadata.get("duration_ms") if isinstance(metadata.get("duration_ms"), float) else None,
+        duration_ms=metadata.get("duration_ms") if isinstance(metadata.get("duration_ms"), (int, float)) else None,
     )
 
 

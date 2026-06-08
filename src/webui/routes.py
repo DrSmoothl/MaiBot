@@ -12,6 +12,7 @@ from src.webui.core import (
     set_auth_cookie,
 )
 from src.webui.dependencies import require_auth, verify_token_optional
+from src.webui.routers.behavior import router as behavior_router
 from src.webui.routers.config import router as config_router
 from src.webui.routers.emoji import router as emoji_router
 from src.webui.routers.expression import router as expression_router
@@ -42,6 +43,7 @@ router.include_router(expression_router)
 # 注册黑话管理路由
 router.include_router(jargon_router)
 # 注册表情包管理路由
+router.include_router(behavior_router)
 router.include_router(emoji_router)
 # 注册插件管理路由
 router.include_router(plugin_router)

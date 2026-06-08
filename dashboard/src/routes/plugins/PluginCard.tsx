@@ -1,13 +1,14 @@
 import { useNavigate } from '@tanstack/react-router'
+import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, ThumbsUp, Trash2 } from 'lucide-react'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
-import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 
+import { PluginIcon } from './PluginIcon'
 import type { GitStatus, MaimaiVersion, PluginInfo, PluginLoadProgress, PluginStatsData } from './types'
 import { getPluginTypeLabel } from './types'
-import { PluginIcon } from './PluginIcon'
 
 interface PluginCardProps {
   plugin: PluginInfo
@@ -15,7 +16,9 @@ interface PluginCardProps {
   maimaiVersion: MaimaiVersion | null
   pluginStats: Record<string, PluginStatsData>
   loadProgress: PluginLoadProgress | null
+  likingPluginIds: Set<string>
   onInstall: (plugin: PluginInfo) => void
+  onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
   onUninstall: (plugin: PluginInfo) => void
   checkPluginCompatibility: (plugin: PluginInfo) => boolean
@@ -30,7 +33,9 @@ export function PluginCard({
   maimaiVersion,
   pluginStats,
   loadProgress,
+  likingPluginIds,
   onInstall,
+  onLike,
   onUpdate,
   onUninstall,
   checkPluginCompatibility,
@@ -42,6 +47,10 @@ export function PluginCard({
   const stats = [plugin.manifest?.id]
     .map(id => id ? pluginStats[id] : undefined)
     .find(Boolean)
+  const likeCount = stats?.likes ?? 0
+  const isLiked = stats?.liked === true
+  const isLiking = likingPluginIds.has(plugin.manifest?.id || plugin.id)
+  const isInstalling = loadProgress?.operation === 'install' && loadProgress?.plugin_id === plugin.id
 
   return (
     <Card
@@ -55,6 +64,7 @@ export function PluginCard({
               pluginId={plugin.id}
               manifest={plugin.manifest}
               installed={plugin.installed}
+              marketplaceIconUrl={plugin.assets?.icon_64}
               className="h-9 w-9 rounded-md"
               iconClassName="h-4 w-4"
             />
@@ -67,9 +77,11 @@ export function PluginCard({
             {getStatusBadge(plugin)}
           </div>
         </div>
-        <CardDescription className="line-clamp-2 text-xs leading-snug">{plugin.manifest?.description || '无描述'}</CardDescription>
+        <CardDescription className="line-clamp-2 min-h-[2.0625rem] text-xs leading-snug">
+          {plugin.manifest?.description || '无描述'}
+        </CardDescription>
       </CardHeader>
-      <CardContent className="px-4 pb-2.5">
+      <CardContent className="flex-1 px-4 pb-2.5">
         <div className="space-y-2">
           {/* 统计信息 */}
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -83,7 +95,7 @@ export function PluginCard({
             </div>
             <div className="flex items-center gap-1">
               <span>点赞</span>
-              <span>{(stats?.likes ?? 0).toLocaleString()}</span>
+              <span>{likeCount.toLocaleString()}</span>
             </div>
           </div>
           {/* 标签 */}
@@ -118,8 +130,24 @@ export function PluginCard({
           </div>
         </div>
       </CardContent>
-      <CardFooter className="px-4 pb-4 pt-1.5">
-        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+      <CardFooter className="mt-auto px-4 pb-4 pt-1.5">
+        <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:items-center sm:justify-end">
+          <Button
+            variant={isLiked ? 'secondary' : 'outline'}
+            size="sm"
+            className="w-full px-2 sm:w-auto"
+            title={isLiked ? '取消点赞' : '点赞'}
+            aria-label={isLiked ? '取消点赞' : '点赞'}
+            disabled={isLiking}
+            onClick={() => onLike(plugin)}
+          >
+            {isLiking ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ThumbsUp className={isLiked ? 'h-4 w-4 fill-current' : 'h-4 w-4'} />
+            )}
+            <span>{likeCount.toLocaleString()}</span>
+          </Button>
           <Button 
             variant="outline"
             size="sm"
@@ -162,7 +190,7 @@ export function PluginCard({
           ) : (
             <Button 
               size="sm"
-              className="w-full sm:w-auto"
+              className="w-full px-0 sm:w-8"
               disabled={
                 !gitStatus?.installed || 
                 loadProgress?.operation === 'install' ||
@@ -175,10 +203,10 @@ export function PluginCard({
                     ? (getIncompatibleReason(plugin) ?? '插件与当前麦麦版本不兼容')
                     : undefined
               }
+              aria-label={isInstalling ? '正在安装' : '安装'}
               onClick={() => onInstall(plugin)}
             >
-              <Download className="h-4 w-4 mr-1" />
-              {loadProgress?.operation === 'install' && loadProgress?.plugin_id === plugin.id ? '安装中...' : '安装'}
+              {isInstalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </Button>
           )}
         </div>

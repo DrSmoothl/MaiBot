@@ -102,11 +102,9 @@ function resolveDescription(schema?: ConfigSchema | FieldSchema): string {
 function resolveIconName(
   iconOverride: string | undefined,
   schema?: ConfigSchema | FieldSchema,
-  nested?: ConfigSchema,
 ): string | undefined {
   if (iconOverride) return iconOverride
   if (schema && 'x-icon' in schema && schema['x-icon']) return schema['x-icon']
-  if (nested?.uiIcon) return nested.uiIcon
   return undefined
 }
 
@@ -331,7 +329,7 @@ export function createListItemEditorHook(
 
     const label = resolveLabel(schema, fieldPath)
     const description = resolveDescription(schema)
-    const iconName = resolveIconName(options.iconName, schema, nestedSchema)
+    const iconName = resolveIconName(options.iconName, schema)
     const addButtonPlacement = options.addButtonPlacement ?? 'bottom'
     const shouldCollapse = options.collapseWhen?.({ parentValues }) ?? false
     const [manuallyExpanded, setManuallyExpanded] = useState(false)

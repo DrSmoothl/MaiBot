@@ -261,7 +261,7 @@ export function MessageList({
                         : 'bg-muted text-foreground rounded-2xl rounded-bl-md'
                     )}
                   >
-                    <RenderMessageContent message={message} isBot={!isUser} />
+                    <RenderMessageContent message={message} />
                   </div>
                 </div>
               </div>

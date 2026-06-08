@@ -1,4 +1,4 @@
-import { Activity, Boxes, Database, FileText, Hash, Home, MessageSquare, Network, Package, ScrollText, Sliders, Smile, Sparkles } from 'lucide-react'
+import { Activity, Boxes, BrainCircuit, Database, FileText, Hash, Home, MessageSquare, Network, Package, ScrollText, Sliders, Smile, Sparkles } from 'lucide-react'
 
 import type { MenuSection } from './types'
 
@@ -25,6 +25,7 @@ export const menuSections: MenuSection[] = [
       { icon: Smile, label: 'sidebar.menu.emojiManagement', path: '/resource/emoji', searchDescription: 'search.items.emojiDesc' },
       { icon: MessageSquare, label: 'sidebar.menu.expressionManagement', path: '/resource/expression', searchDescription: 'search.items.expressionDesc' },
       { icon: Hash, label: 'sidebar.menu.slangManagement', path: '/resource/jargon', searchDescription: 'search.items.jargonDesc' },
+      { icon: BrainCircuit, label: 'sidebar.menu.behaviorLearning', path: '/resource/behavior', searchDescription: 'search.items.behaviorLearningDesc', featureFlag: 'behaviorLearning' },
       { icon: Database, label: 'sidebar.menu.knowledgeBase', path: '/resource/knowledge-base' },
     ],
   },

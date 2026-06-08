@@ -135,11 +135,14 @@ export function Header({
         {/* 工作区切换：复用 Tabs 组件 + Motion 动画指示器 */}
         <LayoutGroup id="workspace-switcher">
           <Tabs value={workspaceMode} aria-label={t('workspace.switcherLabel')}>
-            <TabsList className="bg-background/60 relative h-9 gap-0.5 border p-1 shadow-sm backdrop-blur">
+            <TabsList
+              data-dashboard-workspace-tabs="true"
+              className="relative h-9 gap-0.5 border bg-transparent p-1 shadow-sm"
+            >
               <TabsTrigger
                 asChild
                 value="settings"
-                className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-xs font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
               >
                 <Link to="/">
                   {workspaceMode === 'settings' && (
@@ -150,13 +153,15 @@ export function Header({
                     />
                   )}
                   <SlidersHorizontal className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{t('workspace.settings')}</span>
+                  <span className="hidden font-sans text-base font-semibold tracking-wider uppercase sm:inline">
+                    {t('workspace.settings')}
+                  </span>
                 </Link>
               </TabsTrigger>
               <TabsTrigger
                 asChild
                 value="chat"
-                className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-xs font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
               >
                 <Link to="/chat">
                   {workspaceMode === 'chat' && (
@@ -167,13 +172,15 @@ export function Header({
                     />
                   )}
                   <MessageSquare className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{t('workspace.chat')}</span>
+                  <span className="hidden font-sans text-base font-semibold tracking-wider uppercase sm:inline">
+                    {t('workspace.chat')}
+                  </span>
                 </Link>
               </TabsTrigger>
               <TabsTrigger
                 asChild
                 value="logs"
-                className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-xs font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
               >
                 <Link to="/logs">
                   {workspaceMode === 'logs' && (
@@ -184,7 +191,9 @@ export function Header({
                     />
                   )}
                   <FileText className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{t('workspace.logs')}</span>
+                  <span className="hidden font-sans text-base font-semibold tracking-wider uppercase sm:inline">
+                    {t('workspace.logs')}
+                  </span>
                 </Link>
               </TabsTrigger>
             </TabsList>

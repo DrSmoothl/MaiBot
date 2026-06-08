@@ -1178,7 +1178,7 @@ function IndexPageContent() {
         {/* 机器人状态卡片 */}
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
               <FileText className="h-4 w-4" />
               {t('home.versionCard.title')}
             </CardTitle>
@@ -1242,7 +1242,7 @@ function IndexPageContent() {
 
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
               <Power className="h-4 w-4" />
               {t('home.botStatus.title')}
             </CardTitle>
@@ -1368,8 +1368,8 @@ function IndexPageContent() {
 
         {/* 快速操作卡片 */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
               <Zap className="h-4 w-4" />
               {t('home.quickActions.title')}
             </CardTitle>
@@ -1397,23 +1397,32 @@ function IndexPageContent() {
                   const content = (
                     <>
                       <Icon className={`h-4 w-4 ${shortcut.id === 'action:restart' && isRestarting ? 'animate-spin' : ''}`} />
-                      {shortcut.label}
+                      <span className="min-w-0 flex-1 truncate text-left">
+                        {shortcut.label}
+                      </span>
                       {shortcut.badge && (
-                        <span className="ml-1 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs text-white">
+                        <span className="ml-1 shrink-0 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs text-white">
                           {shortcut.badge}
                         </span>
                       )}
-                      {shortcut.external && <ExternalLink className="h-3.5 w-3.5" />}
+                      {shortcut.external && <ExternalLink className="h-3.5 w-3.5 shrink-0" />}
                     </>
                   )
 
                   if (shortcut.href) {
                     return (
-                      <Button key={shortcut.id} variant="outline" size="sm" asChild className="gap-2">
+                      <Button
+                        key={shortcut.id}
+                        variant="outline"
+                        size="sm"
+                        asChild
+                        className="max-w-[14rem] justify-start gap-2 overflow-hidden sm:max-w-[18rem]"
+                      >
                         <a
                           href={shortcut.href}
                           target={shortcut.external ? '_blank' : undefined}
                           rel={shortcut.external ? 'noopener noreferrer' : undefined}
+                          title={shortcut.label}
                         >
                           {content}
                         </a>
@@ -1428,7 +1437,8 @@ function IndexPageContent() {
                       size="sm"
                       onClick={shortcut.action}
                       disabled={shortcut.disabled}
-                      className="gap-2"
+                      className="max-w-[14rem] justify-start gap-2 overflow-hidden sm:max-w-[18rem]"
+                      title={shortcut.label}
                     >
                       {content}
                     </Button>
@@ -1446,7 +1456,7 @@ function IndexPageContent() {
         <Card>
           <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1.5">
-              <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
                 <BarChart3 className="h-4 w-4" />
                 {t('home.stats.overviewTitle')}
               </CardTitle>
@@ -1586,7 +1596,7 @@ function IndexPageContent() {
 
         <Card className="xl:self-stretch">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
               <HardDrive className="h-4 w-4" />
               {t('home.storage.title')}
             </CardTitle>

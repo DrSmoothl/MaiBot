@@ -3,10 +3,10 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Set
 
-import asyncio
-
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
+
+import asyncio
 
 from src.common.logger import get_logger
 
@@ -222,7 +222,31 @@ class UnifiedWebSocketManager:
         connection = self.connections.get(connection_id)
         if connection is None:
             return
-        await connection.send_queue.put(message)
+
+        sender_task = connection.sender_task
+        target_loop = sender_task.get_loop() if sender_task is not None else None
+        if target_loop is None or target_loop.is_closed() or not target_loop.is_running():
+            return
+
+        current_loop = asyncio.get_running_loop()
+        if target_loop is current_loop:
+            await connection.send_queue.put(message)
+            return
+
+        # WebUI 运行在独立线程事件循环中，跨 loop 投递必须回到连接所属 loop 执行。
+        try:
+            future = asyncio.run_coroutine_threadsafe(connection.send_queue.put(message), target_loop)
+        except RuntimeError as exc:
+            logger.debug(f"统一 WebSocket 跨线程投递失败: connection={connection_id}, error={exc}")
+            return
+
+        try:
+            await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+            future.cancel()
+            raise
+        except Exception as exc:
+            logger.debug(f"统一 WebSocket 等待跨线程投递时出现异常: connection={connection_id}, error={exc}")
 
     async def send_response(
         self,

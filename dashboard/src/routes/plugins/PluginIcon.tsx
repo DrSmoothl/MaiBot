@@ -33,6 +33,7 @@ interface PluginIconProps {
   pluginId: string
   manifest?: PluginIconManifest
   installed?: boolean
+  marketplaceIconUrl?: string
   className?: string
   iconClassName?: string
 }
@@ -95,18 +96,37 @@ function getFallbackIcon(manifest?: PluginIconManifest, icon?: PluginDisplayIcon
   return resolveLucideIcon(icon?.fallback) ?? DEFAULT_TYPE_ICONS[normalizePluginType(manifest?.plugin_type)]
 }
 
-function getImageSource(pluginId: string, icon: PluginDisplayIcon, installed?: boolean): string | null {
-  if (icon.type === 'local' && installed) {
+function getImageSource(
+  pluginId: string,
+  icon: PluginDisplayIcon,
+  installed?: boolean,
+  marketplaceIconUrl?: string
+): string | null {
+  if (icon.type !== 'local') {
+    return null
+  }
+
+  if (installed) {
     return `/api/webui/plugins/icon/${encodeURIComponent(pluginId)}`
   }
 
-  return null
+  return marketplaceIconUrl?.trim() || null
 }
 
-export function PluginIcon({ pluginId, manifest, installed, className, iconClassName }: PluginIconProps) {
+export function PluginIcon({
+  pluginId,
+  manifest,
+  installed,
+  marketplaceIconUrl,
+  className,
+  iconClassName
+}: PluginIconProps) {
   const icon = manifest?.display?.icon
   const [imageFailed, setImageFailed] = useState(false)
-  const imageSource = useMemo(() => icon ? getImageSource(pluginId, icon, installed) : null, [icon, installed, pluginId])
+  const imageSource = useMemo(
+    () => icon ? getImageSource(pluginId, icon, installed, marketplaceIconUrl) : null,
+    [icon, installed, marketplaceIconUrl, pluginId]
+  )
 
   useEffect(() => {
     setImageFailed(false)

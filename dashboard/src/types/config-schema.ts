@@ -62,7 +62,7 @@ export interface ConfigSchema {
   nested?: Record<string, ConfigSchema>
   uiParent?: string
   uiLabel?: string
-  uiIcon?: string
+  uiAdvanced?: boolean
 }
 
 export interface ConfigSchemaResponse {

@@ -143,6 +143,15 @@ const jargonManagementRoute = createRoute({
 })
 
 // 资源管理路由 - 知识库图谱可视化
+const behaviorLearningRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/resource/behavior',
+  component: lazyRouteComponent(
+    () => import('./routes/resource/behavior/index.tsx'),
+    'BehaviorLearningPage'
+  ),
+})
+
 const knowledgeGraphRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/resource/knowledge-graph',
@@ -187,6 +196,13 @@ const chatRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/chat',
   component: lazyRouteComponent(() => import('./routes/chat/index'), 'ChatPage'),
+})
+
+// 外部程序嵌入用聊天室路由，不挂载 dashboard 顶栏
+const chatEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/chat/embed',
+  component: lazyRouteComponent(() => import('./routes/chat/embed'), 'ChatEmbedPage'),
 })
 
 // 插件市场路由
@@ -282,6 +298,7 @@ const notFoundRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   authRoute,
   setupRoute,
+  chatEmbedRoute,
   protectedRoute.addChildren([
     indexRoute,
     botConfigRoute,
@@ -293,6 +310,7 @@ const routeTree = rootRoute.addChildren([
     emojiManagementRoute,
     expressionManagementRoute,
     jargonManagementRoute,
+    behaviorLearningRoute,
     personManagementRoute,
     knowledgeGraphRoute,
     knowledgeBaseRoute,

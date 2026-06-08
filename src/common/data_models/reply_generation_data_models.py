@@ -8,7 +8,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from . import BaseDataModel
 
@@ -106,6 +106,10 @@ class ReplyGenerationResult(BaseDataModel):
         default_factory=list,
         metadata={"description": "本次选中的表达方式 ID 列表。"},
     )
+    selected_expression_details: List[Dict[str, Any]] = field(
+        default_factory=list,
+        metadata={"description": "本次选中的表达方式详情列表。"},
+    )
     text_fragments: List[str] = field(
         default_factory=list,
         metadata={"description": "对模型输出进行切分、规范化后的文本片段列表。"},
@@ -126,6 +130,65 @@ class ReplyGenerationResult(BaseDataModel):
         default_factory=list,
         metadata={"description": "本次 replyer 实际发送给模型的消息列表。"},
     )
+
+
+def _format_selected_expression_line(expression: Dict[str, Any], fallback_id: Optional[int] = None) -> str:
+    """格式化单条已选表达方式，供终端与监控详情展示。"""
+
+    expression_id = expression.get("id")
+    if not isinstance(expression_id, int):
+        expression_id = fallback_id
+    situation = str(expression.get("situation") or "").strip()
+    style = str(expression.get("style") or "").strip()
+
+    prefix = f"{expression_id}：" if expression_id is not None else ""
+    if situation and style:
+        return f"[{prefix}] {situation} -> {style}"
+    if situation:
+        return f"{prefix}{situation}"
+    if style:
+        return f"{prefix}{style}"
+    if expression_id is not None:
+        return str(expression_id)
+    return ""
+
+
+def _format_selected_expressions(result: ReplyGenerationResult) -> str:
+    """将已选表达方式格式化为带 ID 和内容的多行文本。"""
+
+    if result.selected_expression_details:
+        detail_map = {
+            expression["id"]: expression
+            for expression in result.selected_expression_details
+            if isinstance(expression.get("id"), int)
+        }
+        ordered_details: List[Tuple[Dict[str, Any], Optional[int]]] = []
+        seen_detail_ids: Set[int] = set()
+        for expression_id in result.selected_expression_ids:
+            detail = detail_map.get(expression_id)
+            if detail is None:
+                ordered_details.append(({}, expression_id))
+                continue
+            ordered_details.append((detail, expression_id))
+            seen_detail_ids.add(expression_id)
+
+        for detail in result.selected_expression_details:
+            expression_id = detail.get("id")
+            if isinstance(expression_id, int) and expression_id in seen_detail_ids:
+                continue
+            ordered_details.append((detail, expression_id if isinstance(expression_id, int) else None))
+
+        lines = [
+            line
+            for detail, fallback_id in ordered_details
+            if (line := _format_selected_expression_line(detail, fallback_id))
+        ]
+        if lines:
+            return "\n".join(lines)
+
+    if result.selected_expression_ids:
+        return ", ".join(str(item) for item in result.selected_expression_ids)
+    return ""
 
 
 def build_reply_monitor_detail(result: ReplyGenerationResult) -> Dict[str, Any]:
@@ -164,10 +227,11 @@ def build_reply_monitor_detail(result: ReplyGenerationResult) -> Dict[str, Any]:
         detail["metrics"] = metrics
 
     extra_sections: List[Dict[str, str]] = []
-    if result.selected_expression_ids:
+    selected_expression_content = _format_selected_expressions(result)
+    if selected_expression_content:
         extra_sections.append({
             "title": "已选表达方式",
-            "content": ", ".join(str(item) for item in result.selected_expression_ids),
+            "content": selected_expression_content,
         })
     if result.metrics.stage_logs:
         extra_sections.append({

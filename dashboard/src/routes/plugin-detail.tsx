@@ -549,6 +549,7 @@ export function PluginDetailPage() {
                       pluginId={plugin.id}
                       manifest={plugin.manifest}
                       installed={isInstalled}
+                      marketplaceIconUrl={plugin.assets?.icon_64}
                       className="h-14 w-14"
                       iconClassName="h-7 w-7"
                     />

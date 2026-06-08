@@ -1,4 +1,4 @@
-"""Maisaka 阶段状态广播。"""
+﻿"""Maisaka 阶段状态广播。"""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ class MaisakaStageStatusBoard:
     @staticmethod
     def _schedule_stage_status_event(payload: dict[str, Any]) -> None:
         try:
-            from src.maisaka.monitor_events import emit_stage_status
+            from src.maisaka.monitor.events import emit_stage_status
 
             asyncio.get_running_loop().create_task(emit_stage_status(**payload))
         except RuntimeError:
@@ -77,7 +77,7 @@ class MaisakaStageStatusBoard:
     @staticmethod
     def _schedule_stage_removed_event(session_id: str, removed: dict[str, Any] | None) -> None:
         try:
-            from src.maisaka.monitor_events import emit_stage_removed
+            from src.maisaka.monitor.events import emit_stage_removed
 
             asyncio.get_running_loop().create_task(
                 emit_stage_removed(

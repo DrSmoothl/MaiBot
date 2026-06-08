@@ -8,6 +8,7 @@ import type {
   BatchReviewResponse,
   ChatInfo,
   ChatListResponse,
+  Expression,
   ExpressionCreateRequest,
   ExpressionCreateResponse,
   ExpressionDeleteResponse,
@@ -35,12 +36,12 @@ const API_BASE = '/api/webui/expression'
 /**
  * 获取聊天列表
  */
-export async function getChatList(params: { include_legacy?: boolean } = {}): Promise<ApiResponse<ChatInfo[]>> {
+export async function getChatList(
+  params: { include_legacy?: boolean } = {}
+): Promise<ApiResponse<ChatInfo[]>> {
   const queryParams = new URLSearchParams()
   if (params.include_legacy) queryParams.append('include_legacy', 'true')
-  const response = await fetchWithAuth(`${API_BASE}/chats?${queryParams}`, {
-    
-  })
+  const response = await fetchWithAuth(`${API_BASE}/chats?${queryParams}`, {})
 
   if (!response.ok) {
     try {
@@ -178,6 +179,8 @@ export async function getExpressionList(params: {
   chat_id?: string
   chat_ids?: string[]
   include_legacy?: boolean
+  review_filter?: 'all' | 'user_checked' | 'unchecked'
+  sort_by?: 'time'
 }): Promise<ApiResponse<ExpressionListResponse>> {
   const queryParams = new URLSearchParams()
 
@@ -186,11 +189,11 @@ export async function getExpressionList(params: {
   if (params.search) queryParams.append('search', params.search)
   if (params.chat_id) queryParams.append('chat_id', params.chat_id)
   if (params.include_legacy) queryParams.append('include_legacy', 'true')
+  if (params.review_filter) queryParams.append('review_filter', params.review_filter)
+  if (params.sort_by) queryParams.append('sort_by', params.sort_by)
   params.chat_ids?.forEach((chatId) => queryParams.append('chat_ids', chatId))
 
-  const response = await fetchWithAuth(`${API_BASE}/list?${queryParams}`, {
-    
-  })
+  const response = await fetchWithAuth(`${API_BASE}/list?${queryParams}`, {})
 
   if (!response.ok) {
     try {
@@ -437,7 +440,11 @@ export async function previewLegacyExpressionImportFile(
  */
 export async function importLegacyExpressions(params: {
   db_path: string
-  mappings: Array<{ old_chat_id: string; target_chat_id?: string | null; target_chat_ids?: string[] }>
+  mappings: Array<{
+    old_chat_id: string
+    target_chat_id?: string | null
+    target_chat_ids?: string[]
+  }>
 }): Promise<ApiResponse<LegacyExpressionImportResponse>> {
   const response = await fetchWithAuth(`${API_BASE}/legacy-import/import`, {
     method: 'POST',
@@ -477,9 +484,7 @@ export async function importLegacyExpressions(params: {
  * 获取表达方式详细信息
  */
 export async function getExpressionDetail(expressionId: number): Promise<ApiResponse<any>> {
-  const response = await fetchWithAuth(`${API_BASE}/${expressionId}`, {
-    
-  })
+  const response = await fetchWithAuth(`${API_BASE}/${expressionId}`, {})
 
   if (!response.ok) {
     try {
@@ -520,12 +525,10 @@ export async function getExpressionDetail(expressionId: number): Promise<ApiResp
 /**
  * 创建表达方式
  */
-export async function createExpression(
-  data: ExpressionCreateRequest
-): Promise<ApiResponse<any>> {
+export async function createExpression(data: ExpressionCreateRequest): Promise<ApiResponse<any>> {
   const response = await fetchWithAuth(`${API_BASE}/`, {
     method: 'POST',
-    
+
     body: JSON.stringify(data),
   })
 
@@ -574,7 +577,7 @@ export async function updateExpression(
 ): Promise<ApiResponse<any>> {
   const response = await fetchWithAuth(`${API_BASE}/${expressionId}`, {
     method: 'PATCH',
-    
+
     body: JSON.stringify(data),
   })
 
@@ -617,10 +620,53 @@ export async function updateExpression(
 /**
  * 删除表达方式
  */
+export async function updateExpressionReviewStatus(
+  expressionId: number,
+  approved: boolean
+): Promise<ApiResponse<Expression>> {
+  const response = await fetchWithAuth(`${API_BASE}/${expressionId}/review-status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ approved }),
+  })
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: formatApiError(errorData, '更新表达方式审核状态失败'),
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '更新表达方式审核状态失败',
+      }
+    }
+  }
+
+  try {
+    const responseData: ExpressionUpdateResponse = await response.json()
+    if (responseData.success && responseData.data) {
+      return {
+        success: true,
+        data: responseData.data,
+      }
+    }
+    return {
+      success: false,
+      error: responseData.message || '更新表达方式审核状态失败',
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析表达方式审核状态响应',
+    }
+  }
+}
+
 export async function deleteExpression(expressionId: number): Promise<ApiResponse<any>> {
   const response = await fetchWithAuth(`${API_BASE}/${expressionId}`, {
     method: 'DELETE',
-    
   })
 
   if (!response.ok) {
@@ -665,7 +711,7 @@ export async function deleteExpression(expressionId: number): Promise<ApiRespons
 export async function batchDeleteExpressions(expressionIds: number[]): Promise<ApiResponse<any>> {
   const response = await fetchWithAuth(`${API_BASE}/batch/delete`, {
     method: 'POST',
-    
+
     body: JSON.stringify({ ids: expressionIds }),
   })
 
@@ -708,12 +754,12 @@ export async function batchDeleteExpressions(expressionIds: number[]): Promise<A
 /**
  * 获取表达方式统计数据
  */
-export async function getExpressionStats(params: { include_legacy?: boolean } = {}): Promise<ApiResponse<any>> {
+export async function getExpressionStats(
+  params: { include_legacy?: boolean } = {}
+): Promise<ApiResponse<any>> {
   const queryParams = new URLSearchParams()
   if (params.include_legacy) queryParams.append('include_legacy', 'true')
-  const response = await fetchWithAuth(`${API_BASE}/stats/summary?${queryParams}`, {
-    
-  })
+  const response = await fetchWithAuth(`${API_BASE}/stats/summary?${queryParams}`, {})
 
   if (!response.ok) {
     try {
@@ -775,7 +821,7 @@ export async function getReviewStats(): Promise<ApiResponse<ReviewStats>> {
   }
 
   try {
-    const data = await response.json() as ReviewStats
+    const data = (await response.json()) as ReviewStats
     return {
       success: true,
       data: data,
@@ -895,11 +941,13 @@ export async function batchReviewExpressions(
   }
 }
 
-export async function getExpressionReviewLogs(params: {
-  limit?: number
-  passed?: boolean
-  chat_id?: string
-} = {}): Promise<ApiResponse<ExpressionReviewLogListResponse>> {
+export async function getExpressionReviewLogs(
+  params: {
+    limit?: number
+    passed?: boolean
+    chat_id?: string
+  } = {}
+): Promise<ApiResponse<ExpressionReviewLogListResponse>> {
   const queryParams = new URLSearchParams()
   if (params.limit) queryParams.append('limit', params.limit.toString())
   if (params.passed !== undefined) queryParams.append('passed', params.passed ? 'true' : 'false')

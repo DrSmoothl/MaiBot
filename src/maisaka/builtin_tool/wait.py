@@ -12,7 +12,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="wait",
-        description="暂停当前私聊对话并固定等待一段时间，期间不因新消息提前恢复。",
+        description="暂停当前对话并固定等待一段时间，期间不因新消息提前恢复。",
         parameters_schema={
             "type": "object",
             "properties": {
@@ -45,6 +45,6 @@ async def handle_tool(
     tool_ctx.runtime._enter_wait_state(seconds=wait_seconds, tool_call_id=invocation.call_id)
     return tool_ctx.build_success_result(
         invocation.tool_name,
-        f"当前私聊对话循环进入等待状态，将固定等待 {wait_seconds} 秒；期间收到的新消息不会提前打断本次等待。",
+        f"当前对话循环进入等待状态，将固定等待 {wait_seconds} 秒；期间收到的新消息不会提前打断本次等待。",
         metadata={"pause_execution": True},
     )

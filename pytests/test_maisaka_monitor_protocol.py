@@ -15,6 +15,7 @@ from src.common.data_models.reply_generation_data_models import (
     GenerationMetrics,
     LLMCompletionResult,
     ReplyGenerationResult,
+    build_reply_monitor_detail,
 )
 from src.core.tooling import ToolExecutionResult, ToolInvocation
 from src.maisaka.context_messages import SessionBackedMessage, ToolResultMessage
@@ -135,6 +136,28 @@ async def _call_message_factory(message_factory: Callable[..., Any], client: obj
     if inspect.isawaitable(result):
         return await result
     return result
+
+
+def test_reply_monitor_detail_displays_selected_expression_details() -> None:
+    result = ReplyGenerationResult(
+        selected_expression_ids=[212, 254],
+        selected_expression_details=[
+            {"id": 212, "situation": "有人开玩笑", "style": "轻松吐槽", "count": 1},
+            {"id": 254, "situation": "气氛沉默", "style": "主动接话", "count": 1},
+        ],
+    )
+
+    detail = build_reply_monitor_detail(result)
+    expression_section = next(
+        section
+        for section in detail["extra_sections"]
+        if section["title"] == "已选表达方式"
+    )
+
+    assert expression_section["content"] == (
+        "212：当有人开玩笑时，可以自然地用轻松吐槽这种表达习惯。\n"
+        "254：当气氛沉默时，可以自然地用主动接话这种表达习惯。"
+    )
 
 
 class _FakeLegacyLLMServiceClient:
@@ -459,7 +482,7 @@ async def test_reply_tool_puts_monitor_detail_into_metadata(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
-async def test_reply_tool_merges_heuristic_memory_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_reply_tool_drops_legacy_reference_info_argument(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
     fake_reply_result = ReplyGenerationResult(
         success=True,
@@ -475,11 +498,6 @@ async def test_reply_tool_merges_heuristic_memory_reference(monkeypatch: pytest.
 
     monkeypatch.setattr(reply_tool_module.replyer_manager, "get_replyer", lambda **kwargs: _FakeReplyer())
     monkeypatch.setattr(reply_tool_module, "render_cli_message", lambda text: text)
-    monkeypatch.setattr(
-        reply_tool_module,
-        "merge_heuristic_memory_reference_for_replyer",
-        lambda **kwargs: f"{kwargs['reference_info']}\n\n【启发式记忆-内部参考】\n1. 测试记忆".strip(),
-    )
 
     target_message = SimpleNamespace(
         message_id="msg-1",
@@ -511,8 +529,8 @@ async def test_reply_tool_merges_heuristic_memory_reference(monkeypatch: pytest.
     result = await reply_tool_module.handle_tool(tool_ctx, invocation)
 
     assert result.success is True
-    assert "已有参考" in captured["reference_info"]
-    assert "启发式记忆-内部参考" in captured["reference_info"]
+    assert "reference_info" not in captured
+    assert "reference_info" not in captured["reply_tool_args"]
 
 
 @pytest.mark.asyncio

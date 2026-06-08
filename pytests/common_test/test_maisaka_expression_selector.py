@@ -340,6 +340,7 @@ async def test_select_for_reply_uses_candidates_modified_by_before_select_hook(m
     )
 
     assert result.selected_expression_ids == [2]
+    assert result.selected_expressions == [original_candidates[1]]
     assert "主动接话" in result.expression_habits
     assert fake_manager.calls[0][0] == "expression.select.before_select"
     assert fake_manager.calls[1][0] == "expression.select.after_selection"
@@ -421,6 +422,7 @@ async def test_select_for_reply_uses_direct_selection_when_precise_selection_dis
 
     assert sub_agent_calls == []
     assert result.selected_expression_ids == [1, 2]
+    assert result.selected_expressions == candidates
 
 
 @pytest.mark.asyncio
@@ -462,6 +464,7 @@ async def test_select_for_reply_uses_sub_agent_when_precise_selection_enabled(
 
     assert len(sub_agent_calls) == 1
     assert result.selected_expression_ids == [2]
+    assert result.selected_expressions == [candidates[1]]
     assert "主动接话" in result.expression_habits
     assert "轻松吐槽" not in result.expression_habits
 

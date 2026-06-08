@@ -1,11 +1,11 @@
-"""view_complex_message 内置工具。"""
+﻿"""view_complex_message 内置工具。"""
 
 from typing import Optional
 
 from src.common.logger import get_logger
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 
-from ..context_messages import (
+from src.maisaka.context.messages import (
     SessionBackedMessage,
     build_full_complex_message_content,
     build_full_complex_message_content_from_sequence,

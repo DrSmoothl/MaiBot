@@ -4,7 +4,7 @@
 提供系统重启、状态查询等功能
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -17,11 +17,17 @@ from sqlmodel import col, select
 import asyncio
 import mimetypes
 import os
+import sqlite3
 import time
 
 from src.common.database.database import engine, get_db_session
 from src.common.database.database_model import Images, ImageType
 from src.common.logger import get_logger
+from src.common.utils.image_path import (
+    StoredImagePathError,
+    resolve_stored_image_path,
+    stored_image_paths_equal,
+)
 from src.config.config import MMC_VERSION
 from src.webui.dependencies import require_auth
 
@@ -39,6 +45,7 @@ _DATABASE_FILE = _DATA_DIR / "MaiBot.db"
 _DATABASE_AUXILIARY_SUFFIXES = ("-wal", "-shm")
 _RESTART_EXIT_CODE = 42
 _LOCAL_CACHE_STATS_CACHE_TTL_SECONDS = 120
+_SQLITE_BUSY_TIMEOUT_SECONDS = 30
 _CACHE_IMAGE_EXTENSIONS = {
     ".avif",
     ".bmp",
@@ -48,9 +55,69 @@ _CACHE_IMAGE_EXTENSIONS = {
     ".png",
     ".webp",
 }
+_DATABASE_CLEANUP_TABLES: dict[str, dict[str, str]] = {
+    "llm_usage": {
+        "label": "LLM 调用记录",
+        "category": "调用与统计",
+        "description": "模型调用、Token、耗时和费用记录。",
+        "date_column": "timestamp",
+    },
+    "tool_records": {
+        "label": "工具调用记录",
+        "category": "调用与统计",
+        "description": "内置工具和插件工具的调用过程记录。",
+        "date_column": "timestamp",
+    },
+    "mai_messages": {
+        "label": "消息记录",
+        "category": "聊天历史",
+        "description": "收到的聊天消息与消息元数据。",
+        "date_column": "timestamp",
+    },
+    "chat_history": {
+        "label": "聊天摘要历史",
+        "category": "聊天历史",
+        "description": "聊天片段摘要、主题和关键词记录。",
+        "date_column": "end_timestamp",
+    },
+    "online_time": {
+        "label": "在线时长记录",
+        "category": "运行统计",
+        "description": "运行在线时长统计记录。",
+        "date_column": "timestamp",
+    },
+    "statistics_message_hourly": {
+        "label": "消息小时统计",
+        "category": "统计缓存",
+        "description": "按小时聚合的消息统计缓存。",
+        "date_column": "bucket_time",
+    },
+    "statistics_tool_hourly": {
+        "label": "工具小时统计",
+        "category": "统计缓存",
+        "description": "按小时聚合的工具调用统计缓存。",
+        "date_column": "bucket_time",
+    },
+    "statistics_model_hourly": {
+        "label": "模型小时统计",
+        "category": "统计缓存",
+        "description": "按小时聚合的模型调用统计缓存。",
+        "date_column": "bucket_time",
+    },
+}
+_PROTECTED_DATA_PATHS = {
+    _DATABASE_FILE.resolve(),
+    *[Path(f"{_DATABASE_FILE}{suffix}").resolve() for suffix in _DATABASE_AUXILIARY_SUFFIXES],
+}
+_SPECIAL_CACHE_DIRS = (
+    _IMAGE_DIR.resolve(),
+    _EMOJI_DIR.resolve(),
+    _EMOJI_THUMBNAIL_DIR.resolve(),
+)
 _restart_task: asyncio.Task[None] | None = None
 
 CacheImageTarget = Literal["images", "emoji"]
+DatabaseCleanupMode = Literal["all", "older_than_days"]
 
 
 class RestartResponse(BaseModel):
@@ -96,6 +163,11 @@ class DatabaseTableStats(BaseModel):
     rows: int
     size: int = 0
     size_source: Literal["dbstat", "estimated"] = "estimated"
+    label: str = ""
+    category: str = "其他"
+    description: str = ""
+    cleanup_supported: bool = False
+    cleanup_date_column: str | None = None
 
 
 class DatabaseStorageStats(BaseModel):
@@ -104,6 +176,10 @@ class DatabaseStorageStats(BaseModel):
     files: list[DatabaseFileStats]
     tables: list[DatabaseTableStats]
     total_size: int
+    page_size: int = 0
+    page_count: int = 0
+    freelist_count: int = 0
+    free_size: int = 0
 
 
 class LocalCacheStatsResponse(BaseModel):
@@ -114,6 +190,7 @@ class LocalCacheStatsResponse(BaseModel):
 
 
 _local_cache_stats_cache: tuple[float, LocalCacheStatsResponse] | None = None
+_database_stats_cache: tuple[float, DatabaseStorageStats] | None = None
 
 
 class LocalCacheImageItem(BaseModel):
@@ -175,11 +252,42 @@ class LocalCacheLogDirectoryListResponse(BaseModel):
     data: list[LocalCacheLogDirectoryItem]
 
 
+class LocalCacheDataEntry(BaseModel):
+    """data 目录中的文件或文件夹条目。"""
+
+    relative_path: str
+    name: str
+    full_path: str
+    kind: Literal["file", "directory"]
+    file_count: int
+    total_size: int
+    modified_time: float
+    protected: bool = False
+    protection_reason: str | None = None
+
+
+class LocalCacheDataEntriesResponse(BaseModel):
+    """data 目录浏览响应。"""
+
+    success: bool
+    root_path: str
+    relative_path: str
+    current_path: str
+    parent_path: str | None = None
+    file_count: int
+    total_size: int
+    total: int
+    data: list[LocalCacheDataEntry]
+
+
 class LocalCacheCleanupRequest(BaseModel):
     """本地缓存清理请求。"""
 
     target: Literal["images", "emoji", "log_files", "database_logs"]
-    tables: list[Literal["llm_usage", "tool_records", "mai_messages"]] = Field(default_factory=list)
+    tables: list[str] = Field(default_factory=list)
+    database_mode: DatabaseCleanupMode = "all"
+    older_than_days: int | None = Field(default=None, ge=1)
+    vacuum_after_cleanup: bool = True
 
 
 class LocalCacheCleanupResponse(BaseModel):
@@ -191,6 +299,23 @@ class LocalCacheCleanupResponse(BaseModel):
     removed_files: int = 0
     removed_bytes: int = 0
     removed_records: int = 0
+    vacuumed: bool = False
+    database_size_before: int | None = None
+    database_size_after: int | None = None
+    reclaimed_bytes: int = 0
+
+
+class LocalCacheDatabaseVacuumResponse(BaseModel):
+    """数据库 VACUUM 维护响应。"""
+
+    success: bool
+    message: str
+    database_size_before: int
+    database_size_after: int
+    reclaimed_bytes: int
+    checkpoint_busy: int = 0
+    checkpoint_log: int = 0
+    checkpointed: int = 0
 
 
 class LocalCacheImageDeleteRequest(BaseModel):
@@ -216,14 +341,128 @@ class LocalCacheLogDirectoryDeleteRequest(BaseModel):
     relative_path: str
 
 
+class LocalCacheDataEntryDeleteRequest(BaseModel):
+    """data 目录条目删除请求。"""
+
+    relative_path: str
+
+
 def _iter_files(directory: Path) -> list[Path]:
     if not directory.exists() or not directory.is_dir():
         return []
     return [path for path in directory.rglob("*") if path.is_file()]
 
 
+def _get_path_summary(path: Path) -> tuple[int, int, float]:
+    if not path.exists():
+        return 0, 0, 0.0
+    if path.is_file():
+        try:
+            file_stat = path.stat()
+        except OSError:
+            logger.warning(f"读取文件信息失败: {path}")
+            return 0, 0, 0.0
+        return 1, file_stat.st_size, file_stat.st_mtime
+
+    file_count = 0
+    total_size = 0
+    modified_time = 0.0
+    for file_path in _iter_files(path):
+        try:
+            file_stat = file_path.stat()
+        except OSError:
+            logger.warning(f"读取目录文件信息失败: {file_path}")
+            continue
+        file_count += 1
+        total_size += file_stat.st_size
+        modified_time = max(modified_time, file_stat.st_mtime)
+    return file_count, total_size, modified_time
+
+
 def _is_cache_image_file(path: Path) -> bool:
     return path.suffix.lower() in _CACHE_IMAGE_EXTENSIONS
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
+
+
+def _resolve_data_path(relative_path: str = "") -> Path:
+    root_path = _DATA_DIR.resolve()
+    try:
+        target_path = (root_path / relative_path).resolve()
+        target_path.relative_to(root_path)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="无效的 data 路径") from exc
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail="未找到指定 data 条目")
+    return target_path
+
+
+def _get_data_path_protection_reason(path: Path) -> str | None:
+    resolved_path = path.resolve()
+    if resolved_path == _DATA_DIR.resolve():
+        return "data 根目录不能删除"
+    if resolved_path in _PROTECTED_DATA_PATHS:
+        return "当前正在使用的主数据库文件不能在这里删除"
+    for cache_dir in _SPECIAL_CACHE_DIRS:
+        if _is_relative_to(resolved_path, cache_dir):
+            return "图片、表情和缩略图缓存请使用上方专用清理入口，以同步数据库记录"
+    return None
+
+
+def _build_data_entry(path: Path, root_path: Path) -> LocalCacheDataEntry:
+    resolved_path = path.resolve()
+    file_count, total_size, modified_time = _get_path_summary(path)
+    protection_reason = _get_data_path_protection_reason(resolved_path)
+    return LocalCacheDataEntry(
+        relative_path=resolved_path.relative_to(root_path).as_posix(),
+        name=path.name,
+        full_path=str(resolved_path),
+        kind="directory" if path.is_dir() else "file",
+        file_count=file_count,
+        total_size=total_size,
+        modified_time=modified_time,
+        protected=protection_reason is not None,
+        protection_reason=protection_reason,
+    )
+
+
+def _build_data_entries_response(relative_path: str) -> LocalCacheDataEntriesResponse:
+    root_path = _DATA_DIR.resolve()
+    current_path = _resolve_data_path(relative_path)
+    if not current_path.is_dir():
+        raise HTTPException(status_code=400, detail="只能浏览 data 目录中的文件夹")
+
+    entries: list[LocalCacheDataEntry] = []
+    for child in current_path.iterdir():
+        try:
+            entries.append(_build_data_entry(child, root_path))
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning(f"读取 data 条目信息失败: {child}, error={exc}")
+
+    file_count = sum(entry.file_count for entry in entries)
+    total_size = sum(entry.total_size for entry in entries)
+    current_relative_path = "" if current_path == root_path else current_path.relative_to(root_path).as_posix()
+    parent_path = None
+    if current_path != root_path:
+        parent_path = "" if current_path.parent == root_path else current_path.parent.relative_to(root_path).as_posix()
+
+    return LocalCacheDataEntriesResponse(
+        success=True,
+        root_path=str(root_path),
+        relative_path=current_relative_path,
+        current_path=str(current_path),
+        parent_path=parent_path,
+        file_count=file_count,
+        total_size=total_size,
+        total=len(entries),
+        data=sorted(entries, key=lambda item: (item.kind != "directory", -item.total_size, item.name.lower())),
+    )
 
 
 def _get_cache_image_target(target: CacheImageTarget) -> tuple[Path, ImageType, str]:
@@ -251,8 +490,8 @@ def _resolve_cache_image_file(target: CacheImageTarget, relative_path: str) -> P
 
 def _paths_equal(left: str, right: Path) -> bool:
     try:
-        return Path(left).resolve() == right.resolve()
-    except (OSError, RuntimeError):
+        return stored_image_paths_equal(left, right)
+    except (OSError, RuntimeError, StoredImagePathError):
         return False
 
 
@@ -264,8 +503,8 @@ def _get_image_records_by_path(image_type: ImageType) -> dict[Path, list[Images]
 
     for record in records:
         try:
-            record_path = Path(record.full_path).resolve()
-        except (OSError, RuntimeError):
+            record_path = resolve_stored_image_path(record.full_path)
+        except (OSError, RuntimeError, StoredImagePathError):
             continue
         records_by_path.setdefault(record_path, []).append(record)
     return records_by_path
@@ -436,14 +675,8 @@ def _resolve_log_directory(relative_path: str) -> Path:
 
 
 def _get_directory_size(directory: Path) -> tuple[int, int]:
-    files = _iter_files(directory)
-    total_size = 0
-    for file_path in files:
-        try:
-            total_size += file_path.stat().st_size
-        except OSError:
-            logger.warning(f"读取缓存文件大小失败: {file_path}")
-    return len(files), total_size
+    file_count, total_size, _ = _get_path_summary(directory)
+    return file_count, total_size
 
 
 def _get_image_record_count(image_type: ImageType) -> int:
@@ -491,6 +724,26 @@ def _get_database_files() -> list[DatabaseFileStats]:
                 logger.warning(f"读取数据库文件大小失败: {db_path}")
         result.append(DatabaseFileStats(path=str(db_path), exists=exists, size=size))
     return result
+
+
+def _get_database_total_size() -> int:
+    return sum(file.size for file in _get_database_files())
+
+
+def _get_database_page_stats() -> tuple[int, int, int]:
+    if not _DATABASE_FILE.exists():
+        return 0, 0, 0
+
+    try:
+        with sqlite3.connect(_DATABASE_FILE, timeout=_SQLITE_BUSY_TIMEOUT_SECONDS) as connection:
+            connection.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_SECONDS * 1000}")
+            page_size = int(connection.execute("PRAGMA page_size").fetchone()[0] or 0)
+            page_count = int(connection.execute("PRAGMA page_count").fetchone()[0] or 0)
+            freelist_count = int(connection.execute("PRAGMA freelist_count").fetchone()[0] or 0)
+    except sqlite3.Error as exc:
+        logger.warning(f"读取数据库分页统计失败: {exc}")
+        return 0, 0, 0
+    return page_size, page_count, freelist_count
 
 
 def _quote_sqlite_identifier(identifier: str) -> str:
@@ -568,16 +821,34 @@ def _get_database_table_stats() -> list[DatabaseTableStats]:
             else:
                 size = dbstat_sizes.get(table_name, 0)
                 size_source = "dbstat"
-            table_stats.append(DatabaseTableStats(name=table_name, rows=row_count, size=size, size_source=size_source))
+            cleanup_config = _DATABASE_CLEANUP_TABLES.get(table_name)
+            table_stats.append(
+                DatabaseTableStats(
+                    name=table_name,
+                    rows=row_count,
+                    size=size,
+                    size_source=size_source,
+                    label=cleanup_config["label"] if cleanup_config is not None else table_name,
+                    category=cleanup_config["category"] if cleanup_config is not None else "其他",
+                    description=cleanup_config["description"] if cleanup_config is not None else "",
+                    cleanup_supported=cleanup_config is not None,
+                    cleanup_date_column=cleanup_config["date_column"] if cleanup_config is not None else None,
+                )
+            )
     return sorted(table_stats, key=lambda item: item.name)
 
 
-def _build_database_stats() -> DatabaseStorageStats:
+def _build_database_stats(include_tables: bool = True) -> DatabaseStorageStats:
     files = _get_database_files()
+    page_size, page_count, freelist_count = _get_database_page_stats()
     return DatabaseStorageStats(
         files=files,
-        tables=_get_database_table_stats(),
+        tables=_get_database_table_stats() if include_tables else [],
         total_size=sum(file.size for file in files),
+        page_size=page_size,
+        page_count=page_count,
+        freelist_count=freelist_count,
+        free_size=page_size * freelist_count,
     )
 
 
@@ -594,7 +865,7 @@ def _build_local_cache_stats_response() -> LocalCacheStatsResponse:
             ),
             _build_directory_stats("logs", "日志文件", _LOG_DIR),
         ],
-        database=_build_database_stats(),
+        database=_build_database_stats(include_tables=False),
     )
 
 
@@ -617,10 +888,30 @@ def _store_local_cache_stats_response(response: LocalCacheStatsResponse) -> Loca
     return response
 
 
+def _get_cached_database_stats_response() -> DatabaseStorageStats | None:
+    cached = _database_stats_cache
+    if cached is None:
+        return None
+
+    expires_at, response = cached
+    if time.monotonic() >= expires_at:
+        return None
+    return response
+
+
+def _store_database_stats_response(response: DatabaseStorageStats) -> DatabaseStorageStats:
+    global _database_stats_cache
+
+    expires_at = time.monotonic() + _LOCAL_CACHE_STATS_CACHE_TTL_SECONDS
+    _database_stats_cache = (expires_at, response)
+    return response
+
+
 def _invalidate_local_cache_stats_cache() -> None:
-    global _local_cache_stats_cache
+    global _database_stats_cache, _local_cache_stats_cache
 
     _local_cache_stats_cache = None
+    _database_stats_cache = None
 
 
 def _build_local_cache_image_list_response(
@@ -710,6 +1001,94 @@ def _delete_local_cache_log_directory_response(
     )
 
 
+def _delete_data_entry_response(request: LocalCacheDataEntryDeleteRequest) -> LocalCacheCleanupResponse:
+    target_path = _resolve_data_path(request.relative_path)
+    protection_reason = _get_data_path_protection_reason(target_path)
+    if protection_reason is not None:
+        raise HTTPException(status_code=400, detail=protection_reason)
+
+    if target_path.is_file():
+        try:
+            file_size = target_path.stat().st_size
+            target_path.unlink()
+        except OSError as exc:
+            logger.warning(f"删除 data 文件失败: {target_path}, error={exc}")
+            raise HTTPException(status_code=500, detail="删除 data 文件失败") from exc
+        return LocalCacheCleanupResponse(
+            success=True,
+            message="data 文件已删除",
+            target="data",
+            removed_files=1,
+            removed_bytes=file_size,
+        )
+
+    if not target_path.is_dir():
+        raise HTTPException(status_code=400, detail="只能删除 data 目录中的文件或文件夹")
+
+    removed_files, removed_bytes = _remove_directory_contents(target_path)
+    try:
+        target_path.rmdir()
+    except OSError as exc:
+        logger.warning(f"删除 data 文件夹失败: {target_path}, error={exc}")
+        raise HTTPException(status_code=500, detail="删除 data 文件夹失败，可能仍有文件被占用") from exc
+
+    return LocalCacheCleanupResponse(
+        success=True,
+        message="data 文件夹已删除",
+        target="data",
+        removed_files=removed_files,
+        removed_bytes=removed_bytes,
+    )
+
+
+def _checkpoint_database() -> tuple[int, int, int]:
+    if not _DATABASE_FILE.exists():
+        return 0, 0, 0
+
+    try:
+        with sqlite3.connect(_DATABASE_FILE, timeout=_SQLITE_BUSY_TIMEOUT_SECONDS) as connection:
+            connection.isolation_level = None
+            connection.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_SECONDS * 1000}")
+            row = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    except sqlite3.Error as exc:
+        logger.warning(f"数据库 WAL checkpoint 失败: {exc}")
+        return 0, 0, 0
+
+    if row is None:
+        return 0, 0, 0
+    return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
+
+
+def _vacuum_database_response() -> LocalCacheDatabaseVacuumResponse:
+    if not _DATABASE_FILE.exists():
+        raise HTTPException(status_code=404, detail="数据库文件不存在")
+
+    before_size = _get_database_total_size()
+    _checkpoint_database()
+
+    try:
+        with sqlite3.connect(_DATABASE_FILE, timeout=_SQLITE_BUSY_TIMEOUT_SECONDS) as connection:
+            connection.isolation_level = None
+            connection.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_SECONDS * 1000}")
+            connection.execute("VACUUM")
+    except sqlite3.Error as exc:
+        logger.warning(f"数据库 VACUUM 失败: {exc}")
+        raise HTTPException(status_code=500, detail=f"数据库 VACUUM 失败: {exc}") from exc
+
+    checkpoint_busy, checkpoint_log, checkpointed = _checkpoint_database()
+    after_size = _get_database_total_size()
+    return LocalCacheDatabaseVacuumResponse(
+        success=True,
+        message="数据库 VACUUM 已完成",
+        database_size_before=before_size,
+        database_size_after=after_size,
+        reclaimed_bytes=max(0, before_size - after_size),
+        checkpoint_busy=checkpoint_busy,
+        checkpoint_log=checkpoint_log,
+        checkpointed=checkpointed,
+    )
+
+
 def _cleanup_local_cache_response(request: LocalCacheCleanupRequest) -> LocalCacheCleanupResponse:
     if request.target == "images":
         removed_files, removed_bytes = _remove_directory_contents(_IMAGE_DIR)
@@ -749,12 +1128,20 @@ def _cleanup_local_cache_response(request: LocalCacheCleanupRequest) -> LocalCac
     if not request.tables:
         raise HTTPException(status_code=400, detail="请至少选择一个要清理的数据库表")
 
-    removed_records = _delete_log_records(list(request.tables))
+    removed_records = _delete_database_records(list(request.tables), request.database_mode, request.older_than_days)
+    maintenance_result = None
+    if request.vacuum_after_cleanup and removed_records > 0:
+        maintenance_result = _vacuum_database_response()
+
     return LocalCacheCleanupResponse(
         success=True,
-        message="数据库日志记录已清理",
+        message="数据库记录已清理",
         target=request.target,
         removed_records=removed_records,
+        vacuumed=maintenance_result is not None,
+        database_size_before=maintenance_result.database_size_before if maintenance_result is not None else None,
+        database_size_after=maintenance_result.database_size_after if maintenance_result is not None else None,
+        reclaimed_bytes=maintenance_result.reclaimed_bytes if maintenance_result is not None else 0,
     )
 
 
@@ -921,17 +1308,37 @@ def _delete_image_records(image_type: ImageType) -> int:
     return removed_records
 
 
-def _delete_log_records(table_names: list[str]) -> int:
-    allowed_tables = {"llm_usage", "tool_records", "mai_messages"}
+def _delete_database_records(
+    table_names: list[str],
+    mode: DatabaseCleanupMode,
+    older_than_days: int | None,
+) -> int:
+    allowed_tables = set(_DATABASE_CLEANUP_TABLES)
     invalid_tables = set(table_names) - allowed_tables
     if invalid_tables:
         raise ValueError(f"不支持清理这些表: {', '.join(sorted(invalid_tables))}")
+    if mode == "older_than_days" and older_than_days is None:
+        raise HTTPException(status_code=400, detail="按时间清理时必须设置保留天数")
 
     removed_records = 0
+    existing_tables = set(inspect(engine).get_table_names())
     with engine.begin() as connection:
         for table_name in table_names:
-            quoted_table_name = table_name.replace('"', '""')
-            result = connection.execute(text(f'DELETE FROM "{quoted_table_name}"'))
+            if table_name not in existing_tables:
+                continue
+
+            quoted_table_name = _quote_sqlite_identifier(table_name)
+            if mode == "all":
+                result = connection.execute(text(f"DELETE FROM {quoted_table_name}"))
+            else:
+                cleanup_config = _DATABASE_CLEANUP_TABLES[table_name]
+                date_column = cleanup_config["date_column"]
+                cutoff_time = datetime.now() - timedelta(days=older_than_days or 0)
+                quoted_date_column = _quote_sqlite_identifier(date_column)
+                result = connection.execute(
+                    text(f"DELETE FROM {quoted_table_name} WHERE {quoted_date_column} < :cutoff_time"),
+                    {"cutoff_time": cutoff_time},
+                )
             removed_records += int(result.rowcount or 0)
     return removed_records
 
@@ -1021,7 +1428,7 @@ async def get_maibot_status():
 
 @router.get("/local-cache", response_model=LocalCacheStatsResponse)
 async def get_local_cache_stats():
-    """获取 data 目录下图片、表情包和数据库的本地存储情况。"""
+    """获取本地存储概览，数据库表详情会按需单独加载以加快首屏速度。"""
     try:
         cached_response = _get_cached_local_cache_stats_response()
         if cached_response is not None:
@@ -1032,6 +1439,63 @@ async def get_local_cache_stats():
     except Exception as e:
         logger.exception(f"获取本地缓存统计失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取本地缓存统计失败: {str(e)}") from e
+
+
+@router.get("/local-cache/database", response_model=DatabaseStorageStats)
+async def get_local_cache_database_stats() -> DatabaseStorageStats:
+    """获取数据库文件、分页空闲空间和表级存储详情。"""
+    try:
+        cached_response = _get_cached_database_stats_response()
+        if cached_response is not None:
+            return cached_response
+
+        response = await asyncio.to_thread(_build_database_stats, True)
+        return _store_database_stats_response(response)
+    except Exception as e:
+        logger.exception(f"获取数据库存储统计失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取数据库存储统计失败: {str(e)}") from e
+
+
+@router.post("/local-cache/database/vacuum", response_model=LocalCacheDatabaseVacuumResponse)
+async def vacuum_local_cache_database() -> LocalCacheDatabaseVacuumResponse:
+    """执行 SQLite VACUUM，释放删除记录后留下的空闲页。"""
+    try:
+        response = await asyncio.to_thread(_vacuum_database_response)
+        _invalidate_local_cache_stats_cache()
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"数据库 VACUUM 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"数据库 VACUUM 失败: {str(e)}") from e
+
+
+@router.get("/local-cache/data-entries", response_model=LocalCacheDataEntriesResponse)
+async def list_local_cache_data_entries(
+    relative_path: Annotated[str, Query(description="相对于 data 目录的文件夹路径")] = "",
+) -> LocalCacheDataEntriesResponse:
+    """浏览 data 目录下的文件和文件夹，按需统计当前层级。"""
+    try:
+        return await asyncio.to_thread(_build_data_entries_response, relative_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"获取 data 目录条目失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取 data 目录条目失败: {str(e)}") from e
+
+
+@router.delete("/local-cache/data-entries", response_model=LocalCacheCleanupResponse)
+async def delete_local_cache_data_entry(request: LocalCacheDataEntryDeleteRequest) -> LocalCacheCleanupResponse:
+    """删除 data 目录中的非受保护文件或文件夹。"""
+    try:
+        response = await asyncio.to_thread(_delete_data_entry_response, request)
+        _invalidate_local_cache_stats_cache()
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"删除 data 目录条目失败: {e}")
+        raise HTTPException(status_code=500, detail=f"删除 data 目录条目失败: {str(e)}") from e
 
 
 @router.get("/local-cache/images", response_model=LocalCacheImageListResponse)

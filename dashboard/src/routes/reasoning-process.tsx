@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
   Clock,
@@ -6,8 +7,10 @@ import {
   Copy,
   Cpu,
   FileCode2,
+  FileJson,
   FileText,
   Layers,
+  MessageSquare,
   RefreshCw,
   Search,
   Timer,
@@ -50,6 +53,36 @@ const STAGE_LABELS: Record<string, string> = {
   timing_gate: '时机判断',
 }
 
+type StructuredPromptMessage = {
+  index?: number
+  role?: string
+  content?: unknown
+  content_text?: string
+  tool_call_id?: string
+  tool_calls?: unknown[]
+}
+
+type StructuredPromptPayload = {
+  schema_version?: number
+  request?: {
+    kind?: string
+    selection_reason?: string
+  }
+  metadata?: {
+    model_name?: string
+    duration_ms?: number
+  }
+  messages?: StructuredPromptMessage[]
+  output?: {
+    title?: string
+    content?: unknown
+    content_text?: string
+    tool_calls?: unknown[]
+  } | null
+  tool_definitions?: unknown[]
+  text_dump?: string
+}
+
 function formatStageName(stage: string): string {
   return STAGE_LABELS[stage] ?? stage
 }
@@ -89,6 +122,68 @@ function getReasoningMetadataText(item: ReasoningPromptFile): string {
   return parts.join(' · ')
 }
 
+function getStructuredPromptMessageRoleStyle(role?: string): {
+  label: string
+  containerClassName: string
+  badgeClassName: string
+} {
+  const normalizedRole = String(role || '').trim().toLowerCase()
+  if (normalizedRole === 'system') {
+    return {
+      label: 'system',
+      containerClassName: 'border-cyan-300/70 bg-cyan-50/70 dark:border-cyan-700/60 dark:bg-cyan-950/25',
+      badgeClassName: 'border-cyan-400/70 bg-cyan-100/80 text-cyan-900 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-100',
+    }
+  }
+  if (normalizedRole === 'user') {
+    return {
+      label: 'user',
+      containerClassName: 'border-emerald-300/70 bg-emerald-50/70 dark:border-emerald-700/60 dark:bg-emerald-950/25',
+      badgeClassName:
+        'border-emerald-400/70 bg-emerald-100/80 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100',
+    }
+  }
+  if (normalizedRole === 'assistant') {
+    return {
+      label: 'assistant',
+      containerClassName: 'border-amber-300/70 bg-amber-50/70 dark:border-amber-700/60 dark:bg-amber-950/25',
+      badgeClassName:
+        'border-amber-400/70 bg-amber-100/80 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100',
+    }
+  }
+  if (normalizedRole === 'tool') {
+    return {
+      label: 'tool',
+      containerClassName: 'border-violet-300/70 bg-violet-50/70 dark:border-violet-700/60 dark:bg-violet-950/25',
+      badgeClassName:
+        'border-violet-400/70 bg-violet-100/80 text-violet-900 dark:border-violet-700 dark:bg-violet-950 dark:text-violet-100',
+    }
+  }
+
+  return {
+    label: role || '未知角色',
+    containerClassName: 'bg-muted/30',
+    badgeClassName: 'bg-background/80',
+  }
+}
+
+function stringifyStructuredValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null || value === undefined) return ''
+  return JSON.stringify(value, null, 2)
+}
+
+function parseStructuredPrompt(content: string): StructuredPromptPayload | null {
+  if (!content.trim()) return null
+  try {
+    const payload = JSON.parse(content) as unknown
+    if (payload && typeof payload === 'object') return payload as StructuredPromptPayload
+  } catch {
+    return null
+  }
+  return null
+}
+
 function formatSessionType(chatType: string): string {
   if (chatType === 'group') return '群聊'
   if (chatType === 'private') return '私聊'
@@ -122,9 +217,15 @@ function getSessionSubtitle(sessionInfo?: ReasoningPromptSessionInfo): string {
 
 interface ReasoningProcessPageProps {
   embedded?: boolean
+  toolbarContainerId?: string
+  toolbarVisible?: boolean
 }
 
-export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageProps) {
+export function ReasoningProcessPage({
+  embedded = false,
+  toolbarContainerId,
+  toolbarVisible = true,
+}: ReasoningProcessPageProps) {
   const { toast } = useToast()
   const [items, setItems] = useState<ReasoningPromptFile[]>([])
   const [stages, setStages] = useState<string[]>([])
@@ -139,12 +240,14 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
   const [total, setTotal] = useState(0)
   const [selected, setSelected] = useState<ReasoningPromptFile | null>(null)
   const [textContent, setTextContent] = useState('')
-  const [activePreview, setActivePreview] = useState<'text' | 'html'>('text')
+  const [jsonContent, setJsonContent] = useState('')
+  const [activePreview, setActivePreview] = useState<'structured' | 'text' | 'html'>('structured')
   const [htmlPreviewUrl, setHtmlPreviewUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [contentLoading, setContentLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [browsingStage, setBrowsingStage] = useState(false)
+  const [toolbarRoot, setToolbarRoot] = useState<HTMLElement | null>(null)
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const stageCards = useMemo(() => {
@@ -164,6 +267,11 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
   const sessionInfoByName = useMemo(() => {
     return new Map(sessionInfos.map((item) => [item.name, item]))
   }, [sessionInfos])
+  const structuredPrompt = useMemo(() => parseStructuredPrompt(jsonContent), [jsonContent])
+
+  useEffect(() => {
+    setToolbarRoot(toolbarContainerId ? document.getElementById(toolbarContainerId) : null)
+  }, [toolbarContainerId])
 
   useEffect(() => {
     let ignore = false
@@ -250,16 +358,34 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
     async function loadContent() {
       if (!selected?.text_path) {
         setTextContent('')
+      } else {
+        setContentLoading(true)
+        try {
+          const data = await getReasoningPromptFile(selected.text_path)
+          if (!ignore) setTextContent(data.content)
+        } catch (err) {
+          if (!ignore) {
+            setTextContent(err instanceof Error ? err.message : '读取文本失败')
+          }
+        } finally {
+          if (!ignore) setContentLoading(false)
+        }
+      }
+
+      if (!selected?.json_path) {
+        setJsonContent('')
         return
       }
 
+      setJsonContent('')
       setContentLoading(true)
       try {
-        const data = await getReasoningPromptFile(selected.text_path)
-        if (!ignore) setTextContent(data.content)
+        const data = await getReasoningPromptFile(selected.json_path)
+        if (!ignore) setJsonContent(data.content)
       } catch (err) {
         if (!ignore) {
-          setTextContent(err instanceof Error ? err.message : '读取文本失败')
+          setJsonContent('')
+          setTextContent((current) => current || (err instanceof Error ? err.message : '读取结构化内容失败'))
         }
       } finally {
         if (!ignore) setContentLoading(false)
@@ -275,7 +401,9 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
       if (!ignore) setHtmlPreviewUrl(url)
     }
 
-    if (selected?.html_path && !selected.text_path) {
+    if (selected?.json_path) {
+      setActivePreview('structured')
+    } else if (selected?.html_path && !selected.text_path) {
       setActivePreview('html')
     } else {
       setActivePreview('text')
@@ -307,17 +435,18 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
   }
 
   async function handleCopyPrompt() {
-    if (!textContent || contentLoading) {
+    const copyContent = textContent || structuredPrompt?.text_dump || jsonContent
+    if (!copyContent || contentLoading) {
       toast({
         title: '暂无可复制内容',
-        description: '请先选择一条包含 txt 的 prompt 记录',
+        description: '请先选择一条包含 prompt 内容的记录',
         variant: 'destructive',
       })
       return
     }
 
     try {
-      await navigator.clipboard.writeText(textContent)
+      await navigator.clipboard.writeText(copyContent)
       toast({
         title: '已复制完整 Prompt',
         description: selected
@@ -338,8 +467,84 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
   }
 
   const selectedSessionInfo = selected ? sessionInfoByName.get(selected.session_id) : undefined
-  const selectedMetadataText = selected ? getReasoningMetadataText(selected) : ''
-  const selectedDurationText = selected ? formatDurationMs(selected.duration_ms) : ''
+  const selectedStructuredPrompt = selected?.json_path ? structuredPrompt : null
+  const selectedModelName = selected?.model_name || selectedStructuredPrompt?.metadata?.model_name || ''
+  const selectedDurationText = formatDurationMs(
+    selected?.duration_ms ?? selectedStructuredPrompt?.metadata?.duration_ms ?? null
+  )
+  const selectedMessageCount = selectedStructuredPrompt ? (selectedStructuredPrompt.messages?.length ?? 0) : null
+  const renderRefreshButton = () => (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setRefreshKey((current) => current + 1)}
+      disabled={loading}
+      className="h-10 shrink-0 justify-start"
+    >
+      <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+      刷新
+    </Button>
+  )
+  const renderBrowsingControls = (inToolbar = false) => (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-10 shrink-0 justify-start"
+        onClick={() => setBrowsingStage(false)}
+      >
+        <ArrowLeft className="h-4 w-4" />
+        类型
+      </Button>
+
+      <Select
+        value={session}
+        onValueChange={(value) => resetToFirstPage(() => setSession(value))}
+        disabled={sessions.length === 0 && loading}
+      >
+        <SelectTrigger className={cn('h-10', inToolbar ? 'w-[240px]' : undefined)}>
+          <SelectValue placeholder="会话" />
+        </SelectTrigger>
+        <SelectContent>
+          {session === AUTO_SESSION && (
+            <SelectItem value={AUTO_SESSION}>自动选择最近会话</SelectItem>
+          )}
+          {sessions.map((item) => {
+            const sessionInfo = sessionInfoByName.get(item)
+            return (
+              <SelectItem key={item} value={item}>
+                <div className="min-w-0">
+                  <div className="truncate">{getSessionDisplayName(item, sessionInfo)}</div>
+                  {sessionInfo && (
+                    <div className="text-muted-foreground truncate text-xs">
+                      {getSessionSubtitle(sessionInfo)}
+                    </div>
+                  )}
+                </div>
+              </SelectItem>
+            )
+          })}
+        </SelectContent>
+      </Select>
+
+      <div className={cn('relative', inToolbar ? 'min-w-[300px] flex-1 max-w-[520px]' : undefined)}>
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+        <Input
+          value={search}
+          onChange={(event) => resetToFirstPage(() => setSearch(event.target.value))}
+          className="h-10 pl-9"
+          placeholder="搜索会话显示名、真实会话、文件名或 replyer 回复内容"
+        />
+      </div>
+    </>
+  )
+  const toolbarContent = (
+    <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
+      {renderRefreshButton()}
+      {browsingStage && renderBrowsingControls(true)}
+    </div>
+  )
+  const toolbarPortal = embedded && toolbarVisible && toolbarRoot ? createPortal(toolbarContent, toolbarRoot) : null
   const renderStageCard = (item: ReasoningPromptStageInfo, compact = false) => (
     <button
       key={item.name}
@@ -368,86 +573,23 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col gap-3 overflow-hidden', embedded ? 'p-0' : 'p-3 lg:p-4')}>
+      {toolbarPortal}
+
       {!embedded && (
-        <div>
-          <h1 className="text-foreground text-xl font-semibold tracking-normal">推理过程</h1>
-          <p className="text-muted-foreground text-sm">浏览 logs/maisaka_prompt 下的 prompt 记录</p>
+        <div className="flex flex-shrink-0 items-start justify-between gap-3">
+          <div>
+            <h1 className="text-foreground text-xl font-semibold tracking-normal">推理过程</h1>
+            <p className="text-muted-foreground text-sm">浏览 logs/maisaka_prompt 下的 prompt 记录</p>
+          </div>
+          {renderRefreshButton()}
         </div>
       )}
 
-      <div
-        className={cn(
-          'grid flex-shrink-0 grid-cols-1 gap-2',
-          browsingStage
-            ? 'md:grid-cols-[auto_auto_minmax(220px,320px)_1fr]'
-            : 'md:grid-cols-[auto_1fr]'
-        )}
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setRefreshKey((current) => current + 1)}
-          disabled={loading}
-          className="h-10 justify-start"
-        >
-          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-          刷新
-        </Button>
-
-        {browsingStage && (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-10 justify-start"
-              onClick={() => setBrowsingStage(false)}
-            >
-              <ArrowLeft className="h-4 w-4" />
-              类型
-            </Button>
-
-            <Select
-              value={session}
-              onValueChange={(value) => resetToFirstPage(() => setSession(value))}
-              disabled={sessions.length === 0 && loading}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="会话" />
-              </SelectTrigger>
-              <SelectContent>
-                {session === AUTO_SESSION && (
-                  <SelectItem value={AUTO_SESSION}>自动选择最近会话</SelectItem>
-                )}
-                {sessions.map((item) => {
-                  const sessionInfo = sessionInfoByName.get(item)
-                  return (
-                    <SelectItem key={item} value={item}>
-                      <div className="min-w-0">
-                        <div className="truncate">{getSessionDisplayName(item, sessionInfo)}</div>
-                        {sessionInfo && (
-                          <div className="text-muted-foreground truncate text-xs">
-                            {getSessionSubtitle(sessionInfo)}
-                          </div>
-                        )}
-                      </div>
-                    </SelectItem>
-                  )
-                })}
-              </SelectContent>
-            </Select>
-
-            <div className="relative">
-              <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-              <Input
-                value={search}
-                onChange={(event) => resetToFirstPage(() => setSearch(event.target.value))}
-                className="pl-9"
-                placeholder="搜索会话显示名、真实会话、文件名或 replyer 回复内容"
-              />
-            </div>
-          </>
-        )}
-      </div>
+      {!embedded && browsingStage && (
+        <div className="grid flex-shrink-0 grid-cols-1 gap-2 md:grid-cols-[auto_minmax(220px,320px)_1fr]">
+          {renderBrowsingControls()}
+        </div>
+      )}
 
       {error && (
         <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-sm">
@@ -501,6 +643,8 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
                     selected?.stem === item.stem
                   const durationText = formatDurationMs(item.duration_ms)
                   const metadataText = getReasoningMetadataText(item)
+                  const previewText =
+                    item.stage === 'replyer' ? item.output_preview : item.action_preview
                   return (
                     <button
                       key={`${item.stage}/${item.session_id}/${item.stem}`}
@@ -513,31 +657,22 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
                           : 'hover:border-border hover:bg-muted/60 border-transparent'
                       )}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <Badge variant="secondary" className="max-w-[150px] truncate">
-                          {formatStageName(item.stage)}
-                        </Badge>
-                        <span className="text-muted-foreground flex items-center gap-1 text-xs">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          {previewText && (
+                            <div
+                              className="text-foreground line-clamp-2 text-sm font-medium"
+                              title={previewText}
+                            >
+                              {previewText}
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
                           <Clock className="h-3.5 w-3.5" />
                           {formatTime(item.timestamp, item.modified_at)}
                         </span>
                       </div>
-                      {item.stage === 'replyer' && item.output_preview && (
-                        <div
-                          className="text-foreground line-clamp-2 text-sm"
-                          title={item.output_preview}
-                        >
-                          {item.output_preview}
-                        </div>
-                      )}
-                      {(item.stage === 'planner' || item.stage === 'timing_gate') && item.action_preview && (
-                        <div
-                          className="text-foreground line-clamp-2 text-sm"
-                          title={item.action_preview}
-                        >
-                          {item.action_preview}
-                        </div>
-                      )}
                       {metadataText && (
                         <div
                           className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs"
@@ -557,13 +692,7 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
                           )}
                         </div>
                       )}
-                      <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
-                        <span className="truncate">
-                          {item.resolved_session_id
-                            ? item.resolved_session_id.slice(0, 8)
-                            : item.session_id}{' '}
-                          · {item.stem}
-                        </span>
+                      <div className="text-muted-foreground flex items-center justify-end text-xs">
                         <span className="shrink-0">{formatSize(item.size)}</span>
                       </div>
                     </button>
@@ -597,119 +726,239 @@ export function ReasoningProcessPage({ embedded = false }: ReasoningProcessPageP
           </div>
 
           <div className="bg-background flex min-h-0 flex-col overflow-hidden rounded-md border">
-            <div className="flex min-h-14 flex-shrink-0 flex-col gap-1 border-b px-4 py-3 md:flex-row md:items-center md:justify-between">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">
-                  {selected
-                    ? `${formatStageName(selected.stage)}/${getSessionDisplayName(
-                        selected.session_id,
-                        selectedSessionInfo,
-                        selected.session_display_name
-                      )}/${selected.stem}`
-                    : '未选择记录'}
-                </div>
-                <div className="text-muted-foreground text-xs">
-                  {selected
-                    ? `${formatSize(selected.size)} · ${formatTime(selected.timestamp, selected.modified_at)}`
-                    : '从左侧列表选择一条记录'}
-                </div>
-                {selectedMetadataText && (
-                  <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                    {selected?.model_name && (
-                      <span className="inline-flex min-w-0 items-center gap-1">
-                        <Cpu className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{selected.model_name}</span>
-                      </span>
-                    )}
-                    {selectedDurationText && (
-                      <span className="inline-flex items-center gap-1">
-                        <Timer className="h-3.5 w-3.5 shrink-0" />
-                        {selectedDurationText}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {selected && selectedSessionInfo && (
-                  <div className="text-muted-foreground mt-1 truncate text-xs">
-                    {getSessionSubtitle(selectedSessionInfo)}
-                  </div>
-                )}
-              </div>
-              {selected && (
-                <div className="text-muted-foreground flex items-center gap-2 text-xs">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1.5"
-                    onClick={handleCopyPrompt}
-                    disabled={!selected.text_path || contentLoading || !textContent}
-                    title="复制完整 Prompt"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    复制
-                  </Button>
-                  {selected.text_path && (
-                    <span className="inline-flex items-center gap-1">
-                      <FileText className="h-3.5 w-3.5" />
-                      txt
-                    </span>
-                  )}
-                  {selected.html_path && (
-                    <span className="inline-flex items-center gap-1">
-                      <FileCode2 className="h-3.5 w-3.5" />
-                      html
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
             <Tabs
               value={activePreview}
-              onValueChange={(value) => setActivePreview(value as 'text' | 'html')}
-              className="flex min-h-0 flex-1 flex-col"
+              onValueChange={(value) => setActivePreview(value as 'structured' | 'text' | 'html')}
+              className="min-h-0 flex-1"
             >
-              <div className="flex flex-shrink-0 border-b px-3 py-2">
-                <TabsList>
-                  <TabsTrigger value="text" disabled={!selected?.text_path}>
-                    <FileText className="mr-1 h-4 w-4" />
-                    文本
-                  </TabsTrigger>
-                  <TabsTrigger value="html" disabled={!selected?.html_path}>
-                    <Code2 className="mr-1 h-4 w-4" />
-                    HTML
-                  </TabsTrigger>
-                </TabsList>
-              </div>
-
-              <TabsContent value="text" className="m-0 min-h-0 flex-1 overflow-hidden">
-                <ScrollArea className="h-full">
-                  {contentLoading ? (
-                    <div className="flex min-h-full items-center justify-center p-4">
-                      <ThinkingIllustration />
+              <ScrollArea className="h-full">
+                <div className="min-h-full">
+                  <div className="flex min-h-14 flex-col gap-3 border-b px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">
+                        {selected
+                          ? `${formatStageName(selected.stage)}/${getSessionDisplayName(
+                              selected.session_id,
+                              selectedSessionInfo,
+                              selected.session_display_name
+                            )}/${selected.stem}`
+                          : '未选择记录'}
+                      </div>
+                      <div className="text-muted-foreground text-xs">
+                        {selected
+                          ? `${formatSize(selected.size)} · ${formatTime(selected.timestamp, selected.modified_at)}`
+                          : '从左侧列表选择一条记录'}
+                      </div>
+                      {(selectedModelName ||
+                        selectedDurationText ||
+                        selectedMessageCount !== null) && (
+                        <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                          {selectedModelName && (
+                            <span className="inline-flex min-w-0 items-center gap-1">
+                              <Cpu className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{selectedModelName}</span>
+                            </span>
+                          )}
+                          {selectedDurationText && (
+                            <span className="inline-flex items-center gap-1">
+                              <Timer className="h-3.5 w-3.5 shrink-0" />
+                              {selectedDurationText}
+                            </span>
+                          )}
+                          {selectedMessageCount !== null && (
+                            <span className="inline-flex items-center gap-1">
+                              <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+                              {selectedMessageCount} 条消息
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {selected && selectedSessionInfo && (
+                        <div className="text-muted-foreground mt-1 truncate text-xs">
+                          {getSessionSubtitle(selectedSessionInfo)}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <pre className="text-foreground min-h-full p-4 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
-                      {textContent || '没有文本内容'}
-                    </pre>
-                  )}
-                </ScrollArea>
-              </TabsContent>
-
-              <TabsContent value="html" className="m-0 min-h-0 flex-1 overflow-hidden">
-                {selected?.html_path && htmlPreviewUrl ? (
-                  <iframe
-                    title="推理过程 HTML 预览"
-                    src={htmlPreviewUrl}
-                    sandbox=""
-                    className="h-full w-full border-0 bg-white"
-                  />
-                ) : (
-                  <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-                    没有 HTML 预览
+                    {selected && (
+                      <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-2 text-xs">
+                        <TabsList className="h-8 rounded-md">
+                          <TabsTrigger
+                            value="structured"
+                            disabled={!selected?.json_path}
+                            className="h-6 gap-1 px-2 text-xs"
+                          >
+                            <FileJson className="h-3.5 w-3.5" />
+                            结构化
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="text"
+                            disabled={!selected?.text_path}
+                            className="h-6 gap-1 px-2 text-xs"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            文本
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="html"
+                            disabled={!selected?.html_path}
+                            className="h-6 gap-1 px-2 text-xs"
+                          >
+                            <Code2 className="h-3.5 w-3.5" />
+                            HTML
+                          </TabsTrigger>
+                        </TabsList>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5"
+                          onClick={handleCopyPrompt}
+                          disabled={
+                            contentLoading ||
+                            !(textContent || structuredPrompt?.text_dump || jsonContent)
+                          }
+                          title="复制完整 Prompt"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          复制
+                        </Button>
+                        {selected.text_path && (
+                          <span className="inline-flex items-center gap-1">
+                            <FileText className="h-3.5 w-3.5" />
+                            txt
+                          </span>
+                        )}
+                        {selected.json_path && (
+                          <span className="inline-flex items-center gap-1">
+                            <FileJson className="h-3.5 w-3.5" />
+                            json
+                          </span>
+                        )}
+                        {selected.html_path && (
+                          <span className="inline-flex items-center gap-1">
+                            <FileCode2 className="h-3.5 w-3.5" />
+                            html
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
-              </TabsContent>
+
+                  <TabsContent value="structured" className="m-0">
+                    {contentLoading ? (
+                      <div className="flex min-h-[360px] items-center justify-center p-4">
+                        <ThinkingIllustration />
+                      </div>
+                    ) : structuredPrompt ? (
+                      <div className="space-y-3 p-3">
+                        {structuredPrompt.request?.selection_reason && (
+                          <div className="rounded-md border p-3">
+                            <div className="text-muted-foreground text-xs">选择原因</div>
+                            <pre className="text-foreground mt-2 text-sm break-words whitespace-pre-wrap">
+                              {structuredPrompt.request.selection_reason}
+                            </pre>
+                          </div>
+                        )}
+
+                        {structuredPrompt.output && (
+                          <div className="rounded-md border p-3">
+                            <Badge variant="secondary" className="mb-2">
+                              {structuredPrompt.output.title || '输出结果'}
+                            </Badge>
+                            <pre className="text-foreground font-mono text-xs leading-5 whitespace-pre-wrap">
+                              {structuredPrompt.output.content_text ||
+                                stringifyStructuredValue(structuredPrompt.output.content) ||
+                                '空输出'}
+                            </pre>
+                            {structuredPrompt.output.tool_calls &&
+                              structuredPrompt.output.tool_calls.length > 0 && (
+                                <pre className="bg-background/60 mt-3 rounded-md border p-3 font-mono text-xs leading-5 whitespace-pre-wrap">
+                                  {JSON.stringify(structuredPrompt.output.tool_calls, null, 2)}
+                                </pre>
+                              )}
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          {(structuredPrompt.messages ?? []).map((message, index) => {
+                            const roleStyle = getStructuredPromptMessageRoleStyle(message.role)
+                            return (
+                              <div
+                                key={`${message.index ?? index}-${message.role ?? 'unknown'}`}
+                                className={cn('rounded-md border p-3', roleStyle.containerClassName)}
+                              >
+                                <div className="mb-2 flex flex-wrap items-center gap-2">
+                                  <Badge variant="outline">#{message.index ?? index + 1}</Badge>
+                                  <Badge variant="outline" className={roleStyle.badgeClassName}>
+                                    {roleStyle.label}
+                                  </Badge>
+                                  {message.tool_call_id && (
+                                    <span className="text-muted-foreground text-xs">
+                                      tool_call_id: {message.tool_call_id}
+                                    </span>
+                                  )}
+                                </div>
+                                <pre className="text-foreground font-mono text-xs leading-5 whitespace-pre-wrap">
+                                  {message.content_text ||
+                                    stringifyStructuredValue(message.content) ||
+                                    '空内容'}
+                                </pre>
+                                {message.tool_calls && message.tool_calls.length > 0 && (
+                                  <pre className="bg-background/60 mt-3 rounded-md border p-3 font-mono text-xs leading-5 whitespace-pre-wrap">
+                                    {JSON.stringify(message.tool_calls, null, 2)}
+                                  </pre>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+
+                        {structuredPrompt.tool_definitions &&
+                          structuredPrompt.tool_definitions.length > 0 && (
+                            <div className="rounded-md border p-3">
+                              <Badge variant="secondary" className="mb-2">
+                                工具定义
+                              </Badge>
+                              <pre className="text-foreground font-mono text-xs leading-5 whitespace-pre-wrap">
+                                {JSON.stringify(structuredPrompt.tool_definitions, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground flex min-h-[360px] items-center justify-center text-sm">
+                        没有结构化内容
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="text" className="m-0">
+                    {contentLoading ? (
+                      <div className="flex min-h-[360px] items-center justify-center p-4">
+                        <ThinkingIllustration />
+                      </div>
+                    ) : (
+                      <pre className="text-foreground min-h-[360px] p-4 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
+                        {textContent || '没有文本内容'}
+                      </pre>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="html" className="m-0">
+                    {selected?.html_path && htmlPreviewUrl ? (
+                      <iframe
+                        title="推理过程 HTML 预览"
+                        src={htmlPreviewUrl}
+                        sandbox=""
+                        className="h-[70vh] min-h-[420px] w-full border-0 bg-white"
+                      />
+                    ) : (
+                      <div className="text-muted-foreground flex min-h-[360px] items-center justify-center text-sm">
+                        没有 HTML 预览
+                      </div>
+                    )}
+                  </TabsContent>
+                </div>
+              </ScrollArea>
             </Tabs>
           </div>
         </div>

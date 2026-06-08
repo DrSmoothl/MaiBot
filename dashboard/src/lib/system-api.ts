@@ -64,12 +64,21 @@ export interface DatabaseTableStats {
   rows: number
   size: number
   size_source: 'dbstat' | 'estimated'
+  label: string
+  category: string
+  description: string
+  cleanup_supported: boolean
+  cleanup_date_column: string | null
 }
 
 export interface DatabaseStorageStats {
   files: DatabaseFileStats[]
   tables: DatabaseTableStats[]
   total_size: number
+  page_size: number
+  page_count: number
+  freelist_count: number
+  free_size: number
 }
 
 export interface LocalCacheStats {
@@ -128,17 +137,58 @@ export interface LocalCacheLogDirectoryListResponse {
   data: LocalCacheLogDirectoryItem[]
 }
 
+export interface LocalCacheDataEntry {
+  relative_path: string
+  name: string
+  full_path: string
+  kind: 'file' | 'directory'
+  file_count: number
+  total_size: number
+  modified_time: number
+  protected: boolean
+  protection_reason: string | null
+}
+
+export interface LocalCacheDataEntriesResponse {
+  success: boolean
+  root_path: string
+  relative_path: string
+  current_path: string
+  parent_path: string | null
+  file_count: number
+  total_size: number
+  total: number
+  data: LocalCacheDataEntry[]
+}
+
 export interface LocalCacheCleanupResult {
   success: boolean
   message: string
-  target: 'images' | 'emoji' | 'log_files' | 'database_logs'
+  target: 'images' | 'emoji' | 'log_files' | 'database_logs' | 'data'
   removed_files: number
   removed_bytes: number
   removed_records: number
+  vacuumed: boolean
+  database_size_before: number | null
+  database_size_after: number | null
+  reclaimed_bytes: number
 }
 
-export type LocalCacheCleanupTarget = LocalCacheCleanupResult['target']
-export type LogCleanupTable = 'llm_usage' | 'tool_records' | 'mai_messages'
+export type LocalCacheCleanupTarget = 'images' | 'emoji' | 'log_files' | 'database_logs'
+export type DatabaseCleanupMode = 'all' | 'older_than_days'
+export type DatabaseCleanupTable = string
+export type LogCleanupTable = DatabaseCleanupTable
+
+export interface LocalCacheDatabaseVacuumResult {
+  success: boolean
+  message: string
+  database_size_before: number
+  database_size_after: number
+  reclaimed_bytes: number
+  checkpoint_busy: number
+  checkpoint_log: number
+  checkpointed: number
+}
 
 export function getLocalCacheImagePreviewUrl(target: LocalCacheImageTarget, relativePath: string): string {
   const query = new URLSearchParams({
@@ -162,9 +212,79 @@ export async function getLocalCacheStats(): Promise<LocalCacheStats> {
   return await response.json()
 }
 
+export async function getLocalCacheDatabaseStats(): Promise<DatabaseStorageStats> {
+  const response = await fetchWithAuth('/api/webui/system/local-cache/database', {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '获取数据库统计失败')
+  }
+
+  return await response.json()
+}
+
+export async function vacuumLocalCacheDatabase(): Promise<LocalCacheDatabaseVacuumResult> {
+  const response = await fetchWithAuth('/api/webui/system/local-cache/database/vacuum', {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '数据库 VACUUM 失败')
+  }
+
+  return await response.json()
+}
+
+export async function getLocalCacheDataEntries(relativePath = ''): Promise<LocalCacheDataEntriesResponse> {
+  const query = new URLSearchParams()
+  if (relativePath) {
+    query.set('relative_path', relativePath)
+  }
+
+  const response = await fetchWithAuth(`/api/webui/system/local-cache/data-entries?${query.toString()}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '获取 data 目录失败')
+  }
+
+  return await response.json()
+}
+
+export async function deleteLocalCacheDataEntry(relativePath: string): Promise<LocalCacheCleanupResult> {
+  const response = await fetchWithAuth('/api/webui/system/local-cache/data-entries', {
+    method: 'DELETE',
+    headers: {
+      ...getAuthHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ relative_path: relativePath }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '删除 data 条目失败')
+  }
+
+  return await response.json()
+}
+
 export async function cleanupLocalCache(
   target: LocalCacheCleanupTarget,
-  tables: LogCleanupTable[] = []
+  tables: DatabaseCleanupTable[] = [],
+  options: {
+    database_mode?: DatabaseCleanupMode
+    older_than_days?: number
+    vacuum_after_cleanup?: boolean
+  } = {}
 ): Promise<LocalCacheCleanupResult> {
   const response = await fetchWithAuth('/api/webui/system/local-cache/cleanup', {
     method: 'POST',
@@ -172,7 +292,13 @@ export async function cleanupLocalCache(
       ...getAuthHeaders(),
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ target, tables }),
+    body: JSON.stringify({
+      target,
+      tables,
+      database_mode: options.database_mode ?? 'all',
+      older_than_days: options.older_than_days ?? null,
+      vacuum_after_cleanup: options.vacuum_after_cleanup ?? true,
+    }),
   })
 
   if (!response.ok) {

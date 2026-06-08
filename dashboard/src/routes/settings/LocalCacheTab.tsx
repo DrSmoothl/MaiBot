@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Database,
   Eye,
+  File,
   Folder,
   FolderOpen,
   HardDrive,
@@ -13,8 +14,9 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  Wrench,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import {
   AlertDialog,
@@ -39,21 +41,35 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import {
   cleanupLocalCache,
+  deleteLocalCacheDataEntry,
   deleteLocalCacheImagesByDateRange,
   deleteLocalCacheImagesOlderThanRecentDays,
   deleteLocalCacheLogDirectory,
   deleteLocalCacheImage,
+  getLocalCacheDataEntries,
+  getLocalCacheDatabaseStats,
   getLocalCacheImagePreviewUrl,
   getLocalCacheImages,
   getLocalCacheLogDirectories,
   getLocalCacheStats,
+  vacuumLocalCacheDatabase,
   type CacheDirectoryStats,
-  type DatabaseTableStats,
+  type DatabaseCleanupMode,
+  type DatabaseStorageStats,
+  type LocalCacheDataEntry,
+  type LocalCacheDataEntriesResponse,
   type LocalCacheImageItem,
   type LocalCacheImageListResponse,
   type LocalCacheImageTarget,
@@ -61,25 +77,15 @@ import {
   type LocalCacheLogDirectoryListResponse,
   type LocalCacheCleanupTarget,
   type LocalCacheStats,
-  type LogCleanupTable,
 } from '@/lib/system-api'
 
 const IMAGE_PAGE_SIZE = 40
+const DATABASE_KEEP_DAY_OPTIONS = [7, 30, 90, 180, 365]
 
 type ImageDateFilters = {
   endDate: string
   startDate: string
 }
-
-const LOG_CLEANUP_OPTIONS: Array<{
-  table: LogCleanupTable
-  label: string
-  description: string
-}> = [
-  { table: 'llm_usage', label: 'llm_usage', description: '记录 LLM 调用统计信息' },
-  { table: 'tool_records', label: 'tool_records', description: '记录工具使用记录' },
-  { table: 'mai_messages', label: 'mai_messages', description: '清理收到的消息' },
-]
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -113,6 +119,29 @@ function formatModifiedTime(timestamp: number): string {
     return '-'
   }
   return new Date(timestamp * 1000).toLocaleString('zh-CN')
+}
+
+function formatCleanupDescription(result: {
+  removed_bytes?: number
+  removed_files?: number
+  removed_records?: number
+  reclaimed_bytes?: number
+  vacuumed?: boolean
+}): string {
+  const parts: string[] = []
+  if (result.removed_files) {
+    parts.push(`删除 ${result.removed_files} 个文件`)
+  }
+  if (result.removed_bytes) {
+    parts.push(`释放 ${formatBytes(result.removed_bytes)}`)
+  }
+  if (result.removed_records) {
+    parts.push(`移除 ${result.removed_records} 条记录`)
+  }
+  if (result.vacuumed) {
+    parts.push(`VACUUM 释放 ${formatBytes(result.reclaimed_bytes ?? 0)}`)
+  }
+  return parts.length > 0 ? `${parts.join('，')}。` : '没有可清理的内容。'
 }
 
 function CacheImagePreview({
@@ -438,8 +467,9 @@ function CacheImageListPanel({
                   <AlertDialogContent>
                     <AlertDialogHeader>
                       <AlertDialogTitle>确认删除这张图片？</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        将删除 {item.file_name}，并移除对应数据库记录。操作不可撤销。
+                      <AlertDialogDescription className="break-words">
+                        将删除 <span className="break-all font-mono">{item.file_name}</span>
+                        ，并移除对应数据库记录。操作不可撤销。
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -602,6 +632,390 @@ function LogDirectoryListPanel({
   )
 }
 
+function DataDirectoryPanel({
+  cleanupDisabled,
+  deletingPath,
+  isLoading,
+  list,
+  onBack,
+  onDelete,
+  onOpen,
+  onRefresh,
+}: {
+  cleanupDisabled: boolean
+  deletingPath: string | null
+  isLoading: boolean
+  list: LocalCacheDataEntriesResponse | null
+  onBack: () => void
+  onDelete: (item: LocalCacheDataEntry) => void
+  onOpen: (relativePath: string) => void
+  onRefresh: () => void
+}) {
+  const items = list?.data ?? []
+  const currentLabel = list?.relative_path ? `data/${list.relative_path}` : 'data'
+
+  return (
+    <div className="rounded-lg border bg-card p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h4 className="text-sm font-semibold">data 文件管理</h4>
+          <p className="mt-1 break-all text-xs text-muted-foreground">
+            {currentLabel}，共 {list?.total ?? 0} 个条目 / {list?.file_count ?? 0} 个文件，占用 {formatBytes(list?.total_size ?? 0)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={onBack} disabled={isLoading || !list || list.relative_path === ''}>
+            <ChevronLeft className="h-4 w-4" />
+            上级
+          </Button>
+          <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            刷新
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {isLoading && !list ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="rounded-md border p-3">
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="mt-2 h-3 w-2/3" />
+              <Skeleton className="mt-2 h-3 w-1/2" />
+            </div>
+          ))
+        ) : items.length === 0 ? (
+          <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+            当前 data 目录为空
+          </div>
+        ) : (
+          items.map((item) => {
+            const deleting = deletingPath === item.relative_path
+            const isDirectory = item.kind === 'directory'
+            return (
+              <div key={item.relative_path} className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <div className="mt-0.5 shrink-0 rounded-md bg-muted p-2">
+                    {isDirectory ? (
+                      <Folder className="h-4 w-4 text-primary" />
+                    ) : (
+                      <File className="h-4 w-4 text-primary" />
+                    )}
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="max-w-full truncate text-sm font-medium">{item.name}</span>
+                      <Badge variant={isDirectory ? 'secondary' : 'outline'}>{isDirectory ? '文件夹' : '文件'}</Badge>
+                      {item.protected && <Badge variant="outline">受保护</Badge>}
+                    </div>
+                    <p className="break-all text-xs text-muted-foreground">{item.relative_path || 'data'}</p>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>{item.file_count} 个文件</span>
+                      <span>{formatBytes(item.total_size)}</span>
+                      <span>{formatModifiedTime(item.modified_time)}</span>
+                    </div>
+                    {item.protection_reason && (
+                      <p className="text-xs text-muted-foreground">{item.protection_reason}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  {isDirectory && (
+                    <Button variant="outline" size="sm" onClick={() => onOpen(item.relative_path)} disabled={isLoading}>
+                      <FolderOpen className="h-4 w-4" />
+                      打开
+                    </Button>
+                  )}
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-2 text-destructive hover:text-destructive"
+                        disabled={cleanupDisabled || deleting || item.protected}
+                      >
+                        {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        删除
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>确认删除 {item.name}？</AlertDialogTitle>
+                        <AlertDialogDescription className="break-words">
+                          将删除 <span className="break-all font-mono">{item.relative_path}</span>
+                          {isDirectory ? ' 及其包含的所有文件。' : '。'}操作不可撤销。
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>取消</AlertDialogCancel>
+                        <AlertDialogAction variant="destructive" onClick={() => onDelete(item)}>确认删除</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DatabaseManagementPanel({
+  cleanupDisabled,
+  cleanupMode,
+  databaseStats,
+  isLoading,
+  isVacuuming,
+  keepDays,
+  onCleanup,
+  onKeepDaysChange,
+  onModeChange,
+  onRefresh,
+  onToggleTable,
+  onVacuum,
+  onVacuumAfterCleanupChange,
+  selectedTables,
+  vacuumAfterCleanup,
+}: {
+  cleanupDisabled: boolean
+  cleanupMode: DatabaseCleanupMode
+  databaseStats: DatabaseStorageStats | null
+  isLoading: boolean
+  isVacuuming: boolean
+  keepDays: number
+  onCleanup: () => void
+  onKeepDaysChange: (days: number) => void
+  onModeChange: (mode: DatabaseCleanupMode) => void
+  onRefresh: () => void
+  onToggleTable: (table: string, checked: boolean) => void
+  onVacuum: () => void
+  onVacuumAfterCleanupChange: (checked: boolean) => void
+  selectedTables: string[]
+  vacuumAfterCleanup: boolean
+}) {
+  const tables = databaseStats?.tables ?? []
+  const cleanableTables = tables.filter((table) => table.cleanup_supported)
+  const totalDatabaseRows = tables.reduce((total, table) => total + table.rows, 0)
+  const selectedRows = selectedTables.reduce(
+    (total, tableName) => total + (tables.find((table) => table.name === tableName)?.rows ?? 0),
+    0
+  )
+
+  return (
+    <div className="rounded-lg border bg-card p-4 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="flex items-center gap-2 text-base font-semibold sm:text-lg">
+            <Database className="h-5 w-5" />
+            数据库管理
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+            按表查看占用，清理可维护记录，并在需要释放磁盘空间时执行 VACUUM。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={onRefresh} disabled={isLoading || cleanupDisabled} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            刷新数据库
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="gap-2" disabled={cleanupDisabled || isVacuuming || !databaseStats}>
+                {isVacuuming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}
+                VACUUM
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>确认执行数据库 VACUUM？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  VACUUM 会重建 SQLite 数据库以释放空闲页，数据库较大时可能需要等待一段时间，并需要额外临时磁盘空间。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>取消</AlertDialogCancel>
+                <AlertDialogAction onClick={onVacuum}>确认执行</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="gap-2" disabled={cleanupDisabled || isLoading || cleanableTables.length === 0}>
+                <Trash2 className="h-4 w-4" />
+                清理记录
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+              <AlertDialogHeader>
+                <AlertDialogTitle>选择数据库清理范围</AlertDialogTitle>
+                <AlertDialogDescription>
+                  默认不会勾选任何表。资源类表只展示不开放通用清理，避免误删表达、黑话、人物和会话数据。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1.5">
+                  <span className="text-xs text-muted-foreground">清理模式</span>
+                  <Select value={cleanupMode} onValueChange={(value) => onModeChange(value as DatabaseCleanupMode)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="older_than_days">仅清理较早记录</SelectItem>
+                      <SelectItem value="all">清空所选表</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs text-muted-foreground">保留最近</span>
+                  <Select
+                    value={String(keepDays)}
+                    onValueChange={(value) => onKeepDaysChange(Number(value))}
+                    disabled={cleanupMode !== 'older_than_days'}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DATABASE_KEEP_DAY_OPTIONS.map((days) => (
+                        <SelectItem key={days} value={String(days)}>{days} 天</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-3 rounded-md border p-3">
+                <Checkbox
+                  checked={vacuumAfterCleanup}
+                  onCheckedChange={(value) => onVacuumAfterCleanupChange(value === true)}
+                />
+                <span className="text-sm">
+                  清理完成后执行 VACUUM
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    删除记录后会产生空闲页，VACUUM 才能尽量把主数据库文件缩小。
+                  </span>
+                </span>
+              </label>
+
+              <div className="space-y-3">
+                {cleanableTables.map((table) => {
+                  const checked = selectedTables.includes(table.name)
+                  const checkboxId = `database-cleanup-${table.name}`
+                  return (
+                    <label
+                      key={table.name}
+                      htmlFor={checkboxId}
+                      className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50"
+                    >
+                      <Checkbox
+                        id={checkboxId}
+                        checked={checked}
+                        onCheckedChange={(value) => onToggleTable(table.name, value === true)}
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">{table.label || table.name}</span>
+                          <Badge variant="outline">{table.category}</Badge>
+                        </span>
+                        <span className="mt-1 block break-all font-mono text-xs text-muted-foreground">{table.name}</span>
+                        <span className="mt-1 block text-xs text-muted-foreground">{table.description}</span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          当前 {table.rows} 条记录，占用 {formatBytes(table.size)}
+                          {table.cleanup_date_column ? `，时间列 ${table.cleanup_date_column}` : ''}
+                        </span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+
+              <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+                将清理 {selectedTables.length} 张表
+                {cleanupMode === 'older_than_days' ? `，保留最近 ${keepDays} 天记录` : `，预计删除 ${selectedRows} 条记录`}。
+                {vacuumAfterCleanup ? ' 清理后会执行 VACUUM。' : ' 清理后不会立即缩小数据库文件。'}
+              </div>
+
+              <AlertDialogFooter>
+                <AlertDialogCancel>取消</AlertDialogCancel>
+                <AlertDialogAction onClick={onCleanup} disabled={selectedTables.length === 0}>
+                  确认清理
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div>
+          <div className="text-xs text-muted-foreground">总体大小</div>
+          <div className="text-lg font-semibold">{formatBytes(databaseStats?.total_size ?? 0)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">可回收空闲页</div>
+          <div className="text-lg font-semibold">{formatBytes(databaseStats?.free_size ?? 0)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">数据库文件</div>
+          <div className="text-lg font-semibold">{databaseStats?.files.length ?? 0}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">数据表</div>
+          <div className="text-lg font-semibold">{tables.length}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">总记录数</div>
+          <div className="text-lg font-semibold">{totalDatabaseRows}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-md border">
+        <div className="grid grid-cols-[minmax(0,1fr)_90px_100px] gap-3 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground sm:grid-cols-[minmax(0,1fr)_120px_140px_90px]">
+          <span>表名</span>
+          <span className="text-right">记录数</span>
+          <span className="text-right">表大小</span>
+          <span className="hidden text-right sm:block">清理</span>
+        </div>
+        <div className="max-h-80 overflow-y-auto">
+          {isLoading && !databaseStats ? (
+            Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="grid grid-cols-[minmax(0,1fr)_90px_100px] gap-3 border-t px-3 py-2 sm:grid-cols-[minmax(0,1fr)_120px_140px_90px]">
+                <Skeleton className="h-4 w-2/3" />
+                <Skeleton className="h-4 w-12 justify-self-end" />
+                <Skeleton className="h-4 w-16 justify-self-end" />
+                <Skeleton className="hidden h-4 w-12 justify-self-end sm:block" />
+              </div>
+            ))
+          ) : tables.length === 0 ? (
+            <div className="border-t p-6 text-center text-sm text-muted-foreground">数据库详情加载后会显示表统计</div>
+          ) : (
+            tables.map((table) => (
+              <div
+                key={table.name}
+                className="grid grid-cols-[minmax(0,1fr)_90px_100px] gap-3 border-t px-3 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_120px_140px_90px]"
+              >
+                <span className="min-w-0 truncate font-mono text-xs" title={table.description || table.name}>
+                  {table.name}
+                </span>
+                <span className="text-right text-muted-foreground">{table.rows}</span>
+                <span className="text-right text-muted-foreground">{formatBytes(table.size)}</span>
+                <span className="hidden text-right text-xs text-muted-foreground sm:block">
+                  {table.cleanup_supported ? '可清理' : '仅查看'}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DirectoryCard({
   item,
   isBrowserOpen,
@@ -712,7 +1126,13 @@ export function LocalCacheTab() {
   const [stats, setStats] = useState<LocalCacheStats | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [cleanupTarget, setCleanupTarget] = useState<LocalCacheCleanupTarget | null>(null)
-  const [selectedLogTables, setSelectedLogTables] = useState<LogCleanupTable[]>([])
+  const [databaseStats, setDatabaseStats] = useState<DatabaseStorageStats | null>(null)
+  const [loadingDatabaseStats, setLoadingDatabaseStats] = useState(false)
+  const [isVacuuming, setIsVacuuming] = useState(false)
+  const [selectedDatabaseTables, setSelectedDatabaseTables] = useState<string[]>([])
+  const [databaseCleanupMode, setDatabaseCleanupMode] = useState<DatabaseCleanupMode>('older_than_days')
+  const [databaseKeepDays, setDatabaseKeepDays] = useState(90)
+  const [vacuumAfterCleanup, setVacuumAfterCleanup] = useState(true)
   const [browserTarget, setBrowserTarget] = useState<LocalCacheImageTarget | null>(null)
   const [isLogBrowserOpen, setIsLogBrowserOpen] = useState(false)
   const [imageLists, setImageLists] = useState<Record<LocalCacheImageTarget, LocalCacheImageListResponse | null>>({
@@ -732,17 +1152,10 @@ export function LocalCacheTab() {
   const [logDirectories, setLogDirectories] = useState<LocalCacheLogDirectoryListResponse | null>(null)
   const [loadingLogDirectories, setLoadingLogDirectories] = useState(false)
   const [deletingLogPath, setDeletingLogPath] = useState<string | null>(null)
-
-  const tableStats = useMemo(() => {
-    const rows = new Map<string, DatabaseTableStats>()
-    for (const table of stats?.database.tables ?? []) {
-      rows.set(table.name, table)
-    }
-    return rows
-  }, [stats?.database.tables])
-
-  const selectedLogRows = selectedLogTables.reduce((total, table) => total + (tableStats.get(table)?.rows ?? 0), 0)
-  const totalDatabaseRows = (stats?.database.tables ?? []).reduce((total, table) => total + table.rows, 0)
+  const [dataEntries, setDataEntries] = useState<LocalCacheDataEntriesResponse | null>(null)
+  const [dataRelativePath, setDataRelativePath] = useState('')
+  const [loadingDataEntries, setLoadingDataEntries] = useState(false)
+  const [deletingDataPath, setDeletingDataPath] = useState<string | null>(null)
 
   const refreshImageList = useCallback(async (
     target: LocalCacheImageTarget,
@@ -782,6 +1195,38 @@ export function LocalCacheTab() {
       })
     } finally {
       setLoadingLogDirectories(false)
+    }
+  }, [toast])
+
+  const refreshDatabaseStats = useCallback(async () => {
+    setLoadingDatabaseStats(true)
+    try {
+      setDatabaseStats(await getLocalCacheDatabaseStats())
+    } catch (error) {
+      toast({
+        title: '获取数据库统计失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoadingDatabaseStats(false)
+    }
+  }, [toast])
+
+  const refreshDataEntries = useCallback(async (relativePath: string) => {
+    setLoadingDataEntries(true)
+    try {
+      const result = await getLocalCacheDataEntries(relativePath)
+      setDataEntries(result)
+      setDataRelativePath(result.relative_path)
+    } catch (error) {
+      toast({
+        title: '获取 data 目录失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoadingDataEntries(false)
     }
   }, [toast])
 
@@ -852,9 +1297,10 @@ export function LocalCacheTab() {
       if (target === 'log_files' && isLogBrowserOpen) {
         await refreshLogDirectories()
       }
+      void refreshDatabaseStats()
       toast({
         title: result.message,
-        description: `删除 ${result.removed_files} 个文件，释放 ${formatBytes(result.removed_bytes)}，移除 ${result.removed_records} 条记录。`,
+        description: formatCleanupDescription(result),
       })
     } catch (error) {
       toast({
@@ -875,7 +1321,7 @@ export function LocalCacheTab() {
       await refreshLogDirectories()
       toast({
         title: result.message,
-        description: `删除 ${result.removed_files} 个文件，释放 ${formatBytes(result.removed_bytes)}。`,
+        description: formatCleanupDescription(result),
       })
     } catch (error) {
       toast({
@@ -896,9 +1342,10 @@ export function LocalCacheTab() {
       setImagePages((current) => ({ ...current, [target]: 1 }))
       await refreshStats()
       await refreshImageList(target, 1, filters)
+      void refreshDatabaseStats()
       toast({
         title: result.message,
-        description: `删除 ${result.removed_files} 个文件，释放 ${formatBytes(result.removed_bytes)}，移除 ${result.removed_records} 条记录。`,
+        description: formatCleanupDescription(result),
       })
     } catch (error) {
       toast({
@@ -918,9 +1365,10 @@ export function LocalCacheTab() {
       setImagePages((current) => ({ ...current, [target]: 1 }))
       await refreshStats()
       await refreshImageList(target, 1)
+      void refreshDatabaseStats()
       toast({
         title: result.message,
-        description: `删除 ${result.removed_files} 个文件，释放 ${formatBytes(result.removed_bytes)}，移除 ${result.removed_records} 条记录。`,
+        description: formatCleanupDescription(result),
       })
     } catch (error) {
       toast({
@@ -944,9 +1392,10 @@ export function LocalCacheTab() {
       setImagePages((current) => ({ ...current, [target]: nextPage }))
       await refreshStats()
       await refreshImageList(target, nextPage)
+      void refreshDatabaseStats()
       toast({
         title: result.message,
-        description: `删除 ${result.removed_files} 个文件，释放 ${formatBytes(result.removed_bytes)}，移除 ${result.removed_records} 条记录。`,
+        description: formatCleanupDescription(result),
       })
     } catch (error) {
       toast({
@@ -959,15 +1408,20 @@ export function LocalCacheTab() {
     }
   }
 
-  const handleLogCleanup = async () => {
+  const handleDatabaseCleanup = async () => {
     setCleanupTarget('database_logs')
     try {
-      const result = await cleanupLocalCache('database_logs', selectedLogTables)
-      setSelectedLogTables([])
+      const result = await cleanupLocalCache('database_logs', selectedDatabaseTables, {
+        database_mode: databaseCleanupMode,
+        older_than_days: databaseCleanupMode === 'older_than_days' ? databaseKeepDays : undefined,
+        vacuum_after_cleanup: vacuumAfterCleanup,
+      })
+      setSelectedDatabaseTables([])
       await refreshStats()
+      await refreshDatabaseStats()
       toast({
         title: result.message,
-        description: `已清理 ${result.removed_records} 条数据库记录。`,
+        description: formatCleanupDescription(result),
       })
     } catch (error) {
       toast({
@@ -980,8 +1434,61 @@ export function LocalCacheTab() {
     }
   }
 
-  const toggleLogTable = (table: LogCleanupTable, checked: boolean) => {
-    setSelectedLogTables((current) => {
+  const handleDatabaseVacuum = async () => {
+    setIsVacuuming(true)
+    try {
+      const result = await vacuumLocalCacheDatabase()
+      await refreshStats()
+      await refreshDatabaseStats()
+      toast({
+        title: result.message,
+        description: `释放 ${formatBytes(result.reclaimed_bytes)}，当前数据库占用 ${formatBytes(result.database_size_after)}。`,
+      })
+    } catch (error) {
+      toast({
+        title: '数据库 VACUUM 失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsVacuuming(false)
+    }
+  }
+
+  const handleOpenDataPath = (relativePath: string) => {
+    void refreshDataEntries(relativePath)
+  }
+
+  const handleBackDataPath = () => {
+    if (!dataEntries || dataEntries.relative_path === '') {
+      return
+    }
+    void refreshDataEntries(dataEntries.parent_path ?? '')
+  }
+
+  const handleDeleteDataEntry = async (item: LocalCacheDataEntry) => {
+    setDeletingDataPath(item.relative_path)
+    try {
+      const result = await deleteLocalCacheDataEntry(item.relative_path)
+      await refreshStats()
+      await refreshDataEntries(dataRelativePath)
+      toast({
+        title: result.message,
+        description: formatCleanupDescription(result),
+      })
+    } catch (error) {
+      toast({
+        title: '删除 data 条目失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeletingDataPath(null)
+    }
+  }
+
+  const toggleDatabaseTable = (table: string, checked: boolean) => {
+    setSelectedDatabaseTables((current) => {
       if (checked) {
         return current.includes(table) ? current : [...current, table]
       }
@@ -991,10 +1498,20 @@ export function LocalCacheTab() {
 
   useEffect(() => {
     void refreshStats()
-  }, [refreshStats])
+    void refreshDatabaseStats()
+    void refreshDataEntries('')
+  }, [refreshDataEntries, refreshDatabaseStats, refreshStats])
 
   const imageBrowserCleanupDisabled = cleanupTarget !== null || isLoading || loadingImageTarget !== null || deletingImageKey !== null
+  const dataCleanupDisabled = cleanupTarget !== null || isLoading || loadingDataEntries || deletingDataPath !== null
+  const databaseCleanupDisabled = cleanupTarget !== null || isLoading || loadingDatabaseStats || isVacuuming
   const browserTargetLabel = browserTarget === 'images' ? '图片缓存' : '表情包缓存'
+
+  const handleRefreshAll = () => {
+    void refreshStats()
+    void refreshDatabaseStats()
+    void refreshDataEntries(dataRelativePath)
+  }
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -1009,7 +1526,12 @@ export function LocalCacheTab() {
               浏览 data 目录中的图片、表情包、日志文件和数据库存储占用。
             </p>
           </div>
-          <Button variant="outline" onClick={refreshStats} disabled={isLoading} className="gap-2">
+          <Button
+            variant="outline"
+            onClick={handleRefreshAll}
+            disabled={isLoading || loadingDatabaseStats || loadingDataEntries}
+            className="gap-2"
+          >
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             刷新
           </Button>
@@ -1085,122 +1607,34 @@ export function LocalCacheTab() {
         </DialogContent>
       </Dialog>
 
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h3 className="flex items-center gap-2 text-base font-semibold sm:text-lg">
-              <Database className="h-5 w-5" />
-              数据库清理
-            </h3>
-            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-              清理数据库中的统计、工具和消息记录，不会删除日志文件、图片、表情文件和配置文件。
-            </p>
-          </div>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" className="gap-2" disabled={cleanupTarget !== null || isLoading}>
-                <Trash2 className="h-4 w-4" />
-                数据库清理
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>选择要清理的数据库记录范围</AlertDialogTitle>
-                <AlertDialogDescription>
-                  数据库当前占用 {formatBytes(stats?.database.total_size ?? 0)}。请手动勾选需要清理的表，默认不会选择任何内容。
-                </AlertDialogDescription>
-              </AlertDialogHeader>
+      <DataDirectoryPanel
+        list={dataEntries}
+        isLoading={loadingDataEntries}
+        deletingPath={deletingDataPath}
+        cleanupDisabled={dataCleanupDisabled}
+        onRefresh={() => void refreshDataEntries(dataRelativePath)}
+        onBack={handleBackDataPath}
+        onOpen={handleOpenDataPath}
+        onDelete={handleDeleteDataEntry}
+      />
 
-              <div className="space-y-3">
-                {LOG_CLEANUP_OPTIONS.map((option) => {
-                  const table = tableStats.get(option.table)
-                  const rows = table?.rows ?? 0
-                  const checked = selectedLogTables.includes(option.table)
-                  const checkboxId = `log-cleanup-${option.table}`
-                  return (
-                    <label
-                      key={option.table}
-                      htmlFor={checkboxId}
-                      className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50"
-                    >
-                      <Checkbox
-                        id={checkboxId}
-                        checked={checked}
-                        onCheckedChange={(value) => toggleLogTable(option.table, value === true)}
-                        className="mt-0.5"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium">{option.label}</span>
-                        <span className="block text-xs text-muted-foreground">{option.description}</span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          当前 {rows} 条记录，占用 {formatBytes(table?.size ?? 0)}
-                        </span>
-                      </span>
-                    </label>
-                  )
-                })}
-              </div>
-
-              <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-                将清理 {selectedLogTables.length} 张表，预计删除 {selectedLogRows} 条记录。删除后数据库文件大小不一定立即缩小。
-              </div>
-
-              <AlertDialogFooter>
-                <AlertDialogCancel>取消</AlertDialogCancel>
-                <AlertDialogAction onClick={handleLogCleanup} disabled={selectedLogTables.length === 0}>
-                  确认清理
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div>
-            <div className="text-xs text-muted-foreground">总体大小</div>
-            <div className="text-lg font-semibold">{formatBytes(stats?.database.total_size ?? 0)}</div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground">数据库文件</div>
-            <div className="text-lg font-semibold">{stats?.database.files.length ?? 0}</div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground">数据表</div>
-            <div className="text-lg font-semibold">{stats?.database.tables.length ?? 0}</div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground">总记录数</div>
-            <div className="text-lg font-semibold">{totalDatabaseRows}</div>
-          </div>
-        </div>
-
-        <div className="mt-4 overflow-hidden rounded-md border">
-          <div className="grid grid-cols-[minmax(0,1fr)_90px_100px] gap-3 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground sm:grid-cols-[minmax(0,1fr)_120px_140px_90px]">
-            <span>表名</span>
-            <span className="text-right">记录数</span>
-            <span className="text-right">表大小</span>
-            <span className="hidden text-right sm:block">来源</span>
-          </div>
-          <div className="max-h-80 overflow-y-auto">
-            {(stats?.database.tables ?? []).map((table) => (
-              <div
-                key={table.name}
-                className="grid grid-cols-[minmax(0,1fr)_90px_100px] gap-3 border-t px-3 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_120px_140px_90px]"
-              >
-                <span className="min-w-0 truncate font-mono text-xs">{table.name}</span>
-                <span className="text-right text-muted-foreground">{table.rows}</span>
-                <span className="text-right text-muted-foreground">{formatBytes(table.size)}</span>
-                <span className="hidden text-right text-xs text-muted-foreground sm:block">
-                  {table.size_source === 'dbstat' ? '实际' : '估算'}
-                </span>
-              </div>
-            ))}
-            {(stats?.database.tables ?? []).length === 0 && (
-              <div className="border-t p-6 text-center text-sm text-muted-foreground">暂无数据表</div>
-            )}
-          </div>
-        </div>
-      </div>
+      <DatabaseManagementPanel
+        databaseStats={databaseStats}
+        isLoading={loadingDatabaseStats}
+        isVacuuming={isVacuuming}
+        cleanupDisabled={databaseCleanupDisabled}
+        selectedTables={selectedDatabaseTables}
+        cleanupMode={databaseCleanupMode}
+        keepDays={databaseKeepDays}
+        vacuumAfterCleanup={vacuumAfterCleanup}
+        onRefresh={refreshDatabaseStats}
+        onVacuum={handleDatabaseVacuum}
+        onCleanup={handleDatabaseCleanup}
+        onToggleTable={toggleDatabaseTable}
+        onModeChange={setDatabaseCleanupMode}
+        onKeepDaysChange={setDatabaseKeepDays}
+        onVacuumAfterCleanupChange={setVacuumAfterCleanup}
+      />
     </div>
   )
 }

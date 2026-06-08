@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+﻿from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple
 
@@ -29,7 +29,7 @@ from .expression_utils import check_expression_suitability, parse_expression_res
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
     from .jargon_miner import JargonMiner, JargonEntry
-    from src.maisaka.context_messages import LLMContextMessage
+    from src.maisaka.context.messages import LLMContextMessage
 
 
 logger = get_logger("expressor")
@@ -351,7 +351,7 @@ class ExpressionLearner:
     ) -> List["SessionMessage"]:
         """从上下文消息中过滤出真实聊天消息。"""
 
-        from src.maisaka.context_messages import SessionBackedMessage
+        from src.maisaka.context.messages import SessionBackedMessage
 
         source_messages: List["SessionMessage"] = []
         seen_message_ids: set[str] = set()

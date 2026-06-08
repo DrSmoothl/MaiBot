@@ -36,7 +36,6 @@ class BotConfig(ConfigBase):
     """机器人配置类"""
 
     __ui_label__ = "基础"
-    __ui_icon__ = "bot"
 
     platform: str = Field(
         default="",
@@ -121,7 +120,6 @@ class PersonalityConfig(ConfigBase):
 
     __ui_parent__ = "bot"
     __ui_label__ = "人格"
-    __ui_icon__ = "user-circle"
 
     personality: str = Field(
         default="你是一个大二女大学生，现在正在上网和群友聊天。",
@@ -264,7 +262,6 @@ class VisualConfig(ConfigBase):
     """视觉配置类"""
 
     __ui_label__ = "视觉"
-    __ui_icon__ = "image"
 
     planner_mode: Literal["text", "multimodal", "auto"] = Field(
         default="auto",
@@ -443,7 +440,6 @@ class ChatConfig(ConfigBase):
     """聊天配置类"""
 
     __ui_label__ = "聊天"
-    __ui_icon__ = "message-square"
 
     talk_value: float = Field(
         default=1,
@@ -593,39 +589,6 @@ class ChatConfig(ConfigBase):
     )
     """最多保留多少条中期聊天摘要消息，超出后移除最早的摘要"""
 
-    enable_independent_timing_gate: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "独立时间感知",
-                "en_US": "Independent timing gate",
-                "ja_JP": "独立タイミング判断",
-            },
-            "x-widget": "switch",
-            "x-icon": "clock-3",
-            "x-description-display": "icon",
-        },
-    )
-    """开启后对回复时机判定更精确，可能消耗更多token"""
-
-    enable_replyer_format_output: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "Replyer 格式化输出",
-                "en_US": "Replyer formatted output",
-                "ja_JP": "Replyer フォーマット出力",
-            },
-            "x-widget": "switch",
-            "x-icon": "braces",
-            "advanced": True,
-        },
-    )
-    """
-    是否允许 replyer 输出 <text>、<at>、<emoji>、<image> 等格式化片段，
-    并在发送前解析为真实消息组件，可能会影响回复表现
-    """
-
     enable_reply_quote: bool = Field(
         default=True,
         json_schema_extra={
@@ -676,14 +639,14 @@ class ChatConfig(ConfigBase):
     )
     """planner如果遇到新消息，重新开始思考的次数"""
 
-    timing_gate_non_continue_cooldown_seconds: float = Field(
-        default=8,
+    no_action_backoff_base_seconds: float = Field(
+        default=15,
         ge=0,
         json_schema_extra={
             "label": {
-                "zh_CN": "Timing Gate 平滑",
-                "en_US": "Timing Gate non-continue cooldown",
-                "ja_JP": "Timing Gate 非 continue クールダウン",
+                "zh_CN": "no_action 退避基准",
+                "en_US": "no_action backoff base",
+                "ja_JP": "no_action バックオフ基準",
             },
             "x-widget": "input",
             "x-icon": "timer",
@@ -691,7 +654,58 @@ class ChatConfig(ConfigBase):
             "advanced": False,
         },
     )
-    """这个值决定了Timing Gate判断的最低时间间隔"""
+    """连续 no_action 后的退避基准秒数，0 表示不启用退避"""
+
+    no_action_backoff_cap_seconds: float = Field(
+        default=300,
+        ge=0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "no_action 退避上限",
+                "en_US": "no_action backoff cap",
+                "ja_JP": "no_action バックオフ上限",
+            },
+            "x-widget": "input",
+            "x-icon": "timer-reset",
+            "x-description-display": "icon",
+            "advanced": True,
+        },
+    )
+    """连续 no_action 退避秒数上限"""
+
+    no_action_backoff_start_count: int = Field(
+        default=2,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "no_action 退避起点",
+                "en_US": "no_action backoff start",
+                "ja_JP": "no_action バックオフ開始",
+            },
+            "x-widget": "input",
+            "x-icon": "list-start",
+            "x-description-display": "icon",
+            "advanced": True,
+        },
+    )
+    """连续第几次 no_action 后开始退避"""
+
+    no_action_backoff_bypass_pending_count: int = Field(
+        default=6,
+        ge=0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "no_action 退避绕过消息数",
+                "en_US": "no_action backoff bypass messages",
+                "ja_JP": "no_action バックオフ迂回メッセージ数",
+            },
+            "x-widget": "input",
+            "x-icon": "message-square-more",
+            "x-description-display": "icon",
+            "advanced": True,
+        },
+    )
+    """退避期间待处理消息达到该数量时直接绕过退避，0 表示不按消息数绕过"""
 
     group_chat_prompt: str = Field(
         default=(
@@ -744,7 +758,7 @@ class ChatConfig(ConfigBase):
     )
 
     enable_talk_value_rules: bool = Field(
-        default=True,
+        default=False,
         json_schema_extra={
             "label": {
                 "zh_CN": "启用动态发言频率规则",
@@ -777,11 +791,114 @@ class ChatConfig(ConfigBase):
     """
 
 
+class ExperimentalConfig(ConfigBase):
+    """实验性功能配置类"""
+
+    __ui_label__ = "实验性功能"
+    __ui_advanced__ = True
+
+    enable_behavior_learning: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用行为学习",
+                "en_US": "Enable behavior learning",
+                "ja_JP": "行動学習を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "brain-circuit",
+        },
+    )
+    """是否启用行为学习；关闭后不再从裁切历史中抽取和写入行为经验。"""
+
+    enable_replyer_format_output: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "Replyer 格式化输出",
+                "en_US": "Replyer formatted output",
+                "ja_JP": "Replyer フォーマット出力",
+            },
+            "x-widget": "switch",
+            "x-icon": "braces",
+            "advanced": True,
+        },
+    )
+    """
+    是否允许 replyer 输出 <text>、<at>、<emoji>、<image> 等格式化片段，
+    并在发送前解析为真实消息组件，可能会影响回复表现
+    """
+
+    focus_mode: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "Focus 模式",
+                "en_US": "Focus mode",
+                "ja_JP": "Focus モード",
+            },
+            "x-widget": "switch",
+            "x-icon": "target",
+            "advanced": True,
+        },
+    )
+    """开启后仍正常创建聊天流，但同一时间只有一个 Maisaka 处于活跃关注状态，且忽略聊天频率控制"""
+
+    focus_on_private: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "私聊启用 Focus",
+                "en_US": "Focus private chats",
+                "ja_JP": "私聊で Focus を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "message-circle",
+            "advanced": True,
+        },
+    )
+    """关闭时，Focus 模式只作用于群聊；开启后，群聊和私聊都会进入 Focus。"""
+
+    focus_groups: list["ChatStreamGroup"] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "Focus 互通组",
+                "en_US": "Focus sharing groups",
+                "ja_JP": "Focus 共有グループ",
+            },
+            "x-widget": "custom",
+            "x-icon": "users",
+            "advanced": True,
+        },
+    )
+    """_wrap_Focus 互通组；不配置时所有启用 Focus 的聊天共享一个 Focus；配置后只有同组聊天互通，不同组可同时 Focus。"""
+
+    focus_cool_time: int = Field(
+        default=120,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "Focus 冷却时间",
+                "en_US": "Focus cool time",
+                "ja_JP": "Focus クールタイム",
+            },
+            "x-widget": "input",
+            "x-icon": "timer",
+            "x-layout": "inline-right",
+            "x-input-width": "12rem",
+            "x-row": "focus-cool-time",
+            "advanced": True,
+        },
+    )
+    """Focus 模式下关注聊天超过该秒数没有进入循环时，会被其他聊天的新消息唤醒一次"""
+
+
 class MessageReceiveConfig(ConfigBase):
     """消息接收配置类"""
 
     __ui_label__ = "消息接收"
-    __ui_icon__ = "message-square-text"
+    __ui_advanced__ = True
 
     image_parse_threshold: int = Field(
         default=5,
@@ -2575,8 +2692,7 @@ class AMemorixWebConfig(ConfigBase):
 class AMemorixConfig(ConfigBase):
     """长期记忆配置"""
 
-    __ui_label__ = "长期记忆"
-    __ui_icon__ = "brain"
+    __ui_label__ = "记忆"
 
     plugin: AMemorixPluginConfig = Field(
         default_factory=AMemorixPluginConfig,
@@ -2830,11 +2946,13 @@ class ChatStreamGroup(ConfigBase):
     """_wrap_互通聊天流"""
 
 
+ExperimentalConfig.model_rebuild()
+
+
 class ExpressionConfig(ConfigBase):
     """表达配置类"""
 
-    __ui_label__ = "表达与黑话"
-    __ui_icon__ = "pen-tool"
+    __ui_label__ = "学习"
 
     expression_checked_only: bool = Field(
         default=True,
@@ -2936,7 +3054,6 @@ class JargonConfig(ConfigBase):
 
     __ui_parent__ = "expression"
     __ui_label__ = "黑话"
-    __ui_icon__ = "book-open"
 
     learning_list: list[LearningItem] = Field(
         default_factory=lambda: [
@@ -2979,7 +3096,7 @@ class VoiceConfig(ConfigBase):
     """语音识别配置类"""
 
     __ui_label__ = "语音"
-    __ui_icon__ = "mic"
+    __ui_advanced__ = True
 
     enable_asr: bool = Field(
         default=False,
@@ -2994,8 +3111,8 @@ class VoiceConfig(ConfigBase):
 class EmojiConfig(ConfigBase):
     """表情包配置类"""
 
-    __ui_label__ = "表情包"
-    __ui_icon__ = "smile"
+    __ui_label__ = "表情"
+    __ui_advanced__ = True
 
     emoji_send_num: int = Field(
         default=25,
@@ -3070,6 +3187,22 @@ class EmojiConfig(ConfigBase):
         },
     )
     """是否偷取表情包，让麦麦可以将一些表情包据为己有"""
+
+    max_emoji_size_mb: float = Field(
+        default=5.0,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "收集表情大小上限（MB）",
+                "en_US": "Collected emoji size limit (MB)",
+                "ja_JP": "収集する絵文字サイズ上限（MB）",
+            },
+            "x-widget": "input",
+            "x-icon": "file-warning",
+            "advanced": True,
+        },
+    )
+    """偷取/收集聊天表情包时允许保存的最大文件大小，0 表示不限制"""
 
     content_filtration: bool = Field(
         default=False,
@@ -3168,7 +3301,7 @@ class ResponsePostProcessConfig(ConfigBase):
     """回复后处理配置类"""
 
     __ui_label__ = "后处理"
-    __ui_icon__ = "settings"
+    __ui_advanced__ = True
 
     enable_response_post_process: bool = Field(
         default=True,
@@ -3300,8 +3433,8 @@ class ResponseSplitterConfig(ConfigBase):
 class LogConfig(ConfigBase):
     """日志配置类"""
 
-    __ui_label__ = "调试与日志"
-    __ui_icon__ = "file-text"
+    __ui_label__ = "调试"
+    __ui_advanced__ = True
 
     date_style: str = Field(
         default="m-d H:i:s",
@@ -3464,7 +3597,6 @@ class DebugConfig(ConfigBase):
 
     __ui_parent__ = "log"
     __ui_label__ = "其他"
-    __ui_icon__ = "more-horizontal"
 
     show_maisaka_thinking: bool = Field(
         default=True,
@@ -3474,15 +3606,6 @@ class DebugConfig(ConfigBase):
         },
     )
     """是否显示回复器推理"""
-
-    fold_maisaka_thinking: bool = Field(
-        default=True,
-        json_schema_extra={
-            "x-widget": "switch",
-            "x-icon": "minimize-2",
-        },
-    )
-    """是否折叠 Maisaka 的 prompt 展示入口"""
 
     show_jargon_prompt: bool = Field(
         default=False,
@@ -3528,6 +3651,15 @@ class DebugConfig(ConfigBase):
         },
     )
     """是否记录 Planner 完整请求体和完整回复体，默认关闭"""
+
+    keep_prompt_preview_json_base64: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "image",
+        },
+    )
+    """是否在 Prompt 预览 JSON 中保留内联 base64 图片，默认关闭以减少日志体积"""
 
     enable_llm_cache_stats: bool = Field(
         default=False,
@@ -3685,7 +3817,6 @@ class LPMMKnowledgeConfig(ConfigBase):
     """LPMM知识库配置类"""
 
     __ui_label__ = "知识库"
-    __ui_icon__ = "book-open"
 
     enable: bool = Field(
         default=True,
@@ -3855,7 +3986,7 @@ class WebUIConfig(ConfigBase):
     """WebUI配置类"""
 
     __ui_label__ = "WebUI"
-    __ui_icon__ = "layout"
+    __ui_advanced__ = True
 
     enabled: bool = Field(
         default=True,
@@ -4384,8 +4515,8 @@ class MCPConfig(ConfigBase):
 class PluginConfig(ConfigBase):
     """插件管理配置类"""
 
-    __ui_label__ = "插件管理"
-    __ui_icon__ = "shield"
+    __ui_label__ = "插件"
+    __ui_advanced__ = True
 
     permission: list[str] = Field(
         default_factory=list,
@@ -4528,8 +4659,8 @@ class PluginRuntimeRenderConfig(ConfigBase):
 class PluginRuntimeConfig(ConfigBase):
     """插件运行时配置类"""
 
-    __ui_label__ = "插件运行时"
-    __ui_icon__ = "puzzle"
+    __ui_parent__ = "plugin"
+    __ui_label__ = "运行时"
 
     enabled: bool = Field(
         default=True,

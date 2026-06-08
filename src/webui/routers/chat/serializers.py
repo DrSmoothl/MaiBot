@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional
 
 import base64
+import mimetypes
 
 from src.common.data_models.message_component_data_model import (
     AtComponent,
@@ -17,6 +18,7 @@ from src.common.data_models.message_component_data_model import (
     TextComponent,
     VoiceComponent,
 )
+from src.common.utils.image_path import resolve_stored_image_path
 
 
 def serialize_message_sequence(message_sequence: MessageSequence) -> List[Dict[str, Any]]:
@@ -53,6 +55,8 @@ def serialize_message_component(component: StandardMessageComponents) -> Optiona
             segment_type="image",
             mime_type="image/png",
             binary_data=component.binary_data,
+            binary_hash=component.binary_hash,
+            image_type_name="IMAGE",
             fallback_text=component.content,
         )
 
@@ -61,6 +65,8 @@ def serialize_message_component(component: StandardMessageComponents) -> Optiona
             segment_type="emoji",
             mime_type="image/gif",
             binary_data=component.binary_data,
+            binary_hash=component.binary_hash,
+            image_type_name="EMOJI",
             fallback_text=component.content,
         )
 
@@ -69,6 +75,8 @@ def serialize_message_component(component: StandardMessageComponents) -> Optiona
             segment_type="voice",
             mime_type="audio/wav",
             binary_data=component.binary_data,
+            binary_hash="",
+            image_type_name="",
             fallback_text=component.content,
         )
 
@@ -110,6 +118,8 @@ def _serialize_binary_component(
     segment_type: str,
     mime_type: str,
     binary_data: bytes,
+    binary_hash: str,
+    image_type_name: str,
     fallback_text: str,
 ) -> Dict[str, Any]:
     """序列化带二进制负载的消息组件。
@@ -123,14 +133,59 @@ def _serialize_binary_component(
     Returns:
         Dict[str, Any]: 序列化后的 WebUI 消息段。
     """
-    if binary_data:
-        encoded_payload = base64.b64encode(binary_data).decode()
-        return {"type": segment_type, "data": f"data:{mime_type};base64,{encoded_payload}"}
+    loaded_binary_data, loaded_mime_type = _load_cached_binary_data(
+        binary_data=binary_data,
+        binary_hash=binary_hash,
+        image_type_name=image_type_name,
+        default_mime_type=mime_type,
+    )
+    if loaded_binary_data:
+        encoded_payload = base64.b64encode(loaded_binary_data).decode()
+        return {"type": segment_type, "data": f"data:{loaded_mime_type};base64,{encoded_payload}"}
 
     if fallback_text:
         return {"type": "text", "data": fallback_text}
 
     return {"type": "unknown", "original_type": segment_type, "data": ""}
+
+
+def _load_cached_binary_data(
+    *,
+    binary_data: bytes,
+    binary_hash: str,
+    image_type_name: str,
+    default_mime_type: str,
+) -> tuple[bytes, str]:
+    """从组件自身或图片缓存中读取 WebUI 可展示的二进制数据。"""
+
+    if binary_data:
+        return binary_data, default_mime_type
+
+    normalized_hash = str(binary_hash or "").strip()
+    if not normalized_hash or not image_type_name:
+        return b"", default_mime_type
+
+    try:
+        from sqlmodel import select
+
+        from src.common.database.database import get_db_session
+        from src.common.database.database_model import Images, ImageType
+
+        image_type = ImageType[image_type_name]
+        with get_db_session(auto_commit=False) as db:
+            statement = select(Images).filter_by(image_hash=normalized_hash, image_type=image_type).limit(1)
+            image_record = db.exec(statement).first()
+        if image_record is None or image_record.no_file_flag:
+            return b"", default_mime_type
+
+        image_path = resolve_stored_image_path(image_record.full_path)
+        if not image_path.is_file():
+            return b"", default_mime_type
+
+        guessed_mime_type = mimetypes.guess_type(str(image_path))[0] or default_mime_type
+        return image_path.read_bytes(), guessed_mime_type
+    except Exception:
+        return b"", default_mime_type
 
 
 def _serialize_forward_component(component: ForwardComponent) -> Dict[str, Any]:

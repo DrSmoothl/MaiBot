@@ -344,16 +344,3 @@ async def test_resolves_hash_only_scope_before_filtering(monkeypatch: pytest.Mon
     assert "hash-only 其他群聊摘要" not in result
 
 
-def test_merge_reference_for_replyer_dedups_marker() -> None:
-    injector = HeuristicMemoryInjector()
-    injector._states["session-1"] = injector_module.HeuristicMemoryRecallState(
-        cached_reference="【启发式记忆-内部参考】\n1. 旧记忆",
-        cache_expires_at=9999999999,
-    )
-
-    merged = injector.merge_reference_for_replyer(session_id="session-1", reference_info="已有参考")
-    duplicated = injector.merge_reference_for_replyer(session_id="session-1", reference_info=merged)
-
-    assert "已有参考" in merged
-    assert "旧记忆" in merged
-    assert duplicated == merged

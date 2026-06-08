@@ -1,4 +1,4 @@
-"""Maisaka 内置工具执行上下文。"""
+﻿"""Maisaka 内置工具执行上下文。"""
 
 from __future__ import annotations
 
@@ -21,17 +21,17 @@ from src.common.logger import get_logger
 from src.config.config import global_config
 from src.core.tooling import ToolExecutionResult
 
-from ..context_messages import SessionBackedMessage
-from ..message_adapter import format_speaker_content
-from ..planner_message_utils import (
+from src.maisaka.context.messages import SessionBackedMessage
+from src.maisaka.context.message_adapter import format_speaker_content
+from src.maisaka.context.planner_messages import (
     build_planner_prefix,
     build_session_backed_text_message,
     extract_quote_ids_from_message_sequence,
 )
 
 if TYPE_CHECKING:
-    from ..reasoning_engine import MaisakaReasoningEngine
-    from ..runtime import MaisakaHeartFlowChatting
+    from src.maisaka.reasoning_engine import MaisakaReasoningEngine
+    from src.maisaka.runtime import MaisakaHeartFlowChatting
 
 FORMATTED_REPLY_TAG_PATTERN = re.compile(
     r"<(?P<tag>text|at|emoji|image)(?P<attrs>[^>]*)>(?P<body>.*?)</(?P=tag)>",
@@ -65,6 +65,7 @@ class BuiltinToolRuntimeContext:
         content: str = "",
         structured_content: Any = None,
         metadata: Optional[Dict[str, Any]] = None,
+        post_history_messages: Optional[Sequence[Any]] = None,
     ) -> ToolExecutionResult:
         """构造统一工具成功结果。"""
 
@@ -73,6 +74,7 @@ class BuiltinToolRuntimeContext:
             success=True,
             content=content,
             structured_content=structured_content,
+            post_history_messages=list(post_history_messages or []),
             metadata=dict(metadata or {}),
         )
 
@@ -444,7 +446,7 @@ class BuiltinToolRuntimeContext:
     async def post_process_reply_message_sequences_async(self, reply_text: str) -> List[MessageSequence]:
         """将 replyer 输出处理为可发送组件序列。"""
 
-        if getattr(global_config.chat, "enable_replyer_format_output", False):
+        if global_config.experimental.enable_replyer_format_output:
             return await self._post_process_formatted_reply_message_sequences(reply_text)
         return self.post_process_reply_message_sequences(reply_text)
 
@@ -468,6 +470,7 @@ class BuiltinToolRuntimeContext:
             text=reply_text,
             timestamp=reply_timestamp,
             source_kind="guided_reply",
+            chat_id=getattr(self.runtime, "session_id", ""),
         )
         self.runtime._chat_history.append(history_message)
 
@@ -495,6 +498,7 @@ class BuiltinToolRuntimeContext:
             text="\n".join(note_lines),
             timestamp=datetime.now(),
             source_kind="replyer_expression_annotation",
+            chat_id=getattr(self.runtime, "session_id", ""),
             include_message_id=False,
         )
         self.runtime._chat_history.append(history_message)
@@ -507,8 +511,8 @@ class BuiltinToolRuntimeContext:
         if callable(runtime_append):
             return bool(runtime_append(message, source_kind=source_kind))
 
-        from ..context_messages import SessionBackedMessage
-        from ..history_utils import build_prefixed_message_sequence, build_session_message_visible_text
+        from src.maisaka.context.messages import SessionBackedMessage
+        from src.maisaka.context.history import build_prefixed_message_sequence, build_session_message_visible_text
         user_info = message.message_info.user_info
         speaker_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
         planner_prefix = build_planner_prefix(
@@ -516,6 +520,7 @@ class BuiltinToolRuntimeContext:
             user_name=speaker_name,
             group_card=user_info.user_cardname or "",
             message_id=message.message_id,
+            chat_id=message.session_id,
             quote_ids=extract_quote_ids_from_message_sequence(message.raw_message),
             include_message_id=not message.is_notify and bool(message.message_id),
         )
@@ -544,6 +549,7 @@ class BuiltinToolRuntimeContext:
         planner_prefix = build_planner_prefix(
             timestamp=reply_timestamp,
             user_name=bot_name,
+            chat_id=getattr(self.runtime, "session_id", ""),
         )
         history_message = SessionBackedMessage(
             raw_message=MessageSequence(

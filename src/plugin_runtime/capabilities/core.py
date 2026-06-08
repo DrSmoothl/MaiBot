@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 from typing import Any, Dict, List
 
 from src.common.logger import get_logger
@@ -161,8 +161,8 @@ class RuntimeCoreCapabilityMixin:
 
         try:
             from src.chat.heart_flow.heartflow_manager import heartflow_manager
-            from src.maisaka.context_messages import SessionBackedMessage
-            from src.maisaka.message_adapter import build_visible_text_from_sequence
+            from src.maisaka.context.messages import SessionBackedMessage
+            from src.maisaka.context.message_adapter import build_visible_text_from_sequence
             from src.plugin_runtime.host.message_utils import PluginMessageUtils
 
             runtime = await heartflow_manager.get_or_create_heartflow_chat(stream_id)

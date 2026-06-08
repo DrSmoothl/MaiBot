@@ -17,10 +17,10 @@ import { TitleBar } from '@/components/electron/TitleBar'
 import { matchesShortcut } from '@/lib/keyboard'
 import { isElectron } from '@/lib/runtime'
 import { cn } from '@/lib/utils'
-import { menuSections } from './constants'
 import { Header } from './Header'
 import { Sidebar } from './Sidebar'
 import type { LayoutProps } from './types'
+import { useMenuSections } from './use-menu-sections'
 
 export function Layout({ children }: LayoutProps) {
   const { t } = useTranslation()
@@ -39,6 +39,7 @@ export function Layout({ children }: LayoutProps) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [tooltipsEnabled, setTooltipsEnabled] = useState(false) // 控制 tooltip 启用状态
   const { theme, setTheme } = useTheme()
+  const menuSections = useMenuSections()
 
   // 侧边栏状态变化时，延迟启用/禁用 tooltip
   useEffect(() => {
@@ -99,7 +100,7 @@ export function Layout({ children }: LayoutProps) {
         })
       }
     })
-  }, [router, announce, t])
+  }, [router, announce, t, menuSections])
 
   // 获取实际应用的主题（处理 system 情况）
   const getActualTheme = () => {

@@ -7,9 +7,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
-import { AlertCircle, AlertTriangle, CheckCircle2, Info, Loader2, Search, Settings2 } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowUpDown, CheckCircle2, Filter, Info, Loader2, Search, Settings2 } from 'lucide-react'
 
 import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
@@ -32,16 +31,17 @@ import {
 import {
   getCachedPluginStatsSummary,
   getPluginStatsSummary,
+  likePlugin,
   recordPluginDownload,
   type PluginStatsData,
 } from '@/lib/plugin-stats'
 
 import { InstallDialog } from './InstallDialog'
-import { InstalledTab } from './InstalledTab'
 import { MarketplaceTab } from './MarketplaceTab'
-import { UpdatesTab } from './UpdatesTab'
 import type { GitStatus, MaimaiVersion, MarketplaceSortKey, PluginInfo, PluginLoadProgress } from './types'
 import { getPluginType, PLUGIN_TYPE_OPTIONS } from './types'
+
+const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
 
 // 主导出组件：包装 RestartProvider
 export function PluginsPage() {
@@ -61,8 +61,10 @@ function PluginsPageContent() {
   const [searchQuery, setSearchQuery] = useState('')
   const [pluginTypeFilter, setPluginTypeFilter] = useState('all')
   const [marketplaceSortBy, setMarketplaceSortBy] = useState<MarketplaceSortKey>('default')
-  const [activeTab, setActiveTab] = useState('all')  // all | installed | updates
-  const [showCompatibleOnly, setShowCompatibleOnly] = useState(true)  // 默认只显示兼容的
+  const [showCompatibleOnly] = useState(
+    () => localStorage.getItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY) !== 'false'
+  )
+  const [hideInstalledPlugins, setHideInstalledPlugins] = useState(true)
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -71,6 +73,7 @@ function PluginsPageContent() {
   const [maimaiVersion, setMaimaiVersion] = useState<MaimaiVersion | null>(null)
   const [, setInstalledPlugins] = useState<InstalledPlugin[]>([])
   const [pluginStats, setPluginStats] = useState<Record<string, PluginStatsData>>({})
+  const [likingPluginIds, setLikingPluginIds] = useState<Set<string>>(() => new Set())
   
   // 安装对话框状态
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
@@ -120,6 +123,62 @@ function PluginsPageContent() {
     return statsMap
   }
 
+  const mergeInstalledPluginInfo = (
+    marketPlugins: PluginInfo[],
+    installed: InstalledPlugin[]
+  ): PluginInfo[] => {
+    const mergedData = marketPlugins.map(plugin => {
+      const isInstalled = checkPluginInstalled(plugin.id, installed)
+      const installedVersion = getInstalledPluginVersion(plugin.id, installed)
+
+      return {
+        ...plugin,
+        installed: isInstalled,
+        installed_version: installedVersion
+      }
+    })
+
+    for (const installedPlugin of installed) {
+      const existsInMarket = mergedData.some(p => p.id === installedPlugin.id)
+      if (!existsInMarket && installedPlugin.manifest) {
+        const urls = installedPlugin.manifest.urls as PluginInfo['manifest']['urls'] | undefined
+        // 添加本地安装但不在市场的插件
+        mergedData.push({
+          id: installedPlugin.id,
+          manifest: {
+            manifest_version: installedPlugin.manifest.manifest_version || 1,
+            id: installedPlugin.manifest.id || installedPlugin.id,
+            name: installedPlugin.manifest.name,
+            version: installedPlugin.manifest.version,
+            description: installedPlugin.manifest.description || '',
+            author: installedPlugin.manifest.author,
+            license: installedPlugin.manifest.license || 'Unknown',
+            host_application: installedPlugin.manifest.host_application,
+            homepage_url: installedPlugin.manifest.homepage_url || urls?.homepage,
+            repository_url: installedPlugin.manifest.repository_url || urls?.repository,
+            urls,
+            keywords: installedPlugin.manifest.keywords || [],
+            plugin_type: installedPlugin.manifest.plugin_type || 'extension',
+            display: installedPlugin.manifest.display,
+            default_locale: (installedPlugin.manifest.default_locale as string) || 'zh-CN',
+            locales_path: installedPlugin.manifest.locales_path as string | undefined,
+          },
+          downloads: 0,
+          rating: 0,
+          review_count: 0,
+          installed: true,
+          installed_version: installedPlugin.manifest.version,
+          source: 'local',
+          stats_ids: [installedPlugin.manifest.id].filter(Boolean) as string[],
+          published_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+    }
+
+    return mergedData
+  }
+
   // 统一管理 WebSocket 和数据加载
   useEffect(() => {
     let unsubscribeProgress: (() => Promise<void>) | null = null
@@ -136,8 +195,7 @@ function PluginsPageContent() {
         setLoading(false)
       }
 
-      // 1. 先连接 WebSocket（异步获取 token）
-      unsubscribeProgress = await connectPluginProgressWebSocket(
+      const progressSubscription = connectPluginProgressWebSocket(
         (progress) => {
           if (isUnmounted) return
           
@@ -150,7 +208,7 @@ function PluginsPageContent() {
                 setLoadProgress(null)
               }
             }, 2000)
-          } else if (progress.stage === 'error') {
+          } else if (progress.stage === 'error' && progress.operation === 'fetch') {
             setLoading(false)
             setError(progress.error || '加载失败')
           }
@@ -166,151 +224,115 @@ function PluginsPageContent() {
           }
         }
       )
-
-      // 2. 检查 Git 状态
-      if (!isUnmounted) {
-        const statusResult = await checkGitStatus()
-        if (!statusResult.success) {
-          toast({
-            title: 'Git 状态检查失败',
-            description: statusResult.error,
-            variant: 'destructive',
-          })
-          setGitStatus({ installed: false, error: statusResult.error })
-        } else {
-          setGitStatus(statusResult.data)
-          
-          if (!statusResult.data.installed) {
-            toast({
-              title: 'Git 未安装',
-              description: statusResult.data.error || '请先安装 Git 才能使用插件安装功能',
-              variant: 'destructive',
-            })
+        .then((unsubscribe) => {
+          if (isUnmounted) {
+            void unsubscribe()
+            return unsubscribe
           }
-        }
-      }
 
-      // 3. 获取麦麦版本
-      if (!isUnmounted) {
-        const versionResult = await getMaimaiVersion()
-        if (!versionResult.success) {
-          toast({
-            title: '版本获取失败',
-            description: versionResult.error,
-            variant: 'destructive',
-          })
-        } else {
-          setMaimaiVersion(versionResult.data)
-        }
-      }
-      // 4. 加载插件列表（包含已安装信息）
+          unsubscribeProgress = unsubscribe
+          return unsubscribe
+        })
+        .catch((error) => {
+          console.error('WebSocket subscribe error:', error)
+          return null
+        })
+
+      // 并发加载互不依赖的数据，避免 Git 检查、版本读取、市场清单和本地扫描串行拖慢页面。
       if (!isUnmounted) {
         try {
           if (!cachedPluginList?.length) {
             setLoading(true)
           }
           setError(null)
-          const apiResult = await fetchPluginList({ forceRefresh: Boolean(cachedPluginList?.length) })
-          if (!apiResult.success) {
-            if (!isUnmounted) {
-              setError(apiResult.error)
-              toast({
-                title: '加载失败',
-                description: apiResult.error,
-                variant: 'destructive',
-              })
-            }
+          const [
+            statusResult,
+            versionResult,
+            apiResult,
+            installedResult,
+          ] = await Promise.all([
+            checkGitStatus(),
+            getMaimaiVersion(),
+            fetchPluginList(),
+            getInstalledPlugins(),
+          ])
+          if (isUnmounted) {
             return
           }
-          const data = apiResult.data
-          
-          if (!isUnmounted) {
-            // 获取已安装插件列表
-            const installedResult = await getInstalledPlugins()
-            if (!installedResult.success) {
+
+          if (!statusResult.success) {
+            toast({
+              title: 'Git 状态检查失败',
+              description: statusResult.error,
+              variant: 'destructive',
+            })
+            setGitStatus({ installed: false, error: statusResult.error })
+          } else {
+            setGitStatus(statusResult.data)
+
+            if (!statusResult.data.installed) {
               toast({
-                title: '获取已安装插件失败',
-                description: installedResult.error,
+                title: 'Git 未安装',
+                description: statusResult.data.error || '请先安装 Git 才能使用插件安装功能',
                 variant: 'destructive',
               })
-              return
             }
-            const installed = installedResult.data
-            setInstalledPlugins(installed)
-            
-            // 将已安装信息合并到插件数据中
-            const mergedData = data.map(plugin => {
-              const isInstalled = checkPluginInstalled(plugin.id, installed)
-              const installedVersion = getInstalledPluginVersion(plugin.id, installed)
-              
-              return {
-                ...plugin,
-                installed: isInstalled,
-                installed_version: installedVersion
+          }
+
+          if (!versionResult.success) {
+            toast({
+              title: '版本获取失败',
+              description: versionResult.error,
+              variant: 'destructive',
+            })
+          } else {
+            setMaimaiVersion(versionResult.data)
+          }
+
+          if (!apiResult.success) {
+            setError(apiResult.error)
+            toast({
+              title: '加载失败',
+              description: apiResult.error,
+              variant: 'destructive',
+            })
+            return
+          }
+
+          if (!installedResult.success) {
+            toast({
+              title: '获取已安装插件失败',
+              description: installedResult.error,
+              variant: 'destructive',
+            })
+          }
+
+          const installed = installedResult.success ? installedResult.data : []
+          setInstalledPlugins(installed)
+          const mergedData = mergeInstalledPluginInfo(apiResult.data, installed)
+
+          if (cachedStatsSummary) {
+            setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary))
+          }
+          setPlugins(mergedData)
+
+          getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
+            .then((statsSummary) => {
+              if (!isUnmounted) {
+                setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
               }
             })
-          
-            
-            // 添加本地安装但不在市场的插件
-            for (const installedPlugin of installed) {
-              const existsInMarket = mergedData.some(p => p.id === installedPlugin.id)
-              if (!existsInMarket && installedPlugin.manifest) {
-                const urls = installedPlugin.manifest.urls as PluginInfo['manifest']['urls'] | undefined
-                // 添加本地插件到列表
-                mergedData.push({
-                  id: installedPlugin.id,
-                  manifest: {
-                    manifest_version: installedPlugin.manifest.manifest_version || 1,
-                    id: installedPlugin.manifest.id || installedPlugin.id,
-                    name: installedPlugin.manifest.name,
-                    version: installedPlugin.manifest.version,
-                    description: installedPlugin.manifest.description || '',
-                    author: installedPlugin.manifest.author,
-                    license: installedPlugin.manifest.license || 'Unknown',
-                    host_application: installedPlugin.manifest.host_application,
-                    homepage_url: installedPlugin.manifest.homepage_url || urls?.homepage,
-                    repository_url: installedPlugin.manifest.repository_url || urls?.repository,
-                    urls,
-                    keywords: installedPlugin.manifest.keywords || [],
-                    plugin_type: installedPlugin.manifest.plugin_type || 'extension',
-                    display: installedPlugin.manifest.display,
-                    default_locale: (installedPlugin.manifest.default_locale as string) || 'zh-CN',
-                    locales_path: installedPlugin.manifest.locales_path as string | undefined,
-                  },
-                  downloads: 0,
-                  rating: 0,
-                  review_count: 0,
-                  installed: true,
-                  installed_version: installedPlugin.manifest.version,
-                  source: 'local',
-                  stats_ids: [installedPlugin.manifest.id].filter(Boolean) as string[],
-                  published_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                })
-              }
-            }
-            
-            if (cachedStatsSummary) {
-              setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary))
-            }
-            setPlugins(mergedData)
-
-            getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
-              .then((statsSummary) => {
-                if (!isUnmounted) {
-                  setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
-                }
-              })
-              .catch((statsError) => {
-                console.warn('刷新插件统计失败:', statsError)
-              })
-          }
+            .catch((statsError) => {
+              console.warn('刷新插件统计失败:', statsError)
+            })
         } finally {
           if (!isUnmounted) {
             setLoading(false)
           }
         }
       }
+
+      void progressSubscription
     }
 
     init()
@@ -470,6 +492,77 @@ function PluginsPageContent() {
     setInstallDialogOpen(true)
   }
 
+  const handleInstallDialogOpenChange = (open: boolean) => {
+    if (!open && loadProgress?.operation === 'install' && loadProgress.stage === 'loading') {
+      return
+    }
+
+    setInstallDialogOpen(open)
+    if (!open) {
+      setInstallingPlugin(null)
+    }
+  }
+
+  const handleLike = async (plugin: PluginInfo) => {
+    const pluginId = plugin.manifest?.id || plugin.id
+    if (likingPluginIds.has(pluginId)) {
+      return
+    }
+
+    setLikingPluginIds((currentIds) => {
+      const nextIds = new Set(currentIds)
+      nextIds.add(pluginId)
+      return nextIds
+    })
+
+    try {
+      const result = await likePlugin(pluginId)
+
+      if (!result.success) {
+        toast({
+          title: '点赞失败',
+          description: result.error || '无法提交点赞',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      setPluginStats((currentStats) => {
+        const currentPluginStats = currentStats[pluginId] ?? currentStats[plugin.id] ?? {
+          plugin_id: pluginId,
+          likes: 0,
+          dislikes: 0,
+          downloads: plugin.downloads ?? 0,
+          rating: plugin.rating ?? 0,
+          rating_count: 0,
+        }
+        const nextPluginStats: PluginStatsData = {
+          ...currentPluginStats,
+          plugin_id: pluginId,
+          likes: Number(result.likes ?? currentPluginStats.likes),
+          dislikes: Number(result.dislikes ?? currentPluginStats.dislikes),
+          liked: result.liked,
+          disliked: result.disliked,
+        }
+        const nextStats = { ...currentStats }
+        const statsIds = [pluginId, plugin.id, plugin.manifest?.id, currentPluginStats.plugin_id]
+          .filter((id): id is string => Boolean(id))
+
+        for (const statsId of statsIds) {
+          nextStats[statsId] = nextPluginStats
+        }
+
+        return nextStats
+      })
+    } finally {
+      setLikingPluginIds((currentIds) => {
+        const nextIds = new Set(currentIds)
+        nextIds.delete(pluginId)
+        return nextIds
+      })
+    }
+  }
+
   // 安装插件处理
   const handleInstall = async (branch: string) => {
     if (!installingPlugin) return
@@ -483,8 +576,16 @@ function PluginsPageContent() {
     }
 
     try {
-      setInstallDialogOpen(false)
-      
+      setLoadProgress({
+        operation: 'install',
+        stage: 'loading',
+        progress: 0,
+        message: `正在准备安装 ${installingPlugin.manifest.name}`,
+        plugin_id: installingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 0,
+      })
+
       const installResult = await installPlugin(
         installingPlugin.id,
         installingPlugin.manifest.repository_url || installingPlugin.manifest.urls?.repository || '',
@@ -492,6 +593,16 @@ function PluginsPageContent() {
       )
       
       if (!installResult.success) {
+        setLoadProgress({
+          operation: 'install',
+          stage: 'error',
+          progress: 0,
+          message: installResult.error || '安装失败',
+          error: installResult.error || '安装失败',
+          plugin_id: installingPlugin.id,
+          total_plugins: 1,
+          loaded_plugins: 0,
+        })
         toast({
           title: '安装失败',
           description: installResult.error,
@@ -511,9 +622,18 @@ function PluginsPageContent() {
         title: '安装成功',
         description: `${installingPlugin.manifest.name} 已成功安装`,
       })
+      setLoadProgress({
+        operation: 'install',
+        stage: 'success',
+        progress: 100,
+        message: `${installingPlugin.manifest.name} 已成功安装`,
+        plugin_id: installingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 1,
+      })
       
       // 重新加载已安装插件列表
-      const installedResult = await getInstalledPlugins()
+      const installedResult = await getInstalledPlugins({ forceRefresh: true })
       if (!installedResult.success) {
         toast({
           title: '获取已安装插件失败',
@@ -542,13 +662,22 @@ function PluginsPageContent() {
         })
       )
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '未知错误'
+      setLoadProgress({
+        operation: 'install',
+        stage: 'error',
+        progress: 0,
+        message: errorMessage,
+        error: errorMessage,
+        plugin_id: installingPlugin.id,
+        total_plugins: 1,
+        loaded_plugins: 0,
+      })
       toast({
         title: '安装失败',
-        description: error instanceof Error ? error.message : '未知错误',
+        description: errorMessage,
         variant: 'destructive',
       })
-    } finally {
-      setInstallingPlugin(null)
     }
   }
 
@@ -572,7 +701,7 @@ function PluginsPageContent() {
       })
       
       // 重新加载已安装插件列表
-      const installedResult = await getInstalledPlugins()
+      const installedResult = await getInstalledPlugins({ forceRefresh: true })
       if (!installedResult.success) {
         toast({
           title: '获取已安装插件失败',
@@ -652,7 +781,7 @@ function PluginsPageContent() {
       })
       
       // 重新加载已安装插件列表
-      const installedResult = await getInstalledPlugins()
+      const installedResult = await getInstalledPlugins({ forceRefresh: true })
       if (!installedResult.success) {
         toast({
           title: '获取已安装插件失败',
@@ -690,10 +819,11 @@ function PluginsPageContent() {
   }
 
   // 过滤插件用于标签页统计
-  const getFilteredPluginCount = (tab: 'all' | 'installed' | 'updates') => {
+  const getFilteredPluginCount = () => {
     return plugins.filter(p => {
       if (!p.manifest) return false
-      if (tab === 'all' && p.source === 'local') return false
+      if (p.source === 'local') return false
+      if (hideInstalledPlugins && p.installed) return false
       const matchesSearch = searchQuery === '' ||
         p.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -702,15 +832,8 @@ function PluginsPageContent() {
       const matchesCompatibility = !showCompatibleOnly || 
         !maimaiVersion || 
         checkPluginCompatibility(p)
-      
-      let matchesTab = true
-      if (tab === 'installed') {
-        matchesTab = p.installed === true
-      } else if (tab === 'updates') {
-        matchesTab = p.installed === true && needsUpdate(p)
-      }
-      
-      return matchesSearch && matchesType && matchesCompatibility && matchesTab
+
+      return matchesSearch && matchesType && matchesCompatibility
     }).length
   }
 
@@ -718,15 +841,14 @@ function PluginsPageContent() {
     <ScrollArea className="h-full">
       <div className="space-y-6 p-4 sm:p-6">
         {/* 标题 */}
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div
+          data-plugin-market-header="true"
+          className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4"
+        >
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">插件市场</h1>
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={() => navigate({ to: '/plugin-mirrors' })}>
-              <Settings2 className="h-4 w-4 mr-2" />
-              配置镜像源
-            </Button>
+            <h1 data-plugin-market-title="true" className="text-2xl sm:text-3xl font-bold">
+              插件市场
+            </h1>
           </div>
         </div>
 
@@ -790,8 +912,15 @@ function PluginsPageContent() {
 
             {/* 类型筛选 */}
             <Select value={pluginTypeFilter} onValueChange={setPluginTypeFilter}>
-              <SelectTrigger className="w-full sm:w-[200px]">
-                <SelectValue placeholder="选择类型" />
+              <SelectTrigger
+                aria-label="类型筛选"
+                title="类型筛选"
+                className="w-full justify-center gap-1 px-2 sm:w-12"
+              >
+                <Filter className="h-4 w-4" />
+                <span className="sr-only">
+                  <SelectValue placeholder="选择类型" />
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部类型</SelectItem>
@@ -806,29 +935,55 @@ function PluginsPageContent() {
               value={marketplaceSortBy}
               onValueChange={(value) => setMarketplaceSortBy(value as MarketplaceSortKey)}
             >
-              <SelectTrigger className="w-full sm:w-[160px]">
-                <SelectValue placeholder="排序" />
+              <SelectTrigger
+                aria-label="排序"
+                title="排序"
+                className="w-full justify-center gap-1 px-2 sm:w-12"
+              >
+                <ArrowUpDown className="h-4 w-4" />
+                <span className="sr-only">
+                  <SelectValue placeholder="排序" />
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="default">推荐排序</SelectItem>
+                <SelectItem value="latest">最新上架</SelectItem>
                 <SelectItem value="downloads">下载最多</SelectItem>
                 <SelectItem value="likes">点赞最多</SelectItem>
                 <SelectItem value="rating">评分最高</SelectItem>
               </SelectContent>
             </Select>
 
+            <Badge
+              variant="outline"
+              data-plugin-market-count-badge="true"
+              className="h-9 border-input bg-transparent px-3 text-sm font-normal"
+            >
+              全部插件 {getFilteredPluginCount()}
+            </Badge>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:ml-auto sm:w-auto"
+              onClick={() => navigate({ to: '/plugin-mirrors' })}
+            >
+              <Settings2 className="h-4 w-4 mr-2" />
+              设置
+            </Button>
+
             {/* 兼容性筛选 */}
             <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-2 sm:w-auto sm:min-w-fit">
               <Checkbox
-                id="compatible-only"
-                checked={showCompatibleOnly}
-                onCheckedChange={(checked) => setShowCompatibleOnly(checked === true)}
+                id="hide-installed-plugins"
+                checked={hideInstalledPlugins}
+                onCheckedChange={(checked) => setHideInstalledPlugins(checked === true)}
               />
               <label
-                htmlFor="compatible-only"
+                htmlFor="hide-installed-plugins"
                 className="cursor-pointer text-sm font-medium leading-none whitespace-nowrap peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
               >
-                仅显示当前版本
+                排除已安装
               </label>
               {isFetchingMarketplace && (
                 <div
@@ -846,23 +1001,11 @@ function PluginsPageContent() {
           </div>
         </Card>
 
-        {/* 标签页 */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="all">
-              全部插件 ({getFilteredPluginCount('all')})
-            </TabsTrigger>
-            <TabsTrigger value="installed">
-              已安装 ({getFilteredPluginCount('installed')})
-            </TabsTrigger>
-            <TabsTrigger value="updates">
-              可更新 ({getFilteredPluginCount('updates')})
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-
         {/* 加载错误显示 */}
-        {loadProgress && loadProgress.stage === 'error' && loadProgress.error && (
+        {loadProgress
+          && loadProgress.operation === 'fetch'
+          && loadProgress.stage === 'error'
+          && loadProgress.error && (
           <Card className="border-destructive bg-destructive/10">
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -896,18 +1039,21 @@ function PluginsPageContent() {
               </Button>
             </div>
           </Card>
-        ) : activeTab === 'all' ? (
+        ) : (
           <MarketplaceTab
             plugins={plugins}
             searchQuery={searchQuery}
             pluginTypeFilter={pluginTypeFilter}
             showCompatibleOnly={showCompatibleOnly}
+            hideInstalledPlugins={hideInstalledPlugins}
             sortBy={marketplaceSortBy}
             gitStatus={gitStatus}
             maimaiVersion={maimaiVersion}
             pluginStats={pluginStats}
             loadProgress={loadProgress}
+            likingPluginIds={likingPluginIds}
             onInstall={openInstallDialog}
+            onLike={handleLike}
             onUpdate={handleUpdate}
             onUninstall={handleUninstall}
             checkPluginCompatibility={checkPluginCompatibility}
@@ -915,49 +1061,14 @@ function PluginsPageContent() {
             getStatusBadge={getStatusBadge}
             getIncompatibleReason={getIncompatibleReason}
           />
-        ) : activeTab === 'installed' ? (
-          <InstalledTab
-            plugins={plugins}
-            searchQuery={searchQuery}
-            pluginTypeFilter={pluginTypeFilter}
-            showCompatibleOnly={showCompatibleOnly}
-            gitStatus={gitStatus}
-            maimaiVersion={maimaiVersion}
-            pluginStats={pluginStats}
-            loadProgress={loadProgress}
-            onInstall={openInstallDialog}
-            onUpdate={handleUpdate}
-            onUninstall={handleUninstall}
-            checkPluginCompatibility={checkPluginCompatibility}
-            needsUpdate={needsUpdate}
-            getStatusBadge={getStatusBadge}
-            getIncompatibleReason={getIncompatibleReason}
-          />
-        ) : activeTab === 'updates' ? (
-          <UpdatesTab
-            plugins={plugins}
-            searchQuery={searchQuery}
-            pluginTypeFilter={pluginTypeFilter}
-            showCompatibleOnly={showCompatibleOnly}
-            gitStatus={gitStatus}
-            maimaiVersion={maimaiVersion}
-            pluginStats={pluginStats}
-            loadProgress={loadProgress}
-            onInstall={openInstallDialog}
-            onUpdate={handleUpdate}
-            onUninstall={handleUninstall}
-            checkPluginCompatibility={checkPluginCompatibility}
-            needsUpdate={needsUpdate}
-            getStatusBadge={getStatusBadge}
-            getIncompatibleReason={getIncompatibleReason}
-          />
-        ) : null}
+        )}
 
         {/* 安装对话框 */}
         <InstallDialog
           open={installDialogOpen}
           plugin={installingPlugin}
-          onOpenChange={setInstallDialogOpen}
+          loadProgress={loadProgress}
+          onOpenChange={handleInstallDialogOpenChange}
           onInstall={handleInstall}
         />
 

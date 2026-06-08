@@ -5,15 +5,25 @@ import asyncio
 import pytest
 
 from src.chat.heart_flow.heartFC_utils import CycleDetail
+from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.common.utils.utils_config import ChatConfigUtils
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionResult, ToolInvocation
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.maisaka import reasoning_engine as reasoning_engine_module
-from src.maisaka.builtin_tool import get_timing_tools
+from src.maisaka.builtin_tool import get_builtin_tools, get_timing_tools
+from src.maisaka.builtin_tool.context import BuiltinToolRuntimeContext
+from src.maisaka.builtin_tool.no_action import handle_tool as handle_no_action_tool
 from src.maisaka.chat_loop_service import ChatResponse, MaisakaChatLoopService
-from src.maisaka.context_messages import AssistantMessage, TIMING_GATE_INVALID_TOOL_HINT_SOURCE, ToolResultMessage
-from src.maisaka.history_post_processor import HistoryPostProcessResult
+from src.maisaka.context.messages import (
+    AssistantMessage,
+    ReferenceMessage,
+    ReferenceMessageType,
+    SessionBackedMessage,
+    TIMING_GATE_INVALID_TOOL_HINT_SOURCE,
+    ToolResultMessage,
+)
+from src.maisaka.context.post_processor import HistoryPostProcessResult
 from src.maisaka.reasoning_engine import MaisakaReasoningEngine
 from src.maisaka.runtime import MaisakaHeartFlowChatting
 
@@ -57,7 +67,7 @@ def _build_runtime_stub(*, is_group_chat: bool) -> SimpleNamespace:
     )
 
 
-def test_timing_gate_tools_expose_wait_only_in_private_chat() -> None:
+def test_timing_gate_tools_expose_wait_in_all_chat_types() -> None:
     private_tool_names = {
         tool_definition["name"]
         for tool_definition in get_timing_tools(ToolAvailabilityContext(is_group_chat=False))
@@ -68,7 +78,18 @@ def test_timing_gate_tools_expose_wait_only_in_private_chat() -> None:
     }
 
     assert private_tool_names == {"continue", "no_action", "wait"}
-    assert group_tool_names == {"continue", "no_action"}
+    assert group_tool_names == {"continue", "no_action", "wait"}
+
+
+def test_no_action_is_available_to_planner_and_timing_gate() -> None:
+    planner_tool_names = {tool_definition["name"] for tool_definition in get_builtin_tools()}
+    timing_tool_names = {
+        tool_definition["name"]
+        for tool_definition in get_timing_tools(ToolAvailabilityContext(is_group_chat=True))
+    }
+
+    assert "no_action" in planner_tool_names
+    assert "no_action" in timing_tool_names
 
 
 @pytest.mark.asyncio
@@ -171,34 +192,44 @@ async def test_timing_gate_invalid_tool_retries_until_valid(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
-async def test_timing_gate_group_chat_treats_wait_as_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_timing_gate_group_chat_allows_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = _build_runtime_stub(is_group_chat=True)
-
-    def _enter_stop_state() -> None:
-        runtime.stopped = True
-
-    runtime._enter_stop_state = _enter_stop_state
     engine = MaisakaReasoningEngine(runtime)  # type: ignore[arg-type]
 
     async def _fake_timing_gate_sub_agent(**kwargs: object) -> ChatResponse:
         tool_definitions = kwargs["tool_definitions"]
-        assert {tool_definition["name"] for tool_definition in tool_definitions} == {"continue", "no_action"}
+        assert {tool_definition["name"] for tool_definition in tool_definitions} == {"continue", "no_action", "wait"}
         return _build_chat_response([
-            ToolCall(call_id="disabled-wait", func_name="wait", args={"seconds": 3}),
+            ToolCall(call_id="group-wait", func_name="wait", args={"seconds": 3}),
         ])
 
-    async def _fail_invoke_tool_call(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise AssertionError("群聊中禁用的 wait 不应被执行")
+    async def _fake_invoke_tool_call(
+        tool_call: ToolCall,
+        latest_thought: str,
+        anchor_message: object,
+        *,
+        append_history: bool = True,
+        store_record: bool = True,
+    ) -> tuple[ToolInvocation, ToolExecutionResult, None]:
+        del latest_thought, anchor_message, append_history, store_record
+        return (
+            ToolInvocation(tool_name=tool_call.func_name, call_id=tool_call.call_id),
+            ToolExecutionResult(
+                tool_name=tool_call.func_name,
+                success=True,
+                content="等待 3 秒后重新判断",
+                metadata={"timing_action": "wait"},
+            ),
+            None,
+        )
 
     monkeypatch.setattr(engine, "_run_timing_gate_sub_agent", _fake_timing_gate_sub_agent)
-    monkeypatch.setattr(engine, "_invoke_tool_call", _fail_invoke_tool_call)
+    monkeypatch.setattr(engine, "_invoke_tool_call", _fake_invoke_tool_call)
 
     action, _, tool_results, _ = await engine._run_timing_gate(object())  # type: ignore[arg-type]
 
-    assert action == "no_action"
-    assert runtime.stopped is True
-    assert tool_results[-1] == "- no_action [非法 Timing 工具]: 返回了 wait，已停止本轮并等待新消息"
+    assert action == "wait"
+    assert tool_results == ["- wait [成功]: 等待 3 秒后重新判断"]
 
 
 def test_timing_gate_invalid_tool_hint_keeps_only_latest() -> None:
@@ -233,6 +264,202 @@ def test_timing_gate_invalid_tool_hint_only_visible_to_timing_gate() -> None:
 
     assert timing_history == [hint_message]
     assert planner_history == []
+
+
+def test_planner_no_tool_hint_inserted_after_latest_user_and_hidden_from_timing_gate() -> None:
+    first_user = SessionBackedMessage(
+        raw_message=MessageSequence([TextComponent("first")]),
+        visible_text="first",
+        timestamp=datetime.now(),
+        source_kind="user",
+    )
+    latest_user = SessionBackedMessage(
+        raw_message=MessageSequence([TextComponent("latest")]),
+        visible_text="latest",
+        timestamp=datetime.now(),
+        source_kind="user",
+    )
+    assistant_message = AssistantMessage(content="analysis only", timestamp=datetime.now())
+    runtime = SimpleNamespace(_chat_history=[first_user, latest_user, assistant_message])
+    engine = MaisakaReasoningEngine(runtime)  # type: ignore[arg-type]
+
+    engine._insert_planner_no_tool_hint(1)
+
+    hint_message = runtime._chat_history[2]
+    assert isinstance(hint_message, ReferenceMessage)
+    assert hint_message.reference_type == ReferenceMessageType.PLANNER_TOOL_HINT
+    assert "必须调用至少一个当前可用工具" in hint_message.content
+
+    timing_history = MaisakaChatLoopService._filter_history_for_request_kind(
+        runtime._chat_history,
+        request_kind="timing_gate",
+    )
+    planner_history = MaisakaChatLoopService._filter_history_for_request_kind(
+        runtime._chat_history,
+        request_kind="planner",
+    )
+
+    assert hint_message not in timing_history
+    assert hint_message in planner_history
+
+    engine._insert_planner_no_tool_hint(2)
+    planner_hints = [
+        message
+        for message in runtime._chat_history
+        if isinstance(message, ReferenceMessage)
+        and message.reference_type == ReferenceMessageType.PLANNER_TOOL_HINT
+    ]
+    assert len(planner_hints) == 1
+    assert "严厉提醒" in planner_hints[0].content
+
+
+def test_planner_continuation_skips_timing_until_finish() -> None:
+    runtime = SimpleNamespace(
+        _planner_continuation_active=False,
+        _force_next_timing_continue=True,
+        _force_next_timing_message_id="message-1",
+        _force_next_timing_reason="测试触发",
+        log_prefix="[test]",
+    )
+
+    def _is_planner_continuation_active() -> bool:
+        return runtime._planner_continuation_active
+
+    def _start_planner_continuation() -> None:
+        runtime._planner_continuation_active = True
+
+    def _finish_planner_continuation() -> None:
+        runtime._planner_continuation_active = False
+
+    def _consume_force_next_timing_continue_reason() -> str | None:
+        if not runtime._force_next_timing_continue:
+            return None
+        runtime._force_next_timing_continue = False
+        runtime._force_next_timing_message_id = ""
+        runtime._force_next_timing_reason = ""
+        return "forced timing consumed"
+
+    runtime._is_planner_continuation_active = _is_planner_continuation_active
+    runtime._start_planner_continuation = _start_planner_continuation
+    runtime._finish_planner_continuation = _finish_planner_continuation
+    runtime._consume_force_next_timing_continue_reason = _consume_force_next_timing_continue_reason
+    engine = MaisakaReasoningEngine(runtime)  # type: ignore[arg-type]
+
+    assert engine._should_run_initial_timing_gate() is True
+
+    engine._start_planner_continuation()
+
+    assert engine._should_run_initial_timing_gate() is False
+    assert runtime._planner_continuation_active is True
+    assert runtime._force_next_timing_continue is False
+    assert runtime._force_next_timing_message_id == ""
+    assert runtime._force_next_timing_reason == ""
+
+    engine._finish_planner_continuation()
+
+    assert engine._should_run_initial_timing_gate() is True
+
+
+@pytest.mark.asyncio
+async def test_planner_no_action_tool_keeps_planner_continuation() -> None:
+    runtime = SimpleNamespace(_planner_continuation_active=True, stopped=False)
+
+    def _enter_stop_state() -> None:
+        runtime.stopped = True
+
+    runtime._enter_stop_state = _enter_stop_state
+    tool_ctx = BuiltinToolRuntimeContext(engine=SimpleNamespace(), runtime=runtime)  # type: ignore[arg-type]
+
+    result = await handle_no_action_tool(
+        tool_ctx,
+        ToolInvocation(tool_name="no_action", call_id="no-action-call"),
+    )
+
+    assert result.success is True
+    assert result.metadata["pause_execution"] is True
+    assert runtime.stopped is True
+    assert runtime._planner_continuation_active is True
+
+
+def test_planner_no_tool_retry_escalates_to_finish_after_three_attempts() -> None:
+    latest_user = SessionBackedMessage(
+        raw_message=MessageSequence([TextComponent("latest")]),
+        visible_text="latest",
+        timestamp=datetime.now(),
+        source_kind="user",
+    )
+    runtime = SimpleNamespace(
+        _chat_history=[latest_user],
+        _planner_continuation_active=True,
+        log_prefix="[test]",
+        stopped=False,
+    )
+
+    def _enter_stop_state() -> None:
+        runtime.stopped = True
+
+    def _finish_planner_continuation() -> None:
+        runtime._planner_continuation_active = False
+
+    runtime._enter_stop_state = _enter_stop_state
+    runtime._finish_planner_continuation = _finish_planner_continuation
+    engine = MaisakaReasoningEngine(runtime)  # type: ignore[arg-type]
+    planner_extra_lines: list[str] = []
+
+    no_tool_count, reason, detail, should_finish = engine._handle_planner_no_tool_retry(
+        0,
+        planner_extra_lines,
+    )
+    planner_hints = [
+        message
+        for message in runtime._chat_history
+        if isinstance(message, ReferenceMessage)
+        and message.reference_type == ReferenceMessageType.PLANNER_TOOL_HINT
+    ]
+    assert no_tool_count == 1
+    assert reason == "planner_missing_tool_retry"
+    assert "第 1 次没有调用工具" in detail
+    assert should_finish is False
+    assert runtime.stopped is False
+    assert len(planner_hints) == 1
+    assert "必须调用至少一个当前可用工具" in planner_hints[0].content
+
+    no_tool_count, reason, detail, should_finish = engine._handle_planner_no_tool_retry(
+        no_tool_count,
+        planner_extra_lines,
+    )
+    planner_hints = [
+        message
+        for message in runtime._chat_history
+        if isinstance(message, ReferenceMessage)
+        and message.reference_type == ReferenceMessageType.PLANNER_TOOL_HINT
+    ]
+    assert no_tool_count == 2
+    assert reason == "planner_missing_tool_retry"
+    assert "第 2 次没有调用工具" in detail
+    assert should_finish is False
+    assert runtime.stopped is False
+    assert len(planner_hints) == 1
+    assert "严厉提醒" in planner_hints[0].content
+
+    no_tool_count, reason, detail, should_finish = engine._handle_planner_no_tool_retry(
+        no_tool_count,
+        planner_extra_lines,
+    )
+    planner_hints = [
+        message
+        for message in runtime._chat_history
+        if isinstance(message, ReferenceMessage)
+        and message.reference_type == ReferenceMessageType.PLANNER_TOOL_HINT
+    ]
+    assert no_tool_count == 3
+    assert reason == "finish"
+    assert "连续 3 次没有调用工具" in detail
+    assert should_finish is True
+    assert runtime.stopped is True
+    assert runtime._planner_continuation_active is False
+    assert planner_hints == []
+    assert planner_extra_lines[-1] == "状态：连续 3 次未调用工具，已视为 finish"
 
 
 def test_timing_gate_context_filters_non_timing_actions() -> None:
@@ -302,6 +529,8 @@ def test_timing_gate_context_filters_non_timing_actions() -> None:
 
 def test_forced_timing_trigger_bypasses_message_frequency_threshold() -> None:
     runtime = SimpleNamespace(
+        session_id="test-session",
+        chat_stream=SimpleNamespace(is_group_session=True),
         _STATE_WAIT="wait",
         _agent_state="stop",
         _message_turn_scheduled=False,
@@ -343,6 +572,8 @@ def test_zero_reply_frequency_keeps_effective_zero(monkeypatch: pytest.MonkeyPat
 
 def test_zero_reply_frequency_schedules_silent_turn_before_forced_trigger() -> None:
     runtime = SimpleNamespace(
+        session_id="test-session",
+        chat_stream=SimpleNamespace(is_group_session=True),
         _STATE_WAIT="wait",
         _agent_state="stop",
         _message_turn_scheduled=False,

@@ -9,11 +9,15 @@ from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 
+from .behavior_feedback import get_tool_spec as get_behavior_feedback_tool_spec
+from .behavior_feedback import handle_tool as handle_behavior_feedback_tool
 from .context import BuiltinToolRuntimeContext
 from .continue_tool import get_tool_spec as get_continue_tool_spec
 from .continue_tool import handle_tool as handle_continue_tool
 from .finish import get_tool_spec as get_finish_tool_spec
 from .finish import handle_tool as handle_finish_tool
+from .fetch_histroy import get_tool_spec as get_fetch_histroy_tool_spec
+from .fetch_histroy import handle_tool as handle_fetch_histroy_tool
 from .no_action import get_tool_spec as get_no_action_tool_spec
 from .no_action import handle_tool as handle_no_action_tool
 from .query_jargon import get_tool_spec as get_query_jargon_tool_spec
@@ -28,6 +32,8 @@ from .send_emoji import get_tool_spec as get_send_emoji_tool_spec
 from .send_emoji import handle_tool as handle_send_emoji_tool
 from .send_image import get_tool_spec as get_send_image_tool_spec
 from .send_image import handle_tool as handle_send_image_tool
+from .switch_chat import get_tool_spec as get_switch_chat_tool_spec
+from .switch_chat import handle_tool as handle_switch_chat_tool
 from .tool_search import get_tool_spec as get_tool_search_tool_spec
 from .tool_search import handle_tool as handle_tool_search_tool
 from .view_complex_message import get_tool_spec as get_view_complex_message_tool_spec
@@ -40,7 +46,7 @@ BuiltinToolRawHandler = Callable[
     [BuiltinToolRuntimeContext, ToolInvocation, Optional[ToolExecutionContext]],
     Awaitable[ToolExecutionResult],
 ]
-BuiltinToolStage = Literal["timing", "action"]
+BuiltinToolStage = Literal["timing", "action", "both"]
 BuiltinToolVisibility = Literal["visible", "deferred", "hidden"]
 BuiltinToolChatScope = Literal["all", "group", "private"]
 
@@ -80,11 +86,17 @@ def _get_query_person_profile_tool_spec() -> ToolSpec:
 
 
 BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
-    BuiltinToolEntry("no_action", get_no_action_tool_spec, handle_no_action_tool, stage="timing"),
+    BuiltinToolEntry("no_action", get_no_action_tool_spec, handle_no_action_tool, stage="both"),
     BuiltinToolEntry("continue", get_continue_tool_spec, handle_continue_tool, stage="timing"),
-    BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="timing", chat_scope="private"),
+    BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="timing"),
     BuiltinToolEntry("finish", get_finish_tool_spec, handle_finish_tool, stage="action"),
     BuiltinToolEntry("reply", get_reply_tool_spec, handle_reply_tool, stage="action"),
+    BuiltinToolEntry(
+        "behavior_feedback",
+        get_behavior_feedback_tool_spec,
+        handle_behavior_feedback_tool,
+        stage="action",
+    ),
     BuiltinToolEntry(
         "view_complex_message",
         get_view_complex_message_tool_spec,
@@ -102,6 +114,13 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("send_emoji", get_send_emoji_tool_spec, handle_send_emoji_tool, stage="action"),
     BuiltinToolEntry("send_image", get_send_image_tool_spec, handle_send_image_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),
+    BuiltinToolEntry(
+        "fetch_histroy",
+        get_fetch_histroy_tool_spec,
+        handle_fetch_histroy_tool,
+        stage="action",
+    ),
+    BuiltinToolEntry("switch_chat", get_switch_chat_tool_spec, handle_switch_chat_tool, stage="action"),
 ]
 
 
@@ -116,7 +135,7 @@ def _get_builtin_tool_entries(
     entries = BUILTIN_TOOL_ENTRIES
     entries = [entry for entry in entries if _is_builtin_tool_enabled_by_config(entry)]
     if stage is not None:
-        entries = [entry for entry in entries if entry.stage == stage]
+        entries = [entry for entry in entries if entry.stage in {stage, "both"}]
     if visibility is not None:
         entries = [entry for entry in entries if entry.visibility == visibility]
     if context is not None:
@@ -128,15 +147,19 @@ def _is_builtin_tool_enabled_by_config(entry: BuiltinToolEntry) -> bool:
     """根据全局配置判断内置工具是否应暴露。"""
 
     if entry.name in {"send_emoji", "send_image"}:
-        chat_config = getattr(global_config, "chat", None)
-        if bool(getattr(chat_config, "enable_replyer_format_output", False)):
+        if bool(global_config.experimental.enable_replyer_format_output):
             return False
+    if entry.name in {"fetch_histroy", "switch_chat"}:
+        return bool(global_config.experimental.focus_mode)
     return True
 
 
 def _is_builtin_tool_available(entry: BuiltinToolEntry, context: ToolAvailabilityContext) -> bool:
     """判断内置工具是否适用于当前聊天。"""
 
+    if entry.name in {"fetch_histroy", "switch_chat"}:
+        if context.is_group_chat is False and not bool(global_config.experimental.focus_on_private):
+            return False
     if entry.chat_scope == "all":
         return True
     if entry.chat_scope == "group":
@@ -160,13 +183,7 @@ def get_builtin_tool_visibility(tool_spec: ToolSpec) -> BuiltinToolVisibility:
 def is_builtin_tool_in_action_stage(tool_spec: ToolSpec) -> bool:
     """判断内置工具是否属于 Action Loop 阶段。"""
 
-    return str(tool_spec.metadata.get("builtin_stage") or "").strip() == "action"
-
-
-def is_builtin_tool_in_timing_stage(tool_spec: ToolSpec) -> bool:
-    """判断内置工具是否属于 Timing Gate 阶段。"""
-
-    return str(tool_spec.metadata.get("builtin_stage") or "").strip() == "timing"
+    return str(tool_spec.metadata.get("builtin_stage") or "").strip() in {"action", "both"}
 
 
 def get_all_builtin_tool_specs(context: Optional[ToolAvailabilityContext] = None) -> List[ToolSpec]:

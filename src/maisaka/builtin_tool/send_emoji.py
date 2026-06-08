@@ -1,4 +1,4 @@
-"""send_emoji 内置工具。"""
+﻿"""send_emoji 内置工具。"""
 
 from datetime import datetime
 from io import BytesIO
@@ -21,7 +21,7 @@ from src.common.logger import get_logger
 from src.config.config import config_manager, global_config
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.llm_models.payload_content.message import MessageBuilder, RoleType
-from src.maisaka.context_messages import (
+from src.maisaka.context.messages import (
     LLMContextMessage,
     ReferenceMessage,
     ReferenceMessageType,

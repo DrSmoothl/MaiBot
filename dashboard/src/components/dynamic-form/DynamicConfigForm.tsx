@@ -1,5 +1,5 @@
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import * as React from 'react'
-import * as LucideIcons from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -37,15 +37,6 @@ function resolveSectionTitle(schema: ConfigSchema) {
 
 function resolveFieldSectionTitle(field: FieldSchema) {
   return resolveLocalizedText(field.label, undefined, field.name)
-}
-
-function SectionIcon({ iconName }: { iconName?: string }) {
-  if (!iconName) return null
-  const IconComponent = LucideIcons[iconName as keyof typeof LucideIcons] as
-    | React.ComponentType<{ className?: string }>
-    | undefined
-  if (!IconComponent) return null
-  return <IconComponent className="h-5 w-5 text-muted-foreground" />
 }
 
 export function AdvancedSettingsButton({
@@ -101,7 +92,6 @@ function DynamicConfigSection({
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <SectionIcon iconName={nestedSchema.uiIcon} />
               <CardTitle className="text-lg text-primary">{sectionTitle}</CardTitle>
             </div>
           </div>
@@ -109,11 +99,18 @@ function DynamicConfigSection({
             type="button"
             size="sm"
             variant="outline"
+            className="w-8 px-0"
+            aria-label={collapsed ? '展开' : '收起'}
             aria-controls={contentId}
             aria-expanded={!collapsed}
+            title={collapsed ? '展开' : '收起'}
             onClick={() => setCollapsed((current) => !current)}
           >
-            {collapsed ? '展开' : '收起'}
+            {collapsed ? (
+              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <ChevronUp className="h-4 w-4" aria-hidden="true" />
+            )}
           </Button>
         </div>
       </CardHeader>
@@ -167,7 +164,6 @@ function NestedDynamicConfigSection({
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <SectionIcon iconName={nestedSchema.uiIcon} />
               <CardTitle className="text-sm text-primary">{sectionTitle}</CardTitle>
             </div>
           </div>
@@ -175,11 +171,18 @@ function NestedDynamicConfigSection({
             type="button"
             size="sm"
             variant="outline"
+            className="w-8 px-0"
+            aria-label={collapsed ? '展开' : '收起'}
             aria-controls={contentId}
             aria-expanded={!collapsed}
+            title={collapsed ? '展开' : '收起'}
             onClick={() => setCollapsed((current) => !current)}
           >
-            {collapsed ? '展开' : '收起'}
+            {collapsed ? (
+              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <ChevronUp className="h-4 w-4" aria-hidden="true" />
+            )}
           </Button>
         </div>
       </CardHeader>
@@ -249,6 +252,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
             schema={field}
             nestedSchema={nestedSchema}
             parentValues={values}
+            advancedVisible={resolvedAdvancedVisible}
           />
         )
       }
@@ -262,6 +266,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
           schema={field}
           nestedSchema={nestedSchema}
           parentValues={values}
+          advancedVisible={resolvedAdvancedVisible}
         >
           <DynamicField
             schema={field}
@@ -454,6 +459,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
                   schema={nestedField ?? nestedSchema}
                   nestedSchema={nestedSchema}
                   parentValues={values}
+                  advancedVisible={resolvedAdvancedVisible}
                 />
               )
 
@@ -466,7 +472,6 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
                     nestedSchema={{
                       ...nestedSchema,
                       classDoc: resolveFieldSectionTitle(nestedField),
-                      uiIcon: nestedField['x-icon'],
                     }}
                     values={{}}
                     onChange={onChange}
@@ -494,6 +499,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
                   schema={nestedField ?? nestedSchema}
                   nestedSchema={nestedSchema}
                   parentValues={values}
+                  advancedVisible={resolvedAdvancedVisible}
                 >
                   <DynamicConfigForm
                     schema={nestedSchema}

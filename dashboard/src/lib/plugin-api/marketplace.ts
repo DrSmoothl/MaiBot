@@ -44,6 +44,7 @@ interface PluginListStorageCache {
  */
 interface PluginApiResponse {
   id?: string
+  assets?: PluginInfo['assets']
   manifest: {
     manifest_version: number
     id?: string
@@ -115,6 +116,35 @@ function normalizePluginManifest(manifest: PluginApiResponse['manifest']): Plugi
     display: manifest.display,
     default_locale: manifest.default_locale || 'zh-CN',
     locales_path: manifest.locales_path,
+  }
+}
+
+function normalizePluginAssetUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) {
+    return undefined
+  }
+
+  const normalizedValue = value.trim()
+  if (/^https?:\/\//.test(normalizedValue)) {
+    return normalizedValue
+  }
+
+  const normalizedPath = normalizedValue.replace(/^\/+/, '')
+  if (!normalizedPath || normalizedPath.includes('..')) {
+    return undefined
+  }
+
+  return `https://raw.githubusercontent.com/${PLUGIN_REPO_OWNER}/${PLUGIN_REPO_NAME}/${PLUGIN_REPO_BRANCH}/${normalizedPath}`
+}
+
+function normalizePluginAssets(assets: PluginApiResponse['assets']): PluginInfo['assets'] | undefined {
+  const icon64 = normalizePluginAssetUrl(assets?.icon_64)
+  if (!icon64) {
+    return undefined
+  }
+
+  return {
+    icon_64: icon64,
   }
 }
 
@@ -247,6 +277,7 @@ async function fetchPluginListUncached(): Promise<ApiResponse<PluginInfo[]>> {
         marketplace_order: index,
         stats_ids: uniqueNonEmptyValues([manifestId]),
         manifest: normalizePluginManifest({ ...item.manifest, id: pluginId }),
+        assets: normalizePluginAssets(item.assets),
         downloads: 0,
         rating: 0,
         review_count: 0,

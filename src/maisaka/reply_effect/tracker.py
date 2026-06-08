@@ -1,4 +1,4 @@
-"""会话级回复效果观察器。"""
+﻿"""会话级回复效果观察器。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import time
 import uuid
 
 from src.chat.message_receive.message import SessionMessage
-from src.maisaka.history_utils import build_session_message_visible_text
+from src.maisaka.context.history import build_session_message_visible_text
 
 from .image_utils import extract_visual_attachments_from_sequence
 from .judge import JudgeRunner, judge_reply_effect
@@ -66,7 +66,6 @@ class ReplyEffectTracker:
         reply_text: str,
         reply_segments: List[str],
         planner_reasoning: str,
-        reference_info: str,
         tool_context: Dict[str, Any] | None = None,
         send_results: List[Dict[str, Any]] | None = None,
         reply_metadata: Dict[str, Any] | None = None,
@@ -89,7 +88,6 @@ class ReplyEffectTracker:
                 reply_text=reply_text,
                 reply_segments=list(reply_segments),
                 planner_reasoning=planner_reasoning,
-                reference_info=reference_info,
                 tool_context=dict(tool_context or {}),
                 send_results=list(send_results or []),
                 reply_metadata=dict(reply_metadata or {}),

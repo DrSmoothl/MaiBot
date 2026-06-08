@@ -34,8 +34,7 @@ export function NavItem({ item, sidebarOpen, tooltipsEnabled, onMobileMenuClose 
         />
         <span
           className={cn(
-            'text-sm font-medium whitespace-nowrap transition-all duration-300',
-            isActive && 'font-semibold',
+            'text-base font-medium whitespace-nowrap transition-all duration-300',
             sidebarOpen
               ? 'max-w-[200px] opacity-100'
               : 'max-w-[200px] opacity-100 lg:max-w-0 lg:overflow-hidden lg:opacity-0'

@@ -146,6 +146,12 @@ class ExpressionUpdateRequest(BaseModel):
     chat_id: Optional[str] = None
 
 
+class ExpressionReviewStatusRequest(BaseModel):
+    """表达方式列表行审核状态切换请求。"""
+
+    approved: bool
+
+
 class ExpressionUpdateResponse(BaseModel):
     """表达方式更新响应"""
 
@@ -590,6 +596,18 @@ def normalize_legacy_content_list(raw_value: Any) -> str:
     return normalize_list([raw_value])
 
 
+def apply_expression_list_review_filter(statement: Any, review_filter: str) -> Any:
+    """为表达方式列表应用人工审核状态筛选。"""
+
+    if review_filter == "all":
+        return statement
+    if review_filter == "user_checked":
+        return statement.where(col(Expression.checked).is_(True), col(Expression.modified_by) == ModifiedBy.USER)
+    if review_filter == "unchecked":
+        return statement.where(col(Expression.checked).is_(False))
+    raise HTTPException(status_code=400, detail=f"不支持的表达方式筛选: {review_filter}")
+
+
 def connect_legacy_sqlite(db_path: str) -> sqlite3.Connection:
     """以只读方式连接旧版 SQLite 数据库。"""
 
@@ -978,6 +996,8 @@ async def get_expression_list(
     search: Optional[str] = Query(None, description="搜索关键词"),
     chat_id: Optional[str] = Query(None, description="聊天ID筛选"),
     chat_ids: Optional[List[str]] = Query(None, description="multiple chat ids"),
+    review_filter: str = Query("all", description="表达方式筛选: all/user_checked/unchecked"),
+    sort_by: str = Query("time", description="表达方式排序: time"),
     include_legacy: bool = Query(False, description="是否显示旧格式/非当前账号的表达方式"),
 ) -> ExpressionListResponse:
     """获取表达方式列表。
@@ -993,6 +1013,9 @@ async def get_expression_list(
     """
     try:
         # 构建查询
+        if sort_by != "time":
+            raise HTTPException(status_code=400, detail=f"不支持的表达方式排序: {sort_by}")
+
         if not include_legacy:
             with get_db_session() as filter_session:
                 visible_chat_ids = get_visible_expression_chat_ids(filter_session, include_legacy=False)
@@ -1022,6 +1045,8 @@ async def get_expression_list(
         elif not include_legacy:
             statement = statement.where(col(Expression.session_id).in_(visible_chat_ids))
 
+        statement = apply_expression_list_review_filter(statement, review_filter)
+
         # 排序：最后活跃时间倒序（NULL 值放在最后）
         statement = statement.order_by(
             case((col(Expression.last_active_time).is_(None), 1), else_=0),
@@ -1045,6 +1070,7 @@ async def get_expression_list(
                 count_statement = count_statement.where(col(Expression.session_id).in_(chat_ids))
             elif not include_legacy:
                 count_statement = count_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+            count_statement = apply_expression_list_review_filter(count_statement, review_filter)
             total = count_expressions(session, count_statement)
             data = [expression_to_response(expr, session) for expr in expressions]
 
@@ -1457,6 +1483,36 @@ async def update_expression(
     except Exception as e:
         logger.exception(f"更新表达方式失败: {e}")
         raise HTTPException(status_code=500, detail=f"更新表达方式失败: {str(e)}") from e
+
+
+@router.patch("/{expression_id}/review-status", response_model=ExpressionUpdateResponse)
+async def update_expression_review_status(
+    expression_id: int,
+    request: ExpressionReviewStatusRequest,
+) -> ExpressionUpdateResponse:
+    """切换表达方式的人工审核状态，不删除表达方式。"""
+
+    try:
+        with get_db_session() as session:
+            db_expression = session.exec(select(Expression).where(col(Expression.id) == expression_id).limit(1)).first()
+            if not db_expression:
+                raise HTTPException(status_code=404, detail=f"未找到 ID 为 {expression_id} 的表达方式")
+
+            db_expression.checked = request.approved
+            db_expression.modified_by = ModifiedBy.USER if request.approved else None
+            db_expression.last_active_time = datetime.now()
+            session.add(db_expression)
+            data = expression_to_response(db_expression, session)
+
+        message = "已设为人工通过" if request.approved else "已设为拒绝"
+        logger.info(f"表达方式审核状态已更新: ID={expression_id}, approved={request.approved}")
+        return ExpressionUpdateResponse(success=True, message=message, data=data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"更新表达方式审核状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"更新表达方式审核状态失败: {str(e)}") from e
 
 
 @router.delete("/{expression_id}", response_model=ExpressionDeleteResponse)

@@ -42,6 +42,7 @@ export default function CodeEditorImpl({
     EditorView.theme({
       '&': {
         fontFamily: '"JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace',
+        minHeight: 0,
       },
       '.cm-content': {
         fontFamily: '"JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace',
@@ -51,6 +52,10 @@ export default function CodeEditorImpl({
       },
       '.cm-scroller': {
         fontFamily: '"JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace',
+        minHeight: 0,
+        overflow: 'auto !important',
+        overscrollBehavior: 'contain',
+        touchAction: 'pan-x pan-y',
       },
     }),
   ]
@@ -65,13 +70,15 @@ export default function CodeEditorImpl({
   return (
     <div
       data-dashboard-code-editor="true"
-      className={`custom-scrollbar overflow-hidden rounded-md border ${className}`}
+      className={`custom-scrollbar min-h-0 overflow-hidden rounded-md border ${className}`}
     >
       <CodeMirror
+        className="min-h-0"
         value={value}
         height={height}
         minHeight={minHeight}
         maxHeight={maxHeight}
+        style={{ height, minHeight, maxHeight }}
         theme={effectiveTheme === 'dark' ? oneDark : undefined}
         extensions={extensions}
         onChange={onChange}

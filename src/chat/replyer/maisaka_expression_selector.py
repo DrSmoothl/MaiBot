@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
+﻿from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import json
 
@@ -14,7 +14,7 @@ from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
 from src.config.config import global_config
 from src.learners.learner_utils_old import weighted_sample
-from src.maisaka.context_messages import LLMContextMessage
+from src.maisaka.context.messages import LLMContextMessage
 
 logger = get_logger("maisaka_expression_selector")
 
@@ -27,6 +27,7 @@ class MaisakaExpressionSelectionResult:
 
     expression_habits: str = ""
     selected_expression_ids: List[int] = field(default_factory=list)
+    selected_expressions: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class MaisakaExpressionSelector:
@@ -153,10 +154,10 @@ class MaisakaExpressionSelector:
         if not selected_expressions:
             return ""
         lines = [
-            f"- 当{expression['situation']}时，可以自然地用{expression['style']}这种表达习惯。"
+            f"""- 当"{expression['situation']}"时，可以用"{expression['style']}"来表达。"""
             for expression in selected_expressions
         ]
-        return "【表达习惯参考】\n" + "\n".join(lines)
+        return "【表达习惯参考，请视情况自然的使用】\n" + "\n".join(lines)
 
     @staticmethod
     def _normalize_history_line(message: LLMContextMessage) -> str:
@@ -252,6 +253,7 @@ class MaisakaExpressionSelector:
         return MaisakaExpressionSelectionResult(
             expression_habits=self._build_expression_habits_block(selected_expressions),
             selected_expression_ids=selected_ids,
+            selected_expressions=list(selected_expressions),
         )
 
     @staticmethod
@@ -357,15 +359,21 @@ class MaisakaExpressionSelector:
         candidates: List[dict[str, Any]],
         selected_ids: List[int],
     ) -> MaisakaExpressionSelectionResult:
-        selected_expressions = [
-            candidate
+        candidate_map = {
+            candidate["id"]: candidate
             for candidate in candidates
-            if candidate.get("id") in selected_ids
+            if isinstance(candidate.get("id"), int)
+        }
+        selected_expressions = [
+            candidate_map[expression_id]
+            for expression_id in selected_ids
+            if expression_id in candidate_map
         ]
         self._update_last_active_time(selected_ids)
         return MaisakaExpressionSelectionResult(
             expression_habits=self._build_expression_habits_block(selected_expressions),
             selected_expression_ids=selected_ids,
+            selected_expressions=list(selected_expressions),
         )
 
     def _build_selection_result_from_expressions(
@@ -382,6 +390,7 @@ class MaisakaExpressionSelector:
         return MaisakaExpressionSelectionResult(
             expression_habits=self._build_expression_habits_block(selected_expressions),
             selected_expression_ids=selected_ids,
+            selected_expressions=list(selected_expressions),
         )
 
     async def _build_default_selection_result(
@@ -506,11 +515,13 @@ class MaisakaExpressionSelector:
             sub_agent_runner=sub_agent_runner,
         )
         selected_ids = list(selection_result.selected_expression_ids)
-        selected_expressions = [
-            candidate
-            for candidate in candidates
-            if candidate.get("id") in selected_ids
-        ]
+        selected_expressions = list(selection_result.selected_expressions)
+        if not selected_expressions and selected_ids:
+            selected_expressions = [
+                candidate
+                for candidate in candidates
+                if candidate.get("id") in selected_ids
+            ]
 
         after_selection_result = await self._get_runtime_manager().invoke_hook(
             "expression.select.after_selection",

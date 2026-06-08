@@ -1,4 +1,4 @@
-"""reply 内置工具。"""
+﻿"""reply 内置工具。"""
 
 from typing import Any, Optional
 
@@ -10,15 +10,16 @@ from src.common.data_models.reply_generation_data_models import ReplyGenerationR
 from src.common.logger import get_logger
 from src.config import config as config_module
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
-from src.maisaka.context_messages import ToolResultMessage
-from src.maisaka.heuristic_memory_injector import merge_heuristic_memory_reference_for_replyer
-from src.maisaka.message_adapter import build_visible_text_from_sequence
+from src.maisaka.context.message_adapter import build_visible_text_from_sequence
+from src.maisaka.context.messages import ToolResultMessage
+from src.maisaka.memory.heuristic_injector import merge_heuristic_memory_reference_for_replyer
 from src.services import send_service
 
 from .context import BuiltinToolRuntimeContext
 from .query_memory import REPLYER_MEMORY_REFERENCE_MARKER
 
 logger = get_logger("maisaka_builtin_reply")
+_REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote", "reference_info"}
 
 
 async def _run_expression_selector(tool_ctx: BuiltinToolRuntimeContext, system_prompt: str) -> str:
@@ -47,11 +48,6 @@ def get_tool_spec() -> ToolSpec:
                 "set_quote": {
                     "type": "boolean",
                     "description": "以引用回复的方式发送这条回复，不用每句都引用。",
-                    "default": True,
-                },
-                "reference_info": {
-                    "type": "string",
-                    "description": "有助于回复的信息，之前搜集得到的事实性信息，记忆等，使用平文本格式。",
                     "default": True,
                 },
             },
@@ -180,7 +176,7 @@ async def handle_tool(
     reply_tool_args = {
         key: value
         for key, value in dict(invocation.arguments or {}).items()
-        if key not in {"msg_id", "set_quote", "reference_info"}
+        if key not in _REPLY_TOOL_INTERNAL_ARGUMENTS
     }
     enable_reply_quote = bool(config_module.global_config.chat.enable_reply_quote)
     effective_set_quote = set_quote and enable_reply_quote
@@ -296,7 +292,7 @@ async def handle_tool(
                     stream_id=tool_ctx.runtime.session_id,
                     processed_plain_text=segment,
                     set_reply=segment_set_quote,
-                    reply_message=target_message if segment_set_quote else None,
+                    reply_message=target_message,
                     selected_expressions=reply_result.selected_expression_ids or None,
                     typing=index > 0,
                     sync_to_maisaka_history=True,
@@ -370,7 +366,6 @@ async def handle_tool(
             reply_text=combined_reply_text,
             reply_segments=reply_segments,
             planner_reasoning=latest_thought,
-            reference_info=reference_info,
             tool_context={
                 "tool_name": invocation.tool_name,
                 "call_id": invocation.call_id,

@@ -49,7 +49,6 @@ class ReplySnapshot:
     reply_text: str
     reply_segments: List[str]
     planner_reasoning: str
-    reference_info: str
     tool_context: Dict[str, Any] = field(default_factory=dict)
     send_results: List[Dict[str, Any]] = field(default_factory=list)
     reply_metadata: Dict[str, Any] = field(default_factory=dict)

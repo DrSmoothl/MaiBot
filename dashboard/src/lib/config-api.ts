@@ -8,9 +8,28 @@ import type { ApiResponse } from '@/types/api'
 import type { ConfigSchema } from '@/types/config-schema'
 
 const API_BASE = '/api/webui/config'
+export const BOT_CONFIG_UPDATED_EVENT = 'maibot:bot-config-updated'
 const schemaRequestCache = new Map<string, Promise<ApiResponse<ConfigSchema>>>()
 const configDataCache = new Map<string, { timestamp: number; request: Promise<ApiResponse<Record<string, unknown>>> }>()
 const CONFIG_DATA_CACHE_TTL = 30_000
+
+function unwrapConfigResponse(data: unknown): Record<string, unknown> {
+  if (
+    data &&
+    typeof data === 'object' &&
+    'config' in data &&
+    (data as Record<string, unknown>).config &&
+    typeof (data as Record<string, unknown>).config === 'object'
+  ) {
+    return (data as { config: Record<string, unknown> }).config
+  }
+
+  if (data && typeof data === 'object') {
+    return data as Record<string, unknown>
+  }
+
+  return {}
+}
 
 function getCachedSchema(key: string, url: string): Promise<ApiResponse<ConfigSchema>> {
   const cachedRequest = schemaRequestCache.get(key)
@@ -36,7 +55,10 @@ function getCachedConfigData(key: string, url: string): Promise<ApiResponse<Reco
   }
 
   const request = fetchWithAuth(url, { cache: 'no-store' })
-    .then((response) => parseResponse<Record<string, unknown>>(response))
+    .then((response) => parseResponse<unknown>(response))
+    .then((result): ApiResponse<Record<string, unknown>> => (
+      result.success ? { success: true, data: unwrapConfigResponse(result.data) } : result
+    ))
     .catch((error) => {
       configDataCache.delete(key)
       throw error
@@ -52,6 +74,12 @@ function invalidateConfigDataCache(key?: string): void {
     return
   }
   configDataCache.clear()
+}
+
+function notifyBotConfigUpdated(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(BOT_CONFIG_UPDATED_EVENT))
+  }
 }
 
 /**
@@ -80,7 +108,8 @@ export async function getConfigSectionSchema(sectionName: string): Promise<ApiRe
  */
 export async function getBotConfig(): Promise<ApiResponse<Record<string, unknown>>> {
   const response = await fetchWithAuth(`${API_BASE}/bot`, { cache: 'no-store' })
-  return parseResponse<Record<string, unknown>>(response)
+  const result = await parseResponse<unknown>(response)
+  return result.success ? { success: true, data: unwrapConfigResponse(result.data) } : result
 }
 
 /** Cached config data for lightweight status summaries. */
@@ -93,7 +122,8 @@ export async function getBotConfigCached(): Promise<ApiResponse<Record<string, u
  */
 export async function getModelConfig(): Promise<ApiResponse<Record<string, unknown>>> {
   const response = await fetchWithAuth(`${API_BASE}/model`, { cache: 'no-store' })
-  return parseResponse<Record<string, unknown>>(response)
+  const result = await parseResponse<unknown>(response)
+  return result.success ? { success: true, data: unwrapConfigResponse(result.data) } : result
 }
 
 /** Cached model config data for lightweight status summaries. */
@@ -112,7 +142,10 @@ export async function updateBotConfig(
     body: JSON.stringify(config),
   })
   const result = await parseResponse<Record<string, unknown>>(response)
-  if (result.success) invalidateConfigDataCache('bot')
+  if (result.success) {
+    invalidateConfigDataCache('bot')
+    notifyBotConfigUpdated()
+  }
   return result
 }
 
@@ -133,7 +166,10 @@ export async function updateBotConfigRaw(rawContent: string): Promise<ApiRespons
     body: JSON.stringify({ raw_content: rawContent }),
   })
   const result = await parseResponse<Record<string, unknown>>(response)
-  if (result.success) invalidateConfigDataCache('bot')
+  if (result.success) {
+    invalidateConfigDataCache('bot')
+    notifyBotConfigUpdated()
+  }
   return result
 }
 
@@ -164,7 +200,10 @@ export async function updateBotConfigSection(
     body: JSON.stringify(sectionData),
   })
   const result = await parseResponse<Record<string, unknown>>(response)
-  if (result.success) invalidateConfigDataCache('bot')
+  if (result.success) {
+    invalidateConfigDataCache('bot')
+    notifyBotConfigUpdated()
+  }
   return result
 }
 

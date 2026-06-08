@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
+import asyncio
 import pytest
 
 from src.platform_io.drivers.base import PlatformIODriver
@@ -128,6 +129,7 @@ class TestPlatformIODedupe:
 
         assert await manager.accept_inbound(first_envelope) is True
         assert await manager.accept_inbound(second_envelope) is False
+        await asyncio.sleep(0)
         assert len(accepted_envelopes) == 1
 
     @pytest.mark.asyncio
@@ -151,7 +153,32 @@ class TestPlatformIODedupe:
 
         assert await manager.accept_inbound(first_envelope) is True
         assert await manager.accept_inbound(second_envelope) is True
+        await asyncio.sleep(0)
         assert len(accepted_envelopes) == 2
+
+    @pytest.mark.asyncio
+    async def test_accept_inbound_does_not_wait_for_dispatcher_completion(self) -> None:
+        """入站接收确认不应等待后续业务链路完整处理完成。"""
+        manager = _build_manager()
+        dispatcher_started = asyncio.Event()
+        dispatcher_can_finish = asyncio.Event()
+
+        async def dispatcher(envelope: InboundMessageEnvelope) -> None:
+            """模拟耗时较长的上层消息处理。"""
+            del envelope
+            dispatcher_started.set()
+            await dispatcher_can_finish.wait()
+
+        manager.set_inbound_dispatcher(dispatcher)
+
+        assert await asyncio.wait_for(
+            manager.accept_inbound(_build_envelope(external_message_id="msg-async")),
+            timeout=0.1,
+        ) is True
+        await asyncio.wait_for(dispatcher_started.wait(), timeout=1)
+
+        dispatcher_can_finish.set()
+        await asyncio.sleep(0)
 
     def test_build_inbound_dedupe_key_prefers_explicit_identity(self) -> None:
         """去重键应只来自显式或稳定的技术身份。"""

@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ShortcutKbd } from '@/components/ui/kbd'
-import { menuSections } from '@/components/layout/constants'
+import { useMenuSections } from '@/components/layout/use-menu-sections'
 import { registeredRoutePaths } from '@/router'
 import { getBotConfigSchema, getModelConfigSchema } from '@/lib/config-api'
 import { getAllLocalizedText, resolveFieldLabel } from '@/lib/config-label'
@@ -131,6 +131,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const { i18n, t } = useTranslation()
+  const menuSections = useMenuSections()
 
   useEffect(() => {
     setConfigSearchItems([])
@@ -225,7 +226,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
             ].join(' '),
           }))
       ),
-    [t]
+    [menuSections, t]
   )
 
   // 过滤搜索结果

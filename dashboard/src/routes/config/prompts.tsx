@@ -249,7 +249,7 @@ export function PromptManagementPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] flex-col gap-3 p-3 sm:h-[calc(100vh-140px)] sm:gap-4 sm:p-6">
+    <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center justify-between gap-2">
           <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">Prompt 管理</h1>
@@ -413,7 +413,7 @@ export function PromptManagementPage() {
       </div>
 
       <Dialog open={defaultPromptOpen} onOpenChange={setDefaultPromptOpen}>
-        <DialogContent className="max-w-[min(96vw,1100px)]">
+        <DialogContent className="h-[calc(100dvh-2rem)] max-w-[min(96vw,1100px)]">
           <DialogHeader>
             <DialogTitle>默认 Prompt</DialogTitle>
             <DialogDescription>
@@ -421,17 +421,20 @@ export function PromptManagementPage() {
             </DialogDescription>
           </DialogHeader>
           {loadingDefaultPrompt ? (
-            <div className="flex h-[520px] items-center justify-center gap-2 text-sm text-muted-foreground">
+            <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
               <ThinkingIllustration />
             </div>
           ) : (
-            <CodeEditor
-              value={defaultPromptContent}
-              readOnly
-              language="text"
-              height="min(62vh, 620px)"
-              minHeight="420px"
-            />
+            <div className="min-h-0 flex-1">
+              <CodeEditor
+                value={defaultPromptContent}
+                readOnly
+                language="text"
+                height="100%"
+                minHeight="0"
+                className="h-full"
+              />
+            </div>
           )}
         </DialogContent>
       </Dialog>

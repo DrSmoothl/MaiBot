@@ -82,13 +82,12 @@ class ConfigSchemaGenerator:
         # 将 UI 分组元数据写入 schema
         ui_parent = getattr(config_class, "__ui_parent__", "")
         ui_label = getattr(config_class, "__ui_label__", "")
-        ui_icon = getattr(config_class, "__ui_icon__", "")
+        ui_advanced = bool(getattr(config_class, "__ui_advanced__", False))
         if ui_parent:
             schema["uiParent"] = ui_parent
         if ui_label:
             schema["uiLabel"] = ui_label
-        if ui_icon:
-            schema["uiIcon"] = ui_icon
+        schema["uiAdvanced"] = ui_advanced
 
         return schema
 

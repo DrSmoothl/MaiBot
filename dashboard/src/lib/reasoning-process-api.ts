@@ -16,6 +16,7 @@ export type ReasoningPromptFile = {
   timestamp: number | null
   text_path: string | null
   html_path: string | null
+  json_path: string | null
   output_preview: string | null
   action_preview: string | null
   model_name: string | null
