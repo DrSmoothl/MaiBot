@@ -815,7 +815,7 @@ wheels = [
 
 [[package]]
 name = "maibot"
-version = "1.0.0rc5"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "ahocorasick-rs" },

@@ -9,6 +9,7 @@ Consolidation rules:
 - The merged trigger should remain a retrievable scenario/start description, the action should preserve executable behavior, and the outcome should summarize the shared result.
 - Choose keeper_id as the most stable, feedback-rich, and representative entry. Put the other IDs into merge_ids.
 - If two entries use clearly different behavior strategies, such as "give the answer directly" versus "admit uncertainty", do not merge them.
+- The same scenario/start may intentionally keep multiple branches. If action or outcome differs clearly, do not merge merely because the scenario is the same.
 - Do not merge if it would lose important boundaries, risk levels, or tone differences.
 - Do not propose deletion; duplicate entries will be disabled automatically by the system.
 

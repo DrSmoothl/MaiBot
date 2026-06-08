@@ -8,8 +8,23 @@ export interface BehaviorChatInfo {
   platform: string
   chat_type: string
   path_count: number
+  cluster_count: number
   scene_count: number
   last_active_time: string | null
+}
+
+export interface BehaviorClusterTag {
+  tag: string
+  probability: number
+}
+
+export interface BehaviorSceneCluster {
+  id: number | null
+  name: string
+  tags: BehaviorClusterTag[]
+  source_count: number
+  score: number
+  update_time: string | null
 }
 
 export interface BehaviorPathItem {
@@ -17,6 +32,11 @@ export interface BehaviorPathItem {
   session_id: string | null
   chat_name: string
   trigger: string
+  scene_cluster_id: number | null
+  scene_cluster_name: string
+  scene_cluster_tags: BehaviorClusterTag[]
+  scene_cluster_source_count: number
+  scene_cluster_score: number
   action: string
   outcome: string
   count: number
@@ -57,6 +77,7 @@ export interface BehaviorGraphEdge {
 
 export interface BehaviorPathDetail {
   path: BehaviorPathItem
+  scene_cluster: BehaviorSceneCluster
   evidence: unknown[]
   feedback: unknown[]
   nodes: BehaviorGraphNode[]
@@ -78,6 +99,15 @@ export interface BehaviorMatchedNode {
   match_score: number
 }
 
+export interface BehaviorMatchedCluster {
+  cluster_id: number
+  name: string
+  score: number
+  tags: BehaviorClusterTag[]
+  source_count: number
+  cluster_score: number
+}
+
 export interface BehaviorRetrievalCandidate {
   behavior_id: number
   score: number
@@ -86,6 +116,7 @@ export interface BehaviorRetrievalCandidate {
 
 export interface BehaviorRetrievalDebugPayload {
   descriptors: BehaviorDescriptor[]
+  matched_clusters: BehaviorMatchedCluster[]
   matched_nodes: BehaviorMatchedNode[]
   expanded_nodes: BehaviorMatchedNode[]
   candidate_scores: Array<{ behavior_id: number; score: number }>

@@ -15,6 +15,7 @@ from src.common.database.database_model import (
     BehaviorExperienceSceneLink,
     BehaviorOutcomeNode,
     BehaviorSceneActionEdge,
+    BehaviorSceneCluster,
     BehaviorSceneNode,
 )
 from src.learners.behavior_scenario import BehaviorScenarioProfile
@@ -65,7 +66,7 @@ def _insert_behavior_experience_path(
         path = BehaviorExperiencePath(
             count=1,
             session_id=session_id,
-            start_scene_node_id=refs.start_scene_node_id,
+            scene_cluster_id=refs.scene_cluster_id,
             action_node_id=refs.action_node_id,
             outcome_node_id=refs.outcome_node_id,
         )
@@ -95,6 +96,62 @@ def _technical_config_profile() -> BehaviorScenarioProfile:
     )
 
 
+def test_scene_cluster_distribution_uses_structured_tags() -> None:
+    profile = _technical_config_profile()
+
+    distribution = graph_store.build_scene_cluster_distribution(profile)
+    tags = {str(item["tag"]) for item in distribution}
+    total_probability = sum(float(item["probability"]) for item in distribution)
+
+    assert "phase:已尝试无效" in tags
+    assert "domain:技术配置" in tags
+    assert "need:追问关键细节" in tags
+    assert 0.999 <= total_probability <= 1.001
+
+
+def test_behavior_paths_share_stable_cluster_start_scene(
+    monkeypatch: pytest.MonkeyPatch,
+    behavior_graph_engine,
+) -> None:
+    _patch_graph_session(monkeypatch, behavior_graph_engine)
+    first_profile = _technical_config_profile()
+    second_profile = BehaviorScenarioProfile(
+        summary="配置排查继续推进，用户换了一种说法描述问题仍然存在",
+        user_intent="继续确认模型配置为什么没有生效",
+        conversation_phase="已尝试无效",
+        domain_tags=["模型选择", "技术配置"],
+        behavior_needs=["给出具体检查点", "追问关键细节"],
+        retrieval_query="模型配置 不生效 检查配置项",
+        confidence=0.82,
+    )
+    first_path_id = _insert_behavior_experience_path(
+        behavior_graph_engine,
+        scene_start=first_profile.to_learning_start_text(),
+        action="追问更底层配置并给出检查方向",
+        outcome="对方继续补充配置位置",
+        session_id="session-a",
+        profile=first_profile,
+    )
+    second_path_id = _insert_behavior_experience_path(
+        behavior_graph_engine,
+        scene_start=second_profile.to_learning_start_text(),
+        action="直接给出最小检查清单",
+        outcome="对方可以按清单逐项验证配置",
+        session_id="session-a",
+        profile=second_profile,
+    )
+
+    with Session(behavior_graph_engine) as session:
+        first_path = session.get(BehaviorExperiencePath, first_path_id)
+        second_path = session.get(BehaviorExperiencePath, second_path_id)
+        assert first_path is not None
+        assert second_path is not None
+        assert first_path.scene_cluster_id == second_path.scene_cluster_id
+        scene_cluster = session.get(BehaviorSceneCluster, first_path.scene_cluster_id)
+        assert scene_cluster is not None
+        assert "phase:已尝试无效" in scene_cluster.normalized_tags
+
+
 def test_link_behavior_experience_to_scene_graph_and_retrieve(
     monkeypatch: pytest.MonkeyPatch,
     behavior_graph_engine,
@@ -119,12 +176,14 @@ def test_link_behavior_experience_to_scene_graph_and_retrieve(
     assert scores[path_id] > 0
     with Session(behavior_graph_engine) as session:
         nodes = session.exec(select(BehaviorSceneNode)).all()
+        clusters = session.exec(select(BehaviorSceneCluster)).all()
         action_nodes = session.exec(select(BehaviorActionNode)).all()
         outcome_nodes = session.exec(select(BehaviorOutcomeNode)).all()
         links = session.exec(select(BehaviorExperienceSceneLink)).all()
         scene_action_edges = session.exec(select(BehaviorSceneActionEdge)).all()
         action_outcome_edges = session.exec(select(BehaviorActionOutcomeEdge)).all()
     assert nodes
+    assert clusters
     assert action_nodes
     assert outcome_nodes
     assert links
@@ -177,7 +236,7 @@ def test_behavior_selector_prefers_scene_graph_scores(monkeypatch: pytest.Monkey
     patterns = [
         BehaviorExperiencePath(
             id=1,
-            start_scene_node_id=1,
+            scene_cluster_id=1,
             action_node_id=1,
             outcome_node_id=1,
             count=3,
@@ -185,7 +244,7 @@ def test_behavior_selector_prefers_scene_graph_scores(monkeypatch: pytest.Monkey
         ),
         BehaviorExperiencePath(
             id=2,
-            start_scene_node_id=2,
+            scene_cluster_id=2,
             action_node_id=2,
             outcome_node_id=2,
             count=1,

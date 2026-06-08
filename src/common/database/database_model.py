@@ -291,25 +291,26 @@ class Expression(SQLModel, table=True):
 
 
 class BehaviorExperiencePath(SQLModel, table=True):
-    """可反馈的行为经验路径：场景节点 -> 行为动作节点 -> 结果节点。"""
+    """可反馈的行为经验路径：场景簇 -> 行为动作节点 -> 结果节点。"""
 
     __tablename__ = "behavior_experience_paths"  # type: ignore
     __table_args__ = (
         UniqueConstraint(
             "session_id",
-            "start_scene_node_id",
+            "scene_cluster_id",
             "action_node_id",
             "outcome_node_id",
-            name="uq_behavior_experience_path_scope_scene_action_outcome",
+            name="uq_behavior_experience_path_scope_cluster_action_outcome",
         ),
         Index("ix_behavior_experience_paths_session_enabled", "session_id", "enabled"),
+        Index("ix_behavior_experience_paths_cluster", "scene_cluster_id"),
         Index("ix_behavior_experience_paths_action", "action_node_id"),
         Index("ix_behavior_experience_paths_outcome", "outcome_node_id"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
-    start_scene_node_id: int = Field(index=True)
+    scene_cluster_id: int = Field(index=True)
     action_node_id: int = Field(index=True)
     outcome_node_id: int = Field(index=True)
     evidence_list: str = Field(default="[]", sa_column=Column(Text, nullable=False))
@@ -324,6 +325,25 @@ class BehaviorExperiencePath(SQLModel, table=True):
     last_active_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
     last_feedback_time: Optional[datetime] = Field(default=None, sa_column=Column(DateTime, nullable=True))
     create_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime))
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorSceneCluster(SQLModel, table=True):
+    """行为场景簇，用 tag 概率分布描述一类可触发行为分支的场景。"""
+
+    __tablename__ = "behavior_scene_clusters"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint("session_id", "normalized_tags", name="uq_behavior_scene_cluster_scope_tags"),
+        Index("ix_behavior_scene_clusters_session_id", "session_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True)
+    name: str = Field(sa_column=Column(Text, nullable=False))
+    normalized_tags: str = Field(sa_column=Column(Text, nullable=False))
+    tag_distribution: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    source_count: int = Field(default=0)
+    score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
     update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
 
 

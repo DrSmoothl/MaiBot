@@ -6,15 +6,18 @@ from sqlalchemy import or_
 from sqlmodel import Session, select
 
 import difflib
+import json
 import re
 
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
     BehaviorActionNode,
     BehaviorActionOutcomeEdge,
+    BehaviorExperiencePath,
     BehaviorExperienceSceneLink,
     BehaviorOutcomeNode,
     BehaviorSceneActionEdge,
+    BehaviorSceneCluster,
     BehaviorSceneEdge,
     BehaviorSceneNode,
 )
@@ -33,6 +36,8 @@ MIN_LINK_WEIGHT = 0.1
 MAX_LINK_WEIGHT = 8.0
 MIN_NODE_SCORE = -4.0
 MAX_NODE_SCORE = 6.0
+SCENE_CLUSTER_MATCH_THRESHOLD = 0.58
+SCENE_CLUSTER_REUSE_THRESHOLD = 0.72
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,127 @@ def _text_similarity(left: str, right: str) -> float:
     return max(term_score, sequence_score * 0.65)
 
 
+def _normalize_tag_name(tag_kind: str, value: str) -> str:
+    normalized_value = _normalize_display_text(value, max_length=48)
+    normalized_key = _normalize_name(normalized_value, max_length=48)
+    if not normalized_key:
+        return ""
+    return f"{tag_kind}:{normalized_key}"
+
+
+def _build_cluster_tag_weights(profile: BehaviorScenarioProfile) -> dict[str, float]:
+    tag_weights: dict[str, float] = {}
+
+    def add(tag_kind: str, value: str, weight: float) -> None:
+        tag_name = _normalize_tag_name(tag_kind, value)
+        if not tag_name:
+            return
+        tag_weights[tag_name] = max(tag_weights.get(tag_name, 0.0), weight)
+
+    add("phase", profile.conversation_phase, 1.4)
+    for tag in profile.domain_tags[:4]:
+        add("domain", tag, 1.0)
+    for need in profile.behavior_needs[:4]:
+        add("need", need, 1.1)
+    for risk in profile.risk_flags[:3]:
+        add("risk", risk, 0.8)
+    return tag_weights
+
+
+def build_scene_cluster_distribution(profile: BehaviorScenarioProfile) -> list[dict[str, float | str]]:
+    """将场景画像转成 tag 概率分布，用于匹配稳定场景簇。"""
+
+    tag_weights = _build_cluster_tag_weights(profile)
+    total_weight = sum(tag_weights.values())
+    if total_weight <= 0:
+        return []
+    return [
+        {
+            "tag": tag,
+            "probability": round(weight / total_weight, 6),
+        }
+        for tag, weight in sorted(tag_weights.items())
+    ]
+
+
+def _distribution_to_mapping(distribution: Sequence[dict[str, Any]]) -> dict[str, float]:
+    tag_probs: dict[str, float] = {}
+    for item in distribution:
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("tag") or "").strip()
+        if not tag:
+            continue
+        try:
+            probability = float(item.get("probability") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if probability <= 0:
+            continue
+        tag_probs[tag] = tag_probs.get(tag, 0.0) + probability
+    total_probability = sum(tag_probs.values())
+    if total_probability <= 0:
+        return {}
+    return {tag: probability / total_probability for tag, probability in tag_probs.items()}
+
+
+def _mapping_to_distribution(tag_probs: dict[str, float]) -> list[dict[str, float | str]]:
+    total_probability = sum(max(probability, 0.0) for probability in tag_probs.values())
+    if total_probability <= 0:
+        return []
+    return [
+        {
+            "tag": tag,
+            "probability": round(max(probability, 0.0) / total_probability, 6),
+        }
+        for tag, probability in sorted(tag_probs.items())
+        if probability > 0
+    ]
+
+
+def _dump_cluster_distribution(distribution: Sequence[dict[str, Any]]) -> str:
+    return json.dumps(list(distribution), ensure_ascii=False, sort_keys=True)
+
+
+def _load_cluster_distribution(raw_value: Any) -> list[dict[str, Any]]:
+    if isinstance(raw_value, list):
+        return [item for item in raw_value if isinstance(item, dict)]
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return []
+    try:
+        parsed_value = json.loads(raw_value)
+    except (TypeError, ValueError):
+        return []
+    return [item for item in parsed_value if isinstance(item, dict)] if isinstance(parsed_value, list) else []
+
+
+def _cluster_normalized_tags(distribution: Sequence[dict[str, Any]]) -> str:
+    return "|".join(sorted(_distribution_to_mapping(distribution)))
+
+
+def _cluster_name_from_distribution(distribution: Sequence[dict[str, Any]]) -> str:
+    tag_probs = _distribution_to_mapping(distribution)
+    if not tag_probs:
+        return ""
+    parts = [
+        f"{tag}={probability:.3f}"
+        for tag, probability in sorted(tag_probs.items(), key=lambda item: item[1], reverse=True)[:8]
+    ]
+    return "；".join(parts)
+
+
+def _cluster_distribution_overlap(
+    left_distribution: Sequence[dict[str, Any]],
+    right_distribution: Sequence[dict[str, Any]],
+) -> float:
+    left_probs = _distribution_to_mapping(left_distribution)
+    right_probs = _distribution_to_mapping(right_distribution)
+    if not left_probs or not right_probs:
+        return 0.0
+    shared_tags = set(left_probs) & set(right_probs)
+    return round(sum(min(left_probs[tag], right_probs[tag]) for tag in shared_tags), 4)
+
+
 def _session_scope_condition(model: Any, session_ids: set[str]):
     if session_ids:
         return (model.session_id.in_(session_ids)) | (model.session_id.is_(None))  # type: ignore[attr-defined]
@@ -154,8 +280,9 @@ def build_scene_descriptors(
 class BehaviorGraphRefs:
     """一次行为经验路径对应的图节点引用。"""
 
+    scene_cluster: BehaviorSceneCluster
     scene_nodes: list[tuple[BehaviorSceneNode, SceneDescriptor]]
-    start_scene_node_id: int
+    scene_cluster_id: int
     action_node_id: int
     outcome_node_id: int
 
@@ -173,8 +300,9 @@ def upsert_behavior_graph_refs(
 
     normalized_action = _normalize_display_text(action, max_length=240)
     normalized_outcome = _normalize_display_text(outcome, max_length=220)
+    scene_cluster = _upsert_scene_cluster(session, session_id=session_id, profile=profile)
     descriptors = build_scene_descriptors(profile, scene_start=scene_start)
-    if not descriptors:
+    if scene_cluster is None or scene_cluster.id is None:
         return None
     if not normalized_action or not normalized_outcome:
         return None
@@ -193,8 +321,9 @@ def upsert_behavior_graph_refs(
         return None
 
     return BehaviorGraphRefs(
+        scene_cluster=scene_cluster,
         scene_nodes=scene_nodes,
-        start_scene_node_id=int(scene_nodes[0][0].id),
+        scene_cluster_id=int(scene_cluster.id),
         action_node_id=int(action_node.id),
         outcome_node_id=int(outcome_node.id),
     )
@@ -212,7 +341,7 @@ def link_behavior_experience_to_scene_graph(
     if experience_path_id <= 0:
         return
 
-    primary_node = refs.scene_nodes[0][0]
+    primary_node = refs.scene_nodes[0][0] if refs.scene_nodes else None
     for node, descriptor in refs.scene_nodes:
         if node.id is None:
             continue
@@ -232,7 +361,7 @@ def link_behavior_experience_to_scene_graph(
             action_node_id=refs.action_node_id,
             weight=descriptor.weight,
         )
-        if node.id != primary_node.id and primary_node.id is not None:
+        if primary_node is not None and node.id != primary_node.id and primary_node.id is not None:
             _upsert_scene_edge(
                 session,
                 session_id=session_id,
@@ -271,9 +400,6 @@ def retrieve_behavior_scores_from_scene_graph(
         with get_db_session(auto_commit=False) as session:
             nodes = _load_scoped_scene_nodes(session, session_ids=session_ids, include_global=include_global)
             active_node_scores = _score_scene_nodes(nodes, descriptors)
-            if not active_node_scores:
-                return {}
-
             expanded_node_scores = _expand_scene_scores(
                 session,
                 active_node_scores=active_node_scores,
@@ -293,6 +419,20 @@ def retrieve_behavior_scores_from_scene_graph(
                 include_global=include_global,
             )
             for experience_path_id, score in path_scores.items():
+                behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+            cluster_scores = _score_scene_clusters(
+                session,
+                profile=profile,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
+            behavior_cluster_scores = _score_behavior_clusters(
+                session,
+                cluster_scores=cluster_scores,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
+            for experience_path_id, score in behavior_cluster_scores.items():
                 behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
     except Exception as exc:
         logger.error(f"行为场景图检索失败: session_ids={session_ids} error={exc}")
@@ -314,6 +454,7 @@ def debug_retrieve_behavior_scores_from_scene_graph(
     if not descriptors:
         return {
             "descriptors": [],
+            "matched_clusters": [],
             "matched_nodes": [],
             "expanded_nodes": [],
             "candidate_scores": [],
@@ -344,6 +485,20 @@ def debug_retrieve_behavior_scores_from_scene_graph(
             )
             for experience_path_id, score in path_scores.items():
                 behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+            cluster_scores = _score_scene_clusters(
+                session,
+                profile=profile,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
+            behavior_cluster_scores = _score_behavior_clusters(
+                session,
+                cluster_scores=cluster_scores,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
+            for experience_path_id, score in behavior_cluster_scores.items():
+                behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
 
         candidate_scores = sorted(behavior_scores.items(), key=lambda item: item[1], reverse=True)[:max_count]
         return {
@@ -351,6 +506,7 @@ def debug_retrieve_behavior_scores_from_scene_graph(
                 {"node_kind": descriptor.node_kind, "name": descriptor.name, "weight": descriptor.weight}
                 for descriptor in descriptors
             ],
+            "matched_clusters": _debug_cluster_scores(cluster_scores),
             "matched_nodes": [
                 _debug_scene_node_payload(node_map.get(node_id), score)
                 for node_id, score in active_node_scores.items()
@@ -371,6 +527,7 @@ def debug_retrieve_behavior_scores_from_scene_graph(
                 {"node_kind": descriptor.node_kind, "name": descriptor.name, "weight": descriptor.weight}
                 for descriptor in descriptors
             ],
+            "matched_clusters": [],
             "matched_nodes": [],
             "expanded_nodes": [],
             "candidate_scores": [],
@@ -396,6 +553,27 @@ def _debug_scene_node_payload(node: Optional[BehaviorSceneNode], score: float) -
         "node_score": round(float(node.score or 0.0), 4),
         "match_score": round(score, 4),
     }
+
+
+def _debug_cluster_scores(cluster_scores: dict[int, float]) -> list[dict[str, Any]]:
+    if not cluster_scores:
+        return []
+    try:
+        with get_db_session(auto_commit=False) as session:
+            clusters = session.exec(
+                select(BehaviorSceneCluster).where(BehaviorSceneCluster.id.in_(set(cluster_scores)))  # type: ignore[attr-defined]
+            ).all()
+            cluster_by_id = {cluster.id: cluster for cluster in clusters if cluster.id is not None}
+    except Exception:
+        cluster_by_id = {}
+    return [
+        {
+            "cluster_id": cluster_id,
+            "name": cluster_by_id.get(cluster_id).name if cluster_id in cluster_by_id else "",
+            "score": round(score, 4),
+        }
+        for cluster_id, score in sorted(cluster_scores.items(), key=lambda item: item[1], reverse=True)
+    ]
 
 
 def mark_behavior_scene_links_selected(experience_path_id: int) -> None:
@@ -521,6 +699,91 @@ def apply_behavior_scene_feedback(
         logger.error(f"更新行为场景图反馈失败: experience_id={experience_path_id} error={exc}")
 
 
+def _upsert_scene_cluster(
+    session: Session,
+    *,
+    session_id: str,
+    profile: BehaviorScenarioProfile,
+) -> Optional[BehaviorSceneCluster]:
+    distribution = build_scene_cluster_distribution(profile)
+    if not distribution:
+        return None
+    normalized_tags = _cluster_normalized_tags(distribution)
+    if not normalized_tags:
+        return None
+
+    statement = (
+        select(BehaviorSceneCluster)
+        .where(BehaviorSceneCluster.session_id == session_id)
+        .where(BehaviorSceneCluster.normalized_tags == normalized_tags)
+    )
+    cluster = session.exec(statement).first()
+    is_exact_match = cluster is not None
+    if cluster is None:
+        cluster_candidates = session.exec(
+            select(BehaviorSceneCluster).where(BehaviorSceneCluster.session_id == session_id)
+        ).all()
+        best_cluster: Optional[BehaviorSceneCluster] = None
+        best_overlap = 0.0
+        for candidate in cluster_candidates:
+            overlap = _cluster_distribution_overlap(
+                _load_cluster_distribution(candidate.tag_distribution),
+                distribution,
+            )
+            if overlap > best_overlap:
+                best_cluster = candidate
+                best_overlap = overlap
+        if best_cluster is not None and best_overlap >= SCENE_CLUSTER_REUSE_THRESHOLD:
+            cluster = best_cluster
+
+    now = datetime.now()
+    if cluster is None:
+        cluster = BehaviorSceneCluster(
+            session_id=session_id,
+            name=_cluster_name_from_distribution(distribution),
+            normalized_tags=normalized_tags,
+            tag_distribution=_dump_cluster_distribution(distribution),
+            source_count=1,
+            update_time=now,
+        )
+    else:
+        if is_exact_match:
+            cluster.name = _cluster_name_from_distribution(distribution)
+            cluster.normalized_tags = normalized_tags
+            cluster.tag_distribution = _dump_cluster_distribution(distribution)
+        else:
+            cluster.tag_distribution = _merge_cluster_distributions(
+                _load_cluster_distribution(cluster.tag_distribution),
+                distribution,
+                existing_weight=max(int(cluster.source_count or 0), 1),
+            )
+        cluster.source_count += 1
+        cluster.update_time = now
+    session.add(cluster)
+    session.flush()
+    return cluster
+
+
+def _merge_cluster_distributions(
+    existing_distribution: Sequence[dict[str, Any]],
+    new_distribution: Sequence[dict[str, Any]],
+    *,
+    existing_weight: int,
+) -> str:
+    existing_probs = _distribution_to_mapping(existing_distribution)
+    new_probs = _distribution_to_mapping(new_distribution)
+    if not existing_probs:
+        return _dump_cluster_distribution(new_distribution)
+    merged_probs: dict[str, float] = {}
+    all_tags = set(existing_probs) | set(new_probs)
+    for tag in all_tags:
+        merged_probs[tag] = (
+            existing_probs.get(tag, 0.0) * float(existing_weight)
+            + new_probs.get(tag, 0.0)
+        ) / (float(existing_weight) + 1.0)
+    return _dump_cluster_distribution(_mapping_to_distribution(merged_probs))
+
+
 def _upsert_scene_node(
     session: Session,
     *,
@@ -547,6 +810,7 @@ def _upsert_scene_node(
         )
     else:
         node.name = descriptor.name
+        node.normalized_name = normalized_name
         node.source_count += 1
         node.update_time = now
     session.add(node)
@@ -823,6 +1087,64 @@ def _expand_scene_scores(
             spread_score = target_score * float(edge.weight or 1.0) * SCENE_EDGE_SPREAD_FACTOR
             expanded_scores[edge.source_scene_id] = max(expanded_scores.get(edge.source_scene_id, 0.0), spread_score)
     return expanded_scores
+
+
+def _score_scene_clusters(
+    session: Session,
+    *,
+    profile: BehaviorScenarioProfile,
+    session_ids: set[str],
+    include_global: bool,
+) -> dict[int, float]:
+    target_distribution = build_scene_cluster_distribution(profile)
+    if not target_distribution:
+        return {}
+
+    statement = select(BehaviorSceneCluster)
+    if not include_global:
+        statement = statement.where(_session_scope_condition(BehaviorSceneCluster, session_ids))
+
+    cluster_scores: dict[int, float] = {}
+    for cluster in session.exec(statement).all():
+        if cluster.id is None:
+            continue
+        overlap = _cluster_distribution_overlap(
+            _load_cluster_distribution(cluster.tag_distribution),
+            target_distribution,
+        )
+        if overlap < SCENE_CLUSTER_MATCH_THRESHOLD:
+            continue
+        reinforcement = 1.0 + max(float(cluster.score or 0.0), -2.0) * 0.04
+        cluster_scores[cluster.id] = round(overlap * 2.0 * reinforcement, 4)
+    return dict(sorted(cluster_scores.items(), key=lambda item: item[1], reverse=True)[:MAX_SCENE_GRAPH_MATCHED_NODES])
+
+
+def _score_behavior_clusters(
+    session: Session,
+    *,
+    cluster_scores: dict[int, float],
+    session_ids: set[str],
+    include_global: bool,
+) -> dict[int, float]:
+    if not cluster_scores:
+        return {}
+
+    statement = select(BehaviorExperiencePath).where(
+        BehaviorExperiencePath.scene_cluster_id.in_(set(cluster_scores))  # type: ignore[attr-defined]
+    )
+    if not include_global:
+        statement = statement.where(_session_scope_condition(BehaviorExperiencePath, session_ids))
+
+    behavior_scores: dict[int, float] = {}
+    for path in session.exec(statement).all():
+        if path.id is None or not path.enabled:
+            continue
+        cluster_score = cluster_scores.get(path.scene_cluster_id, 0.0)
+        if cluster_score <= 0:
+            continue
+        history_bonus = 1.0 + min(float(path.count or 0), 20.0) * 0.02
+        behavior_scores[path.id] = behavior_scores.get(path.id, 0.0) + cluster_score * history_bonus
+    return behavior_scores
 
 
 def _score_behavior_links(

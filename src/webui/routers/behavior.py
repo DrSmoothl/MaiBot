@@ -17,6 +17,7 @@ from src.common.database.database_model import (
     BehaviorExperienceSceneLink,
     BehaviorOutcomeNode,
     BehaviorSceneActionEdge,
+    BehaviorSceneCluster,
     BehaviorSceneEdge,
     BehaviorSceneNode,
     ChatSession,
@@ -34,8 +35,23 @@ class BehaviorChatInfo(BaseModel):
     platform: str = ""
     chat_type: str = ""
     path_count: int = 0
+    cluster_count: int = 0
     scene_count: int = 0
     last_active_time: Optional[str] = None
+
+
+class BehaviorClusterTag(BaseModel):
+    tag: str
+    probability: float = 0.0
+
+
+class BehaviorSceneClusterPayload(BaseModel):
+    id: Optional[int] = None
+    name: str = ""
+    tags: list[BehaviorClusterTag] = Field(default_factory=list)
+    source_count: int = 0
+    score: float = 0.0
+    update_time: Optional[str] = None
 
 
 class BehaviorPathItem(BaseModel):
@@ -43,6 +59,11 @@ class BehaviorPathItem(BaseModel):
     session_id: Optional[str] = None
     chat_name: str = ""
     trigger: str = ""
+    scene_cluster_id: Optional[int] = None
+    scene_cluster_name: str = ""
+    scene_cluster_tags: list[BehaviorClusterTag] = Field(default_factory=list)
+    scene_cluster_source_count: int = 0
+    scene_cluster_score: float = 0.0
     action: str = ""
     outcome: str = ""
     count: int = 0
@@ -122,6 +143,35 @@ def _load_json_list(raw_value: Any) -> list[Any]:
     return parsed if isinstance(parsed, list) else []
 
 
+def _cluster_tag_payloads(raw_value: Any) -> list[BehaviorClusterTag]:
+    tags: list[BehaviorClusterTag] = []
+    for item in _load_json_list(raw_value):
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("tag") or "").strip()
+        if not tag:
+            continue
+        try:
+            probability = float(item.get("probability") or 0.0)
+        except (TypeError, ValueError):
+            probability = 0.0
+        tags.append(BehaviorClusterTag(tag=tag, probability=max(probability, 0.0)))
+    return sorted(tags, key=lambda item: item.probability, reverse=True)
+
+
+def _cluster_payload(cluster: Optional[BehaviorSceneCluster]) -> BehaviorSceneClusterPayload:
+    if cluster is None:
+        return BehaviorSceneClusterPayload()
+    return BehaviorSceneClusterPayload(
+        id=cluster.id,
+        name=str(cluster.name or ""),
+        tags=_cluster_tag_payloads(cluster.tag_distribution),
+        source_count=int(cluster.source_count or 0),
+        score=float(cluster.score or 0.0),
+        update_time=_isoformat(cluster.update_time),
+    )
+
+
 def _chat_type_of(session: Optional[ChatSession]) -> str:
     if session is None:
         return ""
@@ -161,6 +211,12 @@ async def list_behavior_chats() -> dict[str, Any]:
             select(BehaviorSceneNode.session_id, func.count(BehaviorSceneNode.id)).group_by(BehaviorSceneNode.session_id)
         ).all()
         scene_count_by_session = {row[0]: int(row[1] or 0) for row in scene_rows}
+        cluster_rows = session.exec(
+            select(BehaviorSceneCluster.session_id, func.count(BehaviorSceneCluster.id)).group_by(
+                BehaviorSceneCluster.session_id
+            )
+        ).all()
+        cluster_count_by_session = {row[0]: int(row[1] or 0) for row in cluster_rows}
         session_ids = [row[0] for row in path_rows if row[0]]
         chat_sessions = {}
         if session_ids:
@@ -176,6 +232,7 @@ async def list_behavior_chats() -> dict[str, Any]:
             platform=str(chat_sessions[row[0]].platform) if row[0] in chat_sessions else "",
             chat_type=_chat_type_of(chat_sessions.get(row[0])),
             path_count=int(row[1] or 0),
+            cluster_count=cluster_count_by_session.get(row[0], 0),
             scene_count=scene_count_by_session.get(row[0], 0),
             last_active_time=_isoformat(row[2]),
         ).model_dump()
@@ -213,7 +270,11 @@ async def list_behavior_paths(
             path_items = [
                 item
                 for item in path_items
-                if normalized_search in f"{item.trigger}\n{item.action}\n{item.outcome}\n{item.chat_name}".lower()
+                if normalized_search
+                in (
+                    f"{item.scene_cluster_name}\n{item.trigger}\n{item.action}\n{item.outcome}\n{item.chat_name}\n"
+                    + "\n".join(tag.tag for tag in item.scene_cluster_tags)
+                ).lower()
             ]
         total = len(path_items)
         start = (page - 1) * page_size
@@ -270,6 +331,7 @@ async def get_behavior_path_detail(path_id: int) -> BehaviorPathDetailResponse:
     return BehaviorPathDetailResponse(
         data={
             "path": item.model_dump(),
+            "scene_cluster": _cluster_payload(session.get(BehaviorSceneCluster, path.scene_cluster_id)).model_dump(),
             "evidence": _load_json_list(path.evidence_list),
             "feedback": _load_json_list(path.feedback_list),
             "nodes": [node.model_dump() for node in nodes],
@@ -305,10 +367,12 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
         if behavior_ids:
             paths = session.exec(select(BehaviorExperiencePath).where(col(BehaviorExperiencePath.id).in_(behavior_ids))).all()
         path_items = {item.id: item for item in _build_path_items(session, list(paths))}
+        matched_clusters = _enrich_debug_clusters(session, debug_payload.get("matched_clusters", []))
     return {
         "success": True,
         "data": {
             **debug_payload,
+            "matched_clusters": matched_clusters,
             "candidates": [
                 {
                     **score_item,
@@ -323,11 +387,11 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
 
 
 def _build_path_items(session: Any, paths: list[BehaviorExperiencePath]) -> list[BehaviorPathItem]:
-    scene_ids = {path.start_scene_node_id for path in paths}
+    cluster_ids = {path.scene_cluster_id for path in paths}
     action_ids = {path.action_node_id for path in paths}
     outcome_ids = {path.outcome_node_id for path in paths}
     session_ids = {path.session_id for path in paths if path.session_id}
-    scene_nodes = _load_scene_nodes(session, scene_ids)
+    scene_clusters = _load_scene_clusters(session, cluster_ids)
     action_nodes = {
         node.id: node
         for node in session.exec(select(BehaviorActionNode).where(col(BehaviorActionNode.id).in_(action_ids))).all()
@@ -340,26 +404,74 @@ def _build_path_items(session: Any, paths: list[BehaviorExperiencePath]) -> list
         chat.session_id: chat
         for chat in session.exec(select(ChatSession).where(col(ChatSession.session_id).in_(session_ids))).all()
     }
-    return [
-        BehaviorPathItem(
-            id=path.id or 0,
-            session_id=path.session_id,
-            chat_name=_chat_display_name(chat_sessions.get(path.session_id), path.session_id),
-            trigger=scene_nodes[path.start_scene_node_id].name if path.start_scene_node_id in scene_nodes else "",
-            action=action_nodes[path.action_node_id].action if path.action_node_id in action_nodes else "",
-            outcome=outcome_nodes[path.outcome_node_id].outcome if path.outcome_node_id in outcome_nodes else "",
-            count=int(path.count or 0),
-            activation_count=int(path.activation_count or 0),
-            success_count=int(path.success_count or 0),
-            failure_count=int(path.failure_count or 0),
-            score=float(path.score or 0.0),
-            enabled=bool(path.enabled),
-            last_active_time=_isoformat(path.last_active_time),
-            last_feedback_time=_isoformat(path.last_feedback_time),
-            update_time=_isoformat(path.update_time),
+    items: list[BehaviorPathItem] = []
+    for path in paths:
+        scene_cluster = scene_clusters.get(path.scene_cluster_id)
+        cluster_payload = _cluster_payload(scene_cluster)
+        cluster_name = cluster_payload.name
+        items.append(
+            BehaviorPathItem(
+                id=path.id or 0,
+                session_id=path.session_id,
+                chat_name=_chat_display_name(chat_sessions.get(path.session_id), path.session_id),
+                trigger=cluster_name,
+                scene_cluster_id=cluster_payload.id,
+                scene_cluster_name=cluster_name,
+                scene_cluster_tags=cluster_payload.tags,
+                scene_cluster_source_count=cluster_payload.source_count,
+                scene_cluster_score=cluster_payload.score,
+                action=action_nodes[path.action_node_id].action if path.action_node_id in action_nodes else "",
+                outcome=outcome_nodes[path.outcome_node_id].outcome if path.outcome_node_id in outcome_nodes else "",
+                count=int(path.count or 0),
+                activation_count=int(path.activation_count or 0),
+                success_count=int(path.success_count or 0),
+                failure_count=int(path.failure_count or 0),
+                score=float(path.score or 0.0),
+                enabled=bool(path.enabled),
+                last_active_time=_isoformat(path.last_active_time),
+                last_feedback_time=_isoformat(path.last_feedback_time),
+                update_time=_isoformat(path.update_time),
+            )
         )
-        for path in paths
-    ]
+    return items
+
+
+def _enrich_debug_clusters(session: Any, matched_clusters: Any) -> list[dict[str, Any]]:
+    if not isinstance(matched_clusters, list):
+        return []
+    cluster_ids = {
+        int(item["cluster_id"])
+        for item in matched_clusters
+        if isinstance(item, dict) and isinstance(item.get("cluster_id"), int)
+    }
+    scene_clusters = _load_scene_clusters(session, cluster_ids)
+    enriched_clusters: list[dict[str, Any]] = []
+    for item in matched_clusters:
+        if not isinstance(item, dict):
+            continue
+        cluster_id = item.get("cluster_id")
+        cluster = scene_clusters.get(cluster_id) if isinstance(cluster_id, int) else None
+        cluster_payload = _cluster_payload(cluster)
+        enriched_clusters.append(
+            {
+                **item,
+                "name": cluster_payload.name or str(item.get("name") or ""),
+                "tags": [tag.model_dump() for tag in cluster_payload.tags],
+                "source_count": cluster_payload.source_count,
+                "cluster_score": cluster_payload.score,
+            }
+        )
+    return enriched_clusters
+
+
+def _load_scene_clusters(session: Any, scene_cluster_ids: set[int]) -> dict[int, BehaviorSceneCluster]:
+    if not scene_cluster_ids:
+        return {}
+    return {
+        cluster.id: cluster
+        for cluster in session.exec(select(BehaviorSceneCluster).where(col(BehaviorSceneCluster.id).in_(scene_cluster_ids))).all()
+        if cluster.id is not None
+    }
 
 
 def _load_scene_nodes(session: Any, scene_node_ids: set[int]) -> dict[int, BehaviorSceneNode]:

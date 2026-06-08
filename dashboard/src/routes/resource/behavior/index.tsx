@@ -47,6 +47,7 @@ import {
   listBehaviorChats,
   listBehaviorPaths,
   type BehaviorChatInfo,
+  type BehaviorClusterTag,
   type BehaviorPathDetail,
   type BehaviorPathItem,
   type BehaviorRetrievalDebugPayload,
@@ -60,6 +61,11 @@ type ActiveTab = 'paths' | 'debug' | 'graph'
 interface BehaviorSceneGroup {
   key: string
   trigger: string
+  sceneClusterId: number | null
+  clusterName: string
+  clusterTags: BehaviorClusterTag[]
+  clusterSourceCount: number
+  clusterScore: number
   chatName: string
   paths: BehaviorPathItem[]
   latestUpdate: string | null
@@ -132,26 +138,22 @@ function shortText(value: string, maxLength = 72): string {
   return `${value.slice(0, maxLength)}...`
 }
 
-function parseSceneStart(value: string): {
-  summary: string
-  intent: string
-  phase: string
-  domains: string
-  needs: string
-  raw: string
-} {
-  const parts = value
-    .split(/[;；]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-  return {
-    summary: parts[0] ?? value,
-    intent: parts[1] ?? '',
-    phase: parts[2] ?? '',
-    domains: parts[3] ?? '',
-    needs: parts[4] ?? '',
-    raw: value,
-  }
+function formatProbability(value: number): string {
+  if (!Number.isFinite(value)) return '0%'
+  return `${Math.round(value * 100)}%`
+}
+
+function topClusterTags(tags: BehaviorClusterTag[], maxCount = 6): BehaviorClusterTag[] {
+  return tags
+    .slice()
+    .sort((left, right) => right.probability - left.probability)
+    .slice(0, maxCount)
+}
+
+function clusterTitle(name: string, tags: BehaviorClusterTag[]): string {
+  const tagNames = topClusterTags(tags, 3).map((item) => item.tag)
+  if (tagNames.length > 0) return tagNames.join(' · ')
+  return name || '未命名场景簇'
 }
 
 export function BehaviorLearningPage() {
@@ -191,12 +193,18 @@ export function BehaviorLearningPage() {
   const sceneGroups = useMemo(() => {
     const groups = new Map<string, BehaviorSceneGroup>()
     paths.forEach((path) => {
-      const key = `${path.session_id || '__global__'}::${path.trigger}`
+      const clusterKey = path.scene_cluster_id ?? (path.scene_cluster_name || path.trigger)
+      const key = `${path.session_id || '__global__'}::cluster:${clusterKey}`
       const existing = groups.get(key)
       if (!existing) {
         groups.set(key, {
           key,
           trigger: path.trigger,
+          sceneClusterId: path.scene_cluster_id,
+          clusterName: path.scene_cluster_name || path.trigger,
+          clusterTags: path.scene_cluster_tags,
+          clusterSourceCount: path.scene_cluster_source_count,
+          clusterScore: path.scene_cluster_score,
           chatName: path.chat_name,
           paths: [path],
           latestUpdate: path.update_time,
@@ -345,7 +353,7 @@ export function BehaviorLearningPage() {
             <h1 className="text-2xl font-semibold tracking-normal">行为学习</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            浏览场景、行为、结果之间的经验路径和检索命中情况
+            浏览场景簇、行为分支、结果之间的经验路径和检索命中情况
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -363,7 +371,7 @@ export function BehaviorLearningPage() {
               <SelectItem value="all">全部聊天流</SelectItem>
               {chats.map((chat) => (
                 <SelectItem key={chat.session_id || '__global__'} value={chat.session_id || '__global__'}>
-                  {chat.display_name}
+                  {chat.display_name} · {chat.cluster_count} 簇
                 </SelectItem>
               ))}
             </SelectContent>
@@ -390,7 +398,7 @@ export function BehaviorLearningPage() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') applySearch() }}
-                placeholder="搜索场景、行为、结果"
+                placeholder="搜索场景簇 tag、行为、结果"
                 className="pl-9"
               />
             </div>
@@ -409,7 +417,7 @@ export function BehaviorLearningPage() {
 
           <div className="overflow-hidden rounded-lg border bg-background">
             <div className="flex items-center justify-between border-b px-4 py-3 text-sm text-muted-foreground">
-              <span>{selectedChatName} · {total} 条经验路径</span>
+              <span>{selectedChatName} · {sceneGroups.length} 个场景簇 · {total} 条经验路径</span>
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             </div>
             <ScrollArea className="h-[560px]">
@@ -502,7 +510,7 @@ function SceneGroupRow({
   onToggle: () => void
   onSelectPath: (pathId: number) => void
 }) {
-  const scene = parseSceneStart(group.trigger)
+  const title = clusterTitle(group.clusterName, group.clusterTags)
   return (
     <Collapsible open={open} onOpenChange={onToggle}>
       <div className="px-4 py-3">
@@ -519,13 +527,15 @@ function SceneGroupRow({
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 )}
                 <Badge variant="outline">{group.paths.length} 个行为分支</Badge>
+                {group.sceneClusterId !== null && <Badge variant="secondary">场景簇 #{group.sceneClusterId}</Badge>}
                 <span className="text-xs text-muted-foreground">{group.chatName}</span>
                 <span className="text-xs text-muted-foreground">更新 {formatTime(group.latestUpdate)}</span>
               </div>
               <p className="text-sm leading-6">
-                <span className="text-muted-foreground">场景摘要：</span>
-                {shortText(scene.summary, 130)}
+                <span className="text-muted-foreground">触发分布：</span>
+                {shortText(title, 130)}
               </p>
+              <ClusterTagPills tags={group.clusterTags} maxCount={5} />
             </div>
             <div className="grid min-w-[220px] grid-cols-4 gap-2 text-center text-xs">
               <Metric label="最高分" value={formatScore(group.bestScore)} />
@@ -537,7 +547,13 @@ function SceneGroupRow({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="mt-2 space-y-2 border-l pl-4">
-            <SceneSummaryPanel sceneText={group.trigger} compact />
+            <ClusterDistributionPanel
+              name={group.clusterName}
+              tags={group.clusterTags}
+              sourceCount={group.clusterSourceCount}
+              score={group.clusterScore}
+              compact
+            />
             {group.paths.map((path) => (
               <button
                 key={path.id}
@@ -583,29 +599,61 @@ function Metric({ label, value }: { label: string; value: string }) {
   )
 }
 
-function SceneSummaryPanel({ sceneText, compact = false }: { sceneText: string; compact?: boolean }) {
-  const scene = parseSceneStart(sceneText)
-  const rows = [
-    ['摘要', scene.summary],
-    ['意图', scene.intent],
-    ['阶段', scene.phase],
-    ['标签', scene.domains],
-    ['需求', scene.needs],
-  ].filter(([, value]) => value)
+function ClusterTagPills({ tags, maxCount = 6 }: { tags: BehaviorClusterTag[]; maxCount?: number }) {
+  const visibleTags = topClusterTags(tags, maxCount)
+  if (visibleTags.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {visibleTags.map((item) => (
+        <Badge key={item.tag} variant="outline" className="max-w-full whitespace-normal break-all text-[11px]">
+          {item.tag} · {formatProbability(item.probability)}
+        </Badge>
+      ))}
+    </div>
+  )
+}
 
+function ClusterDistributionPanel({
+  name,
+  tags,
+  sourceCount,
+  score,
+  compact = false,
+}: {
+  name: string
+  tags: BehaviorClusterTag[]
+  sourceCount?: number
+  score?: number
+  compact?: boolean
+}) {
+  const visibleTags = topClusterTags(tags, compact ? 8 : 12)
   return (
     <div className={cn('rounded-lg border bg-muted/20', compact ? 'p-3' : 'p-4')}>
-      <div className="mb-2 text-xs font-medium text-muted-foreground">场景</div>
-      <div className="space-y-1.5">
-        {rows.map(([label, value]) => (
-          <div key={label} className={cn('grid gap-2 text-sm', compact ? 'md:grid-cols-[3rem_minmax(0,1fr)]' : 'md:grid-cols-[4rem_minmax(0,1fr)]')}>
-            <span className="text-muted-foreground">{label}</span>
-            <span className="min-w-0 break-words leading-6">{value}</span>
-          </div>
-        ))}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">场景簇</span>
+        {sourceCount !== undefined && <Badge variant="outline">样本 {sourceCount}</Badge>}
+        {score !== undefined && <Badge variant="outline">簇分 {formatScore(score)}</Badge>}
       </div>
-      {rows.length <= 1 && scene.raw !== scene.summary && (
-        <p className="mt-2 break-words text-xs leading-5 text-muted-foreground">{scene.raw}</p>
+      <p className="mb-3 break-words text-sm font-medium leading-6">{clusterTitle(name, tags)}</p>
+      {visibleTags.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{name || '暂无 tag 分布'}</p>
+      ) : (
+        <div className="space-y-2">
+          {visibleTags.map((item) => (
+            <div key={item.tag} className="grid gap-2 text-sm sm:grid-cols-[minmax(0,1fr)_4rem] sm:items-center">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="break-words text-xs text-foreground">{item.tag}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{formatProbability(item.probability)}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-primary" style={{ width: formatProbability(item.probability) }} />
+                </div>
+              </div>
+              <span className="hidden text-right text-xs text-muted-foreground sm:block">{item.probability.toFixed(3)}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -624,7 +672,7 @@ function RetrievalDebugView({ result }: { result: BehaviorRetrievalDebugPayload 
   if (!result) {
     return (
       <div className="rounded-lg border bg-background p-8 text-center text-sm text-muted-foreground">
-        输入场景画像后，可以看到描述节点、命中的场景节点和候选经验路径
+        输入场景画像后，可以看到命中的场景簇、描述节点和候选经验路径
       </div>
     )
   }
@@ -632,6 +680,9 @@ function RetrievalDebugView({ result }: { result: BehaviorRetrievalDebugPayload 
     <div className="grid gap-4 lg:grid-cols-2">
       <Panel title="描述节点">
         <TokenList items={result.descriptors.map((item) => `${item.node_kind} · ${item.name} · ${item.weight}`)} />
+      </Panel>
+      <Panel title="命中场景簇">
+        <ClusterScoreList clusters={result.matched_clusters} />
       </Panel>
       <Panel title="命中节点">
         <NodeScoreList nodes={result.matched_nodes} />
@@ -652,7 +703,7 @@ function RetrievalDebugView({ result }: { result: BehaviorRetrievalDebugPayload 
                 </div>
                 {candidate.path ? (
                   <div className="space-y-1 text-muted-foreground">
-                    <p>场景：{shortText(candidate.path.trigger, 56)}</p>
+                    <p>场景簇：{shortText(clusterTitle(candidate.path.scene_cluster_name, candidate.path.scene_cluster_tags), 56)}</p>
                     <p>行为：{shortText(candidate.path.action, 56)}</p>
                   </div>
                 ) : (
@@ -857,7 +908,12 @@ function PathGraphView({ detail, loading }: { detail: BehaviorPathDetail | null;
           <h2 className="text-base font-semibold">#{detail.path.id} {detail.path.chat_name}</h2>
           <p className="mt-1 text-sm text-muted-foreground">最近更新 {formatTime(detail.path.update_time)}</p>
         </div>
-        <SceneSummaryPanel sceneText={detail.path.trigger} />
+        <ClusterDistributionPanel
+          name={detail.scene_cluster.name || detail.path.scene_cluster_name || detail.path.trigger}
+          tags={detail.scene_cluster.tags.length > 0 ? detail.scene_cluster.tags : detail.path.scene_cluster_tags}
+          sourceCount={detail.scene_cluster.source_count || detail.path.scene_cluster_source_count}
+          score={detail.scene_cluster.score || detail.path.scene_cluster_score}
+        />
         <div className="grid gap-3 md:grid-cols-2">
           <PathBlock title="行为" content={detail.path.action} />
           <PathBlock title="结果" content={detail.path.outcome} />
@@ -930,6 +986,25 @@ function TokenList({ items }: { items: string[] }) {
         <Badge key={item} variant="outline" className="max-w-full whitespace-normal break-all">
           {item}
         </Badge>
+      ))}
+    </div>
+  )
+}
+
+function ClusterScoreList({ clusters }: { clusters: BehaviorRetrievalDebugPayload['matched_clusters'] }) {
+  if (clusters.length === 0) return <p className="text-sm text-muted-foreground">暂无数据</p>
+  return (
+    <div className="space-y-2">
+      {clusters.map((cluster) => (
+        <div key={cluster.cluster_id} className="rounded-md border px-3 py-2 text-sm">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Badge variant="outline">#{cluster.cluster_id}</Badge>
+            <span className="text-xs text-muted-foreground">匹配 {formatScore(cluster.score)}</span>
+            <span className="text-xs text-muted-foreground">样本 {cluster.source_count}</span>
+          </div>
+          <p className="mb-2 break-words text-sm font-medium">{clusterTitle(cluster.name, cluster.tags)}</p>
+          <ClusterTagPills tags={cluster.tags} maxCount={5} />
+        </div>
       ))}
     </div>
   )

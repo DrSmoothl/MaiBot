@@ -9,7 +9,7 @@ import json
 import time
 
 from src.common.database.database import get_db_session
-from src.common.database.database_model import BehaviorExperiencePath
+from src.common.database.database_model import BehaviorExperiencePath, BehaviorSceneCluster
 from src.common.logger import get_logger
 
 from .behavior_pattern_store import (
@@ -31,6 +31,11 @@ POSITIVE_STALE_DECAY_AFTER_DAYS = 60
 MERGE_SIMILARITY_THRESHOLD = 0.86
 MERGE_TRIGGER_MIN_SIMILARITY = 0.78
 MERGE_ACTION_MIN_SIMILARITY = 0.78
+MERGE_OUTCOME_MIN_SIMILARITY = 0.82
+MERGE_CLUSTER_DISTRIBUTION_MIN_OVERLAP = 0.72
+MERGE_CLUSTER_ACTION_MIN_SIMILARITY = 0.92
+MERGE_CLUSTER_OUTCOME_MIN_SIMILARITY = 0.9
+MERGE_CLUSTER_SIMILARITY_THRESHOLD = 0.92
 MAINTENANCE_SOURCE = "behavior_pattern_maintenance"
 
 
@@ -215,6 +220,12 @@ class BehaviorPatternMaintenanceService:
                     for merge_id in merge_ids:
                         duplicate = pattern_by_id.get(merge_id)
                         if duplicate is None or not duplicate.enabled:
+                            continue
+                        if not self._should_merge(keeper, duplicate):
+                            logger.debug(
+                                f"跳过语义整合建议：keeper_id={keeper_id} merge_id={merge_id} "
+                                "未满足维护器合并规则"
+                            )
                             continue
                         duplicates.append(duplicate)
                     if not duplicates:
@@ -499,19 +510,72 @@ class BehaviorPatternMaintenanceService:
             "outcome": str(payload.get("outcome") or ""),
         }
 
+    @staticmethod
+    def _cluster_distribution(path: BehaviorExperiencePath) -> str:
+        try:
+            with get_db_session(auto_commit=False) as session:
+                scene_cluster = session.get(BehaviorSceneCluster, path.scene_cluster_id)
+                if scene_cluster is None:
+                    return ""
+                return str(scene_cluster.tag_distribution or "")
+        except Exception as exc:
+            logger.debug(f"读取行为表现所属场景簇失败: behavior_id={path.id} error={exc}")
+            return ""
+
+    @classmethod
+    def _cluster_distribution_overlap(cls, left_pattern: BehaviorExperiencePath, right_pattern: BehaviorExperiencePath) -> float:
+        left_distribution = cls._load_cluster_distribution(cls._cluster_distribution(left_pattern))
+        right_distribution = cls._load_cluster_distribution(cls._cluster_distribution(right_pattern))
+        if not left_distribution or not right_distribution:
+            return 0.0
+        shared_tags = set(left_distribution) & set(right_distribution)
+        return sum(min(left_distribution[tag], right_distribution[tag]) for tag in shared_tags)
+
+    @staticmethod
+    def _load_cluster_distribution(raw_value: str) -> dict[str, float]:
+        try:
+            raw_distribution = json.loads(raw_value or "[]")
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(raw_distribution, list):
+            return {}
+        distribution: dict[str, float] = {}
+        for item in raw_distribution:
+            if not isinstance(item, dict):
+                continue
+            tag = str(item.get("tag") or "").strip()
+            if not tag:
+                continue
+            try:
+                probability = float(item.get("probability") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if probability > 0:
+                distribution[tag] = distribution.get(tag, 0.0) + probability
+        total_probability = sum(distribution.values())
+        if total_probability <= 0:
+            return {}
+        return {tag: probability / total_probability for tag, probability in distribution.items()}
+
     def _should_merge(self, left_pattern: BehaviorExperiencePath, right_pattern: BehaviorExperiencePath) -> bool:
         left_payload = self._path_payload(left_pattern)
         right_payload = self._path_payload(right_pattern)
+        cluster_overlap = self._cluster_distribution_overlap(left_pattern, right_pattern)
+        if cluster_overlap < MERGE_CLUSTER_DISTRIBUTION_MIN_OVERLAP:
+            return False
+
         trigger_similarity = self._text_similarity(left_payload["trigger"], right_payload["trigger"])
         action_similarity = self._text_similarity(left_payload["action"], right_payload["action"])
+        outcome_similarity = self._text_similarity(left_payload["outcome"], right_payload["outcome"])
         combined_similarity = self._text_similarity(
             f"{left_payload['trigger']}\n{left_payload['action']}",
             f"{right_payload['trigger']}\n{right_payload['action']}",
         )
         return (
             trigger_similarity >= MERGE_TRIGGER_MIN_SIMILARITY
-            and action_similarity >= MERGE_ACTION_MIN_SIMILARITY
-            and combined_similarity >= MERGE_SIMILARITY_THRESHOLD
+            and action_similarity >= MERGE_CLUSTER_ACTION_MIN_SIMILARITY
+            and outcome_similarity >= MERGE_CLUSTER_OUTCOME_MIN_SIMILARITY
+            and combined_similarity >= MERGE_CLUSTER_SIMILARITY_THRESHOLD
         )
 
     @staticmethod

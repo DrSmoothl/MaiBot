@@ -11,7 +11,7 @@ from src.common.database.database_model import (
     BehaviorActionNode,
     BehaviorExperiencePath,
     BehaviorOutcomeNode,
-    BehaviorSceneNode,
+    BehaviorSceneCluster,
 )
 from src.common.logger import get_logger
 
@@ -94,10 +94,10 @@ def _path_texts_from_session(
     session: Session,
     path: BehaviorExperiencePath,
 ) -> tuple[str, str, str]:
-    scene_node = session.get(BehaviorSceneNode, path.start_scene_node_id)
+    scene_cluster = session.get(BehaviorSceneCluster, path.scene_cluster_id)
     action_node = session.get(BehaviorActionNode, path.action_node_id)
     outcome_node = session.get(BehaviorOutcomeNode, path.outcome_node_id)
-    trigger = scene_node.name if scene_node is not None else ""
+    trigger = scene_cluster.name if scene_cluster is not None else ""
     action = action_node.action if action_node is not None else ""
     outcome = outcome_node.outcome if outcome_node is not None else ""
     return trigger, action, outcome
@@ -127,7 +127,7 @@ def _path_to_dict_from_session(
         "trigger": trigger,
         "action": action,
         "outcome": outcome,
-        "start_scene_node_id": path.start_scene_node_id,
+        "scene_cluster_id": path.scene_cluster_id,
         "action_node_id": path.action_node_id,
         "outcome_node_id": path.outcome_node_id,
         "count": path.count,
@@ -252,7 +252,7 @@ def upsert_behavior_experience(
             statement = (
                 select(BehaviorExperiencePath)
                 .where(BehaviorExperiencePath.session_id == session_id)
-                .where(BehaviorExperiencePath.start_scene_node_id == graph_refs.start_scene_node_id)
+                .where(BehaviorExperiencePath.scene_cluster_id == graph_refs.scene_cluster_id)
                 .where(BehaviorExperiencePath.action_node_id == graph_refs.action_node_id)
                 .where(BehaviorExperiencePath.outcome_node_id == graph_refs.outcome_node_id)
             )
@@ -260,7 +260,7 @@ def upsert_behavior_experience(
             if path is None:
                 path = BehaviorExperiencePath(
                     session_id=session_id,
-                    start_scene_node_id=graph_refs.start_scene_node_id,
+                    scene_cluster_id=graph_refs.scene_cluster_id,
                     action_node_id=graph_refs.action_node_id,
                     outcome_node_id=graph_refs.outcome_node_id,
                     evidence_list=_dump_json_list([evidence_item]),
