@@ -12,6 +12,7 @@ import numpy as np
 import pickle
 import time
 
+from src.chat.message_receive.chat_manager import chat_manager
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.services import message_service as message_api
@@ -247,6 +248,23 @@ class SDKMemoryKernel:
         if not isinstance(filter_config, dict) or not filter_config:
             return True
 
+        return self._chat_filter_config_allows(
+            filter_config,
+            stream_id=stream_id,
+            group_id=group_id,
+            user_id=user_id,
+            default_when_empty=True,
+        )
+
+    @staticmethod
+    def _chat_filter_config_allows(
+        filter_config: Dict[str, Any],
+        *,
+        stream_id: str = "",
+        group_id: str = "",
+        user_id: str = "",
+        default_when_empty: bool = True,
+    ) -> bool:
         if not bool(filter_config.get("enabled", True)):
             return True
 
@@ -256,7 +274,7 @@ class SDKMemoryKernel:
             patterns = []
 
         if not patterns:
-            return mode == "blacklist"
+            return bool(default_when_empty) if mode == "blacklist" else False
 
         stream_token = str(stream_id or "").strip()
         group_token = str(group_id or "").strip()
@@ -1549,7 +1567,8 @@ class SDKMemoryKernel:
                 shared_chat_ids=shared_chat_ids,
             )
             hits = self._filter_episode_hits([self._episode_hit(row) for row in rows])
-            hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)[:limit]
+            hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)
+            hits = self._filter_hits_by_retrieval_type_scope(hits)[:limit]
             return {"summary": self._summary(hits), "hits": hits}
 
         if mode == "aggregate":
@@ -1570,6 +1589,7 @@ class SDKMemoryKernel:
             filtered = self._filter_hits(hits, request.person_id)
             filtered = self._filter_user_visible_hits(filtered)
             filtered = self._filter_hits_by_chat_scope(filtered, request.chat_id, shared_chat_ids)
+            filtered = self._filter_hits_by_retrieval_type_scope(filtered)
             filtered = filtered[:limit]
             return {"summary": self._summary(filtered), "hits": filtered}
 
@@ -1595,6 +1615,7 @@ class SDKMemoryKernel:
         filtered = self._filter_hits(hits, request.person_id)
         filtered = self._filter_user_visible_hits(filtered)
         filtered = self._filter_hits_by_chat_scope(filtered, request.chat_id, shared_chat_ids)
+        filtered = self._filter_hits_by_retrieval_type_scope(filtered)
         filtered = filtered[:limit]
         return {"summary": self._summary(filtered), "hits": filtered}
 
@@ -5791,6 +5812,160 @@ class SDKMemoryKernel:
                 allowed_indexes.add(index)
 
         return [dict(hit) for index, hit in enumerate(hits) if index in allowed_indexes]
+
+    def _filter_hits_by_retrieval_type_scope(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """按检索结果类型应用可选聊天过滤，不改变写入和全局入口过滤。"""
+
+        if not hits or not self._has_enabled_retrieval_type_filter():
+            return hits
+
+        paragraph_hashes: List[str] = []
+        relation_hashes: List[str] = []
+        for item in hits:
+            item_type = str(item.get("type", "") or "").strip()
+            item_hash = str(item.get("hash", "") or "").strip()
+            if not item_hash:
+                continue
+            if item_type == "paragraph":
+                paragraph_hashes.append(item_hash)
+            elif item_type == "relation":
+                relation_hashes.append(item_hash)
+
+        paragraph_map: Dict[str, Dict[str, Any]] = {}
+        relation_paragraph_map: Dict[str, List[Dict[str, Any]]] = {}
+        if self.metadata_store is not None:
+            paragraph_map = self.metadata_store.get_paragraphs_by_hashes(paragraph_hashes)
+            relation_paragraph_map = self.metadata_store.get_paragraphs_by_relation_hashes(relation_hashes)
+
+        filtered: List[Dict[str, Any]] = []
+        for item in hits:
+            contexts = self._retrieval_filter_contexts_for_hit(
+                item,
+                paragraph_map=paragraph_map,
+                relation_paragraph_map=relation_paragraph_map,
+            )
+            if any(self._retrieval_filter_context_allowed(context) for context in contexts):
+                filtered.append(dict(item))
+        return filtered
+
+    def _has_enabled_retrieval_type_filter(self) -> bool:
+        retrieval_config = self._retrieval_type_filter_root()
+        if not retrieval_config:
+            return False
+        for kind in ("chat_stream", "chat_summary", "episode"):
+            type_config = retrieval_config.get(kind)
+            if isinstance(type_config, dict) and bool(type_config.get("enabled", False)):
+                return True
+        return False
+
+    def _retrieval_type_filter_root(self) -> Dict[str, Any]:
+        filter_config = self._cfg("filter", {}) or {}
+        if not isinstance(filter_config, dict):
+            return {}
+        retrieval_config = filter_config.get("retrieval") or {}
+        return retrieval_config if isinstance(retrieval_config, dict) else {}
+
+    def _retrieval_type_filter_config(self, kind: str) -> Dict[str, Any]:
+        retrieval_config = self._retrieval_type_filter_root()
+        type_config = retrieval_config.get(str(kind or "").strip())
+        return type_config if isinstance(type_config, dict) else {}
+
+    def _retrieval_filter_contexts_for_hit(
+        self,
+        hit: Dict[str, Any],
+        *,
+        paragraph_map: Dict[str, Dict[str, Any]],
+        relation_paragraph_map: Dict[str, List[Dict[str, Any]]],
+    ) -> List[Dict[str, str]]:
+        hit_type = str(hit.get("type", "") or "").strip()
+        hit_hash = str(hit.get("hash", "") or "").strip()
+
+        if hit_type == "paragraph" and hit_hash in paragraph_map:
+            return [self._retrieval_filter_context_from_paragraph(paragraph_map[hit_hash])]
+
+        if hit_type == "relation" and hit_hash in relation_paragraph_map:
+            contexts = [
+                self._retrieval_filter_context_from_paragraph(paragraph)
+                for paragraph in relation_paragraph_map.get(hit_hash, [])
+                if isinstance(paragraph, dict)
+            ]
+            if contexts:
+                return contexts
+
+        return [self._retrieval_filter_context_from_hit(hit)]
+
+    def _retrieval_filter_context_from_hit(self, hit: Dict[str, Any]) -> Dict[str, str]:
+        metadata = coerce_metadata_dict(hit.get("metadata"))
+        source = str(metadata.get("source", "") or hit.get("source", "") or "").strip()
+        source_type = str(metadata.get("source_type", "") or "").strip()
+        hit_type = str(hit.get("type", "") or "").strip()
+        stream_id = str(metadata.get("chat_id", "") or "").strip()
+        if not stream_id:
+            stream_id = self._source_stream_id(source)
+        return self._retrieval_filter_context(
+            kind=self._retrieval_filter_kind(hit_type=hit_type, source_type=source_type, source=source),
+            stream_id=stream_id,
+        )
+
+    def _retrieval_filter_context_from_paragraph(self, paragraph: Dict[str, Any]) -> Dict[str, str]:
+        metadata = coerce_metadata_dict(paragraph.get("metadata"))
+        source = str(paragraph.get("source", "") or metadata.get("source", "") or "").strip()
+        source_type = str(metadata.get("source_type", "") or "").strip()
+        stream_id = str(metadata.get("chat_id", "") or "").strip()
+        if not stream_id:
+            stream_id = self._source_stream_id(source)
+        return self._retrieval_filter_context(
+            kind=self._retrieval_filter_kind(hit_type="paragraph", source_type=source_type, source=source),
+            stream_id=stream_id,
+        )
+
+    @staticmethod
+    def _retrieval_filter_kind(*, hit_type: str, source_type: str, source: str) -> str:
+        if str(hit_type or "").strip() == "episode":
+            return "episode"
+        clean_source_type = str(source_type or "").strip()
+        clean_source = str(source or "").strip()
+        if clean_source_type == "chat_summary" or clean_source.startswith("chat_summary:"):
+            return "chat_summary"
+        return "chat_stream"
+
+    @staticmethod
+    def _source_stream_id(source: str) -> str:
+        token = str(source or "").strip()
+        for prefix in ("chat_summary:", "maibot.chat_history:"):
+            if token.startswith(prefix):
+                return token[len(prefix):].strip()
+        return ""
+
+    @staticmethod
+    def _retrieval_filter_context(*, kind: str, stream_id: str) -> Dict[str, str]:
+        stream_token = str(stream_id or "").strip()
+        group_id = ""
+        user_id = ""
+        if stream_token:
+            session = chat_manager.get_existing_session_by_session_id(stream_token)
+            if session is not None:
+                group_id = str(getattr(session, "group_id", "") or "").strip()
+                user_id = str(getattr(session, "user_id", "") or "").strip()
+        return {
+            "kind": str(kind or "").strip() or "chat_stream",
+            "stream_id": stream_token,
+            "group_id": group_id,
+            "user_id": user_id,
+        }
+
+    def _retrieval_filter_context_allowed(self, context: Dict[str, str]) -> bool:
+        kind = str(context.get("kind", "") or "chat_stream").strip()
+        type_config = self._retrieval_type_filter_config(kind)
+        if not type_config or not bool(type_config.get("enabled", False)):
+            return True
+        return self._chat_filter_config_allows(
+            type_config,
+            stream_id=str(context.get("stream_id", "") or "").strip(),
+            group_id=str(context.get("group_id", "") or "").strip(),
+            user_id=str(context.get("user_id", "") or "").strip(),
+            default_when_empty=True,
+        )
 
     @staticmethod
     def _resolve_knowledge_type(source_type: str) -> str:

@@ -2240,7 +2240,7 @@ export function KnowledgeBasePage() {
 
   const shouldRenderMemoryTab = (tab: MemoryConsoleTab) => activeTab === tab || visitedMemoryTabs.has(tab)
   const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
-  const renderPanelFallback = (tab: LoadableMemoryTab, _label: string) => (
+  const renderPanelFallback = (tab: LoadableMemoryTab) => (
     <TabsContent value={tab} className="space-y-4">
       <div className="flex min-h-[240px] items-center justify-center rounded-xl border bg-background/70 text-sm text-muted-foreground">
         <ThinkingIllustration size={tabLoading[tab] ? 'md' : 'sm'} />
@@ -2261,7 +2261,7 @@ export function KnowledgeBasePage() {
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="flex-1 overflow-auto">
-        <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
+        <div className="memory-console-density mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 py-4 xl:px-5">
           <div className="hidden">
             <Button variant="outline" size="sm" onClick={() => void loadPage()}>
               <RefreshCw className="mr-2 h-4 w-4" />
@@ -2372,7 +2372,7 @@ export function KnowledgeBasePage() {
 
           {/* 快速开始 Hero —— 给新用户明确的"先做什么" */}
           {quickStartVisible && (
-            <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-5 pr-12 shadow-sm">
+            <div className="relative overflow-hidden rounded-xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-4 pr-11 shadow-sm">
               <Button
                 type="button"
                 variant="ghost"
@@ -2384,7 +2384,7 @@ export function KnowledgeBasePage() {
               >
                 <X className="h-4 w-4" />
               </Button>
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="space-y-1.5 lg:max-w-sm">
                 <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary">
                   快速开始
@@ -2394,11 +2394,11 @@ export function KnowledgeBasePage() {
                   不知道该做什么？挑一个最常用的入口，下面的标签页里有更详细的设置。
                 </p>
               </div>
-              <div className="grid w-full gap-2.5 sm:grid-cols-3 lg:max-w-3xl">
+              <div className="grid w-full gap-2 sm:grid-cols-3 lg:max-w-3xl">
                 <button
                   type="button"
                   onClick={() => switchMemoryTab('import')}
-                  className="group flex items-start gap-3 rounded-xl border border-border/70 bg-background/80 p-3.5 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
+                  className="group flex items-start gap-2 rounded-lg border border-border/70 bg-background/80 p-3 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
                 >
                   <div className="flex-none rounded-lg bg-primary/10 p-2 text-primary transition-transform group-hover:scale-105">
                     <Upload className="h-4 w-4" />
@@ -2413,7 +2413,7 @@ export function KnowledgeBasePage() {
                 <button
                   type="button"
                   onClick={() => switchMemoryTab('tuning')}
-                  className="group flex items-start gap-3 rounded-xl border border-border/70 bg-background/80 p-3.5 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
+                  className="group flex items-start gap-2 rounded-lg border border-border/70 bg-background/80 p-3 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
                 >
                   <div className="flex-none rounded-lg bg-amber-500/10 p-2 text-amber-500 transition-transform group-hover:scale-105">
                     <SlidersHorizontal className="h-4 w-4" />
@@ -2428,7 +2428,7 @@ export function KnowledgeBasePage() {
                 <button
                   type="button"
                   onClick={() => switchMemoryTab('graph')}
-                  className="group flex items-start gap-3 rounded-xl border border-border/70 bg-background/80 p-3.5 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
+                  className="group flex items-start gap-2 rounded-lg border border-border/70 bg-background/80 p-3 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
                 >
                   <div className="flex-none rounded-lg bg-violet-500/10 p-2 text-violet-500 transition-transform group-hover:scale-105">
                     <Database className="h-4 w-4" />
@@ -2448,10 +2448,10 @@ export function KnowledgeBasePage() {
           <Tabs
             value={activeTab}
             onValueChange={(value) => switchMemoryTab(value as MemoryConsoleTab)}
-            className="space-y-5"
+            className="space-y-3"
           >
-            <div className="-mx-6 border-b border-border/40 px-6 pb-2 pt-1">
-              <div className="flex flex-wrap items-center gap-3">
+            <div className="-mx-4 border-b border-border/40 px-4 pb-1.5 pt-0 xl:-mx-5 xl:px-5">
+              <div className="flex flex-wrap items-center gap-2">
                 <MemoryMiniTabs
                   items={[
                     { value: 'graph', label: '图谱', description: '实体关系图与证据视图' },
@@ -2461,7 +2461,7 @@ export function KnowledgeBasePage() {
                     { value: 'profiles', label: '人物画像', description: '查询和维护人物画像' },
                   ]}
                   className="w-fit max-w-full"
-                  triggerClassName="px-4"
+                  triggerClassName="px-3"
                 />
                 <MemoryMiniTabs
                   items={[
@@ -2471,7 +2471,7 @@ export function KnowledgeBasePage() {
                     { value: 'feedback', label: '纠错历史', description: '查看反馈与回滚' },
                   ]}
                   className="w-fit max-w-full"
-                  triggerClassName="px-4"
+                  triggerClassName="px-3"
                 />
               </div>
             </div>
@@ -2480,7 +2480,7 @@ export function KnowledgeBasePage() {
               <KnowledgeGraphPage embedded onOpenConsole={() => switchMemoryTab('import')} />
             </TabsContent>
 
-            {shouldRenderMemoryTab('timeline') && (shouldShowPanelFallback('timeline') ? renderPanelFallback('timeline', '审计时间线') : (
+            {shouldRenderMemoryTab('timeline') && (shouldShowPanelFallback('timeline') ? renderPanelFallback('timeline') : (
             <TabsContent value="timeline" className="space-y-4">
               <MemoryTimelineManager
                 chatTargets={importChatTargets}
@@ -2492,7 +2492,7 @@ export function KnowledgeBasePage() {
             </TabsContent>
             ))}
 
-            {shouldRenderMemoryTab('import') && (shouldShowPanelFallback('import') ? renderPanelFallback('import', '导入数据') : (
+            {shouldRenderMemoryTab('import') && (shouldShowPanelFallback('import') ? renderPanelFallback('import') : (
             <ImportTab
               importCreateMode={importCreateMode}
               setImportCreateMode={setImportCreateMode}
@@ -2643,7 +2643,7 @@ export function KnowledgeBasePage() {
             />
             ))}
 
-            {shouldRenderMemoryTab('tuning') && (shouldShowPanelFallback('tuning') ? renderPanelFallback('tuning', '调优数据') : (
+            {shouldRenderMemoryTab('tuning') && (shouldShowPanelFallback('tuning') ? renderPanelFallback('tuning') : (
             <TuningTab
               tuningObjective={tuningObjective}
               setTuningObjective={setTuningObjective}
@@ -2681,7 +2681,7 @@ export function KnowledgeBasePage() {
               {shouldRenderMemoryTab('maintenance') ? <MemoryMaintenanceManager initialTarget={maintenanceInitialTarget} /> : null}
             </TabsContent>
 
-            {shouldRenderMemoryTab('delete') && (shouldShowPanelFallback('delete') ? renderPanelFallback('delete', '删除数据') : (
+            {shouldRenderMemoryTab('delete') && (shouldShowPanelFallback('delete') ? renderPanelFallback('delete') : (
             <DeleteTab
               sourceSearch={sourceSearch}
               setSourceSearch={setSourceSearch}
@@ -2721,7 +2721,7 @@ export function KnowledgeBasePage() {
             />
             ))}
 
-            {shouldRenderMemoryTab('feedback') && (shouldShowPanelFallback('feedback') ? renderPanelFallback('feedback', '纠错历史') : (
+            {shouldRenderMemoryTab('feedback') && (shouldShowPanelFallback('feedback') ? renderPanelFallback('feedback') : (
             <FeedbackTab
               feedbackSearch={feedbackSearch}
               setFeedbackSearch={setFeedbackSearch}

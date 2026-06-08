@@ -103,6 +103,46 @@ class _ScopedSearchMetadataStore:
         return {str(paragraph_hash): [] for paragraph_hash in paragraph_hashes}
 
 
+class _RetrievalTypeFilterMetadataStore(_ScopedSearchMetadataStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.paragraphs.update(
+            {
+                "para-stream-other": {
+                    "hash": "para-stream-other",
+                    "content": "其他聊天流普通记忆。",
+                    "source": "maibot.chat_history:session-other",
+                    "metadata": {"chat_id": "session-other", "source_type": "chat_history"},
+                },
+                "para-stream-current": {
+                    "hash": "para-stream-current",
+                    "content": "当前聊天流普通记忆。",
+                    "source": "maibot.chat_history:session-current",
+                    "metadata": {"chat_id": "session-current", "source_type": "chat_history"},
+                },
+                "para-summary-current": {
+                    "hash": "para-summary-current",
+                    "content": "当前群聊摘要。",
+                    "source": "chat_summary:session-current",
+                    "metadata": {"chat_id": "session-current", "source_type": "chat_summary"},
+                },
+                "para-summary-other": {
+                    "hash": "para-summary-other",
+                    "content": "其他群聊摘要。",
+                    "source": "chat_summary:session-other",
+                    "metadata": {"chat_id": "session-other", "source_type": "chat_summary"},
+                },
+            }
+        )
+        self.relation_paragraphs.update(
+            {
+                "rel-stream-current": [self.paragraphs["para-stream-current"]],
+                "rel-stream-other": [self.paragraphs["para-stream-other"]],
+                "rel-summary-other": [self.paragraphs["para-summary-other"]],
+            }
+        )
+
+
 class _ScopedSearchRetriever:
     config = type("RetrieverConfig", (), {"enable_ppr": False})()
 
@@ -194,6 +234,12 @@ def _build_scoped_search_kernel(tmp_path) -> tuple[SDKMemoryKernel, _ScopedSearc
     kernel.aggregate_query_service = object()  # type: ignore[assignment]
     kernel.threshold_filter = None
     return kernel, retriever
+
+
+def _build_retrieval_filter_kernel(config: dict[str, Any]) -> SDKMemoryKernel:
+    kernel = SDKMemoryKernel(plugin_root=Path.cwd(), config=config)
+    kernel.metadata_store = _RetrievalTypeFilterMetadataStore()  # type: ignore[assignment]
+    return kernel
 
 
 @pytest.mark.asyncio
@@ -312,3 +358,175 @@ async def test_search_memory_keeps_global_results_without_chat_id(tmp_path) -> N
 
     assert [item["hash"] for item in payload["hits"]] == ["para-other", "rel-other"]
     assert retriever.top_k_values == [2]
+
+
+def test_retrieval_type_filter_is_disabled_by_default() -> None:
+    kernel = _build_retrieval_filter_kernel(config={})
+    hits = [
+        {
+            "type": "paragraph",
+            "hash": "para-summary-other",
+            "content": "其他群聊摘要。",
+            "metadata": {"chat_id": "session-other", "source_type": "chat_summary"},
+        }
+    ]
+
+    assert kernel._filter_hits_by_retrieval_type_scope(hits) == hits
+
+
+def test_retrieval_type_filter_requires_enabled_flag() -> None:
+    kernel = _build_retrieval_filter_kernel(
+        config={
+            "filter": {
+                "retrieval": {
+                    "episode": {
+                        "enabled": True,
+                        "mode": "blacklist",
+                        "chats": [],
+                    },
+                    "chat_summary": {
+                        "mode": "whitelist",
+                        "chats": ["stream:session-current"],
+                    }
+                }
+            }
+        }
+    )
+    hits = [
+        {
+            "type": "paragraph",
+            "hash": "para-summary-other",
+            "content": "其他群聊摘要。",
+            "metadata": {"chat_id": "session-other", "source_type": "chat_summary"},
+        }
+    ]
+
+    assert kernel._filter_hits_by_retrieval_type_scope(hits) == hits
+
+
+def test_retrieval_type_filter_matches_group_blacklist(monkeypatch: pytest.MonkeyPatch) -> None:
+    kernel = _build_retrieval_filter_kernel(
+        config={
+            "filter": {
+                "retrieval": {
+                    "chat_summary": {
+                        "enabled": True,
+                        "mode": "blacklist",
+                        "chats": ["group:group-other"],
+                    }
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "src.A_memorix.core.runtime.sdk_memory_kernel.chat_manager.get_existing_session_by_session_id",
+        lambda session_id: type(
+            "Session",
+            (),
+            {
+                "group_id": "group-other" if session_id == "session-other" else "group-current",
+                "user_id": "",
+            },
+        )(),
+    )
+    hits = [
+        {
+            "type": "paragraph",
+            "hash": "para-summary-current",
+            "content": "当前群聊摘要。",
+            "metadata": {"chat_id": "session-current", "source_type": "chat_summary"},
+        },
+        {
+            "type": "paragraph",
+            "hash": "para-summary-other",
+            "content": "其他群聊摘要。",
+            "metadata": {"chat_id": "session-other", "source_type": "chat_summary"},
+        },
+    ]
+
+    filtered = kernel._filter_hits_by_retrieval_type_scope(hits)
+
+    assert [item["hash"] for item in filtered] == ["para-summary-current"]
+
+
+def test_retrieval_type_filter_matches_stream_when_session_unresolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _build_retrieval_filter_kernel(
+        config={
+            "filter": {
+                "retrieval": {
+                    "episode": {
+                        "enabled": True,
+                        "mode": "blacklist",
+                        "chats": ["stream:session-other"],
+                    }
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "src.A_memorix.core.runtime.sdk_memory_kernel.chat_manager.get_existing_session_by_session_id",
+        lambda session_id: None,
+    )
+    hits = [
+        {
+            "type": "episode",
+            "episode_id": "episode-current",
+            "content": "当前 episode",
+            "metadata": {"source": "chat_summary:session-current"},
+        },
+        {
+            "type": "episode",
+            "episode_id": "episode-other",
+            "content": "其他 episode",
+            "metadata": {"source": "chat_summary:session-other"},
+        },
+    ]
+
+    filtered = kernel._filter_hits_by_retrieval_type_scope(hits)
+
+    assert [item["episode_id"] for item in filtered] == ["episode-current"]
+
+
+def test_retrieval_type_filter_applies_to_relation_source_paragraph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _build_retrieval_filter_kernel(
+        config={
+            "filter": {
+                "retrieval": {
+                    "chat_stream": {
+                        "enabled": True,
+                        "mode": "whitelist",
+                        "chats": ["stream:session-current"],
+                    }
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "src.A_memorix.core.runtime.sdk_memory_kernel.chat_manager.get_existing_session_by_session_id",
+        lambda session_id: None,
+    )
+    hits = [
+        {
+            "type": "relation",
+            "hash": "rel-stream-current",
+            "content": "当前聊天流 讨论 普通记忆",
+            "metadata": {},
+        },
+        {
+            "type": "relation",
+            "hash": "rel-stream-other",
+            "content": "其他聊天流 讨论 普通记忆",
+            "metadata": {},
+        },
+    ]
+
+    filtered = kernel._filter_hits_by_retrieval_type_scope(hits)
+
+    assert [item["hash"] for item in filtered] == ["rel-stream-current"]
