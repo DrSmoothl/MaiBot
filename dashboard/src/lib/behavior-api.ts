@@ -27,6 +27,19 @@ export interface BehaviorSceneCluster {
   update_time: string | null
 }
 
+export interface BehaviorClusterItem extends BehaviorSceneCluster {
+  session_id: string | null
+  chat_name: string
+  path_count: number
+  enabled_path_count: number
+  activation_count: number
+  success_count: number
+  failure_count: number
+  observed_path_count: number
+  self_reflection_path_count: number
+  last_active_time: string | null
+}
+
 export interface BehaviorPathItem {
   id: number
   session_id: string | null
@@ -37,6 +50,8 @@ export interface BehaviorPathItem {
   scene_cluster_tags: BehaviorClusterTag[]
   scene_cluster_source_count: number
   scene_cluster_score: number
+  actor_type: string
+  learning_type: string
   action: string
   outcome: string
   count: number
@@ -56,6 +71,14 @@ export interface BehaviorPathListResponse {
   page: number
   page_size: number
   data: BehaviorPathItem[]
+}
+
+export interface BehaviorClusterListResponse {
+  success: boolean
+  total: number
+  page: number
+  page_size: number
+  data: BehaviorClusterItem[]
 }
 
 export interface BehaviorGraphNode {
@@ -133,7 +156,6 @@ export interface BehaviorRetrievalDebugRequest {
   domain_tags: string[]
   behavior_needs: string[]
   risk_flags: string[]
-  avoid_behaviors: string[]
   retrieval_query: string
   max_count: number
 }
@@ -163,6 +185,20 @@ export async function listBehaviorPaths(params: {
     if (value !== undefined && value !== '') query.set(key, String(value))
   })
   const response = await fetchWithAuth(`${API_BASE}/paths?${query.toString()}`)
+  return readJson(response)
+}
+
+export async function listBehaviorClusters(params: {
+  session_id?: string
+  search?: string
+  page?: number
+  page_size?: number
+}): Promise<BehaviorClusterListResponse> {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') query.set(key, String(value))
+  })
+  const response = await fetchWithAuth(`${API_BASE}/clusters?${query.toString()}`)
   return readJson(response)
 }
 

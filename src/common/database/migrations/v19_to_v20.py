@@ -115,6 +115,8 @@ def _create_behavior_experience_paths_table(connection: Connection) -> None:
             scene_cluster_id INTEGER NOT NULL,
             action_node_id INTEGER NOT NULL,
             outcome_node_id INTEGER NOT NULL,
+            actor_type VARCHAR(40) NOT NULL DEFAULT 'other_user',
+            learning_type VARCHAR(40) NOT NULL DEFAULT 'observed_behavior',
             evidence_list TEXT NOT NULL DEFAULT '[]',
             feedback_list TEXT NOT NULL DEFAULT '[]',
             count INTEGER NOT NULL DEFAULT 0,
@@ -128,8 +130,8 @@ def _create_behavior_experience_paths_table(connection: Connection) -> None:
             create_time DATETIME NOT NULL,
             update_time DATETIME NOT NULL,
             PRIMARY KEY (id),
-            CONSTRAINT uq_behavior_experience_path_scope_cluster_action_outcome
-                UNIQUE (session_id, scene_cluster_id, action_node_id, outcome_node_id)
+            CONSTRAINT uq_behavior_experience_path_scope_cluster_action_outcome_actor
+                UNIQUE (session_id, scene_cluster_id, action_node_id, outcome_node_id, actor_type, learning_type)
         )
         """
     )
@@ -140,6 +142,14 @@ def _create_behavior_experience_paths_table(connection: Connection) -> None:
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_behavior_experience_paths_cluster "
         "ON behavior_experience_paths (scene_cluster_id)"
+    )
+    connection.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_behavior_experience_paths_learning_type "
+        "ON behavior_experience_paths (learning_type)"
+    )
+    connection.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_behavior_experience_paths_actor_type "
+        "ON behavior_experience_paths (actor_type)"
     )
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_behavior_experience_paths_action "

@@ -558,6 +558,9 @@ class BehaviorPatternMaintenanceService:
         return {tag: probability / total_probability for tag, probability in distribution.items()}
 
     def _should_merge(self, left_pattern: BehaviorExperiencePath, right_pattern: BehaviorExperiencePath) -> bool:
+        if left_pattern.actor_type != right_pattern.actor_type or left_pattern.learning_type != right_pattern.learning_type:
+            return False
+
         left_payload = self._path_payload(left_pattern)
         right_payload = self._path_payload(right_pattern)
         cluster_overlap = self._cluster_distribution_overlap(left_pattern, right_pattern)

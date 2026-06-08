@@ -9,8 +9,6 @@ from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 
-from .behavior_feedback import get_tool_spec as get_behavior_feedback_tool_spec
-from .behavior_feedback import handle_tool as handle_behavior_feedback_tool
 from .context import BuiltinToolRuntimeContext
 from .continue_tool import get_tool_spec as get_continue_tool_spec
 from .continue_tool import handle_tool as handle_continue_tool
@@ -91,12 +89,6 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="timing"),
     BuiltinToolEntry("finish", get_finish_tool_spec, handle_finish_tool, stage="action"),
     BuiltinToolEntry("reply", get_reply_tool_spec, handle_reply_tool, stage="action"),
-    BuiltinToolEntry(
-        "behavior_feedback",
-        get_behavior_feedback_tool_spec,
-        handle_behavior_feedback_tool,
-        stage="action",
-    ),
     BuiltinToolEntry(
         "view_complex_message",
         get_view_complex_message_tool_spec,

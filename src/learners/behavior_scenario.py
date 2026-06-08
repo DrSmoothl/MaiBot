@@ -25,7 +25,6 @@ class BehaviorScenarioProfile:
     domain_tags: list[str] = field(default_factory=list)
     behavior_needs: list[str] = field(default_factory=list)
     risk_flags: list[str] = field(default_factory=list)
-    avoid_behaviors: list[str] = field(default_factory=list)
     retrieval_query: str = ""
     confidence: float = 0.0
 
@@ -39,7 +38,6 @@ class BehaviorScenarioProfile:
                 self.domain_tags,
                 self.behavior_needs,
                 self.risk_flags,
-                self.avoid_behaviors,
                 self.retrieval_query,
             ]
         )
@@ -52,7 +50,6 @@ class BehaviorScenarioProfile:
             " ".join(self.domain_tags),
             " ".join(self.behavior_needs),
             " ".join(self.risk_flags),
-            " ".join(self.avoid_behaviors),
             self.retrieval_query,
             context_text,
         ]
@@ -69,7 +66,6 @@ class BehaviorScenarioProfile:
                 "domain_tags": self.domain_tags,
                 "behavior_needs": self.behavior_needs,
                 "risk_flags": self.risk_flags,
-                "avoid_behaviors": self.avoid_behaviors,
                 "retrieval_query": self.retrieval_query,
                 "confidence": self.confidence,
             },
@@ -123,11 +119,9 @@ class BehaviorScenarioSegment:
                 "domain_tags": self.profile.domain_tags,
                 "behavior_needs": self.profile.behavior_needs,
                 "risk_flags": self.profile.risk_flags,
-                "avoid_behaviors": self.profile.avoid_behaviors,
                 "retrieval_query": self.profile.retrieval_query,
                 "confidence": self.profile.confidence,
             },
-            "scene_start": self.profile.to_learning_start_text(),
         }
 
 
@@ -201,7 +195,6 @@ def _profile_from_mapping(parsed_response: dict[str, Any]) -> BehaviorScenarioPr
         domain_tags=_coerce_string_list(parsed_response.get("domain_tags")),
         behavior_needs=_coerce_string_list(parsed_response.get("behavior_needs")),
         risk_flags=_coerce_string_list(parsed_response.get("risk_flags")),
-        avoid_behaviors=_coerce_string_list(parsed_response.get("avoid_behaviors")),
         retrieval_query=" ".join(str(parsed_response.get("retrieval_query") or "").split()).strip(),
         confidence=_coerce_float(parsed_response.get("confidence")),
     )
@@ -290,10 +283,6 @@ def parse_behavior_scenario_segments_response(response: str) -> list[BehaviorSce
 class BehaviorScenarioAnalyzer:
     """用 LLM 将最近上下文抽象成行为选择所需的场景画像。"""
 
-    @staticmethod
-    def _context_placeholder_text() -> str:
-        return "上下文已作为后续多条消息提供；请只分析这些消息，不要把本句当作聊天内容。"
-
     async def analyze(
         self,
         *,
@@ -310,7 +299,6 @@ class BehaviorScenarioAnalyzer:
         prompt = load_prompt(
             "behavior_scene_analyze",
             bot_name=global_config.bot.nickname,
-            context_text=normalized_context if include_context_in_prompt else self._context_placeholder_text(),
         )
         try:
             raw_response = await sub_agent_runner(prompt)

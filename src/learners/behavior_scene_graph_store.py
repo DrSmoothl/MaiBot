@@ -270,8 +270,6 @@ def build_scene_descriptors(
         add("need", need, weight=0.75)
     for risk in profile.risk_flags[:2]:
         add("risk", risk, weight=0.45)
-    for avoid_behavior in profile.avoid_behaviors[:2]:
-        add("avoid", avoid_behavior, weight=0.35)
 
     return descriptors[:MAX_SCENE_GRAPH_NODES_PER_PROFILE]
 

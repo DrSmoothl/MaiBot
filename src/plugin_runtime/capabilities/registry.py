@@ -34,6 +34,7 @@ def register_capability_impls(manager: "PluginRuntimeManager", supervisor: "Plug
     _register("llm.generate", manager._cap_llm_generate)
     _register("llm.generate_with_tools", manager._cap_llm_generate_with_tools)
     _register("llm.embed", manager._cap_llm_embed)
+    _register("llm.transcribe_audio", manager._cap_llm_transcribe_audio)
     _register("llm.get_available_models", manager._cap_llm_get_available_models)
 
     _register("config.get", manager._cap_config_get)

@@ -25,6 +25,7 @@ from .v16_to_v17 import migrate_v16_to_v17
 from .v17_to_v18 import migrate_v17_to_v18
 from .v18_to_v19 import migrate_v18_to_v19
 from .v19_to_v20 import migrate_v19_to_v20
+from .v20_to_v21 import migrate_v20_to_v21
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -48,7 +49,8 @@ V17_SCHEMA_VERSION = 17
 V18_SCHEMA_VERSION = 18
 V19_SCHEMA_VERSION = 19
 V20_SCHEMA_VERSION = 20
-LATEST_SCHEMA_VERSION = 20
+V21_SCHEMA_VERSION = 21
+LATEST_SCHEMA_VERSION = 21
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -237,6 +239,48 @@ def _detect_v20_base_schema(snapshot: DatabaseSchemaSnapshot) -> bool:
         return False
     if not snapshot.has_column("behavior_experience_paths", "scene_cluster_id"):
         return False
+    if snapshot.has_column("behavior_experience_paths", "actor_type"):
+        return False
+    if snapshot.has_column("behavior_experience_paths", "learning_type"):
+        return False
+    if snapshot.has_column("behavior_experience_paths", "start_scene_node_id"):
+        return False
+    if not snapshot.has_table("behavior_experience_scene_links"):
+        return False
+    if not snapshot.has_table("behavior_scene_nodes"):
+        return False
+    if not snapshot.has_table("behavior_scene_edges"):
+        return False
+    if not snapshot.has_table("behavior_action_nodes"):
+        return False
+    if not snapshot.has_table("behavior_outcome_nodes"):
+        return False
+    if not snapshot.has_table("behavior_scene_action_edges"):
+        return False
+    if not snapshot.has_table("behavior_action_outcome_edges"):
+        return False
+    return True
+
+
+def _detect_v21_base_schema(snapshot: DatabaseSchemaSnapshot) -> bool:
+    """判断数据库是否满足区分观察学习与自身反馈的行为路径结构。"""
+
+    if not _detect_v18_common_schema(snapshot):
+        return False
+    if not snapshot.has_table("behavior_scene_clusters"):
+        return False
+    if not snapshot.has_column("behavior_scene_clusters", "tag_distribution"):
+        return False
+    if not snapshot.has_column("behavior_scene_clusters", "normalized_tags"):
+        return False
+    if not snapshot.has_table("behavior_experience_paths"):
+        return False
+    if not snapshot.has_column("behavior_experience_paths", "scene_cluster_id"):
+        return False
+    if not snapshot.has_column("behavior_experience_paths", "actor_type"):
+        return False
+    if not snapshot.has_column("behavior_experience_paths", "learning_type"):
+        return False
     if snapshot.has_column("behavior_experience_paths", "start_scene_node_id"):
         return False
     if not snapshot.has_table("behavior_experience_scene_links"):
@@ -279,9 +323,24 @@ class LatestSchemaVersionDetector(BaseSchemaVersionDetector):
             Optional[int]: 若识别为最新结构则返回最新版本号，否则返回 ``None``。
         """
 
-        if not _detect_v20_base_schema(snapshot):
+        if not _detect_v21_base_schema(snapshot):
             return None
         return LATEST_SCHEMA_VERSION
+
+
+class V20SchemaVersionDetector(BaseSchemaVersionDetector):
+    """v20 schema 结构探测器。"""
+
+    @property
+    def name(self) -> str:
+        return "v20_schema_detector"
+
+    def detect_version(self, snapshot: DatabaseSchemaSnapshot) -> Optional[int]:
+        """检测数据库是否为 v20 结构。"""
+
+        if not _detect_v20_base_schema(snapshot):
+            return None
+        return V20_SCHEMA_VERSION
 
 
 class V19SchemaVersionDetector(BaseSchemaVersionDetector):
@@ -898,6 +957,7 @@ def build_default_schema_version_detectors() -> List[BaseSchemaVersionDetector]:
 
     return [
         LatestSchemaVersionDetector(),
+        V20SchemaVersionDetector(),
         V19SchemaVersionDetector(),
         V18SchemaVersionDetector(),
         V17SchemaVersionDetector(),
@@ -1072,6 +1132,13 @@ def build_default_migration_registry() -> MigrationRegistry:
                 name="v19_to_v20",
                 description="删除测试期行为数据，创建独立场景簇概率分布结构。",
                 handler=migrate_v19_to_v20,
+            ),
+            MigrationStep(
+                version_from=V20_SCHEMA_VERSION,
+                version_to=V21_SCHEMA_VERSION,
+                name="v20_to_v21",
+                description="为行为经验路径增加行为主体与学习类型字段。",
+                handler=migrate_v20_to_v21,
             ),
         ]
     )
