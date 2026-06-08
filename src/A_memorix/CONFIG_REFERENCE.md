@@ -277,6 +277,21 @@ default_sample_size = 24
 enabled = true
 mode = "blacklist" # blacklist / whitelist
 chats = ["group:123", "user:456", "stream:abc"]
+
+[filter.retrieval.chat_stream]
+enabled = false
+mode = "blacklist"
+chats = []
+
+[filter.retrieval.chat_summary]
+enabled = false
+mode = "blacklist"
+chats = []
+
+[filter.retrieval.episode]
+enabled = false
+mode = "blacklist"
+chats = []
 ```
 
 规则：
@@ -286,6 +301,14 @@ chats = ["group:123", "user:456", "stream:abc"]
 - 列表为空时：
   - `blacklist` => 全允许
   - `whitelist` => 全拒绝
+- `chats` 支持 `group:<group_id>`、`user:<user_id>`、`private:<user_id>`、
+  `stream:<session_id>`；裸字符串会匹配 stream/group/user 任一 token。
+- `filter.retrieval.*` 只在检索结果后置过滤阶段生效，不影响写入、聊天摘要生成、
+  Episode 生成、人物画像刷新或画像快照。
+- `chat_stream` 裁剪普通 paragraph/relation 命中；`chat_summary` 裁剪
+  `source_type=chat_summary` 或 `source=chat_summary:<session_id>` 命中；
+  `episode` 裁剪 Episode 命中。
+- 人物画像当前保持全局聚合与缓存，不按群组隔离。
 
 ### `shared_memory_groups`
 
@@ -309,6 +332,7 @@ rule_type = "group"
 注意：
 
 - `filter.whitelist` 只控制哪些聊天流允许读写记忆。
+- `filter.retrieval.*` 只裁剪已经召回的检索结果，不会扩大检索范围。
 - `shared_memory_groups` 才控制哪些聊天流互相共享检索范围。
 - 成员会解析为系统已知的真实聊天流 ID；解析不到的目标不会生效。
 

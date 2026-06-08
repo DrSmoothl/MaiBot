@@ -1997,6 +1997,89 @@ class AMemorixThresholdConfig(ConfigBase):
     """是否启用自动阈值调整"""
 
 
+class AMemorixRetrievalSubtypeFilterConfig(ConfigBase):
+    """A_Memorix 检索结果分类型聊天过滤配置"""
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用结果过滤",
+                "en_US": "Enable result filter",
+                "ja_JP": "結果フィルターを有効化",
+            },
+        },
+    )
+    """是否启用当前检索结果类型的聊天过滤"""
+
+    mode: Literal["blacklist", "whitelist"] = Field(
+        default="blacklist",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "过滤模式",
+                "en_US": "Filter mode",
+                "ja_JP": "フィルターモード",
+            },
+        },
+    )
+    """过滤模式"""
+
+    chats: list[str] = Field(
+        default_factory=lambda: [],
+        json_schema_extra={
+            "label": {
+                "zh_CN": "聊天流列表",
+                "en_US": "Chat stream list",
+                "ja_JP": "チャットストリーム一覧",
+            },
+        },
+    )
+    """聊天流列表"""
+
+
+class AMemorixRetrievalFilterConfig(ConfigBase):
+    """A_Memorix 检索结果后置聊天过滤配置"""
+
+    chat_stream: AMemorixRetrievalSubtypeFilterConfig = Field(
+        default_factory=AMemorixRetrievalSubtypeFilterConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "普通聊天流记忆",
+                "en_US": "Chat stream memory",
+                "ja_JP": "通常チャット記憶",
+            },
+            "x-collapsed-by-default": True,
+        },
+    )
+    """普通 paragraph/relation 命中的检索后置过滤"""
+
+    chat_summary: AMemorixRetrievalSubtypeFilterConfig = Field(
+        default_factory=AMemorixRetrievalSubtypeFilterConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "聊天总结记忆",
+                "en_US": "Chat summary memory",
+                "ja_JP": "チャット要約記憶",
+            },
+            "x-collapsed-by-default": True,
+        },
+    )
+    """聊天总结命中的检索后置过滤"""
+
+    episode: AMemorixRetrievalSubtypeFilterConfig = Field(
+        default_factory=AMemorixRetrievalSubtypeFilterConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "Episode 记忆",
+                "en_US": "Episode memory",
+                "ja_JP": "Episode 記憶",
+            },
+            "x-collapsed-by-default": True,
+        },
+    )
+    """Episode 命中的检索后置过滤"""
+
+
 class AMemorixFilterConfig(ConfigBase):
     """A_Memorix 聊天过滤配置"""
 
@@ -2035,6 +2118,19 @@ class AMemorixFilterConfig(ConfigBase):
         },
     )
     """聊天流列表"""
+
+    retrieval: AMemorixRetrievalFilterConfig = Field(
+        default_factory=AMemorixRetrievalFilterConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "检索结果过滤",
+                "en_US": "Retrieval result filter",
+                "ja_JP": "検索結果フィルター",
+            },
+            "x-collapsed-by-default": True,
+        },
+    )
+    """仅对检索结果生效的分类型聊天过滤，不影响写入和后台生成"""
 
 
 class AMemorixSharedMemoryGroupConfig(ConfigBase):

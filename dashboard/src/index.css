@@ -1137,6 +1137,110 @@
   background: transparent;
 }
 
+/* 长期记忆控制台密度优化：只收紧记忆页局部布局，不影响全局组件默认尺寸。 */
+.memory-console-density {
+  --memory-density-gap: 0.75rem;
+}
+
+.memory-console-density [data-dashboard-card='true'] {
+  border-radius: 0.5rem;
+}
+
+.memory-console-density [data-dashboard-card-header='true'] {
+  padding: 1rem 1rem 0.625rem;
+}
+
+.memory-console-density [data-dashboard-card-content='true'] {
+  padding: 0 1rem 1rem;
+}
+
+.memory-console-density [data-dashboard-card-footer='true'] {
+  padding: 0 1rem 1rem;
+}
+
+.memory-console-density [data-dashboard-card-header='true'].pb-3 {
+  padding-bottom: 0.625rem;
+}
+
+.memory-console-density .space-y-4 > :not([hidden]) ~ :not([hidden]),
+.memory-console-density .space-y-5 > :not([hidden]) ~ :not([hidden]),
+.memory-console-density .space-y-6 > :not([hidden]) ~ :not([hidden]),
+.memory-console-density [data-dashboard-card-content='true'].space-y-3 > :not([hidden]) ~ :not([hidden]),
+.memory-console-density [data-dashboard-card-content='true'].space-y-4 > :not([hidden]) ~ :not([hidden]),
+.memory-console-density [data-dashboard-card-content='true'].space-y-5 > :not([hidden]) ~ :not([hidden]),
+.memory-console-density [data-dashboard-card-content='true'].space-y-6 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0;
+  margin-bottom: 0;
+  margin-block-start: 0;
+  margin-block-end: 0;
+}
+
+.memory-console-density .space-y-4 > :not([hidden]):not(:last-child),
+.memory-console-density .space-y-5 > :not([hidden]):not(:last-child),
+.memory-console-density .space-y-6 > :not([hidden]):not(:last-child),
+.memory-console-density [data-dashboard-card-content='true'].space-y-3 > :not([hidden]):not(:last-child),
+.memory-console-density [data-dashboard-card-content='true'].space-y-4 > :not([hidden]):not(:last-child),
+.memory-console-density [data-dashboard-card-content='true'].space-y-5 > :not([hidden]):not(:last-child),
+.memory-console-density [data-dashboard-card-content='true'].space-y-6 > :not([hidden]):not(:last-child) {
+  margin-top: 0;
+  margin-bottom: var(--memory-density-gap);
+  margin-block-start: 0;
+  margin-block-end: var(--memory-density-gap);
+}
+
+.memory-console-density .gap-4,
+.memory-console-density .gap-5,
+.memory-console-density .gap-6 {
+  gap: var(--memory-density-gap);
+}
+
+.memory-console-density .gap-3 {
+  gap: 0.625rem;
+}
+
+.memory-console-density [data-dashboard-tabs-list='true'] {
+  gap: 0.25rem;
+  padding: 0.25rem;
+}
+
+.memory-console-density [data-dashboard-tabs-trigger='true'] {
+  padding: 0.25rem 0.625rem;
+}
+
+.memory-console-density th {
+  height: 2.25rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.memory-console-density td {
+  padding: 0.5rem 0.75rem;
+}
+
+.memory-console-density [class*='h-[520px]'] {
+  height: 28rem;
+}
+
+.memory-console-density [class*='h-[420px]'] {
+  height: 23rem;
+}
+
+.memory-console-density [class*='h-[300px]'] {
+  height: 16rem;
+}
+
+.memory-console-density [class*='h-[220px]'] {
+  height: 12rem;
+}
+
+.memory-console-density textarea.min-h-\[180px\] {
+  min-height: 9rem;
+}
+
+.memory-console-density textarea.min-h-\[120px\] {
+  min-height: 6rem;
+}
+
 /* ============================================================
  * Touch & Pointer 优化 (Task 4)
  * ============================================================ */

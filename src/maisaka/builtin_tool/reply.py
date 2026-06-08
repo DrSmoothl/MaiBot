@@ -138,7 +138,6 @@ async def handle_tool(
         )
 
     replyer_chat_history = list(tool_ctx.runtime._chat_history)
-
     try:
         success, reply_result = await replyer.generate_reply_with_context(
             reply_reason=latest_thought,

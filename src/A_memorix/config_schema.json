@@ -36,7 +36,10 @@
           "retrieval",
           "retrieval.sparse",
           "threshold",
-          "filter"
+          "filter",
+          "filter.retrieval.chat_stream",
+          "filter.retrieval.chat_summary",
+          "filter.retrieval.episode"
         ],
         "order": 3
       },
@@ -1580,6 +1583,183 @@
           "min": 0.1,
           "max": 600,
           "step": 0.1,
+          "choices": null
+        }
+      }
+    },
+    "filter.retrieval.chat_stream": {
+      "name": "filter.retrieval.chat_stream",
+      "title": "普通聊天流检索过滤",
+      "description": "按群组、私聊用户或聊天流裁剪普通 paragraph/relation 检索命中。",
+      "icon": null,
+      "collapsed": true,
+      "order": 9.1,
+      "fields": {
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "是否启用该类型的检索结果后置过滤。",
+          "label": "启用结果过滤",
+          "ui_type": "switch",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 1,
+          "hint": "仅影响已经召回的检索结果，不影响写入、摘要生成、Episode 生成或人物画像。",
+          "choices": null
+        },
+        "mode": {
+          "name": "mode",
+          "type": "string",
+          "default": "blacklist",
+          "description": "过滤模式",
+          "label": "过滤模式",
+          "ui_type": "select",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 2,
+          "hint": "blacklist 为移除列表中的来源；whitelist 为仅保留列表中的来源。",
+          "choices": [
+            "blacklist",
+            "whitelist"
+          ]
+        },
+        "chats": {
+          "name": "chats",
+          "type": "array",
+          "default": [],
+          "description": "聊天流列表",
+          "label": "聊天流列表",
+          "ui_type": "list",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 3,
+          "hint": "示例：group:123、user:456、private:456、stream:abc；裸字符串会匹配 stream/group/user 任一 token。",
+          "item_type": "string",
+          "min_items": 0,
+          "max_items": 500,
+          "placeholder": "group:123",
+          "choices": null
+        }
+      }
+    },
+    "filter.retrieval.chat_summary": {
+      "name": "filter.retrieval.chat_summary",
+      "title": "聊天总结检索过滤",
+      "description": "按群组、私聊用户或聊天流裁剪 chat_summary 来源的检索命中。",
+      "icon": null,
+      "collapsed": true,
+      "order": 9.2,
+      "fields": {
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "是否启用该类型的检索结果后置过滤。",
+          "label": "启用结果过滤",
+          "ui_type": "switch",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 1,
+          "hint": "仅影响已经召回的检索结果，不影响写入、摘要生成、Episode 生成或人物画像。",
+          "choices": null
+        },
+        "mode": {
+          "name": "mode",
+          "type": "string",
+          "default": "blacklist",
+          "description": "过滤模式",
+          "label": "过滤模式",
+          "ui_type": "select",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 2,
+          "hint": "blacklist 为移除列表中的来源；whitelist 为仅保留列表中的来源。",
+          "choices": [
+            "blacklist",
+            "whitelist"
+          ]
+        },
+        "chats": {
+          "name": "chats",
+          "type": "array",
+          "default": [],
+          "description": "聊天流列表",
+          "label": "聊天流列表",
+          "ui_type": "list",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 3,
+          "hint": "示例：group:123、user:456、private:456、stream:abc；裸字符串会匹配 stream/group/user 任一 token。",
+          "item_type": "string",
+          "min_items": 0,
+          "max_items": 500,
+          "placeholder": "group:123",
+          "choices": null
+        }
+      }
+    },
+    "filter.retrieval.episode": {
+      "name": "filter.retrieval.episode",
+      "title": "Episode 检索过滤",
+      "description": "按群组、私聊用户或聊天流裁剪 Episode 检索命中。",
+      "icon": null,
+      "collapsed": true,
+      "order": 9.3,
+      "fields": {
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "是否启用该类型的检索结果后置过滤。",
+          "label": "启用结果过滤",
+          "ui_type": "switch",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 1,
+          "hint": "仅影响已经召回的检索结果，不影响写入、摘要生成、Episode 生成或人物画像。",
+          "choices": null
+        },
+        "mode": {
+          "name": "mode",
+          "type": "string",
+          "default": "blacklist",
+          "description": "过滤模式",
+          "label": "过滤模式",
+          "ui_type": "select",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 2,
+          "hint": "blacklist 为移除列表中的来源；whitelist 为仅保留列表中的来源。",
+          "choices": [
+            "blacklist",
+            "whitelist"
+          ]
+        },
+        "chats": {
+          "name": "chats",
+          "type": "array",
+          "default": [],
+          "description": "聊天流列表",
+          "label": "聊天流列表",
+          "ui_type": "list",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 3,
+          "hint": "示例：group:123、user:456、private:456、stream:abc；裸字符串会匹配 stream/group/user 任一 token。",
+          "item_type": "string",
+          "min_items": 0,
+          "max_items": 500,
+          "placeholder": "group:123",
           "choices": null
         }
       }

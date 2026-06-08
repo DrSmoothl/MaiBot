@@ -230,6 +230,7 @@ MAIBOT_UI_REUSE_SERVICES=1 bash scripts/verify_a_memorix_webui.sh
 - `embedding.quantization_type`（当前仅支持 `int8`）
 - `retrieval.*`
 - `retrieval.sparse.*`
+- `filter.retrieval.*`（仅检索结果后置过滤，不影响写入、摘要/Episode 生成或人物画像）
 - `episode.*`
 - `person_profile.*`
 - `memory.*`

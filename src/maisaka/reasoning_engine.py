@@ -2025,6 +2025,10 @@ class MaisakaReasoningEngine:
         if not history_content:
             history_content = "工具执行成功。" if result.success else f"工具 {tool_call.func_name} 执行失败。"
 
+        normalized_metadata = self._normalize_tool_record_value(result.metadata)
+        if not isinstance(normalized_metadata, dict):
+            normalized_metadata = {}
+
         self._runtime._chat_history.append(
             ToolResultMessage(
                 content=history_content,
@@ -2032,6 +2036,7 @@ class MaisakaReasoningEngine:
                 tool_call_id=tool_call.call_id,
                 tool_name=tool_call.func_name,
                 success=result.success,
+                metadata=normalized_metadata,
             )
         )
         self._append_tool_result_media_messages(tool_call, result)

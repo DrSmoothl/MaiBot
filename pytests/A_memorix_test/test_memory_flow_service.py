@@ -47,6 +47,42 @@ def test_person_fact_resolve_target_person_for_private_chat(monkeypatch):
     assert person.person_id == "qq:123"
 
 
+def test_person_fact_resolve_target_person_for_group_without_reply(monkeypatch):
+    class FakePerson:
+        def __init__(self, person_id: str):
+            self.person_id = person_id
+            self.is_known = person_id == "qq:user-1"
+
+    recent_user_message = SimpleNamespace(
+        platform="qq",
+        user_id="user-1",
+        message_info=SimpleNamespace(user_info=SimpleNamespace(user_id="user-1")),
+    )
+
+    def fake_find_messages(**kwargs):
+        if kwargs.get("session_id") == "session-1":
+            return [recent_user_message]
+        return []
+
+    service = memory_flow_module.PersonFactWritebackService.__new__(memory_flow_module.PersonFactWritebackService)
+    monkeypatch.setattr(memory_flow_module, "find_messages", fake_find_messages)
+    monkeypatch.setattr(memory_flow_module, "is_bot_self", lambda platform, user_id: False)
+    monkeypatch.setattr(memory_flow_module, "get_person_id", lambda platform, user_id: f"{platform}:{user_id}")
+    monkeypatch.setattr(memory_flow_module, "Person", FakePerson)
+
+    message = SimpleNamespace(
+        session_id="session-1",
+        timestamp=20.0,
+        reply_to="",
+        session=SimpleNamespace(platform="qq", user_id="bot-1", group_id="group-1", session_id="session-1"),
+    )
+
+    person = service._resolve_target_person(message)
+
+    assert person is not None
+    assert person.person_id == "qq:user-1"
+
+
 def test_person_fact_reply_evidence_keeps_context_for_short_answer(monkeypatch):
     class FakePerson:
         person_id = "qq:user-1"
