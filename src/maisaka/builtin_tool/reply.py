@@ -11,9 +11,12 @@ from src.common.logger import get_logger
 from src.config import config as config_module
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.maisaka.context.message_adapter import build_visible_text_from_sequence
+from src.maisaka.context.messages import ToolResultMessage
+from src.maisaka.memory.heuristic_injector import merge_heuristic_memory_reference_for_replyer
 from src.services import send_service
 
 from .context import BuiltinToolRuntimeContext
+from .query_memory import REPLYER_MEMORY_REFERENCE_MARKER
 
 logger = get_logger("maisaka_builtin_reply")
 _REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote", "reference_info"}
@@ -92,6 +95,73 @@ def _get_selected_expression_habits(reply_result: ReplyGenerationResult) -> str:
     return str(extra.get("selected_expression_habits") or "").strip()
 
 
+def _get_context_message_id(message: Any) -> str:
+    """读取上下文消息对应的真实消息编号。"""
+
+    message_id = str(getattr(message, "message_id", "") or "").strip()
+    if message_id:
+        return message_id
+
+    original_message = getattr(message, "original_message", None)
+    return str(getattr(original_message, "message_id", "") or "").strip()
+
+
+def _find_target_message_index(chat_history: list[Any], target_message_id: str) -> int:
+    """定位当前回复目标在上下文历史中的位置。"""
+
+    if not target_message_id:
+        return -1
+    for index in range(len(chat_history) - 1, -1, -1):
+        if _get_context_message_id(chat_history[index]) == target_message_id:
+            return index
+    return -1
+
+
+def _collect_replyer_memory_references(chat_history: list[Any], *, target_message_id: str) -> list[str]:
+    """收集目标消息之后 query_memory 留给 replyer 的内部参考。"""
+
+    target_index = _find_target_message_index(chat_history, target_message_id)
+    if target_index < 0:
+        return []
+
+    references: list[str] = []
+    seen_references: set[str] = set()
+    for message in chat_history[target_index + 1 :]:
+        if not isinstance(message, ToolResultMessage):
+            continue
+        if message.tool_name != "query_memory" or not message.success:
+            continue
+        metadata = message.metadata if isinstance(message.metadata, dict) else {}
+        reference = str(metadata.get("replyer_memory_reference") or "").strip()
+        if not reference or reference in seen_references:
+            continue
+        seen_references.add(reference)
+        references.append(reference)
+    return references
+
+
+def _merge_query_memory_reference_for_replyer(
+    *,
+    reference_info: str,
+    chat_history: list[Any],
+    target_message_id: str,
+) -> str:
+    """把本轮 query_memory 结果合并给 replyer。"""
+
+    existing = str(reference_info or "").strip()
+    if REPLYER_MEMORY_REFERENCE_MARKER in existing:
+        return existing
+
+    references = _collect_replyer_memory_references(chat_history, target_message_id=target_message_id)
+    if not references:
+        return existing
+
+    memory_reference = "\n\n".join(references)
+    if not existing:
+        return memory_reference
+    return f"{existing}\n\n{memory_reference}"
+
+
 async def handle_tool(
     tool_ctx: BuiltinToolRuntimeContext,
     invocation: ToolInvocation,
@@ -100,6 +170,7 @@ async def handle_tool(
     """执行 reply 内置工具。"""
 
     latest_thought = context.reasoning if context is not None else invocation.reasoning
+    raw_reference_info = str(invocation.arguments.get("reference_info") or "").strip()
     target_message_id = str(invocation.arguments.get("msg_id") or "").strip()
     set_quote = bool(invocation.arguments.get("set_quote", True))
     reply_tool_args = {
@@ -147,10 +218,20 @@ async def handle_tool(
         )
 
     replyer_chat_history = list(tool_ctx.runtime._chat_history)
+    reference_info_with_memory = _merge_query_memory_reference_for_replyer(
+        reference_info=raw_reference_info,
+        chat_history=replyer_chat_history,
+        target_message_id=target_message_id,
+    )
+    reference_info = merge_heuristic_memory_reference_for_replyer(
+        session_id=str(tool_ctx.runtime.session_id or ""),
+        reference_info=reference_info_with_memory,
+    )
 
     try:
         success, reply_result = await replyer.generate_reply_with_context(
             reply_reason=latest_thought,
+            reference_info=reference_info,
             stream_id=tool_ctx.runtime.session_id,
             reply_message=target_message,
             chat_history=replyer_chat_history,

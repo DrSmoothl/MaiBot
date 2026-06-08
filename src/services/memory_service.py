@@ -42,14 +42,14 @@ class MemorySearchResult:
     success: bool = True
     error: str = ""
 
-    def to_text(self, limit: int = 5) -> str:
+    def to_text(self, limit: int = 5, *, truncate_content: bool = True, max_content_chars: int = 160) -> str:
         if not self.hits:
             return ""
         lines = []
         for index, item in enumerate(self.hits[: max(1, int(limit))], start=1):
             content = item.content.strip().replace("\n", " ")
-            if len(content) > 160:
-                content = content[:160] + "..."
+            if truncate_content and len(content) > max_content_chars:
+                content = content[:max_content_chars] + "..."
             lines.append(f"{index}. {content}")
         return "\n".join(lines)
 

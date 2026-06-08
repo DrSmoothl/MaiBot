@@ -404,6 +404,52 @@ export interface MemoryImportChatTargetsPayload {
   data: MemoryImportChatTargetPayload[]
 }
 
+export type MemoryTimelineEventCategory =
+  | 'paragraph'
+  | 'episode'
+  | 'profile'
+  | 'feedback'
+  | 'delete'
+  | 'maintenance'
+
+export interface MemoryTimelineJumpTargetPayload {
+  tab: 'graph' | 'episodes' | 'profiles' | 'feedback' | 'delete' | 'maintenance' | 'timeline'
+  params: Record<string, string | number | boolean | null | undefined>
+}
+
+export interface MemoryTimelineEventPayload {
+  event_id: string
+  event_type: string
+  category: MemoryTimelineEventCategory
+  occurred_at: number
+  chat_id: string
+  chat_name: string
+  title: string
+  summary: string
+  object_count: number
+  key_id?: string
+  source?: string
+  attribution?: string
+  metadata?: Record<string, unknown>
+  jump_target: MemoryTimelineJumpTargetPayload
+}
+
+export interface MemoryTimelinePayload {
+  success: boolean
+  chat: Pick<MemoryImportChatTargetPayload, 'chat_id' | 'chat_name' | 'platform' | 'group_id' | 'user_id' | 'is_group'>
+  range: {
+    time_start?: number | null
+    time_end?: number | null
+    min_time?: number | null
+    max_time?: number | null
+  }
+  items: MemoryTimelineEventPayload[]
+  summary: {
+    total: number
+    by_type: Record<string, number>
+  }
+}
+
 export interface MemoryImportResolvePathPayload {
   success?: boolean
   alias: string
@@ -1004,6 +1050,30 @@ export async function rollbackMemoryFeedbackCorrection(
 
 export async function getMemorySources(): Promise<MemorySourceListPayload> {
   return requestJson<MemorySourceListPayload>('/sources')
+}
+
+export async function getMemoryTimeline(options: {
+  chatId: string
+  timeStart?: number
+  timeEnd?: number
+  types?: string[]
+  limit?: number
+}): Promise<MemoryTimelinePayload> {
+  const params = new URLSearchParams({
+    chat_id: options.chatId,
+    limit: String(options.limit ?? 100),
+  })
+  if (options.timeStart !== undefined) {
+    params.set('time_start', String(options.timeStart))
+  }
+  if (options.timeEnd !== undefined) {
+    params.set('time_end', String(options.timeEnd))
+  }
+  const cleanTypes = (options.types ?? []).map((item) => item.trim()).filter(Boolean)
+  if (cleanTypes.length > 0) {
+    params.set('types', cleanTypes.join(','))
+  }
+  return requestJson<MemoryTimelinePayload>(`/timeline?${params.toString()}`)
 }
 
 export async function getMemoryEpisodes(options?: {

@@ -62,6 +62,7 @@ vi.mock('@/lib/memory-api', () => ({
   getMemoryImportGuide: vi.fn(),
   getMemoryImportSettings: vi.fn(),
   getMemoryImportPathAliases: vi.fn(),
+  getMemoryImportChatTargets: vi.fn(),
   getMemoryImportTasks: vi.fn(),
   getMemoryImportTask: vi.fn(),
   getMemoryImportTaskChunks: vi.fn(),
@@ -88,6 +89,22 @@ vi.mock('@/lib/memory-api', () => ({
   getMemoryDeleteOperation: vi.fn(),
   getMemoryFeedbackCorrections: vi.fn(),
   getMemoryFeedbackCorrection: vi.fn(),
+  getMemoryTimeline: vi.fn(),
+  getMemoryEpisodes: vi.fn(),
+  getMemoryEpisodeStatus: vi.fn(),
+  getMemoryEpisode: vi.fn(),
+  rebuildMemoryEpisodes: vi.fn(),
+  processMemoryEpisodePending: vi.fn(),
+  getMemoryProfiles: vi.fn(),
+  searchMemoryProfiles: vi.fn(),
+  queryMemoryProfile: vi.fn(),
+  setMemoryProfileOverride: vi.fn(),
+  deleteMemoryProfileOverride: vi.fn(),
+  getMemoryRecycleBin: vi.fn(),
+  restoreMaintainedMemory: vi.fn(),
+  reinforceMemory: vi.fn(),
+  freezeMemory: vi.fn(),
+  protectMemory: vi.fn(),
   getMemoryProfileEvidence: vi.fn(),
   correctMemoryProfileEvidence: vi.fn(),
   previewMemoryDelete: vi.fn(),
@@ -193,8 +210,26 @@ function mockImportCompletedWithErrorsDetail(taskId: string): memoryApi.MemoryIm
   }
 }
 
+async function waitForConsoleReady() {
+  await screen.findByRole('tab', { name: '图谱' }, { timeout: 10_000 })
+}
+
 describe('KnowledgeBasePage import workflow', () => {
   beforeEach(() => {
+    if (!Element.prototype.hasPointerCapture) {
+      Element.prototype.hasPointerCapture = vi.fn()
+    }
+    if (!Element.prototype.setPointerCapture) {
+      Element.prototype.setPointerCapture = vi.fn()
+    }
+    if (!Element.prototype.releasePointerCapture) {
+      Element.prototype.releasePointerCapture = vi.fn()
+    }
+    if (!Element.prototype.scrollIntoView) {
+      Element.prototype.scrollIntoView = vi.fn()
+    }
+
+    window.history.replaceState(null, '', '/resource/knowledge-base')
     navigateMock.mockReset()
     toastMock.mockReset()
     vi.mocked(memoryApi.createMemoryUploadImport).mockReset()
@@ -255,6 +290,8 @@ describe('KnowledgeBasePage import workflow', () => {
       embedding_degraded_reason: '',
       embedding_degraded_since: null,
       embedding_last_check: null,
+      vector_rebuild_required: true,
+      vector_rebuild_message: '需要重建向量',
       paragraph_vector_backfill_pending: 2,
       paragraph_vector_backfill_running: 0,
       paragraph_vector_backfill_failed: 1,
@@ -284,6 +321,19 @@ describe('KnowledgeBasePage import workflow', () => {
         plugin_data: 'data/plugins/a-dawn.a-memorix',
         raw: 'data/raw',
       },
+    })
+    vi.mocked(memoryApi.getMemoryImportChatTargets).mockResolvedValue({
+      success: true,
+      data: [
+        {
+          chat_id: 'chat-1',
+          chat_name: '测试群',
+          platform: 'qq',
+          group_id: '10001',
+          user_id: null,
+          is_group: true,
+        },
+      ],
     })
     vi.mocked(memoryApi.getMemoryImportTasks).mockResolvedValue({
       success: true,
@@ -483,6 +533,114 @@ describe('KnowledgeBasePage import workflow', () => {
         updated_at: 1_710_000_012,
       },
     })
+    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
+      success: true,
+      chat: {
+        chat_id: 'chat-1',
+        chat_name: '测试群',
+        platform: 'qq',
+        group_id: '10001',
+        user_id: null,
+        is_group: true,
+      },
+      range: {
+        time_start: 1_710_000_000,
+        time_end: 1_710_003_600,
+        min_time: 1_710_000_000,
+        max_time: 1_710_003_600,
+      },
+      summary: {
+        total: 1,
+        by_type: { episode: 1, episode_created: 1 },
+      },
+      items: [
+        {
+          event_id: 'episode_created:ep-1:1710000100',
+          event_type: 'episode_created',
+          category: 'episode',
+          occurred_at: 1_710_000_100,
+          chat_id: 'chat-1',
+          chat_name: '测试群',
+          title: 'Episode 新增：测试 Episode',
+          summary: '测试 Episode 摘要',
+          object_count: 2,
+          key_id: 'ep-1',
+          source: 'chat_summary:chat-1',
+          attribution: 'source',
+          metadata: { episode_id: 'ep-1' },
+          jump_target: {
+            tab: 'episodes',
+            params: {
+              episode_id: 'ep-1',
+              source: 'chat_summary:chat-1',
+            },
+          },
+        },
+      ],
+    })
+    vi.mocked(memoryApi.getMemoryEpisodeStatus).mockResolvedValue({
+      success: true,
+      pending_queue: 0,
+      counts: {},
+      failed: [],
+    })
+    vi.mocked(memoryApi.getMemoryEpisodes).mockResolvedValue({
+      success: true,
+      items: [
+        {
+          episode_id: 'ep-1',
+          title: '测试 Episode',
+          summary: '测试 Episode 摘要',
+          source: 'chat_summary:chat-1',
+          created_at: 1_710_000_100,
+          updated_at: 1_710_000_100,
+        },
+      ],
+      count: 1,
+    })
+    vi.mocked(memoryApi.getMemoryEpisode).mockResolvedValue({
+      success: true,
+      episode: {
+        episode_id: 'ep-1',
+        title: '测试 Episode',
+        summary: '测试 Episode 摘要',
+        source: 'chat_summary:chat-1',
+        paragraphs: [],
+      },
+    })
+    vi.mocked(memoryApi.rebuildMemoryEpisodes).mockResolvedValue({ success: true } as never)
+    vi.mocked(memoryApi.processMemoryEpisodePending).mockResolvedValue({ success: true } as never)
+    vi.mocked(memoryApi.getMemoryProfiles).mockResolvedValue({
+      success: true,
+      items: [],
+      count: 0,
+    })
+    vi.mocked(memoryApi.searchMemoryProfiles).mockResolvedValue({
+      success: true,
+      items: [],
+      count: 0,
+    })
+    vi.mocked(memoryApi.queryMemoryProfile).mockResolvedValue({
+      success: true,
+      person_id: 'person-1',
+      profile_text: '测试画像',
+    } as never)
+    vi.mocked(memoryApi.getMemoryProfileEvidence).mockResolvedValue({
+      success: true,
+      person_id: 'person-1',
+      evidence: [],
+    } as never)
+    vi.mocked(memoryApi.setMemoryProfileOverride).mockResolvedValue({ success: true } as never)
+    vi.mocked(memoryApi.deleteMemoryProfileOverride).mockResolvedValue({ success: true } as never)
+    vi.mocked(memoryApi.getMemoryRecycleBin).mockResolvedValue({
+      success: true,
+      items: [],
+      count: 0,
+    } as never)
+    vi.mocked(memoryApi.restoreMaintainedMemory).mockResolvedValue({ success: true } as never)
+    vi.mocked(memoryApi.reinforceMemory).mockResolvedValue({ success: true } as never)
+    vi.mocked(memoryApi.freezeMemory).mockResolvedValue({ success: true } as never)
+    vi.mocked(memoryApi.protectMemory).mockResolvedValue({ success: true } as never)
     vi.mocked(memoryApi.previewMemoryDelete).mockResolvedValue({
       success: true,
       mode: 'source',
@@ -557,7 +715,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    expect(await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })).toBeInTheDocument()
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
 
     expect(await screen.findByRole('button', { name: '创建导入任务' })).toBeInTheDocument()
@@ -571,7 +729,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    expect(await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })).toBeInTheDocument()
+    await waitForConsoleReady()
     await user.click(screen.getByRole('button', { name: '重建向量' }))
     await waitFor(() =>
       expect(memoryApi.rebuildMemoryRuntimeVectors).toHaveBeenCalledWith({ dry_run: true }),
@@ -595,7 +753,7 @@ describe('KnowledgeBasePage import workflow', () => {
       await screen.findByRole('button', { name: '创建导入任务' })
     }
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await openImportTab()
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
@@ -659,7 +817,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
     await screen.findByRole('button', { name: '创建导入任务' })
     await user.click(screen.getByRole('tab', { name: 'MaiBot 迁移' }))
@@ -694,7 +852,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
     await screen.findByRole('button', { name: '创建导入任务' })
     await user.click(screen.getByRole('tab', { name: 'MaiBot 迁移' }))
@@ -742,7 +900,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
 
     expect(await screen.findByText('alpha.txt')).toBeInTheDocument()
@@ -771,7 +929,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
 
     expect((await screen.findAllByText('完成（有错误）')).length).toBeGreaterThan(0)
@@ -782,7 +940,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
     await screen.findByText('任务详情')
 
@@ -817,7 +975,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
     await screen.findByText('导入队列')
 
@@ -827,7 +985,7 @@ describe('KnowledgeBasePage import workflow', () => {
       await new Promise((resolve) => setTimeout(resolve, 350))
     })
 
-    expect(screen.getByText('长期记忆控制台')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '图谱' })).toBeInTheDocument()
     expect(vi.mocked(memoryApi.getMemoryImportTasks).mock.calls.length).toBeGreaterThan(initialCalls)
   }, 20_000)
 
@@ -835,7 +993,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '调优' }))
     await screen.findByText('调优任务')
 
@@ -857,7 +1015,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '删除' }))
     await screen.findByText('来源批量删除')
 
@@ -906,7 +1064,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const user = userEvent.setup()
     render(<KnowledgeBasePage />)
 
-    await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })
+    await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '纠错历史' }))
     await screen.findByText('反馈纠错历史')
     await screen.findByText('测试用户最喜欢的颜色是什么')
@@ -923,5 +1081,95 @@ describe('KnowledgeBasePage import workflow', () => {
         reason: '人工确认回退',
       }),
     )
+  }, 20_000)
+
+  it('renders audit timeline and jumps to an episode target', async () => {
+    const user = userEvent.setup()
+    render(<KnowledgeBasePage />)
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
+    expect(await screen.findByText('事件列表')).toBeInTheDocument()
+    expect(await screen.findByText('Episode 新增：测试 Episode')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(memoryApi.getMemoryTimeline).toHaveBeenCalledWith(expect.objectContaining({ chatId: 'chat-1' })),
+    )
+
+    await user.click(screen.getByRole('button', { name: '跳转' }))
+    expect(await screen.findByText('Episode 查询')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(memoryApi.getMemoryEpisodes).toHaveBeenCalledWith(expect.objectContaining({
+        source: 'chat_summary:chat-1',
+      })),
+    )
+    await waitFor(() => expect(memoryApi.getMemoryEpisode).toHaveBeenCalledWith('ep-1'))
+  }, 20_000)
+
+  it('paginates audit timeline events and supports page size presets', async () => {
+    const timelineEvents: memoryApi.MemoryTimelineEventPayload[] = Array.from({ length: 7 }, (_, index) => {
+      const itemNumber = index + 1
+      return {
+        event_id: `paragraph_created:paragraph-${itemNumber}:1710000${itemNumber}`,
+        event_type: 'paragraph_created',
+        category: 'paragraph',
+        occurred_at: 1_710_000_700 - index,
+        chat_id: 'chat-1',
+        chat_name: '测试群',
+        title: `段落新增：第 ${itemNumber} 条`,
+        summary: `分页测试摘要 ${itemNumber}`,
+        object_count: 1,
+        key_id: `paragraph-${itemNumber}`,
+        source: 'chat_summary:chat-1',
+        attribution: 'source',
+        metadata: { paragraph_hash: `paragraph-${itemNumber}` },
+        jump_target: {
+          tab: 'graph',
+          params: {
+            paragraph_hash: `paragraph-${itemNumber}`,
+          },
+        },
+      }
+    })
+    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
+      success: true,
+      chat: {
+        chat_id: 'chat-1',
+        chat_name: '测试群',
+        platform: 'qq',
+        group_id: '10001',
+        user_id: null,
+        is_group: true,
+      },
+      range: {
+        time_start: 1_710_000_000,
+        time_end: 1_710_003_600,
+        min_time: 1_710_000_000,
+        max_time: 1_710_003_600,
+      },
+      summary: {
+        total: timelineEvents.length,
+        by_type: { paragraph: timelineEvents.length, paragraph_created: timelineEvents.length },
+      },
+      items: timelineEvents,
+    })
+
+    const user = userEvent.setup()
+    render(<KnowledgeBasePage />)
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
+    expect(await screen.findByText('段落新增：第 1 条')).toBeInTheDocument()
+    expect(screen.getByText('第 1 / 2 页，每页 5 条')).toBeInTheDocument()
+    expect(screen.queryByText('段落新增：第 6 条')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '下一页' }))
+    expect(await screen.findByText('段落新增：第 6 条')).toBeInTheDocument()
+    expect(screen.getByText('第 2 / 2 页，每页 5 条')).toBeInTheDocument()
+    expect(screen.queryByText('段落新增：第 1 条')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: '每页显示条数' }))
+    await user.click(await screen.findByRole('option', { name: '10 条' }))
+    expect(await screen.findByText('段落新增：第 7 条')).toBeInTheDocument()
+    expect(screen.getByText('第 1 / 1 页，每页 10 条')).toBeInTheDocument()
   }, 20_000)
 })

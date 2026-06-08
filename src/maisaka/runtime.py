@@ -1770,4 +1770,3 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return None
 
         return GroupInfo(group_id=group_info.group_id, group_name=group_info.group_name)
-

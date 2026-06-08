@@ -20,6 +20,7 @@ from src.services.memory_service import MemoryHit, memory_service
 logger = get_logger("maisaka_heuristic_memory")
 
 HEURISTIC_MEMORY_REFERENCE_MARKER = "【启发式记忆-内部参考】"
+_REPLYER_REFERENCE_MARKER = HEURISTIC_MEMORY_REFERENCE_MARKER
 _SOURCE_CHAT_SUMMARY_PREFIX = "chat_summary:"
 _SOURCE_PERSON_FACT_PREFIX = "person_fact:"
 
@@ -157,6 +158,32 @@ class HeuristicMemoryInjector:
             return
         state.cached_reference = ""
         state.cache_expires_at = 0.0
+
+    def get_session_reference(self, session_id: str) -> str:
+        """读取当前会话最近一次可复用的启发式记忆参考。"""
+
+        state = self._states.get(str(session_id or "").strip())
+        if state is None:
+            return ""
+        if state.cache_expires_at and time() > state.cache_expires_at:
+            state.cached_reference = ""
+            state.cache_expires_at = 0.0
+            return ""
+        return state.cached_reference
+
+    def merge_reference_for_replyer(self, *, session_id: str, reference_info: str) -> str:
+        """把同一份启发式记忆参考合并给 Replyer。"""
+
+        existing = str(reference_info or "").strip()
+        if _REPLYER_REFERENCE_MARKER in existing:
+            return existing
+
+        heuristic_reference = self.get_session_reference(session_id)
+        if not heuristic_reference:
+            return existing
+        if not existing:
+            return heuristic_reference
+        return f"{existing}\n\n{heuristic_reference}"
 
     @staticmethod
     def _can_trigger(
@@ -405,3 +432,12 @@ class HeuristicMemoryInjector:
 
 
 heuristic_memory_injector = HeuristicMemoryInjector()
+
+
+def merge_heuristic_memory_reference_for_replyer(*, session_id: str, reference_info: str) -> str:
+    """供 reply 工具合并启发式记忆参考。"""
+
+    return heuristic_memory_injector.merge_reference_for_replyer(
+        session_id=session_id,
+        reference_info=reference_info,
+    )

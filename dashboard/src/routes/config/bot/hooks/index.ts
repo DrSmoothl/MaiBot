@@ -28,6 +28,8 @@ export {
   MultipleReplyStyleHook,
   RegexRulesHook,
 } from './complexFieldHooks'
+export { AMemorixRetrievalChatsHook } from './AMemorixRetrievalChatsHook'
+export { AMemorixRetrievalFilterMirrorHook } from './AMemorixRetrievalFilterMirrorHook'
 export { ChatSectionHook } from './ChatSectionHook'
 export { PersonalitySectionHook } from './PersonalitySectionHook'
 export { DebugSectionHook } from './DebugSectionHook'
