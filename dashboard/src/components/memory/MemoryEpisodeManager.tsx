@@ -70,6 +70,10 @@ function getEpisodeTitle(item: MemoryEpisodeItemPayload): string {
   return String(item.title ?? item.summary ?? item.content ?? getEpisodeId(item) ?? '未命名 Episode')
 }
 
+function formatTimestampInput(timestamp?: number): string {
+  return typeof timestamp === 'number' && Number.isFinite(timestamp) ? String(Math.floor(timestamp)) : ''
+}
+
 function getEpisodeParagraphs(
   item: MemoryEpisodeItemPayload | MemoryEpisodeDetailPayload['episode'] | null | undefined,
 ): MemoryEpisodeParagraphPayload[] {
@@ -86,7 +90,19 @@ function getStatusCount(status: MemoryEpisodeStatusPayload | null, key: string):
   return typeof value === 'number' ? value : 0
 }
 
-export function MemoryEpisodeManager() {
+export interface MemoryEpisodeManagerProps {
+  initialEpisodeId?: string
+  initialSource?: string
+  initialTimeStart?: number
+  initialTimeEnd?: number
+}
+
+export function MemoryEpisodeManager({
+  initialEpisodeId = '',
+  initialSource = '',
+  initialTimeStart,
+  initialTimeEnd,
+}: MemoryEpisodeManagerProps) {
   const { toast } = useToast()
   const [query, setQuery] = useState('')
   const [source, setSource] = useState('')
@@ -111,6 +127,8 @@ export function MemoryEpisodeManager() {
   const [pendingLimit, setPendingLimit] = useState('20')
   const [pendingMaxRetry, setPendingMaxRetry] = useState('3')
   const initialLoadedRef = useRef(false)
+  const initialTargetKeyRef = useRef('')
+  const pendingInitialTargetRef = useRef<{ source: string; timeStart: string; timeEnd: string } | null>(null)
 
   const selectedEpisode = useMemo(() => detail?.episode ?? items.find((item) => getEpisodeId(item) === selectedId), [detail?.episode, items, selectedId])
   const selectedEpisodeParagraphs = useMemo(() => getEpisodeParagraphs(selectedEpisode), [selectedEpisode])
@@ -181,6 +199,52 @@ export function MemoryEpisodeManager() {
     initialLoadedRef.current = true
     void loadEpisodes()
   }, [loadEpisodes])
+
+  useEffect(() => {
+    const targetKey = [initialEpisodeId, initialSource, initialTimeStart, initialTimeEnd].join('|')
+    if (!initialEpisodeId && !initialSource && initialTimeStart === undefined && initialTimeEnd === undefined) {
+      return
+    }
+    if (targetKey === initialTargetKeyRef.current) {
+      return
+    }
+    initialTargetKeyRef.current = targetKey
+    const nextTimeStart = formatTimestampInput(initialTimeStart)
+    const nextTimeEnd = formatTimestampInput(initialTimeEnd)
+    pendingInitialTargetRef.current = {
+      source: initialSource,
+      timeStart: nextTimeStart,
+      timeEnd: nextTimeEnd,
+    }
+    if (initialSource) {
+      setSource(initialSource)
+    }
+    if (initialTimeStart !== undefined) {
+      setTimeStart(nextTimeStart)
+    }
+    if (initialTimeEnd !== undefined) {
+      setTimeEnd(nextTimeEnd)
+    }
+    if (initialEpisodeId) {
+      setSelectedId(initialEpisodeId)
+    }
+  }, [initialEpisodeId, initialSource, initialTimeEnd, initialTimeStart])
+
+  useEffect(() => {
+    const pendingTarget = pendingInitialTargetRef.current
+    if (!pendingTarget) {
+      return
+    }
+    if (
+      (pendingTarget.source && source !== pendingTarget.source)
+      || (pendingTarget.timeStart && timeStart !== pendingTarget.timeStart)
+      || (pendingTarget.timeEnd && timeEnd !== pendingTarget.timeEnd)
+    ) {
+      return
+    }
+    pendingInitialTargetRef.current = null
+    void loadEpisodes()
+  }, [loadEpisodes, source, timeEnd, timeStart])
 
   useEffect(() => {
     if (selectedId) {

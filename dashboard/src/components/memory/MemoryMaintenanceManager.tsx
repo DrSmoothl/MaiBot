@@ -94,7 +94,11 @@ function getActionLabel(action: MaintenanceAction): string {
   }
 }
 
-export function MemoryMaintenanceManager() {
+export interface MemoryMaintenanceManagerProps {
+  initialTarget?: string
+}
+
+export function MemoryMaintenanceManager({ initialTarget = '' }: MemoryMaintenanceManagerProps) {
   const { toast } = useToast()
   const [target, setTarget] = useState('')
   const [action, setAction] = useState<MaintenanceAction>('reinforce')
@@ -105,6 +109,7 @@ export function MemoryMaintenanceManager() {
   const [actionLoading, setActionLoading] = useState(false)
   const [itemSearch, setItemSearch] = useState('')
   const initialLoadedRef = useRef(false)
+  const initialTargetAppliedRef = useRef('')
 
   const filteredItems = useMemo(() => {
     const keyword = itemSearch.trim().toLowerCase()
@@ -146,6 +151,16 @@ export function MemoryMaintenanceManager() {
     initialLoadedRef.current = true
     void loadRecycleBin()
   }, [loadRecycleBin])
+
+  useEffect(() => {
+    const cleanTarget = initialTarget.trim()
+    if (!cleanTarget || cleanTarget === initialTargetAppliedRef.current) {
+      return
+    }
+    initialTargetAppliedRef.current = cleanTarget
+    setTarget(cleanTarget)
+    setItemSearch(cleanTarget)
+  }, [initialTarget])
 
   const runAction = useCallback(async (nextAction: MaintenanceAction, nextTarget: string) => {
     const cleanTarget = nextTarget.trim()
