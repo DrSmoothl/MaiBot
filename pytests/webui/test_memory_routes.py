@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import json
+import pickle
 import pytest
 
 from src.services.memory_service import MemorySearchResult
@@ -126,6 +128,57 @@ class _FakeMemoryMetadataStore:
         if "person_profile" in sql or "FROM relations" in sql:
             return []
         return []
+
+
+class _CountingTimelineMetadataStore(_FakeMemoryMetadataStore):
+    def __init__(self):
+        super().__init__()
+        self.delete_item_query_count = 0
+        self.profile_paragraph_query_count = 0
+        self.paragraph_rows.append(
+            {
+                "hash": "p-zero",
+                "content": "零时间戳段落",
+                "created_at": 0.0,
+                "updated_at": 0.0,
+                "metadata": json.dumps({"chat_id": "chat-1"}).encode("utf-8"),
+                "source": "external",
+                "is_deleted": 0,
+                "deleted_at": None,
+            }
+        )
+        self.paragraph_rows.append(
+            {
+                "hash": "p-pickle",
+                "content": "pickle metadata 不应在请求路径反序列化",
+                "created_at": 180.0,
+                "updated_at": 180.0,
+                "metadata": pickle.dumps({"chat_id": "chat-1"}),
+                "source": "external",
+                "is_deleted": 0,
+                "deleted_at": None,
+            }
+        )
+        self.delete_rows.append(
+            {
+                "operation_id": "op-2",
+                "mode": "source",
+                "selector": '{"sources":["chat_summary:chat-1"]}',
+                "reason": "第二次清理",
+                "requested_by": "tester",
+                "status": "done",
+                "created_at": 175.0,
+                "restored_at": None,
+                "summary_json": '{"sources":["chat_summary:chat-1"]}',
+            }
+        )
+
+    def query(self, sql: str, params=None):
+        if "FROM delete_operation_items" in sql:
+            self.delete_item_query_count += 1
+        if "FROM paragraph_entities" in sql and "JOIN paragraphs" in sql:
+            self.profile_paragraph_query_count += 1
+        return super().query(sql, params)
 
 
 @pytest.fixture
@@ -674,6 +727,41 @@ def test_webui_memory_timeline_rejects_unknown_chat(client: TestClient, monkeypa
 
     assert response.status_code == 400
     assert response.json()["detail"] == "聊天流不存在: missing-chat"
+
+
+def test_webui_memory_timeline_handles_json_bytes_zero_timestamp_and_batches_items(
+    client: TestClient,
+    monkeypatch,
+):
+    store = _CountingTimelineMetadataStore()
+    monkeypatch.setattr(
+        memory_router_module,
+        "_find_real_chat_session",
+        lambda chat_id: SimpleNamespace(
+            session_id=chat_id,
+            platform="qq",
+            group_id="100",
+            user_id=None,
+            group_name="测试群",
+            user_cardname=None,
+            user_nickname=None,
+        ),
+    )
+    monkeypatch.setattr(memory_router_module, "_get_memory_metadata_store", lambda: store)
+    monkeypatch.setattr(memory_router_module, "_prefetch_latest_messages_by_session", lambda db_session, session_ids: {})
+
+    response = client.get("/api/webui/memory/timeline", params={"chat_id": "chat-1", "limit": 50})
+
+    assert response.status_code == 200
+    payload = response.json()
+    paragraph_ids = {
+        item["key_id"]
+        for item in payload["items"]
+        if item["event_type"] == "paragraph_created"
+    }
+    assert "p-zero" in paragraph_ids
+    assert "p-pickle" not in paragraph_ids
+    assert store.delete_item_query_count == 2
 
 
 def test_compat_aggregate_route(client: TestClient, monkeypatch):

@@ -132,6 +132,12 @@ class _RetrievalTypeFilterMetadataStore(_ScopedSearchMetadataStore):
                     "source": "chat_summary:session-other",
                     "metadata": {"chat_id": "session-other", "source_type": "chat_summary"},
                 },
+                "para-person-fact": {
+                    "hash": "para-person-fact",
+                    "content": "人物事实不属于聊天流过滤范围。",
+                    "source": "person_fact",
+                    "metadata": {"source_type": "person_fact"},
+                },
             }
         )
         self.relation_paragraphs.update(
@@ -194,6 +200,31 @@ class _ScopedSearchRetriever:
         return results
 
 
+class _RetrievalTypeFilterSearchRetriever:
+    config = type("RetrieverConfig", (), {"enable_ppr": False})()
+
+    async def retrieve(self, *, query: str, top_k: int, temporal: Any) -> list[RetrievalResult]:
+        del query, top_k, temporal
+        return [
+            RetrievalResult(
+                hash_value="para-stream-other",
+                content="其他聊天流普通记忆。",
+                score=0.99,
+                result_type="paragraph",
+                source="paragraph_search",
+                metadata={},
+            ),
+            RetrievalResult(
+                hash_value="para-stream-current",
+                content="当前聊天流普通记忆。",
+                score=0.98,
+                result_type="paragraph",
+                source="paragraph_search",
+                metadata={},
+            ),
+        ]
+
+
 def _build_kernel(*, entities: list[dict[str, Any]], relations: list[dict[str, Any]]) -> SDKMemoryKernel:
     kernel = SDKMemoryKernel(plugin_root=Path.cwd(), config={})
 
@@ -239,6 +270,25 @@ def _build_scoped_search_kernel(tmp_path) -> tuple[SDKMemoryKernel, _ScopedSearc
 def _build_retrieval_filter_kernel(config: dict[str, Any]) -> SDKMemoryKernel:
     kernel = SDKMemoryKernel(plugin_root=Path.cwd(), config=config)
     kernel.metadata_store = _RetrievalTypeFilterMetadataStore()  # type: ignore[assignment]
+    return kernel
+
+
+def _build_retrieval_filter_search_kernel(tmp_path, config: dict[str, Any]) -> SDKMemoryKernel:
+    kernel = SDKMemoryKernel(plugin_root=tmp_path, config=config)
+
+    async def _fake_initialize() -> None:
+        return None
+
+    kernel.initialize = _fake_initialize  # type: ignore[method-assign]
+    kernel._initialized = True
+    kernel.metadata_store = _RetrievalTypeFilterMetadataStore()  # type: ignore[assignment]
+    kernel.graph_store = object()  # type: ignore[assignment]
+    kernel.vector_store = object()  # type: ignore[assignment]
+    kernel.embedding_manager = object()
+    kernel.retriever = _RetrievalTypeFilterSearchRetriever()  # type: ignore[assignment]
+    kernel.episode_retriever = object()  # type: ignore[assignment]
+    kernel.aggregate_query_service = object()  # type: ignore[assignment]
+    kernel.threshold_filter = None
     return kernel
 
 
@@ -489,6 +539,74 @@ def test_retrieval_type_filter_matches_stream_when_session_unresolved(
     filtered = kernel._filter_hits_by_retrieval_type_scope(hits)
 
     assert [item["episode_id"] for item in filtered] == ["episode-current"]
+
+
+def test_retrieval_type_filter_keeps_non_chat_sources_when_chat_stream_whitelisted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _build_retrieval_filter_kernel(
+        config={
+            "filter": {
+                "retrieval": {
+                    "chat_stream": {
+                        "enabled": True,
+                        "mode": "whitelist",
+                        "chats": ["stream:session-current"],
+                    }
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "src.A_memorix.core.runtime.sdk_memory_kernel.chat_manager.get_existing_session_by_session_id",
+        lambda session_id: None,
+    )
+    hits = [
+        {
+            "type": "paragraph",
+            "hash": "para-person-fact",
+            "content": "人物事实不属于聊天流过滤范围。",
+            "metadata": {"source_type": "person_fact"},
+        }
+    ]
+
+    assert kernel._filter_hits_by_retrieval_type_scope(hits) == hits
+
+
+@pytest.mark.asyncio
+async def test_search_memory_respect_filter_false_skips_retrieval_type_filter(tmp_path) -> None:
+    kernel = _build_retrieval_filter_search_kernel(
+        tmp_path,
+        config={
+            "retrieval": {
+                "search": {
+                    "smart_fallback": {"enabled": False},
+                    "safe_content_dedup": {"enabled": False},
+                }
+            },
+            "filter": {
+                "retrieval": {
+                    "chat_stream": {
+                        "enabled": True,
+                        "mode": "whitelist",
+                        "chats": ["stream:session-current"],
+                    }
+                }
+            },
+        },
+    )
+
+    payload = await kernel.search_memory(
+        KernelSearchRequest(
+            query="普通记忆",
+            limit=10,
+            mode="search",
+            respect_filter=False,
+        )
+    )
+
+    assert [item["hash"] for item in payload["hits"]] == ["para-stream-other", "para-stream-current"]
 
 
 def test_retrieval_type_filter_applies_to_relation_source_paragraph(

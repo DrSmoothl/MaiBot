@@ -594,13 +594,15 @@ export function KnowledgeBasePage() {
     if (tab === 'episodes') {
       const episodeId = readJumpParam(target, 'episode_id')
       const source = readJumpParam(target, 'source')
+      const timeStart = readJumpNumber(target, 'time_start')
+      const timeEnd = readJumpNumber(target, 'time_end')
       setEpisodeInitialTarget({
         episodeId,
         source,
-        timeStart: readJumpNumber(target, 'time_start'),
-        timeEnd: readJumpNumber(target, 'time_end'),
+        timeStart,
+        timeEnd,
       })
-      switchMemoryTab('episodes', { episode_id: episodeId, source })
+      switchMemoryTab('episodes', { episode_id: episodeId, source, time_start: timeStart, time_end: timeEnd })
       return
     }
 

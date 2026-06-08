@@ -149,7 +149,9 @@ class PersonFactWritebackService:
                 logger.debug(f"查询 reply_to 目标失败: {exc}")
                 replies = []
             if replies:
-                return self._person_from_user_message(replies[0], fallback_platform=session_platform)
+                person = self._person_from_user_message(replies[0], fallback_platform=session_platform)
+                if person is not None:
+                    return person
 
         session_id = str(
             getattr(message, "session_id", "")

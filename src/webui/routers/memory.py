@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 import json
-import pickle
 import shutil
 import uuid
 
@@ -383,9 +382,17 @@ def _safe_float(value: Any) -> Optional[float]:
         parsed = float(value)
     except (TypeError, ValueError):
         return None
-    if not parsed or parsed != parsed:
+    if parsed != parsed or parsed in {float("inf"), float("-inf")}:
         return None
     return parsed
+
+
+def _first_float(*values: Any) -> Optional[float]:
+    for value in values:
+        parsed = _safe_float(value)
+        if parsed is not None:
+            return parsed
+    return None
 
 
 def _decode_metadata_payload(raw: Any) -> dict[str, Any]:
@@ -393,7 +400,7 @@ def _decode_metadata_payload(raw: Any) -> dict[str, Any]:
         return dict(raw)
     if isinstance(raw, bytes):
         try:
-            decoded = pickle.loads(raw)
+            decoded = json.loads(raw.decode("utf-8"))
             return dict(decoded) if isinstance(decoded, dict) else {}
         except Exception:
             return {}
@@ -402,11 +409,7 @@ def _decode_metadata_payload(raw: Any) -> dict[str, Any]:
             decoded = json.loads(raw)
             return dict(decoded) if isinstance(decoded, dict) else {}
         except Exception:
-            try:
-                decoded = pickle.loads(raw.encode("latin1"))
-                return dict(decoded) if isinstance(decoded, dict) else {}
-            except Exception:
-                return {}
+            return {}
     return {}
 
 
@@ -521,6 +524,18 @@ def _query_memory_rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str,
         return []
 
 
+def _timeline_query_limit(limit: int, multiplier: int, minimum: int) -> Optional[int]:
+    if limit <= 0:
+        return None
+    return max(limit * multiplier, minimum)
+
+
+def _append_limit(sql: str, limit: Optional[int]) -> str:
+    if limit is None:
+        return sql
+    return f"{sql}\n        LIMIT ?"
+
+
 def _timeline_paragraph_events(
     *,
     chat: MemoryTimelineChat,
@@ -529,14 +544,17 @@ def _timeline_paragraph_events(
     accepted_types: set[str],
     limit: int,
 ) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 5, 200)
     rows = _query_memory_rows(
-        """
+        _append_limit(
+            """
         SELECT hash, content, created_at, updated_at, metadata, source, is_deleted, deleted_at
         FROM paragraphs
         ORDER BY COALESCE(updated_at, created_at, 0) DESC
-        LIMIT ?
         """,
-        (max(limit * 5, 200),),
+            query_limit,
+        ),
+        (query_limit,) if query_limit is not None else (),
     )
     events: list[MemoryTimelineEvent] = []
     for row in rows:
@@ -551,7 +569,7 @@ def _timeline_paragraph_events(
         updated_at = _safe_float(row.get("updated_at"))
         deleted_at = _safe_float(row.get("deleted_at"))
         is_deleted = bool(int(row.get("is_deleted") or 0))
-        if created_at and _event_in_range(created_at, time_start, time_end):
+        if created_at is not None and _event_in_range(created_at, time_start, time_end):
             events.append(
                 _timeline_event(
                     event_type="paragraph_created",
@@ -567,7 +585,12 @@ def _timeline_paragraph_events(
                     jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
                 )
             )
-        if updated_at and created_at and abs(updated_at - created_at) > 1.0 and _event_in_range(updated_at, time_start, time_end):
+        if (
+            updated_at is not None
+            and created_at is not None
+            and abs(updated_at - created_at) > 1.0
+            and _event_in_range(updated_at, time_start, time_end)
+        ):
             events.append(
                 _timeline_event(
                     event_type="paragraph_updated",
@@ -583,7 +606,7 @@ def _timeline_paragraph_events(
                     jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
                 )
             )
-        if is_deleted and deleted_at and _event_in_range(deleted_at, time_start, time_end):
+        if is_deleted and deleted_at is not None and _event_in_range(deleted_at, time_start, time_end):
             events.append(
                 _timeline_event(
                     event_type="paragraph_deleted",
@@ -614,15 +637,18 @@ def _timeline_episode_events(
     if not sources:
         return []
     placeholders = ",".join("?" for _ in sources)
+    query_limit = _timeline_query_limit(limit, 3, 100)
     rows = _query_memory_rows(
-        f"""
+        _append_limit(
+            f"""
         SELECT episode_id, source, title, summary, paragraph_count, created_at, updated_at, event_time_start, event_time_end
         FROM episodes
         WHERE source IN ({placeholders})
         ORDER BY COALESCE(updated_at, created_at, event_time_start, 0) DESC
-        LIMIT ?
         """,
-        (*sources, max(limit * 3, 100)),
+            query_limit,
+        ),
+        (*sources, *((query_limit,) if query_limit is not None else ())),
     )
     events: list[MemoryTimelineEvent] = []
     for row in rows:
@@ -633,7 +659,7 @@ def _timeline_episode_events(
         summary = str(row.get("summary") or row.get("title") or "Episode 已生成").strip()
         title = str(row.get("title") or "Episode").strip()
         paragraph_count = int(row.get("paragraph_count") or 1)
-        if created_at and _event_in_range(created_at, time_start, time_end):
+        if created_at is not None and _event_in_range(created_at, time_start, time_end):
             events.append(
                 _timeline_event(
                     event_type="episode_created",
@@ -650,7 +676,12 @@ def _timeline_episode_events(
                     jump_target={"tab": "episodes", "params": {"episode_id": episode_id, "source": source}},
                 )
             )
-        if updated_at and created_at and abs(updated_at - created_at) > 1.0 and _event_in_range(updated_at, time_start, time_end):
+        if (
+            updated_at is not None
+            and created_at is not None
+            and abs(updated_at - created_at) > 1.0
+            and _event_in_range(updated_at, time_start, time_end)
+        ):
             events.append(
                 _timeline_event(
                     event_type="episode_updated",
@@ -698,15 +729,18 @@ def _timeline_feedback_events(
     accepted_types: set[str],
     limit: int,
 ) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 3, 100)
     rows = _query_memory_rows(
-        """
+        _append_limit(
+            """
         SELECT *
         FROM memory_feedback_tasks
         WHERE session_id = ?
         ORDER BY COALESCE(updated_at, query_timestamp, created_at, 0) DESC
-        LIMIT ?
         """,
-        (chat.chat_id, max(limit * 3, 100)),
+            query_limit,
+        ),
+        (chat.chat_id, *((query_limit,) if query_limit is not None else ())),
     )
     events: list[MemoryTimelineEvent] = []
     for row in rows:
@@ -718,8 +752,8 @@ def _timeline_feedback_events(
         task_id = str(task.get("id") or "").strip()
         query_tool_id = str(task.get("query_tool_id") or "").strip()
         status = str(task.get("status") or "").strip()
-        updated_at = _safe_float(task.get("updated_at")) or _safe_float(task.get("query_timestamp")) or _safe_float(task.get("created_at"))
-        if updated_at and _event_in_range(updated_at, time_start, time_end):
+        updated_at = _first_float(task.get("updated_at"), task.get("query_timestamp"), task.get("created_at"))
+        if updated_at is not None and _event_in_range(updated_at, time_start, time_end):
             events.append(
                 _timeline_event(
                     event_type="feedback_correction_applied",
@@ -737,7 +771,7 @@ def _timeline_feedback_events(
                 )
             )
         rolled_back_at = _safe_float(task.get("rolled_back_at"))
-        if rolled_back_at and _event_in_range(rolled_back_at, time_start, time_end):
+        if rolled_back_at is not None and _event_in_range(rolled_back_at, time_start, time_end):
             events.append(
                 _timeline_event(
                     event_type="feedback_correction_rollback",
@@ -755,7 +789,7 @@ def _timeline_feedback_events(
                 )
             )
         for person_id in _feedback_person_ids(task):
-            if updated_at and _event_in_range(updated_at, time_start, time_end):
+            if updated_at is not None and _event_in_range(updated_at, time_start, time_end):
                 events.append(
                     _timeline_event(
                         event_type="profile_updated",
@@ -806,35 +840,48 @@ def _timeline_delete_events(
     accepted_types: set[str],
     limit: int,
 ) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 4, 200)
     rows = _query_memory_rows(
-        """
+        _append_limit(
+            """
         SELECT operation_id, mode, selector, reason, requested_by, status, created_at, restored_at, summary_json
         FROM delete_operations
         ORDER BY COALESCE(restored_at, created_at, 0) DESC
-        LIMIT ?
         """,
-        (max(limit * 4, 200),),
+            query_limit,
+        ),
+        (query_limit,) if query_limit is not None else (),
     )
+    operation_ids = [str(row.get("operation_id") or "").strip() for row in rows]
+    operation_ids = [operation_id for operation_id in operation_ids if operation_id]
+    items_by_operation: dict[str, list[dict[str, Any]]] = {operation_id: [] for operation_id in operation_ids}
+    if operation_ids:
+        placeholders = ",".join("?" for _ in operation_ids)
+        item_rows = _query_memory_rows(
+            f"""
+            SELECT operation_id, item_type, item_hash, item_key, payload_json, created_at
+            FROM delete_operation_items
+            WHERE operation_id IN ({placeholders})
+            ORDER BY operation_id ASC, id ASC
+            """,
+            tuple(operation_ids),
+        )
+        for item in item_rows:
+            operation_id = str(item.get("operation_id") or "").strip()
+            if operation_id in items_by_operation:
+                items_by_operation[operation_id].append(dict(item))
+
     events: list[MemoryTimelineEvent] = []
     for row in rows:
         operation_id = str(row.get("operation_id") or "").strip()
         if not operation_id:
             continue
-        item_rows = _query_memory_rows(
-            """
-            SELECT item_type, item_hash, item_key, payload_json, created_at
-            FROM delete_operation_items
-            WHERE operation_id = ?
-            ORDER BY id ASC
-            """,
-            (operation_id,),
-        )
         decoded_items = [
             {
                 **dict(item),
                 "payload": _decode_json_payload(item.get("payload_json"), {}),
             }
-            for item in item_rows
+            for item in items_by_operation.get(operation_id, [])
         ]
         summary_payload = _decode_json_payload(row.get("summary_json"), {})
         selector_payload = _decode_json_payload(row.get("selector"), row.get("selector"))
@@ -848,7 +895,7 @@ def _timeline_delete_events(
         restored_at = _safe_float(row.get("restored_at"))
         mode = str(row.get("mode") or "").strip()
         reason = str(row.get("reason") or "").strip()
-        if created_at and _event_in_range(created_at, time_start, time_end):
+        if created_at is not None and _event_in_range(created_at, time_start, time_end):
             events.append(
                 _timeline_event(
                     event_type="delete_executed",
@@ -865,7 +912,7 @@ def _timeline_delete_events(
                     jump_target={"tab": "delete", "params": {"operation_id": operation_id}},
                 )
             )
-        if restored_at and _event_in_range(restored_at, time_start, time_end):
+        if restored_at is not None and _event_in_range(restored_at, time_start, time_end):
             events.append(
                 _timeline_event(
                     event_type="delete_restored",
@@ -893,8 +940,10 @@ def _timeline_profile_events(
     accepted_types: set[str],
     limit: int,
 ) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 3, 100)
     rows = _query_memory_rows(
-        """
+        _append_limit(
+            """
         SELECT DISTINCT pps.person_id, pps.profile_version, pps.updated_at, pps.source_note
         FROM person_profile_snapshots pps
         JOIN paragraph_entities pe ON pe.entity_hash = pps.person_id OR pe.entity_hash IN (
@@ -902,28 +951,43 @@ def _timeline_profile_events(
         )
         JOIN paragraphs p ON p.hash = pe.paragraph_hash
         ORDER BY pps.updated_at DESC
-        LIMIT ?
         """,
-        (max(limit * 3, 100),),
+            query_limit,
+        ),
+        (query_limit,) if query_limit is not None else (),
     )
+    person_ids = [str(row.get("person_id") or "").strip() for row in rows]
+    person_ids = [person_id for person_id in person_ids if person_id]
+    paragraphs_by_person: dict[str, list[dict[str, Any]]] = {person_id: [] for person_id in person_ids}
+    if person_ids:
+        placeholders = ",".join("?" for _ in person_ids)
+        paragraph_rows = _query_memory_rows(
+            f"""
+            SELECT pe.entity_hash, e.name AS entity_name, p.hash, p.metadata, p.source
+            FROM paragraph_entities pe
+            LEFT JOIN entities e ON e.hash = pe.entity_hash
+            JOIN paragraphs p ON p.hash = pe.paragraph_hash
+            WHERE pe.entity_hash IN ({placeholders}) OR e.name IN ({placeholders})
+            """,
+            (*person_ids, *person_ids),
+        )
+        person_id_set = set(person_ids)
+        for paragraph in paragraph_rows:
+            entity_hash = str(paragraph.get("entity_hash") or "").strip()
+            entity_name = str(paragraph.get("entity_name") or "").strip()
+            for candidate in (entity_hash, entity_name):
+                if candidate in person_id_set:
+                    paragraphs_by_person[candidate].append(dict(paragraph))
+
     events: list[MemoryTimelineEvent] = []
     for row in rows:
-        paragraph_rows = _query_memory_rows(
-            """
-            SELECT p.hash, p.metadata, p.source
-            FROM paragraph_entities pe
-            JOIN paragraphs p ON p.hash = pe.paragraph_hash
-            WHERE pe.entity_hash = ? OR pe.entity_hash IN (SELECT hash FROM entities WHERE name = ?)
-            LIMIT 100
-            """,
-            (row.get("person_id"), row.get("person_id")),
-        )
+        person_id = str(row.get("person_id") or "").strip()
+        paragraph_rows = paragraphs_by_person.get(person_id, [])
         if not any(_paragraph_matches_chat(paragraph, chat.chat_id)[0] for paragraph in paragraph_rows):
             continue
         updated_at = _safe_float(row.get("updated_at"))
-        if not updated_at or not _event_in_range(updated_at, time_start, time_end):
+        if updated_at is None or not _event_in_range(updated_at, time_start, time_end):
             continue
-        person_id = str(row.get("person_id") or "").strip()
         events.append(
             _timeline_event(
                 event_type="profile_updated",
@@ -940,20 +1004,23 @@ def _timeline_profile_events(
                 jump_target={"tab": "profiles", "params": {"person_id": person_id}},
             )
         )
+    override_limit = _timeline_query_limit(limit, 1, 100)
     override_rows = _query_memory_rows(
-        """
+        _append_limit(
+            """
         SELECT person_id, updated_at, updated_by, source
         FROM person_profile_overrides
         ORDER BY updated_at DESC
-        LIMIT ?
         """,
-        (max(limit, 100),),
+            override_limit,
+        ),
+        (override_limit,) if override_limit is not None else (),
     )
     for row in override_rows:
         source = str(row.get("source") or "").strip()
         person_id = str(row.get("person_id") or "").strip()
         updated_at = _safe_float(row.get("updated_at"))
-        if not updated_at or not _event_in_range(updated_at, time_start, time_end):
+        if updated_at is None or not _event_in_range(updated_at, time_start, time_end):
             continue
         if not _source_matches_chat(source, chat.chat_id) and chat.chat_id not in source:
             continue
@@ -983,16 +1050,19 @@ def _timeline_maintenance_events(
     accepted_types: set[str],
     limit: int,
 ) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 4, 200)
     rows = _query_memory_rows(
-        """
+        _append_limit(
+            """
         SELECT r.hash, r.subject, r.predicate, r.object, r.source_paragraph, r.last_reinforced,
                r.inactive_since, r.protected_until, r.metadata, p.source, p.metadata AS paragraph_metadata
         FROM relations r
         LEFT JOIN paragraphs p ON p.hash = r.source_paragraph
         ORDER BY COALESCE(r.last_reinforced, r.inactive_since, r.protected_until, r.created_at, 0) DESC
-        LIMIT ?
         """,
-        (max(limit * 4, 200),),
+            query_limit,
+        ),
+        (query_limit,) if query_limit is not None else (),
     )
     events: list[MemoryTimelineEvent] = []
     for row in rows:
@@ -1009,7 +1079,7 @@ def _timeline_maintenance_events(
             ("relation_protected", "protected_until", "关系保护"),
         ):
             occurred_at = _safe_float(row.get(timestamp_key))
-            if not occurred_at or not _event_in_range(occurred_at, time_start, time_end):
+            if occurred_at is None or not _event_in_range(occurred_at, time_start, time_end):
                 continue
             events.append(
                 _timeline_event(
@@ -1081,11 +1151,11 @@ async def _memory_timeline(
                 time_start=None,
                 time_end=None,
                 accepted_types=set(),
-                limit=safe_limit,
+                limit=0,
             )
         )
     bound_events = _dedupe_timeline_events(bound_events)
-    bound_times = [event.occurred_at for event in bound_events if event.occurred_at]
+    bound_times = [event.occurred_at for event in bound_events if event.occurred_at is not None]
     min_time = min(bound_times) if bound_times else None
     max_time = max(bound_times) if bound_times else None
 

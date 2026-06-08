@@ -1568,7 +1568,9 @@ class SDKMemoryKernel:
             )
             hits = self._filter_episode_hits([self._episode_hit(row) for row in rows])
             hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)
-            hits = self._filter_hits_by_retrieval_type_scope(hits)[:limit]
+            if request.respect_filter:
+                hits = self._filter_hits_by_retrieval_type_scope(hits)
+            hits = hits[:limit]
             return {"summary": self._summary(hits), "hits": hits}
 
         if mode == "aggregate":
@@ -1589,7 +1591,8 @@ class SDKMemoryKernel:
             filtered = self._filter_hits(hits, request.person_id)
             filtered = self._filter_user_visible_hits(filtered)
             filtered = self._filter_hits_by_chat_scope(filtered, request.chat_id, shared_chat_ids)
-            filtered = self._filter_hits_by_retrieval_type_scope(filtered)
+            if request.respect_filter:
+                filtered = self._filter_hits_by_retrieval_type_scope(filtered)
             filtered = filtered[:limit]
             return {"summary": self._summary(filtered), "hits": filtered}
 
@@ -1615,7 +1618,8 @@ class SDKMemoryKernel:
         filtered = self._filter_hits(hits, request.person_id)
         filtered = self._filter_user_visible_hits(filtered)
         filtered = self._filter_hits_by_chat_scope(filtered, request.chat_id, shared_chat_ids)
-        filtered = self._filter_hits_by_retrieval_type_scope(filtered)
+        if request.respect_filter:
+            filtered = self._filter_hits_by_retrieval_type_scope(filtered)
         filtered = filtered[:limit]
         return {"summary": self._summary(filtered), "hits": filtered}
 
@@ -5927,12 +5931,16 @@ class SDKMemoryKernel:
         clean_source = str(source or "").strip()
         if clean_source_type == "chat_summary" or clean_source.startswith("chat_summary:"):
             return "chat_summary"
-        return "chat_stream"
+        if clean_source_type in {"chat_history", "chat_stream", "maibot.chat_history"}:
+            return "chat_stream"
+        if clean_source.startswith("chat_stream:") or clean_source.startswith("maibot.chat_history:"):
+            return "chat_stream"
+        return ""
 
     @staticmethod
     def _source_stream_id(source: str) -> str:
         token = str(source or "").strip()
-        for prefix in ("chat_summary:", "maibot.chat_history:"):
+        for prefix in ("chat_summary:", "chat_stream:", "maibot.chat_history:"):
             if token.startswith(prefix):
                 return token[len(prefix):].strip()
         return ""
@@ -5948,14 +5956,16 @@ class SDKMemoryKernel:
                 group_id = str(getattr(session, "group_id", "") or "").strip()
                 user_id = str(getattr(session, "user_id", "") or "").strip()
         return {
-            "kind": str(kind or "").strip() or "chat_stream",
+            "kind": str(kind or "").strip(),
             "stream_id": stream_token,
             "group_id": group_id,
             "user_id": user_id,
         }
 
     def _retrieval_filter_context_allowed(self, context: Dict[str, str]) -> bool:
-        kind = str(context.get("kind", "") or "chat_stream").strip()
+        kind = str(context.get("kind", "") or "").strip()
+        if not kind:
+            return True
         type_config = self._retrieval_type_filter_config(kind)
         if not type_config or not bool(type_config.get("enabled", False)):
             return True

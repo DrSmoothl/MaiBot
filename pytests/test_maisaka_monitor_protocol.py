@@ -18,11 +18,11 @@ from src.common.data_models.reply_generation_data_models import (
     build_reply_monitor_detail,
 )
 from src.core.tooling import ToolExecutionResult, ToolInvocation
-from src.maisaka.context_messages import SessionBackedMessage, ToolResultMessage
 from src.maisaka.builtin_tool.context import BuiltinToolRuntimeContext
 from src.maisaka.builtin_tool import reply as reply_tool_module
 from src.maisaka.builtin_tool import send_emoji as send_emoji_tool_module
-from src.maisaka.monitor_events import emit_planner_finalized
+from src.maisaka.context.messages import SessionBackedMessage, ToolResultMessage
+from src.maisaka.monitor.events import emit_planner_finalized
 from src.maisaka.reasoning_engine import MaisakaReasoningEngine
 from src.maisaka import runtime as runtime_module
 from src.maisaka.runtime import MaisakaHeartFlowChatting
@@ -529,7 +529,8 @@ async def test_reply_tool_drops_legacy_reference_info_argument(monkeypatch: pyte
     result = await reply_tool_module.handle_tool(tool_ctx, invocation)
 
     assert result.success is True
-    assert "reference_info" not in captured
+    assert "reference_info" in captured
+    assert "已有参考" in str(captured["reference_info"])
     assert "reference_info" not in captured["reply_tool_args"]
 
 

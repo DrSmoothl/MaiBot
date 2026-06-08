@@ -146,4 +146,28 @@ describe('AMemorixRetrievalChatsHook', () => {
 
     expect(onParentChange).toHaveBeenCalledWith('filter.retrieval.episode.enabled', true)
   })
+
+  it('treats string false as disabled in mirrored retrieval filter controls', () => {
+    render(
+      <AMemorixRetrievalFilterMirrorHook
+        fieldPath="a_memorix.episode"
+        parentValues={{
+          filter: {
+            retrieval: {
+              episode: {
+                enabled: 'false',
+                mode: 'blacklist',
+                chats: [],
+              },
+            },
+          },
+        }}
+        value={{}}
+      >
+        <div>Episode 原有设置</div>
+      </AMemorixRetrievalFilterMirrorHook>,
+    )
+
+    expect(screen.getByText('未启用，黑名单，已选择 0 个聊天流 token。')).toBeInTheDocument()
+  })
 })

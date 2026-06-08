@@ -43,6 +43,13 @@ const getNestedValue = (source: Record<string, unknown>, path: string[]): unknow
   return current
 }
 
+const normalizeEnabledValue = (value: unknown): boolean => {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  return String(value ?? '').trim().toLowerCase() === 'true'
+}
+
 const normalizeSubtypeFilterValue = (
   parentValues: Record<string, unknown> | undefined,
   kind: RetrievalFilterKind,
@@ -55,7 +62,7 @@ const normalizeSubtypeFilterValue = (
     chats: Array.isArray(subtypeConfig.chats)
       ? subtypeConfig.chats.map((item) => String(item ?? '').trim()).filter(Boolean)
       : [],
-    enabled: Boolean(subtypeConfig.enabled),
+    enabled: normalizeEnabledValue(subtypeConfig.enabled),
     mode: rawMode === 'whitelist' ? 'whitelist' : 'blacklist',
   }
 }

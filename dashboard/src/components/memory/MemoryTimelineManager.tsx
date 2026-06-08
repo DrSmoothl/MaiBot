@@ -186,6 +186,7 @@ export function MemoryTimelineManager({
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_TIMELINE_PAGE_SIZE)
   const initialAppliedRef = useRef(false)
+  const latestRequestRef = useRef(0)
 
   const selectedChat = useMemo(
     () => chatTargets.find((item) => item.chat_id === chatId) ?? null,
@@ -195,6 +196,7 @@ export function MemoryTimelineManager({
     () => normalizeRange(rangeBounds[0], rangeBounds[1], timeStart, timeEnd),
     [rangeBounds, timeEnd, timeStart],
   )
+  const [sliderDraft, setSliderDraft] = useState<[number, number]>(sliderValue)
   const filteredTypes = useMemo(() => (typeFilter === 'all' ? [] : [typeFilter]), [typeFilter])
 
   useEffect(() => {
@@ -222,9 +224,13 @@ export function MemoryTimelineManager({
 
   const loadTimeline = useCallback(async () => {
     if (!chatId) {
+      latestRequestRef.current += 1
       setPayload(null)
+      setLoading(false)
       return
     }
+    const requestId = latestRequestRef.current + 1
+    latestRequestRef.current = requestId
     setLoading(true)
     try {
       const nextPayload = await getMemoryTimeline({
@@ -234,6 +240,9 @@ export function MemoryTimelineManager({
         types: filteredTypes,
         limit: TIMELINE_FETCH_LIMIT,
       })
+      if (requestId !== latestRequestRef.current) {
+        return
+      }
       setPayload(nextPayload)
       const minTime = nextPayload.range.min_time
       const maxTime = nextPayload.range.max_time
@@ -241,13 +250,18 @@ export function MemoryTimelineManager({
         setRangeBounds(normalizeRange(minTime, maxTime))
       }
     } catch (error) {
+      if (requestId !== latestRequestRef.current) {
+        return
+      }
       toast({
         title: '加载审计时间线失败',
         description: error instanceof Error ? error.message : String(error),
         variant: 'destructive',
       })
     } finally {
-      setLoading(false)
+      if (requestId === latestRequestRef.current) {
+        setLoading(false)
+      }
     }
   }, [chatId, filteredTypes, timeEnd, timeStart, toast])
 
@@ -262,6 +276,13 @@ export function MemoryTimelineManager({
   }, [])
 
   const handleSliderChange = useCallback((value: number[]) => {
+    if (value.length < 2) {
+      return
+    }
+    setSliderDraft(normalizeRange(rangeBounds[0], rangeBounds[1], value[0], value[1]))
+  }, [rangeBounds])
+
+  const handleSliderCommit = useCallback((value: number[]) => {
     if (value.length < 2) {
       return
     }
@@ -285,6 +306,10 @@ export function MemoryTimelineManager({
   useEffect(() => {
     setCurrentPage(1)
   }, [payload])
+
+  useEffect(() => {
+    setSliderDraft(sliderValue)
+  }, [sliderValue])
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages))
@@ -360,12 +385,13 @@ export function MemoryTimelineManager({
                 min={rangeBounds[0]}
                 max={rangeBounds[1]}
                 step={60}
-                value={sliderValue}
+                value={sliderDraft}
                 onValueChange={handleSliderChange}
+                onValueCommit={handleSliderCommit}
               />
               <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                <span>窗口开始：{formatMemoryTime(sliderValue[0])}</span>
-                <span>窗口结束：{formatMemoryTime(sliderValue[1])}</span>
+                <span>窗口开始：{formatMemoryTime(sliderDraft[0])}</span>
+                <span>窗口结束：{formatMemoryTime(sliderDraft[1])}</span>
               </div>
             </div>
 
