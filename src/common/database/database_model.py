@@ -353,22 +353,63 @@ class BehaviorSceneCluster(SQLModel, table=True):
     update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
 
 
+class BehaviorSceneTagCluster(SQLModel, table=True):
+    """行为场景 tag 簇成员索引，用于将同义 tag 快速归到同一个簇。"""
+
+    __tablename__ = "behavior_scene_tag_clusters"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint("tag_kind", "tag", name="uq_behavior_scene_tag_cluster_kind_tag"),
+        Index("ix_behavior_scene_tag_clusters_kind_cluster", "tag_kind", "cluster_key"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tag_kind: str = Field(max_length=40, index=True)
+    tag: str = Field(sa_column=Column(Text, nullable=False))
+    cluster_key: str = Field(sa_column=Column(Text, nullable=False))
+    source_count: int = Field(default=0)
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
 class BehaviorSceneNode(SQLModel, table=True):
     """行为表现的场景节点，用于组织场景和行为之间的关联图。"""
 
     __tablename__ = "behavior_scene_nodes"  # type: ignore
     __table_args__ = (
-        UniqueConstraint("session_id", "node_kind", "normalized_name", name="uq_behavior_scene_node_scope_kind_name"),
         Index("ix_behavior_scene_nodes_session_kind", "session_id", "node_kind"),
+        Index("ix_behavior_scene_nodes_session_kind_name", "session_id", "node_kind", "name"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
     node_kind: str = Field(default="scene", max_length=40)
     name: str = Field(sa_column=Column(Text, nullable=False))
-    normalized_name: str = Field(sa_column=Column(Text, nullable=False))
     source_count: int = Field(default=0)
     score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
+    update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
+
+
+class BehaviorSceneNodeTag(SQLModel, table=True):
+    """行为场景节点到 tag 簇的倒排索引，用于快速激活图谱节点。"""
+
+    __tablename__ = "behavior_scene_node_tags"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint(
+            "scene_node_id",
+            "tag_kind",
+            "cluster_key",
+            name="uq_behavior_scene_node_tag_node_kind_cluster",
+        ),
+        Index("ix_behavior_scene_node_tags_scope_kind_cluster", "session_id", "tag_kind", "cluster_key"),
+        Index("ix_behavior_scene_node_tags_node", "scene_node_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: Optional[str] = Field(default=None, max_length=255, nullable=True, index=True)
+    scene_node_id: int = Field(index=True)
+    tag_kind: str = Field(max_length=40, index=True)
+    cluster_key: str = Field(sa_column=Column(Text, nullable=False))
+    weight: float = Field(default=1.0, sa_column=Column(Float, nullable=False, server_default="1"))
+    count: int = Field(default=0)
     update_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
 
 

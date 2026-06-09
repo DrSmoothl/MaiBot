@@ -432,14 +432,14 @@ class BehaviorLearner:
             return False
 
         scene_start_by_segment_id = {
-            segment.segment_id: segment.profile.to_learning_start_text()
+            segment.segment_id: segment.profile.tag_cluster_text()
             for segment in scene_segments
-            if segment.profile.to_learning_start_text()
+            if segment.profile.tag_cluster_text()
         }
         primary_segment = scene_segments[0]
         scene_start = scene_start_by_segment_id.get(primary_segment.segment_id, "")
         if not scene_start:
-            logger.debug(f"{learning_session_id} 行为学习未形成可用 start 场景，跳过本批次")
+            logger.debug(f"{learning_session_id} 行为学习未形成可用 tag 场景，跳过本批次")
             return False
 
         prompt = load_prompt(

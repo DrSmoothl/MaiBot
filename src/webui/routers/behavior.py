@@ -22,7 +22,7 @@ from src.common.database.database_model import (
     BehaviorSceneNode,
     ChatSession,
 )
-from src.learners.behavior_scenario import BehaviorScenarioProfile
+from src.learners.behavior_scenario import BehaviorScenarioProfile, parse_behavior_scenario_response
 from src.learners.behavior_scene_graph_store import debug_retrieve_behavior_scores_from_scene_graph
 from src.webui.dependencies import require_auth
 
@@ -135,10 +135,7 @@ class BehaviorScenarioDebugRequest(BaseModel):
     include_global: bool = Field(default=True)
     summary: str = Field(default="")
     user_intent: str = Field(default="")
-    conversation_phase: str = Field(default="")
-    domain_tags: list[str] = Field(default_factory=list)
-    behavior_needs: list[str] = Field(default_factory=list)
-    risk_flags: list[str] = Field(default_factory=list)
+    tag_clusters: list[dict[str, Any]] = Field(default_factory=list)
     max_count: int = Field(default=20, ge=1, le=80)
 
 
@@ -403,13 +400,12 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
     """按输入场景模拟一次本地场景图检索。"""
 
     profile = BehaviorScenarioProfile(
-        summary=request.summary,
-        user_intent=request.user_intent,
-        conversation_phase=request.conversation_phase,
-        domain_tags=request.domain_tags,
-        behavior_needs=request.behavior_needs,
-        risk_flags=request.risk_flags,
-        confidence=1.0,
+        summary=" ".join(request.summary.split()).strip(),
+        user_intent=" ".join(request.user_intent.split()).strip(),
+        tag_clusters=parse_behavior_scenario_response(
+            json.dumps({"tag_clusters": request.tag_clusters}, ensure_ascii=False)
+        ).tag_clusters,
+        confidence=1.0 if request.tag_clusters else 0.0,
     )
     debug_payload = debug_retrieve_behavior_scores_from_scene_graph(
         session_ids=_session_scope(request.session_id),

@@ -1,13 +1,17 @@
 You are the behavior-scenario analyzer for {bot_name}.
-You will see recent chat context. Split it into 1 to 3 scenario segments that can be used to retrieve, learn, and select behavior patterns.
+You will see recent chat context. Split it into 1 to 5 scenario segments that can be used to retrieve, learn, and select behavior patterns.
 
 Analysis rules:
 - Do not continue the chat, decide whether to reply, or make a plan for the planner.
 - Describe only information related to "what behavior pattern should be used".
 - If the context has one clear topic, output only 1 segment. Split only when there are parallel group-chat threads, topic switches, or different interaction goals.
 - Every segment must include source_ids referencing the source line numbers it covers. Segments may overlap a little, but do not force unrelated messages into the same segment.
-- Each profile should focus on the scenario start, user intent, conversation phase, needed behavior strategies, and scenario risk signals.
 - Write summary as a reusable scenario summary, not a one-off detail.
+- The profile must not output loose tags directly. Output tag_clusters instead. Each tag cluster is a set of equal equivalent or near-equivalent members; matching any member should count as matching the whole cluster.
+- tag_clusters.kind must be one of phase, domain, need, risk.
+- phase means conversation phase, domain means scenario domain, need means needed behavior strategy, and risk means risk signal.
+- Each tag_clusters item must contain only kind and tags. Do not output name, cluster_key, display_name, or alias fields.
+- tags should contain 2 to 6 equivalent or near-equivalent expressions. All members are equal; do not stuff unrelated keywords.
 - If the context has no clear scenario, still output one low-confidence segment.
 
 Output only a JSON object:
@@ -18,12 +22,14 @@ Output only a JSON object:
       "title": "Short segment title",
       "source_ids": ["1", "2", "3"],
       "profile": {{
-        "summary": "One-sentence summary of this segment",
+        "summary": "One-sentence reusable summary of this segment",
         "user_intent": "The main intent of the user or group chat in this segment",
-        "conversation_phase": "For example: initial help request / tried and failed / waiting for confirmation / playful interaction / boundary probing / insufficient information",
-        "domain_tags": ["technical configuration", "error troubleshooting"],
-        "behavior_needs": ["ask for key details", "provide concrete checks"],
-        "risk_flags": ["insufficient information", "avoid fabrication"],
+        "tag_clusters": [
+          {{"kind": "phase", "tags": ["tried and failed", "continue locating the issue", "needs further diagnosis"]}},
+          {{"kind": "domain", "tags": ["model configuration", "API parameters", "WebUI configuration"]}},
+          {{"kind": "need", "tags": ["ask for key details", "provide concrete checks", "confirm key configuration"]}},
+          {{"kind": "risk", "tags": ["missing logs", "missing concrete configuration", "avoid fabrication"]}}
+        ],
         "confidence": 0.82
       }}
     }}

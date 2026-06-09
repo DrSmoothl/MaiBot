@@ -24,6 +24,7 @@ from .builtin import (
     V19_SCHEMA_VERSION,
     V20_SCHEMA_VERSION,
     V21_SCHEMA_VERSION,
+    V22_SCHEMA_VERSION,
     build_default_migration_registry,
     build_default_schema_version_resolver,
 )
@@ -99,6 +100,7 @@ __all__ = [
     "V19_SCHEMA_VERSION",
     "V20_SCHEMA_VERSION",
     "V21_SCHEMA_VERSION",
+    "V22_SCHEMA_VERSION",
     "MigrationExecutionContext",
     "MigrationPlan",
     "MigrationPlanner",

@@ -14,6 +14,35 @@ logger = get_logger("behavior_scenario")
 
 ScenarioAgentRunner = Callable[[str], Awaitable[str]]
 
+_TAG_KIND_ALIASES = {
+    "phase": "phase",
+    "domain": "domain",
+    "need": "need",
+    "risk": "risk",
+}
+
+
+@dataclass(frozen=True)
+class BehaviorScenarioTagCluster:
+    """LLM 学到的平等 tag 簇。命中任一成员时，检索按一个 tag 计分。"""
+
+    kind: str
+    tags: list[str] = field(default_factory=list)
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "tags": self.tags,
+        }
+
+    def all_values(self) -> list[str]:
+        values: list[str] = []
+        for value in self.tags:
+            normalized_value = " ".join(str(value or "").split()).strip()
+            if normalized_value and normalized_value not in values:
+                values.append(normalized_value)
+        return values
+
 
 @dataclass(frozen=True)
 class BehaviorScenarioProfile:
@@ -21,36 +50,21 @@ class BehaviorScenarioProfile:
 
     summary: str = ""
     user_intent: str = ""
-    conversation_phase: str = ""
-    domain_tags: list[str] = field(default_factory=list)
-    behavior_needs: list[str] = field(default_factory=list)
-    risk_flags: list[str] = field(default_factory=list)
+    tag_clusters: list[BehaviorScenarioTagCluster] = field(default_factory=list)
     confidence: float = 0.0
 
     @property
     def has_signal(self) -> bool:
-        return any(
-            [
-                self.summary,
-                self.user_intent,
-                self.conversation_phase,
-                self.domain_tags,
-                self.behavior_needs,
-                self.risk_flags,
-            ]
-        )
+        return bool(self.tag_clusters)
 
-    def to_retrieval_text(self, context_text: str = "") -> str:
-        parts = [
-            self.summary,
-            self.user_intent,
-            self.conversation_phase,
-            " ".join(self.domain_tags),
-            " ".join(self.behavior_needs),
-            " ".join(self.risk_flags),
-            context_text,
-        ]
-        return "\n".join(part for part in parts if str(part or "").strip())
+    def tag_cluster_text(self) -> str:
+        cluster_texts: list[str] = []
+        for cluster in self.tag_clusters:
+            values = cluster.all_values()
+            if not values:
+                continue
+            cluster_texts.append(f"{cluster.kind}:{'/'.join(values)}")
+        return " ".join(cluster_texts)
 
     def to_prompt_text(self) -> str:
         if not self.has_signal:
@@ -59,33 +73,12 @@ class BehaviorScenarioProfile:
             {
                 "summary": self.summary,
                 "user_intent": self.user_intent,
-                "conversation_phase": self.conversation_phase,
-                "domain_tags": self.domain_tags,
-                "behavior_needs": self.behavior_needs,
-                "risk_flags": self.risk_flags,
+                "tag_clusters": [cluster.to_prompt_payload() for cluster in self.tag_clusters],
                 "confidence": self.confidence,
             },
             ensure_ascii=False,
             indent=2,
         )
-
-    def to_learning_start_text(self, *, max_length: int = 150) -> str:
-        """将场景画像压缩成可写入行为模式 trigger 的统一 start。"""
-
-        if not self.has_signal:
-            return ""
-
-        parts = [
-            self.summary,
-            self.user_intent,
-            self.conversation_phase,
-            "、".join(self.domain_tags[:3]),
-            "、".join(self.behavior_needs[:3]),
-        ]
-        scene_start = "；".join(part for part in parts if str(part or "").strip()).strip()
-        if len(scene_start) <= max_length:
-            return scene_start
-        return scene_start[:max_length].rstrip()
 
 
 @dataclass(frozen=True)
@@ -109,10 +102,7 @@ class BehaviorScenarioSegment:
             "profile": {
                 "summary": self.profile.summary,
                 "user_intent": self.profile.user_intent,
-                "conversation_phase": self.profile.conversation_phase,
-                "domain_tags": self.profile.domain_tags,
-                "behavior_needs": self.profile.behavior_needs,
-                "risk_flags": self.profile.risk_flags,
+                "tag_clusters": [cluster.to_prompt_payload() for cluster in self.profile.tag_clusters],
                 "confidence": self.profile.confidence,
             },
         }
@@ -180,14 +170,44 @@ def _coerce_source_ids(raw_value: Any, *, max_items: int = 24) -> list[str]:
     return source_ids
 
 
+def _normalize_tag_kind(raw_value: Any) -> str:
+    normalized_kind = " ".join(str(raw_value or "").lower().split()).strip()
+    return _TAG_KIND_ALIASES.get(normalized_kind, normalized_kind)
+
+
+def _coerce_tag_clusters(raw_value: Any, *, max_items: int = 16) -> list[BehaviorScenarioTagCluster]:
+    if isinstance(raw_value, list):
+        raw_items = raw_value
+    else:
+        return []
+
+    clusters: list[BehaviorScenarioTagCluster] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        kind = _normalize_tag_kind(raw_item.get("kind"))
+        if kind not in {"phase", "domain", "need", "risk"}:
+            continue
+        raw_tags = raw_item.get("tags")
+        if not isinstance(raw_tags, list):
+            continue
+        tags = _coerce_string_list(raw_tags, max_items=8)
+        if not tags:
+            continue
+
+        clusters.append(BehaviorScenarioTagCluster(kind=kind, tags=tags))
+        if len(clusters) >= max_items:
+            break
+    return clusters
+
+
 def _profile_from_mapping(parsed_response: dict[str, Any]) -> BehaviorScenarioProfile:
+    tag_clusters = _coerce_tag_clusters(parsed_response.get("tag_clusters"))
+
     return BehaviorScenarioProfile(
         summary=" ".join(str(parsed_response.get("summary") or "").split()).strip(),
         user_intent=" ".join(str(parsed_response.get("user_intent") or "").split()).strip(),
-        conversation_phase=" ".join(str(parsed_response.get("conversation_phase") or "").split()).strip(),
-        domain_tags=_coerce_string_list(parsed_response.get("domain_tags")),
-        behavior_needs=_coerce_string_list(parsed_response.get("behavior_needs")),
-        risk_flags=_coerce_string_list(parsed_response.get("risk_flags")),
+        tag_clusters=tag_clusters,
         confidence=_coerce_float(parsed_response.get("confidence")),
     )
 

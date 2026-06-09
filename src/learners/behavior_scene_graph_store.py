@@ -5,9 +5,8 @@ from typing import Any, Optional, Sequence
 from sqlalchemy import or_
 from sqlmodel import Session, select
 
-import difflib
 import json
-import re
+import uuid
 
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
@@ -20,17 +19,18 @@ from src.common.database.database_model import (
     BehaviorSceneCluster,
     BehaviorSceneEdge,
     BehaviorSceneNode,
+    BehaviorSceneNodeTag,
+    BehaviorSceneTagCluster,
 )
 from src.common.logger import get_logger
 
-from .behavior_scenario import BehaviorScenarioProfile
+from .behavior_scenario import BehaviorScenarioProfile, BehaviorScenarioTagCluster
 
 logger = get_logger("behavior_scene_graph")
 
 MAX_SCENE_GRAPH_NODES_PER_PROFILE = 12
 MAX_SCENE_GRAPH_MATCHED_NODES = 24
 MAX_SCENE_GRAPH_BEHAVIOR_IDS = 48
-SCENE_NODE_MATCH_THRESHOLD = 0.18
 SCENE_EDGE_SPREAD_FACTOR = 0.35
 MIN_LINK_WEIGHT = 0.1
 MAX_LINK_WEIGHT = 8.0
@@ -38,6 +38,8 @@ MIN_NODE_SCORE = -4.0
 MAX_NODE_SCORE = 6.0
 SCENE_CLUSTER_MATCH_THRESHOLD = 0.58
 SCENE_CLUSTER_REUSE_THRESHOLD = 0.72
+MIN_TAG_CLUSTER_MERGE_OVERLAP = 2
+MAX_TAG_CLUSTER_MEMBERS = 24
 
 
 @dataclass(frozen=True)
@@ -63,79 +65,255 @@ def _normalize_display_text(value: str, *, max_length: int = 180) -> str:
     return normalized[:max_length].rstrip()
 
 
+TAG_KIND_ALIASES = {
+    "phase": "phase",
+    "domain": "domain",
+    "need": "need",
+    "risk": "risk",
+}
+
+TAG_KIND_WEIGHTS = {
+    "phase": 1.4,
+    "domain": 1.0,
+    "need": 1.1,
+    "risk": 0.8,
+}
+
+
+def _normalize_tag_kind(tag_kind: str) -> str:
+    normalized_kind = _normalize_name(tag_kind, max_length=40)
+    return TAG_KIND_ALIASES.get(normalized_kind, normalized_kind)
+
+
+def _normalize_tag_value(value: str) -> str:
+    display_value = _normalize_display_text(value, max_length=80)
+    return _normalize_name(display_value, max_length=80)
+
+
+def _load_tag_cluster_lookup(session: Session) -> dict[tuple[str, str], str]:
+    rows = session.exec(select(BehaviorSceneTagCluster)).all()
+    return {
+        (row.tag_kind, row.tag): row.cluster_key
+        for row in rows
+        if row.tag_kind and row.tag and row.cluster_key
+    }
+
+
+def _tag_cluster_values(cluster: BehaviorScenarioTagCluster) -> list[str]:
+    values: list[str] = []
+    for value in cluster.tags:
+        display_value = _normalize_display_text(value, max_length=80)
+        if display_value and display_value not in values:
+            values.append(display_value)
+    return values
+
+
+def _select_tag_cluster_rows(
+    session: Session,
+    *,
+    tag_kind: str,
+    normalized_tags: set[str],
+) -> list[BehaviorSceneTagCluster]:
+    if not tag_kind or not normalized_tags:
+        return []
+    rows = session.exec(
+        select(BehaviorSceneTagCluster)
+        .where(BehaviorSceneTagCluster.tag_kind == tag_kind)
+        .where(BehaviorSceneTagCluster.tag.in_(normalized_tags))  # type: ignore[attr-defined]
+    ).all()
+    return list(rows)
+
+
+def _select_tag_cluster_rows_by_keys(
+    session: Session,
+    *,
+    tag_kind: str,
+    cluster_keys: set[str],
+) -> list[BehaviorSceneTagCluster]:
+    if not tag_kind or not cluster_keys:
+        return []
+    rows = session.exec(
+        select(BehaviorSceneTagCluster)
+        .where(BehaviorSceneTagCluster.tag_kind == tag_kind)
+        .where(BehaviorSceneTagCluster.cluster_key.in_(cluster_keys))  # type: ignore[attr-defined]
+    ).all()
+    return list(rows)
+
+
+def _new_tag_cluster_key() -> str:
+    return f"tc_{uuid.uuid4().hex}"
+
+
+def _choose_merge_tag_cluster_key(
+    *,
+    values: Sequence[str],
+    existing_rows: Sequence[BehaviorSceneTagCluster],
+) -> str:
+    incoming_tags = {_normalize_tag_value(value) for value in values if _normalize_tag_value(value)}
+    rows_by_cluster: dict[str, list[BehaviorSceneTagCluster]] = {}
+    for row in existing_rows:
+        if not row.cluster_key:
+            continue
+        rows_by_cluster.setdefault(row.cluster_key, []).append(row)
+
+    best_key = ""
+    best_score = -1
+    for cluster_key, rows in rows_by_cluster.items():
+        row_tags = {row.tag for row in rows if row.tag}
+        overlap_count = len(incoming_tags & row_tags)
+        if overlap_count < MIN_TAG_CLUSTER_MERGE_OVERLAP:
+            continue
+        if overlap_count > best_score:
+            best_key = cluster_key
+            best_score = overlap_count
+    return best_key
+
+
+def _upsert_profile_tag_clusters(session: Session, profile: BehaviorScenarioProfile) -> None:
+    if not profile.tag_clusters:
+        return
+
+    now = datetime.now()
+    for cluster in profile.tag_clusters:
+        tag_kind = _normalize_tag_kind(cluster.kind)
+        if tag_kind not in TAG_KIND_WEIGHTS:
+            continue
+        values = _tag_cluster_values(cluster)
+        if not values:
+            continue
+
+        normalized_tags = {_normalize_tag_value(value) for value in values if _normalize_tag_value(value)}
+        existing_rows = _select_tag_cluster_rows(session, tag_kind=tag_kind, normalized_tags=normalized_tags)
+        existing_keys = {row.cluster_key for row in existing_rows if row.cluster_key}
+        related_rows = _select_tag_cluster_rows_by_keys(
+            session,
+            tag_kind=tag_kind,
+            cluster_keys=existing_keys,
+        )
+        related_rows_by_id = {id(row): row for row in [*existing_rows, *related_rows]}
+        candidate_rows = list(related_rows_by_id.values())
+        merge_cluster_key = _choose_merge_tag_cluster_key(values=values, existing_rows=candidate_rows)
+        selected_rows = [row for row in candidate_rows if row.cluster_key == merge_cluster_key] if merge_cluster_key else []
+        if selected_rows:
+            chosen_row = max(selected_rows, key=lambda row: int(row.source_count or 0))
+            cluster_key = chosen_row.cluster_key
+        else:
+            cluster_key = _new_tag_cluster_key()
+        if not cluster_key:
+            continue
+
+        members = [_normalize_tag_value(value) for value in values if _normalize_tag_value(value)]
+        for row in selected_rows:
+            if row.tag and row.tag not in members:
+                members.append(row.tag)
+            if len(members) >= MAX_TAG_CLUSTER_MEMBERS:
+                break
+        members = members[:MAX_TAG_CLUSTER_MEMBERS]
+        row_by_key = {(row.tag_kind, row.tag): row for row in selected_rows}
+        blocked_row_keys = {
+            (row.tag_kind, row.tag)
+            for row in existing_rows
+            if row.cluster_key != cluster_key and row.tag_kind and row.tag
+        }
+        for member in members:
+            normalized_member = _normalize_tag_value(member)
+            if not normalized_member:
+                continue
+            row_key = (tag_kind, normalized_member)
+            if row_key in blocked_row_keys:
+                continue
+            row = row_by_key.get(row_key)
+            if row is None:
+                row = BehaviorSceneTagCluster(
+                    tag_kind=tag_kind,
+                    tag=normalized_member,
+                    cluster_key=cluster_key,
+                    source_count=1,
+                    update_time=now,
+                )
+            else:
+                row.tag = normalized_member
+                row.cluster_key = cluster_key
+                row.source_count = int(row.source_count or 0) + 1
+                row.update_time = now
+            session.add(row)
+    session.flush()
+
+
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return min(maximum, max(minimum, value))
 
 
-def _extract_terms(text: str) -> set[str]:
-    normalized_text = _normalize_name(text, max_length=400)
-    if not normalized_text:
-        return set()
-
-    terms: set[str] = set(re.findall(r"[a-z0-9_./:-]{2,}", normalized_text))
-    for segment in re.findall(r"[\u4e00-\u9fff]+", normalized_text):
-        if len(segment) == 1:
-            terms.add(segment)
-            continue
-        for ngram_length in (2, 3, 4):
-            if len(segment) < ngram_length:
-                continue
-            for index in range(len(segment) - ngram_length + 1):
-                terms.add(segment[index : index + ngram_length])
-    return terms
-
-
-def _text_similarity(left: str, right: str) -> float:
-    normalized_left = _normalize_name(left)
-    normalized_right = _normalize_name(right)
-    if not normalized_left or not normalized_right:
-        return 0.0
-    if normalized_left == normalized_right:
-        return 1.0
-
-    left_terms = _extract_terms(normalized_left)
-    right_terms = _extract_terms(normalized_right)
-    term_score = 0.0
-    if left_terms and right_terms:
-        overlap_count = len(left_terms & right_terms)
-        if overlap_count > 0:
-            term_score = overlap_count / (len(left_terms) ** 0.5 * len(right_terms) ** 0.5)
-
-    sequence_score = difflib.SequenceMatcher(None, normalized_left, normalized_right).ratio()
-    return max(term_score, sequence_score * 0.65)
-
-
-def _normalize_tag_name(tag_kind: str, value: str) -> str:
-    normalized_value = _normalize_display_text(value, max_length=48)
-    normalized_key = _normalize_name(normalized_value, max_length=48)
-    if not normalized_key:
+def _normalize_tag_name(
+    tag_kind: str,
+    value: str,
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
+) -> str:
+    normalized_kind = _normalize_tag_kind(tag_kind)
+    normalized_key = _normalize_tag_value(value)
+    if not normalized_kind or not normalized_key:
         return ""
-    return f"{tag_kind}:{normalized_key}"
+    cluster_key = (tag_lookup or {}).get((normalized_kind, normalized_key), normalized_key)
+    return f"{normalized_kind}:{cluster_key}"
 
 
-def _build_cluster_tag_weights(profile: BehaviorScenarioProfile) -> dict[str, float]:
+def _normalize_stored_tag_name(
+    tag_name: str,
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
+) -> str:
+    normalized_tag = str(tag_name or "").strip()
+    if ":" not in normalized_tag:
+        return ""
+    tag_kind, tag_value = normalized_tag.split(":", 1)
+    normalized_kind = _normalize_tag_kind(tag_kind)
+    normalized_value = _normalize_tag_value(tag_value)
+    if normalized_kind and normalized_value.startswith("tc_"):
+        return f"{normalized_kind}:{normalized_value}"
+    return _normalize_tag_name(tag_kind, tag_value, tag_lookup=tag_lookup)
+
+
+def _build_cluster_tag_weights(
+    profile: BehaviorScenarioProfile,
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
+) -> dict[str, float]:
     tag_weights: dict[str, float] = {}
 
-    def add(tag_kind: str, value: str, weight: float) -> None:
-        tag_name = _normalize_tag_name(tag_kind, value)
-        if not tag_name:
-            return
-        tag_weights[tag_name] = max(tag_weights.get(tag_name, 0.0), weight)
-
-    add("phase", profile.conversation_phase, 1.4)
-    for tag in profile.domain_tags[:4]:
-        add("domain", tag, 1.0)
-    for need in profile.behavior_needs[:4]:
-        add("need", need, 1.1)
-    for risk in profile.risk_flags[:3]:
-        add("risk", risk, 0.8)
+    for cluster in profile.tag_clusters:
+        values = _tag_cluster_values(cluster)
+        if not values:
+            continue
+        normalized_kind = _normalize_tag_kind(cluster.kind)
+        if normalized_kind not in TAG_KIND_WEIGHTS:
+            continue
+        normalized_values = []
+        for value in values:
+            normalized_value = _normalize_tag_value(value)
+            if normalized_value and normalized_value not in normalized_values:
+                normalized_values.append(normalized_value)
+        if not normalized_values:
+            continue
+        mapped_cluster_key = ""
+        for normalized_value in normalized_values:
+            mapped_cluster_key = (tag_lookup or {}).get((normalized_kind, normalized_value), "")
+            if mapped_cluster_key:
+                break
+        cluster_key = mapped_cluster_key or normalized_values[0]
+        tag_name = f"{normalized_kind}:{cluster_key}"
+        tag_weights[tag_name] = max(tag_weights.get(tag_name, 0.0), TAG_KIND_WEIGHTS[normalized_kind])
     return tag_weights
 
 
-def build_scene_cluster_distribution(profile: BehaviorScenarioProfile) -> list[dict[str, float | str]]:
+def build_scene_cluster_distribution(
+    profile: BehaviorScenarioProfile,
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
+) -> list[dict[str, float | str]]:
     """将场景画像转成 tag 概率分布，用于匹配稳定场景簇。"""
 
-    tag_weights = _build_cluster_tag_weights(profile)
+    tag_weights = _build_cluster_tag_weights(profile, tag_lookup=tag_lookup)
     total_weight = sum(tag_weights.values())
     if total_weight <= 0:
         return []
@@ -148,12 +326,19 @@ def build_scene_cluster_distribution(profile: BehaviorScenarioProfile) -> list[d
     ]
 
 
-def _distribution_to_mapping(distribution: Sequence[dict[str, Any]]) -> dict[str, float]:
+def _distribution_to_mapping(
+    distribution: Sequence[dict[str, Any]],
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
+) -> dict[str, float]:
     tag_probs: dict[str, float] = {}
     for item in distribution:
         if not isinstance(item, dict):
             continue
         tag = str(item.get("tag") or "").strip()
+        if not tag:
+            continue
+        tag = _normalize_stored_tag_name(tag, tag_lookup=tag_lookup)
         if not tag:
             continue
         try:
@@ -199,12 +384,43 @@ def _load_cluster_distribution(raw_value: Any) -> list[dict[str, Any]]:
     return [item for item in parsed_value if isinstance(item, dict)] if isinstance(parsed_value, list) else []
 
 
-def _cluster_normalized_tags(distribution: Sequence[dict[str, Any]]) -> str:
-    return "|".join(sorted(_distribution_to_mapping(distribution)))
+def _distribution_tag_entries(distribution: Sequence[dict[str, Any]]) -> list[tuple[str, str, float]]:
+    entries: list[tuple[str, str, float]] = []
+    for item in distribution:
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("tag") or "").strip()
+        if ":" not in tag:
+            continue
+        tag_kind, cluster_key = tag.split(":", 1)
+        tag_kind = _normalize_tag_kind(tag_kind)
+        cluster_key = _normalize_tag_value(cluster_key)
+        if not tag_kind or not cluster_key:
+            continue
+        try:
+            probability = float(item.get("probability") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if probability <= 0:
+            continue
+        entries.append((tag_kind, cluster_key, probability))
+    return entries
 
 
-def _cluster_name_from_distribution(distribution: Sequence[dict[str, Any]]) -> str:
-    tag_probs = _distribution_to_mapping(distribution)
+def _cluster_normalized_tags(
+    distribution: Sequence[dict[str, Any]],
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
+) -> str:
+    return "|".join(sorted(_distribution_to_mapping(distribution, tag_lookup=tag_lookup)))
+
+
+def _cluster_name_from_distribution(
+    distribution: Sequence[dict[str, Any]],
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
+) -> str:
+    tag_probs = _distribution_to_mapping(distribution, tag_lookup=tag_lookup)
     if not tag_probs:
         return ""
     parts = [
@@ -217,9 +433,11 @@ def _cluster_name_from_distribution(distribution: Sequence[dict[str, Any]]) -> s
 def _cluster_distribution_overlap(
     left_distribution: Sequence[dict[str, Any]],
     right_distribution: Sequence[dict[str, Any]],
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
 ) -> float:
-    left_probs = _distribution_to_mapping(left_distribution)
-    right_probs = _distribution_to_mapping(right_distribution)
+    left_probs = _distribution_to_mapping(left_distribution, tag_lookup=tag_lookup)
+    right_probs = _distribution_to_mapping(right_distribution, tag_lookup=tag_lookup)
     if not left_probs or not right_probs:
         return 0.0
     shared_tags = set(left_probs) & set(right_probs)
@@ -259,17 +477,10 @@ def build_scene_descriptors(
             )
         )
 
-    add("scene", scene_start or profile.to_learning_start_text(), weight=1.25)
-    add("scene", profile.summary, weight=1.0)
-    add("intent", profile.user_intent, weight=0.85)
-    add("phase", profile.conversation_phase, weight=0.8)
-
-    for tag in profile.domain_tags[:4]:
-        add("domain", tag, weight=0.65)
-    for need in profile.behavior_needs[:4]:
-        add("need", need, weight=0.75)
-    for risk in profile.risk_flags[:2]:
-        add("risk", risk, weight=0.45)
+    for cluster in profile.tag_clusters:
+        values = _tag_cluster_values(cluster)
+        if values:
+            add(cluster.kind, values[0], weight=TAG_KIND_WEIGHTS.get(cluster.kind, 1.0))
 
     return descriptors[:MAX_SCENE_GRAPH_NODES_PER_PROFILE]
 
@@ -312,6 +523,19 @@ def upsert_behavior_graph_refs(
     scene_nodes = [(node, descriptor) for node, descriptor in scene_nodes if node.id is not None]
     if not scene_nodes:
         return None
+
+    tag_lookup = _load_tag_cluster_lookup(session)
+    tag_distribution = build_scene_cluster_distribution(profile, tag_lookup=tag_lookup)
+    for node, descriptor in scene_nodes:
+        if node.id is None:
+            continue
+        _upsert_scene_node_tags(
+            session,
+            session_id=session_id,
+            scene_node_id=node.id,
+            descriptor=descriptor,
+            tag_distribution=tag_distribution,
+        )
 
     action_node = _upsert_action_node(session, session_id=session_id, action=normalized_action)
     outcome_node = _upsert_outcome_node(session, session_id=session_id, outcome=normalized_outcome)
@@ -390,14 +614,17 @@ def retrieve_behavior_scores_from_scene_graph(
 ) -> dict[int, float]:
     """根据当前场景画像在场景图中召回行为经验路径 ID 及图分数。"""
 
-    descriptors = build_scene_descriptors(profile, scene_start=profile.to_learning_start_text())
-    if not descriptors:
+    if not profile.tag_clusters:
         return {}
 
     try:
         with get_db_session(auto_commit=False) as session:
-            nodes = _load_scoped_scene_nodes(session, session_ids=session_ids, include_global=include_global)
-            active_node_scores = _score_scene_nodes(nodes, descriptors)
+            active_node_scores = _score_scene_nodes_by_tag_clusters(
+                session,
+                profile=profile,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
             expanded_node_scores = _expand_scene_scores(
                 session,
                 active_node_scores=active_node_scores,
@@ -448,8 +675,7 @@ def debug_retrieve_behavior_scores_from_scene_graph(
 ) -> dict[str, Any]:
     """返回行为场景图检索的中间过程，供 WebUI 浏览和调试。"""
 
-    descriptors = build_scene_descriptors(profile, scene_start=profile.to_learning_start_text())
-    if not descriptors:
+    if not profile.tag_clusters:
         return {
             "descriptors": [],
             "matched_clusters": [],
@@ -458,11 +684,16 @@ def debug_retrieve_behavior_scores_from_scene_graph(
             "candidate_scores": [],
         }
 
+    descriptors = build_scene_descriptors(profile)
     try:
         with get_db_session(auto_commit=False) as session:
-            nodes = _load_scoped_scene_nodes(session, session_ids=session_ids, include_global=include_global)
-            node_map = {node.id: node for node in nodes if node.id is not None}
-            active_node_scores = _score_scene_nodes(nodes, descriptors)
+            active_node_scores = _score_scene_nodes_by_tag_clusters(
+                session,
+                profile=profile,
+                session_ids=session_ids,
+                include_global=include_global,
+            )
+            node_map = _load_scene_node_map(session, set(active_node_scores))
             expanded_node_scores = _expand_scene_scores(
                 session,
                 active_node_scores=active_node_scores,
@@ -497,6 +728,10 @@ def debug_retrieve_behavior_scores_from_scene_graph(
             )
             for experience_path_id, score in behavior_cluster_scores.items():
                 behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+
+            missing_node_ids = set(expanded_node_scores) - set(node_map)
+            if missing_node_ids:
+                node_map.update(_load_scene_node_map(session, missing_node_ids))
 
         candidate_scores = sorted(behavior_scores.items(), key=lambda item: item[1], reverse=True)[:max_count]
         return {
@@ -703,58 +938,61 @@ def _upsert_scene_cluster(
     session_id: str,
     profile: BehaviorScenarioProfile,
 ) -> Optional[BehaviorSceneCluster]:
-    distribution = build_scene_cluster_distribution(profile)
+    _upsert_profile_tag_clusters(session, profile)
+    tag_lookup = _load_tag_cluster_lookup(session)
+    distribution = build_scene_cluster_distribution(profile, tag_lookup=tag_lookup)
     if not distribution:
         return None
-    normalized_tags = _cluster_normalized_tags(distribution)
+    normalized_tags = _cluster_normalized_tags(distribution, tag_lookup=tag_lookup)
     if not normalized_tags:
         return None
 
-    statement = (
-        select(BehaviorSceneCluster)
-        .where(BehaviorSceneCluster.session_id == session_id)
-        .where(BehaviorSceneCluster.normalized_tags == normalized_tags)
-    )
-    cluster = session.exec(statement).first()
-    is_exact_match = cluster is not None
-    if cluster is None:
-        cluster_candidates = session.exec(
-            select(BehaviorSceneCluster).where(BehaviorSceneCluster.session_id == session_id)
-        ).all()
-        best_cluster: Optional[BehaviorSceneCluster] = None
-        best_overlap = 0.0
-        for candidate in cluster_candidates:
-            overlap = _cluster_distribution_overlap(
-                _load_cluster_distribution(candidate.tag_distribution),
-                distribution,
-            )
-            if overlap > best_overlap:
-                best_cluster = candidate
-                best_overlap = overlap
-        if best_cluster is not None and best_overlap >= SCENE_CLUSTER_REUSE_THRESHOLD:
-            cluster = best_cluster
+    cluster_candidates = session.exec(
+        select(BehaviorSceneCluster).where(BehaviorSceneCluster.session_id == session_id)
+    ).all()
+    best_cluster: Optional[BehaviorSceneCluster] = None
+    best_overlap = 0.0
+    for candidate in cluster_candidates:
+        overlap = _cluster_distribution_overlap(
+            _load_cluster_distribution(candidate.tag_distribution),
+            distribution,
+            tag_lookup=tag_lookup,
+        )
+        if overlap > best_overlap:
+            best_cluster = candidate
+            best_overlap = overlap
+    cluster = best_cluster if best_cluster is not None and best_overlap >= SCENE_CLUSTER_REUSE_THRESHOLD else None
 
     now = datetime.now()
     if cluster is None:
         cluster = BehaviorSceneCluster(
             session_id=session_id,
-            name=_cluster_name_from_distribution(distribution),
+            name=_cluster_name_from_distribution(distribution, tag_lookup=tag_lookup),
             normalized_tags=normalized_tags,
             tag_distribution=_dump_cluster_distribution(distribution),
             source_count=1,
             update_time=now,
         )
     else:
-        if is_exact_match:
-            cluster.name = _cluster_name_from_distribution(distribution)
-            cluster.normalized_tags = normalized_tags
-            cluster.tag_distribution = _dump_cluster_distribution(distribution)
-        else:
-            cluster.tag_distribution = _merge_cluster_distributions(
-                _load_cluster_distribution(cluster.tag_distribution),
-                distribution,
-                existing_weight=max(int(cluster.source_count or 0), 1),
-            )
+        cluster.tag_distribution = _merge_cluster_distributions(
+            _load_cluster_distribution(cluster.tag_distribution),
+            distribution,
+            existing_weight=max(int(cluster.source_count or 0), 1),
+            tag_lookup=tag_lookup,
+        )
+        merged_distribution = _load_cluster_distribution(cluster.tag_distribution)
+        merged_normalized_tags = _cluster_normalized_tags(merged_distribution, tag_lookup=tag_lookup)
+        same_normalized_cluster = session.exec(
+            select(BehaviorSceneCluster)
+            .where(BehaviorSceneCluster.session_id == session_id)
+            .where(BehaviorSceneCluster.normalized_tags == merged_normalized_tags)
+        ).first()
+        if same_normalized_cluster is None or same_normalized_cluster.id == cluster.id:
+            cluster.normalized_tags = merged_normalized_tags
+        cluster.name = _cluster_name_from_distribution(
+            merged_distribution,
+            tag_lookup=tag_lookup,
+        )
         cluster.source_count += 1
         cluster.update_time = now
     session.add(cluster)
@@ -767,9 +1005,10 @@ def _merge_cluster_distributions(
     new_distribution: Sequence[dict[str, Any]],
     *,
     existing_weight: int,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
 ) -> str:
-    existing_probs = _distribution_to_mapping(existing_distribution)
-    new_probs = _distribution_to_mapping(new_distribution)
+    existing_probs = _distribution_to_mapping(existing_distribution, tag_lookup=tag_lookup)
+    new_probs = _distribution_to_mapping(new_distribution, tag_lookup=tag_lookup)
     if not existing_probs:
         return _dump_cluster_distribution(new_distribution)
     merged_probs: dict[str, float] = {}
@@ -788,12 +1027,12 @@ def _upsert_scene_node(
     session_id: str,
     descriptor: SceneDescriptor,
 ) -> BehaviorSceneNode:
-    normalized_name = _normalize_name(descriptor.name)
+    node_name = _normalize_name(descriptor.name)
     statement = (
         select(BehaviorSceneNode)
         .where(BehaviorSceneNode.session_id == session_id)
         .where(BehaviorSceneNode.node_kind == descriptor.node_kind)
-        .where(BehaviorSceneNode.normalized_name == normalized_name)
+        .where(BehaviorSceneNode.name == node_name)
     )
     node = session.exec(statement).first()
     now = datetime.now()
@@ -801,19 +1040,52 @@ def _upsert_scene_node(
         node = BehaviorSceneNode(
             session_id=session_id,
             node_kind=descriptor.node_kind,
-            name=descriptor.name,
-            normalized_name=normalized_name,
+            name=node_name,
             source_count=1,
             update_time=now,
         )
     else:
-        node.name = descriptor.name
-        node.normalized_name = normalized_name
+        node.name = node_name
         node.source_count += 1
         node.update_time = now
     session.add(node)
     session.flush()
     return node
+
+
+def _upsert_scene_node_tags(
+    session: Session,
+    *,
+    session_id: str,
+    scene_node_id: int,
+    descriptor: SceneDescriptor,
+    tag_distribution: Sequence[dict[str, Any]],
+) -> None:
+    now = datetime.now()
+    for tag_kind, cluster_key, probability in _distribution_tag_entries(tag_distribution):
+        weight = _clamp(float(descriptor.weight) * probability, MIN_LINK_WEIGHT, MAX_LINK_WEIGHT)
+        statement = (
+            select(BehaviorSceneNodeTag)
+            .where(BehaviorSceneNodeTag.scene_node_id == scene_node_id)
+            .where(BehaviorSceneNodeTag.tag_kind == tag_kind)
+            .where(BehaviorSceneNodeTag.cluster_key == cluster_key)
+        )
+        row = session.exec(statement).first()
+        if row is None:
+            row = BehaviorSceneNodeTag(
+                session_id=session_id,
+                scene_node_id=scene_node_id,
+                tag_kind=tag_kind,
+                cluster_key=cluster_key,
+                weight=weight,
+                count=1,
+                update_time=now,
+            )
+        else:
+            row.count += 1
+            row.weight = _clamp(float(row.weight or 1.0) + weight * 0.04, MIN_LINK_WEIGHT, MAX_LINK_WEIGHT)
+            row.update_time = now
+        session.add(row)
 
 
 def _upsert_scene_edge(
@@ -1016,39 +1288,57 @@ def _upsert_action_outcome_edge(
     session.add(edge)
 
 
-def _load_scoped_scene_nodes(
+def _load_scene_node_map(session: Session, node_ids: set[int]) -> dict[int, BehaviorSceneNode]:
+    if not node_ids:
+        return {}
+    nodes = session.exec(select(BehaviorSceneNode).where(BehaviorSceneNode.id.in_(node_ids))).all()  # type: ignore[attr-defined]
+    return {int(node.id): node for node in nodes if node.id is not None}
+
+
+def _score_scene_nodes_by_tag_clusters(
     session: Session,
     *,
+    profile: BehaviorScenarioProfile,
     session_ids: set[str],
     include_global: bool,
-) -> list[BehaviorSceneNode]:
-    statement = select(BehaviorSceneNode)
-    if not include_global:
-        statement = statement.where(_session_scope_condition(BehaviorSceneNode, session_ids))
-    statement = statement.order_by(BehaviorSceneNode.update_time.desc())  # type: ignore[attr-defined]
-    return list(session.exec(statement).all())
-
-
-def _score_scene_nodes(
-    nodes: Sequence[BehaviorSceneNode],
-    descriptors: Sequence[SceneDescriptor],
 ) -> dict[int, float]:
-    scored_nodes: list[tuple[int, float]] = []
-    for node in nodes:
-        if node.id is None:
+    tag_lookup = _load_tag_cluster_lookup(session)
+    distribution = build_scene_cluster_distribution(profile, tag_lookup=tag_lookup)
+    tag_entries = _distribution_tag_entries(distribution)
+    if not tag_entries:
+        return {}
+
+    probability_by_key = {(tag_kind, cluster_key): probability for tag_kind, cluster_key, probability in tag_entries}
+    tag_kinds = {tag_kind for tag_kind, _, _ in tag_entries}
+    cluster_keys = {cluster_key for _, cluster_key, _ in tag_entries}
+    statement = (
+        select(BehaviorSceneNodeTag)
+        .where(BehaviorSceneNodeTag.tag_kind.in_(tag_kinds))  # type: ignore[attr-defined]
+        .where(BehaviorSceneNodeTag.cluster_key.in_(cluster_keys))  # type: ignore[attr-defined]
+    )
+    if not include_global:
+        statement = statement.where(_session_scope_condition(BehaviorSceneNodeTag, session_ids))
+
+    node_scores: dict[int, float] = {}
+    for row in session.exec(statement).all():
+        probability = probability_by_key.get((row.tag_kind, row.cluster_key), 0.0)
+        if probability <= 0 or row.scene_node_id <= 0:
             continue
-        best_score = 0.0
-        for descriptor in descriptors:
-            kind_multiplier = 1.0 if node.node_kind == descriptor.node_kind else 0.72
-            similarity = _text_similarity(node.name, descriptor.name)
-            score = similarity * descriptor.weight * kind_multiplier
-            if node.normalized_name == _normalize_name(descriptor.name) and node.node_kind == descriptor.node_kind:
-                score = max(score, descriptor.weight + 0.35)
-            best_score = max(best_score, score)
-        if best_score < SCENE_NODE_MATCH_THRESHOLD:
+        history_bonus = 1.0 + min(float(row.count or 0), 20.0) * 0.02
+        score = probability * float(row.weight or 1.0) * history_bonus
+        node_scores[row.scene_node_id] = node_scores.get(row.scene_node_id, 0.0) + score
+
+    if not node_scores:
+        return {}
+
+    nodes = _load_scene_node_map(session, set(node_scores))
+    scored_nodes: list[tuple[int, float]] = []
+    for node_id, score in node_scores.items():
+        node = nodes.get(node_id)
+        if node is None:
             continue
         reinforcement = 1.0 + max(float(node.score or 0.0), -2.0) * 0.04
-        scored_nodes.append((node.id, round(best_score * reinforcement, 4)))
+        scored_nodes.append((node_id, round(score * reinforcement, 4)))
 
     scored_nodes.sort(key=lambda item: item[1], reverse=True)
     return dict(scored_nodes[:MAX_SCENE_GRAPH_MATCHED_NODES])
@@ -1094,7 +1384,8 @@ def _score_scene_clusters(
     session_ids: set[str],
     include_global: bool,
 ) -> dict[int, float]:
-    target_distribution = build_scene_cluster_distribution(profile)
+    tag_lookup = _load_tag_cluster_lookup(session)
+    target_distribution = build_scene_cluster_distribution(profile, tag_lookup=tag_lookup)
     if not target_distribution:
         return {}
 
@@ -1109,6 +1400,7 @@ def _score_scene_clusters(
         overlap = _cluster_distribution_overlap(
             _load_cluster_distribution(cluster.tag_distribution),
             target_distribution,
+            tag_lookup=tag_lookup,
         )
         if overlap < SCENE_CLUSTER_MATCH_THRESHOLD:
             continue

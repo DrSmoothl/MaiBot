@@ -2,8 +2,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-import re
-
 from src.common.logger import get_logger
 from src.common.utils.utils_config import BehaviorConfigUtils, ChatConfigUtils
 from src.config.config import global_config
@@ -21,8 +19,6 @@ logger = get_logger("behavior_selector")
 
 ScenarioAgentRunner = Callable[[str], Awaitable[str]]
 MAX_SELECTOR_CANDIDATES = 12
-CONTEXT_RETRIEVAL_MIN_SCORE = 0.03
-MAX_CONTEXT_RETRIEVAL_TERMS = 240
 
 
 @dataclass
@@ -47,12 +43,8 @@ class BehaviorPatternSelector:
             lines.append(f"场景摘要：{scenario_profile.summary}")
         if scenario_profile.user_intent:
             lines.append(f"用户意图：{scenario_profile.user_intent}")
-        if scenario_profile.conversation_phase:
-            lines.append(f"对话阶段：{scenario_profile.conversation_phase}")
-        if scenario_profile.behavior_needs:
-            lines.append(f"当前需要：{'；'.join(scenario_profile.behavior_needs[:3])}")
-        if scenario_profile.risk_flags:
-            lines.append(f"注意边界：{'；'.join(scenario_profile.risk_flags[:2])}")
+        if scenario_profile.tag_clusters:
+            lines.append(f"场景标签：{scenario_profile.tag_cluster_text()}")
         return "\n".join(lines) if lines else "无可用场景画像。"
 
     @staticmethod
@@ -127,120 +119,23 @@ class BehaviorPatternSelector:
             + self_feedback_bonus,
         )
 
-    @staticmethod
-    def _normalize_retrieval_text(text: str) -> str:
-        return " ".join(str(text or "").lower().split()).strip()
-
-    @classmethod
-    def _extract_retrieval_terms(cls, text: str) -> set[str]:
-        normalized_text = cls._normalize_retrieval_text(text)
-        if not normalized_text:
-            return set()
-
-        terms: set[str] = set()
-        for token in re.findall(r"[a-z0-9_./:-]{2,}", normalized_text):
-            terms.add(token)
-
-        chinese_segments = re.findall(r"[\u4e00-\u9fff]+", normalized_text)
-        for segment in chinese_segments:
-            if len(segment) == 1:
-                terms.add(segment)
-                continue
-            for ngram_length in (2, 3, 4):
-                if len(segment) < ngram_length:
-                    continue
-                for index in range(len(segment) - ngram_length + 1):
-                    terms.add(segment[index : index + ngram_length])
-        if len(terms) <= MAX_CONTEXT_RETRIEVAL_TERMS:
-            return terms
-        return set(sorted(terms)[:MAX_CONTEXT_RETRIEVAL_TERMS])
-
-    @classmethod
-    def _context_relevance_score(cls, candidate: dict[str, Any], context_text: str) -> float:
-        normalized_context = cls._normalize_retrieval_text(context_text)
-        if not normalized_context:
-            return 0.0
-
-        candidate_text = "\n".join(
-            [
-                str(candidate.get("trigger") or ""),
-                str(candidate.get("action") or ""),
-                str(candidate.get("outcome") or ""),
-            ]
-        )
-        query_terms = cls._extract_retrieval_terms(normalized_context)
-        candidate_terms = cls._extract_retrieval_terms(candidate_text)
-        if not query_terms or not candidate_terms:
-            return 0.0
-
-        overlap_count = len(query_terms & candidate_terms)
-        if overlap_count <= 0:
-            return 0.0
-
-        overlap_score = overlap_count / (len(query_terms) ** 0.5 * len(candidate_terms) ** 0.5)
-        trigger_terms = cls._extract_retrieval_terms(str(candidate.get("trigger") or ""))
-        action_terms = cls._extract_retrieval_terms(str(candidate.get("action") or ""))
-        trigger_bonus = len(query_terms & trigger_terms) / max(len(trigger_terms), 1)
-        action_bonus = len(query_terms & action_terms) / max(len(action_terms), 1)
-        return overlap_score + trigger_bonus * 0.45 + action_bonus * 0.2
-
-    def _rank_candidates_by_context(
-        self,
-        candidates: list[dict[str, Any]],
-        *,
-        context_text: str,
-        max_count: int,
-    ) -> list[dict[str, Any]]:
-        scored_candidates: list[tuple[float, float, dict[str, Any]]] = []
-        for candidate in candidates:
-            relevance_score = self._context_relevance_score(candidate, context_text)
-            scored_candidates.append((relevance_score, self._candidate_weight(candidate), candidate))
-
-        best_relevance = max((score for score, _, _ in scored_candidates), default=0.0)
-        if best_relevance < CONTEXT_RETRIEVAL_MIN_SCORE:
-            return []
-
-        scored_candidates.sort(
-            key=lambda item: (
-                item[0],
-                item[1],
-                int(item[2].get("success_count") or 0),
-                int(item[2].get("id") or 0),
-            ),
-            reverse=True,
-        )
-        selected_candidates: list[dict[str, Any]] = []
-        for relevance_score, _, candidate in scored_candidates:
-            if relevance_score < CONTEXT_RETRIEVAL_MIN_SCORE and selected_candidates:
-                break
-            candidate = dict(candidate)
-            candidate["context_match_score"] = round(relevance_score, 4)
-            selected_candidates.append(candidate)
-            if len(selected_candidates) >= max_count:
-                return selected_candidates
-
-        return selected_candidates
-
     def _rank_candidates_by_scene_graph(
         self,
         candidates: list[dict[str, Any]],
         *,
         scene_graph_scores: dict[int, float],
-        context_text: str,
         max_count: int,
     ) -> list[dict[str, Any]]:
         if not scene_graph_scores:
             return []
 
         graph_candidates: list[dict[str, Any]] = []
-        remaining_candidates: list[dict[str, Any]] = []
         for candidate in candidates:
             candidate_id = candidate.get("id")
             if not isinstance(candidate_id, int):
                 continue
             graph_score = scene_graph_scores.get(candidate_id)
             if graph_score is None:
-                remaining_candidates.append(candidate)
                 continue
             candidate = dict(candidate)
             candidate["scene_graph_score"] = round(graph_score, 4)
@@ -258,24 +153,7 @@ class BehaviorPatternSelector:
             ),
             reverse=True,
         )
-        selected_candidates = graph_candidates[:max_count]
-        if len(selected_candidates) >= max_count:
-            return selected_candidates
-
-        selected_ids = {int(candidate.get("id") or 0) for candidate in selected_candidates}
-        fill_candidates = [
-            candidate
-            for candidate in remaining_candidates
-            if int(candidate.get("id") or 0) not in selected_ids
-        ]
-        selected_candidates.extend(
-            self._rank_candidates_by_context(
-                fill_candidates,
-                context_text=context_text,
-                max_count=max_count - len(selected_candidates),
-            )
-        )
-        return selected_candidates
+        return graph_candidates[:max_count]
 
     def _load_behavior_candidates(
         self,
@@ -304,11 +182,6 @@ class BehaviorPatternSelector:
             if not candidate.get("trigger") or not candidate.get("action") or not candidate.get("outcome"):
                 continue
             candidates.append(candidate)
-        retrieval_text = (
-            scenario_profile.to_retrieval_text(context_text)
-            if scenario_profile is not None and scenario_profile.has_signal
-            else context_text
-        )
         if scenario_profile is not None and scenario_profile.has_signal:
             scene_graph_scores = retrieve_behavior_scores_from_scene_graph(
                 session_ids=related_session_ids,
@@ -318,17 +191,12 @@ class BehaviorPatternSelector:
             scene_graph_ranked_candidates = self._rank_candidates_by_scene_graph(
                 candidates,
                 scene_graph_scores=scene_graph_scores,
-                context_text=retrieval_text,
                 max_count=max_count,
             )
             if scene_graph_ranked_candidates:
                 return scene_graph_ranked_candidates
 
-        return self._rank_candidates_by_context(
-            candidates,
-            context_text=retrieval_text,
-            max_count=max_count,
-        )
+        return []
 
     @staticmethod
     def _build_group_reference_text(
@@ -406,7 +274,7 @@ class BehaviorPatternSelector:
                 else candidate
             )
             if selected_behavior:
-                for score_key in ("scene_graph_score", "context_match_score"):
+                for score_key in ("scene_graph_score",):
                     if score_key in candidate:
                         selected_behavior[score_key] = candidate[score_key]
                 selected_behaviors.append(selected_behavior)

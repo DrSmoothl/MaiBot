@@ -268,6 +268,8 @@ class VisualConfig(ConfigBase):
         json_schema_extra={
             "x-widget": "select",
             "x-icon": "git-branch",
+            "x-layout": "inline-right",
+            "x-input-width": "12rem",
             "x-option-descriptions": VISUAL_MODE_OPTION_DESCRIPTIONS,
             "x-row": "visual-modes",
         },
@@ -279,6 +281,8 @@ class VisualConfig(ConfigBase):
         json_schema_extra={
             "x-widget": "select",
             "x-icon": "git-branch",
+            "x-layout": "inline-right",
+            "x-input-width": "12rem",
             "x-option-descriptions": VISUAL_MODE_OPTION_DESCRIPTIONS,
             "x-row": "visual-modes",
         },
@@ -307,6 +311,8 @@ class VisualConfig(ConfigBase):
         json_schema_extra={
             "x-widget": "input",
             "x-icon": "timer",
+            "x-layout": "inline-right",
+            "x-input-width": "7.5rem",
             "label": {
                 "zh_CN": "识图最长等待时间",
                 "en_US": "Max image recognition wait time",
@@ -518,7 +524,7 @@ class ChatConfig(ConfigBase):
             "x-widget": "input",
             "x-icon": "layers",
             "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-input-width": "6.5rem",
             "x-row": "context-sizes",
         },
     )
@@ -535,7 +541,7 @@ class ChatConfig(ConfigBase):
             "x-widget": "input",
             "x-icon": "layers",
             "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-input-width": "6.5rem",
             "x-row": "context-sizes",
         },
     )
@@ -583,7 +589,7 @@ class ChatConfig(ConfigBase):
             "x-widget": "input",
             "x-icon": "archive",
             "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-input-width": "6.5rem",
             "x-row": "context-sizes",
         },
     )
@@ -3128,7 +3134,6 @@ class ExpressionConfig(ConfigBase):
             "x-icon": "list",
         },
     )
-    """_wrap_表达学习配置列表，支持按聊天流配置"""
 
     expression_groups: list[ChatStreamGroup] = Field(
         default_factory=list,

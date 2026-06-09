@@ -20,16 +20,16 @@ from src.common.database.database_model import (  # noqa: E402
     BehaviorSceneCluster,
     BehaviorSceneNode,
 )
-from src.learners.behavior_scenario import BehaviorScenarioProfile  # noqa: E402
+from src.learners.behavior_scenario import BehaviorScenarioProfile, parse_behavior_scenario_response  # noqa: E402
 from src.learners.behavior_scene_graph_store import (  # noqa: E402
     _expand_scene_scores,
     _load_cluster_distribution,
-    _load_scoped_scene_nodes,
+    _load_scene_node_map,
     _score_behavior_clusters,
     _score_behavior_links,
     _score_behavior_paths,
     _score_scene_clusters,
-    _score_scene_nodes,
+    _score_scene_nodes_by_tag_clusters,
     build_scene_cluster_distribution,
     build_scene_descriptors,
 )
@@ -45,46 +45,15 @@ def _split_values(raw_value: str) -> List[str]:
 
 
 def _build_profile(args: Namespace) -> BehaviorScenarioProfile:
-    if args.profile_json:
-        raw_profile = json.loads(args.profile_json)
-        if not isinstance(raw_profile, dict):
-            raise ValueError("--profile-json 必须是 JSON 对象")
-        return BehaviorScenarioProfile(
-            summary=" ".join(str(raw_profile.get("summary") or "").split()).strip(),
-            user_intent=" ".join(str(raw_profile.get("user_intent") or "").split()).strip(),
-            conversation_phase=" ".join(str(raw_profile.get("conversation_phase") or "").split()).strip(),
-            domain_tags=_coerce_list(raw_profile.get("domain_tags")),
-            behavior_needs=_coerce_list(raw_profile.get("behavior_needs")),
-            risk_flags=_coerce_list(raw_profile.get("risk_flags")),
-            confidence=_coerce_float(raw_profile.get("confidence")),
-        )
-    return BehaviorScenarioProfile(
-        summary=args.summary,
-        user_intent=args.user_intent,
-        conversation_phase=args.phase,
-        domain_tags=_split_values(args.domain_tags),
-        behavior_needs=_split_values(args.behavior_needs),
-        risk_flags=_split_values(args.risk_flags),
-        confidence=1.0,
-    )
-
-
-def _coerce_list(raw_value: Any) -> List[str]:
-    raw_items = raw_value if isinstance(raw_value, list) else [raw_value]
-    values: List[str] = []
-    for raw_item in raw_items:
-        value = " ".join(str(raw_item or "").split()).strip()
-        if value and value not in values:
-            values.append(value)
-    return values
-
-
-def _coerce_float(raw_value: Any) -> float:
-    try:
-        value = float(raw_value)
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, min(1.0, value))
+    if not args.profile_json:
+        raise ValueError("请提供 --profile-json，且其中必须包含 tag_clusters")
+    raw_profile = json.loads(args.profile_json)
+    if not isinstance(raw_profile, dict):
+        raise ValueError("--profile-json 必须是 JSON 对象")
+    profile = parse_behavior_scenario_response(json.dumps(raw_profile, ensure_ascii=False))
+    if not profile.tag_clusters:
+        raise ValueError("--profile-json 必须包含非空 tag_clusters")
+    return profile
 
 
 def _session_ids(args: Namespace) -> Set[str]:
@@ -171,22 +140,29 @@ def _compare_sets(graph_scores: Dict[int, float], cluster_scores: Dict[int, floa
 def compare_matching(args: Namespace) -> Dict[str, Any]:
     profile = _build_profile(args)
     if not profile.has_signal:
-        raise ValueError("请至少提供一个场景画像字段，例如 --summary 或 --phase")
+        raise ValueError("请提供包含 tag_clusters 的场景画像")
 
     session_ids = _session_ids(args)
-    descriptors = build_scene_descriptors(profile, scene_start=profile.to_learning_start_text())
+    descriptors = build_scene_descriptors(profile)
     target_distribution = build_scene_cluster_distribution(profile)
 
     with get_db_session(auto_commit=False) as session:
-        nodes = _load_scoped_scene_nodes(session, session_ids=session_ids, include_global=args.include_global)
-        node_by_id = {node.id: node for node in nodes if node.id is not None}
-        active_node_scores = _score_scene_nodes(nodes, descriptors)
+        active_node_scores = _score_scene_nodes_by_tag_clusters(
+            session,
+            profile=profile,
+            session_ids=session_ids,
+            include_global=args.include_global,
+        )
+        node_by_id = _load_scene_node_map(session, set(active_node_scores))
         expanded_node_scores = _expand_scene_scores(
             session,
             active_node_scores=active_node_scores,
             session_ids=session_ids,
             include_global=args.include_global,
         )
+        missing_node_ids = set(expanded_node_scores) - set(node_by_id)
+        if missing_node_ids:
+            node_by_id.update(_load_scene_node_map(session, missing_node_ids))
         graph_link_scores = _score_behavior_links(
             session,
             node_scores=expanded_node_scores,
@@ -242,12 +218,9 @@ def compare_matching(args: Namespace) -> Dict[str, Any]:
         "profile": {
             "summary": profile.summary,
             "user_intent": profile.user_intent,
-            "conversation_phase": profile.conversation_phase,
-            "domain_tags": profile.domain_tags,
-            "behavior_needs": profile.behavior_needs,
-            "risk_flags": profile.risk_flags,
+            "tag_clusters": [cluster.to_prompt_payload() for cluster in profile.tag_clusters],
             "confidence": profile.confidence,
-            "scene_start": profile.to_learning_start_text(),
+            "tag_key": profile.tag_cluster_text(),
         },
         "input_descriptors": [
             {"kind": descriptor.node_kind, "name": descriptor.name, "weight": descriptor.weight}
@@ -327,13 +300,7 @@ def parse_args() -> Namespace:
         action="store_true",
         help="按现有实现开启 include_global；注意这会跳过 session_id 过滤。",
     )
-    parser.add_argument("--summary", default="", help="场景摘要。")
-    parser.add_argument("--user-intent", default="", help="用户意图。")
-    parser.add_argument("--phase", default="", help="对话阶段。")
-    parser.add_argument("--domain-tags", default="", help="领域标签，逗号分隔。")
-    parser.add_argument("--behavior-needs", default="", help="行为需求，逗号分隔。")
-    parser.add_argument("--risk-flags", default="", help="风险标记，逗号分隔。")
-    parser.add_argument("--profile-json", default="", help="直接传入 BehaviorScenarioProfile 风格 JSON 对象。")
+    parser.add_argument("--profile-json", required=True, help="直接传入包含 tag_clusters 的场景画像 JSON 对象。")
     parser.add_argument("--max-count", type=int, default=10, help="每类输出的最大数量。")
     parser.add_argument("--json", action="store_true", help="输出完整 JSON。")
     return parser.parse_args()
