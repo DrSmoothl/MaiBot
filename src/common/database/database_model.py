@@ -582,28 +582,6 @@ class Jargon(SQLModel, table=True):
     updated_timestamp: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
 
 
-class ChatHistory(SQLModel, table=True):
-    """存储聊天历史记录的模型"""
-
-    __tablename__ = "chat_history"  # type: ignore
-
-    id: Optional[int] = Field(default=None, primary_key=True)  # 自增主键
-
-    # 元信息
-    session_id: str = Field(index=True, max_length=255)  # 聊天会话ID
-    start_timestamp: datetime = Field(sa_column=Column(DateTime, index=True))  # 聊天开始时间
-    end_timestamp: datetime = Field(sa_column=Column(DateTime, index=True))  # 聊天结束时间
-    query_count: int = Field(default=0)  # 被检索次数
-    query_forget_count: int = Field(default=0)  # 被遗忘检查的次数
-
-    # 历史消息内容
-    original_messages: str  # 对话原文
-    participants: str  # 参与者列表，JSON格式存储
-    theme: str  # 对话主题：这段对话的主要内容，一个简短的标题
-    keywords: str  # 关键词：这段对话的关键词，JSON格式存储
-    summary: str  # 概括：对这段话的平文本概括
-
-
 class BinaryData(SQLModel, table=True):
     """存储二进制数据的模型"""
 

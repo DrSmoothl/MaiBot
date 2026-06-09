@@ -1,4 +1,6 @@
-"""v21 到 v22 schema 迁移：重建行为场景 tag 簇索引结构。"""
+"""v21 到 v22 schema 迁移：重建行为场景索引并清理 legacy v1 遗留表。"""
+
+from __future__ import annotations
 
 from sqlalchemy.engine import Connection
 
@@ -8,6 +10,30 @@ from .models import MigrationExecutionContext
 
 logger = get_logger("database_migration")
 
+
+LEGACY_V1_BACKUP_TABLE_PREFIX = "__legacy_v1_"
+LEGACY_V1_BACKUP_TABLES = (
+    "__legacy_v1_action_records",
+    "__legacy_v1_chat_history",
+    "__legacy_v1_chat_streams",
+    "__legacy_v1_emoji",
+    "__legacy_v1_emoji_description_cache",
+    "__legacy_v1_expression",
+    "__legacy_v1_group_info",
+    "__legacy_v1_image_descriptions",
+    "__legacy_v1_images",
+    "__legacy_v1_jargon",
+    "__legacy_v1_llm_usage",
+    "__legacy_v1_messages",
+    "__legacy_v1_online_time",
+    "__legacy_v1_person_info",
+    "__legacy_v1_thinking_back",
+)
+LEGACY_V1_STALE_TABLES = (
+    "chat_history",
+    "thinking_back",
+)
+LEGACY_V1_CLEANUP_TABLES = LEGACY_V1_BACKUP_TABLES + LEGACY_V1_STALE_TABLES
 
 _BEHAVIOR_GRAPH_TABLES = (
     "behavior_action_outcome_edges",
@@ -25,10 +51,11 @@ _BEHAVIOR_GRAPH_TABLES = (
 
 
 def migrate_v21_to_v22(context: MigrationExecutionContext) -> None:
-    """合并本地 v21-v27 迁移，直接落到当前行为场景图最终结构。"""
+    """合并本地行为图结构迁移，并清理 legacy v1 遗留表。"""
 
+    existing_cleanup_tables = _existing_tables(context.connection, LEGACY_V1_CLEANUP_TABLES)
     context.start_progress(
-        total_tables=len(_BEHAVIOR_GRAPH_TABLES) + 3,
+        total_tables=len(_BEHAVIOR_GRAPH_TABLES) + 3 + max(len(existing_cleanup_tables), 1) + 1,
         total_records=0,
         description="v21 -> v22 迁移进度",
         table_unit_name="表",
@@ -42,16 +69,33 @@ def migrate_v21_to_v22(context: MigrationExecutionContext) -> None:
     _create_behavior_scene_node_tags_table(context.connection)
     context.advance_progress(records=0, completed_tables=1, item_name="behavior_scene_node_tags")
 
-    removed_records = 0
+    removed_behavior_records = 0
     for table_name in _BEHAVIOR_GRAPH_TABLES:
         removed_count = _clear_table(context.connection, table_name)
-        removed_records += removed_count
+        removed_behavior_records += removed_count
         context.advance_progress(records=removed_count, completed_tables=1, item_name=table_name)
 
+    for table_name in existing_cleanup_tables:
+        _drop_table(context.connection, table_name)
+        context.advance_progress(records=0, completed_tables=1, item_name=table_name)
+
+    if not existing_cleanup_tables:
+        context.advance_progress(records=0, completed_tables=1, item_name="legacy_v1_cleanup")
+
+    _vacuum_database_best_effort(context.connection)
+    context.advance_progress(records=0, completed_tables=1, item_name="vacuum")
+
     logger.info(
-        "v21 -> v22 数据库迁移完成：已合并行为场景 tag 簇索引、节点倒排索引与旧学习数据清理，"
-        f"共清空 {removed_records} 条旧行为场景学习数据"
+        "v21 -> v22 数据库迁移完成：已合并行为场景索引重建、旧行为学习数据清理和 legacy v1 遗留表清理，"
+        f"共清空 {removed_behavior_records} 条旧行为场景学习数据，"
+        f"删除 legacy 表 {len(existing_cleanup_tables)} 个"
     )
+
+
+def has_legacy_v1_cleanup_tables(connection: Connection) -> bool:
+    """检查数据库是否仍包含 legacy v1 清理目标。"""
+
+    return bool(_existing_tables(connection, LEGACY_V1_CLEANUP_TABLES))
 
 
 def _ensure_behavior_scene_nodes_table(connection: Connection) -> None:
@@ -268,6 +312,35 @@ def _clear_table(connection: Connection, table_name: str) -> int:
     count = int(count_row[0] or 0) if count_row is not None else 0
     connection.exec_driver_sql(f"DELETE FROM {table_name}")
     return count
+
+
+def _existing_tables(connection: Connection, table_names: tuple[str, ...]) -> list[str]:
+    rows = connection.exec_driver_sql(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN ({placeholders})
+        ORDER BY name
+        """.format(placeholders=", ".join("?" for _ in table_names)),
+        table_names,
+    ).all()
+    return [str(row[0]) for row in rows]
+
+
+def _drop_table(connection: Connection, table_name: str) -> None:
+    escaped_table_name = table_name.replace('"', '""')
+    connection.exec_driver_sql(f'DROP TABLE IF EXISTS "{escaped_table_name}"')
+
+
+def _vacuum_database_best_effort(connection: Connection) -> None:
+    """尝试回收 SQLite 文件空间，但不因为 VACUUM 失败阻断迁移。"""
+
+    connection.commit()
+    try:
+        connection.exec_driver_sql("VACUUM")
+    except Exception as exc:
+        logger.warning(f"v21 -> v22 数据库 VACUUM 已跳过：{exc}")
 
 
 def _has_table(connection: Connection, table_name: str) -> bool:

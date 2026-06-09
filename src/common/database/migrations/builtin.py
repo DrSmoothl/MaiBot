@@ -26,7 +26,7 @@ from .v17_to_v18 import migrate_v17_to_v18
 from .v18_to_v19 import migrate_v18_to_v19
 from .v19_to_v20 import migrate_v19_to_v20
 from .v20_to_v21 import migrate_v20_to_v21
-from .v21_to_v22 import migrate_v21_to_v22
+from .v21_to_v22 import LEGACY_V1_CLEANUP_TABLES, migrate_v21_to_v22
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -91,7 +91,7 @@ def _detect_v13_base_schema(snapshot: DatabaseSchemaSnapshot) -> bool:
         return False
     if not snapshot.has_column("images", "image_type"):
         return False
-    if not snapshot.has_column("chat_history", "session_id"):
+    if snapshot.has_table("chat_history") and not snapshot.has_column("chat_history", "session_id"):
         return False
     if not snapshot.has_column("person_info", "user_nickname"):
         return False
@@ -361,6 +361,8 @@ class LatestSchemaVersionDetector(BaseSchemaVersionDetector):
 
         if not _detect_v22_base_schema(snapshot):
             return None
+        if any(snapshot.has_table(table_name) for table_name in LEGACY_V1_CLEANUP_TABLES):
+            return None
         return LATEST_SCHEMA_VERSION
 
 
@@ -376,6 +378,8 @@ class V22SchemaVersionDetector(BaseSchemaVersionDetector):
 
         if not _detect_v22_base_schema(snapshot):
             return None
+        if any(snapshot.has_table(table_name) for table_name in LEGACY_V1_CLEANUP_TABLES):
+            return None
         return V22_SCHEMA_VERSION
 
 
@@ -389,6 +393,10 @@ class V21SchemaVersionDetector(BaseSchemaVersionDetector):
     def detect_version(self, snapshot: DatabaseSchemaSnapshot) -> Optional[int]:
         """检测数据库是否为 v21 结构。"""
 
+        if _detect_v22_base_schema(snapshot):
+            if any(snapshot.has_table(table_name) for table_name in LEGACY_V1_CLEANUP_TABLES):
+                return V21_SCHEMA_VERSION
+            return None
         if not _detect_v21_base_schema(snapshot):
             return None
         if snapshot.has_table("behavior_scene_tag_clusters"):
@@ -1214,8 +1222,9 @@ def build_default_migration_registry() -> MigrationRegistry:
                 version_from=V21_SCHEMA_VERSION,
                 version_to=V22_SCHEMA_VERSION,
                 name="v21_to_v22",
-                description="合并行为场景 tag 簇索引、节点倒排索引与旧学习数据清理。",
+                description="合并行为场景索引重建、旧行为学习数据清理和 legacy v1 遗留表清理。",
                 handler=migrate_v21_to_v22,
+                transactional=False,
             ),
         ]
     )
