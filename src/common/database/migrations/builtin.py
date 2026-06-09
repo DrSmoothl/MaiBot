@@ -26,6 +26,7 @@ from .v17_to_v18 import migrate_v17_to_v18
 from .v18_to_v19 import migrate_v18_to_v19
 from .v19_to_v20 import migrate_v19_to_v20
 from .v20_to_v21 import migrate_v20_to_v21
+from .v21_to_v22 import LEGACY_V1_CLEANUP_TABLES, migrate_v21_to_v22
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -50,7 +51,8 @@ V18_SCHEMA_VERSION = 18
 V19_SCHEMA_VERSION = 19
 V20_SCHEMA_VERSION = 20
 V21_SCHEMA_VERSION = 21
-LATEST_SCHEMA_VERSION = 21
+V22_SCHEMA_VERSION = 22
+LATEST_SCHEMA_VERSION = 22
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -89,7 +91,7 @@ def _detect_v13_base_schema(snapshot: DatabaseSchemaSnapshot) -> bool:
         return False
     if not snapshot.has_column("images", "image_type"):
         return False
-    if not snapshot.has_column("chat_history", "session_id"):
+    if snapshot.has_table("chat_history") and not snapshot.has_column("chat_history", "session_id"):
         return False
     if not snapshot.has_column("person_info", "user_nickname"):
         return False
@@ -325,7 +327,24 @@ class LatestSchemaVersionDetector(BaseSchemaVersionDetector):
 
         if not _detect_v21_base_schema(snapshot):
             return None
+        if any(snapshot.has_table(table_name) for table_name in LEGACY_V1_CLEANUP_TABLES):
+            return None
         return LATEST_SCHEMA_VERSION
+
+
+class V21SchemaVersionDetector(BaseSchemaVersionDetector):
+    """v21 schema 结构探测器。"""
+
+    @property
+    def name(self) -> str:
+        return "v21_schema_detector"
+
+    def detect_version(self, snapshot: DatabaseSchemaSnapshot) -> Optional[int]:
+        """检测数据库是否为 v21 结构。"""
+
+        if not _detect_v21_base_schema(snapshot):
+            return None
+        return V21_SCHEMA_VERSION
 
 
 class V20SchemaVersionDetector(BaseSchemaVersionDetector):
@@ -957,6 +976,7 @@ def build_default_schema_version_detectors() -> List[BaseSchemaVersionDetector]:
 
     return [
         LatestSchemaVersionDetector(),
+        V21SchemaVersionDetector(),
         V20SchemaVersionDetector(),
         V19SchemaVersionDetector(),
         V18SchemaVersionDetector(),
@@ -1139,6 +1159,14 @@ def build_default_migration_registry() -> MigrationRegistry:
                 name="v20_to_v21",
                 description="为行为经验路径增加行为主体与学习类型字段。",
                 handler=migrate_v20_to_v21,
+            ),
+            MigrationStep(
+                version_from=V21_SCHEMA_VERSION,
+                version_to=V22_SCHEMA_VERSION,
+                name="v21_to_v22",
+                description="清理 v1 迁移遗留备份表以及不再使用的旧聊天历史/思考回溯表。",
+                handler=migrate_v21_to_v22,
+                transactional=False,
             ),
         ]
     )

@@ -67,14 +67,10 @@ def migrate_legacy_v1_to_v2(context: MigrationExecutionContext) -> None:
         ("llm_usage", _migrate_model_usage),
         ("images", _migrate_images),
         ("mai_messages", _migrate_messages),
-        ("action_records", _migrate_action_records),
-        ("tool_records", _migrate_tool_records),
         ("online_time", _migrate_online_time),
         ("person_info", _migrate_person_info),
         ("expressions", _migrate_expressions),
         ("jargons", _migrate_jargons),
-        ("chat_history", _migrate_chat_history),
-        ("thinking_questions", _migrate_thinking_questions),
     ]
     migrated_counts: Dict[str, int] = {}
     total_record_count = _estimate_total_record_count(context.connection)
@@ -570,12 +566,8 @@ def _estimate_total_record_count(connection: Connection) -> int:
         + _count_legacy_table_rows(connection, "emoji")
         + _count_legacy_table_rows(connection, "images")
         + _count_legacy_table_rows(connection, "messages")
-        + _count_legacy_table_rows(connection, "action_records")
-        + _count_legacy_table_rows(connection, "action_records")
         + _count_legacy_table_rows(connection, "online_time")
         + _count_legacy_table_rows(connection, "person_info")
-        + _count_legacy_table_rows(connection, "chat_history")
-        + _count_legacy_table_rows(connection, "thinking_back")
     )
 
 
