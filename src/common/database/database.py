@@ -8,6 +8,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel, Session, create_engine
 
+import threading
+
 from src.common.database.image_path_migration import normalize_image_storage_paths
 from src.common.database.migrations import create_database_migration_bootstrapper
 from src.common.logger import get_logger
@@ -62,6 +64,7 @@ SessionLocal = sessionmaker(
 _migration_bootstrapper = create_database_migration_bootstrapper(engine)
 
 _db_initialized = False
+_db_initialize_lock = threading.Lock()
 
 
 def initialize_database() -> None:
@@ -76,18 +79,23 @@ def initialize_database() -> None:
     global _db_initialized
     if _db_initialized:
         return
-    _DB_DIR.mkdir(parents=True, exist_ok=True)
-    import src.common.database.database_model  # noqa: F401
 
-    migration_state = _migration_bootstrapper.prepare_database()
-    logger.info(
-        "数据库迁移准备完成，"
-        f" 当前版本={migration_state.resolved_version.version}，目标版本={migration_state.target_version}"
-    )
-    SQLModel.metadata.create_all(engine)
-    _migration_bootstrapper.finalize_database(migration_state)
-    normalize_image_storage_paths(engine)
-    _db_initialized = True
+    with _db_initialize_lock:
+        if _db_initialized:
+            return
+
+        _DB_DIR.mkdir(parents=True, exist_ok=True)
+        import src.common.database.database_model  # noqa: F401
+
+        migration_state = _migration_bootstrapper.prepare_database()
+        logger.info(
+            "数据库迁移准备完成，"
+            f" 当前版本={migration_state.resolved_version.version}，目标版本={migration_state.target_version}"
+        )
+        SQLModel.metadata.create_all(engine)
+        _migration_bootstrapper.finalize_database(migration_state)
+        normalize_image_storage_paths(engine)
+        _db_initialized = True
 
 
 @contextmanager
