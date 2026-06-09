@@ -73,10 +73,10 @@ TAG_KIND_ALIASES = {
 }
 
 TAG_KIND_WEIGHTS = {
-    "phase": 1.4,
-    "domain": 1.0,
-    "need": 1.1,
-    "risk": 0.8,
+    "phase": 1.0,
+    "domain": 1.25,
+    "need": 1.25,
+    "risk": 0.6,
 }
 
 

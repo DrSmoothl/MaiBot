@@ -55,7 +55,7 @@ def migrate_v21_to_v22(context: MigrationExecutionContext) -> None:
 
     existing_cleanup_tables = _existing_tables(context.connection, LEGACY_V1_CLEANUP_TABLES)
     context.start_progress(
-        total_tables=len(_BEHAVIOR_GRAPH_TABLES) + 3 + max(len(existing_cleanup_tables), 1) + 1,
+        total_tables=len(_BEHAVIOR_GRAPH_TABLES) + 3 + max(len(existing_cleanup_tables), 1),
         total_records=0,
         description="v21 -> v22 迁移进度",
         table_unit_name="表",
@@ -81,9 +81,6 @@ def migrate_v21_to_v22(context: MigrationExecutionContext) -> None:
 
     if not existing_cleanup_tables:
         context.advance_progress(records=0, completed_tables=1, item_name="legacy_v1_cleanup")
-
-    _vacuum_database_best_effort(context.connection)
-    context.advance_progress(records=0, completed_tables=1, item_name="vacuum")
 
     logger.info(
         "v21 -> v22 数据库迁移完成：已合并行为场景索引重建、旧行为学习数据清理和 legacy v1 遗留表清理，"
@@ -331,16 +328,6 @@ def _existing_tables(connection: Connection, table_names: tuple[str, ...]) -> li
 def _drop_table(connection: Connection, table_name: str) -> None:
     escaped_table_name = table_name.replace('"', '""')
     connection.exec_driver_sql(f'DROP TABLE IF EXISTS "{escaped_table_name}"')
-
-
-def _vacuum_database_best_effort(connection: Connection) -> None:
-    """尝试回收 SQLite 文件空间，但不因为 VACUUM 失败阻断迁移。"""
-
-    connection.commit()
-    try:
-        connection.exec_driver_sql("VACUUM")
-    except Exception as exc:
-        logger.warning(f"v21 -> v22 数据库 VACUUM 已跳过：{exc}")
 
 
 def _has_table(connection: Connection, table_name: str) -> bool:
