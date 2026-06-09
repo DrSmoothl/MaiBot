@@ -10,6 +10,12 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { DynamicConfigForm } from '@/components/dynamic-form/DynamicConfigForm'
 import { fieldTitleClassName } from '@/components/dynamic-form/fieldStyle'
 import { resolveLocalizedText } from '@/lib/config-label'
@@ -29,6 +35,8 @@ export interface ListItemEditorOptions {
   addLabel?: string
   /** 顶部辅助说明 */
   helperText?: string
+  /** 标题旁信息图标说明 */
+  infoText?: string
   /** 列表为空时的占位说明 */
   emptyText?: string
   /** 顶部图标（覆盖 schema 自带的 x-icon） */
@@ -375,6 +383,28 @@ export function createListItemEditorHook(
             <div className="flex min-w-0 items-center gap-2">
               {renderLucideIcon(iconName, 'h-5 w-5 flex-shrink-0 text-muted-foreground')}
               <CardTitle className={fieldTitleClassName(schema, 'truncate text-base')}>{label}</CardTitle>
+              {options.infoText && (
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`${label} 说明`}
+                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <LucideIcons.CircleAlert className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="right"
+                      align="center"
+                      className="max-w-80 whitespace-pre-line bg-background text-foreground border shadow-lg"
+                    >
+                      {options.infoText}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
             {shouldCollapse && options.collapseButtonDisplay === 'icon' && (
               <Button
@@ -455,20 +485,18 @@ export function createListItemEditorHook(
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-sm font-semibold">
-                      <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
-                        {index + 1}
-                      </span>
                       <span className="truncate">{title}</span>
                     </div>
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
+                      size="icon"
                       className="text-destructive hover:text-destructive"
+                      aria-label={`删除${title}`}
+                      title={`删除${title}`}
                       onClick={() => handleRemove(index)}
                     >
-                      <Trash2 className="mr-1 h-4 w-4" />
-                      删除
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                   {renderItemEditor(item, index)}

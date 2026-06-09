@@ -24,6 +24,12 @@ import type { FieldSchema } from "@/types/config-schema"
 import { fieldTitleClassName } from "./fieldStyle"
 
 const ARRAY_DRAFT_LINE_PATTERN = /\r\n|\n|\r/
+const TAG_DRAFT_SPLIT_PATTERN = /[\r\n,，;；]+/
+const VISUAL_INLINE_FIELD_NAMES = new Set([
+  'planner_mode',
+  'replyer_mode',
+  'wait_image_recognize_max_time',
+])
 
 export interface DynamicFieldProps {
   schema: FieldSchema
@@ -124,6 +130,93 @@ function PrimitiveArrayEditor({
   )
 }
 
+function StringArrayTagsEditor({
+  onChange,
+  schema,
+  value,
+}: Pick<DynamicFieldProps, 'onChange' | 'schema' | 'value'>) {
+  const arrayValue = React.useMemo(
+    () => resolvePrimitiveArrayValue(value, schema.default).map((item) => String(item ?? '')),
+    [schema.default, value],
+  )
+  const [draftValue, setDraftValue] = React.useState('')
+  const fieldLabel = resolveFieldLabel(schema)
+
+  const commitItems = (nextItems: string[]) => {
+    onChange(nextItems.filter((item) => item.trim().length > 0))
+  }
+
+  const addDraftItems = () => {
+    const draftItems = draftValue
+      .split(TAG_DRAFT_SPLIT_PATTERN)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+
+    if (draftItems.length === 0) {
+      return
+    }
+
+    commitItems(Array.from(new Set([...arrayValue, ...draftItems])))
+    setDraftValue('')
+  }
+
+  const removeItem = (targetIndex: number) => {
+    commitItems(arrayValue.filter((_, index) => index !== targetIndex))
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2.25rem] gap-2">
+        <Input
+          value={draftValue}
+          placeholder="qq:123456789"
+          onChange={(event) => setDraftValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              addDraftItems()
+            }
+          }}
+        />
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className="h-9 w-9"
+          aria-label={`添加${fieldLabel}`}
+          title={`添加${fieldLabel}`}
+          onClick={addDraftItems}
+        >
+          <LucideIcons.Plus className="h-4 w-4" />
+        </Button>
+      </div>
+      {arrayValue.length > 0 && (
+        <div className="space-y-1.5">
+          {arrayValue.map((item, index) => (
+            <div
+              key={`${item}-${index}`}
+              className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center gap-2 rounded-md border bg-muted/20 px-2.5 py-2"
+            >
+              <span className="min-w-0 truncate font-mono text-sm">{item}</span>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-destructive hover:text-destructive"
+                aria-label={`删除${item}`}
+                title={`删除${item}`}
+                onClick={() => removeItem(index)}
+              >
+                <LucideIcons.Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * DynamicField - 根据字段类型和 x-widget 渲染对应的 shadcn/ui 组件
  * 
@@ -184,6 +277,10 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
 
   const renderPrimitiveArrayEditor = () => {
     return <PrimitiveArrayEditor schema={schema} value={value} onChange={onChange} />
+  }
+
+  const renderStringArrayTagsEditor = () => {
+    return <StringArrayTagsEditor schema={schema} value={value} onChange={onChange} />
   }
 
   const renderObjectEditor = () => {
@@ -306,6 +403,11 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           return renderTextInput('password')
         case 'switch':
           return renderSwitch()
+        case 'tags':
+          if (type === 'array' && schema.items?.type === 'string') {
+            return renderStringArrayTagsEditor()
+          }
+          return renderPrimitiveArrayEditor()
         case 'talk-time':
           return renderTalkTimeInput()
         case 'textarea':
@@ -370,11 +472,12 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
   const renderSwitch = () => {
     const checked = Boolean(value)
     return (
-      <div className="flex min-w-0 items-center justify-between gap-3 py-1.5">
-        <div className="min-w-0 pr-4">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-1.5">
+        <div className="min-w-0">
           {renderFieldHeader()}
         </div>
         <Switch
+          className="shrink-0 justify-self-end"
           checked={checked}
           onCheckedChange={(checked) => onChange(checked)}
         />
@@ -430,6 +533,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
             max={max}
             step={step}
             className="min-w-0 flex-1"
+            data-dashboard-slider="config"
           />
           <Input
             aria-label={`${fieldLabel} 数值`}
@@ -446,11 +550,6 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
             className="h-8 w-24 shrink-0 text-right"
           />
         </div>
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>{min}</span>
-          <span className="font-medium text-foreground">{numValue}</span>
-          <span>{max}</span>
-        </div>
       </div>
     )
   }
@@ -465,6 +564,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
 
     return (
       <DraftNumberInput
+        className={inlineRightInputClassName}
         value={value}
         defaultValue={schema.default}
         integer={schema.type === 'integer'}
@@ -472,6 +572,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
         min={min}
         max={max}
         step={step}
+        style={inlineRightInputStyle}
       />
     )
   }
@@ -488,9 +589,11 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           : String(value)
     return (
       <Input
+        className={inlineRightInputClassName}
         type={type}
         value={strValue}
         onChange={(e) => onChange(e.target.value)}
+        style={inlineRightInputStyle}
       />
     )
   }
@@ -592,7 +695,10 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
 
     return (
       <Select value={strValue} onValueChange={(val) => onChange(val)}>
-        <SelectTrigger>
+        <SelectTrigger
+          className={inlineRightInputClassName}
+          style={inlineRightInputStyle}
+        >
           <SelectValue placeholder={`Select ${fieldLabel}`} />
         </SelectTrigger>
         <SelectContent>
@@ -638,10 +744,18 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
   const isBoolean =
     schema['x-widget'] === 'switch' ||
     (!schema['x-widget'] && schema.type === 'boolean')
+  const isVisualInlineField = VISUAL_INLINE_FIELD_NAMES.has(schema.name)
   const supportsInlineRight =
-    schema['x-layout'] === 'inline-right' &&
+    (schema['x-layout'] === 'inline-right' || isVisualInlineField) &&
     ['input', 'number', 'password', 'select', undefined].includes(schema['x-widget']) &&
     ['string', 'number', 'integer', 'select'].includes(schema.type)
+  const defaultInlineRightInputWidth = isNumericField ? '7.5rem' : '12rem'
+  const schemaInputWidth = schema['x-input-width']
+  const inlineRightInputWidth = isNumericField && (!schemaInputWidth || schemaInputWidth === '12rem')
+    ? defaultInlineRightInputWidth
+    : schemaInputWidth ?? defaultInlineRightInputWidth
+  const inlineRightInputStyle = supportsInlineRight ? { width: inlineRightInputWidth } : undefined
+  const inlineRightInputClassName = supportsInlineRight ? '!w-[var(--field-input-width)]' : undefined
 
   // Switch/Boolean 字段自带完整布局，直接返回
   if (isBoolean) {
@@ -651,13 +765,13 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
   if (supportsInlineRight) {
     return (
       <div
-        className="flex flex-col gap-1.5 py-1.5 sm:flex-row sm:items-center"
-        style={{ '--field-input-width': schema['x-input-width'] ?? '12rem' } as React.CSSProperties}
+        className="grid min-w-0 grid-cols-1 items-center gap-1.5 py-1.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3"
+        style={{ '--field-input-width': inlineRightInputWidth } as React.CSSProperties}
       >
-        <div className="min-w-0 sm:shrink-0">
+        <div className="min-w-0">
           {renderFieldHeader()}
         </div>
-        <div className="min-w-20 flex-1 sm:ml-auto sm:max-w-[var(--field-input-width)]">
+        <div className="min-w-20 justify-self-start sm:justify-self-end" style={{ width: inlineRightInputWidth }}>
           {renderInputComponent()}
         </div>
       </div>

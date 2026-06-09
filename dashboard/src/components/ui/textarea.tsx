@@ -97,14 +97,32 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     }, [autoResize, hasFixedHeight, minHeight, maxHeight])
 
     // 监听 value 变化并调整高度
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
       adjustHeight()
     }, [value, adjustHeight])
 
-    // 组件挂载时调整高度
+    // 字体和容器布局稳定后再次测量，避免初始 scrollHeight 被算得过高。
     React.useEffect(() => {
       adjustHeight()
-    }, [adjustHeight])
+
+      const textarea = innerRef.current
+      if (!textarea || !autoResize || hasFixedHeight) return
+
+      const animationFrameId = window.requestAnimationFrame(adjustHeight)
+      const resizeObserver = new ResizeObserver(adjustHeight)
+      resizeObserver.observe(textarea)
+      if (textarea.parentElement) {
+        resizeObserver.observe(textarea.parentElement)
+      }
+
+      const fonts = document.fonts
+      fonts?.ready.then(adjustHeight).catch(() => undefined)
+
+      return () => {
+        window.cancelAnimationFrame(animationFrameId)
+        resizeObserver.disconnect()
+      }
+    }, [adjustHeight, autoResize, hasFixedHeight])
 
     // 处理 onChange 事件
     const handleChange = React.useCallback(

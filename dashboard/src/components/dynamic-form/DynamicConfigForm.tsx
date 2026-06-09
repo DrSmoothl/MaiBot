@@ -455,8 +455,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
         row.length > 1 ? (
           <div
             key={row.map((field) => field.name).join('|')}
-            className="grid min-w-0 gap-3 py-0.5 md:grid-cols-[repeat(var(--field-row-count),minmax(0,1fr))]"
-            style={{ '--field-row-count': row.length } as React.CSSProperties}
+            className="grid min-w-0 gap-3 py-0.5 md:grid-cols-[repeat(auto-fit,minmax(min(18rem,100%),1fr))]"
           >
             {row.map((field) => (
               <div key={field.name} className="min-w-0">{renderField(field)}</div>

@@ -20,6 +20,7 @@ export type XWidgetType =
   | 'select'
   | 'slider'
   | 'switch'
+  | 'tags'
   | 'talk-time'
   | 'textarea'
 
