@@ -623,9 +623,25 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
           )
 
           if (level === 0 && sectionColumns === 2 && visibleNestedSections.length > 1) {
+            const leftColumnSections = visibleNestedSections.filter((_, index) => index % 2 === 0)
+            const rightColumnSections = visibleNestedSections.filter((_, index) => index % 2 === 1)
+
             return (
-              <div className="grid min-w-0 items-start gap-3 md:grid-cols-2">
-                {visibleNestedSections}
+              <div className="grid min-w-0 gap-3 md:grid-cols-2">
+                <div className="min-w-0 space-y-3">
+                  {leftColumnSections.map((section) => (
+                    <React.Fragment key={section.key}>
+                      {section}
+                    </React.Fragment>
+                  ))}
+                </div>
+                <div className="min-w-0 space-y-3">
+                  {rightColumnSections.map((section) => (
+                    <React.Fragment key={section.key}>
+                      {section}
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
             )
           }
