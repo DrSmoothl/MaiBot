@@ -149,6 +149,10 @@ class DatabaseMigrationManager:
                             self.version_store.write_version(connection, step.version_to)
                             connection.commit()
             except Exception as exc:
+                logger.exception(
+                    f"数据库迁移步骤执行失败，将输出完整 traceback: "
+                    f"{step.name} ({step.version_from} -> {step.version_to})"
+                )
                 raise DatabaseMigrationExecutionError(
                     f"执行迁移步骤 {step.name} ({step.version_from} -> {step.version_to}) 失败。"
                 ) from exc
