@@ -700,11 +700,9 @@ export function BehaviorLearningPage() {
   const [debugResult, setDebugResult] = useState<BehaviorRetrievalDebugPayload | null>(null)
   const [debugForm, setDebugForm] = useState({
     summary: '',
-    userIntent: '',
-    conversationPhase: '',
     domainTags: '',
     behaviorNeeds: '',
-    riskFlags: '',
+    otherTraits: '',
   })
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -850,12 +848,11 @@ export function BehaviorLearningPage() {
       const result = await debugBehaviorRetrieval({
         session_id: selectedSessionId === 'all' || selectedSessionId === '__global__' ? undefined : selectedSessionId,
         include_global: selectedSessionId === 'all',
+        retrieval_mode: 'tag_expand_scene_cluster',
         summary: debugForm.summary,
-        user_intent: debugForm.userIntent,
-        conversation_phase: debugForm.conversationPhase,
-        domain_tags: splitTags(debugForm.domainTags),
-        behavior_needs: splitTags(debugForm.behaviorNeeds),
-        risk_flags: splitTags(debugForm.riskFlags),
+        tag_clusters: splitTags(debugForm.domainTags).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
+        need: { tag_name: splitTags(debugForm.behaviorNeeds)[0] ?? '', tag_aliases: [] },
+        other_traits: splitTags(debugForm.otherTraits).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
         max_count: 20,
       })
       setDebugResult(result.data)
@@ -1056,17 +1053,14 @@ export function BehaviorLearningPage() {
             <Field label="场景摘要">
               <Textarea value={debugForm.summary} onChange={(event) => setDebugForm({ ...debugForm, summary: event.target.value })} />
             </Field>
-            <Field label="用户意图">
-              <Input value={debugForm.userIntent} onChange={(event) => setDebugForm({ ...debugForm, userIntent: event.target.value })} />
-            </Field>
-            <Field label="对话阶段">
-              <Input value={debugForm.conversationPhase} onChange={(event) => setDebugForm({ ...debugForm, conversationPhase: event.target.value })} />
-            </Field>
             <Field label="领域标签">
               <Input value={debugForm.domainTags} onChange={(event) => setDebugForm({ ...debugForm, domainTags: event.target.value })} placeholder="用逗号分隔" />
             </Field>
             <Field label="行为需求">
               <Input value={debugForm.behaviorNeeds} onChange={(event) => setDebugForm({ ...debugForm, behaviorNeeds: event.target.value })} placeholder="用逗号分隔" />
+            </Field>
+            <Field label="他人特点/态度">
+              <Input value={debugForm.otherTraits} onChange={(event) => setDebugForm({ ...debugForm, otherTraits: event.target.value })} placeholder="用逗号分隔" />
             </Field>
             <Button className="w-full" onClick={runDebug} disabled={debugLoading}>
               {debugLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GitBranch className="mr-2 h-4 w-4" />}

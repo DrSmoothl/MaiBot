@@ -41,8 +41,6 @@ class BehaviorPatternSelector:
         lines = []
         if scenario_profile.summary:
             lines.append(f"场景摘要：{scenario_profile.summary}")
-        if scenario_profile.user_intent:
-            lines.append(f"用户意图：{scenario_profile.user_intent}")
         if scenario_profile.tag_clusters:
             lines.append(f"场景标签：{scenario_profile.tag_cluster_text()}")
         return "\n".join(lines) if lines else "无可用场景画像。"
@@ -159,7 +157,6 @@ class BehaviorPatternSelector:
         self,
         session_id: str,
         *,
-        context_text: str = "",
         scenario_profile: BehaviorScenarioProfile | None = None,
         max_count: int = MAX_SELECTOR_CANDIDATES,
     ) -> list[dict[str, Any]]:
@@ -256,7 +253,6 @@ class BehaviorPatternSelector:
         )
         candidates = self._load_behavior_candidates(
             session_id,
-            context_text=context_text,
             scenario_profile=scenario_profile,
             max_count=max(1, min(3, int(max_count))),
         )

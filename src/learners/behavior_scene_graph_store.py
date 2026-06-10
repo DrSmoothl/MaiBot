@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional, Sequence
+from typing import Any, Literal, Optional, Sequence
 
 from sqlalchemy import or_
 from sqlmodel import Session, select
@@ -36,10 +36,30 @@ MIN_LINK_WEIGHT = 0.1
 MAX_LINK_WEIGHT = 8.0
 MIN_NODE_SCORE = -4.0
 MAX_NODE_SCORE = 6.0
-SCENE_CLUSTER_MATCH_THRESHOLD = 0.58
 SCENE_CLUSTER_REUSE_THRESHOLD = 0.72
 MIN_TAG_CLUSTER_MERGE_OVERLAP = 2
 MAX_TAG_CLUSTER_MEMBERS = 24
+TAG_EXPAND_SCENE_CLUSTER_THRESHOLD = 0.30
+TAG_EXPAND_SCENE_CLUSTER_TOPK = 8
+TAG_EXPAND_MAX_TAG_SCORE = 0.12
+TAG_EXPAND_OVER_DIRECT_CAP = 0.5
+TAG_EXPAND_CO_TAG_FACTOR = 0.08
+TAG_EXPAND_EDGE_TAG_FACTOR = 0.025
+TAG_EXPAND_SEED_KINDS = {"domain"}
+TAG_EXPAND_KIND_FACTOR = {
+    "attitude": 0.25,
+    "domain": 1.0,
+    "need": 0.35,
+}
+
+BehaviorSceneRetrievalMode = Literal["tag_expand_scene_cluster", "pure_scene_node"]
+DEFAULT_BEHAVIOR_SCENE_RETRIEVAL_MODE: BehaviorSceneRetrievalMode = "tag_expand_scene_cluster"
+
+
+def _normalize_retrieval_mode(mode: str | None) -> BehaviorSceneRetrievalMode:
+    if mode in {"tag_expand_scene_cluster", "pure_scene_node"}:
+        return mode
+    return DEFAULT_BEHAVIOR_SCENE_RETRIEVAL_MODE
 
 
 @dataclass(frozen=True)
@@ -66,17 +86,17 @@ def _normalize_display_text(value: str, *, max_length: int = 180) -> str:
 
 
 TAG_KIND_ALIASES = {
-    "phase": "phase",
+    "attitude": "attitude",
     "domain": "domain",
     "need": "need",
-    "risk": "risk",
+    "other_attitude": "attitude",
+    "other_traits": "attitude",
 }
 
 TAG_KIND_WEIGHTS = {
-    "phase": 1.0,
+    "attitude": 1.1,
     "domain": 1.25,
     "need": 1.25,
-    "risk": 0.6,
 }
 
 
@@ -202,7 +222,11 @@ def _upsert_profile_tag_clusters(session: Session, profile: BehaviorScenarioProf
         if not cluster_key:
             continue
 
-        members = [_normalize_tag_value(value) for value in values if _normalize_tag_value(value)]
+        members: list[str] = []
+        for value in values:
+            normalized_value = _normalize_tag_value(value)
+            if normalized_value and normalized_value not in members:
+                members.append(normalized_value)
         for row in selected_rows:
             if row.tag and row.tag not in members:
                 members.append(row.tag)
@@ -252,7 +276,7 @@ def _normalize_tag_name(
 ) -> str:
     normalized_kind = _normalize_tag_kind(tag_kind)
     normalized_key = _normalize_tag_value(value)
-    if not normalized_kind or not normalized_key:
+    if normalized_kind not in TAG_KIND_WEIGHTS or not normalized_key:
         return ""
     cluster_key = (tag_lookup or {}).get((normalized_kind, normalized_key), normalized_key)
     return f"{normalized_kind}:{cluster_key}"
@@ -268,6 +292,8 @@ def _normalize_stored_tag_name(
         return ""
     tag_kind, tag_value = normalized_tag.split(":", 1)
     normalized_kind = _normalize_tag_kind(tag_kind)
+    if normalized_kind not in TAG_KIND_WEIGHTS:
+        return ""
     normalized_value = _normalize_tag_value(tag_value)
     if normalized_kind and normalized_value.startswith("tc_"):
         return f"{normalized_kind}:{normalized_value}"
@@ -341,6 +367,9 @@ def _distribution_to_mapping(
         tag = _normalize_stored_tag_name(tag, tag_lookup=tag_lookup)
         if not tag:
             continue
+        tag_kind, _ = tag.split(":", 1)
+        if tag_kind not in TAG_KIND_WEIGHTS:
+            continue
         try:
             probability = float(item.get("probability") or 0.0)
         except (TypeError, ValueError):
@@ -395,7 +424,7 @@ def _distribution_tag_entries(distribution: Sequence[dict[str, Any]]) -> list[tu
         tag_kind, cluster_key = tag.split(":", 1)
         tag_kind = _normalize_tag_kind(tag_kind)
         cluster_key = _normalize_tag_value(cluster_key)
-        if not tag_kind or not cluster_key:
+        if tag_kind not in TAG_KIND_WEIGHTS or not cluster_key:
             continue
         try:
             probability = float(item.get("probability") or 0.0)
@@ -478,9 +507,12 @@ def build_scene_descriptors(
         )
 
     for cluster in profile.tag_clusters:
+        if _normalize_tag_kind(cluster.kind) not in TAG_KIND_WEIGHTS:
+            continue
         values = _tag_cluster_values(cluster)
         if values:
-            add(cluster.kind, values[0], weight=TAG_KIND_WEIGHTS.get(cluster.kind, 1.0))
+            normalized_kind = _normalize_tag_kind(cluster.kind)
+            add(normalized_kind, values[0], weight=TAG_KIND_WEIGHTS[normalized_kind])
 
     return descriptors[:MAX_SCENE_GRAPH_NODES_PER_PROFILE]
 
@@ -611,56 +643,63 @@ def retrieve_behavior_scores_from_scene_graph(
     include_global: bool,
     profile: BehaviorScenarioProfile,
     max_count: int = MAX_SCENE_GRAPH_BEHAVIOR_IDS,
+    retrieval_mode: BehaviorSceneRetrievalMode = DEFAULT_BEHAVIOR_SCENE_RETRIEVAL_MODE,
 ) -> dict[int, float]:
     """根据当前场景画像在场景图中召回行为经验路径 ID 及图分数。"""
 
     if not profile.tag_clusters:
         return {}
 
+    active_retrieval_mode = _normalize_retrieval_mode(retrieval_mode)
     try:
         with get_db_session(auto_commit=False) as session:
-            active_node_scores = _score_scene_nodes_by_tag_clusters(
-                session,
-                profile=profile,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            expanded_node_scores = _expand_scene_scores(
-                session,
-                active_node_scores=active_node_scores,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            behavior_scores = _score_behavior_links(
-                session,
-                node_scores=expanded_node_scores,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            path_scores = _score_behavior_paths(
-                session,
-                node_scores=expanded_node_scores,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            for experience_path_id, score in path_scores.items():
-                behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
-            cluster_scores = _score_scene_clusters(
-                session,
-                profile=profile,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            behavior_cluster_scores = _score_behavior_clusters(
-                session,
-                cluster_scores=cluster_scores,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            for experience_path_id, score in behavior_cluster_scores.items():
-                behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+            behavior_scores: dict[int, float] = {}
+            if active_retrieval_mode == "pure_scene_node":
+                active_node_scores = _score_scene_nodes_by_tag_clusters(
+                    session,
+                    profile=profile,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                expanded_node_scores = _expand_scene_scores(
+                    session,
+                    active_node_scores=active_node_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                behavior_link_scores = _score_behavior_links(
+                    session,
+                    node_scores=expanded_node_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                behavior_scores.update(behavior_link_scores)
+                path_scores = _score_behavior_paths(
+                    session,
+                    node_scores=expanded_node_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                for experience_path_id, score in path_scores.items():
+                    behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+
+            if active_retrieval_mode == "tag_expand_scene_cluster":
+                cluster_scores, _ = _score_scene_clusters_by_expanded_tags(
+                    session,
+                    profile=profile,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                behavior_cluster_scores = _score_behavior_clusters(
+                    session,
+                    cluster_scores=cluster_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                for experience_path_id, score in behavior_cluster_scores.items():
+                    behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
     except Exception as exc:
-        logger.error(f"行为场景图检索失败: session_ids={session_ids} error={exc}")
+        logger.error(f"行为场景图检索失败: session_ids={session_ids} mode={active_retrieval_mode} error={exc}")
         return {}
 
     return dict(sorted(behavior_scores.items(), key=lambda item: item[1], reverse=True)[:max_count])
@@ -672,11 +711,13 @@ def debug_retrieve_behavior_scores_from_scene_graph(
     include_global: bool,
     profile: BehaviorScenarioProfile,
     max_count: int = MAX_SCENE_GRAPH_BEHAVIOR_IDS,
+    retrieval_mode: BehaviorSceneRetrievalMode = DEFAULT_BEHAVIOR_SCENE_RETRIEVAL_MODE,
 ) -> dict[str, Any]:
     """返回行为场景图检索的中间过程，供 WebUI 浏览和调试。"""
 
     if not profile.tag_clusters:
         return {
+            "retrieval_mode": _normalize_retrieval_mode(retrieval_mode),
             "descriptors": [],
             "matched_clusters": [],
             "matched_nodes": [],
@@ -685,49 +726,61 @@ def debug_retrieve_behavior_scores_from_scene_graph(
         }
 
     descriptors = build_scene_descriptors(profile)
+    active_retrieval_mode = _normalize_retrieval_mode(retrieval_mode)
     try:
         with get_db_session(auto_commit=False) as session:
-            active_node_scores = _score_scene_nodes_by_tag_clusters(
-                session,
-                profile=profile,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            node_map = _load_scene_node_map(session, set(active_node_scores))
-            expanded_node_scores = _expand_scene_scores(
-                session,
-                active_node_scores=active_node_scores,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            behavior_scores = _score_behavior_links(
-                session,
-                node_scores=expanded_node_scores,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            path_scores = _score_behavior_paths(
-                session,
-                node_scores=expanded_node_scores,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            for experience_path_id, score in path_scores.items():
-                behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
-            cluster_scores = _score_scene_clusters(
-                session,
-                profile=profile,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            behavior_cluster_scores = _score_behavior_clusters(
-                session,
-                cluster_scores=cluster_scores,
-                session_ids=session_ids,
-                include_global=include_global,
-            )
-            for experience_path_id, score in behavior_cluster_scores.items():
-                behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+            active_node_scores: dict[int, float] = {}
+            expanded_node_scores: dict[int, float] = {}
+            node_map: dict[int, BehaviorSceneNode] = {}
+            behavior_scores: dict[int, float] = {}
+
+            if active_retrieval_mode == "pure_scene_node":
+                active_node_scores = _score_scene_nodes_by_tag_clusters(
+                    session,
+                    profile=profile,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                node_map = _load_scene_node_map(session, set(active_node_scores))
+                expanded_node_scores = _expand_scene_scores(
+                    session,
+                    active_node_scores=active_node_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                behavior_link_scores = _score_behavior_links(
+                    session,
+                    node_scores=expanded_node_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                behavior_scores.update(behavior_link_scores)
+                path_scores = _score_behavior_paths(
+                    session,
+                    node_scores=expanded_node_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                for experience_path_id, score in path_scores.items():
+                    behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+
+            cluster_scores: dict[int, float] = {}
+            tag_expand_debug: dict[str, Any] = {}
+            if active_retrieval_mode == "tag_expand_scene_cluster":
+                cluster_scores, tag_expand_debug = _score_scene_clusters_by_expanded_tags(
+                    session,
+                    profile=profile,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                behavior_cluster_scores = _score_behavior_clusters(
+                    session,
+                    cluster_scores=cluster_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                for experience_path_id, score in behavior_cluster_scores.items():
+                    behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
 
             missing_node_ids = set(expanded_node_scores) - set(node_map)
             if missing_node_ids:
@@ -735,6 +788,7 @@ def debug_retrieve_behavior_scores_from_scene_graph(
 
         candidate_scores = sorted(behavior_scores.items(), key=lambda item: item[1], reverse=True)[:max_count]
         return {
+            "retrieval_mode": active_retrieval_mode,
             "descriptors": [
                 {"node_kind": descriptor.node_kind, "name": descriptor.name, "weight": descriptor.weight}
                 for descriptor in descriptors
@@ -752,10 +806,12 @@ def debug_retrieve_behavior_scores_from_scene_graph(
                 {"behavior_id": experience_path_id, "score": round(score, 4)}
                 for experience_path_id, score in candidate_scores
             ],
+            "tag_expand": tag_expand_debug,
         }
     except Exception as exc:
-        logger.error(f"行为场景图调试检索失败: session_ids={session_ids} error={exc}")
+        logger.error(f"行为场景图调试检索失败: session_ids={session_ids} mode={active_retrieval_mode} error={exc}")
         return {
+            "retrieval_mode": active_retrieval_mode,
             "descriptors": [
                 {"node_kind": descriptor.node_kind, "name": descriptor.name, "weight": descriptor.weight}
                 for descriptor in descriptors
@@ -1377,17 +1433,158 @@ def _expand_scene_scores(
     return expanded_scores
 
 
-def _score_scene_clusters(
+def _seed_scene_nodes_by_domain_tags(
+    session: Session,
+    *,
+    direct_tags: dict[str, float],
+    session_ids: set[str],
+    include_global: bool,
+) -> dict[int, float]:
+    tag_entries: list[tuple[str, str, float]] = []
+    for tag_name, probability in direct_tags.items():
+        if ":" not in tag_name:
+            continue
+        tag_kind, cluster_key = tag_name.split(":", 1)
+        if tag_kind not in TAG_EXPAND_SEED_KINDS:
+            continue
+        tag_entries.append((tag_kind, cluster_key, probability))
+    if not tag_entries:
+        return {}
+
+    tag_kinds = {tag_kind for tag_kind, _, _ in tag_entries}
+    cluster_keys = {cluster_key for _, cluster_key, _ in tag_entries}
+    probability_by_key = {
+        (tag_kind, cluster_key): probability for tag_kind, cluster_key, probability in tag_entries
+    }
+    statement = (
+        select(BehaviorSceneNodeTag)
+        .where(BehaviorSceneNodeTag.tag_kind.in_(tag_kinds))  # type: ignore[attr-defined]
+        .where(BehaviorSceneNodeTag.cluster_key.in_(cluster_keys))  # type: ignore[attr-defined]
+    )
+    if not include_global:
+        statement = statement.where(_session_scope_condition(BehaviorSceneNodeTag, session_ids))
+
+    node_scores: dict[int, float] = {}
+    for row in session.exec(statement).all():
+        probability = probability_by_key.get((row.tag_kind, row.cluster_key), 0.0)
+        if probability <= 0 or row.scene_node_id <= 0:
+            continue
+        history_bonus = 1.0 + min(float(row.count or 0), 20.0) * 0.02
+        score = probability * float(row.weight or 1.0) * history_bonus
+        node_scores[row.scene_node_id] = node_scores.get(row.scene_node_id, 0.0) + score
+    return node_scores
+
+
+def _expand_tag_scores_once(
+    session: Session,
+    *,
+    direct_tags: dict[str, float],
+    session_ids: set[str],
+    include_global: bool,
+) -> dict[str, float]:
+    seed_node_scores = _seed_scene_nodes_by_domain_tags(
+        session,
+        direct_tags=direct_tags,
+        session_ids=session_ids,
+        include_global=include_global,
+    )
+    if not seed_node_scores:
+        return {}
+
+    expanded_tags: dict[str, float] = {}
+
+    def add_tag_score(tag_kind: str, cluster_key: str, value: float) -> None:
+        if value <= 0:
+            return
+        tag_name = f"{tag_kind}:{cluster_key}"
+        if tag_name in direct_tags:
+            return
+        adjusted_value = value * TAG_EXPAND_KIND_FACTOR.get(tag_kind, 0.2)
+        if adjusted_value <= 0:
+            return
+        expanded_tags[tag_name] = min(
+            TAG_EXPAND_MAX_TAG_SCORE,
+            expanded_tags.get(tag_name, 0.0) + adjusted_value,
+        )
+
+    seed_node_ids = set(seed_node_scores)
+    node_tag_rows = session.exec(
+        select(BehaviorSceneNodeTag).where(BehaviorSceneNodeTag.scene_node_id.in_(seed_node_ids))  # type: ignore[attr-defined]
+    ).all()
+    for row in node_tag_rows:
+        node_score = seed_node_scores.get(row.scene_node_id, 0.0)
+        if node_score <= 0:
+            continue
+        history_bonus = 1.0 + min(float(row.count or 0), 20.0) * 0.01
+        add_tag_score(
+            row.tag_kind,
+            row.cluster_key,
+            node_score * float(row.weight or 1.0) * history_bonus * TAG_EXPAND_CO_TAG_FACTOR,
+        )
+
+    edge_statement = select(BehaviorSceneEdge).where(
+        or_(
+            BehaviorSceneEdge.source_scene_id.in_(seed_node_ids),  # type: ignore[attr-defined]
+            BehaviorSceneEdge.target_scene_id.in_(seed_node_ids),  # type: ignore[attr-defined]
+        )
+    )
+    if not include_global:
+        edge_statement = edge_statement.where(_session_scope_condition(BehaviorSceneEdge, session_ids))
+
+    neighbor_scores: dict[int, float] = {}
+    for edge in session.exec(edge_statement).all():
+        source_score = seed_node_scores.get(edge.source_scene_id, 0.0)
+        target_score = seed_node_scores.get(edge.target_scene_id, 0.0)
+        if source_score > 0:
+            neighbor_scores[edge.target_scene_id] = max(
+                neighbor_scores.get(edge.target_scene_id, 0.0),
+                source_score * float(edge.weight or 1.0),
+            )
+        if target_score > 0:
+            neighbor_scores[edge.source_scene_id] = max(
+                neighbor_scores.get(edge.source_scene_id, 0.0),
+                target_score * float(edge.weight or 1.0),
+            )
+
+    if neighbor_scores:
+        neighbor_tag_rows = session.exec(
+            select(BehaviorSceneNodeTag).where(BehaviorSceneNodeTag.scene_node_id.in_(set(neighbor_scores)))  # type: ignore[attr-defined]
+        ).all()
+        for row in neighbor_tag_rows:
+            node_score = neighbor_scores.get(row.scene_node_id, 0.0)
+            if node_score <= 0:
+                continue
+            history_bonus = 1.0 + min(float(row.count or 0), 20.0) * 0.01
+            add_tag_score(
+                row.tag_kind,
+                row.cluster_key,
+                node_score * float(row.weight or 1.0) * history_bonus * TAG_EXPAND_EDGE_TAG_FACTOR,
+            )
+
+    return dict(sorted(expanded_tags.items(), key=lambda item: item[1], reverse=True))
+
+
+def _score_scene_clusters_by_expanded_tags(
     session: Session,
     *,
     profile: BehaviorScenarioProfile,
     session_ids: set[str],
     include_global: bool,
-) -> dict[int, float]:
+) -> tuple[dict[int, float], dict[str, Any]]:
     tag_lookup = _load_tag_cluster_lookup(session)
-    target_distribution = build_scene_cluster_distribution(profile, tag_lookup=tag_lookup)
-    if not target_distribution:
-        return {}
+    direct_tags = _distribution_to_mapping(
+        build_scene_cluster_distribution(profile, tag_lookup=tag_lookup),
+        tag_lookup=tag_lookup,
+    )
+    if not direct_tags:
+        return {}, {"direct_tag_count": 0, "expanded_tag_count": 0, "cluster_count": 0}
+
+    expanded_tags = _expand_tag_scores_once(
+        session,
+        direct_tags=direct_tags,
+        session_ids=session_ids,
+        include_global=include_global,
+    )
 
     statement = select(BehaviorSceneCluster)
     if not include_global:
@@ -1397,16 +1594,36 @@ def _score_scene_clusters(
     for cluster in session.exec(statement).all():
         if cluster.id is None:
             continue
-        overlap = _cluster_distribution_overlap(
+        cluster_tags = _distribution_to_mapping(
             _load_cluster_distribution(cluster.tag_distribution),
-            target_distribution,
             tag_lookup=tag_lookup,
         )
-        if overlap < SCENE_CLUSTER_MATCH_THRESHOLD:
+        if not cluster_tags:
             continue
-        reinforcement = 1.0 + max(float(cluster.score or 0.0), -2.0) * 0.04
-        cluster_scores[cluster.id] = round(overlap * 2.0 * reinforcement, 4)
-    return dict(sorted(cluster_scores.items(), key=lambda item: item[1], reverse=True)[:MAX_SCENE_GRAPH_MATCHED_NODES])
+        direct_shared_tags = set(direct_tags) & set(cluster_tags)
+        if not direct_shared_tags:
+            continue
+        direct_overlap = sum(min(direct_tags[tag], cluster_tags[tag]) for tag in direct_shared_tags)
+        expanded_overlap = sum(
+            min(expanded_tags.get(tag, 0.0), probability)
+            for tag, probability in cluster_tags.items()
+            if tag not in direct_tags
+        )
+        capped_expanded_overlap = min(expanded_overlap, direct_overlap * TAG_EXPAND_OVER_DIRECT_CAP)
+        score = direct_overlap + capped_expanded_overlap
+        if score < TAG_EXPAND_SCENE_CLUSTER_THRESHOLD:
+            continue
+        cluster_scores[int(cluster.id)] = round(score * 2.0, 4)
+
+    sorted_cluster_scores = dict(
+        sorted(cluster_scores.items(), key=lambda item: item[1], reverse=True)[:TAG_EXPAND_SCENE_CLUSTER_TOPK]
+    )
+    debug_payload = {
+        "direct_tag_count": len(direct_tags),
+        "expanded_tag_count": len(expanded_tags),
+        "cluster_count": len(sorted_cluster_scores),
+    }
+    return sorted_cluster_scores, debug_payload
 
 
 def _score_behavior_clusters(

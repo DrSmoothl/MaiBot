@@ -89,8 +89,11 @@ BEHAVIOR_SCENARIO_CONSTRAINT_TEXT = (
     "【行为表现情景分析任务约束】\n"
     "你现在不是主 planner，不要续写聊天、不要判断是否需要回复、不要选择行为表现。\n"
     "你只负责把当前上下文抽象成行为表现检索用的场景画像。\n"
-    "只能输出 JSON 对象，字段必须包含 summary、user_intent、tag_clusters、confidence；"
-    "tag_clusters 中每项只能包含 kind、tags，tags 成员地位平等，不要输出 name 或 cluster_key。"
+    "只能输出 JSON 对象，字段必须包含 summary、tag_clusters、need、other_traits、confidence；"
+    "tag_clusters 只表示领域概念，每项只能包含 tag_name、tag_aliases；"
+    "need 单独输出为包含 tag_name、tag_aliases 的对象；"
+    "other_traits 表示他人的特点和态度，输出 tag_name、tag_aliases 数组；"
+    "不要输出 kind、phase、risk、tags、name 或 cluster_key。"
 )
 
 

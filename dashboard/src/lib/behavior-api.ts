@@ -150,12 +150,11 @@ export interface BehaviorRetrievalDebugPayload {
 export interface BehaviorRetrievalDebugRequest {
   session_id?: string
   include_global: boolean
+  retrieval_mode?: string
   summary: string
-  user_intent: string
-  conversation_phase: string
-  domain_tags: string[]
-  behavior_needs: string[]
-  risk_flags: string[]
+  tag_clusters: Array<{ tag_name: string; tag_aliases: string[] }>
+  need: { tag_name: string; tag_aliases: string[] }
+  other_traits: Array<{ tag_name: string; tag_aliases: string[] }>
   max_count: number
 }
 

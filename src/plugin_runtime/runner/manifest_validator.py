@@ -30,7 +30,7 @@ _HTTP_URL_PATTERN = re.compile(r"^https?://.+$")
 _ICON_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _HEX_COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _LOCAL_ICON_SUFFIXES = {".jpg", ".jpeg", ".png", ".svg", ".webp"}
-_RESERVED_PLUGIN_DIRECTORY_NAMES = {"data"}
+_RESERVED_PLUGIN_DIRECTORY_NAMES = {"__pycache__", "data"}
 
 
 def is_reserved_plugin_directory(path: Path) -> bool:

@@ -19,7 +19,12 @@ from src.common.database.database_model import (
     BehaviorSceneCluster,
     BehaviorSceneNode,
 )
-from src.learners.behavior_scenario import BehaviorScenarioProfile, BehaviorScenarioSegment
+from src.learners.behavior_scenario import (
+    BehaviorScenarioProfile,
+    BehaviorScenarioSegment,
+    BehaviorScenarioTagCluster,
+    parse_behavior_scenario_response,
+)
 from src.learners.behavior_selector import BehaviorPatternSelector
 from src.learners.behavior_learner import parse_behavior_response_with_diagnostics
 
@@ -90,10 +95,11 @@ def _insert_behavior_experience_path(
 def _technical_config_profile() -> BehaviorScenarioProfile:
     return BehaviorScenarioProfile(
         summary="有人反馈模型配置已按建议调整但问题依旧",
-        user_intent="继续排查配置为什么没有生效",
-        conversation_phase="已尝试无效",
-        domain_tags=["技术配置", "模型选择"],
-        behavior_needs=["追问关键细节", "给出具体检查点"],
+        tag_clusters=[
+            BehaviorScenarioTagCluster(kind="domain", tags=["技术配置", "模型选择", "配置排查"]),
+            BehaviorScenarioTagCluster(kind="attitude", tags=["用户困惑求助", "态度认真配合"]),
+            BehaviorScenarioTagCluster(kind="need", tags=["追问关键细节", "给出具体检查点", "排查建议"]),
+        ],
         confidence=0.86,
     )
 
@@ -105,10 +111,75 @@ def test_scene_cluster_distribution_uses_structured_tags() -> None:
     tags = {str(item["tag"]) for item in distribution}
     total_probability = sum(float(item["probability"]) for item in distribution)
 
-    assert "phase:已尝试无效" in tags
     assert "domain:技术配置" in tags
+    assert "attitude:用户困惑求助" in tags
     assert "need:追问关键细节" in tags
     assert 0.999 <= total_probability <= 1.001
+
+
+def test_behavior_scenario_parser_requires_tag_name_aliases() -> None:
+    profile = parse_behavior_scenario_response(
+        """
+        {
+          "summary": "用户排查模型配置",
+          "tag_clusters": [
+            {"kind": "domain", "tags": ["模型配置", "API 参数"]},
+            {"kind": "risk", "tags": ["缺少日志", "避免猜测"]},
+            {"kind": "phase", "tag_name": "故障排查中", "tag_aliases": ["继续定位问题"]},
+            {"kind": "need", "tag_name": "追问细节", "tag_aliases": ["给出检查点"]}
+          ],
+          "need": {"kind": "need", "tag_name": "追问细节", "tag_aliases": ["给出检查点"]},
+          "confidence": 0.8
+        }
+        """
+    )
+
+    assert profile.tag_clusters == []
+    assert "risk" not in profile.tag_cluster_text()
+    assert "phase" not in profile.tag_cluster_text()
+
+
+def test_behavior_scenario_parser_accepts_tag_name_aliases() -> None:
+    profile = parse_behavior_scenario_response(
+        """
+        {
+          "summary": "用户反馈模型响应变慢",
+          "tag_clusters": [
+            {
+              "tag_name": "性能问题",
+              "tag_aliases": ["AI性能反馈", "响应延迟", "模型变慢"]
+            }
+          ],
+          "need": {
+            "tag_name": "技术排障指导",
+            "tag_aliases": ["查看日志", "检查配置"]
+          },
+          "other_traits": [
+            {
+              "tag_name": "用户焦急困惑",
+              "tag_aliases": ["对方着急", "不确定问题原因"]
+            }
+          ],
+          "confidence": 0.8
+        }
+        """
+    )
+
+    assert [cluster.kind for cluster in profile.tag_clusters] == ["domain", "attitude", "need"]
+    assert profile.tag_clusters[0].all_values() == ["性能问题", "AI性能反馈", "响应延迟", "模型变慢"]
+    assert profile.tag_clusters[1].all_values() == ["用户焦急困惑", "对方着急", "不确定问题原因"]
+    assert profile.tag_clusters[2].all_values() == ["技术排障指导", "查看日志", "检查配置"]
+
+
+def test_scene_cluster_distribution_ignores_legacy_risk_tags() -> None:
+    distribution = [
+        {"tag": "domain:模型配置", "probability": 0.5},
+        {"tag": "risk:缺少日志", "probability": 0.5},
+    ]
+
+    mapping = graph_store._distribution_to_mapping(distribution)  # noqa: SLF001
+
+    assert mapping == {"domain:模型配置": 1.0}
 
 
 def test_behavior_scene_segment_prompt_payload_hides_scene_start() -> None:
@@ -118,6 +189,9 @@ def test_behavior_scene_segment_prompt_payload_hides_scene_start() -> None:
 
     assert "scene_start" not in payload
     assert payload["profile"]["summary"]
+    assert payload["profile"]["tag_clusters"]
+    assert payload["profile"]["need"]
+    assert payload["profile"]["other_traits"]
 
 
 def test_behavior_learning_parser_keeps_actor_and_learning_type() -> None:
@@ -185,13 +259,13 @@ def test_behavior_store_keeps_observed_and_self_paths_separate(
     _patch_graph_session(monkeypatch, behavior_graph_engine)
     profile = _technical_config_profile()
     common_kwargs = {
-        "trigger": profile.to_learning_start_text(),
+        "trigger": profile.tag_cluster_text(),
         "action": "承认信息不足后追问关键配置",
         "outcome": "对方补充配置，排查方向更明确",
         "source_ids": ["1"],
         "session_id": "session-a",
         "scenario_profile": profile,
-        "scene_start": profile.to_learning_start_text(),
+        "scene_start": profile.tag_cluster_text(),
     }
 
     observed_path = pattern_store.upsert_behavior_experience(
@@ -236,15 +310,16 @@ def test_behavior_paths_share_stable_cluster_start_scene(
     first_profile = _technical_config_profile()
     second_profile = BehaviorScenarioProfile(
         summary="配置排查继续推进，用户换了一种说法描述问题仍然存在",
-        user_intent="继续确认模型配置为什么没有生效",
-        conversation_phase="已尝试无效",
-        domain_tags=["模型选择", "技术配置"],
-        behavior_needs=["给出具体检查点", "追问关键细节"],
+        tag_clusters=[
+            BehaviorScenarioTagCluster(kind="domain", tags=["技术配置", "模型选择", "配置排查"]),
+            BehaviorScenarioTagCluster(kind="attitude", tags=["用户困惑求助", "态度认真配合"]),
+            BehaviorScenarioTagCluster(kind="need", tags=["追问关键细节", "给出具体检查点", "排查建议"]),
+        ],
         confidence=0.82,
     )
     first_path_id = _insert_behavior_experience_path(
         behavior_graph_engine,
-        scene_start=first_profile.to_learning_start_text(),
+        scene_start=first_profile.tag_cluster_text(),
         action="追问更底层配置并给出检查方向",
         outcome="对方继续补充配置位置",
         session_id="session-a",
@@ -252,7 +327,7 @@ def test_behavior_paths_share_stable_cluster_start_scene(
     )
     second_path_id = _insert_behavior_experience_path(
         behavior_graph_engine,
-        scene_start=second_profile.to_learning_start_text(),
+        scene_start=second_profile.tag_cluster_text(),
         action="直接给出最小检查清单",
         outcome="对方可以按清单逐项验证配置",
         session_id="session-a",
@@ -267,7 +342,10 @@ def test_behavior_paths_share_stable_cluster_start_scene(
         assert first_path.scene_cluster_id == second_path.scene_cluster_id
         scene_cluster = session.get(BehaviorSceneCluster, first_path.scene_cluster_id)
         assert scene_cluster is not None
-        assert "phase:已尝试无效" in scene_cluster.normalized_tags
+        assert "phase:" not in scene_cluster.normalized_tags
+        assert "domain:" in scene_cluster.normalized_tags
+        assert "attitude:" in scene_cluster.normalized_tags
+        assert "need:" in scene_cluster.normalized_tags
 
 
 def test_link_behavior_experience_to_scene_graph_and_retrieve(
@@ -278,7 +356,7 @@ def test_link_behavior_experience_to_scene_graph_and_retrieve(
     profile = _technical_config_profile()
     path_id = _insert_behavior_experience_path(
         behavior_graph_engine,
-        scene_start=profile.to_learning_start_text(),
+        scene_start=profile.tag_cluster_text(),
         action="追问更底层配置并给出检查方向",
         outcome="对方继续补充配置位置",
         session_id="session-a",
@@ -309,6 +387,44 @@ def test_link_behavior_experience_to_scene_graph_and_retrieve(
     assert action_outcome_edges
 
 
+def test_scene_graph_retrieval_mode_switch(
+    monkeypatch: pytest.MonkeyPatch,
+    behavior_graph_engine,
+) -> None:
+    _patch_graph_session(monkeypatch, behavior_graph_engine)
+    profile = _technical_config_profile()
+    path_id = _insert_behavior_experience_path(
+        behavior_graph_engine,
+        scene_start=profile.tag_cluster_text(),
+        action="追问更底层配置并给出检查方向",
+        outcome="对方继续补充配置位置",
+        session_id="session-a",
+        profile=profile,
+    )
+
+    default_scores = graph_store.retrieve_behavior_scores_from_scene_graph(
+        session_ids={"session-a"},
+        include_global=False,
+        profile=profile,
+    )
+    tag_expand_scores = graph_store.retrieve_behavior_scores_from_scene_graph(
+        session_ids={"session-a"},
+        include_global=False,
+        profile=profile,
+        retrieval_mode="tag_expand_scene_cluster",
+    )
+    pure_scores = graph_store.retrieve_behavior_scores_from_scene_graph(
+        session_ids={"session-a"},
+        include_global=False,
+        profile=profile,
+        retrieval_mode="pure_scene_node",
+    )
+
+    assert default_scores == tag_expand_scores
+    assert path_id in default_scores
+    assert path_id in pure_scores
+
+
 def test_scene_graph_selection_and_feedback_update_links(
     monkeypatch: pytest.MonkeyPatch,
     behavior_graph_engine,
@@ -317,7 +433,7 @@ def test_scene_graph_selection_and_feedback_update_links(
     profile = _technical_config_profile()
     path_id = _insert_behavior_experience_path(
         behavior_graph_engine,
-        scene_start=profile.to_learning_start_text(),
+        scene_start=profile.tag_cluster_text(),
         action="追问更底层配置并给出检查方向",
         outcome="对方继续补充配置位置",
         session_id="session-a",
@@ -380,7 +496,7 @@ def test_behavior_selector_prefers_scene_graph_scores(monkeypatch: pytest.Monkey
         },
         2: {
             "id": 2,
-            "trigger": profile.to_learning_start_text(),
+            "trigger": profile.tag_cluster_text(),
             "action": "追问更底层配置并给出检查方向",
             "outcome": "对方继续补充配置位置",
             "count": 1,
@@ -396,7 +512,6 @@ def test_behavior_selector_prefers_scene_graph_scores(monkeypatch: pytest.Monkey
 
     candidates = selector._load_behavior_candidates(
         "session-a",
-        context_text="配置不生效，想继续排查",
         scenario_profile=profile,
     )
 
@@ -407,11 +522,10 @@ def test_behavior_selector_prefers_scene_graph_scores(monkeypatch: pytest.Monkey
 def test_behavior_reference_text_hides_internal_metadata() -> None:
     profile = BehaviorScenarioProfile(
         summary="用户想替换当前模型服务商",
-        user_intent="寻找便宜的识图模型 API",
-        conversation_phase="配置咨询",
-        domain_tags=["模型配置", "识图模型"],
-        behavior_needs=["给出替换建议", "管理小模型预期"],
-        risk_flags=["需确认模型支持识图"],
+        tag_clusters=[
+            BehaviorScenarioTagCluster(kind="domain", tags=["模型配置", "识图模型"]),
+            BehaviorScenarioTagCluster(kind="need", tags=["给出替换建议", "管理小模型预期"]),
+        ],
         confidence=0.85,
     )
     behaviors = [
@@ -444,12 +558,12 @@ def test_behavior_reference_text_hides_internal_metadata() -> None:
     assert "优先级：高" in reference_text
     assert "优先级：中" in reference_text
     assert "场景摘要：用户想替换当前模型服务商" in reference_text
-    assert "当前需要：给出替换建议；管理小模型预期" in reference_text
+    assert "场景标签：" in reference_text
     assert "路径类型" not in reference_text
     assert "actor_type" not in reference_text
     assert "learning_type" not in reference_text
     assert "匹配分数" not in reference_text
     assert "scene_graph_score" not in reference_text
     assert "context_match_score" not in reference_text
-    assert "domain_tags" not in reference_text
+    assert "tag_clusters" not in reference_text
     assert "confidence" not in reference_text

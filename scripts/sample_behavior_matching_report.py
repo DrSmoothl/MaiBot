@@ -169,8 +169,9 @@ async def _analyze_profile_with_llm(
         return None, raw_response
     return {
         "summary": profile.summary,
-        "user_intent": profile.user_intent,
-        "tag_clusters": [cluster.to_prompt_payload() for cluster in profile.tag_clusters],
+        "tag_clusters": profile.domain_prompt_payloads(),
+        "need": profile.need_prompt_payload(),
+        "other_traits": profile.other_traits_prompt_payloads(),
         "confidence": profile.confidence,
     }, raw_response
 
@@ -290,13 +291,20 @@ def write_markdown_report(report: dict[str, object], output_path: Path) -> None:
         profile = sample["profile"]
         lines.append("### 画像")
         lines.append(f"- summary：{profile['summary']}")
-        lines.append(f"- user_intent：{profile['user_intent']}")
         if profile.get("tag_clusters"):
             lines.append("- tag_clusters：")
             for cluster in profile["tag_clusters"]:
-                lines.append(
-                    f"  - {cluster.get('kind')} tags={', '.join(cluster.get('tags') or [])}"
-                )
+                values = [cluster.get("tag_name") or "", *(cluster.get("tag_aliases") or [])]
+                lines.append(f"  - {', '.join(str(value) for value in values if value)}")
+        if profile.get("need"):
+            need = profile["need"]
+            values = [need.get("tag_name") or "", *(need.get("tag_aliases") or [])]
+            lines.append(f"- need：{', '.join(str(value) for value in values if value)}")
+        if profile.get("other_traits"):
+            lines.append("- other_traits：")
+            for cluster in profile["other_traits"]:
+                values = [cluster.get("tag_name") or "", *(cluster.get("tag_aliases") or [])]
+                lines.append(f"  - {', '.join(str(value) for value in values if value)}")
         if sample.get("raw_llm_response"):
             lines.append("")
             lines.append("LLM 原始输出：")

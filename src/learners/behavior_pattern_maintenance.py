@@ -28,14 +28,9 @@ UNUSED_DECAY_AFTER_DAYS = 14
 UNUSED_DISABLE_AFTER_DAYS = 60
 UNRESPONDED_DECAY_AFTER_DAYS = 21
 POSITIVE_STALE_DECAY_AFTER_DAYS = 60
-MERGE_SIMILARITY_THRESHOLD = 0.86
-MERGE_TRIGGER_MIN_SIMILARITY = 0.78
-MERGE_ACTION_MIN_SIMILARITY = 0.78
-MERGE_OUTCOME_MIN_SIMILARITY = 0.82
 MERGE_CLUSTER_DISTRIBUTION_MIN_OVERLAP = 0.72
 MERGE_CLUSTER_ACTION_MIN_SIMILARITY = 0.92
 MERGE_CLUSTER_OUTCOME_MIN_SIMILARITY = 0.9
-MERGE_CLUSTER_SIMILARITY_THRESHOLD = 0.92
 MAINTENANCE_SOURCE = "behavior_pattern_maintenance"
 
 
@@ -567,18 +562,11 @@ class BehaviorPatternMaintenanceService:
         if cluster_overlap < MERGE_CLUSTER_DISTRIBUTION_MIN_OVERLAP:
             return False
 
-        trigger_similarity = self._text_similarity(left_payload["trigger"], right_payload["trigger"])
         action_similarity = self._text_similarity(left_payload["action"], right_payload["action"])
         outcome_similarity = self._text_similarity(left_payload["outcome"], right_payload["outcome"])
-        combined_similarity = self._text_similarity(
-            f"{left_payload['trigger']}\n{left_payload['action']}",
-            f"{right_payload['trigger']}\n{right_payload['action']}",
-        )
         return (
-            trigger_similarity >= MERGE_TRIGGER_MIN_SIMILARITY
-            and action_similarity >= MERGE_CLUSTER_ACTION_MIN_SIMILARITY
+            action_similarity >= MERGE_CLUSTER_ACTION_MIN_SIMILARITY
             and outcome_similarity >= MERGE_CLUSTER_OUTCOME_MIN_SIMILARITY
-            and combined_similarity >= MERGE_CLUSTER_SIMILARITY_THRESHOLD
         )
 
     @staticmethod
