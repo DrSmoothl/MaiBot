@@ -22,9 +22,11 @@
 2. 重构代码时，如果原来的代码中没有类型注解，则重构的时候，如果某个函数的功能较为复杂或者参数较多，则应该添加类型注解来提高代码的可读性和可维护性。（对于简单的变量，可以不添加类型注解）
 3. 对于参数化泛型，应该使用`typing`模块中的类型注解来指定参数化泛型的类型。
     - 例如，使用`List[int]`来表示一个包含整数的列表，使用`Dict[str, Any]`来表示一个键为字符串，值为任意类型的字典。
+
 ## 变量规范
 1. 当确定某个变量/实例是某种类型的时候（优先按照类型注解确定，除非你分析出类型注解是错误的），可以不必使用`or`进行fallback。
     - 例如，`bot_nickname = (global_config.bot.nickname or "").strip()` 可以改为 `bot_nickname = global_config.bot.nickname.strip()`，前提是我们确定`global_config.bot.nickname`一定是一个字符串。
+
 ## 类属性使用规范
 1. 应该尽量减少使用getattr和setattr方法，除非是在对一个动态类进行处理或者使用Monkeypatch完成Pytest
 2. 在重构代码时，如果遇到getattr和setattr，应该尝试检查这个类实例是否有这个属性，如果有，则直接替换为类属性访问写法。
@@ -32,10 +34,12 @@
 
 ## debug规范
 1. 不要总是想找兜底，一定要精准的找到问题的核心，然后提出建议，兜底是不合适，难以维护的。
+2. 不要总是考虑fallback，如果哪里有错误，一定要让他及时完整的暴露，而不是用fall_back兜底掩盖过去
 
 # 运行/调试/构建/测试/依赖
 优先使用uv
 依赖项以 pyproject.toml 为准，要同步更新requirements.txt
+不要总是考虑fallback，如果哪里有错误，一定要让他及时完整的暴露，而不是用fall_back兜底掩盖过去
 
 # 语言规范
 项目的首选语言为简体中文，无论是注释语言，日志展示语言，还是 WebUI 展示语言都首要以简体中文为首要实现目标
@@ -56,6 +60,7 @@
 Radix 组件不随便移出上下文，像 TabsTrigger 必须留在 TabsList 里。
 
 修改完webui不用急着npm run build，这个应该手动来
+WebUI 开发服务固定起到 7999 端口。
 
 # 会话 ID 规范
 除聊天流创建/注册链路外，业务模块不应自行调用 `SessionUtils.calculate_session_id` 计算资源归属 ID。表达学习、黑话、记忆、WebUI、配置匹配等模块应通过 `chat_manager` 的内部接口，基于 platform、目标 ID 和聊天类型解析已存在的真实聊天流；如果解析不到真实 `ChatSession.session_id`，不要把自行计算的 fallback hash 写入数据库。
