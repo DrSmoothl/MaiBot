@@ -15,11 +15,14 @@ logger = get_logger("behavior_scenario")
 ScenarioAgentRunner = Callable[[str], Awaitable[str]]
 
 _TAG_KIND_ALIASES = {
-    "phase": "phase",
+    "attitude": "attitude",
     "domain": "domain",
     "need": "need",
-    "risk": "risk",
+    "other_attitude": "attitude",
+    "other_traits": "attitude",
 }
+
+_ALLOWED_TAG_KINDS = {"attitude", "domain", "need"}
 
 
 @dataclass(frozen=True)
@@ -30,9 +33,10 @@ class BehaviorScenarioTagCluster:
     tags: list[str] = field(default_factory=list)
 
     def to_prompt_payload(self) -> dict[str, Any]:
+        values = self.all_values()
         return {
-            "kind": self.kind,
-            "tags": self.tags,
+            "tag_name": values[0] if values else "",
+            "tag_aliases": values[1:],
         }
 
     def all_values(self) -> list[str]:
@@ -49,7 +53,6 @@ class BehaviorScenarioProfile:
     """行为表现选择前的场景画像。"""
 
     summary: str = ""
-    user_intent: str = ""
     tag_clusters: list[BehaviorScenarioTagCluster] = field(default_factory=list)
     confidence: float = 0.0
 
@@ -60,11 +63,33 @@ class BehaviorScenarioProfile:
     def tag_cluster_text(self) -> str:
         cluster_texts: list[str] = []
         for cluster in self.tag_clusters:
+            if _normalize_tag_kind(cluster.kind) not in _ALLOWED_TAG_KINDS:
+                continue
             values = cluster.all_values()
             if not values:
                 continue
             cluster_texts.append(f"{cluster.kind}:{'/'.join(values)}")
         return " ".join(cluster_texts)
+
+    def domain_prompt_payloads(self) -> list[dict[str, Any]]:
+        return [
+            cluster.to_prompt_payload()
+            for cluster in self.tag_clusters
+            if _normalize_tag_kind(cluster.kind) == "domain" and cluster.all_values()
+        ]
+
+    def need_prompt_payload(self) -> dict[str, Any]:
+        for cluster in self.tag_clusters:
+            if _normalize_tag_kind(cluster.kind) == "need" and cluster.all_values():
+                return cluster.to_prompt_payload()
+        return {"tag_name": "", "tag_aliases": []}
+
+    def other_traits_prompt_payloads(self) -> list[dict[str, Any]]:
+        return [
+            cluster.to_prompt_payload()
+            for cluster in self.tag_clusters
+            if _normalize_tag_kind(cluster.kind) == "attitude" and cluster.all_values()
+        ]
 
     def to_prompt_text(self) -> str:
         if not self.has_signal:
@@ -72,8 +97,9 @@ class BehaviorScenarioProfile:
         return json.dumps(
             {
                 "summary": self.summary,
-                "user_intent": self.user_intent,
-                "tag_clusters": [cluster.to_prompt_payload() for cluster in self.tag_clusters],
+                "tag_clusters": self.domain_prompt_payloads(),
+                "need": self.need_prompt_payload(),
+                "other_traits": self.other_traits_prompt_payloads(),
                 "confidence": self.confidence,
             },
             ensure_ascii=False,
@@ -101,8 +127,9 @@ class BehaviorScenarioSegment:
             "source_ids": self.source_ids,
             "profile": {
                 "summary": self.profile.summary,
-                "user_intent": self.profile.user_intent,
-                "tag_clusters": [cluster.to_prompt_payload() for cluster in self.profile.tag_clusters],
+                "tag_clusters": self.profile.domain_prompt_payloads(),
+                "need": self.profile.need_prompt_payload(),
+                "other_traits": self.profile.other_traits_prompt_payloads(),
                 "confidence": self.profile.confidence,
             },
         }
@@ -175,7 +202,12 @@ def _normalize_tag_kind(raw_value: Any) -> str:
     return _TAG_KIND_ALIASES.get(normalized_kind, normalized_kind)
 
 
-def _coerce_tag_clusters(raw_value: Any, *, max_items: int = 16) -> list[BehaviorScenarioTagCluster]:
+def _coerce_tag_cluster_items(
+    raw_value: Any,
+    *,
+    kind: str,
+    max_items: int = 16,
+) -> list[BehaviorScenarioTagCluster]:
     if isinstance(raw_value, list):
         raw_items = raw_value
     else:
@@ -185,13 +217,11 @@ def _coerce_tag_clusters(raw_value: Any, *, max_items: int = 16) -> list[Behavio
     for raw_item in raw_items:
         if not isinstance(raw_item, dict):
             continue
-        kind = _normalize_tag_kind(raw_item.get("kind"))
-        if kind not in {"phase", "domain", "need", "risk"}:
+        if "kind" in raw_item:
             continue
-        raw_tags = raw_item.get("tags")
-        if not isinstance(raw_tags, list):
-            continue
-        tags = _coerce_string_list(raw_tags, max_items=8)
+        tag_name = " ".join(str(raw_item.get("tag_name") or "").split()).strip()
+        raw_aliases = raw_item.get("tag_aliases")
+        tags = _coerce_string_list([tag_name, *_coerce_string_list(raw_aliases, max_items=8)], max_items=8)
         if not tags:
             continue
 
@@ -201,12 +231,29 @@ def _coerce_tag_clusters(raw_value: Any, *, max_items: int = 16) -> list[Behavio
     return clusters
 
 
+def _coerce_need_tag_cluster(raw_value: Any) -> BehaviorScenarioTagCluster | None:
+    if isinstance(raw_value, dict):
+        if "kind" in raw_value:
+            return None
+        tag_name = " ".join(str(raw_value.get("tag_name") or "").split()).strip()
+        raw_aliases = raw_value.get("tag_aliases")
+        tags = _coerce_string_list([tag_name, *_coerce_string_list(raw_aliases, max_items=8)], max_items=8)
+    else:
+        tags = _coerce_string_list(raw_value, max_items=1)
+    if not tags:
+        return None
+    return BehaviorScenarioTagCluster(kind="need", tags=tags)
+
+
 def _profile_from_mapping(parsed_response: dict[str, Any]) -> BehaviorScenarioProfile:
-    tag_clusters = _coerce_tag_clusters(parsed_response.get("tag_clusters"))
+    tag_clusters = _coerce_tag_cluster_items(parsed_response.get("tag_clusters"), kind="domain")
+    tag_clusters.extend(_coerce_tag_cluster_items(parsed_response.get("other_traits"), kind="attitude", max_items=8))
+    need_cluster = _coerce_need_tag_cluster(parsed_response.get("need"))
+    if need_cluster is not None:
+        tag_clusters.append(need_cluster)
 
     return BehaviorScenarioProfile(
         summary=" ".join(str(parsed_response.get("summary") or "").split()).strip(),
-        user_intent=" ".join(str(parsed_response.get("user_intent") or "").split()).strip(),
         tag_clusters=tag_clusters,
         confidence=_coerce_float(parsed_response.get("confidence")),
     )

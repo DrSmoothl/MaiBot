@@ -33,6 +33,7 @@ _LOCAL_ICON_SUFFIXES = {".jpg", ".jpeg", ".png", ".svg", ".webp"}
 _RESERVED_PLUGIN_DIRECTORY_NAMES = {"data", "__pycache__"}  # 条目需为 casefold 形式
 
 
+
 def is_reserved_plugin_directory(path: Path) -> bool:
     """判断 plugins/ 子目录是否为保留目录：data、__pycache__（不区分大小写）及 ``.`` 开头的隐藏目录。"""
     name = path.name.casefold()

@@ -217,8 +217,9 @@ def compare_matching(args: Namespace) -> Dict[str, Any]:
         },
         "profile": {
             "summary": profile.summary,
-            "user_intent": profile.user_intent,
-            "tag_clusters": [cluster.to_prompt_payload() for cluster in profile.tag_clusters],
+            "tag_clusters": profile.domain_prompt_payloads(),
+            "need": profile.need_prompt_payload(),
+            "other_traits": profile.other_traits_prompt_payloads(),
             "confidence": profile.confidence,
             "tag_key": profile.tag_cluster_text(),
         },

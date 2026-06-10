@@ -133,9 +133,11 @@ class BehaviorPathDetailResponse(BaseModel):
 class BehaviorScenarioDebugRequest(BaseModel):
     session_id: Optional[str] = Field(default=None)
     include_global: bool = Field(default=True)
+    retrieval_mode: str = Field(default="tag_expand_scene_cluster")
     summary: str = Field(default="")
-    user_intent: str = Field(default="")
     tag_clusters: list[dict[str, Any]] = Field(default_factory=list)
+    need: dict[str, Any] = Field(default_factory=dict)
+    other_traits: list[dict[str, Any]] = Field(default_factory=list)
     max_count: int = Field(default=20, ge=1, le=80)
 
 
@@ -401,17 +403,24 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
 
     profile = BehaviorScenarioProfile(
         summary=" ".join(request.summary.split()).strip(),
-        user_intent=" ".join(request.user_intent.split()).strip(),
         tag_clusters=parse_behavior_scenario_response(
-            json.dumps({"tag_clusters": request.tag_clusters}, ensure_ascii=False)
+            json.dumps(
+                {
+                    "tag_clusters": request.tag_clusters,
+                    "need": request.need,
+                    "other_traits": request.other_traits,
+                },
+                ensure_ascii=False,
+            )
         ).tag_clusters,
-        confidence=1.0 if request.tag_clusters else 0.0,
+        confidence=1.0 if request.tag_clusters or request.need or request.other_traits else 0.0,
     )
     debug_payload = debug_retrieve_behavior_scores_from_scene_graph(
         session_ids=_session_scope(request.session_id),
         include_global=request.include_global,
         profile=profile,
         max_count=request.max_count,
+        retrieval_mode=request.retrieval_mode,
     )
     behavior_ids = [item["behavior_id"] for item in debug_payload.get("candidate_scores", [])]
     with get_db_session(auto_commit=False) as session:
