@@ -215,6 +215,11 @@ def _is_available_emoji_record(record: Images) -> bool:
     return record_path.exists() and record_path.is_file()
 
 
+def _is_known_emoji_maintenance_record(record: Images) -> bool:
+    """判断维护扫描是否应把数据库记录对应文件视为已处理。"""
+    return record.is_registered or record.is_banned or record.vlm_processed
+
+
 def _resolve_existing_emoji_path(raw_path: str | Path | None) -> Optional[Path]:
     """将表情包路径归一化；路径为空或不存在时返回 ``None``。"""
     if not raw_path:
@@ -1055,6 +1060,35 @@ class EmojiManager:
         logger.info(f"[构建描述] 成功为表情包构建情绪标签: {target_emoji.description}")
         return True, target_emoji
 
+    def _mark_emoji_vlm_processed(self, target_emoji: MaiEmoji) -> None:
+        """记录表情包已经过 VLM 处理，避免自动维护任务反复消耗识别额度。"""
+        if not target_emoji.file_hash:
+            return
+
+        try:
+            with get_db_session() as session:
+                statement = select(Images).filter_by(
+                    image_hash=target_emoji.file_hash,
+                    image_type=ImageType.EMOJI,
+                ).limit(1)
+                image_record = session.exec(statement).first()
+                if image_record is None:
+                    image_record = target_emoji.to_db_instance()
+                    image_record.is_registered = False
+                    image_record.is_banned = False
+                    image_record.query_count = 0
+                    image_record.register_time = None
+                    image_record.last_used_time = None
+
+                image_record.full_path = serialize_stored_image_path(target_emoji.full_path)
+                if target_emoji.description:
+                    image_record.description = target_emoji.description
+                image_record.no_file_flag = False
+                image_record.vlm_processed = True
+                session.add(image_record)
+        except Exception as exc:
+            logger.error(f"[register_emoji] 标记表情包 VLM 处理状态失败: {exc}")
+
     def check_emoji_file_integrity(self) -> None:
         """
         检查表情包文件和数据库注册记录的一致性。
@@ -1121,7 +1155,7 @@ class EmojiManager:
                 with get_db_session() as session:
                     statement = select(Images).filter_by(image_type=ImageType.EMOJI)
                     for record in session.exec(statement).all():
-                        if not record.is_registered and not record.is_banned:
+                        if not _is_known_emoji_maintenance_record(record):
                             continue
                         if record_path := _resolve_existing_emoji_path(record.full_path):
                             known_paths.add(record_path)
@@ -1208,11 +1242,13 @@ class EmojiManager:
 
         if not target_emoji.description:
             desc_success, target_emoji = await self.build_emoji_description(target_emoji)
+            self._mark_emoji_vlm_processed(target_emoji)
             if not desc_success:
                 logger.error(f"[register_emoji] Failed to build emoji description: {file_full_path}")
                 return "failed"
 
         if not await self.review_emoji_for_registration(target_emoji):
+            self._mark_emoji_vlm_processed(target_emoji)
             logger.error(f"[register_emoji] Emoji did not pass content review: {file_full_path}")
             return "failed"
 

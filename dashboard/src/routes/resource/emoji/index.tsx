@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Trash2, Upload } from 'lucide-react'
+import { RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-// import { Input } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -65,6 +65,8 @@ export function EmojiManagementPage() {
   const [pageSize, setPageSize] = useState(20)
   const [statusFilter, setStatusFilter] = useState<EmojiStatus | 'all'>('adopted')
   const [formatFilter, setFormatFilter] = useState<string>('all')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchKeyword, setSearchKeyword] = useState('')
   const [sortBy, setSortBy] = useState<string>('usage_count')
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc')
   const [selectedEmoji, setSelectedEmoji] = useState<Emoji | null>(null)
@@ -90,6 +92,7 @@ export function EmojiManagementPage() {
         page_size: pageSize,
         status: statusFilter === 'all' ? undefined : statusFilter,
         format: formatFilter === 'all' ? undefined : formatFilter,
+        search: searchKeyword || undefined,
         sort_by: sortBy,
         sort_order: sortOrder,
       })
@@ -111,6 +114,7 @@ export function EmojiManagementPage() {
     pageSize,
     statusFilter,
     formatFilter,
+    searchKeyword,
     sortBy,
     sortOrder,
     toast,
@@ -133,6 +137,14 @@ export function EmojiManagementPage() {
   useEffect(() => {
     loadStats()
   }, [])
+
+  useEffect(() => {
+    const debounceTimer = window.setTimeout(() => {
+      setSearchKeyword(searchInput.trim())
+    }, 300)
+
+    return () => window.clearTimeout(debounceTimer)
+  }, [searchInput])
 
   // 查看详情
   const handleViewDetail = async (emoji: Emoji) => {
@@ -268,6 +280,12 @@ export function EmojiManagementPage() {
   // 获取格式选项
   const formatOptions = stats?.formats ? Object.keys(stats.formats) : []
 
+  const handleSearchInputChange = (value: string) => {
+    setSearchInput(value)
+    setPage(1)
+    setSelectedIds(new Set())
+  }
+
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
       <ScrollArea className="flex-1">
@@ -316,6 +334,34 @@ export function EmojiManagementPage() {
           <Card>
             <CardContent className="space-y-4 pt-6">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="emoji-search">搜索 tag</Label>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="emoji-search"
+                      value={searchInput}
+                      onChange={(event) =>
+                        handleSearchInputChange(event.target.value)
+                      }
+                      placeholder="搜索 tag、描述或哈希..."
+                      className="pr-9 pl-8"
+                    />
+                    {searchInput && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-1 top-1 h-7 w-7"
+                        onClick={() => handleSearchInputChange('')}
+                        aria-label="清空搜索"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <Label>排序方式</Label>
                   <Select
@@ -510,7 +556,9 @@ export function EmojiManagementPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardDescription>
-                共 {total} 个表情包,当前第 {page} 页
+                {searchKeyword
+                  ? `搜索“${searchKeyword}”命中 ${total} 个表情包,当前第 ${page} 页`
+                  : `共 ${total} 个表情包,当前第 ${page} 页`}
               </CardDescription>
             </CardHeader>
             <CardContent>
