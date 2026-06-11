@@ -44,6 +44,12 @@ from src.learners.behavior_scene_cluster_store import (  # noqa: E402
     retrieve_behavior_scores_from_scene_clusters,
 )
 
+RETRIEVAL_METHODS = {
+    "direct": "direct_domain_overlap",
+    "spread1": "tag_cluster_spread_1",
+    "spread2": "tag_cluster_spread_2",
+}
+
 
 @dataclass(frozen=True)
 class EvalWindow:
@@ -288,12 +294,14 @@ def _retrieve_candidates(
     profile,
     max_count: int,
     include_global: bool,
+    retrieval_mode: str,
 ) -> list[dict[str, Any]]:
     behavior_scores = retrieve_behavior_scores_from_scene_clusters(
         session_ids={session_id},
         include_global=include_global,
         profile=profile,
         max_count=max_count,
+        retrieval_mode=retrieval_mode,
     )
     candidates: list[dict[str, Any]] = []
     for behavior_id, score in behavior_scores.items():
@@ -474,10 +482,91 @@ def _build_report_stats(samples: list[dict[str, Any]]) -> dict[str, Any]:
     if overlap_values:
         comparison["avg_topk_overlap"] = round(sum(overlap_values) / len(overlap_values), 4)
 
+    method_comparison: dict[str, dict[str, Any]] = {}
+    for scope_name in ("same_chat", "all_chats"):
+        direct_key = f"{scope_name}/direct"
+        method_summary: dict[str, Any] = {
+            "segment_count": 0,
+            "direct_hit": 0,
+            "spread1_hit": 0,
+            "spread2_hit": 0,
+            "spread1_new_hit": 0,
+            "spread2_new_hit": 0,
+            "spread1_same_top1_as_direct": 0,
+            "spread2_same_top1_as_direct": 0,
+            "spread1_different_top1_from_direct": 0,
+            "spread2_different_top1_from_direct": 0,
+            "spread1_avg_topk_overlap_with_direct": 0.0,
+            "spread2_avg_topk_overlap_with_direct": 0.0,
+        }
+        spread1_overlap_values: list[int] = []
+        spread2_overlap_values: list[int] = []
+        for sample in samples:
+            for segment in sample["segments"]:
+                retrieval = segment.get("retrieval", {})
+                if direct_key not in retrieval:
+                    continue
+                method_summary["segment_count"] += 1
+                direct_candidates = retrieval.get(direct_key, [])
+                spread1_candidates = retrieval.get(f"{scope_name}/spread1", [])
+                spread2_candidates = retrieval.get(f"{scope_name}/spread2", [])
+                if direct_candidates:
+                    method_summary["direct_hit"] += 1
+                if spread1_candidates:
+                    method_summary["spread1_hit"] += 1
+                if spread2_candidates:
+                    method_summary["spread2_hit"] += 1
+                if not direct_candidates and spread1_candidates:
+                    method_summary["spread1_new_hit"] += 1
+                if not direct_candidates and spread2_candidates:
+                    method_summary["spread2_new_hit"] += 1
+                if direct_candidates and spread1_candidates:
+                    if direct_candidates[0].get("id") == spread1_candidates[0].get("id"):
+                        method_summary["spread1_same_top1_as_direct"] += 1
+                    else:
+                        method_summary["spread1_different_top1_from_direct"] += 1
+                if direct_candidates and spread2_candidates:
+                    if direct_candidates[0].get("id") == spread2_candidates[0].get("id"):
+                        method_summary["spread2_same_top1_as_direct"] += 1
+                    else:
+                        method_summary["spread2_different_top1_from_direct"] += 1
+                direct_ids = {candidate.get("id") for candidate in direct_candidates}
+                spread1_overlap_values.append(
+                    len(direct_ids & {candidate.get("id") for candidate in spread1_candidates})
+                )
+                spread2_overlap_values.append(
+                    len(direct_ids & {candidate.get("id") for candidate in spread2_candidates})
+                )
+        if method_summary["segment_count"] > 0:
+            method_summary["direct_hit_rate"] = round(
+                method_summary["direct_hit"] / method_summary["segment_count"],
+                4,
+            )
+            method_summary["spread1_hit_rate"] = round(
+                method_summary["spread1_hit"] / method_summary["segment_count"],
+                4,
+            )
+            method_summary["spread2_hit_rate"] = round(
+                method_summary["spread2_hit"] / method_summary["segment_count"],
+                4,
+            )
+        if spread1_overlap_values:
+            method_summary["spread1_avg_topk_overlap_with_direct"] = round(
+                sum(spread1_overlap_values) / len(spread1_overlap_values),
+                4,
+            )
+        if spread2_overlap_values:
+            method_summary["spread2_avg_topk_overlap_with_direct"] = round(
+                sum(spread2_overlap_values) / len(spread2_overlap_values),
+                4,
+            )
+        method_comparison[scope_name] = method_summary
+
     sample_distribution = Counter(str(sample["session_id"]) for sample in samples)
     return {
         "modes": mode_stats,
         "comparison": comparison,
+        "method_comparison": method_comparison,
         "sample_session_distribution": dict(sample_distribution.most_common()),
     }
 
@@ -497,28 +586,31 @@ async def _evaluate_window(window: EvalWindow, args: Namespace) -> dict[str, Any
     segment_results: list[dict[str, Any]] = []
     for segment in segments:
         retrieval_results: dict[str, list[dict[str, Any]]] = {}
-        if args.scope in {"both", "same-chat"}:
-            same_chat_candidates = _retrieve_candidates(
-                session_id=window.session_id,
-                profile=segment.profile,
-                max_count=args.max_count,
-                include_global=False,
-            )
-            retrieval_results["same_chat"] = [
-                _brief_candidate(candidate, query_session_id=window.session_id)
-                for candidate in same_chat_candidates
-            ]
-        if args.scope in {"both", "all-chats"}:
-            all_chat_candidates = _retrieve_candidates(
-                session_id=window.session_id,
-                profile=segment.profile,
-                max_count=args.max_count,
-                include_global=True,
-            )
-            retrieval_results["all_chats"] = [
-                _brief_candidate(candidate, query_session_id=window.session_id)
-                for candidate in all_chat_candidates
-            ]
+        for method_name, retrieval_mode in RETRIEVAL_METHODS.items():
+            if args.scope in {"both", "same-chat"}:
+                same_chat_candidates = _retrieve_candidates(
+                    session_id=window.session_id,
+                    profile=segment.profile,
+                    max_count=args.max_count,
+                    include_global=False,
+                    retrieval_mode=retrieval_mode,
+                )
+                retrieval_results[f"same_chat/{method_name}"] = [
+                    _brief_candidate(candidate, query_session_id=window.session_id)
+                    for candidate in same_chat_candidates
+                ]
+            if args.scope in {"both", "all-chats"}:
+                all_chat_candidates = _retrieve_candidates(
+                    session_id=window.session_id,
+                    profile=segment.profile,
+                    max_count=args.max_count,
+                    include_global=True,
+                    retrieval_mode=retrieval_mode,
+                )
+                retrieval_results[f"all_chats/{method_name}"] = [
+                    _brief_candidate(candidate, query_session_id=window.session_id)
+                    for candidate in all_chat_candidates
+                ]
         segment_results.append(
             {
                 "segment_id": segment.segment_id,
@@ -631,6 +723,12 @@ def _mode_label(mode: str) -> str:
     labels = {
         "same_chat": "同 chat_id",
         "all_chats": "所有 chat_id",
+        "same_chat/direct": "同 chat_id / 无扩散",
+        "same_chat/spread1": "同 chat_id / 一次扩散",
+        "same_chat/spread2": "同 chat_id / 二次扩散",
+        "all_chats/direct": "所有 chat_id / 无扩散",
+        "all_chats/spread1": "所有 chat_id / 一次扩散",
+        "all_chats/spread2": "所有 chat_id / 二次扩散",
     }
     return labels.get(mode, mode)
 
@@ -703,6 +801,26 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 "",
             ]
         )
+
+    method_comparison = stats.get("method_comparison", {})
+    if method_comparison:
+        lines.extend(["### 三种检索方法对照", ""])
+        for scope_name, summary in method_comparison.items():
+            lines.append(f"#### {_mode_label(scope_name)}")
+            lines.append("")
+            lines.append(f"- 片段数：{summary['segment_count']}")
+            lines.append(f"- 无扩散命中：{summary['direct_hit']}（{summary.get('direct_hit_rate', 0):.2%}）")
+            lines.append(f"- 一次扩散命中：{summary['spread1_hit']}（{summary.get('spread1_hit_rate', 0):.2%}）")
+            lines.append(f"- 二次扩散命中：{summary['spread2_hit']}（{summary.get('spread2_hit_rate', 0):.2%}）")
+            lines.append(f"- 一次扩散新增命中：{summary['spread1_new_hit']}")
+            lines.append(f"- 二次扩散新增命中：{summary['spread2_new_hit']}")
+            lines.append(f"- 一次扩散 Top1 与无扩散相同：{summary['spread1_same_top1_as_direct']}")
+            lines.append(f"- 一次扩散 Top1 与无扩散不同：{summary['spread1_different_top1_from_direct']}")
+            lines.append(f"- 二次扩散 Top1 与无扩散相同：{summary['spread2_same_top1_as_direct']}")
+            lines.append(f"- 二次扩散 Top1 与无扩散不同：{summary['spread2_different_top1_from_direct']}")
+            lines.append(f"- 一次扩散与无扩散平均 TopK 重叠：{summary['spread1_avg_topk_overlap_with_direct']}")
+            lines.append(f"- 二次扩散与无扩散平均 TopK 重叠：{summary['spread2_avg_topk_overlap_with_direct']}")
+            lines.append("")
 
     lines.extend(["## 逐条召回分析", ""])
     for sample in report["samples"]:

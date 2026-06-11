@@ -1,6 +1,8 @@
 """行为学习图谱浏览 API。"""
 
+from collections import defaultdict
 from datetime import datetime
+from itertools import combinations
 from typing import Annotated, Any, Optional
 
 import json
@@ -15,6 +17,7 @@ from src.common.database.database_model import (
     BehaviorExperiencePath,
     BehaviorOutcome,
     BehaviorSceneCluster,
+    BehaviorSceneTagCluster,
     ChatSession,
 )
 from src.learners.behavior_scenario import BehaviorScenarioProfile, parse_behavior_scenario_response
@@ -107,6 +110,11 @@ class BehaviorClusterListResponse(BaseModel):
     data: list[BehaviorClusterItem]
 
 
+class BehaviorGraphDataResponse(BaseModel):
+    success: bool = True
+    data: dict[str, Any]
+
+
 class BehaviorNodePayload(BaseModel):
     id: int
     kind: str
@@ -132,7 +140,7 @@ class BehaviorPathDetailResponse(BaseModel):
 class BehaviorScenarioDebugRequest(BaseModel):
     session_id: Optional[str] = Field(default=None)
     include_global: bool = Field(default=True)
-    retrieval_mode: str = Field(default="direct_domain_overlap")
+    retrieval_mode: str = Field(default="tag_cluster_spread_1")
     summary: str = Field(default="")
     tag_clusters: list[dict[str, Any]] = Field(default_factory=list)
     need: dict[str, Any] = Field(default_factory=dict)
@@ -189,6 +197,247 @@ def _cluster_payload(cluster: Optional[BehaviorSceneCluster]) -> BehaviorSceneCl
         score=float(cluster.score or 0.0),
         update_time=_isoformat(cluster.update_time),
     )
+
+
+def _split_tag_ref(tag_ref: str) -> tuple[str, str]:
+    if ":" not in tag_ref:
+        return "", tag_ref
+    tag_kind, cluster_key = tag_ref.split(":", 1)
+    return tag_kind, cluster_key
+
+
+def _tag_cluster_members_by_key(session: Any) -> dict[str, list[dict[str, Any]]]:
+    members: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    rows = session.exec(
+        select(BehaviorSceneTagCluster).order_by(
+            BehaviorSceneTagCluster.cluster_key,
+            BehaviorSceneTagCluster.source_count.desc(),  # type: ignore[attr-defined]
+            BehaviorSceneTagCluster.tag,
+        )
+    ).all()
+    for row in rows:
+        members[str(row.cluster_key)].append(
+            {
+                "kind": row.tag_kind,
+                "tag": row.tag,
+                "source_count": int(row.source_count or 0),
+            }
+        )
+    return members
+
+
+def _tag_ref_display(tag_ref: str, members_by_key: dict[str, list[dict[str, Any]]]) -> str:
+    tag_kind, cluster_key = _split_tag_ref(tag_ref)
+    members = members_by_key.get(cluster_key, [])
+    if not members:
+        return tag_ref
+    names: list[str] = []
+    for member in members:
+        if tag_kind and member["kind"] != tag_kind:
+            continue
+        tag = str(member["tag"] or "")
+        if tag and tag not in names:
+            names.append(tag)
+        if len(names) >= 2:
+            break
+    if not names:
+        for member in members[:2]:
+            tag = str(member["tag"] or "")
+            if tag and tag not in names:
+                names.append(tag)
+    return " / ".join(names) if names else tag_ref
+
+
+def _distribution_mapping(raw_value: Any) -> dict[str, float]:
+    mapping: dict[str, float] = {}
+    for item in _load_json_list(raw_value):
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("tag") or "").strip()
+        if not tag:
+            continue
+        try:
+            probability = float(item.get("probability") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if probability <= 0:
+            continue
+        mapping[tag] = mapping.get(tag, 0.0) + probability
+    total = sum(mapping.values())
+    if total <= 0:
+        return {}
+    return {tag: probability / total for tag, probability in mapping.items()}
+
+
+def _readable_tag_distribution(
+    raw_value: Any,
+    members_by_key: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    tag_probs = _distribution_mapping(raw_value)
+    tags: list[dict[str, Any]] = []
+    for tag, probability in sorted(tag_probs.items(), key=lambda item: item[1], reverse=True):
+        tag_kind, cluster_key = _split_tag_ref(tag)
+        tags.append(
+            {
+                "tag": tag,
+                "kind": tag_kind,
+                "cluster_key": cluster_key,
+                "display": _tag_ref_display(tag, members_by_key),
+                "probability": probability,
+            }
+        )
+    return tags
+
+
+def _scene_cluster_display_name(cluster_id: int, tags: list[dict[str, Any]]) -> str:
+    names: list[str] = []
+    for item in tags[:4]:
+        for part in str(item.get("display") or "").split(" / "):
+            if part and part not in names:
+                names.append(part)
+            if len(names) >= 3:
+                break
+        if len(names) >= 3:
+            break
+    return f"#{cluster_id}｜{' / '.join(names)}" if names else f"场景簇 #{cluster_id}"
+
+
+def _build_behavior_graph_data(session: Any, session_id: Optional[str]) -> dict[str, Any]:
+    statement = select(BehaviorSceneCluster)
+    if session_id is not None and session_id != "all":
+        if session_id == "__global__":
+            statement = statement.where(BehaviorSceneCluster.session_id.is_(None))  # type: ignore[attr-defined]
+        else:
+            statement = statement.where(BehaviorSceneCluster.session_id == session_id)
+    clusters = list(session.exec(statement.order_by(BehaviorSceneCluster.id)).all())  # type: ignore[attr-defined]
+    cluster_ids = {cluster.id for cluster in clusters if cluster.id is not None}
+    members_by_key = _tag_cluster_members_by_key(session)
+
+    paths_by_cluster: dict[int, list[BehaviorExperiencePath]] = {cluster_id: [] for cluster_id in cluster_ids}
+    if cluster_ids:
+        paths = session.exec(
+            select(BehaviorExperiencePath).where(col(BehaviorExperiencePath.scene_cluster_id).in_(cluster_ids))
+        ).all()
+        for path in paths:
+            paths_by_cluster.setdefault(path.scene_cluster_id, []).append(path)
+
+    scene_nodes: list[dict[str, Any]] = []
+    scene_distribution_by_id: dict[int, dict[str, float]] = {}
+    for cluster in clusters:
+        if cluster.id is None:
+            continue
+        tags = _readable_tag_distribution(cluster.tag_distribution, members_by_key)
+        label = _scene_cluster_display_name(cluster.id, tags)
+        cluster_paths = paths_by_cluster.get(cluster.id, [])
+        scene_distribution_by_id[cluster.id] = {str(item["tag"]): float(item["probability"]) for item in tags}
+        scene_nodes.append(
+            {
+                "id": cluster.id,
+                "label": label,
+                "short_label": label.split("｜", 1)[1] if "｜" in label else label,
+                "session_id": cluster.session_id or "__global__",
+                "source_count": int(cluster.source_count or 0),
+                "score": float(cluster.score or 0.0),
+                "path_count": len(cluster_paths),
+                "activation_count": sum(int(path.activation_count or 0) for path in cluster_paths),
+                "success_count": sum(int(path.success_count or 0) for path in cluster_paths),
+                "failure_count": sum(int(path.failure_count or 0) for path in cluster_paths),
+                "update_time": _isoformat(cluster.update_time),
+                "tags": tags,
+            }
+        )
+
+    scene_edges: list[dict[str, Any]] = []
+    scene_label_by_id = {node["id"]: node["label"] for node in scene_nodes}
+    for left_id, right_id in combinations(scene_distribution_by_id, 2):
+        left_tags = scene_distribution_by_id[left_id]
+        right_tags = scene_distribution_by_id[right_id]
+        shared_tags = sorted(set(left_tags) & set(right_tags))
+        if not shared_tags:
+            continue
+        weight = sum(min(left_tags[tag], right_tags[tag]) for tag in shared_tags)
+        if weight <= 0:
+            continue
+        scene_edges.append(
+            {
+                "source": left_id,
+                "target": right_id,
+                "source_label": scene_label_by_id.get(left_id, str(left_id)),
+                "target_label": scene_label_by_id.get(right_id, str(right_id)),
+                "weight": round(weight, 6),
+                "shared_tags": [
+                    {
+                        "tag": tag,
+                        "display": _tag_ref_display(tag, members_by_key),
+                        "left": left_tags[tag],
+                        "right": right_tags[tag],
+                        "overlap": min(left_tags[tag], right_tags[tag]),
+                    }
+                    for tag in shared_tags
+                ],
+            }
+        )
+    scene_edges.sort(key=lambda item: item["weight"], reverse=True)
+
+    tag_source_count: dict[str, int] = defaultdict(int)
+    tag_aliases: dict[str, list[str]] = defaultdict(list)
+    tag_kind_by_id: dict[str, str] = {}
+    for cluster_key, members in members_by_key.items():
+        for member in members:
+            tag_kind = str(member["kind"] or "")
+            tag_id = f"{tag_kind}:{cluster_key}" if tag_kind else cluster_key
+            tag_kind_by_id[tag_id] = tag_kind
+            tag_source_count[tag_id] += int(member["source_count"] or 0)
+            tag = str(member["tag"] or "")
+            if tag and tag not in tag_aliases[tag_id]:
+                tag_aliases[tag_id].append(tag)
+
+    tag_weight: dict[str, float] = defaultdict(float)
+    tag_scene_count: dict[str, set[int]] = defaultdict(set)
+    tag_edges: dict[tuple[str, str], dict[str, Any]] = {}
+    for scene_id, tag_probs in scene_distribution_by_id.items():
+        for tag, probability in tag_probs.items():
+            tag_weight[tag] += probability
+            tag_scene_count[tag].add(scene_id)
+        for left_tag, right_tag in combinations(sorted(tag_probs), 2):
+            edge_key = tuple(sorted((left_tag, right_tag)))
+            edge = tag_edges.setdefault(edge_key, {"source": edge_key[0], "target": edge_key[1], "weight": 0.0, "count": 0})
+            edge["weight"] += min(tag_probs[left_tag], tag_probs[right_tag])
+            edge["count"] += 1
+
+    tag_node_ids = set(tag_source_count) | set(tag_weight)
+    tag_nodes = [
+        {
+            "id": tag_id,
+            "kind": tag_kind_by_id.get(tag_id, _split_tag_ref(tag_id)[0]),
+            "cluster_key": _split_tag_ref(tag_id)[1],
+            "label": " / ".join(tag_aliases.get(tag_id, [])[:3]) or _tag_ref_display(tag_id, members_by_key),
+            "aliases": tag_aliases.get(tag_id, [])[:12],
+            "weight": round(tag_weight.get(tag_id, 0.0), 6),
+            "scene_count": len(tag_scene_count.get(tag_id, set())),
+            "source_count": tag_source_count.get(tag_id, 0),
+        }
+        for tag_id in sorted(tag_node_ids)
+    ]
+    tag_edges_payload = [
+        {
+            **edge,
+            "weight": round(float(edge["weight"]), 6),
+        }
+        for edge in sorted(tag_edges.values(), key=lambda item: item["weight"], reverse=True)
+        if float(edge["weight"]) > 0
+    ]
+
+    return {
+        "scene_cluster_network": {
+            "nodes": scene_nodes,
+            "edges": scene_edges,
+        },
+        "tag_network": {
+            "nodes": tag_nodes,
+            "edges": tag_edges_payload,
+        },
+    }
 
 
 def _chat_type_of(session: Optional[ChatSession]) -> str:
@@ -332,6 +581,16 @@ async def list_behavior_clusters(
         start = (page - 1) * page_size
         data = cluster_items[start : start + page_size]
     return BehaviorClusterListResponse(total=total, page=page, page_size=page_size, data=data)
+
+
+@router.get("/graph-data", response_model=BehaviorGraphDataResponse)
+async def get_behavior_graph_data(
+    session_id: Annotated[Optional[str], Query()] = None,
+) -> BehaviorGraphDataResponse:
+    """返回 WebUI 行为学习图谱所需的场景簇网络和 tag 簇分布网络。"""
+
+    with get_db_session(auto_commit=False) as session:
+        return BehaviorGraphDataResponse(data=_build_behavior_graph_data(session, session_id))
 
 
 @router.get("/paths/{path_id}", response_model=BehaviorPathDetailResponse)

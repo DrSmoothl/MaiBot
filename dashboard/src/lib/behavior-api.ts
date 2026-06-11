@@ -81,6 +81,73 @@ export interface BehaviorClusterListResponse {
   data: BehaviorClusterItem[]
 }
 
+export interface BehaviorReadableTag {
+  tag: string
+  kind: string
+  cluster_key: string
+  display: string
+  probability: number
+}
+
+export interface BehaviorSceneGraphNode {
+  id: number
+  label: string
+  short_label: string
+  session_id: string
+  source_count: number
+  score: number
+  path_count: number
+  activation_count: number
+  success_count: number
+  failure_count: number
+  update_time: string | null
+  tags: BehaviorReadableTag[]
+}
+
+export interface BehaviorSceneGraphEdge {
+  source: number
+  target: number
+  source_label: string
+  target_label: string
+  weight: number
+  shared_tags: Array<{
+    tag: string
+    display: string
+    left: number
+    right: number
+    overlap: number
+  }>
+}
+
+export interface BehaviorTagNetworkNode {
+  id: string
+  kind: string
+  cluster_key: string
+  label: string
+  aliases: string[]
+  weight: number
+  scene_count: number
+  source_count: number
+}
+
+export interface BehaviorTagNetworkEdge {
+  source: string
+  target: string
+  weight: number
+  count: number
+}
+
+export interface BehaviorGraphData {
+  scene_cluster_network: {
+    nodes: BehaviorSceneGraphNode[]
+    edges: BehaviorSceneGraphEdge[]
+  }
+  tag_network: {
+    nodes: BehaviorTagNetworkNode[]
+    edges: BehaviorTagNetworkEdge[]
+  }
+}
+
 export interface BehaviorGraphNode {
   id: number
   kind: string
@@ -197,6 +264,18 @@ export async function listBehaviorClusters(params: {
     if (value !== undefined && value !== '') query.set(key, String(value))
   })
   const response = await fetchWithAuth(`${API_BASE}/clusters?${query.toString()}`)
+  return readJson(response)
+}
+
+export async function getBehaviorGraphData(params: {
+  session_id?: string
+} = {}): Promise<{ success: boolean; data: BehaviorGraphData }> {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') query.set(key, String(value))
+  })
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  const response = await fetchWithAuth(`${API_BASE}/graph-data${suffix}`)
   return readJson(response)
 }
 

@@ -44,10 +44,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import {
   debugBehaviorRetrieval,
+  getBehaviorGraphData,
   getBehaviorPathDetail,
   listBehaviorClusters,
   listBehaviorChats,
   listBehaviorPaths,
+  type BehaviorGraphData,
   type BehaviorChatInfo,
   type BehaviorClusterItem,
   type BehaviorClusterTag,
@@ -61,7 +63,7 @@ const PAGE_SIZE = 20
 const DEFAULT_CLUSTER_PAGE_SIZE = 200
 const CLUSTER_PAGE_SIZE_OPTIONS = [200, 1000, 3000, 5000]
 
-type ActiveTab = 'paths' | 'clusters' | 'debug' | 'graph'
+type ActiveTab = 'paths' | 'clusters' | 'scene-network' | 'tag-network' | 'debug' | 'graph'
 
 interface BehaviorSceneGroup {
   key: string
@@ -97,10 +99,19 @@ interface ClusterMapNodeData {
   colorClassName: string
 }
 
+interface BehaviorNetworkNodeData {
+  label: string
+  detail: string
+  metric: string
+  tone: 'primary' | 'teal' | 'amber' | 'violet' | 'slate'
+}
+
 type BehaviorFlowNode = Node<BehaviorFlowNodeData>
 type BehaviorFlowEdge = Edge
 type ClusterMapNode = Node<ClusterMapNodeData>
 type ClusterMapEdge = Edge
+type BehaviorNetworkNode = Node<BehaviorNetworkNodeData>
+type BehaviorNetworkEdge = Edge
 
 const BehaviorGraphNode = memo(({ data }: NodeProps<BehaviorFlowNodeData>) => {
   const styleByKind: Record<string, string> = {
@@ -165,9 +176,35 @@ const ClusterMapNodeView = memo(({ data }: NodeProps<ClusterMapNodeData>) => {
 
 ClusterMapNodeView.displayName = 'ClusterMapNodeView'
 
+const BehaviorNetworkNodeView = memo(({ data }: NodeProps<BehaviorNetworkNodeData>) => {
+  const toneClassName: Record<BehaviorNetworkNodeData['tone'], string> = {
+    amber: 'border-amber-500/40 bg-amber-500 text-white shadow-amber-500/15',
+    primary: 'border-primary/40 bg-primary text-primary-foreground shadow-primary/15',
+    slate: 'border-slate-400/45 bg-slate-600 text-white shadow-slate-500/10',
+    teal: 'border-teal-500/40 bg-teal-600 text-white shadow-teal-500/15',
+    violet: 'border-violet-500/40 bg-violet-600 text-white shadow-violet-500/15',
+  }
+  return (
+    <div
+      className={cn(
+        'group flex h-14 w-14 items-center justify-center rounded-full border text-center text-[10px] font-semibold shadow-lg transition hover:z-10 hover:scale-105 hover:ring-2 hover:ring-primary/30',
+        toneClassName[data.tone]
+      )}
+      title={`${data.detail}\n${data.metric}`}
+    >
+      <Handle className="opacity-0" type="target" position={Position.Left} />
+      <span className="line-clamp-2 px-1 opacity-0 transition group-hover:opacity-100">{data.label}</span>
+      <Handle className="opacity-0" type="source" position={Position.Right} />
+    </div>
+  )
+})
+
+BehaviorNetworkNodeView.displayName = 'BehaviorNetworkNodeView'
+
 const behaviorNodeTypes: NodeTypes = {
   behavior: BehaviorGraphNode,
   clusterMap: ClusterMapNodeView,
+  behaviorNetwork: BehaviorNetworkNodeView,
 }
 
 function formatTime(value: string | null): string {
@@ -677,6 +714,118 @@ function buildClusterHoverGraph(
   }
 }
 
+function networkNodeTone(kind: string): BehaviorNetworkNodeData['tone'] {
+  if (kind === 'need') return 'amber'
+  if (kind === 'attitude') return 'teal'
+  if (kind === 'domain') return 'primary'
+  if (kind === 'scene') return 'violet'
+  return 'slate'
+}
+
+function networkCirclePosition(index: number, count: number, weight: number): { x: number; y: number } {
+  const ring = Math.floor(Math.sqrt(index))
+  const angle = (index / Math.max(count, 1)) * Math.PI * 2 + ring * 0.48
+  const radius = 130 + ring * 64 + Math.max(0, 90 - weight * 8)
+  return {
+    x: 920 + Math.cos(angle) * radius,
+    y: 500 + Math.sin(angle) * radius,
+  }
+}
+
+function buildSceneNetworkGraph(data: BehaviorGraphData | null): {
+  nodes: BehaviorNetworkNode[]
+  edges: BehaviorNetworkEdge[]
+  nodeById: Map<string, BehaviorGraphData['scene_cluster_network']['nodes'][number]>
+} {
+  const sourceNodes = data?.scene_cluster_network.nodes ?? []
+  const sourceEdges = data?.scene_cluster_network.edges ?? []
+  const sortedNodes = sourceNodes.slice().sort((left, right) => right.path_count - left.path_count || right.source_count - left.source_count)
+  const nodeById = new Map<string, BehaviorGraphData['scene_cluster_network']['nodes'][number]>()
+  const nodes: BehaviorNetworkNode[] = sortedNodes.map((node, index) => {
+    const nodeId = `scene:${node.id}`
+    const position = networkCirclePosition(index, sortedNodes.length, node.path_count + node.source_count * 0.2)
+    nodeById.set(nodeId, node)
+    return {
+      id: nodeId,
+      type: 'behaviorNetwork',
+      position,
+      data: {
+        label: shortText(node.short_label || node.label, 16),
+        detail: node.label,
+        metric: `${node.path_count} 路径 · ${node.source_count} 样本`,
+        tone: 'violet',
+      },
+    }
+  })
+  const visibleNodeIds = new Set(nodes.map((node) => node.id))
+  const edges: BehaviorNetworkEdge[] = sourceEdges
+    .filter((edge) => visibleNodeIds.has(`scene:${edge.source}`) && visibleNodeIds.has(`scene:${edge.target}`))
+    .slice(0, 900)
+    .map((edge) => ({
+      id: `scene-edge:${edge.source}:${edge.target}`,
+      source: `scene:${edge.source}`,
+      target: `scene:${edge.target}`,
+      type: 'straight',
+      interactionWidth: 16,
+      style: {
+        stroke: 'hsl(var(--muted-foreground))',
+        strokeWidth: Math.max(0.8, Math.min(5, edge.weight * 5)),
+        opacity: Math.max(0.12, Math.min(0.5, edge.weight)),
+      },
+      data: edge,
+    }))
+  return { nodes, edges, nodeById }
+}
+
+function buildTagNetworkGraph(data: BehaviorGraphData | null): {
+  nodes: BehaviorNetworkNode[]
+  edges: BehaviorNetworkEdge[]
+  nodeById: Map<string, BehaviorGraphData['tag_network']['nodes'][number]>
+} {
+  const sourceNodes = data?.tag_network.nodes ?? []
+  const sourceEdges = data?.tag_network.edges ?? []
+  const connectedIds = new Set(sourceEdges.flatMap((edge) => [edge.source, edge.target]))
+  const sortedNodes = sourceNodes
+    .filter((node) => connectedIds.has(node.id))
+    .sort((left, right) => right.scene_count - left.scene_count || right.source_count - left.source_count)
+    .slice(0, 360)
+  const nodeById = new Map<string, BehaviorGraphData['tag_network']['nodes'][number]>()
+  const nodes: BehaviorNetworkNode[] = sortedNodes.map((node, index) => {
+    const nodeId = `tag:${node.id}`
+    const position = networkCirclePosition(index, sortedNodes.length, node.scene_count + node.source_count * 0.05)
+    nodeById.set(nodeId, node)
+    return {
+      id: nodeId,
+      type: 'behaviorNetwork',
+      position,
+      data: {
+        label: shortText(node.label, 16),
+        detail: `${node.label}\n${node.id}`,
+        metric: `${node.scene_count} 场景簇 · ${node.source_count} 成员样本`,
+        tone: networkNodeTone(node.kind),
+      },
+    }
+  })
+  const visibleNodeIds = new Set(nodes.map((node) => node.id))
+  const edges: BehaviorNetworkEdge[] = sourceEdges
+    .filter((edge) => visibleNodeIds.has(`tag:${edge.source}`) && visibleNodeIds.has(`tag:${edge.target}`))
+    .slice(0, 1200)
+    .map((edge) => ({
+      id: `tag-edge:${edge.source}:${edge.target}`,
+      source: `tag:${edge.source}`,
+      target: `tag:${edge.target}`,
+      type: 'straight',
+      interactionWidth: 16,
+      style: {
+        stroke: 'hsl(var(--muted-foreground))',
+        strokeWidth: Math.max(0.7, Math.min(5, Math.sqrt(edge.weight) * 1.5)),
+        opacity: Math.max(0.1, Math.min(0.42, edge.weight * 0.8)),
+      },
+      data: edge,
+    }))
+  return { nodes, edges, nodeById }
+}
+
 export function BehaviorLearningPage() {
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<ActiveTab>('paths')
@@ -686,6 +835,7 @@ export function BehaviorLearningPage() {
   const [enabledFilter, setEnabledFilter] = useState('all')
   const [paths, setPaths] = useState<BehaviorPathItem[]>([])
   const [clusters, setClusters] = useState<BehaviorClusterItem[]>([])
+  const [graphData, setGraphData] = useState<BehaviorGraphData | null>(null)
   const [openSceneGroups, setOpenSceneGroups] = useState<Set<string>>(new Set())
   const [total, setTotal] = useState(0)
   const [clusterTotal, setClusterTotal] = useState(0)
@@ -693,6 +843,7 @@ export function BehaviorLearningPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
   const [clusterLoading, setClusterLoading] = useState(false)
+  const [graphLoading, setGraphLoading] = useState(false)
   const [selectedPathId, setSelectedPathId] = useState<number | null>(null)
   const [detail, setDetail] = useState<BehaviorPathDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -826,6 +977,24 @@ export function BehaviorLearningPage() {
     }
   }
 
+  const loadGraphData = async () => {
+    setGraphLoading(true)
+    try {
+      const result = await getBehaviorGraphData({
+        session_id: selectedSessionId === 'all' ? undefined : selectedSessionId,
+      })
+      if (result.success) setGraphData(result.data)
+    } catch (error) {
+      toast({
+        title: '加载行为图谱失败',
+        description: error instanceof Error ? error.message : '无法读取行为学习图谱数据',
+        variant: 'destructive',
+      })
+    } finally {
+      setGraphLoading(false)
+    }
+  }
+
   const loadDetail = async (pathId: number) => {
     try {
       setDetailLoading(true)
@@ -848,7 +1017,7 @@ export function BehaviorLearningPage() {
       const result = await debugBehaviorRetrieval({
         session_id: selectedSessionId === 'all' || selectedSessionId === '__global__' ? undefined : selectedSessionId,
         include_global: selectedSessionId === 'all',
-        retrieval_mode: 'tag_expand_scene_cluster',
+        retrieval_mode: 'tag_cluster_spread_1',
         summary: debugForm.summary,
         tag_clusters: splitTags(debugForm.domainTags).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
         need: { tag_name: splitTags(debugForm.behaviorNeeds)[0] ?? '', tag_aliases: [] },
@@ -878,6 +1047,12 @@ export function BehaviorLearningPage() {
   useEffect(() => {
     loadClusters()
   }, [selectedSessionId, clusterPageSize])
+
+  useEffect(() => {
+    if (activeTab === 'scene-network' || activeTab === 'tag-network') {
+      loadGraphData()
+    }
+  }, [activeTab, selectedSessionId])
 
   useEffect(() => {
     if (selectedPathId !== null) {
@@ -928,7 +1103,7 @@ export function BehaviorLearningPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => { loadChats(); loadPaths(); loadClusters() }}>
+          <Button variant="outline" onClick={() => { loadChats(); loadPaths(); loadClusters(); loadGraphData() }}>
             <RefreshCw className="mr-2 h-4 w-4" />
             刷新
           </Button>
@@ -936,9 +1111,11 @@ export function BehaviorLearningPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)} className="min-h-0 flex-1">
-        <TabsList className="grid w-full max-w-2xl grid-cols-4">
+        <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6">
           <TabsTrigger value="paths">经验路径</TabsTrigger>
           <TabsTrigger value="clusters">场景簇浏览</TabsTrigger>
+          <TabsTrigger value="scene-network">场景簇图谱</TabsTrigger>
+          <TabsTrigger value="tag-network">Tag簇网络</TabsTrigger>
           <TabsTrigger value="debug">检索调试</TabsTrigger>
           <TabsTrigger value="graph">局部图谱</TabsTrigger>
         </TabsList>
@@ -1044,6 +1221,22 @@ export function BehaviorLearningPage() {
             total={clusterTotal}
             selectedChatName={selectedChatName}
             loading={clusterLoading}
+          />
+        </TabsContent>
+
+        <TabsContent value="scene-network" className="mt-4">
+          <BehaviorSceneNetworkView
+            graphData={graphData}
+            loading={graphLoading}
+            selectedChatName={selectedChatName}
+          />
+        </TabsContent>
+
+        <TabsContent value="tag-network" className="mt-4">
+          <BehaviorTagNetworkView
+            graphData={graphData}
+            loading={graphLoading}
+            selectedChatName={selectedChatName}
           />
         </TabsContent>
 
@@ -1182,6 +1375,228 @@ function ClusterBrowserView({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function BehaviorSceneNetworkView({
+  graphData,
+  loading,
+  selectedChatName,
+}: {
+  graphData: BehaviorGraphData | null
+  loading: boolean
+  selectedChatName: string
+}) {
+  const { nodes, edges, nodeById } = useMemo(() => buildSceneNetworkGraph(graphData), [graphData])
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const selectedNode = selectedNodeId ? nodeById.get(selectedNodeId) ?? null : null
+  return (
+    <NetworkShell
+      title="场景簇图谱"
+      description={`${selectedChatName} · 节点表示场景簇，连线表示 tag 概率分布重叠`}
+      loading={loading}
+      empty={!loading && nodes.length === 0}
+      nodes={nodes}
+      edges={edges}
+      onNodeSelect={setSelectedNodeId}
+      selectedNodeId={selectedNodeId}
+      detail={selectedNode ? <SceneNetworkDetail node={selectedNode} /> : null}
+    />
+  )
+}
+
+function BehaviorTagNetworkView({
+  graphData,
+  loading,
+  selectedChatName,
+}: {
+  graphData: BehaviorGraphData | null
+  loading: boolean
+  selectedChatName: string
+}) {
+  const { nodes, edges, nodeById } = useMemo(() => buildTagNetworkGraph(graphData), [graphData])
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const selectedNode = selectedNodeId ? nodeById.get(selectedNodeId) ?? null : null
+  return (
+    <NetworkShell
+      title="Tag簇分布网络"
+      description={`${selectedChatName} · 节点表示 tag 簇，连线表示共同出现在同一场景簇分布`}
+      loading={loading}
+      empty={!loading && nodes.length === 0}
+      nodes={nodes}
+      edges={edges}
+      onNodeSelect={setSelectedNodeId}
+      selectedNodeId={selectedNodeId}
+      detail={selectedNode ? <TagNetworkDetail node={selectedNode} /> : null}
+    />
+  )
+}
+
+function NetworkShell({
+  title,
+  description,
+  loading,
+  empty,
+  nodes,
+  edges,
+  selectedNodeId,
+  onNodeSelect,
+  detail,
+}: {
+  title: string
+  description: string
+  loading: boolean
+  empty: boolean
+  nodes: BehaviorNetworkNode[]
+  edges: BehaviorNetworkEdge[]
+  selectedNodeId: string | null
+  onNodeSelect: (nodeId: string | null) => void
+  detail: ReactNode
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border bg-background">
+      <div className="flex flex-col gap-1 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">{title}</h2>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="outline">{nodes.length} 节点</Badge>
+          <Badge variant="outline">{edges.length} 连线</Badge>
+          {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+        </div>
+      </div>
+      {empty ? (
+        <div className="p-8 text-center text-sm text-muted-foreground">暂无图谱数据</div>
+      ) : (
+        <div className="relative h-[680px] overflow-hidden bg-muted/10">
+          <ReactFlow
+            nodes={nodes.map((node) => ({
+              ...node,
+              selected: selectedNodeId === node.id,
+            }))}
+            edges={edges}
+            nodeTypes={behaviorNodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.14 }}
+            minZoom={0.05}
+            maxZoom={4}
+            nodesDraggable
+            nodesConnectable={false}
+            elementsSelectable
+            attributionPosition="bottom-left"
+            onNodeClick={(_event, node) => onNodeSelect(node.id)}
+            onPaneClick={() => onNodeSelect(null)}
+          >
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+            <Controls />
+          </ReactFlow>
+          <div
+            data-open={detail ? 'true' : 'false'}
+            className={cn(
+              'absolute bottom-4 right-4 top-4 w-[min(420px,calc(100%-2rem))] transition duration-200 ease-out',
+              detail ? 'pointer-events-auto translate-x-0 opacity-100' : 'pointer-events-none translate-x-[calc(100%+2rem)] opacity-0'
+            )}
+          >
+            <div className="flex h-full flex-col overflow-hidden rounded-lg border bg-background/96 shadow-2xl backdrop-blur-md supports-[backdrop-filter]:bg-background/88">
+              <div className="flex items-center justify-between border-b bg-background/95 px-4 py-3 backdrop-blur-md">
+                <div>
+                  <h2 className="text-sm font-semibold">节点详情</h2>
+                  <p className="text-xs text-muted-foreground">分布、成员和统计信息</p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => onNodeSelect(null)} aria-label="关闭节点详情">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <ScrollArea className="min-h-0 flex-1 bg-background/90 p-4 backdrop-blur-md">
+                {detail}
+              </ScrollArea>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SceneNetworkDetail({ node }: { node: BehaviorGraphData['scene_cluster_network']['nodes'][number] }) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border bg-muted/20 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">场景簇 #{node.id}</Badge>
+          <Badge variant="outline">{node.session_id}</Badge>
+        </div>
+        <h3 className="break-words text-sm font-semibold leading-6">{node.label}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">更新 {formatTime(node.update_time)}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <Metric label="路径" value={String(node.path_count)} />
+        <Metric label="样本" value={String(node.source_count)} />
+        <Metric label="使用" value={String(node.activation_count)} />
+        <Metric label="簇分" value={formatScore(node.score)} />
+      </div>
+      <Panel title="Tag 分布">
+        <ReadableTagList tags={node.tags} />
+      </Panel>
+    </div>
+  )
+}
+
+function TagNetworkDetail({ node }: { node: BehaviorGraphData['tag_network']['nodes'][number] }) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border bg-muted/20 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">{node.kind || 'tag'}</Badge>
+          <Badge variant="outline">{node.scene_count} 场景簇</Badge>
+        </div>
+        <h3 className="break-words text-sm font-semibold leading-6">{node.label}</h3>
+        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{node.id}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <Metric label="场景簇" value={String(node.scene_count)} />
+        <Metric label="成员样本" value={String(node.source_count)} />
+        <Metric label="权重" value={node.weight.toFixed(3)} />
+        <Metric label="成员" value={String(node.aliases.length)} />
+      </div>
+      <Panel title="Tag 簇成员">
+        {node.aliases.length === 0 ? (
+          <p className="text-sm text-muted-foreground">暂无成员</p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {node.aliases.map((alias) => (
+              <Badge key={alias} variant="outline" className="max-w-full whitespace-normal break-all">
+                {alias}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </div>
+  )
+}
+
+function ReadableTagList({ tags }: { tags: BehaviorGraphData['scene_cluster_network']['nodes'][number]['tags'] }) {
+  if (tags.length === 0) return <p className="text-sm text-muted-foreground">暂无 tag 分布</p>
+  return (
+    <div className="space-y-2">
+      {tags.slice(0, 12).map((tag) => (
+        <div key={tag.tag} className="grid gap-2 text-sm sm:grid-cols-[minmax(0,1fr)_4rem] sm:items-center">
+          <div className="min-w-0">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="break-words text-xs text-foreground">{tag.display}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{formatProbability(tag.probability)}</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-primary" style={{ width: formatProbability(tag.probability) }} />
+            </div>
+            <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{tag.tag}</div>
+          </div>
+          <span className="hidden text-right text-xs text-muted-foreground sm:block">{tag.probability.toFixed(3)}</span>
+        </div>
+      ))}
     </div>
   )
 }

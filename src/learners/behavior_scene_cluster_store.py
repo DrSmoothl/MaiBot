@@ -28,13 +28,17 @@ MIN_TAG_CLUSTER_MERGE_OVERLAP = 2
 MAX_TAG_CLUSTER_MEMBERS = 24
 DIRECT_DOMAIN_OVERLAP_THRESHOLD = 0.30
 DIRECT_DOMAIN_OVERLAP_TOPK = 8
+TAG_CLUSTER_SPREAD_TOPK = 8
+TAG_CLUSTER_SPREAD_DECAY = 0.5
+DIRECT_LOCK_THRESHOLD = 0.60
+LOCKED_DIRECT_SPREAD_FACTOR = 0.25
 
-BehaviorSceneRetrievalMode = Literal["direct_domain_overlap"]
-DEFAULT_BEHAVIOR_SCENE_RETRIEVAL_MODE: BehaviorSceneRetrievalMode = "direct_domain_overlap"
+BehaviorSceneRetrievalMode = Literal["direct_domain_overlap", "tag_cluster_spread_1", "tag_cluster_spread_2"]
+DEFAULT_BEHAVIOR_SCENE_RETRIEVAL_MODE: BehaviorSceneRetrievalMode = "tag_cluster_spread_1"
 
 
 def _normalize_retrieval_mode(mode: str | None) -> BehaviorSceneRetrievalMode:
-    if mode == "direct_domain_overlap":
+    if mode in {"direct_domain_overlap", "tag_cluster_spread_1", "tag_cluster_spread_2"}:
         return mode
     return DEFAULT_BEHAVIOR_SCENE_RETRIEVAL_MODE
 
@@ -516,6 +520,44 @@ def retrieve_behavior_scores_from_scene_clusters(
                 )
                 for experience_path_id, score in behavior_cluster_scores.items():
                     behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+            else:
+                spread_depth = 1 if active_retrieval_mode == "tag_cluster_spread_1" else 2
+                direct_cluster_scores, _ = _score_scene_clusters_by_direct_domain_overlap(
+                    session,
+                    profile=profile,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                spread_cluster_scores, _ = _score_scene_clusters_by_tag_cluster_spread(
+                    session,
+                    profile=profile,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                    max_depth=spread_depth,
+                )
+                direct_behavior_scores = _score_behavior_clusters(
+                    session,
+                    cluster_scores=direct_cluster_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                spread_behavior_scores = _score_behavior_clusters(
+                    session,
+                    cluster_scores=spread_cluster_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                direct_top_score = max(direct_behavior_scores.values(), default=0.0)
+                if direct_top_score >= DIRECT_LOCK_THRESHOLD:
+                    behavior_scores.update(direct_behavior_scores)
+                    for experience_path_id, score in spread_behavior_scores.items():
+                        protected_score = float(score or 0.0) * LOCKED_DIRECT_SPREAD_FACTOR
+                        behavior_scores[experience_path_id] = max(
+                            behavior_scores.get(experience_path_id, 0.0),
+                            protected_score,
+                        )
+                else:
+                    behavior_scores.update(spread_behavior_scores)
     except Exception as exc:
         logger.error(f"行为场景簇检索失败: session_ids={session_ids} mode={active_retrieval_mode} error={exc}")
         return {}
@@ -547,9 +589,9 @@ def debug_retrieve_behavior_scores_from_scene_clusters(
             behavior_scores: dict[int, float] = {}
 
             cluster_scores: dict[int, float] = {}
-            direct_overlap_debug: dict[str, Any] = {}
+            retrieval_debug: dict[str, Any] = {}
             if active_retrieval_mode == "direct_domain_overlap":
-                cluster_scores, direct_overlap_debug = _score_scene_clusters_by_direct_domain_overlap(
+                cluster_scores, retrieval_debug = _score_scene_clusters_by_direct_domain_overlap(
                     session,
                     profile=profile,
                     session_ids=session_ids,
@@ -563,6 +605,55 @@ def debug_retrieve_behavior_scores_from_scene_clusters(
                 )
                 for experience_path_id, score in behavior_cluster_scores.items():
                     behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+            else:
+                spread_depth = 1 if active_retrieval_mode == "tag_cluster_spread_1" else 2
+                direct_cluster_scores, direct_debug = _score_scene_clusters_by_direct_domain_overlap(
+                    session,
+                    profile=profile,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                spread_cluster_scores, spread_debug = _score_scene_clusters_by_tag_cluster_spread(
+                    session,
+                    profile=profile,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                    max_depth=spread_depth,
+                )
+                direct_behavior_scores = _score_behavior_clusters(
+                    session,
+                    cluster_scores=direct_cluster_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                spread_behavior_scores = _score_behavior_clusters(
+                    session,
+                    cluster_scores=spread_cluster_scores,
+                    session_ids=session_ids,
+                    include_global=include_global,
+                )
+                direct_top_score = max(direct_behavior_scores.values(), default=0.0)
+                direct_locked = direct_top_score >= DIRECT_LOCK_THRESHOLD
+                if direct_locked:
+                    behavior_scores.update(direct_behavior_scores)
+                    for experience_path_id, score in spread_behavior_scores.items():
+                        protected_score = float(score or 0.0) * LOCKED_DIRECT_SPREAD_FACTOR
+                        behavior_scores[experience_path_id] = max(
+                            behavior_scores.get(experience_path_id, 0.0),
+                            protected_score,
+                        )
+                    cluster_scores = direct_cluster_scores
+                else:
+                    behavior_scores.update(spread_behavior_scores)
+                    cluster_scores = spread_cluster_scores
+                retrieval_debug = {
+                    "direct": direct_debug,
+                    "spread": spread_debug,
+                    "direct_top_score": round(direct_top_score, 4),
+                    "direct_locked": direct_locked,
+                    "direct_lock_threshold": DIRECT_LOCK_THRESHOLD,
+                    "locked_direct_spread_factor": LOCKED_DIRECT_SPREAD_FACTOR,
+                }
 
         candidate_scores = sorted(behavior_scores.items(), key=lambda item: item[1], reverse=True)[:max_count]
         return {
@@ -573,7 +664,7 @@ def debug_retrieve_behavior_scores_from_scene_clusters(
                 {"behavior_id": experience_path_id, "score": round(score, 4)}
                 for experience_path_id, score in candidate_scores
             ],
-            "direct_domain_overlap": direct_overlap_debug,
+            "retrieval_debug": retrieval_debug,
         }
     except Exception as exc:
         logger.error(f"行为场景簇调试检索失败: session_ids={session_ids} mode={active_retrieval_mode} error={exc}")
@@ -846,6 +937,128 @@ def _score_scene_clusters_by_direct_domain_overlap(
     return sorted_cluster_scores, debug_payload
 
 
+def _build_tag_cluster_adjacency(
+    clusters: Sequence[BehaviorSceneCluster],
+    *,
+    tag_lookup: dict[tuple[str, str], str] | None = None,
+) -> dict[str, set[str]]:
+    adjacency: dict[str, set[str]] = {}
+    for cluster in clusters:
+        cluster_tags = _distribution_to_mapping(
+            _load_cluster_distribution(cluster.tag_distribution),
+            tag_lookup=tag_lookup,
+        )
+        tag_names = sorted(cluster_tags)
+        if len(tag_names) < 2:
+            for tag_name in tag_names:
+                adjacency.setdefault(tag_name, set())
+            continue
+        for left_index, left_tag in enumerate(tag_names):
+            adjacency.setdefault(left_tag, set())
+            for right_tag in tag_names[left_index + 1 :]:
+                adjacency.setdefault(right_tag, set())
+                adjacency[left_tag].add(right_tag)
+                adjacency[right_tag].add(left_tag)
+    return adjacency
+
+
+def _expand_tag_cluster_weights(
+    direct_tags: dict[str, float],
+    adjacency: dict[str, set[str]],
+    *,
+    max_depth: int,
+) -> tuple[dict[str, float], dict[str, Any]]:
+    direct_tag_names = set(direct_tags)
+    tag_weights = {tag: 1.0 for tag in direct_tag_names}
+    visited_tags = set(direct_tag_names)
+    frontier = set(direct_tag_names)
+    hop_counts: dict[int, int] = {0: len(direct_tag_names)}
+
+    for depth in range(1, max_depth + 1):
+        next_frontier: set[str] = set()
+        for tag in frontier:
+            next_frontier.update(adjacency.get(tag, set()))
+        next_frontier -= visited_tags
+        if not next_frontier:
+            hop_counts[depth] = 0
+            frontier = set()
+            continue
+        weight = TAG_CLUSTER_SPREAD_DECAY ** depth
+        for tag in next_frontier:
+            tag_weights[tag] = weight
+        visited_tags.update(next_frontier)
+        frontier = next_frontier
+        hop_counts[depth] = len(next_frontier)
+
+    return tag_weights, {
+        "direct_tag_count": len(direct_tag_names),
+        "expanded_tag_count": max(0, len(tag_weights) - len(direct_tag_names)),
+        "hop_counts": hop_counts,
+        "total_query_tag_count": len(tag_weights),
+    }
+
+
+def _score_scene_clusters_by_tag_cluster_spread(
+    session: Session,
+    *,
+    profile: BehaviorScenarioProfile,
+    session_ids: set[str],
+    include_global: bool,
+    max_depth: int,
+) -> tuple[dict[int, float], dict[str, Any]]:
+    tag_lookup = _load_tag_cluster_lookup(session)
+    direct_tags = _distribution_to_mapping(
+        build_scene_cluster_distribution(profile, tag_lookup=tag_lookup),
+        tag_lookup=tag_lookup,
+    )
+    if not direct_tags:
+        return {}, {
+            "direct_tag_count": 0,
+            "expanded_tag_count": 0,
+            "hop_counts": {0: 0},
+            "total_query_tag_count": 0,
+            "cluster_count": 0,
+        }
+
+    statement = select(BehaviorSceneCluster)
+    if not include_global:
+        statement = statement.where(_session_scope_condition(BehaviorSceneCluster, session_ids))
+    clusters = list(session.exec(statement).all())
+    adjacency = _build_tag_cluster_adjacency(clusters, tag_lookup=tag_lookup)
+    query_tag_weights, debug_payload = _expand_tag_cluster_weights(
+        direct_tags,
+        adjacency,
+        max_depth=max_depth,
+    )
+    total_query_weight = sum(query_tag_weights.values())
+    if total_query_weight <= 0:
+        debug_payload["cluster_count"] = 0
+        return {}, debug_payload
+
+    cluster_scores: dict[int, float] = {}
+    for cluster in clusters:
+        if cluster.id is None:
+            continue
+        cluster_tags = _distribution_to_mapping(
+            _load_cluster_distribution(cluster.tag_distribution),
+            tag_lookup=tag_lookup,
+        )
+        if not cluster_tags:
+            continue
+        shared_tags = set(query_tag_weights) & set(cluster_tags)
+        if not shared_tags:
+            continue
+        hit_weight = sum(query_tag_weights[tag] for tag in shared_tags)
+        hit_ratio = hit_weight / total_query_weight
+        cluster_scores[int(cluster.id)] = round(hit_ratio * 2.0, 4)
+
+    sorted_cluster_scores = dict(
+        sorted(cluster_scores.items(), key=lambda item: item[1], reverse=True)[:TAG_CLUSTER_SPREAD_TOPK]
+    )
+    debug_payload["cluster_count"] = len(sorted_cluster_scores)
+    return sorted_cluster_scores, debug_payload
+
+
 def _score_behavior_clusters(
     session: Session,
     *,
@@ -870,5 +1083,6 @@ def _score_behavior_clusters(
         if cluster_score <= 0:
             continue
         history_bonus = 1.0 + min(float(path.count or 0), 20.0) * 0.02
-        behavior_scores[path.id] = behavior_scores.get(path.id, 0.0) + cluster_score * history_bonus
+        score = cluster_score * history_bonus
+        behavior_scores[path.id] = behavior_scores.get(path.id, 0.0) + score
     return behavior_scores
