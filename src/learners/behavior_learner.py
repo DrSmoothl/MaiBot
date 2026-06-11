@@ -17,7 +17,6 @@ from src.llm_models.payload_content.message import Message, MessageBuilder, Role
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.services.llm_service import LLMServiceClient
 
-from .behavior_pattern_consolidator import behavior_pattern_consolidator
 from .behavior_pattern_maintenance import behavior_pattern_maintenance
 from .behavior_pattern_store import (
     ACTOR_GROUP_COLLECTIVE,
@@ -907,14 +906,6 @@ class BehaviorLearner:
                     f"衰减={maintenance_result.decayed_count} "
                     f"禁用={maintenance_result.disabled_count} "
                     f"合并={maintenance_result.merged_count}"
-                )
-
-            consolidation_result = await behavior_pattern_consolidator.consolidate_after_learning(learning_session_id)
-            if consolidation_result.changed:
-                logger.info(
-                    f"{learning_session_id} 行为表现语义整合完成: "
-                    f"建议={consolidation_result.suggestion_count} "
-                    f"合并={consolidation_result.merged_count}"
                 )
 
         return wrote_pattern

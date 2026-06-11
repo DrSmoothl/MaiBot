@@ -207,7 +207,6 @@ def _initialize_target_database(target_engine) -> None:
 
 def _patch_behavior_storage(get_target_session: SessionProvider) -> None:
     import src.llm_models.utils as llm_model_utils
-    import src.learners.behavior_pattern_consolidator as behavior_pattern_consolidator
     import src.learners.behavior_pattern_maintenance as behavior_pattern_maintenance
     import src.learners.behavior_pattern_store as behavior_pattern_store
     import src.learners.behavior_scene_graph_store as behavior_scene_graph_store
@@ -215,7 +214,6 @@ def _patch_behavior_storage(get_target_session: SessionProvider) -> None:
     behavior_pattern_store.get_db_session = get_target_session
     behavior_scene_graph_store.get_db_session = get_target_session
     behavior_pattern_maintenance.get_db_session = get_target_session
-    behavior_pattern_consolidator.get_db_session = get_target_session
     llm_model_utils.get_db_session = get_target_session
 
 
@@ -225,7 +223,6 @@ def _patch_behavior_model_name(model_name: str) -> None:
         return
 
     import src.learners.behavior_learner as behavior_learner
-    import src.learners.behavior_pattern_consolidator as behavior_pattern_consolidator
 
     def patch_client(client) -> None:
         original_generate = client.generate_response_with_messages
@@ -239,7 +236,6 @@ def _patch_behavior_model_name(model_name: str) -> None:
 
     patch_client(behavior_learner.behavior_learn_model)
     patch_client(behavior_learner.behavior_scene_model)
-    patch_client(behavior_pattern_consolidator.behavior_consolidate_model)
 
 
 def _parse_datetime(raw_value: Optional[str]) -> Optional[datetime]:

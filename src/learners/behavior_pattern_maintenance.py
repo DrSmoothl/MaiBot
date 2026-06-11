@@ -51,18 +51,6 @@ class BehaviorPatternMaintenanceResult:
         return self.decayed_count > 0 or self.disabled_count > 0 or self.merged_count > 0
 
 
-@dataclass(frozen=True)
-class BehaviorPatternMergeGroup:
-    """一组由外部整合器确认的行为表现合并指令。"""
-
-    keeper_id: int
-    merge_ids: list[int] = field(default_factory=list)
-    trigger: str = ""
-    action: str = ""
-    outcome: str = ""
-    reason: str = ""
-
-
 class BehaviorPatternMaintenanceService:
     """集中维护行为表现的用进废退与相似项整合规则。"""
 
@@ -166,105 +154,6 @@ class BehaviorPatternMaintenanceService:
                 return result
         except Exception as exc:
             logger.error(f"行为表现维护失败: session_id={normalized_session_id} error={exc}")
-            return BehaviorPatternMaintenanceResult(session_id=normalized_session_id, skipped_reason="error")
-
-    def apply_merge_groups(
-        self,
-        *,
-        session_id: str,
-        merge_groups: Sequence[BehaviorPatternMergeGroup],
-        now: Optional[datetime] = None,
-    ) -> BehaviorPatternMaintenanceResult:
-        """应用语义整合器确认的合并方案，只合并当前聊天流内的行为表现。"""
-
-        normalized_session_id = str(session_id or "").strip()
-        if not normalized_session_id:
-            return BehaviorPatternMaintenanceResult(session_id="", skipped_reason="empty_session_id")
-        if not merge_groups:
-            return BehaviorPatternMaintenanceResult(session_id=normalized_session_id, skipped_reason="empty_merge_groups")
-
-        merge_time = now or datetime.now()
-        try:
-            with get_db_session() as session:
-                statement = select(BehaviorExperiencePath).where(
-                    BehaviorExperiencePath.session_id == normalized_session_id
-                )
-                patterns = list(session.exec(statement).all())
-                pattern_by_id = {path.id: path for path in patterns if path.id is not None}
-                used_pattern_ids: set[int] = set()
-                touched_pattern_ids: list[int] = []
-                merged_count = 0
-
-                for merge_group in merge_groups:
-                    keeper_id = int(merge_group.keeper_id or 0)
-                    merge_ids = [
-                        merge_id
-                        for merge_id in self._dedupe_ids([int(raw_id or 0) for raw_id in merge_group.merge_ids])
-                        if merge_id > 0 and merge_id != keeper_id
-                    ]
-                    if keeper_id <= 0 or not merge_ids:
-                        continue
-                    if keeper_id in used_pattern_ids or any(merge_id in used_pattern_ids for merge_id in merge_ids):
-                        continue
-
-                    keeper = pattern_by_id.get(keeper_id)
-                    if keeper is None or not keeper.enabled:
-                        continue
-
-                    duplicates: list[BehaviorExperiencePath] = []
-                    for merge_id in merge_ids:
-                        duplicate = pattern_by_id.get(merge_id)
-                        if duplicate is None or not duplicate.enabled:
-                            continue
-                        if not self._should_merge(keeper, duplicate):
-                            logger.debug(
-                                f"跳过语义整合建议：keeper_id={keeper_id} merge_id={merge_id} "
-                                "未满足维护器合并规则"
-                            )
-                            continue
-                        duplicates.append(duplicate)
-                    if not duplicates:
-                        continue
-
-                    for duplicate in duplicates:
-                        self._merge_into_keeper(keeper, duplicate, now=merge_time)
-                        session.add(duplicate)
-                        if duplicate.id is not None:
-                            used_pattern_ids.add(duplicate.id)
-                            touched_pattern_ids.append(duplicate.id)
-
-                    self._apply_merge_group_summary(keeper, merge_group)
-                    self._append_maintenance_event(
-                        keeper,
-                        now=merge_time,
-                        score_delta=0.0,
-                        status="semantic_consolidation",
-                        reason=merge_group.reason or "语义整合器确认这些行为表现描述的是同一类可复用行为。",
-                        extra={
-                            "merged_behavior_ids": [duplicate.id for duplicate in duplicates if duplicate.id is not None],
-                        },
-                    )
-                    keeper.update_time = merge_time
-                    session.add(keeper)
-                    if keeper.id is not None:
-                        used_pattern_ids.add(keeper.id)
-                        touched_pattern_ids.append(keeper.id)
-                    merged_count += len(duplicates)
-
-                result = BehaviorPatternMaintenanceResult(
-                    session_id=normalized_session_id,
-                    scanned_count=len(patterns),
-                    merged_count=merged_count,
-                    touched_pattern_ids=self._dedupe_ids(touched_pattern_ids),
-                )
-                if result.changed:
-                    logger.info(
-                        f"行为表现语义整合已应用: session_id={normalized_session_id} "
-                        f"扫描={result.scanned_count} 合并={result.merged_count}"
-                    )
-                return result
-        except Exception as exc:
-            logger.error(f"行为表现语义整合应用失败: session_id={normalized_session_id} error={exc}")
             return BehaviorPatternMaintenanceResult(session_id=normalized_session_id, skipped_reason="error")
 
     @staticmethod
@@ -641,13 +530,6 @@ class BehaviorPatternMaintenanceService:
             reason=f"已整合到更合适的行为表现 behavior_id={keeper.id}。",
             extra={"merged_into_behavior_id": keeper.id},
         )
-
-    def _apply_merge_group_summary(
-        self,
-        keeper: BehaviorExperiencePath,
-        merge_group: BehaviorPatternMergeGroup,
-    ) -> None:
-        del keeper, merge_group
 
     @staticmethod
     def _pattern_weight(pattern: BehaviorExperiencePath) -> float:
