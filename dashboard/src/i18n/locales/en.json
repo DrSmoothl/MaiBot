@@ -2,6 +2,8 @@
   "header": {
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
+    "collapseTopbar": "Collapse topbar",
+    "expandTopbar": "Expand topbar",
     "toggleConnection": "Toggle backend connection",
     "viewAnnualSummary": "View annual summary",
     "annualSummary": "2025 Annual Summary",

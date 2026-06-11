@@ -16,6 +16,7 @@ export interface BehaviorChatInfo {
 export interface BehaviorClusterTag {
   tag: string
   probability: number
+  display?: string
 }
 
 export interface BehaviorSceneCluster {
@@ -180,15 +181,6 @@ export interface BehaviorDescriptor {
   weight: number
 }
 
-export interface BehaviorMatchedNode {
-  id: number | null
-  node_kind: string
-  name: string
-  source_count: number
-  node_score: number
-  match_score: number
-}
-
 export interface BehaviorMatchedCluster {
   cluster_id: number
   name: string
@@ -204,13 +196,30 @@ export interface BehaviorRetrievalCandidate {
   path: BehaviorPathItem | null
 }
 
+export interface BehaviorRetrievalDebugStage {
+  direct_tag_count: number
+  expanded_tag_count?: number
+  hop_counts?: Record<string, number>
+  total_query_tag_count?: number
+  cluster_count: number
+}
+
+export interface BehaviorRetrievalDebugInfo {
+  direct?: BehaviorRetrievalDebugStage
+  spread?: BehaviorRetrievalDebugStage
+  direct_top_score?: number
+  direct_locked?: boolean
+  direct_lock_threshold?: number
+  locked_direct_spread_factor?: number
+}
+
 export interface BehaviorRetrievalDebugPayload {
+  retrieval_mode: string
   descriptors: BehaviorDescriptor[]
   matched_clusters: BehaviorMatchedCluster[]
-  matched_nodes: BehaviorMatchedNode[]
-  expanded_nodes: BehaviorMatchedNode[]
   candidate_scores: Array<{ behavior_id: number; score: number }>
   candidates: BehaviorRetrievalCandidate[]
+  retrieval_debug: BehaviorRetrievalDebugInfo
   error?: string
 }
 
@@ -218,7 +227,7 @@ export interface BehaviorRetrievalDebugRequest {
   session_id?: string
   include_global: boolean
   retrieval_mode?: string
-  summary: string
+  summary?: string
   tag_clusters: Array<{ tag_name: string; tag_aliases: string[] }>
   need: { tag_name: string; tag_aliases: string[] }
   other_traits: Array<{ tag_name: string; tag_aliases: string[] }>

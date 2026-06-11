@@ -37,6 +37,7 @@ export function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [topbarCollapsed, setTopbarCollapsed] = useState(false)
   const [tooltipsEnabled, setTooltipsEnabled] = useState(false) // 控制 tooltip 启用状态
   const [visibleWorkspaceMode, setVisibleWorkspaceMode] = useState<WorkspaceMode>(workspaceMode)
   const [visibleChildren, setVisibleChildren] = useState<LayoutProps['children']>(children)
@@ -220,6 +221,8 @@ export function Layout({ children }: LayoutProps) {
               onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
               onSearchOpenChange={setSearchOpen}
               onThemeChange={setTheme}
+              onTopbarToggle={() => setTopbarCollapsed(!topbarCollapsed)}
+              topbarCollapsed={topbarCollapsed}
               workspaceMode={workspaceMode}
             />
 

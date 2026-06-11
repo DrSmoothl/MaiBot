@@ -2,6 +2,8 @@
   "header": {
     "collapseSidebar": "サイドバーを折りたたむ",
     "expandSidebar": "サイドバーを展開する",
+    "collapseTopbar": "トップバーを折りたたむ",
+    "expandTopbar": "トップバーを展開する",
     "toggleConnection": "バックエンド接続を切り替える",
     "viewAnnualSummary": "年間サマリーを表示",
     "annualSummary": "2025 年間サマリー",

@@ -439,6 +439,31 @@ def _cluster_distribution_overlap(
     return round(sum(min(left_probs[tag], right_probs[tag]) for tag in shared_tags), 4)
 
 
+def _scene_cluster_session_ids(raw_session_id: str | None) -> set[str]:
+    normalized_session_id = str(raw_session_id or "").strip()
+    if not normalized_session_id:
+        return set()
+    if normalized_session_id.startswith("["):
+        try:
+            parsed_value = json.loads(normalized_session_id)
+        except (TypeError, ValueError):
+            return {normalized_session_id}
+        if isinstance(parsed_value, list):
+            return {
+                str(item or "").strip()
+                for item in parsed_value
+                if str(item or "").strip()
+            }
+    return {normalized_session_id}
+
+
+def _scene_cluster_matches_sessions(raw_session_id: str | None, session_ids: set[str]) -> bool:
+    if not session_ids:
+        return raw_session_id is None
+    cluster_session_ids = _scene_cluster_session_ids(raw_session_id)
+    return not cluster_session_ids or bool(cluster_session_ids & session_ids)
+
+
 def _session_scope_condition(model: Any, session_ids: set[str]):
     if session_ids:
         return (model.session_id.in_(session_ids)) | (model.session_id.is_(None))  # type: ignore[attr-defined]
@@ -581,6 +606,7 @@ def debug_retrieve_behavior_scores_from_scene_clusters(
             "descriptors": [],
             "matched_clusters": [],
             "candidate_scores": [],
+            "retrieval_debug": {},
         }
 
     active_retrieval_mode = _normalize_retrieval_mode(retrieval_mode)
@@ -605,6 +631,7 @@ def debug_retrieve_behavior_scores_from_scene_clusters(
                 )
                 for experience_path_id, score in behavior_cluster_scores.items():
                     behavior_scores[experience_path_id] = behavior_scores.get(experience_path_id, 0.0) + score
+                retrieval_debug = {"direct": retrieval_debug}
             else:
                 spread_depth = 1 if active_retrieval_mode == "tag_cluster_spread_1" else 2
                 direct_cluster_scores, direct_debug = _score_scene_clusters_by_direct_domain_overlap(
@@ -673,6 +700,7 @@ def debug_retrieve_behavior_scores_from_scene_clusters(
             "descriptors": [],
             "matched_clusters": [],
             "candidate_scores": [],
+            "retrieval_debug": {},
             "error": str(exc),
         }
 
@@ -764,9 +792,11 @@ def _upsert_scene_cluster(
     if not distribution:
         return None
 
-    cluster_candidates = session.exec(
-        select(BehaviorSceneCluster).where(BehaviorSceneCluster.session_id == session_id)
-    ).all()
+    cluster_candidates = [
+        cluster
+        for cluster in session.exec(select(BehaviorSceneCluster)).all()
+        if _scene_cluster_matches_sessions(cluster.session_id, {session_id})
+    ]
     best_cluster: Optional[BehaviorSceneCluster] = None
     best_overlap = 0.0
     for candidate in cluster_candidates:
@@ -905,11 +935,11 @@ def _score_scene_clusters_by_direct_domain_overlap(
         return {}, {"direct_tag_count": 0, "cluster_count": 0}
 
     statement = select(BehaviorSceneCluster)
-    if not include_global:
-        statement = statement.where(_session_scope_condition(BehaviorSceneCluster, session_ids))
 
     cluster_scores: dict[int, float] = {}
     for cluster in session.exec(statement).all():
+        if not include_global and not _scene_cluster_matches_sessions(cluster.session_id, session_ids):
+            continue
         if cluster.id is None:
             continue
         cluster_tags = _distribution_to_mapping(
@@ -1021,9 +1051,11 @@ def _score_scene_clusters_by_tag_cluster_spread(
         }
 
     statement = select(BehaviorSceneCluster)
-    if not include_global:
-        statement = statement.where(_session_scope_condition(BehaviorSceneCluster, session_ids))
-    clusters = list(session.exec(statement).all())
+    clusters = [
+        cluster
+        for cluster in session.exec(statement).all()
+        if include_global or _scene_cluster_matches_sessions(cluster.session_id, session_ids)
+    ]
     adjacency = _build_tag_cluster_adjacency(clusters, tag_lookup=tag_lookup)
     query_tag_weights, debug_payload = _expand_tag_cluster_weights(
         direct_tags,

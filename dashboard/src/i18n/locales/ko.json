@@ -2,6 +2,8 @@
   "header": {
     "collapseSidebar": "사이드바 접기",
     "expandSidebar": "사이드바 펼치기",
+    "collapseTopbar": "상단 바 접기",
+    "expandTopbar": "상단 바 펼치기",
     "toggleConnection": "백엔드 연결 전환",
     "viewAnnualSummary": "연간 요약 보기",
     "annualSummary": "2025 연간 요약",

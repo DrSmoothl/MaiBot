@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent, ReactNode } from 'react'
 import {
   ChevronDown,
   ChevronLeft,
@@ -30,7 +30,6 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
@@ -40,18 +39,15 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import {
   debugBehaviorRetrieval,
   getBehaviorGraphData,
   getBehaviorPathDetail,
-  listBehaviorClusters,
   listBehaviorChats,
   listBehaviorPaths,
   type BehaviorGraphData,
   type BehaviorChatInfo,
-  type BehaviorClusterItem,
   type BehaviorClusterTag,
   type BehaviorPathDetail,
   type BehaviorPathItem,
@@ -60,10 +56,8 @@ import {
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 20
-const DEFAULT_CLUSTER_PAGE_SIZE = 200
-const CLUSTER_PAGE_SIZE_OPTIONS = [200, 1000, 3000, 5000]
 
-type ActiveTab = 'paths' | 'clusters' | 'scene-network' | 'tag-network' | 'debug' | 'graph'
+type ActiveTab = 'paths' | 'scene-network' | 'tag-network' | 'debug' | 'graph'
 
 interface BehaviorSceneGroup {
   key: string
@@ -88,17 +82,6 @@ interface BehaviorFlowNodeData {
   detail: string
 }
 
-interface ClusterMapNodeData {
-  label: string
-  kind: 'cluster' | 'callout'
-  detail: string
-  tags: BehaviorClusterTag[]
-  metric: string
-  groupIndex: number
-  groupName: string
-  colorClassName: string
-}
-
 interface BehaviorNetworkNodeData {
   label: string
   detail: string
@@ -108,10 +91,48 @@ interface BehaviorNetworkNodeData {
 
 type BehaviorFlowNode = Node<BehaviorFlowNodeData>
 type BehaviorFlowEdge = Edge
-type ClusterMapNode = Node<ClusterMapNodeData>
-type ClusterMapEdge = Edge
 type BehaviorNetworkNode = Node<BehaviorNetworkNodeData>
 type BehaviorNetworkEdge = Edge
+
+interface CanvasNetworkNode {
+  id: string
+  x: number
+  y: number
+  vx: number
+  vy: number
+  fixed: boolean
+  radius: number
+  label: string
+  detail: string
+  metric: string
+  tone: BehaviorNetworkNodeData['tone']
+}
+
+interface CanvasTransform {
+  x: number
+  y: number
+  zoom: number
+}
+
+interface CanvasNetworkSettings {
+  showLabels: boolean
+  paused: boolean
+  search: string
+  minWeightValue: number
+  nodeLimit: number
+  onlyConnected: boolean
+}
+
+type CanvasNetworkKind = 'scene' | 'tag'
+
+const DEFAULT_CANVAS_NETWORK_SETTINGS: CanvasNetworkSettings = {
+  showLabels: true,
+  paused: false,
+  search: '',
+  minWeightValue: 0,
+  nodeLimit: 0,
+  onlyConnected: true,
+}
 
 const BehaviorGraphNode = memo(({ data }: NodeProps<BehaviorFlowNodeData>) => {
   const styleByKind: Record<string, string> = {
@@ -137,45 +158,6 @@ const BehaviorGraphNode = memo(({ data }: NodeProps<BehaviorFlowNodeData>) => {
 
 BehaviorGraphNode.displayName = 'BehaviorGraphNode'
 
-const ClusterMapNodeView = memo(({ data }: NodeProps<ClusterMapNodeData>) => {
-  if (data.kind === 'callout') {
-    const primaryTag = topClusterTags(data.tags, 1)[0]
-    return (
-      <div className="pointer-events-none w-64 rounded-lg border bg-background/96 p-3 text-left text-xs shadow-xl backdrop-blur-md">
-        <Handle className="opacity-0" type="target" position={Position.Left} />
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary">{data.label}</Badge>
-          <Badge variant="outline">{data.groupName}</Badge>
-          <span className="text-muted-foreground">{data.metric}</span>
-        </div>
-        {primaryTag && (
-          <div className="mb-2 rounded-md border bg-muted/30 px-2 py-1.5">
-            <div className="break-words font-medium text-foreground">{primaryTag.tag}</div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-              <div className="h-full rounded-full bg-primary" style={{ width: formatProbability(primaryTag.probability) }} />
-            </div>
-          </div>
-        )}
-        <div className="line-clamp-3 leading-5 text-muted-foreground">{data.detail}</div>
-      </div>
-    )
-  }
-
-  return (
-    <div className={cn(
-      'group flex h-12 w-12 items-center justify-center rounded-full border text-center text-[10px] font-semibold shadow-[0_4px_10px_rgba(15,23,42,0.16)] transition hover:z-10 hover:shadow-xl hover:ring-2 hover:ring-primary/35',
-      data.colorClassName
-    )}
-    title={`${data.detail}\n${data.groupName} · ${data.metric}`}>
-      <Handle className="opacity-0" type="target" position={Position.Left} />
-      <span className="opacity-0 transition group-hover:opacity-100">{data.label}</span>
-      <Handle className="opacity-0" type="source" position={Position.Right} />
-    </div>
-  )
-})
-
-ClusterMapNodeView.displayName = 'ClusterMapNodeView'
-
 const BehaviorNetworkNodeView = memo(({ data }: NodeProps<BehaviorNetworkNodeData>) => {
   const toneClassName: Record<BehaviorNetworkNodeData['tone'], string> = {
     amber: 'border-amber-500/40 bg-amber-500 text-white shadow-amber-500/15',
@@ -187,7 +169,7 @@ const BehaviorNetworkNodeView = memo(({ data }: NodeProps<BehaviorNetworkNodeDat
   return (
     <div
       className={cn(
-        'group flex h-14 w-14 items-center justify-center rounded-full border text-center text-[10px] font-semibold shadow-lg transition hover:z-10 hover:scale-105 hover:ring-2 hover:ring-primary/30',
+        'behavior-network-node-drag-handle group flex h-14 w-14 cursor-grab items-center justify-center rounded-full border text-center text-[10px] font-semibold shadow-lg transition active:cursor-grabbing hover:z-10 hover:scale-105 hover:ring-2 hover:ring-primary/30',
         toneClassName[data.tone]
       )}
       title={`${data.detail}\n${data.metric}`}
@@ -203,7 +185,6 @@ BehaviorNetworkNodeView.displayName = 'BehaviorNetworkNodeView'
 
 const behaviorNodeTypes: NodeTypes = {
   behavior: BehaviorGraphNode,
-  clusterMap: ClusterMapNodeView,
   behaviorNetwork: BehaviorNetworkNodeView,
 }
 
@@ -256,462 +237,30 @@ function topClusterTags(tags: BehaviorClusterTag[], maxCount = 6): BehaviorClust
     .slice(0, maxCount)
 }
 
+function tagDisplayText(tag: BehaviorClusterTag): string {
+  const display = tag.display?.trim()
+  if (display) return display
+  return tag.tag
+}
+
+function isInternalTagRef(value: string): boolean {
+  return /^(domain|need|attitude|scene):[a-z]+_[0-9a-f]{16,}$/i.test(value.trim())
+}
+
 function clusterTitle(name: string, tags: BehaviorClusterTag[]): string {
-  const tagNames = topClusterTags(tags, 3).map((item) => item.tag)
+  const tagNames = topClusterTags(tags, 3)
+    .map(tagDisplayText)
+    .filter((value) => value && !isInternalTagRef(value))
   if (tagNames.length > 0) return tagNames.join(' · ')
   return name || '未命名场景簇'
-}
-
-function latestTime(left: string | null, right: string | null): string | null {
-  if (!left) return right
-  if (!right) return left
-  return right > left ? right : left
-}
-
-function buildClusterItemsFromPaths(paths: BehaviorPathItem[]): BehaviorClusterItem[] {
-  const clusters = new Map<string, BehaviorClusterItem>()
-  paths.forEach((path) => {
-    const clusterKey = String(path.scene_cluster_id ?? (path.scene_cluster_name || path.trigger || path.id))
-    const existing = clusters.get(clusterKey)
-    if (!existing) {
-      clusters.set(clusterKey, {
-        id: path.scene_cluster_id,
-        name: path.scene_cluster_name || path.trigger,
-        tags: path.scene_cluster_tags,
-        source_count: path.scene_cluster_source_count,
-        score: path.scene_cluster_score,
-        update_time: path.update_time,
-        session_id: path.session_id,
-        chat_name: path.chat_name,
-        path_count: 1,
-        enabled_path_count: path.enabled ? 1 : 0,
-        activation_count: path.activation_count,
-        success_count: path.success_count,
-        failure_count: path.failure_count,
-        observed_path_count: path.learning_type === 'observed_behavior' ? 1 : 0,
-        self_reflection_path_count: path.learning_type === 'self_reflection' ? 1 : 0,
-        last_active_time: path.last_active_time,
-      })
-      return
-    }
-    existing.path_count += 1
-    existing.enabled_path_count += path.enabled ? 1 : 0
-    existing.activation_count += path.activation_count
-    existing.success_count += path.success_count
-    existing.failure_count += path.failure_count
-    existing.observed_path_count += path.learning_type === 'observed_behavior' ? 1 : 0
-    existing.self_reflection_path_count += path.learning_type === 'self_reflection' ? 1 : 0
-    existing.source_count = Math.max(existing.source_count, path.scene_cluster_source_count)
-    existing.score = Math.max(existing.score, path.scene_cluster_score)
-    existing.update_time = latestTime(existing.update_time, path.update_time)
-    existing.last_active_time = latestTime(existing.last_active_time, path.last_active_time)
-  })
-  return Array.from(clusters.values()).sort((left, right) => (right.update_time ?? '').localeCompare(left.update_time ?? ''))
 }
 
 function stableHash(value: string): number {
   return Array.from(value).reduce((hash, char) => (hash * 33 + char.charCodeAt(0)) % 1000003, 5381)
 }
 
-const JS_DISTANCE_MAX = Math.sqrt(Math.log(2))
-const CLUSTER_COLOR_CLASSES = [
-  'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-primary-foreground',
-  'border-[hsl(var(--chart-1))] bg-[hsl(var(--chart-1))] text-white',
-  'border-[hsl(var(--chart-2))] bg-[hsl(var(--chart-2))] text-white',
-  'border-[hsl(var(--chart-3))] bg-[hsl(var(--chart-3))] text-white',
-  'border-[hsl(var(--chart-4))] bg-[hsl(var(--chart-4))] text-white',
-  'border-[hsl(var(--chart-5))] bg-[hsl(var(--chart-5))] text-white',
-]
-
-interface ClusterProjectionPoint {
-  x: number
-  y: number
-}
-
-interface ClusterMapGroup {
-  index: number
-  name: string
-  colorClassName: string
-  count: number
-  topTags: BehaviorClusterTag[]
-}
-
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
-}
-
-function normalizeTagDistribution(tags: BehaviorClusterTag[]): Map<string, number> {
-  const total = tags.reduce((sum, item) => sum + Math.max(item.probability, 0), 0)
-  if (total <= 0) return new Map()
-  return new Map(tags.map((item) => [item.tag, Math.max(item.probability, 0) / total]))
-}
-
-function jensenShannonDistance(
-  leftTags: BehaviorClusterTag[],
-  rightTags: BehaviorClusterTag[],
-  tagUniverse: string[]
-): number {
-  const left = normalizeTagDistribution(leftTags)
-  const right = normalizeTagDistribution(rightTags)
-  let leftDivergence = 0
-  let rightDivergence = 0
-  tagUniverse.forEach((tag) => {
-    const leftValue = left.get(tag) ?? 0
-    const rightValue = right.get(tag) ?? 0
-    const middle = (leftValue + rightValue) / 2
-    if (leftValue > 0 && middle > 0) leftDivergence += leftValue * Math.log(leftValue / middle)
-    if (rightValue > 0 && middle > 0) rightDivergence += rightValue * Math.log(rightValue / middle)
-  })
-  return Math.sqrt(Math.max(0, (leftDivergence + rightDivergence) / 2))
-}
-
-function similarityFromDistance(distance: number): number {
-  return 1 - clampNumber(distance / JS_DISTANCE_MAX, 0, 1)
-}
-
-function buildDistanceMatrix(clusters: BehaviorClusterItem[], tagUniverse: string[]): number[][] {
-  const distances = clusters.map(() => clusters.map(() => 0))
-  for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < clusters.length; rightIndex += 1) {
-      const distance = jensenShannonDistance(clusters[leftIndex].tags, clusters[rightIndex].tags, tagUniverse)
-      distances[leftIndex][rightIndex] = distance
-      distances[rightIndex][leftIndex] = distance
-    }
-  }
-  return distances
-}
-
-function normalizeVector(vector: number[]): number[] {
-  const norm = Math.hypot(...vector)
-  if (norm <= 1e-9) return vector.map(() => 0)
-  return vector.map((value) => value / norm)
-}
-
-function multiplyMatrixVector(matrix: number[][], vector: number[]): number[] {
-  return matrix.map((row) => row.reduce((sum, value, index) => sum + value * vector[index], 0))
-}
-
-function dotProduct(left: number[], right: number[]): number {
-  return left.reduce((sum, value, index) => sum + value * right[index], 0)
-}
-
-function powerEigen(matrix: number[][], seed: number): { value: number; vector: number[] } {
-  const size = matrix.length
-  let vector = normalizeVector(Array.from({ length: size }, (_, index) => {
-    const base = (index + 1) * (seed + 2)
-    return Math.sin(base) + Math.cos(base * 0.7)
-  }))
-  for (let iteration = 0; iteration < 80; iteration += 1) {
-    const next = normalizeVector(multiplyMatrixVector(matrix, vector))
-    if (Math.hypot(...next) <= 1e-9) break
-    vector = next
-  }
-  const multiplied = multiplyMatrixVector(matrix, vector)
-  return { value: dotProduct(vector, multiplied), vector }
-}
-
-function classicalMdsProjection(distances: number[][]): ClusterProjectionPoint[] {
-  const size = distances.length
-  if (size === 0) return []
-  if (size === 1) return [{ x: 0, y: 0 }]
-
-  const squared = distances.map((row) => row.map((value) => value * value))
-  const rowMeans = squared.map((row) => row.reduce((sum, value) => sum + value, 0) / size)
-  const totalMean = rowMeans.reduce((sum, value) => sum + value, 0) / size
-  const centered = squared.map((row, rowIndex) => (
-    row.map((value, columnIndex) => -0.5 * (value - rowMeans[rowIndex] - rowMeans[columnIndex] + totalMean))
-  ))
-
-  const first = powerEigen(centered, 1)
-  const deflated = centered.map((row, rowIndex) => (
-    row.map((value, columnIndex) => value - first.value * first.vector[rowIndex] * first.vector[columnIndex])
-  ))
-  const second = powerEigen(deflated, 7)
-  const firstScale = Math.sqrt(Math.max(first.value, 0))
-  const secondScale = Math.sqrt(Math.max(second.value, 0))
-
-  if (firstScale <= 1e-6 && secondScale <= 1e-6) {
-    return Array.from({ length: size }, (_, index) => {
-      const angle = (index / size) * Math.PI * 2
-      return { x: Math.cos(angle), y: Math.sin(angle) }
-    })
-  }
-  return first.vector.map((value, index) => ({
-    x: value * firstScale,
-    y: second.vector[index] * secondScale,
-  }))
-}
-
-function scaleProjection(points: ClusterProjectionPoint[], width: number, height: number): ClusterProjectionPoint[] {
-  if (points.length === 0) return []
-  const minX = Math.min(...points.map((point) => point.x))
-  const maxX = Math.max(...points.map((point) => point.x))
-  const minY = Math.min(...points.map((point) => point.y))
-  const maxY = Math.max(...points.map((point) => point.y))
-  const spanX = Math.max(maxX - minX, 1e-6)
-  const spanY = Math.max(maxY - minY, 1e-6)
-  const scale = Math.min((width - 60) / spanX, (height - 55) / spanY)
-  return points.map((point, index) => {
-    const jitter = stableHash(`projection:${index}`)
-    return {
-      x: width / 2 + (point.x - (minX + maxX) / 2) * scale + (jitter % 41) - 20,
-      y: height / 2 + (point.y - (minY + maxY) / 2) * scale + ((jitter >> 4) % 41) - 20,
-    }
-  })
-}
-
-function chooseGroupCount(count: number): number {
-  if (count <= 1) return count
-  if (count < 4) return Math.min(count, 2)
-  return clampNumber(Math.round(Math.sqrt(count / 1.8)), 2, 6)
-}
-
-function assignProjectionGroups(points: ClusterProjectionPoint[]): number[] {
-  const groupCount = chooseGroupCount(points.length)
-  if (groupCount <= 1) return points.map(() => 0)
-
-  const centroids: ClusterProjectionPoint[] = [points[0]]
-  while (centroids.length < groupCount) {
-    let bestIndex = 0
-    let bestDistance = -1
-    points.forEach((point, index) => {
-      const distance = Math.min(...centroids.map((centroid) => Math.hypot(point.x - centroid.x, point.y - centroid.y)))
-      if (distance > bestDistance) {
-        bestDistance = distance
-        bestIndex = index
-      }
-    })
-    centroids.push(points[bestIndex])
-  }
-
-  let assignments = points.map(() => 0)
-  for (let iteration = 0; iteration < 24; iteration += 1) {
-    assignments = points.map((point) => {
-      let bestGroup = 0
-      let bestDistance = Number.POSITIVE_INFINITY
-      centroids.forEach((centroid, groupIndex) => {
-        const distance = Math.hypot(point.x - centroid.x, point.y - centroid.y)
-        if (distance < bestDistance) {
-          bestDistance = distance
-          bestGroup = groupIndex
-        }
-      })
-      return bestGroup
-    })
-
-    centroids.forEach((_, groupIndex) => {
-      const members = points.filter((_point, index) => assignments[index] === groupIndex)
-      if (members.length === 0) return
-      centroids[groupIndex] = {
-        x: members.reduce((sum, point) => sum + point.x, 0) / members.length,
-        y: members.reduce((sum, point) => sum + point.y, 0) / members.length,
-      }
-    })
-  }
-  return assignments
-}
-
-function relaxProjectedPositions(points: ClusterProjectionPoint[], width: number, height: number): ClusterProjectionPoint[] {
-  const positions = points.map((point) => ({ ...point }))
-  for (let iteration = 0; iteration < 140; iteration += 1) {
-    const forces = positions.map((position, index) => ({
-      x: (points[index].x - position.x) * 0.012,
-      y: (points[index].y - position.y) * 0.012,
-    }))
-    for (let leftIndex = 0; leftIndex < positions.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < positions.length; rightIndex += 1) {
-        const left = positions[leftIndex]
-        const right = positions[rightIndex]
-        let dx = right.x - left.x
-        let dy = right.y - left.y
-        const rawDistance = Math.hypot(dx, dy)
-        if (rawDistance < 0.001) {
-          const angle = (stableHash(`relax:${leftIndex}:${rightIndex}`) % 360) * Math.PI / 180
-          dx = Math.cos(angle)
-          dy = Math.sin(angle)
-        }
-        const distance = Math.max(Math.hypot(dx, dy), 1)
-        const minDistance = 84
-        if (distance < minDistance) {
-          const push = (minDistance - distance) * 0.09
-          const pushX = (dx / distance) * push
-          const pushY = (dy / distance) * push
-          forces[leftIndex].x -= pushX
-          forces[leftIndex].y -= pushY
-          forces[rightIndex].x += pushX
-          forces[rightIndex].y += pushY
-        }
-      }
-    }
-    positions.forEach((position, index) => {
-      position.x = clampNumber(position.x + forces[index].x, 24, width - 38)
-      position.y = clampNumber(position.y + forces[index].y, 24, height - 42)
-    })
-  }
-  return positions
-}
-
-function summarizeClusterGroups(
-  clusters: BehaviorClusterItem[],
-  groupIndexes: number[]
-): ClusterMapGroup[] {
-  const groups = new Map<number, { count: number; tags: Map<string, number> }>()
-  clusters.forEach((cluster, index) => {
-    const groupIndex = groupIndexes[index] ?? 0
-    const group = groups.get(groupIndex) ?? { count: 0, tags: new Map<string, number>() }
-    group.count += 1
-    cluster.tags.forEach((tag) => {
-      group.tags.set(tag.tag, (group.tags.get(tag.tag) ?? 0) + tag.probability)
-    })
-    groups.set(groupIndex, group)
-  })
-  return Array.from(groups.entries())
-    .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
-    .map(([index, group]) => ({
-      index,
-      name: `区 ${index + 1}`,
-      colorClassName: CLUSTER_COLOR_CLASSES[index % CLUSTER_COLOR_CLASSES.length],
-      count: group.count,
-      topTags: Array.from(group.tags.entries())
-        .sort((left, right) => right[1] - left[1])
-        .slice(0, 8)
-        .map(([tag, probability]) => ({ tag, probability: probability / Math.max(group.count, 1) })),
-    }))
-}
-
-function buildClusterMapGraph(clusters: BehaviorClusterItem[]): {
-  nodes: ClusterMapNode[]
-  edges: ClusterMapEdge[]
-  clusterByNodeId: Map<string, BehaviorClusterItem>
-  groups: ClusterMapGroup[]
-} {
-  const width = 1800
-  const height = 980
-  const tagUniverse = Array.from(new Set(clusters.flatMap((cluster) => cluster.tags.map((tag) => tag.tag)))).sort()
-  const distances = buildDistanceMatrix(clusters, tagUniverse)
-  const projected = scaleProjection(classicalMdsProjection(distances), width, height)
-  const groupIndexes = assignProjectionGroups(projected)
-  const clusterPositions = relaxProjectedPositions(projected, width, height)
-  const groups = summarizeClusterGroups(clusters, groupIndexes)
-  const groupByIndex = new Map(groups.map((group) => [group.index, group]))
-
-  const clusterByNodeId = new Map<string, BehaviorClusterItem>()
-  const nodes: ClusterMapNode[] = clusters.map((cluster, index) => {
-    const clusterId = `cluster:${cluster.id ?? `${cluster.session_id}-${index}`}`
-    const position = clusterPositions[index]
-    const group = groupByIndex.get(groupIndexes[index] ?? 0) ?? groups[0]
-    clusterByNodeId.set(clusterId, cluster)
-    return {
-      id: clusterId,
-      type: 'clusterMap',
-      position: {
-        x: position.x - 12,
-        y: position.y - 12,
-      },
-      data: {
-        kind: 'cluster',
-        label: `#${cluster.id ?? index + 1}`,
-        detail: clusterTitle(cluster.name, cluster.tags),
-        tags: cluster.tags,
-        metric: `${cluster.path_count} 分支`,
-        groupIndex: group?.index ?? 0,
-        groupName: group?.name ?? '区 1',
-        colorClassName: group?.colorClassName ?? CLUSTER_COLOR_CLASSES[0],
-      },
-    }
-  })
-
-  const similarityEdges: Array<{ left: number; right: number; similarity: number }> = []
-  for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < clusters.length; rightIndex += 1) {
-      const similarity = similarityFromDistance(distances[leftIndex][rightIndex])
-      if (similarity >= 0.62) {
-        similarityEdges.push({ left: leftIndex, right: rightIndex, similarity })
-      }
-    }
-  }
-
-  const edges: ClusterMapEdge[] = similarityEdges
-    .sort((left, right) => right.similarity - left.similarity)
-    .slice(0, 18)
-    .map((edge) => {
-      const leftCluster = clusters[edge.left]
-      const rightCluster = clusters[edge.right]
-      const source = `cluster:${leftCluster.id ?? `${leftCluster.session_id}-${edge.left}`}`
-      const target = `cluster:${rightCluster.id ?? `${rightCluster.session_id}-${edge.right}`}`
-      const sameGroup = groupIndexes[edge.left] === groupIndexes[edge.right]
-      return {
-        id: `similarity:${source}:${target}`,
-        source,
-        target,
-        type: 'bezier',
-        animated: edge.similarity >= 0.72,
-        style: {
-          stroke: sameGroup ? '#0f766e' : '#64748b',
-          strokeWidth: Math.max(1, edge.similarity * 2.2),
-          opacity: sameGroup ? 0.18 : 0.1,
-        },
-      }
-    })
-
-  return { nodes, edges, clusterByNodeId, groups }
-}
-
-function buildClusterHoverGraph(
-  hoveredNodeId: string | null,
-  nodes: ClusterMapNode[],
-  edges: ClusterMapEdge[],
-  clusterByNodeId: Map<string, BehaviorClusterItem>
-): { nodes: ClusterMapNode[]; edges: ClusterMapEdge[] } {
-  if (!hoveredNodeId || !clusterByNodeId.has(hoveredNodeId)) return { nodes, edges }
-
-  const sourceNode = nodes.find((node) => node.id === hoveredNodeId)
-  const cluster = clusterByNodeId.get(hoveredNodeId)
-  if (!sourceNode || !cluster) return { nodes, edges }
-
-  const placeRight = sourceNode.position.x < 1320
-  const calloutId = `callout:${hoveredNodeId}`
-  const calloutNode: ClusterMapNode = {
-    id: calloutId,
-    type: 'clusterMap',
-    position: {
-      x: sourceNode.position.x + (placeRight ? 150 : -300),
-      y: sourceNode.position.y - 64,
-    },
-    selectable: false,
-    draggable: false,
-    data: {
-      ...sourceNode.data,
-      kind: 'callout',
-      label: sourceNode.data.label,
-      detail: clusterTitle(cluster.name, cluster.tags),
-      tags: cluster.tags,
-      metric: `${cluster.path_count} 分支`,
-    },
-  }
-
-  const calloutEdge: ClusterMapEdge = {
-    id: `callout-edge:${hoveredNodeId}`,
-    source: hoveredNodeId,
-    target: calloutId,
-    type: 'straight',
-    animated: true,
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: 'hsl(var(--primary))',
-    },
-    style: {
-      stroke: 'hsl(var(--primary))',
-      strokeDasharray: '6 4',
-      strokeWidth: 1.8,
-      opacity: 0.82,
-    },
-  }
-
-  return {
-    nodes: [...nodes, calloutNode],
-    edges: [...edges, calloutEdge],
-  }
 }
 
 function networkNodeTone(kind: string): BehaviorNetworkNodeData['tone'] {
@@ -737,8 +286,8 @@ function buildSceneNetworkGraph(data: BehaviorGraphData | null): {
   edges: BehaviorNetworkEdge[]
   nodeById: Map<string, BehaviorGraphData['scene_cluster_network']['nodes'][number]>
 } {
-  const sourceNodes = data?.scene_cluster_network.nodes ?? []
-  const sourceEdges = data?.scene_cluster_network.edges ?? []
+  const sourceNodes = data?.scene_cluster_network?.nodes ?? []
+  const sourceEdges = data?.scene_cluster_network?.edges ?? []
   const sortedNodes = sourceNodes.slice().sort((left, right) => right.path_count - left.path_count || right.source_count - left.source_count)
   const nodeById = new Map<string, BehaviorGraphData['scene_cluster_network']['nodes'][number]>()
   const nodes: BehaviorNetworkNode[] = sortedNodes.map((node, index) => {
@@ -748,6 +297,9 @@ function buildSceneNetworkGraph(data: BehaviorGraphData | null): {
     return {
       id: nodeId,
       type: 'behaviorNetwork',
+      draggable: true,
+      dragHandle: '.behavior-network-node-drag-handle',
+      selectable: true,
       position,
       data: {
         label: shortText(node.short_label || node.label, 16),
@@ -782,8 +334,8 @@ function buildTagNetworkGraph(data: BehaviorGraphData | null): {
   edges: BehaviorNetworkEdge[]
   nodeById: Map<string, BehaviorGraphData['tag_network']['nodes'][number]>
 } {
-  const sourceNodes = data?.tag_network.nodes ?? []
-  const sourceEdges = data?.tag_network.edges ?? []
+  const sourceNodes = data?.tag_network?.nodes ?? []
+  const sourceEdges = data?.tag_network?.edges ?? []
   const connectedIds = new Set(sourceEdges.flatMap((edge) => [edge.source, edge.target]))
   const sortedNodes = sourceNodes
     .filter((node) => connectedIds.has(node.id))
@@ -797,6 +349,9 @@ function buildTagNetworkGraph(data: BehaviorGraphData | null): {
     return {
       id: nodeId,
       type: 'behaviorNetwork',
+      draggable: true,
+      dragHandle: '.behavior-network-node-drag-handle',
+      selectable: true,
       position,
       data: {
         label: shortText(node.label, 16),
@@ -826,6 +381,15 @@ function buildTagNetworkGraph(data: BehaviorGraphData | null): {
   return { nodes, edges, nodeById }
 }
 
+function edgeWeight(edge: BehaviorNetworkEdge): number {
+  const data = edge.data
+  if (data && typeof data === 'object' && 'weight' in data) {
+    const weight = Number(data.weight)
+    return Number.isFinite(weight) && weight > 0 ? weight : 1
+  }
+  return 1
+}
+
 export function BehaviorLearningPage() {
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<ActiveTab>('paths')
@@ -834,15 +398,11 @@ export function BehaviorLearningPage() {
   const [search, setSearch] = useState('')
   const [enabledFilter, setEnabledFilter] = useState('all')
   const [paths, setPaths] = useState<BehaviorPathItem[]>([])
-  const [clusters, setClusters] = useState<BehaviorClusterItem[]>([])
   const [graphData, setGraphData] = useState<BehaviorGraphData | null>(null)
   const [openSceneGroups, setOpenSceneGroups] = useState<Set<string>>(new Set())
   const [total, setTotal] = useState(0)
-  const [clusterTotal, setClusterTotal] = useState(0)
-  const [clusterPageSize, setClusterPageSize] = useState(DEFAULT_CLUSTER_PAGE_SIZE)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
-  const [clusterLoading, setClusterLoading] = useState(false)
   const [graphLoading, setGraphLoading] = useState(false)
   const [selectedPathId, setSelectedPathId] = useState<number | null>(null)
   const [detail, setDetail] = useState<BehaviorPathDetail | null>(null)
@@ -850,7 +410,6 @@ export function BehaviorLearningPage() {
   const [debugLoading, setDebugLoading] = useState(false)
   const [debugResult, setDebugResult] = useState<BehaviorRetrievalDebugPayload | null>(null)
   const [debugForm, setDebugForm] = useState({
-    summary: '',
     domainTags: '',
     behaviorNeeds: '',
     otherTraits: '',
@@ -926,10 +485,11 @@ export function BehaviorLearningPage() {
         page: targetPage,
         page_size: PAGE_SIZE,
       })
-      setPaths(result.data)
-      setTotal(result.total)
-      if (!selectedPathId && result.data.length > 0) {
-        setSelectedPathId(result.data[0].id)
+      const pathData = result.data
+      setPaths(pathData)
+      setTotal(result.total ?? pathData.length)
+      if (!selectedPathId && pathData.length > 0) {
+        setSelectedPathId(pathData[0].id)
       }
     } catch (error) {
       toast({
@@ -942,48 +502,13 @@ export function BehaviorLearningPage() {
     }
   }
 
-  const loadClusters = async () => {
-    try {
-      setClusterLoading(true)
-      const result = await listBehaviorClusters({
-        session_id: selectedSessionId,
-        search,
-        page: 1,
-        page_size: clusterPageSize,
-      })
-      setClusters(result.data)
-      setClusterTotal(result.total)
-    } catch (error) {
-      try {
-        const fallbackResult = await listBehaviorPaths({
-          session_id: selectedSessionId,
-          search,
-          enabled: 'all',
-          page: 1,
-          page_size: clusterPageSize,
-        })
-        const fallbackClusters = buildClusterItemsFromPaths(fallbackResult.data)
-        setClusters(fallbackClusters)
-        setClusterTotal(fallbackClusters.length)
-      } catch {
-        toast({
-          title: '加载场景簇失败',
-          description: error instanceof Error ? error.message : '无法读取行为场景簇',
-          variant: 'destructive',
-        })
-      }
-    } finally {
-      setClusterLoading(false)
-    }
-  }
-
   const loadGraphData = async () => {
     setGraphLoading(true)
     try {
       const result = await getBehaviorGraphData({
         session_id: selectedSessionId === 'all' ? undefined : selectedSessionId,
       })
-      if (result.success) setGraphData(result.data)
+      if (result.success) setGraphData(result.data ?? null)
     } catch (error) {
       toast({
         title: '加载行为图谱失败',
@@ -1018,7 +543,6 @@ export function BehaviorLearningPage() {
         session_id: selectedSessionId === 'all' || selectedSessionId === '__global__' ? undefined : selectedSessionId,
         include_global: selectedSessionId === 'all',
         retrieval_mode: 'tag_cluster_spread_1',
-        summary: debugForm.summary,
         tag_clusters: splitTags(debugForm.domainTags).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
         need: { tag_name: splitTags(debugForm.behaviorNeeds)[0] ?? '', tag_aliases: [] },
         other_traits: splitTags(debugForm.otherTraits).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
@@ -1045,10 +569,6 @@ export function BehaviorLearningPage() {
   }, [selectedSessionId, enabledFilter, page])
 
   useEffect(() => {
-    loadClusters()
-  }, [selectedSessionId, clusterPageSize])
-
-  useEffect(() => {
     if (activeTab === 'scene-network' || activeTab === 'tag-network') {
       loadGraphData()
     }
@@ -1063,7 +583,6 @@ export function BehaviorLearningPage() {
   const applySearch = () => {
     setPage(1)
     loadPaths(1)
-    loadClusters()
   }
   const toggleSceneGroup = (groupKey: string) => {
     setOpenSceneGroups((current) => {
@@ -1103,7 +622,7 @@ export function BehaviorLearningPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => { loadChats(); loadPaths(); loadClusters(); loadGraphData() }}>
+          <Button variant="outline" onClick={() => { loadChats(); loadPaths(); loadGraphData() }}>
             <RefreshCw className="mr-2 h-4 w-4" />
             刷新
           </Button>
@@ -1111,9 +630,8 @@ export function BehaviorLearningPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)} className="min-h-0 flex-1">
-        <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6">
+        <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
           <TabsTrigger value="paths">经验路径</TabsTrigger>
-          <TabsTrigger value="clusters">场景簇浏览</TabsTrigger>
           <TabsTrigger value="scene-network">场景簇图谱</TabsTrigger>
           <TabsTrigger value="tag-network">Tag簇网络</TabsTrigger>
           <TabsTrigger value="debug">检索调试</TabsTrigger>
@@ -1190,40 +708,6 @@ export function BehaviorLearningPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="clusters" className="mt-4 min-h-0 space-y-4">
-          <div className="flex flex-col gap-2 rounded-lg border bg-background p-3 sm:flex-row sm:items-center">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') applySearch() }}
-                placeholder="搜索场景簇 tag 或聊天流"
-                className="pl-9"
-              />
-            </div>
-            <Button onClick={applySearch}>搜索</Button>
-            <Select value={String(clusterPageSize)} onValueChange={(value) => setClusterPageSize(Number(value))}>
-              <SelectTrigger className="w-full sm:w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CLUSTER_PAGE_SIZE_OPTIONS.map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size} 个
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <ClusterBrowserView
-            clusters={clusters}
-            total={clusterTotal}
-            selectedChatName={selectedChatName}
-            loading={clusterLoading}
-          />
-        </TabsContent>
-
         <TabsContent value="scene-network" className="mt-4">
           <BehaviorSceneNetworkView
             graphData={graphData}
@@ -1243,9 +727,6 @@ export function BehaviorLearningPage() {
         <TabsContent value="debug" className="mt-4 grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
           <div className="space-y-3 rounded-lg border bg-background p-4">
             <h2 className="text-base font-semibold">输入场景画像</h2>
-            <Field label="场景摘要">
-              <Textarea value={debugForm.summary} onChange={(event) => setDebugForm({ ...debugForm, summary: event.target.value })} />
-            </Field>
             <Field label="领域标签">
               <Input value={debugForm.domainTags} onChange={(event) => setDebugForm({ ...debugForm, domainTags: event.target.value })} placeholder="用逗号分隔" />
             </Field>
@@ -1271,114 +752,6 @@ export function BehaviorLearningPage() {
   )
 }
 
-function ClusterBrowserView({
-  clusters,
-  total,
-  selectedChatName,
-  loading,
-}: {
-  clusters: BehaviorClusterItem[]
-  total: number
-  selectedChatName: string
-  loading: boolean
-}) {
-  const { nodes, edges, clusterByNodeId, groups } = useMemo(() => buildClusterMapGraph(clusters), [clusters])
-  const [selectedClusterNodeId, setSelectedClusterNodeId] = useState<string | null>(null)
-  const [hoveredClusterNodeId, setHoveredClusterNodeId] = useState<string | null>(null)
-  const [hoveredGroupIndex, setHoveredGroupIndex] = useState<number | null>(null)
-  const selectedCluster = selectedClusterNodeId && clusterByNodeId.has(selectedClusterNodeId)
-    ? clusterByNodeId.get(selectedClusterNodeId) ?? null
-    : null
-  const { nodes: displayNodes, edges: displayEdges } = useMemo(
-    () => buildClusterHoverGraph(hoveredClusterNodeId, nodes, edges, clusterByNodeId),
-    [clusterByNodeId, edges, hoveredClusterNodeId, nodes]
-  )
-  return (
-    <div className="overflow-hidden rounded-lg border bg-background">
-      <div className="flex flex-col gap-2 border-b px-4 py-3 text-sm text-muted-foreground lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <div>{selectedChatName} · {total} 个场景簇</div>
-          <div className="text-xs">距离越近表示 tag 概率分布越相似，颜色表示自动聚类分区。悬停点会引出简要说明，点击查看完整分布。</div>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {groups.map((group) => (
-            <ClusterGroupLegend
-              key={group.index}
-              group={group}
-              open={hoveredGroupIndex === group.index}
-              onHover={() => setHoveredGroupIndex(group.index)}
-              onLeave={() => setHoveredGroupIndex(null)}
-            />
-          ))}
-        </div>
-        {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-      </div>
-      {clusters.length === 0 && !loading ? (
-        <div className="p-8 text-center text-sm text-muted-foreground">暂无场景簇</div>
-      ) : (
-        <div
-          className="relative h-[620px] overflow-hidden bg-muted/10"
-          onMouseLeave={() => setHoveredClusterNodeId(null)}
-        >
-          <ReactFlow
-            nodes={displayNodes}
-            edges={displayEdges}
-            nodeTypes={behaviorNodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.12 }}
-            minZoom={0.04}
-            maxZoom={8}
-            nodesDraggable
-            nodesConnectable={false}
-            elementsSelectable
-            attributionPosition="bottom-left"
-            onNodeClick={(_event, node) => {
-              if (clusterByNodeId.has(node.id)) {
-                setSelectedClusterNodeId(node.id)
-              }
-            }}
-            onNodeMouseEnter={(_event, node) => {
-              if (clusterByNodeId.has(node.id)) {
-                setHoveredClusterNodeId((current) => current === node.id ? current : node.id)
-              }
-            }}
-            onPaneClick={() => {
-              setSelectedClusterNodeId(null)
-              setHoveredClusterNodeId(null)
-            }}
-          >
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-            <Controls />
-          </ReactFlow>
-          <div
-            data-behavior-cluster-drawer="true"
-            data-open={selectedCluster ? "true" : "false"}
-            className={cn(
-              'absolute bottom-4 right-4 top-4 w-[min(420px,calc(100%-2rem))] transition duration-200 ease-out',
-              selectedCluster ? 'pointer-events-auto translate-x-0 opacity-100' : 'pointer-events-none translate-x-[calc(100%+2rem)] opacity-0'
-            )}
-          >
-            <div className="flex h-full flex-col overflow-hidden rounded-lg border bg-background/96 shadow-2xl backdrop-blur-md supports-[backdrop-filter]:bg-background/88">
-              <div className="flex items-center justify-between border-b bg-background/95 px-4 py-3 backdrop-blur-md">
-                <div>
-                  <h2 className="text-sm font-semibold">场景簇详情</h2>
-                  <p className="text-xs text-muted-foreground">tag 概率分布与关联行为统计</p>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => setSelectedClusterNodeId(null)} aria-label="关闭场景簇详情">
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-              <ScrollArea className="min-h-0 flex-1 bg-background/90 p-4 backdrop-blur-md">
-                {selectedCluster && <ClusterGraphDetail cluster={selectedCluster} />}
-              </ScrollArea>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function BehaviorSceneNetworkView({
   graphData,
   loading,
@@ -1399,6 +772,7 @@ function BehaviorSceneNetworkView({
       empty={!loading && nodes.length === 0}
       nodes={nodes}
       edges={edges}
+      networkKind="scene"
       onNodeSelect={setSelectedNodeId}
       selectedNodeId={selectedNodeId}
       detail={selectedNode ? <SceneNetworkDetail node={selectedNode} /> : null}
@@ -1426,11 +800,472 @@ function BehaviorTagNetworkView({
       empty={!loading && nodes.length === 0}
       nodes={nodes}
       edges={edges}
+      networkKind="tag"
       onNodeSelect={setSelectedNodeId}
       selectedNodeId={selectedNodeId}
       detail={selectedNode ? <TagNetworkDetail node={selectedNode} /> : null}
     />
   )
+}
+
+function canvasToneColor(tone: BehaviorNetworkNodeData['tone']): string {
+  if (tone === 'amber') return '#f59e0b'
+  if (tone === 'teal') return '#0d9488'
+  if (tone === 'primary') return '#2563eb'
+  if (tone === 'violet') return '#7c3aed'
+  return '#475569'
+}
+
+function canvasNodeWeight(node: BehaviorNetworkNode): number {
+  const numbers = node.data.metric.match(/\d+/g)?.map(Number).filter(Number.isFinite) ?? []
+  return Math.max(1, ...numbers)
+}
+
+function buildCanvasNetworkNode(
+  node: BehaviorNetworkNode,
+  index: number,
+  count: number,
+  networkKind: CanvasNetworkKind
+): CanvasNetworkNode {
+  const angle = networkKind === 'scene'
+    ? index / Math.max(count, 1) * Math.PI * 2
+    : index * 2.399963229728653
+  const layoutRadius = networkKind === 'scene'
+    ? 420 + ((stableHash(`${node.id}:ring`) % 1000) / 1000 - 0.5) * 80
+    : 260 + Math.floor(Math.sqrt(index)) * 34
+  const weight = canvasNodeWeight(node)
+  const nodeRadius = networkKind === 'scene'
+    ? clampNumber(6 + Math.sqrt(weight) * 1.2, 6, 26)
+    : clampNumber(5 + Math.sqrt(weight) * 0.45, 5, 24)
+  return {
+    id: node.id,
+    x: Math.cos(angle) * layoutRadius + ((stableHash(node.id) % 1000) / 1000 - 0.5) * 60,
+    y: Math.sin(angle) * layoutRadius + ((stableHash(`${node.id}:y`) % 1000) / 1000 - 0.5) * 60,
+    vx: 0,
+    vy: 0,
+    fixed: false,
+    radius: nodeRadius,
+    label: node.data.label,
+    detail: node.data.detail,
+    metric: node.data.metric,
+    tone: node.data.tone,
+  }
+}
+
+function fitCanvasNetwork(nodes: CanvasNetworkNode[], width: number, height: number): CanvasTransform {
+  if (nodes.length === 0 || width <= 0 || height <= 0) return { x: 0, y: 0, zoom: 1 }
+  const bounds = nodes.reduce(
+    (result, node) => ({
+      minX: Math.min(result.minX, node.x),
+      minY: Math.min(result.minY, node.y),
+      maxX: Math.max(result.maxX, node.x),
+      maxY: Math.max(result.maxY, node.y),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+  )
+  const graphWidth = Math.max(bounds.maxX - bounds.minX, 1)
+  const graphHeight = Math.max(bounds.maxY - bounds.minY, 1)
+  const zoom = clampNumber(Math.min(width / (graphWidth + 180), height / (graphHeight + 180)), 0.08, 2.2)
+  return {
+    x: width / 2 - ((bounds.minX + bounds.maxX) / 2) * zoom,
+    y: height / 2 - ((bounds.minY + bounds.maxY) / 2) * zoom,
+    zoom,
+  }
+}
+
+function BehaviorNetworkCanvas({
+  nodes,
+  edges,
+  networkKind,
+  settings,
+  layoutVersion,
+  selectedNodeId,
+  onNodeSelect,
+}: {
+  nodes: BehaviorNetworkNode[]
+  edges: BehaviorNetworkEdge[]
+  networkKind: CanvasNetworkKind
+  settings: CanvasNetworkSettings
+  layoutVersion: number
+  selectedNodeId: string | null
+  onNodeSelect: (nodeId: string | null) => void
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const nodesRef = useRef<CanvasNetworkNode[]>([])
+  const edgeRef = useRef<Array<{ source: string; target: string; weight: number }>>([])
+  const transformRef = useRef<CanvasTransform>({ x: 0, y: 0, zoom: 1 })
+  const selectedNodeIdRef = useRef<string | null>(selectedNodeId)
+  const settingsRef = useRef(settings)
+  const maxWeightRef = useRef(1)
+  const heatRef = useRef(0.9)
+  const pointerRef = useRef<{
+    mode: 'node' | 'pan' | null
+    nodeId: string | null
+    lastX: number
+    lastY: number
+  }>({ mode: null, nodeId: null, lastX: 0, lastY: 0 })
+  const layoutVersionRef = useRef(layoutVersion)
+
+  useEffect(() => {
+    selectedNodeIdRef.current = selectedNodeId
+  }, [selectedNodeId])
+
+  useEffect(() => {
+    settingsRef.current = settings
+    heatRef.current = Math.max(heatRef.current, 0.55)
+  }, [settings])
+
+  useEffect(() => {
+    const shouldResetLayout = layoutVersionRef.current !== layoutVersion
+    layoutVersionRef.current = layoutVersion
+    const previous = shouldResetLayout ? new Map<string, CanvasNetworkNode>() : new Map(nodesRef.current.map((node) => [node.id, node]))
+    nodesRef.current = nodes.map((node, index) => {
+      const existing = previous.get(node.id)
+      if (!existing) return buildCanvasNetworkNode(node, index, nodes.length, networkKind)
+      const nextNode = buildCanvasNetworkNode(node, index, nodes.length, networkKind)
+      return {
+        ...nextNode,
+        x: existing.x,
+        y: existing.y,
+        vx: existing.vx,
+        vy: existing.vy,
+        fixed: existing.fixed,
+        radius: nextNode.radius,
+      }
+    })
+    edgeRef.current = edges.map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+      weight: edgeWeight(edge),
+    }))
+    maxWeightRef.current = Math.max(1, ...edgeRef.current.map((edge) => edge.weight))
+    const canvas = canvasRef.current
+    if (canvas) {
+      transformRef.current = fitCanvasNetwork(nodesRef.current, canvas.clientWidth, canvas.clientHeight)
+    }
+    heatRef.current = 0.9
+  }, [edges, layoutVersion, networkKind, nodes, settings])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const resize = () => {
+      const width = canvas.clientWidth
+      const height = canvas.clientHeight
+      const ratio = window.devicePixelRatio || 1
+      canvas.width = Math.max(1, Math.floor(width * ratio))
+      canvas.height = Math.max(1, Math.floor(height * ratio))
+      transformRef.current = fitCanvasNetwork(nodesRef.current, width, height)
+      heatRef.current = Math.max(heatRef.current, 0.4)
+    }
+    resize()
+    const observer = new ResizeObserver(resize)
+    observer.observe(canvas)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const handleWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const rect = canvas.getBoundingClientRect()
+      const transform = transformRef.current
+      const oldZoom = transform.zoom
+      const nextZoom = clampNumber(oldZoom * (event.deltaY < 0 ? 1.1 : 0.9), 0.15, 4)
+      const mouseX = event.clientX - rect.left
+      const mouseY = event.clientY - rect.top
+      const worldX = (mouseX - transform.x) / oldZoom
+      const worldY = (mouseY - transform.y) / oldZoom
+      transform.zoom = nextZoom
+      transform.x = mouseX - worldX * nextZoom
+      transform.y = mouseY - worldY * nextZoom
+    }
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', handleWheel)
+  }, [networkKind])
+
+  const screenToWorld = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
+    const canvas = canvasRef.current
+    const rect = canvas?.getBoundingClientRect()
+    const transform = transformRef.current
+    if (!rect) return { x: 0, y: 0 }
+    return {
+      x: (clientX - rect.left - transform.x) / transform.zoom,
+      y: (clientY - rect.top - transform.y) / transform.zoom,
+    }
+  }, [])
+
+  const findNodeAt = useCallback((clientX: number, clientY: number): CanvasNetworkNode | null => {
+    const world = screenToWorld(clientX, clientY)
+    const fallbackRadius = 28
+    let bestNode: CanvasNetworkNode | null = null
+    let bestDistance = Infinity
+    nodesRef.current.forEach((node) => {
+      const radius = Math.max(node.radius, fallbackRadius)
+      const distance = Math.hypot(world.x - node.x, world.y - node.y)
+      if (distance <= radius && distance < bestDistance) {
+        bestNode = node
+        bestDistance = distance
+      }
+    })
+    return bestNode
+  }, [screenToWorld])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const context = canvas?.getContext('2d')
+    if (!canvas || !context) return
+
+    let frameId = 0
+    let disposed = false
+
+    const step = () => {
+      const graphNodes = nodesRef.current
+      const nodeById = new Map(graphNodes.map((node) => [node.id, node]))
+      const heat = heatRef.current
+      const settings = settingsRef.current
+      const charge = networkKind === 'scene' ? 1300 : 1200
+      const linkStrength = networkKind === 'scene' ? 0.005 : 0.004
+
+      if (!settings.paused) {
+        graphNodes.forEach((node) => {
+          if (node.fixed) return
+          node.vx = node.vx * 0.82 + -node.x * 0.0008 * heat
+          node.vy = node.vy * 0.82 + -node.y * 0.0008 * heat
+        })
+
+        if (graphNodes.length <= 520) {
+          for (let leftIndex = 0; leftIndex < graphNodes.length; leftIndex += 1) {
+            for (let rightIndex = leftIndex + 1; rightIndex < graphNodes.length; rightIndex += 1) {
+              const left = graphNodes[leftIndex]
+              const right = graphNodes[rightIndex]
+              const dx = right.x - left.x
+              const dy = right.y - left.y
+              const distanceSquared = Math.max(dx * dx + dy * dy, 25)
+              const distance = Math.sqrt(distanceSquared)
+              const force = charge / distanceSquared * heat
+              const fx = dx / distance * force
+              const fy = dy / distance * force
+              if (!left.fixed) {
+                left.vx -= fx
+                left.vy -= fy
+              }
+              if (!right.fixed) {
+                right.vx += fx
+                right.vy += fy
+              }
+            }
+          }
+        }
+
+        edgeRef.current.forEach((edge) => {
+          const source = nodeById.get(edge.source)
+          const target = nodeById.get(edge.target)
+          if (!source || !target) return
+          const dx = target.x - source.x
+          const dy = target.y - source.y
+          const distance = Math.max(Math.hypot(dx, dy), 1)
+          const targetDistance = networkKind === 'scene'
+            ? 80 + 80 / (1 + edge.weight)
+            : 90 + 70 / Math.max(1, Math.sqrt(edge.weight))
+          const force = (distance - targetDistance) * linkStrength * heat
+          const fx = dx / distance * force
+          const fy = dy / distance * force
+          if (!source.fixed) {
+            source.vx += fx
+            source.vy += fy
+          }
+          if (!target.fixed) {
+            target.vx -= fx
+            target.vy -= fy
+          }
+        })
+
+        graphNodes.forEach((node) => {
+          if (node.fixed) return
+          node.x += node.vx
+          node.y += node.vy
+        })
+        heatRef.current = Math.max(0.08, heat * 0.992)
+      }
+
+      const ratio = window.devicePixelRatio || 1
+      const width = canvas.clientWidth
+      const height = canvas.clientHeight
+      const transform = transformRef.current
+      context.setTransform(ratio, 0, 0, ratio, 0, 0)
+      context.clearRect(0, 0, width, height)
+      context.save()
+      context.translate(transform.x, transform.y)
+      context.scale(transform.zoom, transform.zoom)
+
+      context.lineCap = 'round'
+      const maxWeight = maxWeightRef.current
+      edgeRef.current.forEach((edge) => {
+        const source = nodeById.get(edge.source)
+        const target = nodeById.get(edge.target)
+        if (!source || !target) return
+        context.beginPath()
+        context.moveTo(source.x, source.y)
+        context.lineTo(target.x, target.y)
+        context.strokeStyle = `rgba(82, 95, 117, ${clampNumber(0.12 + edge.weight / maxWeight * 0.6, 0.12, 0.72)})`
+        context.lineWidth = clampNumber(Math.sqrt(edge.weight) * 4, 0.7, 8)
+        context.stroke()
+      })
+
+      graphNodes.forEach((node) => {
+        const selected = selectedNodeIdRef.current === node.id
+        const radius = node.radius
+        context.beginPath()
+        context.arc(node.x, node.y, radius, 0, Math.PI * 2)
+        context.fillStyle = canvasToneColor(node.tone)
+        context.fill()
+        context.lineWidth = selected ? 4 : 1.6
+        context.strokeStyle = selected ? '#111827' : '#ffffff'
+        context.stroke()
+        if (settings.showLabels && (selected || graphNodes.length < 150 || radius > 12)) {
+          context.fillStyle = '#1d2430'
+          context.font = '12px Microsoft YaHei, Segoe UI, sans-serif'
+          context.textAlign = 'center'
+          context.textBaseline = 'top'
+          const label = node.label.length > 22 ? `${node.label.slice(0, 22)}...` : node.label
+          context.fillText(label, node.x, node.y + radius + 4, 160)
+        }
+      })
+
+      context.restore()
+      if (!disposed) {
+        frameId = window.requestAnimationFrame(step)
+      }
+    }
+
+    frameId = window.requestAnimationFrame(step)
+    return () => {
+      disposed = true
+      window.cancelAnimationFrame(frameId)
+    }
+  }, [networkKind])
+
+  const handlePointerDown = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.setPointerCapture(event.pointerId)
+    const node = findNodeAt(event.clientX, event.clientY)
+    pointerRef.current = {
+      mode: node ? 'node' : 'pan',
+      nodeId: node?.id ?? null,
+      lastX: event.clientX,
+      lastY: event.clientY,
+    }
+    if (node) {
+      node.fixed = true
+      onNodeSelect(node.id)
+      heatRef.current = 0.95
+      return
+    }
+    onNodeSelect(null)
+  }, [findNodeAt, onNodeSelect])
+
+  const handlePointerMove = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
+    const pointer = pointerRef.current
+    if (!pointer.mode) {
+      const node = findNodeAt(event.clientX, event.clientY)
+      event.currentTarget.style.cursor = node ? 'grab' : 'move'
+      return
+    }
+    if (pointer.mode === 'pan') {
+      const transform = transformRef.current
+      transform.x += event.clientX - pointer.lastX
+      transform.y += event.clientY - pointer.lastY
+    } else if (pointer.nodeId) {
+      const node = nodesRef.current.find((item) => item.id === pointer.nodeId)
+      const world = screenToWorld(event.clientX, event.clientY)
+      if (node) {
+        node.x = world.x
+        node.y = world.y
+        node.vx = 0
+        node.vy = 0
+        heatRef.current = 0.95
+      }
+    }
+    pointer.lastX = event.clientX
+    pointer.lastY = event.clientY
+  }, [findNodeAt, screenToWorld])
+
+  const handlePointerUp = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
+    const pointer = pointerRef.current
+    if (pointer.nodeId) {
+      const node = nodesRef.current.find((item) => item.id === pointer.nodeId)
+      if (node) node.fixed = false
+      heatRef.current = Math.max(heatRef.current, 0.55)
+    }
+    pointerRef.current = { mode: null, nodeId: null, lastX: 0, lastY: 0 }
+    event.currentTarget.releasePointerCapture(event.pointerId)
+  }, [])
+
+  const handleDoubleClick = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    transformRef.current = fitCanvasNetwork(nodesRef.current, canvas.clientWidth, canvas.clientHeight)
+  }, [])
+
+  return (
+    <div ref={containerRef} className="h-full w-full">
+      <canvas
+        ref={canvasRef}
+        className="h-full w-full touch-none"
+        onDoubleClick={handleDoubleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      />
+    </div>
+  )
+}
+
+function defaultNodeLimit(networkKind: CanvasNetworkKind, nodeCount: number): number {
+  if (networkKind === 'scene') return Math.min(180, nodeCount)
+  return Math.min(260, nodeCount)
+}
+
+function effectiveMinWeight(networkKind: CanvasNetworkKind, minWeightValue: number): number {
+  return networkKind === 'scene' ? minWeightValue / 100 : minWeightValue
+}
+
+function filterCanvasNetwork(
+  nodes: BehaviorNetworkNode[],
+  edges: BehaviorNetworkEdge[],
+  networkKind: CanvasNetworkKind,
+  settings: CanvasNetworkSettings
+): { nodes: BehaviorNetworkNode[]; edges: BehaviorNetworkEdge[] } {
+  const search = settings.search.trim().toLowerCase()
+  const limit = settings.nodeLimit || defaultNodeLimit(networkKind, nodes.length)
+  const minWeight = effectiveMinWeight(networkKind, settings.minWeightValue)
+  const connectedIds = new Set(edges.flatMap((edge) => [edge.source, edge.target]))
+  const searchableText = (node: BehaviorNetworkNode) => `${node.id}\n${node.data.label}\n${node.data.detail}\n${node.data.metric}`.toLowerCase()
+  let visibleNodes = nodes.slice()
+  if (networkKind === 'tag' && settings.onlyConnected) {
+    visibleNodes = visibleNodes.filter((node) => connectedIds.has(node.id))
+  }
+  if (search) {
+    visibleNodes = visibleNodes.filter((node) => searchableText(node).includes(search))
+  }
+  const chosenIds = new Set(visibleNodes.slice(0, limit).map((node) => node.id))
+  const visibleEdges = edges.filter((edge) => (
+    chosenIds.has(edge.source) &&
+    chosenIds.has(edge.target) &&
+    edgeWeight(edge) >= minWeight
+  ))
+  const linkedIds = new Set(visibleEdges.flatMap((edge) => [edge.source, edge.target]))
+  const finalNodes = visibleNodes
+    .slice(0, limit)
+    .filter((node) => linkedIds.has(node.id) || search)
+  return { nodes: finalNodes, edges: visibleEdges }
 }
 
 function NetworkShell({
@@ -1440,6 +1275,7 @@ function NetworkShell({
   empty,
   nodes,
   edges,
+  networkKind,
   selectedNodeId,
   onNodeSelect,
   detail,
@@ -1450,10 +1286,28 @@ function NetworkShell({
   empty: boolean
   nodes: BehaviorNetworkNode[]
   edges: BehaviorNetworkEdge[]
+  networkKind: CanvasNetworkKind
   selectedNodeId: string | null
   onNodeSelect: (nodeId: string | null) => void
   detail: ReactNode
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [layoutVersion, setLayoutVersion] = useState(0)
+  const [settings, setSettings] = useState<CanvasNetworkSettings>(DEFAULT_CANVAS_NETWORK_SETTINGS)
+  const filteredGraph = useMemo(
+    () => filterCanvasNetwork(nodes, edges, networkKind, settings),
+    [edges, networkKind, nodes, settings]
+  )
+  const maxWeightValue = useMemo(() => {
+    const maxWeight = Math.max(1, ...edges.map((edge) => edgeWeight(edge)))
+    return networkKind === 'scene' ? Math.ceil(maxWeight * 100) : Math.ceil(maxWeight)
+  }, [edges, networkKind])
+  const nodeLimit = settings.nodeLimit || defaultNodeLimit(networkKind, nodes.length)
+  const minNodeLimit = networkKind === 'scene' ? 20 : 40
+  const updateSetting = <Key extends keyof CanvasNetworkSettings>(key: Key, value: CanvasNetworkSettings[Key]) => {
+    setSettings((current) => ({ ...current, [key]: value }))
+  }
+
   return (
     <div className="overflow-hidden rounded-lg border bg-background">
       <div className="flex flex-col gap-1 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1462,8 +1316,8 @@ function NetworkShell({
           <p className="text-xs text-muted-foreground">{description}</p>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant="outline">{nodes.length} 节点</Badge>
-          <Badge variant="outline">{edges.length} 连线</Badge>
+          <Badge variant="outline">{filteredGraph.nodes.length} 节点</Badge>
+          <Badge variant="outline">{filteredGraph.edges.length} 连线</Badge>
           {loading && <Loader2 className="h-4 w-4 animate-spin" />}
         </div>
       </div>
@@ -1471,27 +1325,114 @@ function NetworkShell({
         <div className="p-8 text-center text-sm text-muted-foreground">暂无图谱数据</div>
       ) : (
         <div className="relative h-[680px] overflow-hidden bg-muted/10">
-          <ReactFlow
-            nodes={nodes.map((node) => ({
-              ...node,
-              selected: selectedNodeId === node.id,
-            }))}
-            edges={edges}
-            nodeTypes={behaviorNodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.14 }}
-            minZoom={0.05}
-            maxZoom={4}
-            nodesDraggable
-            nodesConnectable={false}
-            elementsSelectable
-            attributionPosition="bottom-left"
-            onNodeClick={(_event, node) => onNodeSelect(node.id)}
-            onPaneClick={() => onNodeSelect(null)}
+          <div
+            className={cn(
+              'absolute left-3 top-3 z-20 w-[min(320px,calc(100%-1.5rem))] transition duration-200',
+              settingsOpen ? 'translate-x-0' : '-translate-x-[calc(100%-2.5rem)]'
+            )}
           >
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-            <Controls />
-          </ReactFlow>
+            <div className="overflow-hidden rounded-md border bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/88">
+              <div className="flex items-center justify-between border-b px-3 py-2">
+                <span className="text-sm font-medium">图谱调节</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSettingsOpen((open) => !open)}
+                  aria-label={settingsOpen ? '收起图谱调节' : '展开图谱调节'}
+                >
+                  <ChevronRight className={cn('h-4 w-4 transition', settingsOpen && 'rotate-180')} />
+                </Button>
+              </div>
+              <div className={cn('grid gap-3 p-3', settingsOpen ? 'block' : 'hidden')}>
+                <div className="grid gap-1 text-xs text-muted-foreground">
+                  <Label htmlFor={`behavior-network-search-${networkKind}`}>搜索</Label>
+                  <Input
+                    id={`behavior-network-search-${networkKind}`}
+                    value={settings.search}
+                    onChange={(event) => updateSetting('search', event.target.value)}
+                    placeholder={networkKind === 'scene' ? '名称、ID、tag 或 session' : 'tag 或 cluster_key'}
+                  />
+                </div>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  {networkKind === 'scene'
+                    ? `最小重叠度 ${effectiveMinWeight(networkKind, settings.minWeightValue).toFixed(2)}`
+                    : `最小边权重 ${settings.minWeightValue.toFixed(0)}`}
+                  <input
+                    type="range"
+                    min={0}
+                    max={maxWeightValue}
+                    step={1}
+                    value={settings.minWeightValue}
+                    onChange={(event) => updateSetting('minWeightValue', Number(event.target.value))}
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  最多显示节点 {nodeLimit}
+                  <input
+                    type="range"
+                    min={minNodeLimit}
+                    max={Math.max(minNodeLimit, nodes.length)}
+                    step={1}
+                    value={nodeLimit}
+                    onChange={(event) => {
+                      updateSetting('nodeLimit', Number(event.target.value))
+                      setLayoutVersion((value) => value + 1)
+                    }}
+                  />
+                </label>
+                {networkKind === 'tag' && (
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={settings.onlyConnected}
+                      onChange={(event) => updateSetting('onlyConnected', event.target.checked)}
+                    />
+                    只显示参与场景分布的 tag 簇
+                  </label>
+                )}
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={settings.showLabels}
+                    onChange={(event) => updateSetting('showLabels', event.target.checked)}
+                  />
+                  显示标签
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={settings.paused}
+                    onChange={(event) => updateSetting('paused', event.target.checked)}
+                  />
+                  暂停
+                </label>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setLayoutVersion((value) => value + 1)}>
+                    重新布局
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSettings(DEFAULT_CANVAS_NETWORK_SETTINGS)
+                      setLayoutVersion((value) => value + 1)
+                    }}
+                  >
+                    重置
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <BehaviorNetworkCanvas
+            nodes={filteredGraph.nodes}
+            edges={filteredGraph.edges}
+            networkKind={networkKind}
+            settings={settings}
+            layoutVersion={layoutVersion}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={onNodeSelect}
+          />
           <div
             data-open={detail ? 'true' : 'false'}
             className={cn(
@@ -1592,111 +1533,10 @@ function ReadableTagList({ tags }: { tags: BehaviorGraphData['scene_cluster_netw
             <div className="h-1.5 overflow-hidden rounded-full bg-muted">
               <div className="h-full rounded-full bg-primary" style={{ width: formatProbability(tag.probability) }} />
             </div>
-            <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{tag.tag}</div>
           </div>
           <span className="hidden text-right text-xs text-muted-foreground sm:block">{tag.probability.toFixed(3)}</span>
         </div>
       ))}
-    </div>
-  )
-}
-
-function ClusterGroupLegend({
-  group,
-  open,
-  onHover,
-  onLeave,
-}: {
-  group: ClusterMapGroup
-  open: boolean
-  onHover: () => void
-  onLeave: () => void
-}) {
-  return (
-    <Popover open={open}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            'rounded-md border px-2 py-0.5 text-[11px] leading-5 transition hover:shadow-sm',
-            group.colorClassName
-          )}
-          onMouseEnter={onHover}
-          onMouseLeave={onLeave}
-        >
-          {group.name} · {group.count}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        className="w-80"
-        onMouseEnter={onHover}
-        onMouseLeave={onLeave}
-      >
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold">{group.name}</div>
-              <div className="text-xs text-muted-foreground">{group.count} 个场景簇</div>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {group.topTags.map((tag) => (
-              <div key={tag.tag} className="grid gap-2 text-xs sm:grid-cols-[minmax(0,1fr)_3.5rem] sm:items-center">
-                <div className="min-w-0">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="break-words text-foreground">{tag.tag}</span>
-                    <span className="shrink-0 text-muted-foreground sm:hidden">{formatProbability(tag.probability)}</span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary" style={{ width: formatProbability(tag.probability) }} />
-                  </div>
-                </div>
-                <span className="hidden text-right text-muted-foreground sm:block">{formatProbability(tag.probability)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-function ClusterGraphDetail({ cluster }: { cluster: BehaviorClusterItem }) {
-  const title = clusterTitle(cluster.name, cluster.tags)
-  const activeRate = cluster.path_count > 0 ? cluster.enabled_path_count / cluster.path_count : 0
-  const hasSelfReflection = (cluster.self_reflection_path_count ?? 0) > 0
-  return (
-    <div className="space-y-3">
-      <div className="rounded-lg border bg-background/95 p-3 shadow-sm">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            {cluster.id !== null && <Badge variant="secondary">场景簇 #{cluster.id}</Badge>}
-            <Badge variant="outline">{cluster.chat_name}</Badge>
-          </div>
-          <h2 className="break-words text-sm font-semibold leading-6">{title}</h2>
-          <p className="text-xs text-muted-foreground">更新 {formatTime(cluster.update_time)} · 最近使用 {formatTime(cluster.last_active_time)}</p>
-        </div>
-      </div>
-      <ClusterDistributionPanel
-        name={cluster.name}
-        tags={cluster.tags}
-        sourceCount={cluster.source_count}
-        score={cluster.score}
-        compact
-      />
-      <div className="mt-3 grid gap-2 text-xs sm:grid-cols-5">
-        <Metric label="分支" value={String(cluster.path_count)} />
-        <Metric label="启用" value={String(cluster.enabled_path_count)} />
-        <Metric label="观察" value={String(cluster.observed_path_count ?? 0)} />
-        <Metric label="自身" value={String(cluster.self_reflection_path_count ?? 0)} />
-        <Metric label="样本" value={String(cluster.source_count)} />
-        <Metric label="簇分" value={formatScore(cluster.score)} />
-        <Metric label="使用" value={String(cluster.activation_count)} />
-        {hasSelfReflection && <Metric label="正向" value={String(cluster.success_count)} />}
-        {hasSelfReflection && <Metric label="负向" value={String(cluster.failure_count)} />}
-        <Metric label="启用率" value={formatProbability(activeRate)} />
-      </div>
     </div>
   )
 }
@@ -1826,7 +1666,7 @@ function ClusterTagPills({ tags, maxCount = 6 }: { tags: BehaviorClusterTag[]; m
     <div className="flex flex-wrap gap-1.5">
       {visibleTags.map((item) => (
         <Badge key={item.tag} variant="outline" className="max-w-full whitespace-normal break-all text-[11px]">
-          {item.tag} · {formatProbability(item.probability)}
+          {tagDisplayText(item)} · {formatProbability(item.probability)}
         </Badge>
       ))}
     </div>
@@ -1863,7 +1703,7 @@ function ClusterDistributionPanel({
             <div key={item.tag} className="grid gap-2 text-sm sm:grid-cols-[minmax(0,1fr)_4rem] sm:items-center">
               <div className="min-w-0">
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="break-words text-xs text-foreground">{item.tag}</span>
+                  <span className="break-words text-xs text-foreground">{tagDisplayText(item)}</span>
                   <span className="shrink-0 text-xs text-muted-foreground">{formatProbability(item.probability)}</span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-muted">
@@ -1892,23 +1732,34 @@ function RetrievalDebugView({ result }: { result: BehaviorRetrievalDebugPayload 
   if (!result) {
     return (
       <div className="rounded-lg border bg-background p-8 text-center text-sm text-muted-foreground">
-        输入场景画像后，可以看到命中的场景簇、描述节点和候选经验路径
+        输入场景画像后，可以看到命中的场景簇、检索调试信息和候选经验路径
       </div>
     )
   }
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Panel title="描述节点">
-        <TokenList items={result.descriptors.map((item) => `${item.node_kind} · ${item.name} · ${item.weight}`)} />
+      {result.error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive lg:col-span-2">
+          {result.error}
+        </div>
+      )}
+      <Panel title="检索概览">
+        <div className="grid gap-2 text-sm sm:grid-cols-2">
+          <Metric label="检索模式" value={retrievalModeLabel(result.retrieval_mode)} />
+          <Metric label="候选分数" value={`${result.candidate_scores.length} 条`} />
+          <Metric label="命中场景簇" value={`${result.matched_clusters.length} 个`} />
+          <Metric label="描述符" value={`${result.descriptors.length} 个`} />
+        </div>
       </Panel>
       <Panel title="命中场景簇">
         <ClusterScoreList clusters={result.matched_clusters} />
       </Panel>
-      <Panel title="命中节点">
-        <NodeScoreList nodes={result.matched_nodes} />
+      <Panel title="直接重叠调试">
+        <RetrievalStageDebug stage={result.retrieval_debug.direct} />
       </Panel>
-      <Panel title="扩展节点">
-        <NodeScoreList nodes={result.expanded_nodes.slice(0, 20)} />
+      <Panel title="Tag 簇扩散调试">
+        <RetrievalStageDebug stage={result.retrieval_debug.spread} />
+        <RetrievalLockDebug debug={result.retrieval_debug} />
       </Panel>
       <Panel title="候选路径">
         <div className="space-y-3">
@@ -1934,6 +1785,55 @@ function RetrievalDebugView({ result }: { result: BehaviorRetrievalDebugPayload 
           )}
         </div>
       </Panel>
+    </div>
+  )
+}
+
+function retrievalModeLabel(mode: string): string {
+  const labels: Record<string, string> = {
+    direct_domain_overlap: '直接领域重叠',
+    tag_cluster_spread_1: 'Tag 簇一跳扩散',
+    tag_cluster_spread_2: 'Tag 簇两跳扩散',
+  }
+  return labels[mode] ?? mode
+}
+
+function RetrievalStageDebug({ stage }: { stage: BehaviorRetrievalDebugPayload['retrieval_debug']['direct'] }) {
+  if (!stage) return <p className="text-sm text-muted-foreground">当前检索模式未产生这部分调试信息</p>
+  const hopCounts = stage.hop_counts ? Object.entries(stage.hop_counts) : []
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-2 text-sm sm:grid-cols-2">
+        <Metric label="直接 tag 数" value={String(stage.direct_tag_count)} />
+        {'expanded_tag_count' in stage && <Metric label="扩展 tag 数" value={String(stage.expanded_tag_count ?? 0)} />}
+        {'total_query_tag_count' in stage && <Metric label="查询 tag 总数" value={String(stage.total_query_tag_count ?? 0)} />}
+        <Metric label="命中场景簇" value={String(stage.cluster_count)} />
+      </div>
+      {hopCounts.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {hopCounts.map(([hop, count]) => (
+            <Badge key={hop} variant="outline">
+              {hop === '0' ? '直接' : `${hop} 跳`}：{count}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RetrievalLockDebug({ debug }: { debug: BehaviorRetrievalDebugPayload['retrieval_debug'] }) {
+  if (debug.direct_top_score === undefined) return null
+  return (
+    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+      <Metric label="直接最高分" value={formatScore(debug.direct_top_score)} />
+      <Metric label="直接锁定" value={debug.direct_locked ? '是' : '否'} />
+      {debug.direct_lock_threshold !== undefined && (
+        <Metric label="锁定阈值" value={formatScore(debug.direct_lock_threshold)} />
+      )}
+      {debug.locked_direct_spread_factor !== undefined && (
+        <Metric label="锁定后扩散系数" value={formatScore(debug.locked_direct_spread_factor)} />
+      )}
     </div>
   )
 }
@@ -1973,9 +1873,11 @@ function shouldShowBehaviorEdgeLabel(kind: string): boolean {
 }
 
 function buildBehaviorFlowGraph(detail: BehaviorPathDetail): { nodes: BehaviorFlowNode[]; edges: BehaviorFlowEdge[] } {
-  const sceneNodes = detail.nodes.filter((node) => node.kind !== 'action' && node.kind !== 'outcome')
-  const actionNodes = detail.nodes.filter((node) => node.kind === 'action')
-  const outcomeNodes = detail.nodes.filter((node) => node.kind === 'outcome')
+  const detailNodes = detail.nodes
+  const detailEdges = detail.edges
+  const sceneNodes = detailNodes.filter((node) => node.kind !== 'action' && node.kind !== 'outcome')
+  const actionNodes = detailNodes.filter((node) => node.kind === 'action')
+  const outcomeNodes = detailNodes.filter((node) => node.kind === 'outcome')
   const layeredNodes = [
     ...sceneNodes,
     {
@@ -2038,7 +1940,7 @@ function buildBehaviorFlowGraph(detail: BehaviorPathDetail): { nodes: BehaviorFl
   })
 
   const nodeIds = new Set(nodes.map((node) => node.id))
-  const edges: BehaviorFlowEdge[] = detail.edges
+  const edges: BehaviorFlowEdge[] = detailEdges
     .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
     .map((edge) => {
       const color = edge.kind === 'action_outcome'
@@ -2121,6 +2023,12 @@ function PathGraphView({ detail, loading }: { detail: BehaviorPathDetail | null;
     return <div className="rounded-lg border bg-background p-8 text-center text-sm text-muted-foreground">先选择一条经验路径</div>
   }
   const isSelfPath = isSelfReflectionPath(detail.path)
+  const sceneClusterTags = detail.scene_cluster.tags
+  const pathClusterTags = detail.path.scene_cluster_tags
+  const detailNodes = detail.nodes
+  const detailEdges = detail.edges
+  const evidence = detail.evidence
+  const feedback = detail.feedback
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="space-y-4 rounded-lg border bg-background p-4">
@@ -2135,7 +2043,7 @@ function PathGraphView({ detail, loading }: { detail: BehaviorPathDetail | null;
         </div>
         <ClusterDistributionPanel
           name={detail.scene_cluster.name || detail.path.scene_cluster_name || detail.path.trigger}
-          tags={detail.scene_cluster.tags.length > 0 ? detail.scene_cluster.tags : detail.path.scene_cluster_tags}
+          tags={sceneClusterTags.length > 0 ? sceneClusterTags : pathClusterTags}
           sourceCount={detail.scene_cluster.source_count || detail.path.scene_cluster_source_count}
           score={detail.scene_cluster.score || detail.path.scene_cluster_score}
         />
@@ -2148,7 +2056,7 @@ function PathGraphView({ detail, loading }: { detail: BehaviorPathDetail | null;
         </Panel>
         <Panel title="节点">
           <div className="grid gap-2 md:grid-cols-2">
-            {detail.nodes.map((node, index) => (
+            {detailNodes.map((node, index) => (
               <div key={`${node.kind}-${node.id}-${index}`} className="rounded-md border p-3">
                 <div className="mb-1 flex items-center gap-2">
                   <Badge variant="outline">{node.kind}</Badge>
@@ -2161,7 +2069,7 @@ function PathGraphView({ detail, loading }: { detail: BehaviorPathDetail | null;
         </Panel>
         <Panel title="边">
           <div className="space-y-2">
-            {detail.edges.map((edge) => (
+            {detailEdges.map((edge) => (
               <div key={edge.id} className="rounded-md border px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">{edge.kind}</Badge>
@@ -2175,11 +2083,11 @@ function PathGraphView({ detail, loading }: { detail: BehaviorPathDetail | null;
       </div>
       <div className="space-y-4">
         <Panel title="证据">
-          <JsonList items={detail.evidence} />
+          <JsonList items={evidence} />
         </Panel>
         {isSelfPath ? (
           <Panel title="反馈">
-            <JsonList items={detail.feedback} />
+            <JsonList items={feedback} />
           </Panel>
         ) : (
           <Panel title="反馈">
@@ -2209,19 +2117,6 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function TokenList({ items }: { items: string[] }) {
-  if (items.length === 0) return <p className="text-sm text-muted-foreground">暂无数据</p>
-  return (
-    <div className="flex flex-wrap gap-2">
-      {items.map((item) => (
-        <Badge key={item} variant="outline" className="max-w-full whitespace-normal break-all">
-          {item}
-        </Badge>
-      ))}
-    </div>
-  )
-}
-
 function ClusterScoreList({ clusters }: { clusters: BehaviorRetrievalDebugPayload['matched_clusters'] }) {
   if (clusters.length === 0) return <p className="text-sm text-muted-foreground">暂无数据</p>
   return (
@@ -2235,23 +2130,6 @@ function ClusterScoreList({ clusters }: { clusters: BehaviorRetrievalDebugPayloa
           </div>
           <p className="mb-2 break-words text-sm font-medium">{clusterTitle(cluster.name, cluster.tags)}</p>
           <ClusterTagPills tags={cluster.tags} maxCount={5} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function NodeScoreList({ nodes }: { nodes: Array<{ id: number | null; node_kind: string; name: string; match_score: number }> }) {
-  if (nodes.length === 0) return <p className="text-sm text-muted-foreground">暂无数据</p>
-  return (
-    <div className="space-y-2">
-      {nodes.map((node, index) => (
-        <div key={`${node.id}-${index}`} className="rounded-md border px-3 py-2 text-sm">
-          <div className="mb-1 flex items-center gap-2">
-            <Badge variant="outline">{node.node_kind || 'node'}</Badge>
-            <span className="text-xs text-muted-foreground">匹配 {formatScore(node.match_score)}</span>
-          </div>
-          <p>{node.name || '-'}</p>
         </div>
       ))}
     </div>

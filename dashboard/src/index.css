@@ -635,6 +635,14 @@
   box-shadow: none !important;
 }
 
+:root [data-dashboard-topbar-toggle='true'] {
+  border-radius: 0 !important;
+}
+
+:root [data-dashboard-topbar-toggle='true']:hover {
+  box-shadow: inset 0 0 0 2px hsl(var(--background)) !important;
+}
+
 :root[data-dashboard-style='future-retro'] [data-dashboard-button='true']:not(:disabled) {
   border: var(--retro-stroke) solid var(--retro-line);
 }

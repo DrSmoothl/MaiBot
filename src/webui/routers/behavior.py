@@ -45,6 +45,7 @@ class BehaviorChatInfo(BaseModel):
 class BehaviorClusterTag(BaseModel):
     tag: str
     probability: float = 0.0
+    display: str = ""
 
 
 class BehaviorSceneClusterPayload(BaseModel):
@@ -170,7 +171,10 @@ def _load_json_list(raw_value: Any) -> list[Any]:
     return parsed if isinstance(parsed, list) else []
 
 
-def _cluster_tag_payloads(raw_value: Any) -> list[BehaviorClusterTag]:
+def _cluster_tag_payloads(
+    raw_value: Any,
+    members_by_key: Optional[dict[str, list[dict[str, Any]]]] = None,
+) -> list[BehaviorClusterTag]:
     tags: list[BehaviorClusterTag] = []
     for item in _load_json_list(raw_value):
         if not isinstance(item, dict):
@@ -182,17 +186,32 @@ def _cluster_tag_payloads(raw_value: Any) -> list[BehaviorClusterTag]:
             probability = float(item.get("probability") or 0.0)
         except (TypeError, ValueError):
             probability = 0.0
-        tags.append(BehaviorClusterTag(tag=tag, probability=max(probability, 0.0)))
+        display = _tag_ref_display(tag, members_by_key) if members_by_key is not None else ""
+        tags.append(BehaviorClusterTag(tag=tag, probability=max(probability, 0.0), display=display))
     return sorted(tags, key=lambda item: item.probability, reverse=True)
 
 
-def _cluster_payload(cluster: Optional[BehaviorSceneCluster]) -> BehaviorSceneClusterPayload:
+def _format_cluster_tag_payloads(tags: list[BehaviorClusterTag]) -> str:
+    parts = [
+        f"{(tag.display or tag.tag)}={tag.probability:.3f}"
+        for tag in tags[:8]
+        if (tag.display or tag.tag)
+    ]
+    return "；".join(parts)
+
+
+def _cluster_payload(
+    cluster: Optional[BehaviorSceneCluster],
+    members_by_key: Optional[dict[str, list[dict[str, Any]]]] = None,
+) -> BehaviorSceneClusterPayload:
     if cluster is None:
         return BehaviorSceneClusterPayload()
+    tags = _cluster_tag_payloads(cluster.tag_distribution, members_by_key)
     return BehaviorSceneClusterPayload(
         id=cluster.id,
-        name=format_scene_cluster_distribution(_load_cluster_distribution(cluster.tag_distribution)),
-        tags=_cluster_tag_payloads(cluster.tag_distribution),
+        name=_format_cluster_tag_payloads(tags)
+        or format_scene_cluster_distribution(_load_cluster_distribution(cluster.tag_distribution)),
+        tags=tags,
         source_count=int(cluster.source_count or 0),
         score=float(cluster.score or 0.0),
         update_time=_isoformat(cluster.update_time),
@@ -226,7 +245,9 @@ def _tag_cluster_members_by_key(session: Any) -> dict[str, list[dict[str, Any]]]
     return members
 
 
-def _tag_ref_display(tag_ref: str, members_by_key: dict[str, list[dict[str, Any]]]) -> str:
+def _tag_ref_display(tag_ref: str, members_by_key: Optional[dict[str, list[dict[str, Any]]]]) -> str:
+    if members_by_key is None:
+        return tag_ref
     tag_kind, cluster_key = _split_tag_ref(tag_ref)
     members = members_by_key.get(cluster_key, [])
     if not members:
@@ -538,7 +559,7 @@ async def list_behavior_paths(
                 in (
                     f"{item.scene_cluster_name}\n{item.trigger}\n{item.action}\n{item.outcome}\n"
                     f"{item.actor_type}\n{item.learning_type}\n{item.chat_name}\n"
-                    + "\n".join(tag.tag for tag in item.scene_cluster_tags)
+                    + "\n".join(f"{tag.tag}\n{tag.display}" for tag in item.scene_cluster_tags)
                 ).lower()
             ]
         total = len(path_items)
@@ -574,7 +595,7 @@ async def list_behavior_clusters(
                 if normalized_search
                 in (
                     f"{item.name}\n{item.chat_name}\n"
-                    + "\n".join(tag.tag for tag in item.tags)
+                    + "\n".join(f"{tag.tag}\n{tag.display}" for tag in item.tags)
                 ).lower()
             ]
         total = len(cluster_items)
@@ -602,6 +623,11 @@ async def get_behavior_path_detail(path_id: int) -> BehaviorPathDetailResponse:
         if path is None:
             raise HTTPException(status_code=404, detail="行为经验路径不存在")
         item = _build_path_items(session, [path])[0]
+        members_by_key = _tag_cluster_members_by_key(session)
+        scene_cluster = _cluster_payload(
+            session.get(BehaviorSceneCluster, path.scene_cluster_id),
+            members_by_key,
+        )
     nodes: list[BehaviorNodePayload] = [
         BehaviorNodePayload(id=path.action_id, kind="action", label=item.action),
         BehaviorNodePayload(id=path.outcome_id, kind="outcome", label=item.outcome),
@@ -609,7 +635,7 @@ async def get_behavior_path_detail(path_id: int) -> BehaviorPathDetailResponse:
     return BehaviorPathDetailResponse(
         data={
             "path": item.model_dump(),
-            "scene_cluster": _cluster_payload(session.get(BehaviorSceneCluster, path.scene_cluster_id)).model_dump(),
+            "scene_cluster": scene_cluster.model_dump(),
             "evidence": _load_json_list(path.evidence_list),
             "feedback": _load_json_list(path.feedback_list),
             "nodes": [node.model_dump() for node in nodes],
@@ -686,10 +712,11 @@ def _build_path_items(session: Any, paths: list[BehaviorExperiencePath]) -> list
         chat.session_id: chat
         for chat in session.exec(select(ChatSession).where(col(ChatSession.session_id).in_(session_ids))).all()
     }
+    members_by_key = _tag_cluster_members_by_key(session)
     items: list[BehaviorPathItem] = []
     for path in paths:
         scene_cluster = scene_clusters.get(path.scene_cluster_id)
-        cluster_payload = _cluster_payload(scene_cluster)
+        cluster_payload = _cluster_payload(scene_cluster, members_by_key)
         cluster_name = cluster_payload.name
         items.append(
             BehaviorPathItem(
@@ -729,13 +756,14 @@ def _enrich_debug_clusters(session: Any, matched_clusters: Any) -> list[dict[str
         if isinstance(item, dict) and isinstance(item.get("cluster_id"), int)
     }
     scene_clusters = _load_scene_clusters(session, cluster_ids)
+    members_by_key = _tag_cluster_members_by_key(session)
     enriched_clusters: list[dict[str, Any]] = []
     for item in matched_clusters:
         if not isinstance(item, dict):
             continue
         cluster_id = item.get("cluster_id")
         cluster = scene_clusters.get(cluster_id) if isinstance(cluster_id, int) else None
-        cluster_payload = _cluster_payload(cluster)
+        cluster_payload = _cluster_payload(cluster, members_by_key)
         enriched_clusters.append(
             {
                 **item,
@@ -762,10 +790,11 @@ def _build_cluster_items(session: Any, clusters: list[BehaviorSceneCluster]) -> 
         chat.session_id: chat
         for chat in session.exec(select(ChatSession).where(col(ChatSession.session_id).in_(session_ids))).all()
     }
+    members_by_key = _tag_cluster_members_by_key(session)
 
     items: list[BehaviorClusterItem] = []
     for cluster in clusters:
-        cluster_payload = _cluster_payload(cluster)
+        cluster_payload = _cluster_payload(cluster, members_by_key)
         cluster_paths = paths_by_cluster_id.get(cluster.id or 0, [])
         last_active_time = max((path.last_active_time for path in cluster_paths if path.last_active_time), default=None)
         items.append(
