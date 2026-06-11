@@ -11,21 +11,16 @@ from sqlmodel import col, func, select
 
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
-    BehaviorActionNode,
-    BehaviorActionOutcomeEdge,
+    BehaviorAction,
     BehaviorExperiencePath,
-    BehaviorExperienceSceneLink,
-    BehaviorOutcomeNode,
-    BehaviorSceneActionEdge,
+    BehaviorOutcome,
     BehaviorSceneCluster,
-    BehaviorSceneEdge,
-    BehaviorSceneNode,
     ChatSession,
 )
 from src.learners.behavior_scenario import BehaviorScenarioProfile, parse_behavior_scenario_response
-from src.learners.behavior_scene_graph_store import (
+from src.learners.behavior_scene_cluster_store import (
     _load_cluster_distribution,
-    debug_retrieve_behavior_scores_from_scene_graph,
+    debug_retrieve_behavior_scores_from_scene_clusters,
     format_scene_cluster_distribution,
 )
 from src.webui.dependencies import require_auth
@@ -137,7 +132,7 @@ class BehaviorPathDetailResponse(BaseModel):
 class BehaviorScenarioDebugRequest(BaseModel):
     session_id: Optional[str] = Field(default=None)
     include_global: bool = Field(default=True)
-    retrieval_mode: str = Field(default="tag_expand_scene_cluster")
+    retrieval_mode: str = Field(default="direct_domain_overlap")
     summary: str = Field(default="")
     tag_clusters: list[dict[str, Any]] = Field(default_factory=list)
     need: dict[str, Any] = Field(default_factory=dict)
@@ -231,10 +226,6 @@ async def list_behavior_chats() -> dict[str, Any]:
             .group_by(BehaviorExperiencePath.session_id)
             .order_by(func.max(BehaviorExperiencePath.last_active_time).desc())
         ).all()
-        scene_rows = session.exec(
-            select(BehaviorSceneNode.session_id, func.count(BehaviorSceneNode.id)).group_by(BehaviorSceneNode.session_id)
-        ).all()
-        scene_count_by_session = {row[0]: int(row[1] or 0) for row in scene_rows}
         cluster_rows = session.exec(
             select(BehaviorSceneCluster.session_id, func.count(BehaviorSceneCluster.id)).group_by(
                 BehaviorSceneCluster.session_id
@@ -257,7 +248,7 @@ async def list_behavior_chats() -> dict[str, Any]:
             chat_type=_chat_type_of(chat_sessions.get(row[0])),
             path_count=int(row[1] or 0),
             cluster_count=cluster_count_by_session.get(row[0], 0),
-            scene_count=scene_count_by_session.get(row[0], 0),
+            scene_count=cluster_count_by_session.get(row[0], 0),
             last_active_time=_isoformat(row[2]),
         ).model_dump()
         for row in path_rows
@@ -352,43 +343,10 @@ async def get_behavior_path_detail(path_id: int) -> BehaviorPathDetailResponse:
         if path is None:
             raise HTTPException(status_code=404, detail="行为经验路径不存在")
         item = _build_path_items(session, [path])[0]
-        scene_links = session.exec(
-            select(BehaviorExperienceSceneLink).where(
-                BehaviorExperienceSceneLink.behavior_experience_path_id == path_id
-            )
-        ).all()
-        scene_node_ids = {link.scene_node_id for link in scene_links}
-        scene_nodes = _load_scene_nodes(session, scene_node_ids)
-        scene_edges = session.exec(
-            select(BehaviorSceneEdge).where(
-                (col(BehaviorSceneEdge.source_scene_id).in_(scene_node_ids))
-                | (col(BehaviorSceneEdge.target_scene_id).in_(scene_node_ids))
-            )
-        ).all()
-        scene_action_edges = session.exec(
-            select(BehaviorSceneActionEdge).where(BehaviorSceneActionEdge.behavior_experience_path_id == path_id)
-        ).all()
-        action_outcome_edges = session.exec(
-            select(BehaviorActionOutcomeEdge).where(BehaviorActionOutcomeEdge.behavior_experience_path_id == path_id)
-        ).all()
-
     nodes: list[BehaviorNodePayload] = [
-        BehaviorNodePayload(
-            id=node.id or 0,
-            kind=node.node_kind,
-            label=node.name,
-            score=float(node.score or 0.0),
-            source_count=int(node.source_count or 0),
-        )
-        for node in scene_nodes.values()
+        BehaviorNodePayload(id=path.action_id, kind="action", label=item.action),
+        BehaviorNodePayload(id=path.outcome_id, kind="outcome", label=item.outcome),
     ]
-    nodes.extend(
-        [
-            BehaviorNodePayload(id=path.action_node_id, kind="action", label=item.action),
-            BehaviorNodePayload(id=path.outcome_node_id, kind="outcome", label=item.outcome),
-        ]
-    )
-    edges = _build_detail_edges(scene_edges, scene_links, scene_action_edges, action_outcome_edges)
     return BehaviorPathDetailResponse(
         data={
             "path": item.model_dump(),
@@ -396,14 +354,14 @@ async def get_behavior_path_detail(path_id: int) -> BehaviorPathDetailResponse:
             "evidence": _load_json_list(path.evidence_list),
             "feedback": _load_json_list(path.feedback_list),
             "nodes": [node.model_dump() for node in nodes],
-            "edges": [edge.model_dump() for edge in edges],
+            "edges": [],
         }
     )
 
 
 @router.post("/retrieval-debug")
 async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dict[str, Any]:
-    """按输入场景模拟一次本地场景图检索。"""
+    """按输入场景模拟一次本地场景簇检索。"""
 
     profile = BehaviorScenarioProfile(
         summary=" ".join(request.summary.split()).strip(),
@@ -419,7 +377,7 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
         ).tag_clusters,
         confidence=1.0 if request.tag_clusters or request.need or request.other_traits else 0.0,
     )
-    debug_payload = debug_retrieve_behavior_scores_from_scene_graph(
+    debug_payload = debug_retrieve_behavior_scores_from_scene_clusters(
         session_ids=_session_scope(request.session_id),
         include_global=request.include_global,
         profile=profile,
@@ -453,17 +411,17 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
 
 def _build_path_items(session: Any, paths: list[BehaviorExperiencePath]) -> list[BehaviorPathItem]:
     cluster_ids = {path.scene_cluster_id for path in paths}
-    action_ids = {path.action_node_id for path in paths}
-    outcome_ids = {path.outcome_node_id for path in paths}
+    action_ids = {path.action_id for path in paths}
+    outcome_ids = {path.outcome_id for path in paths}
     session_ids = {path.session_id for path in paths if path.session_id}
     scene_clusters = _load_scene_clusters(session, cluster_ids)
     action_nodes = {
         node.id: node
-        for node in session.exec(select(BehaviorActionNode).where(col(BehaviorActionNode.id).in_(action_ids))).all()
+        for node in session.exec(select(BehaviorAction).where(col(BehaviorAction.id).in_(action_ids))).all()
     }
     outcome_nodes = {
         node.id: node
-        for node in session.exec(select(BehaviorOutcomeNode).where(col(BehaviorOutcomeNode.id).in_(outcome_ids))).all()
+        for node in session.exec(select(BehaviorOutcome).where(col(BehaviorOutcome.id).in_(outcome_ids))).all()
     }
     chat_sessions = {
         chat.session_id: chat
@@ -487,8 +445,8 @@ def _build_path_items(session: Any, paths: list[BehaviorExperiencePath]) -> list
                 scene_cluster_score=cluster_payload.score,
                 actor_type=str(path.actor_type or "other_user"),
                 learning_type=str(path.learning_type or "observed_behavior"),
-                action=action_nodes[path.action_node_id].action if path.action_node_id in action_nodes else "",
-                outcome=outcome_nodes[path.outcome_node_id].outcome if path.outcome_node_id in outcome_nodes else "",
+                action=action_nodes[path.action_id].action if path.action_id in action_nodes else "",
+                outcome=outcome_nodes[path.outcome_id].outcome if path.outcome_id in outcome_nodes else "",
                 count=int(path.count or 0),
                 activation_count=int(path.activation_count or 0),
                 success_count=int(path.success_count or 0),
@@ -577,67 +535,3 @@ def _load_scene_clusters(session: Any, scene_cluster_ids: set[int]) -> dict[int,
         for cluster in session.exec(select(BehaviorSceneCluster).where(col(BehaviorSceneCluster.id).in_(scene_cluster_ids))).all()
         if cluster.id is not None
     }
-
-
-def _load_scene_nodes(session: Any, scene_node_ids: set[int]) -> dict[int, BehaviorSceneNode]:
-    if not scene_node_ids:
-        return {}
-    return {
-        node.id: node
-        for node in session.exec(select(BehaviorSceneNode).where(col(BehaviorSceneNode.id).in_(scene_node_ids))).all()
-        if node.id is not None
-    }
-
-
-def _build_detail_edges(
-    scene_edges: list[BehaviorSceneEdge],
-    scene_links: list[BehaviorExperienceSceneLink],
-    scene_action_edges: list[BehaviorSceneActionEdge],
-    action_outcome_edges: list[BehaviorActionOutcomeEdge],
-) -> list[BehaviorEdgePayload]:
-    edges: list[BehaviorEdgePayload] = []
-    for edge in scene_edges:
-        edges.append(
-            BehaviorEdgePayload(
-                id=f"scene-{edge.id}",
-                source=f"scene:{edge.source_scene_id}",
-                target=f"scene:{edge.target_scene_id}",
-                kind=edge.edge_type,
-                weight=float(edge.weight or 1.0),
-                count=int(edge.count or 0),
-            )
-        )
-    for link in scene_links:
-        edges.append(
-            BehaviorEdgePayload(
-                id=f"link-{link.id}",
-                source=f"scene:{link.scene_node_id}",
-                target=f"path:{link.behavior_experience_path_id}",
-                kind=link.link_role,
-                weight=float(link.weight or 1.0),
-                count=int(link.count or 0),
-            )
-        )
-    for edge in scene_action_edges:
-        edges.append(
-            BehaviorEdgePayload(
-                id=f"scene-action-{edge.id}",
-                source=f"scene:{edge.scene_node_id}",
-                target=f"action:{edge.action_node_id}",
-                kind="scene_action",
-                weight=float(edge.weight or 1.0),
-                count=int(edge.count or 0),
-            )
-        )
-    for edge in action_outcome_edges:
-        edges.append(
-            BehaviorEdgePayload(
-                id=f"action-outcome-{edge.id}",
-                source=f"action:{edge.action_node_id}",
-                target=f"outcome:{edge.outcome_node_id}",
-                kind="action_outcome",
-                weight=float(edge.weight or 1.0),
-                count=int(edge.count or 0),
-            )
-        )
-    return edges

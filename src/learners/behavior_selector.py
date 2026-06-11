@@ -12,7 +12,7 @@ from .behavior_pattern_store import (
     list_behavior_patterns_for_sessions,
     mark_behavior_pattern_selected,
 )
-from .behavior_scene_graph_store import retrieve_behavior_scores_from_scene_graph
+from .behavior_scene_cluster_store import retrieve_behavior_scores_from_scene_clusters
 from .behavior_scenario import BehaviorScenarioProfile, behavior_scenario_analyzer
 
 logger = get_logger("behavior_selector")
@@ -117,41 +117,41 @@ class BehaviorPatternSelector:
             + self_feedback_bonus,
         )
 
-    def _rank_candidates_by_scene_graph(
+    def _rank_candidates_by_scene_cluster(
         self,
         candidates: list[dict[str, Any]],
         *,
-        scene_graph_scores: dict[int, float],
+        scene_cluster_scores: dict[int, float],
         max_count: int,
     ) -> list[dict[str, Any]]:
-        if not scene_graph_scores:
+        if not scene_cluster_scores:
             return []
 
-        graph_candidates: list[dict[str, Any]] = []
+        matched_candidates: list[dict[str, Any]] = []
         for candidate in candidates:
             candidate_id = candidate.get("id")
             if not isinstance(candidate_id, int):
                 continue
-            graph_score = scene_graph_scores.get(candidate_id)
-            if graph_score is None:
+            cluster_score = scene_cluster_scores.get(candidate_id)
+            if cluster_score is None:
                 continue
             candidate = dict(candidate)
-            candidate["scene_graph_score"] = round(graph_score, 4)
-            graph_candidates.append(candidate)
+            candidate["scene_cluster_score"] = round(cluster_score, 4)
+            matched_candidates.append(candidate)
 
-        if not graph_candidates:
+        if not matched_candidates:
             return []
 
-        graph_candidates.sort(
+        matched_candidates.sort(
             key=lambda candidate: (
-                float(candidate.get("scene_graph_score") or 0.0),
+                float(candidate.get("scene_cluster_score") or 0.0),
                 self._candidate_weight(candidate),
                 int(candidate.get("success_count") or 0),
                 int(candidate.get("id") or 0),
             ),
             reverse=True,
         )
-        return graph_candidates[:max_count]
+        return matched_candidates[:max_count]
 
     def _load_behavior_candidates(
         self,
@@ -180,18 +180,18 @@ class BehaviorPatternSelector:
                 continue
             candidates.append(candidate)
         if scenario_profile is not None and scenario_profile.has_signal:
-            scene_graph_scores = retrieve_behavior_scores_from_scene_graph(
+            scene_cluster_scores = retrieve_behavior_scores_from_scene_clusters(
                 session_ids=related_session_ids,
                 include_global=has_global_share,
                 profile=scenario_profile,
             )
-            scene_graph_ranked_candidates = self._rank_candidates_by_scene_graph(
+            scene_cluster_ranked_candidates = self._rank_candidates_by_scene_cluster(
                 candidates,
-                scene_graph_scores=scene_graph_scores,
+                scene_cluster_scores=scene_cluster_scores,
                 max_count=max_count,
             )
-            if scene_graph_ranked_candidates:
-                return scene_graph_ranked_candidates
+            if scene_cluster_ranked_candidates:
+                return scene_cluster_ranked_candidates
 
         return []
 
@@ -270,7 +270,7 @@ class BehaviorPatternSelector:
                 else candidate
             )
             if selected_behavior:
-                for score_key in ("scene_graph_score",):
+                for score_key in ("scene_cluster_score",):
                     if score_key in candidate:
                         selected_behavior[score_key] = candidate[score_key]
                 selected_behaviors.append(selected_behavior)

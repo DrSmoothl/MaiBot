@@ -7,19 +7,18 @@ import json
 
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
-    BehaviorActionNode,
+    BehaviorAction,
     BehaviorExperiencePath,
-    BehaviorOutcomeNode,
+    BehaviorOutcome,
     BehaviorSceneCluster,
 )
 from src.common.logger import get_logger
 
 from .behavior_scenario import BehaviorScenarioProfile
-from .behavior_scene_graph_store import (
+from .behavior_scene_cluster_store import (
     _load_cluster_distribution,
     apply_behavior_scene_feedback,
     format_scene_cluster_distribution,
-    link_behavior_experience_to_scene_graph,
     mark_behavior_scene_links_selected,
     upsert_behavior_graph_refs,
 )
@@ -120,16 +119,16 @@ def _path_texts_from_session(
     path: BehaviorExperiencePath,
 ) -> tuple[str, str, str]:
     scene_cluster = session.get(BehaviorSceneCluster, path.scene_cluster_id)
-    action_node = session.get(BehaviorActionNode, path.action_node_id)
-    outcome_node = session.get(BehaviorOutcomeNode, path.outcome_node_id)
+    action = session.get(BehaviorAction, path.action_id)
+    outcome = session.get(BehaviorOutcome, path.outcome_id)
     trigger = (
         format_scene_cluster_distribution(_load_cluster_distribution(scene_cluster.tag_distribution))
         if scene_cluster is not None
         else ""
     )
-    action = action_node.action if action_node is not None else ""
-    outcome = outcome_node.outcome if outcome_node is not None else ""
-    return trigger, action, outcome
+    action_text = action.action if action is not None else ""
+    outcome_text = outcome.outcome if outcome is not None else ""
+    return trigger, action_text, outcome_text
 
 
 def _path_to_dict_from_session(
@@ -143,8 +142,8 @@ def _path_to_dict_from_session(
         "action": action,
         "outcome": outcome,
         "scene_cluster_id": path.scene_cluster_id,
-        "action_node_id": path.action_node_id,
-        "outcome_node_id": path.outcome_node_id,
+        "action_id": path.action_id,
+        "outcome_id": path.outcome_id,
         "actor_type": path.actor_type,
         "learning_type": path.learning_type,
         "count": path.count,
@@ -237,7 +236,7 @@ def upsert_behavior_experience(
             )
             if graph_refs is None:
                 logger.warning(
-                    "跳过写入行为经验路径：场景图引用生成失败 "
+                    "跳过写入行为经验路径：场景簇引用生成失败 "
                     f"session_id={session_id} action={normalized_action} outcome={normalized_outcome}"
                 )
                 return None
@@ -246,8 +245,8 @@ def upsert_behavior_experience(
                 select(BehaviorExperiencePath)
                 .where(BehaviorExperiencePath.session_id == session_id)
                 .where(BehaviorExperiencePath.scene_cluster_id == graph_refs.scene_cluster_id)
-                .where(BehaviorExperiencePath.action_node_id == graph_refs.action_node_id)
-                .where(BehaviorExperiencePath.outcome_node_id == graph_refs.outcome_node_id)
+                .where(BehaviorExperiencePath.action_id == graph_refs.action_id)
+                .where(BehaviorExperiencePath.outcome_id == graph_refs.outcome_id)
                 .where(BehaviorExperiencePath.actor_type == normalized_actor_type)
                 .where(BehaviorExperiencePath.learning_type == normalized_learning_type)
             )
@@ -256,8 +255,8 @@ def upsert_behavior_experience(
                 path = BehaviorExperiencePath(
                     session_id=session_id,
                     scene_cluster_id=graph_refs.scene_cluster_id,
-                    action_node_id=graph_refs.action_node_id,
-                    outcome_node_id=graph_refs.outcome_node_id,
+                    action_id=graph_refs.action_id,
+                    outcome_id=graph_refs.outcome_id,
                     actor_type=normalized_actor_type,
                     learning_type=normalized_learning_type,
                     evidence_list=_dump_json_list([evidence_item]),
@@ -283,13 +282,6 @@ def upsert_behavior_experience(
             session.add(path)
             session.flush()
             session.refresh(path)
-            if path.id is not None:
-                link_behavior_experience_to_scene_graph(
-                    session=session,
-                    experience_path_id=path.id,
-                    session_id=session_id,
-                    refs=graph_refs,
-                )
             session.expunge(path)
             return path
     except Exception as exc:

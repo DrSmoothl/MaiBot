@@ -39,9 +39,9 @@ from src.common.database.database_model import (  # noqa: E402
 )
 from src.learners.behavior_learner import BehaviorLearner  # noqa: E402
 from src.learners.behavior_pattern_store import behavior_pattern_to_dict  # noqa: E402
-from src.learners.behavior_scene_graph_store import (  # noqa: E402
+from src.learners.behavior_scene_cluster_store import (  # noqa: E402
     format_scene_cluster_distribution,
-    retrieve_behavior_scores_from_scene_graph,
+    retrieve_behavior_scores_from_scene_clusters,
 )
 
 
@@ -233,10 +233,10 @@ def _scene_cluster_tag_summary(scene_cluster_id: Any) -> str:
     except (TypeError, ValueError):
         return ""
 
-    import src.learners.behavior_scene_graph_store as behavior_scene_graph_store
+    import src.learners.behavior_scene_cluster_store as behavior_scene_cluster_store
 
     try:
-        with behavior_scene_graph_store.get_db_session(auto_commit=False) as session:
+        with behavior_scene_cluster_store.get_db_session(auto_commit=False) as session:
             cluster = session.get(BehaviorSceneCluster, normalized_cluster_id)
             if cluster is None:
                 return ""
@@ -289,7 +289,7 @@ def _retrieve_candidates(
     max_count: int,
     include_global: bool,
 ) -> list[dict[str, Any]]:
-    behavior_scores = retrieve_behavior_scores_from_scene_graph(
+    behavior_scores = retrieve_behavior_scores_from_scene_clusters(
         session_ids={session_id},
         include_global=include_global,
         profile=profile,

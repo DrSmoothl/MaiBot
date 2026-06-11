@@ -209,10 +209,10 @@ def _patch_behavior_storage(get_target_session: SessionProvider) -> None:
     import src.llm_models.utils as llm_model_utils
     import src.learners.behavior_pattern_maintenance as behavior_pattern_maintenance
     import src.learners.behavior_pattern_store as behavior_pattern_store
-    import src.learners.behavior_scene_graph_store as behavior_scene_graph_store
+    import src.learners.behavior_scene_cluster_store as behavior_scene_cluster_store
 
     behavior_pattern_store.get_db_session = get_target_session
-    behavior_scene_graph_store.get_db_session = get_target_session
+    behavior_scene_cluster_store.get_db_session = get_target_session
     behavior_pattern_maintenance.get_db_session = get_target_session
     llm_model_utils.get_db_session = get_target_session
 

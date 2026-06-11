@@ -239,16 +239,10 @@ async def build_report(args: Namespace) -> dict[str, object]:
                 "context": _message_payload(window),
                 "profile": compare_result["profile"],
                 "raw_llm_response": raw_llm_response,
-                "scene_graph": {
-                    "active_nodes": compare_result["scene_graph"]["active_nodes"],
-                    "candidates": _brief_candidates(compare_result["scene_graph"]["behavior_candidates"]),
-                },
                 "scene_cluster": {
                     "matched_clusters": compare_result["scene_cluster"]["matched_clusters"],
                     "candidates": _brief_candidates(compare_result["scene_cluster"]["behavior_candidates"]),
                 },
-                "candidate_diff": compare_result["candidate_diff"],
-                "combined_candidates": _brief_candidates(compare_result["combined_behavior_candidates"]),
             }
         )
     return {
@@ -313,20 +307,9 @@ def write_markdown_report(report: dict[str, object], output_path: Path) -> None:
             lines.append("```")
         lines.append("")
         lines.append("### 检索情况")
-        lines.append(f"- 场景图直接命中节点数：{len(sample['scene_graph']['active_nodes'])}")
         lines.append(f"- 场景簇命中数：{len(sample['scene_cluster']['matched_clusters'])}")
-        lines.append(f"- 两边都命中行为：{sample['candidate_diff']['both']}")
-        lines.append(f"- 仅场景图命中行为：{sample['candidate_diff']['graph_only']}")
-        lines.append(f"- 仅场景簇命中行为：{sample['candidate_diff']['cluster_only']}")
-        lines.append("")
-        lines.append("场景图候选：")
-        _append_candidate_lines(lines, sample["scene_graph"]["candidates"])
-        lines.append("")
         lines.append("场景簇候选：")
         _append_candidate_lines(lines, sample["scene_cluster"]["candidates"])
-        lines.append("")
-        lines.append("合并候选：")
-        _append_candidate_lines(lines, sample["combined_candidates"])
         lines.append("")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")

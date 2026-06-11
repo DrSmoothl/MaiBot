@@ -49,16 +49,16 @@ from src.common.database.database_model import (  # noqa: E402
 )
 from src.learners.behavior_learner import BehaviorLearner  # noqa: E402
 from src.learners.behavior_pattern_store import behavior_pattern_to_dict  # noqa: E402
-from src.learners.behavior_scene_graph_store import (  # noqa: E402
+from src.learners.behavior_scene_cluster_store import (  # noqa: E402
     _distribution_to_mapping,
     _load_cluster_distribution,
     _load_tag_cluster_lookup,
     _normalize_tag_kind,
     _score_behavior_clusters,
-    _score_scene_clusters_by_expanded_tags,
+    _score_scene_clusters_by_direct_domain_overlap,
     _session_scope_condition,
-    build_scene_cluster_distribution,
-    retrieve_behavior_scores_from_scene_graph,
+    build_profile_tag_distribution,
+    retrieve_behavior_scores_from_scene_clusters,
 )
 
 SIDECHANNEL_TABLE = "behavior_experience_tag_links"
@@ -350,7 +350,7 @@ def _write_profile_sidechannel_links(
     _create_sidechannel_table(session)
     tag_lookup = _load_tag_cluster_lookup(session)
     tag_probs = _distribution_to_mapping(
-        build_scene_cluster_distribution(profile, tag_lookup=tag_lookup),
+        build_profile_tag_distribution(profile, tag_lookup=tag_lookup),
         tag_lookup=tag_lookup,
     )
     inserted = 0
@@ -415,7 +415,7 @@ def _collect_profile_sidechannel_link_events(
         return []
     tag_lookup = _load_tag_cluster_lookup(session)
     tag_probs = _distribution_to_mapping(
-        build_scene_cluster_distribution(profile, tag_lookup=tag_lookup),
+        build_profile_tag_distribution(profile, tag_lookup=tag_lookup),
         tag_lookup=tag_lookup,
     )
     events: list[SidechannelLinkEvent] = []
@@ -703,7 +703,7 @@ def _sidechannel_tag_scores(
     tag_probs = {
         tag: probability
         for tag, probability in _distribution_to_mapping(
-            build_scene_cluster_distribution(profile, tag_lookup=tag_lookup),
+            build_profile_tag_distribution(profile, tag_lookup=tag_lookup),
             tag_lookup=tag_lookup,
         ).items()
         if tag.split(":", 1)[0] in SIDECHANNEL_KINDS
@@ -826,7 +826,7 @@ def _retrieve_original(
     include_global: bool,
 ) -> ModeResult:
     start = time.perf_counter()
-    scores = retrieve_behavior_scores_from_scene_graph(
+    scores = retrieve_behavior_scores_from_scene_clusters(
         session_ids={session_id},
         include_global=include_global,
         profile=profile,
@@ -848,7 +848,7 @@ def _retrieve_sidechannel(
     include_global: bool,
 ) -> ModeResult:
     start = time.perf_counter()
-    cluster_scores, _ = _score_scene_clusters_by_expanded_tags(
+    cluster_scores, _ = _score_scene_clusters_by_direct_domain_overlap(
         session,
         profile=profile,
         session_ids={session_id},
