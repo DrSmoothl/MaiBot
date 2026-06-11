@@ -32,6 +32,7 @@ from src.learners.behavior_scene_graph_store import (  # noqa: E402
     _score_scene_nodes_by_tag_clusters,
     build_scene_cluster_distribution,
     build_scene_descriptors,
+    format_scene_cluster_distribution,
 )
 
 
@@ -84,7 +85,9 @@ def _path_payload(session: Session, path_id: int, score: float) -> Dict[str, Any
         "score": round(score, 4),
         "session_id": path.session_id,
         "cluster_id": path.scene_cluster_id,
-        "cluster": cluster.name if cluster is not None else "",
+        "cluster": format_scene_cluster_distribution(_load_cluster_distribution(cluster.tag_distribution))
+        if cluster is not None
+        else "",
         "action": action_node.action if action_node is not None else "",
         "outcome": outcome_node.outcome if outcome_node is not None else "",
         "count": path.count,
@@ -120,7 +123,7 @@ def _cluster_payload(session: Session, cluster_id: int, score: float) -> Dict[st
         "id": cluster.id,
         "score": round(score, 4),
         "session_id": cluster.session_id,
-        "name": cluster.name,
+        "name": format_scene_cluster_distribution(_load_cluster_distribution(cluster.tag_distribution)),
         "tags": _load_cluster_distribution(cluster.tag_distribution),
         "source_count": cluster.source_count,
         "cluster_score": cluster.score,

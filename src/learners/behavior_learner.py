@@ -6,6 +6,7 @@ from json_repair import repair_json
 
 import asyncio
 import json
+import re
 
 from src.chat.utils.utils import is_bot_self
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
@@ -24,6 +25,9 @@ from .behavior_pattern_store import (
     ACTOR_OTHER_USER,
     LEARNING_OBSERVED,
     LEARNING_SELF_REFLECTION,
+    apply_behavior_feedback,
+    behavior_pattern_to_dict,
+    get_behavior_pattern,
     upsert_behavior_pattern,
 )
 from .behavior_scenario import BehaviorScenarioProfile, BehaviorScenarioSegment, behavior_scenario_analyzer
@@ -37,6 +41,13 @@ logger = get_logger("behavior_learner")
 
 behavior_learn_model = LLMServiceClient(task_name="learner", request_type="behavior.learner")
 behavior_scene_model = LLMServiceClient(task_name="learner", request_type="behavior.scene_analyzer")
+behavior_feedback_model = LLMServiceClient(task_name="learner", request_type="behavior.feedback")
+
+BEHAVIOR_REFERENCE_ID_PATTERN = re.compile(r'<behavior_pattern_reference\s+id=["\']?(\d+)["\']?', re.IGNORECASE)
+FEEDBACK_STATUS_SUCCESS = "success"
+FEEDBACK_STATUS_FAILED = "failed"
+FEEDBACK_STATUS_NEUTRAL = "neutral"
+ALLOWED_FEEDBACK_STATUSES = {FEEDBACK_STATUS_SUCCESS, FEEDBACK_STATUS_FAILED, FEEDBACK_STATUS_NEUTRAL}
 
 
 @dataclass(frozen=True)
@@ -80,6 +91,51 @@ class BehaviorFilterResult:
 
     candidates: list[BehaviorCandidate]
     skipped_reasons: dict[str, int]
+
+
+@dataclass(frozen=True)
+class BehaviorReferenceCandidate:
+    """裁切上下文中出现过的行为参考路径。"""
+
+    behavior_id: int
+    trigger: str
+    action: str
+    outcome: str
+    actor_type: str
+    learning_type: str
+    session_id: str = ""
+
+
+@dataclass(frozen=True)
+class BehaviorFeedbackContextItem:
+    """反馈评估时间线中的一项。"""
+
+    item_id: str
+    item_type: str
+    text: str
+    speaker: str = ""
+    source: str = ""
+
+
+@dataclass(frozen=True)
+class BehaviorFeedbackContext:
+    """行为路径反馈评估所需的裁切上下文。"""
+
+    references: list[BehaviorReferenceCandidate]
+    timeline_items: list[BehaviorFeedbackContextItem]
+
+
+@dataclass(frozen=True)
+class BehaviorFeedbackCandidate:
+    """模型判断出的行为路径反馈。"""
+
+    behavior_id: int
+    adopted: bool
+    status: str
+    score_delta: float
+    reason: str
+    outcome: str
+    source_ids: list[str]
 
 
 @dataclass(frozen=True)
@@ -166,6 +222,39 @@ def _coerce_learning_type(raw_value: Any) -> str:
     if normalized_value in {LEARNING_OBSERVED, LEARNING_SELF_REFLECTION}:
         return normalized_value
     return ""
+
+
+def _coerce_bool(raw_value: Any) -> bool:
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, (int, float)):
+        return raw_value != 0
+    normalized_value = str(raw_value or "").strip().lower()
+    return normalized_value in {"1", "true", "yes", "y", "adopted", "used"}
+
+
+def _coerce_feedback_status(raw_value: Any) -> str:
+    normalized_value = str(raw_value or "").strip().lower()
+    if normalized_value in ALLOWED_FEEDBACK_STATUSES:
+        return normalized_value
+    if normalized_value in {"succeeded", "completed", "positive"}:
+        return FEEDBACK_STATUS_SUCCESS
+    if normalized_value in {"blocked", "abandoned", "negative", "failure"}:
+        return FEEDBACK_STATUS_FAILED
+    return FEEDBACK_STATUS_NEUTRAL
+
+
+def _coerce_score_delta(raw_value: Any, *, status: str) -> float:
+    try:
+        score_delta = float(raw_value)
+    except (TypeError, ValueError):
+        if status == FEEDBACK_STATUS_SUCCESS:
+            score_delta = 0.6
+        elif status == FEEDBACK_STATUS_FAILED:
+            score_delta = -0.6
+        else:
+            score_delta = 0.0
+    return max(-1.5, min(1.5, score_delta))
 
 
 def _compact_log_text(text: str, *, max_length: int = 1200) -> str:
@@ -289,6 +378,65 @@ def parse_behavior_response(response: str, *, scene_start: str) -> list[Behavior
     return parse_result.candidates
 
 
+def parse_behavior_feedback_response(response: str) -> list[BehaviorFeedbackCandidate]:
+    """解析行为路径反馈模型返回的 JSON。"""
+
+    normalized_response = _strip_json_code_fence(response or "")
+    if not normalized_response:
+        return []
+
+    try:
+        parsed_response = json.loads(repair_json(normalized_response))
+    except Exception:
+        logger.warning(f"行为路径反馈结果解析失败: {normalized_response!r}")
+        return []
+
+    if isinstance(parsed_response, dict):
+        raw_items = parsed_response.get("feedback") or parsed_response.get("items") or []
+    else:
+        raw_items = parsed_response
+
+    if isinstance(raw_items, dict):
+        raw_items = [raw_items]
+    if not isinstance(raw_items, list):
+        return []
+
+    feedback_items: list[BehaviorFeedbackCandidate] = []
+    used_behavior_ids: set[int] = set()
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        try:
+            behavior_id = int(raw_item.get("behavior_id") or raw_item.get("id") or 0)
+        except (TypeError, ValueError):
+            behavior_id = 0
+        if behavior_id <= 0 or behavior_id in used_behavior_ids:
+            continue
+
+        adopted = _coerce_bool(raw_item.get("adopted"))
+        status = _coerce_feedback_status(raw_item.get("status"))
+        score_delta = _coerce_score_delta(raw_item.get("score_delta"), status=status)
+        reason = str(raw_item.get("reason") or "").strip()
+        outcome = str(raw_item.get("outcome") or "").strip()
+        source_ids = _coerce_source_ids(raw_item.get("source_ids"))
+        if not adopted or status == FEEDBACK_STATUS_NEUTRAL or abs(score_delta) <= 0.0001 or not reason:
+            continue
+
+        used_behavior_ids.add(behavior_id)
+        feedback_items.append(
+            BehaviorFeedbackCandidate(
+                behavior_id=behavior_id,
+                adopted=adopted,
+                status=status,
+                score_delta=score_delta,
+                reason=reason,
+                outcome=outcome,
+                source_ids=source_ids,
+            )
+        )
+    return feedback_items
+
+
 class BehaviorLearner:
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
@@ -301,16 +449,28 @@ class BehaviorLearner:
         """从 Maisaka 被裁切的上下文消息中学习行为表现模式。"""
 
         source_messages = self._extract_session_messages_from_context(context_messages)
-        if not source_messages:
+        feedback_context = self._extract_behavior_feedback_context(context_messages)
+        learner_tasks: list[asyncio.Task[bool]] = []
+
+        if source_messages and len(source_messages) >= self.min_messages_for_extraction:
+            learner_tasks.append(asyncio.create_task(self._learn_from_session_messages(source_messages)))
+        elif not source_messages:
             logger.debug("裁切历史中没有可用于行为学习的真实聊天消息")
-            return False
-        if len(source_messages) < self.min_messages_for_extraction:
+        else:
             logger.debug(
                 f"裁切历史可学习行为消息不足: 可学习={len(source_messages)} 阈值={self.min_messages_for_extraction}"
             )
+
+        if feedback_context is not None:
+            learner_tasks.append(asyncio.create_task(self._evaluate_behavior_feedback(feedback_context)))
+        else:
+            logger.debug("裁切历史中没有可用于行为反馈评估的行为路径参考，跳过反馈阶段")
+
+        if not learner_tasks:
             return False
 
-        return await self._learn_from_session_messages(source_messages)
+        results = await asyncio.gather(*learner_tasks)
+        return any(results)
 
     @staticmethod
     def _extract_session_messages_from_context(
@@ -348,6 +508,201 @@ class BehaviorLearner:
             source_messages.append(original_message)
 
         return source_messages
+
+    def _extract_behavior_feedback_context(
+        self,
+        context_messages: Sequence["LLMContextMessage"],
+    ) -> Optional[BehaviorFeedbackContext]:
+        """从裁切上下文中提取行为路径参考与后续真实聊天，用于反馈评估。"""
+
+        from src.maisaka.context.messages import ReferenceMessage, SessionBackedMessage
+
+        reference_ids: list[int] = []
+        timeline_items: list[BehaviorFeedbackContextItem] = []
+        chat_item_index = 0
+        reference_item_index = 0
+
+        for context_message in context_messages:
+            if isinstance(context_message, ReferenceMessage) and context_message.source == "behavior_pattern":
+                reference_item_index += 1
+                reference_text = str(context_message.content or context_message.processed_plain_text or "").strip()
+                matched_ids = [int(match.group(1)) for match in BEHAVIOR_REFERENCE_ID_PATTERN.finditer(reference_text)]
+                for behavior_id in matched_ids:
+                    if behavior_id not in reference_ids:
+                        reference_ids.append(behavior_id)
+                timeline_items.append(
+                    BehaviorFeedbackContextItem(
+                        item_id=f"ref{reference_item_index}",
+                        item_type="behavior_reference",
+                        text=reference_text,
+                        source=context_message.source,
+                    )
+                )
+                continue
+
+            if not isinstance(context_message, SessionBackedMessage):
+                continue
+            if context_message.source_kind not in {"user", "guided_reply", "outbound_send"}:
+                continue
+            original_message = context_message.original_message
+            if original_message is None:
+                continue
+
+            chat_item_index += 1
+            user_info = original_message.message_info.user_info
+            speaker_kind = "SELF" if is_bot_self(original_message.platform, user_info.user_id) else "USER"
+            timeline_items.append(
+                BehaviorFeedbackContextItem(
+                    item_id=f"m{chat_item_index}",
+                    item_type="chat_message",
+                    text=str(context_message.processed_plain_text or "").strip() or "[空消息]",
+                    speaker=speaker_kind,
+                    source=context_message.source_kind,
+                )
+            )
+
+        if not reference_ids:
+            return None
+
+        references: list[BehaviorReferenceCandidate] = []
+        for behavior_id in reference_ids:
+            path = get_behavior_pattern(behavior_id)
+            if path is None:
+                logger.info(f"行为反馈评估跳过不存在的行为路径: behavior_id={behavior_id}")
+                continue
+            payload = behavior_pattern_to_dict(path)
+            if not payload:
+                continue
+            references.append(
+                BehaviorReferenceCandidate(
+                    behavior_id=behavior_id,
+                    trigger=str(payload.get("trigger") or "").strip(),
+                    action=str(payload.get("action") or "").strip(),
+                    outcome=str(payload.get("outcome") or "").strip(),
+                    actor_type=str(payload.get("actor_type") or "").strip(),
+                    learning_type=str(payload.get("learning_type") or "").strip(),
+                    session_id=str(payload.get("session_id") or "").strip(),
+                )
+            )
+
+        if not references:
+            return None
+        chat_items = [item for item in timeline_items if item.item_type == "chat_message"]
+        if not chat_items:
+            logger.debug("行为反馈评估已跳过：裁切上下文有行为参考但没有后续真实聊天")
+            return None
+        return BehaviorFeedbackContext(
+            references=references,
+            timeline_items=timeline_items,
+        )
+
+    @staticmethod
+    def _format_feedback_references_for_prompt(references: Sequence[BehaviorReferenceCandidate]) -> str:
+        """把行为参考路径压成反馈模型可校验的 JSON。"""
+
+        return json.dumps(
+            [
+                {
+                    "behavior_id": reference.behavior_id,
+                    "trigger": reference.trigger,
+                    "action": reference.action,
+                    "expected_outcome": reference.outcome,
+                    "actor_type": reference.actor_type,
+                    "learning_type": reference.learning_type,
+                    "session_id": reference.session_id,
+                }
+                for reference in references
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    @staticmethod
+    def _format_feedback_timeline_for_prompt(timeline_items: Sequence[BehaviorFeedbackContextItem]) -> str:
+        """把裁切上下文时间线压成反馈模型可引用的 JSON。"""
+
+        return json.dumps(
+            [
+                {
+                    "item_id": item.item_id,
+                    "type": item.item_type,
+                    "speaker": item.speaker,
+                    "source": item.source,
+                    "text": _compact_log_text(item.text, max_length=900),
+                }
+                for item in timeline_items
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    async def _evaluate_behavior_feedback(self, feedback_context: BehaviorFeedbackContext) -> bool:
+        """评估裁切上下文中历史行为路径参考的采用与结果，并写回反馈。"""
+
+        reference_by_id = {reference.behavior_id: reference for reference in feedback_context.references}
+
+        prompt = load_prompt(
+            "evaluate_behavior_feedback",
+            bot_name=global_config.bot.nickname,
+            behavior_references=self._format_feedback_references_for_prompt(feedback_context.references),
+            feedback_timeline=self._format_feedback_timeline_for_prompt(feedback_context.timeline_items),
+        )
+        feedback_messages = [
+            MessageBuilder().set_role(RoleType.System).add_text_content(prompt).build(),
+            MessageBuilder().set_role(RoleType.User).add_text_content("请根据以上行为参考和后续聊天时间线输出反馈 JSON。").build(),
+        ]
+
+        try:
+            generation_result = await behavior_feedback_model.generate_response_with_messages(
+                lambda _client: feedback_messages,
+                options=LLMGenerationOptions(temperature=0.15),
+            )
+            response = generation_result.response or ""
+            self._log_behavior_feedback_preview(
+                feedback_messages,
+                reference_count=len(feedback_context.references),
+                timeline_count=len(feedback_context.timeline_items),
+                output_content=response,
+            )
+        except Exception as exc:
+            logger.error(f"行为路径反馈评估失败: {exc}")
+            return False
+
+        feedback_items = parse_behavior_feedback_response(response)
+        if not feedback_items:
+            logger.debug("行为路径反馈评估未产生可写入反馈")
+            return False
+
+        wrote_count = 0
+        skipped_reasons: Counter[str] = Counter()
+        for feedback_item in feedback_items:
+            reference = reference_by_id.get(feedback_item.behavior_id)
+            if reference is None:
+                skipped_reasons["unknown_behavior_id"] += 1
+                continue
+
+            feedback_path = apply_behavior_feedback(
+                pattern_id=feedback_item.behavior_id,
+                score_delta=feedback_item.score_delta,
+                status=feedback_item.status,
+                reason=feedback_item.reason,
+                outcome=feedback_item.outcome,
+                session_id=reference.session_id or self.session_id,
+            )
+            if feedback_path is None:
+                skipped_reasons["write_failed"] += 1
+                continue
+            wrote_count += 1
+            logger.info(
+                f"行为路径反馈已写入: behavior_id={feedback_item.behavior_id} "
+                f"status={feedback_item.status} score_delta={feedback_item.score_delta} "
+                f"source_ids={feedback_item.source_ids}"
+            )
+
+        logger.info(
+            f"行为路径反馈写入概览: 候选={len(feedback_items)} 成功={wrote_count} 跳过原因={dict(skipped_reasons)}"
+        )
+        return wrote_count > 0
 
     async def _learn_from_session_messages(self, pending_messages: list["SessionMessage"]) -> bool:
         learning_session_id = self._resolve_learning_session_id(pending_messages)
@@ -926,6 +1281,42 @@ class BehaviorLearner:
 
         logger.info(
             f"{self.session_id} 行为学习上下文预览已生成: "
+            f"WebUI={preview_access.viewer_web_uri} "
+            f"HTML={preview_access.viewer_path} "
+            f"TXT={preview_access.dump_path}"
+        )
+
+    def _log_behavior_feedback_preview(
+        self,
+        messages: list[Message],
+        *,
+        reference_count: int,
+        timeline_count: int,
+        output_content: str,
+    ) -> None:
+        """保存行为路径反馈评估上下文预览。"""
+
+        try:
+            preview_access = PromptCLIVisualizer.build_prompt_preview_access(
+                messages,
+                category="behavior_feedback",
+                chat_id=self.session_id,
+                request_kind="behavior_feedback",
+                selection_reason=(
+                    f"会话ID: {self.session_id}\n"
+                    f"来源: trimmed_history_behavior_reference\n"
+                    f"行为参考数: {reference_count}\n"
+                    f"时间线项数: {timeline_count}\n"
+                    f"构建消息数: {len(messages)}"
+                ),
+                output_content=output_content,
+            )
+        except Exception as exc:
+            logger.warning(f"{self.session_id} 行为路径反馈预览保存失败: {exc}")
+            return
+
+        logger.info(
+            f"{self.session_id} 行为路径反馈预览已生成: "
             f"WebUI={preview_access.viewer_web_uri} "
             f"HTML={preview_access.viewer_path} "
             f"TXT={preview_access.dump_path}"

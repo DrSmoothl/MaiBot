@@ -436,19 +436,13 @@ def _distribution_tag_entries(distribution: Sequence[dict[str, Any]]) -> list[tu
     return entries
 
 
-def _cluster_normalized_tags(
+def format_scene_cluster_distribution(
     distribution: Sequence[dict[str, Any]],
     *,
     tag_lookup: dict[tuple[str, str], str] | None = None,
 ) -> str:
-    return "|".join(sorted(_distribution_to_mapping(distribution, tag_lookup=tag_lookup)))
+    """将场景簇 tag 概率分布格式化为展示文本。"""
 
-
-def _cluster_name_from_distribution(
-    distribution: Sequence[dict[str, Any]],
-    *,
-    tag_lookup: dict[tuple[str, str], str] | None = None,
-) -> str:
     tag_probs = _distribution_to_mapping(distribution, tag_lookup=tag_lookup)
     if not tag_probs:
         return ""
@@ -858,7 +852,11 @@ def _debug_cluster_scores(cluster_scores: dict[int, float]) -> list[dict[str, An
     return [
         {
             "cluster_id": cluster_id,
-            "name": cluster_by_id.get(cluster_id).name if cluster_id in cluster_by_id else "",
+            "name": format_scene_cluster_distribution(
+                _load_cluster_distribution(cluster_by_id[cluster_id].tag_distribution)
+            )
+            if cluster_id in cluster_by_id
+            else "",
             "score": round(score, 4),
         }
         for cluster_id, score in sorted(cluster_scores.items(), key=lambda item: item[1], reverse=True)
@@ -999,9 +997,6 @@ def _upsert_scene_cluster(
     distribution = build_scene_cluster_distribution(profile, tag_lookup=tag_lookup)
     if not distribution:
         return None
-    normalized_tags = _cluster_normalized_tags(distribution, tag_lookup=tag_lookup)
-    if not normalized_tags:
-        return None
 
     cluster_candidates = session.exec(
         select(BehaviorSceneCluster).where(BehaviorSceneCluster.session_id == session_id)
@@ -1023,8 +1018,6 @@ def _upsert_scene_cluster(
     if cluster is None:
         cluster = BehaviorSceneCluster(
             session_id=session_id,
-            name=_cluster_name_from_distribution(distribution, tag_lookup=tag_lookup),
-            normalized_tags=normalized_tags,
             tag_distribution=_dump_cluster_distribution(distribution),
             source_count=1,
             update_time=now,
@@ -1034,19 +1027,6 @@ def _upsert_scene_cluster(
             _load_cluster_distribution(cluster.tag_distribution),
             distribution,
             existing_weight=max(int(cluster.source_count or 0), 1),
-            tag_lookup=tag_lookup,
-        )
-        merged_distribution = _load_cluster_distribution(cluster.tag_distribution)
-        merged_normalized_tags = _cluster_normalized_tags(merged_distribution, tag_lookup=tag_lookup)
-        same_normalized_cluster = session.exec(
-            select(BehaviorSceneCluster)
-            .where(BehaviorSceneCluster.session_id == session_id)
-            .where(BehaviorSceneCluster.normalized_tags == merged_normalized_tags)
-        ).first()
-        if same_normalized_cluster is None or same_normalized_cluster.id == cluster.id:
-            cluster.normalized_tags = merged_normalized_tags
-        cluster.name = _cluster_name_from_distribution(
-            merged_distribution,
             tag_lookup=tag_lookup,
         )
         cluster.source_count += 1

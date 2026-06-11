@@ -286,20 +286,23 @@ class MaisakaReasoningEngine:
         )
         logger.info(f"{self._runtime.log_prefix} 行为表现情景分析请求预览已生成，已在控制台显示可点击链接")
 
-    def _clear_behavior_reference_messages(self, history: Optional[list[LLMContextMessage]] = None) -> int:
+    def _clear_behavior_reference_messages(
+        self,
+        history: Optional[list[LLMContextMessage]] = None,
+    ) -> list[ReferenceMessage]:
         """清理当前历史中的行为表现参考，下一次裁切会写入新的参考。"""
 
         target_history = self._runtime._chat_history if history is None else history
         retained_history: list[LLMContextMessage] = []
-        removed_count = 0
+        removed_messages: list[ReferenceMessage] = []
         for message in target_history:
             if isinstance(message, ReferenceMessage) and message.source == "behavior_pattern":
-                removed_count += 1
+                removed_messages.append(message)
                 continue
             retained_history.append(message)
-        if removed_count:
+        if removed_messages:
             target_history[:] = retained_history
-        return removed_count
+        return removed_messages
 
     def _insert_behavior_reference_message(
         self,
@@ -1621,8 +1624,9 @@ class MaisakaReasoningEngine:
         elif process_result.removed_messages:
             logger.debug(f"{self._runtime.log_prefix} 中期聊天记录摘要未启用，跳过摘要生成")
 
+        removed_behavior_reference_messages: list[ReferenceMessage] = []
         if process_result.removed_messages:
-            self._clear_behavior_reference_messages(final_history)
+            removed_behavior_reference_messages = self._clear_behavior_reference_messages(final_history)
             try:
                 reference_message = await self._select_behavior_reference_message(
                     selected_history=final_history,
@@ -1641,8 +1645,12 @@ class MaisakaReasoningEngine:
             process_result.remaining_context_count,
         )
         if process_result.removed_messages:
+            learning_messages = [
+                *removed_behavior_reference_messages,
+                *process_result.removed_messages,
+            ]
             asyncio.create_task(
-                self._runtime._trigger_trimmed_history_learning(process_result.removed_messages)
+                self._runtime._trigger_trimmed_history_learning(learning_messages)
             )
 
     @staticmethod

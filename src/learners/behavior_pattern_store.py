@@ -3,7 +3,6 @@ from typing import Any, Optional, Sequence
 
 from sqlmodel import Session, select
 
-import difflib
 import json
 
 from src.common.database.database import get_db_session
@@ -17,7 +16,9 @@ from src.common.logger import get_logger
 
 from .behavior_scenario import BehaviorScenarioProfile
 from .behavior_scene_graph_store import (
+    _load_cluster_distribution,
     apply_behavior_scene_feedback,
+    format_scene_cluster_distribution,
     link_behavior_experience_to_scene_graph,
     mark_behavior_scene_links_selected,
     upsert_behavior_graph_refs,
@@ -94,10 +95,6 @@ def _coerce_learning_type(learning_type: str, *, actor_type: str) -> str:
     return LEARNING_SELF_REFLECTION if actor_type == ACTOR_MAIBOT_SELF else LEARNING_OBSERVED
 
 
-def _is_self_reflection_path(path: BehaviorExperiencePath) -> bool:
-    return path.actor_type == ACTOR_MAIBOT_SELF and path.learning_type == LEARNING_SELF_REFLECTION
-
-
 def _build_evidence_item(
     *,
     trigger: str,
@@ -125,24 +122,14 @@ def _path_texts_from_session(
     scene_cluster = session.get(BehaviorSceneCluster, path.scene_cluster_id)
     action_node = session.get(BehaviorActionNode, path.action_node_id)
     outcome_node = session.get(BehaviorOutcomeNode, path.outcome_node_id)
-    trigger = scene_cluster.name if scene_cluster is not None else ""
+    trigger = (
+        format_scene_cluster_distribution(_load_cluster_distribution(scene_cluster.tag_distribution))
+        if scene_cluster is not None
+        else ""
+    )
     action = action_node.action if action_node is not None else ""
     outcome = outcome_node.outcome if outcome_node is not None else ""
     return trigger, action, outcome
-
-
-def _path_similarity(
-    session: Session,
-    path: BehaviorExperiencePath,
-    trigger: str,
-    action: str,
-) -> float:
-    path_trigger, path_action, _ = _path_texts_from_session(session, path)
-    source_text = f"{path_trigger}\n{path_action}".strip()
-    target_text = f"{trigger}\n{action}".strip()
-    if not source_text or not target_text:
-        return 0.0
-    return difflib.SequenceMatcher(None, source_text, target_text).ratio()
 
 
 def _path_to_dict_from_session(
@@ -201,38 +188,6 @@ def behavior_experience_to_dict(path: BehaviorExperiencePath) -> dict[str, Any]:
     except Exception as exc:
         logger.error(f"读取行为经验路径文本失败: id={path.id} error={exc}")
         return {}
-
-
-def find_similar_behavior_experience(
-    *,
-    trigger: str,
-    action: str,
-    session_id: str,
-    similarity_threshold: float = 0.76,
-) -> Optional[tuple[BehaviorExperiencePath, float]]:
-    normalized_trigger = _normalize_text(trigger, max_length=180)
-    normalized_action = _normalize_text(action, max_length=240)
-    if not normalized_trigger or not normalized_action:
-        return None
-
-    try:
-        with get_db_session(auto_commit=False) as session:
-            statement = select(BehaviorExperiencePath).where(BehaviorExperiencePath.session_id == session_id)
-            paths = session.exec(statement).all()
-            best_path: Optional[BehaviorExperiencePath] = None
-            best_similarity = 0.0
-            for path in paths:
-                similarity = _path_similarity(session, path, normalized_trigger, normalized_action)
-                if similarity > similarity_threshold and similarity > best_similarity:
-                    best_path = path
-                    best_similarity = similarity
-            if best_path is None:
-                return None
-            session.expunge(best_path)
-            return best_path, best_similarity
-    except Exception as exc:
-        logger.error(f"查找相似行为经验路径失败: {exc}")
-        return None
 
 
 def upsert_behavior_experience(
@@ -433,12 +388,6 @@ def apply_behavior_feedback(
             path = session.get(BehaviorExperiencePath, pattern_id)
             if path is None:
                 return None
-            if not _is_self_reflection_path(path):
-                logger.info(
-                    "跳过行为反馈写入：该路径不是麦麦自身反馈路径 "
-                    f"id={pattern_id} actor_type={path.actor_type} learning_type={path.learning_type}"
-                )
-                return None
 
             feedback_items = _load_json_list(path.feedback_list)
             feedback_items.append(
@@ -481,7 +430,6 @@ def apply_behavior_feedback(
 
 # 兼容旧调用命名；运行时实体已经是 BehaviorExperiencePath。
 behavior_pattern_to_dict = behavior_experience_to_dict
-find_similar_behavior_pattern = find_similar_behavior_experience
 upsert_behavior_pattern = upsert_behavior_experience
 list_behavior_patterns_for_sessions = list_behavior_experiences_for_sessions
 get_behavior_pattern = get_behavior_experience

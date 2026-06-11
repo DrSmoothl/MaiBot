@@ -23,7 +23,11 @@ from src.common.database.database_model import (
     ChatSession,
 )
 from src.learners.behavior_scenario import BehaviorScenarioProfile, parse_behavior_scenario_response
-from src.learners.behavior_scene_graph_store import debug_retrieve_behavior_scores_from_scene_graph
+from src.learners.behavior_scene_graph_store import (
+    _load_cluster_distribution,
+    debug_retrieve_behavior_scores_from_scene_graph,
+    format_scene_cluster_distribution,
+)
 from src.webui.dependencies import require_auth
 
 router = APIRouter(prefix="/behavior", tags=["Behavior"], dependencies=[Depends(require_auth)])
@@ -184,7 +188,7 @@ def _cluster_payload(cluster: Optional[BehaviorSceneCluster]) -> BehaviorSceneCl
         return BehaviorSceneClusterPayload()
     return BehaviorSceneClusterPayload(
         id=cluster.id,
-        name=str(cluster.name or ""),
+        name=format_scene_cluster_distribution(_load_cluster_distribution(cluster.tag_distribution)),
         tags=_cluster_tag_payloads(cluster.tag_distribution),
         source_count=int(cluster.source_count or 0),
         score=float(cluster.score or 0.0),

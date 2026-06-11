@@ -339,14 +339,11 @@ class BehaviorSceneCluster(SQLModel, table=True):
 
     __tablename__ = "behavior_scene_clusters"  # type: ignore
     __table_args__ = (
-        UniqueConstraint("session_id", "normalized_tags", name="uq_behavior_scene_cluster_scope_tags"),
         Index("ix_behavior_scene_clusters_session_id", "session_id"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: Optional[str] = Field(default=None, max_length=255, nullable=True)
-    name: str = Field(sa_column=Column(Text, nullable=False))
-    normalized_tags: str = Field(sa_column=Column(Text, nullable=False))
     tag_distribution: str = Field(default="[]", sa_column=Column(Text, nullable=False))
     source_count: int = Field(default=0)
     score: float = Field(default=0.0, sa_column=Column(Float, nullable=False, server_default="0"))
