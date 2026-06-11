@@ -3510,6 +3510,16 @@ class ResponseSplitterConfig(ConfigBase):
     )
     """回复允许的最大句子数"""
 
+    max_split_num: int = Field(
+        default=3,
+        ge=1,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "list",
+        },
+    )
+    """回复最多分割条数"""
+
     enable_kaomoji_protection: bool = Field(
         default=False,
         json_schema_extra={
