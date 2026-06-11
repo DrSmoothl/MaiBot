@@ -1201,9 +1201,9 @@ function PluginConfigPageContent() {
       return { dotClassName: 'bg-muted-foreground/45', label: '已禁用' }
     }
     if (isPluginLoadSuccess(plugin)) {
-      return { dotClassName: 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.16)]', label: '加载成功' }
+      return { dotClassName: 'bg-emerald-500', label: '加载成功' }
     }
-    return { dotClassName: 'bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.16)]', label: '加载失败' }
+    return { dotClassName: 'bg-red-500', label: '加载失败' }
   }
   const getPluginRepositoryUrl = (plugin: InstalledPlugin): string | undefined => {
     const marketPlugin = marketPluginsById[plugin.id] || (plugin.manifest.id ? marketPluginsById[plugin.manifest.id] : undefined)
@@ -1236,13 +1236,12 @@ function PluginConfigPageContent() {
     ? uniqueFilteredPlugins.filter((plugin) => getPluginUpdateState(plugin).hasUpdate)
     : uniqueFilteredPlugins
 
-  const stopPluginActionEvent = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const stopPluginActionEvent = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault()
     event.stopPropagation()
   }
 
-  const handleTogglePlugin = async (plugin: InstalledPlugin, event: React.MouseEvent<HTMLButtonElement>) => {
-    stopPluginActionEvent(event)
+  const performTogglePlugin = async (plugin: InstalledPlugin) => {
     setActingPluginId(plugin.id)
     try {
       const toggleResult = await togglePlugin(plugin.id)
@@ -1603,7 +1602,7 @@ function PluginConfigPageContent() {
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="divide-y divide-border/80">
             {visiblePlugins.map(plugin => {
               const statusMeta = getPluginStatusMeta(plugin)
               const pluginActing = actingPluginId === plugin.id
@@ -1612,9 +1611,9 @@ function PluginConfigPageContent() {
               return (
               <div
                 key={plugin.id}
-                className={`relative flex min-h-32 cursor-pointer flex-col justify-between gap-4 p-5 transition-colors hover:bg-muted/50 sm:min-h-0 sm:flex-row sm:items-center sm:p-4 ${
-                  isFutureRetroDashboardStyle ? 'border-[3px] border-[#0b5a66]' : 'rounded-lg border'
-                } ${isPluginDisabled(plugin) ? 'opacity-70' : ''}`}
+                className={`relative flex min-h-32 cursor-pointer flex-col justify-between gap-3 py-3 transition-colors hover:bg-muted/50 sm:min-h-0 sm:flex-row sm:items-center sm:px-2 ${
+                  isPluginDisabled(plugin) ? 'opacity-70' : ''
+                }`}
                 role="button"
                 tabIndex={0}
                 onClick={() => openPluginConfig(plugin)}
@@ -1628,15 +1627,17 @@ function PluginConfigPageContent() {
                     title={statusMeta.label}
                     aria-label={statusMeta.label}
                   />
-                  <PluginIcon pluginId={plugin.id} manifest={plugin.manifest} installed className="h-12 w-12 sm:h-10 sm:w-10" />
+                  <div className="flex w-12 flex-shrink-0 flex-col items-center gap-1 sm:w-10">
+                    <PluginIcon pluginId={plugin.id} manifest={plugin.manifest} installed className="h-12 w-12 sm:h-10 sm:w-10" />
+                    <span className="text-muted-foreground text-[0.65rem] leading-none">
+                      v{plugin.manifest.version}
+                    </span>
+                  </div>
                   <div className="min-w-0 flex-1 space-y-2 sm:space-y-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <h3 className="min-w-0 break-words text-sm font-medium leading-snug sm:truncate sm:text-base">
                         {plugin.manifest.name}
                       </h3>
-                      <Badge variant="secondary" className="text-xs flex-shrink-0">
-                        v{plugin.manifest.version}
-                      </Badge>
                       <Badge variant="outline" className="text-xs flex-shrink-0">
                         {getPluginTypeLabel(plugin)}
                       </Badge>
@@ -1650,19 +1651,18 @@ function PluginConfigPageContent() {
                   <Button variant="ghost" size="sm" className="min-w-24 sm:min-w-0">
                     <Settings className="h-4 w-4" />
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={pluginActing}
-                    onClick={(event) => handleTogglePlugin(plugin, event)}
+                  <div
+                    className="flex min-w-24 items-center justify-center gap-2 sm:min-w-0"
+                    onClick={(event) => event.stopPropagation()}
                   >
-                    {pluginActing ? (
-                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Power className="mr-1 h-4 w-4" />
-                    )}
-                    {pluginDisabled ? '启动' : '关闭'}
-                  </Button>
+                    {pluginActing && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <Switch
+                      checked={!pluginDisabled}
+                      disabled={pluginActing}
+                      aria-label={pluginDisabled ? '启动插件' : '关闭插件'}
+                      onCheckedChange={() => void performTogglePlugin(plugin)}
+                    />
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"

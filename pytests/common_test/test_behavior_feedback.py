@@ -8,7 +8,13 @@ import pytest
 
 import src.learners.behavior_pattern_store as pattern_store
 from src.common.database.database_model import BehaviorExperiencePath
-from src.learners.behavior_learner import parse_behavior_feedback_response
+from src.learners.behavior_learner import (
+    BehaviorFeedbackContext,
+    BehaviorFeedbackContextItem,
+    BehaviorLearner,
+    BehaviorReferenceCandidate,
+    parse_behavior_feedback_response,
+)
 
 
 @pytest.fixture(name="behavior_feedback_engine")
@@ -31,6 +37,51 @@ def _patch_pattern_store_session(monkeypatch: pytest.MonkeyPatch, engine) -> Non
                 session.commit()
 
     monkeypatch.setattr(pattern_store, "get_db_session", fake_get_db_session)
+
+
+def test_build_behavior_feedback_messages_uses_multi_message_context() -> None:
+    learner = BehaviorLearner("session-a")
+    feedback_context = BehaviorFeedbackContext(
+        references=[
+            BehaviorReferenceCandidate(
+                behavior_id=12,
+                trigger="用户提到配置报错",
+                action="先追问关键配置路径",
+                outcome="用户补充路径后继续排查",
+                actor_type=pattern_store.ACTOR_MAIBOT_SELF,
+                learning_type=pattern_store.LEARNING_SELF_REFLECTION,
+                session_id="session-a",
+            )
+        ],
+        timeline_items=[
+            BehaviorFeedbackContextItem(
+                item_id="m1",
+                item_type="chat_message",
+                text="麦麦：你先把配置文件路径发一下。",
+                speaker="SELF",
+                source="guided_reply",
+            ),
+            BehaviorFeedbackContextItem(
+                item_id="m2",
+                item_type="chat_message",
+                text="用户：路径是 config/bot_config.toml。",
+                speaker="USER",
+                source="user",
+            ),
+        ],
+    )
+
+    messages = learner._build_behavior_feedback_messages(feedback_context)
+    system_text = messages[0].get_text_content()
+    message_texts = [message.get_text_content() for message in messages]
+
+    assert "behavior_references" not in system_text
+    assert "feedback_timeline" not in system_text
+    assert "路径 1" in system_text
+    assert "behavior_id: 12" in system_text
+    assert "先追问关键配置路径" in system_text
+    assert not any("[behavior_reference]" in text for text in message_texts[1:])
+    assert any("[timeline_item]" in text and "[item_id:m2]" in text for text in message_texts)
 
 
 def test_parse_behavior_feedback_response_keeps_adopted_effective_items() -> None:
@@ -111,8 +162,8 @@ def test_apply_behavior_feedback_accepts_observed_behavior_path(
         path = BehaviorExperiencePath(
             session_id="session-a",
             scene_cluster_id=1,
-            action_node_id=1,
-            outcome_node_id=1,
+            action_id=1,
+            outcome_id=1,
             actor_type=pattern_store.ACTOR_OTHER_USER,
             learning_type=pattern_store.LEARNING_OBSERVED,
             score=0.0,

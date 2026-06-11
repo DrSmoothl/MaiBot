@@ -596,60 +596,84 @@ class BehaviorLearner:
         )
 
     @staticmethod
-    def _format_feedback_references_for_prompt(references: Sequence[BehaviorReferenceCandidate]) -> str:
-        """把行为参考路径压成反馈模型可校验的 JSON。"""
+    def _format_feedback_references_for_system_prompt(references: Sequence[BehaviorReferenceCandidate]) -> str:
+        """把选择的行为参考路径格式化成 system prompt 中的可读文本。"""
 
-        return json.dumps(
-            [
-                {
-                    "behavior_id": reference.behavior_id,
-                    "trigger": reference.trigger,
-                    "action": reference.action,
-                    "expected_outcome": reference.outcome,
-                    "actor_type": reference.actor_type,
-                    "learning_type": reference.learning_type,
-                    "session_id": reference.session_id,
-                }
-                for reference in references
-            ],
-            ensure_ascii=False,
-            indent=2,
-        )
+        formatted_references: list[str] = []
+        for index, reference in enumerate(references, start=1):
+            formatted_references.append(
+                "\n".join(
+                    [
+                        f"路径 {index}",
+                        f"- behavior_id: {reference.behavior_id}",
+                        f"- actor_type: {reference.actor_type or 'unknown'}",
+                        f"- learning_type: {reference.learning_type or 'unknown'}",
+                        f"- session_id: {reference.session_id or 'unknown'}",
+                        f"- 触发场景: {reference.trigger or '[空]'}",
+                        f"- 采用行为: {reference.action or '[空]'}",
+                        f"- 预期结果: {reference.outcome or '[空]'}",
+                    ]
+                )
+            )
+        return "\n\n".join(formatted_references)
 
     @staticmethod
-    def _format_feedback_timeline_for_prompt(timeline_items: Sequence[BehaviorFeedbackContextItem]) -> str:
-        """把裁切上下文时间线压成反馈模型可引用的 JSON。"""
+    def _format_feedback_timeline_message(item: BehaviorFeedbackContextItem) -> str:
+        """把裁切上下文时间线中的单项格式化成独立消息。"""
 
-        return json.dumps(
+        return "\n".join(
             [
-                {
-                    "item_id": item.item_id,
-                    "type": item.item_type,
-                    "speaker": item.speaker,
-                    "source": item.source,
-                    "text": _compact_log_text(item.text, max_length=900),
-                }
-                for item in timeline_items
-            ],
-            ensure_ascii=False,
-            indent=2,
+                "[timeline_item]",
+                f"[item_id:{item.item_id}]",
+                f"[type:{item.item_type}]",
+                f"[speaker:{item.speaker or 'unknown'}]",
+                f"[source:{item.source or 'unknown'}]",
+                "[content]",
+                _compact_log_text(item.text, max_length=900) or "[空]",
+            ]
         )
+
+    def _build_behavior_feedback_messages(self, feedback_context: BehaviorFeedbackContext) -> list[Message]:
+        """构造行为路径反馈使用的多 message 请求。"""
+
+        prompt = load_prompt(
+            "evaluate_behavior_feedback",
+            bot_name=global_config.bot.nickname,
+            behavior_references=self._format_feedback_references_for_system_prompt(feedback_context.references),
+        )
+        feedback_messages = [
+            MessageBuilder()
+            .set_role(RoleType.System)
+            .add_text_content(
+                f"{prompt}\n\n"
+                "注意：候选行为路径已经在本 system prompt 中列出。"
+                "后续聊天时间线会在后续多条 user message 中给出；每条时间线消息包含 item_id，"
+                "source_ids 必须引用时间线消息中的 item_id。"
+            )
+            .build(),
+            MessageBuilder().set_role(RoleType.User).add_text_content("以下是后续聊天时间线。").build()
+        ]
+        for item in feedback_context.timeline_items:
+            feedback_messages.append(
+                MessageBuilder()
+                .set_role(RoleType.User)
+                .add_text_content(self._format_feedback_timeline_message(item))
+                .build()
+            )
+
+        feedback_messages.append(
+            MessageBuilder()
+            .set_role(RoleType.User)
+            .add_text_content("请根据以上行为参考和后续聊天时间线输出反馈 JSON。")
+            .build()
+        )
+        return feedback_messages
 
     async def _evaluate_behavior_feedback(self, feedback_context: BehaviorFeedbackContext) -> bool:
         """评估裁切上下文中历史行为路径参考的采用与结果，并写回反馈。"""
 
         reference_by_id = {reference.behavior_id: reference for reference in feedback_context.references}
-
-        prompt = load_prompt(
-            "evaluate_behavior_feedback",
-            bot_name=global_config.bot.nickname,
-            behavior_references=self._format_feedback_references_for_prompt(feedback_context.references),
-            feedback_timeline=self._format_feedback_timeline_for_prompt(feedback_context.timeline_items),
-        )
-        feedback_messages = [
-            MessageBuilder().set_role(RoleType.System).add_text_content(prompt).build(),
-            MessageBuilder().set_role(RoleType.User).add_text_content("请根据以上行为参考和后续聊天时间线输出反馈 JSON。").build(),
-        ]
+        feedback_messages = self._build_behavior_feedback_messages(feedback_context)
 
         try:
             generation_result = await behavior_feedback_model.generate_response_with_messages(

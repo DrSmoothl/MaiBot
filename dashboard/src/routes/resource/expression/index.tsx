@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { DashboardTabBar, DashboardTabTrigger } from '@/components/ui/dashboard-tabs'
 import { ExpressionReviewer } from '@/components/expression-reviewer'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 
 import {
@@ -745,29 +747,17 @@ export function ExpressionManagementPage() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden p-4 pb-6 sm:p-6">
       <div className="mb-4 flex shrink-0 flex-col gap-3 sm:mb-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="-mx-1 w-[calc(100%+0.5rem)] overflow-x-auto px-1 pb-1 sm:mx-0 sm:w-auto sm:overflow-visible sm:p-0">
-            <div className="bg-muted inline-flex w-max min-w-full rounded-lg border p-1 sm:w-fit sm:min-w-0">
-              <button
-                type="button"
-                onClick={() => handleActiveViewChange('list')}
-                className={`inline-flex h-10 flex-1 shrink-0 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors sm:h-8 sm:flex-none ${
-                  activeView === 'list'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
+          <Tabs
+            value={activeView === 'quick' ? 'quick' : 'list'}
+            onValueChange={(value) => handleActiveViewChange(value as 'list' | 'quick')}
+            className="-mx-1 w-[calc(100%+0.5rem)] px-1 sm:mx-0 sm:w-auto sm:p-0"
+          >
+            <DashboardTabBar className="sm:w-fit">
+              <DashboardTabTrigger value="list" className="h-10 flex-1 gap-2 sm:h-8 sm:flex-none">
                 <MessageSquare className="h-4 w-4" />
                 <span>表达</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleActiveViewChange('quick')}
-                className={`inline-flex h-10 flex-1 shrink-0 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors sm:h-8 sm:flex-none ${
-                  activeView === 'quick'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
+              </DashboardTabTrigger>
+              <DashboardTabTrigger value="quick" className="h-10 flex-1 gap-2 sm:h-8 sm:flex-none">
                 <Zap className="h-4 w-4" />
                 <span>快速审核</span>
                 {uncheckedCount > 0 && (
@@ -775,9 +765,9 @@ export function ExpressionManagementPage() {
                     {uncheckedCount > 99 ? '99+' : uncheckedCount}
                   </span>
                 )}
-              </button>
-            </div>
-          </div>
+              </DashboardTabTrigger>
+            </DashboardTabBar>
+          </Tabs>
           {activeView === 'list' && (
             <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center lg:justify-end">
               <Button

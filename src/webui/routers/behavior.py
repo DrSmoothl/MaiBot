@@ -531,6 +531,10 @@ async def list_behavior_paths(
     session_id: Annotated[Optional[str], Query()] = None,
     search: Annotated[str, Query()] = "",
     enabled: Annotated[str, Query()] = "all",
+    actor_type: Annotated[str, Query()] = "all",
+    learning_type: Annotated[str, Query()] = "all",
+    sort_by: Annotated[str, Query()] = "update_time",
+    sort_order: Annotated[str, Query()] = "desc",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> BehaviorPathListResponse:
@@ -548,8 +552,12 @@ async def list_behavior_paths(
             statement = statement.where(BehaviorExperiencePath.enabled.is_(True))  # type: ignore[attr-defined]
         elif enabled == "false":
             statement = statement.where(BehaviorExperiencePath.enabled.is_(False))  # type: ignore[attr-defined]
+        if actor_type != "all":
+            statement = statement.where(BehaviorExperiencePath.actor_type == actor_type)
+        if learning_type != "all":
+            statement = statement.where(BehaviorExperiencePath.learning_type == learning_type)
 
-        paths = list(session.exec(statement.order_by(BehaviorExperiencePath.update_time.desc())).all())  # type: ignore[attr-defined]
+        paths = list(session.exec(statement).all())
         path_items = _build_path_items(session, paths)
         if normalized_search:
             path_items = [
@@ -562,6 +570,7 @@ async def list_behavior_paths(
                     + "\n".join(f"{tag.tag}\n{tag.display}" for tag in item.scene_cluster_tags)
                 ).lower()
             ]
+        path_items = _sort_behavior_path_items(path_items, sort_by=sort_by, sort_order=sort_order)
         total = len(path_items)
         start = (page - 1) * page_size
         data = path_items[start : start + page_size]
@@ -692,6 +701,35 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
             ],
         },
     }
+
+
+def _sort_behavior_path_items(
+    items: list[BehaviorPathItem],
+    *,
+    sort_by: str,
+    sort_order: str,
+) -> list[BehaviorPathItem]:
+    normalized_sort_by = str(sort_by or "update_time").strip()
+    normalized_sort_order = str(sort_order or "desc").strip().lower()
+    reverse = normalized_sort_order != "asc"
+    text_fields = {"action", "chat_name", "outcome", "scene_cluster_name"}
+    time_fields = {"last_active_time", "last_feedback_time", "update_time"}
+    number_fields = {
+        "activation_count",
+        "count",
+        "failure_count",
+        "scene_cluster_score",
+        "scene_cluster_source_count",
+        "score",
+        "success_count",
+    }
+    allowed_fields = text_fields | time_fields | number_fields
+    if normalized_sort_by not in allowed_fields:
+        normalized_sort_by = "update_time"
+
+    if normalized_sort_by in text_fields | time_fields:
+        return sorted(items, key=lambda item: str(getattr(item, normalized_sort_by) or ""), reverse=reverse)
+    return sorted(items, key=lambda item: float(getattr(item, normalized_sort_by) or 0), reverse=reverse)
 
 
 def _build_path_items(session: Any, paths: list[BehaviorExperiencePath]) -> list[BehaviorPathItem]:

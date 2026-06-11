@@ -251,6 +251,10 @@ export async function listBehaviorPaths(params: {
   session_id?: string
   search?: string
   enabled?: string
+  actor_type?: string
+  learning_type?: string
+  sort_by?: string
+  sort_order?: string
   page?: number
   page_size?: number
 }): Promise<BehaviorPathListResponse> {

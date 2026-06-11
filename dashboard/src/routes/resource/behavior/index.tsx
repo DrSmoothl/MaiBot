@@ -28,6 +28,7 @@ import 'reactflow/dist/style.css'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { DashboardTabBar, DashboardTabTrigger } from '@/components/ui/dashboard-tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -38,7 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import {
   debugBehaviorRetrieval,
@@ -125,6 +126,20 @@ interface CanvasNetworkSettings {
 
 type CanvasNetworkKind = 'scene' | 'tag'
 
+type BehaviorPathSortBy =
+  | 'activation_count'
+  | 'count'
+  | 'failure_count'
+  | 'last_active_time'
+  | 'last_feedback_time'
+  | 'scene_cluster_score'
+  | 'scene_cluster_source_count'
+  | 'score'
+  | 'success_count'
+  | 'update_time'
+
+type SortOrder = 'asc' | 'desc'
+
 const DEFAULT_CANVAS_NETWORK_SETTINGS: CanvasNetworkSettings = {
   showLabels: true,
   paused: false,
@@ -132,6 +147,19 @@ const DEFAULT_CANVAS_NETWORK_SETTINGS: CanvasNetworkSettings = {
   minWeightValue: 0,
   nodeLimit: 0,
   onlyConnected: true,
+}
+
+const PATH_SORT_LABELS: Record<BehaviorPathSortBy, string> = {
+  activation_count: '使用次数',
+  count: '学习次数',
+  failure_count: '负向反馈',
+  last_active_time: '最近使用',
+  last_feedback_time: '最近反馈',
+  scene_cluster_score: '场景簇分',
+  scene_cluster_source_count: '场景样本',
+  score: '路径分数',
+  success_count: '正向反馈',
+  update_time: '最近更新',
 }
 
 const BehaviorGraphNode = memo(({ data }: NodeProps<BehaviorFlowNodeData>) => {
@@ -253,6 +281,38 @@ function clusterTitle(name: string, tags: BehaviorClusterTag[]): string {
     .filter((value) => value && !isInternalTagRef(value))
   if (tagNames.length > 0) return tagNames.join(' · ')
   return name || '未命名场景簇'
+}
+
+function sceneGroupSortValue(group: BehaviorSceneGroup, sortBy: BehaviorPathSortBy): number | string {
+  if (sortBy === 'activation_count') return group.activationCount
+  if (sortBy === 'failure_count') return group.failureCount
+  if (sortBy === 'scene_cluster_score') return group.clusterScore
+  if (sortBy === 'scene_cluster_source_count') return group.clusterSourceCount
+  if (sortBy === 'score') return group.bestScore
+  if (sortBy === 'success_count') return group.successCount
+  if (sortBy === 'count') return group.paths.reduce((sum, path) => sum + path.count, 0)
+  if (sortBy === 'last_active_time') return group.paths.reduce((latest, path) => (
+    path.last_active_time && path.last_active_time > latest ? path.last_active_time : latest
+  ), '')
+  if (sortBy === 'last_feedback_time') return group.paths.reduce((latest, path) => (
+    path.last_feedback_time && path.last_feedback_time > latest ? path.last_feedback_time : latest
+  ), '')
+  return group.latestUpdate ?? ''
+}
+
+function compareSceneGroups(
+  left: BehaviorSceneGroup,
+  right: BehaviorSceneGroup,
+  sortBy: BehaviorPathSortBy,
+  sortOrder: SortOrder
+): number {
+  const leftValue = sceneGroupSortValue(left, sortBy)
+  const rightValue = sceneGroupSortValue(right, sortBy)
+  const direction = sortOrder === 'asc' ? 1 : -1
+  if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+    return (leftValue - rightValue) * direction
+  }
+  return String(leftValue).localeCompare(String(rightValue)) * direction
 }
 
 function stableHash(value: string): number {
@@ -397,6 +457,10 @@ export function BehaviorLearningPage() {
   const [selectedSessionId, setSelectedSessionId] = useState('all')
   const [search, setSearch] = useState('')
   const [enabledFilter, setEnabledFilter] = useState('all')
+  const [actorFilter, setActorFilter] = useState('all')
+  const [learningTypeFilter, setLearningTypeFilter] = useState('all')
+  const [sortBy, setSortBy] = useState<BehaviorPathSortBy>('update_time')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [paths, setPaths] = useState<BehaviorPathItem[]>([])
   const [graphData, setGraphData] = useState<BehaviorGraphData | null>(null)
   const [openSceneGroups, setOpenSceneGroups] = useState<Set<string>>(new Set())
@@ -455,12 +519,10 @@ export function BehaviorLearningPage() {
         existing.latestUpdate = path.update_time
       }
     })
-    return Array.from(groups.values()).sort((left, right) => {
-      const leftTime = left.latestUpdate ?? ''
-      const rightTime = right.latestUpdate ?? ''
-      return rightTime.localeCompare(leftTime)
-    })
-  }, [paths])
+    const sortedGroups = Array.from(groups.values())
+    sortedGroups.sort((left, right) => compareSceneGroups(left, right, sortBy, sortOrder))
+    return sortedGroups
+  }, [paths, sortBy, sortOrder])
 
   const loadChats = async () => {
     try {
@@ -482,6 +544,10 @@ export function BehaviorLearningPage() {
         session_id: selectedSessionId,
         search,
         enabled: enabledFilter,
+        actor_type: actorFilter,
+        learning_type: learningTypeFilter,
+        sort_by: sortBy,
+        sort_order: sortOrder,
         page: targetPage,
         page_size: PAGE_SIZE,
       })
@@ -566,7 +632,7 @@ export function BehaviorLearningPage() {
 
   useEffect(() => {
     loadPaths()
-  }, [selectedSessionId, enabledFilter, page])
+  }, [selectedSessionId, enabledFilter, actorFilter, learningTypeFilter, sortBy, sortOrder, page])
 
   useEffect(() => {
     if (activeTab === 'scene-network' || activeTab === 'tag-network') {
@@ -630,16 +696,16 @@ export function BehaviorLearningPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)} className="min-h-0 flex-1">
-        <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
-          <TabsTrigger value="paths">经验路径</TabsTrigger>
-          <TabsTrigger value="scene-network">场景簇图谱</TabsTrigger>
-          <TabsTrigger value="tag-network">Tag簇网络</TabsTrigger>
-          <TabsTrigger value="debug">检索调试</TabsTrigger>
-          <TabsTrigger value="graph">局部图谱</TabsTrigger>
-        </TabsList>
+        <DashboardTabBar variant="grid" className="max-w-5xl grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+          <DashboardTabTrigger value="paths">经验路径</DashboardTabTrigger>
+          <DashboardTabTrigger value="scene-network">场景簇图谱</DashboardTabTrigger>
+          <DashboardTabTrigger value="tag-network">Tag簇网络</DashboardTabTrigger>
+          <DashboardTabTrigger value="debug">检索调试</DashboardTabTrigger>
+          <DashboardTabTrigger value="graph">局部图谱</DashboardTabTrigger>
+        </DashboardTabBar>
 
         <TabsContent value="paths" className="mt-4 min-h-0 space-y-4">
-          <div className="flex flex-col gap-2 rounded-lg border bg-background p-3 sm:flex-row sm:items-center">
+          <div className="grid gap-2 rounded-lg border bg-background p-3 md:grid-cols-[minmax(16rem,1fr)_repeat(6,minmax(7.5rem,auto))] md:items-center">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -651,13 +717,53 @@ export function BehaviorLearningPage() {
               />
             </div>
             <Select value={enabledFilter} onValueChange={(value) => { setEnabledFilter(value); setPage(1) }}>
-              <SelectTrigger className="w-full sm:w-36">
+              <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部状态</SelectItem>
                 <SelectItem value="true">启用中</SelectItem>
                 <SelectItem value="false">已停用</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={actorFilter} onValueChange={(value) => { setActorFilter(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部来源</SelectItem>
+                <SelectItem value="other_user">他人观察</SelectItem>
+                <SelectItem value="group_collective">群体观察</SelectItem>
+                <SelectItem value="maibot_self">自身反馈</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={learningTypeFilter} onValueChange={(value) => { setLearningTypeFilter(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部类型</SelectItem>
+                <SelectItem value="observed_behavior">观察学习</SelectItem>
+                <SelectItem value="self_reflection">自身反馈</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sortBy} onValueChange={(value) => { setSortBy(value as BehaviorPathSortBy); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(PATH_SORT_LABELS) as Array<[BehaviorPathSortBy, string]>).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={sortOrder} onValueChange={(value) => { setSortOrder(value as SortOrder); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="desc">降序</SelectItem>
+                <SelectItem value="asc">升序</SelectItem>
               </SelectContent>
             </Select>
             <Button onClick={applySearch}>搜索</Button>
@@ -832,7 +938,7 @@ function buildCanvasNetworkNode(
     : index * 2.399963229728653
   const layoutRadius = networkKind === 'scene'
     ? 420 + ((stableHash(`${node.id}:ring`) % 1000) / 1000 - 0.5) * 80
-    : 260 + Math.floor(Math.sqrt(index)) * 34
+    : 360 + Math.floor(Math.sqrt(index)) * 52
   const weight = canvasNodeWeight(node)
   const nodeRadius = networkKind === 'scene'
     ? clampNumber(6 + Math.sqrt(weight) * 1.2, 6, 26)
@@ -1029,8 +1135,8 @@ function BehaviorNetworkCanvas({
       const nodeById = new Map(graphNodes.map((node) => [node.id, node]))
       const heat = heatRef.current
       const settings = settingsRef.current
-      const charge = networkKind === 'scene' ? 1300 : 1200
-      const linkStrength = networkKind === 'scene' ? 0.005 : 0.004
+      const charge = networkKind === 'scene' ? 1300 : 2200
+      const linkStrength = networkKind === 'scene' ? 0.005 : 0.003
 
       if (!settings.paused) {
         graphNodes.forEach((node) => {
@@ -1072,7 +1178,7 @@ function BehaviorNetworkCanvas({
           const distance = Math.max(Math.hypot(dx, dy), 1)
           const targetDistance = networkKind === 'scene'
             ? 80 + 80 / (1 + edge.weight)
-            : 90 + 70 / Math.max(1, Math.sqrt(edge.weight))
+            : 140 + 115 / Math.max(1, Math.sqrt(edge.weight))
           const force = (distance - targetDistance) * linkStrength * heat
           const fx = dx / distance * force
           const fy = dy / distance * force
