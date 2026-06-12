@@ -21,9 +21,10 @@ jobs:
           user: Mai-with-u
           repo: MaiBot
           base: header, activity, metadata
+          base_indepth: no
           repositories: 1
           repositories_batch: 1
           config_animations: no
           plugins_errors_fatal: yes
-          plugin_followup: yes
-          plugin_followup_archived: no
+          plugin_languages: no
+          plugin_languages_indepth: no
