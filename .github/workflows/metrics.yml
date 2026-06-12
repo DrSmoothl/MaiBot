@@ -19,7 +19,7 @@ jobs:
 
       - name: Generate repository metrics
         env:
-          GITHUB_TOKEN: ${{ secrets.METRICS_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python .github/scripts/generate_repository_metrics.py \
             --repo Mai-with-u/MaiBot \
