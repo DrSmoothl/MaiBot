@@ -23,7 +23,7 @@ import {
   Info,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { backendApi } from '@/lib/http'
 import type { PluginInfo } from '@/types/plugin'
 import {
   checkGitStatus,
@@ -170,16 +170,14 @@ export function PluginDetailPage() {
         // 如果插件已安装，优先尝试从本地读取 README
         if (isInstalled && search.pluginId) {
           try {
-            const localResponse = await fetchWithAuth(`/api/webui/plugins/local-readme/${plugin.id}`)
-            
-            if (localResponse.ok) {
-              const localResult = await localResponse.json()
-              
-              if (localResult.success && localResult.data) {
-                setReadme(localResult.data)
-                setReadmeLoading(false)
-                return // 成功获取本地 README，直接返回
-              }
+            const localResult = await backendApi.get<{ success: boolean; data?: string }>(
+              `/api/webui/plugins/local-readme/${plugin.id}`
+            )
+
+            if (localResult.success && localResult.data) {
+              setReadme(localResult.data)
+              setReadmeLoading(false)
+              return // 成功获取本地 README，直接返回
             }
           } catch {
             // 继续执行远程获取逻辑
@@ -198,21 +196,18 @@ export function PluginDetailPage() {
         const cleanRepo = repo.replace(/\.git$/, '')
 
         // 使用后端代理获取 README.md
-        const response = await fetchWithAuth('/api/webui/plugins/fetch-raw', {
-          method: 'POST',
-          body: JSON.stringify({
-            owner,
-            repo: cleanRepo,
-            branch: 'main',
-            file_path: 'README.md',
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error('获取 README 失败')
-        }
-
-        const result = await response.json()
+        const result = await backendApi.post<{ success: boolean; data?: string }>(
+          '/api/webui/plugins/fetch-raw',
+          {
+            body: {
+              owner,
+              repo: cleanRepo,
+              branch: 'main',
+              file_path: 'README.md',
+            },
+            errorMessage: '获取 README 失败',
+          }
+        )
 
         if (result.success && result.data) {
           setReadme(result.data)

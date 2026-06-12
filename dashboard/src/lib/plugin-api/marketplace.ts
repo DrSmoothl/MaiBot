@@ -1,8 +1,7 @@
 import type { ApiResponse } from '@/types/api'
 import type { PluginInfo, PluginType } from '@/types/plugin'
 
-import { fetchWithAuth } from '@/lib/fetch-with-auth'
-import { parseResponse } from '@/lib/api-helpers'
+import { ApiError, backendApi, toApiResponse } from '@/lib/http'
 import { pluginProgressClient } from '@/lib/plugin-progress-client'
 import type { GitStatus, MaimaiVersion } from './types'
 
@@ -223,75 +222,68 @@ export function getCachedPluginList(): PluginInfo[] | null {
  * 从远程获取插件列表(通过后端代理避免 CORS)
  */
 async function fetchPluginListUncached(): Promise<ApiResponse<PluginInfo[]>> {
-  const response = await fetchWithAuth('/api/webui/plugins/fetch-raw', {
-    method: 'POST',
-    body: JSON.stringify({
-      owner: PLUGIN_REPO_OWNER,
-      repo: PLUGIN_REPO_NAME,
-      branch: PLUGIN_REPO_BRANCH,
-      file_path: PLUGIN_DETAILS_FILE
-    })
-  })
-  
-  const apiResult = await parseResponse<{ success: boolean; data: string; error?: string }>(response)
-  
-  if (!apiResult.success) {
-    return apiResult
-  }
-  
-  const result = apiResult.data
-  if (!result.success || !result.data) {
-    return {
-      success: false,
-      error: result.error || '获取插件列表失败'
-    }
-  }
-  
-  const data: PluginApiResponse[] = JSON.parse(result.data)
-  
-  const pluginList = data
-    .filter(item => {
-      if (!item?.manifest) {
-        console.warn('跳过无效插件数据:', item)
-        return false
+  return toApiResponse(async () => {
+    const result = await backendApi.post<{ success: boolean; data: string; error?: string }>(
+      '/api/webui/plugins/fetch-raw',
+      {
+        body: {
+          owner: PLUGIN_REPO_OWNER,
+          repo: PLUGIN_REPO_NAME,
+          branch: PLUGIN_REPO_BRANCH,
+          file_path: PLUGIN_DETAILS_FILE
+        },
+        errorMessage: '获取插件列表失败',
       }
-      const pluginId = item.manifest.id || item.id
-      if (!pluginId) {
-        console.warn('跳过缺少 ID 的插件:', item)
-        return false
-      }
-      if (!item.manifest.name || !item.manifest.version) {
-        console.warn('跳过缺少必需字段的插件:', item.id)
-        return false
-      }
-      return true
-    })
-    .map((item, index) => {
-      const manifestId = item.manifest.id?.trim()
-      const marketplaceId = item.id?.trim()
-      const pluginId = manifestId || marketplaceId!
+    )
 
-      return {
-        id: pluginId,
-        marketplace_id: marketplaceId,
-        marketplace_order: index,
-        stats_ids: uniqueNonEmptyValues([manifestId]),
-        manifest: normalizePluginManifest({ ...item.manifest, id: pluginId }),
-        assets: normalizePluginAssets(item.assets),
-        downloads: 0,
-        rating: 0,
-        review_count: 0,
-        installed: false,
-        source: 'market' as const,
-        published_at: normalizeDateString(item.published_at ?? item.created_at ?? item.added_at),
-        updated_at: normalizeDateString(item.updated_at ?? item.modified_at),
-      }
-    })
-  
-  return {
-    success: true,
-    data: pluginList
-  }
+    // 业务级失败：该 endpoint 的错误字段是 error 而非 message，不走 requireSuccess
+    if (!result.success || !result.data) {
+      throw new ApiError(result.error || '获取插件列表失败', { detail: result })
+    }
+
+    const data: PluginApiResponse[] = JSON.parse(result.data)
+
+    const pluginList = data
+      .filter(item => {
+        if (!item?.manifest) {
+          console.warn('跳过无效插件数据:', item)
+          return false
+        }
+        const pluginId = item.manifest.id || item.id
+        if (!pluginId) {
+          console.warn('跳过缺少 ID 的插件:', item)
+          return false
+        }
+        if (!item.manifest.name || !item.manifest.version) {
+          console.warn('跳过缺少必需字段的插件:', item.id)
+          return false
+        }
+        return true
+      })
+      .map((item, index) => {
+        const manifestId = item.manifest.id?.trim()
+        const marketplaceId = item.id?.trim()
+        const pluginId = manifestId || marketplaceId!
+
+        return {
+          id: pluginId,
+          marketplace_id: marketplaceId,
+          marketplace_order: index,
+          stats_ids: uniqueNonEmptyValues([manifestId]),
+          manifest: normalizePluginManifest({ ...item.manifest, id: pluginId }),
+          assets: normalizePluginAssets(item.assets),
+          downloads: 0,
+          rating: 0,
+          review_count: 0,
+          installed: false,
+          source: 'market' as const,
+          published_at: normalizeDateString(item.published_at ?? item.created_at ?? item.added_at),
+          updated_at: normalizeDateString(item.updated_at ?? item.modified_at),
+        }
+      })
+
+    return pluginList
+  })
 }
 
 export async function fetchPluginList(options: { forceRefresh?: boolean } = {}): Promise<ApiResponse<PluginInfo[]>> {
@@ -333,44 +325,50 @@ export async function fetchPluginList(options: { forceRefresh?: boolean } = {}):
  * 检查本机 Git 安装状态
  */
 export async function checkGitStatus(): Promise<ApiResponse<GitStatus>> {
-  const response = await fetchWithAuth('/api/webui/plugins/git-status')
-  
-  const apiResult = await parseResponse<GitStatus>(response)
-  
-  if (!apiResult.success) {
-    return {
-      success: true,
-      data: {
-        installed: false,
-        error: '无法检测 Git 安装状态'
+  try {
+    const data = await backendApi.get<GitStatus>('/api/webui/plugins/git-status', {
+      errorMessage: '无法检测 Git 安装状态',
+    })
+    return { success: true, data }
+  } catch (error) {
+    // 保持原有行为：HTTP 错误 / 响应解析失败时按“无法检测”处理；网络层失败与认证失效（401）仍向上抛出
+    if (error instanceof ApiError && error.status !== undefined && error.status !== 401) {
+      return {
+        success: true,
+        data: {
+          installed: false,
+          error: '无法检测 Git 安装状态'
+        }
       }
     }
+    throw error
   }
-  
-  return apiResult
 }
 
 /**
  * 获取麦麦版本信息
  */
 export async function getMaimaiVersion(): Promise<ApiResponse<MaimaiVersion>> {
-  const response = await fetchWithAuth('/api/webui/plugins/version')
-  
-  const apiResult = await parseResponse<MaimaiVersion>(response)
-  
-  if (!apiResult.success) {
-    return {
-      success: true,
-      data: {
-        version: '0.0.0',
-        version_major: 0,
-        version_minor: 0,
-        version_patch: 0
+  try {
+    const data = await backendApi.get<MaimaiVersion>('/api/webui/plugins/version', {
+      errorMessage: '获取麦麦版本信息失败',
+    })
+    return { success: true, data }
+  } catch (error) {
+    // 保持原有行为：HTTP 错误 / 响应解析失败时回退为 0.0.0；网络层失败与认证失效（401）仍向上抛出
+    if (error instanceof ApiError && error.status !== undefined && error.status !== 401) {
+      return {
+        success: true,
+        data: {
+          version: '0.0.0',
+          version_major: 0,
+          version_minor: 0,
+          version_patch: 0
+        }
       }
     }
+    throw error
   }
-  
-  return apiResult
 }
 
 /**

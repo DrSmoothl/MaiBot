@@ -1,5 +1,4 @@
-import { parseResponse } from '@/lib/api-helpers'
-import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { backendApi, toApiResponse } from '@/lib/http'
 import type { ApiResponse } from '@/types/api'
 
 const PROMPT_GENERATOR_METHOD_NOT_ALLOWED_MESSAGE =
@@ -74,11 +73,13 @@ export interface PromptGeneratorResponse {
 export async function generatePromptPersona(
   payload: PromptGeneratorRequest
 ): Promise<ApiResponse<PromptGeneratorResponse>> {
-  const response = await fetchWithAuth('/api/webui/config/prompt-generator/generate', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-  return normalizePromptGeneratorError(await parseResponse<PromptGeneratorResponse>(response))
+  const result = await toApiResponse(() =>
+    backendApi.post<PromptGeneratorResponse>('/api/webui/config/prompt-generator/generate', {
+      body: payload,
+      errorMessage: '生成人设 Prompt 失败',
+    })
+  )
+  return normalizePromptGeneratorError(result)
 }
 
 export interface PromptGeneratorApplyResponse {
@@ -91,9 +92,10 @@ export interface PromptGeneratorApplyResponse {
 export async function applyPromptGeneratorBlocks(
   blocks: PromptGeneratorConfigBlock[]
 ): Promise<ApiResponse<PromptGeneratorApplyResponse>> {
-  const response = await fetchWithAuth('/api/webui/config/prompt-generator/apply', {
-    method: 'POST',
-    body: JSON.stringify({ blocks }),
-  })
-  return parseResponse<PromptGeneratorApplyResponse>(response)
+  return toApiResponse(() =>
+    backendApi.post<PromptGeneratorApplyResponse>('/api/webui/config/prompt-generator/apply', {
+      body: { blocks },
+      errorMessage: '应用生成结果失败',
+    })
+  )
 }

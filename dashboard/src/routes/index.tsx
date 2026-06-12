@@ -40,7 +40,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import axios from 'axios'
 
 import { ExpressionReviewer } from '@/components/expression-reviewer'
 import { RestartOverlay } from '@/components/restart-overlay'
@@ -74,7 +73,7 @@ import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import { ZoomableChart } from '@/components/ui/zoomable-chart'
 import { getBotConfigCached, getModelConfigCached } from '@/lib/config-api'
 import { getReviewStats } from '@/lib/expression-api'
-import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { backendApi } from '@/lib/http'
 import {
   getInstalledPlugins,
   getPluginConfigSchema,
@@ -574,11 +573,15 @@ function IndexPageContent() {
   const fetchHitokoto = useCallback(async () => {
     try {
       setHitokotoLoading(true)
-      const response = await axios.get('https://v1.hitokoto.cn/?c=a&c=b&c=c&c=d&c=h&c=i&c=k')
+      const response = await fetch('https://v1.hitokoto.cn/?c=a&c=b&c=c&c=d&c=h&c=i&c=k')
+      if (!response.ok) {
+        throw new Error(`一言接口返回 HTTP ${response.status}`)
+      }
+      const data = await response.json()
       if (isMountedRef.current) {
         setHitokoto({
-          hitokoto: response.data.hitokoto,
-          from: response.data.from || response.data.from_who || t('home.unknownSource')
+          hitokoto: data.hitokoto,
+          from: data.from || data.from_who || t('home.unknownSource')
         })
       }
     } catch (error) {
@@ -607,15 +610,10 @@ function IndexPageContent() {
 
     setIsBotStatusLoading(true)
     try {
-      const response = await fetchWithAuth('/api/webui/system/status')
+      const data = await backendApi.get<BotStatus>('/api/webui/system/status')
       if (!isMountedRef.current) return
-      if (response.ok) {
-        const data = await response.json()
-        botStatusCache = { timestamp: Date.now(), data }
-        setBotStatus(data)
-      } else if (!botStatusCache) {
-        setBotStatus(null)
-      }
+      botStatusCache = { timestamp: Date.now(), data }
+      setBotStatus(data)
     } catch (error) {
       console.error('获取机器人状态失败:', error)
       if (isMountedRef.current && !botStatusCache) {
@@ -962,13 +960,12 @@ function IndexPageContent() {
       } else {
         setLoading(true)
       }
-      const response = await fetchWithAuth(`/api/webui/statistics/dashboard?hours=${timeRange}`)
+      const data = await backendApi.get<DashboardData>('/api/webui/statistics/dashboard', {
+        query: { hours: timeRange },
+      })
       if (!isMountedRef.current) return
-      if (response.ok) {
-        const data = await response.json()
-        dashboardDataCache.set(timeRange, { timestamp: Date.now(), data })
-        setDashboardData(data)
-      }
+      dashboardDataCache.set(timeRange, { timestamp: Date.now(), data })
+      setDashboardData(data)
       setLoading(false)
       setLoadingProgress(100)
     } catch (error) {
