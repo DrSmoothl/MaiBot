@@ -11,20 +11,28 @@ permissions:
 jobs:
   github-metrics:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - uses: lowlighter/metrics@latest
+      - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.METRICS_TOKEN }}
-          filename: assets/repository-metrics.svg
-          template: repository
-          user: Mai-with-u
-          repo: MaiBot
-          base: header, activity, metadata
-          base_indepth: no
-          repositories: 1
-          repositories_batch: 1
-          config_animations: no
-          plugins_errors_fatal: yes
-          plugin_languages: no
-          plugin_languages_indepth: no
+          ref: ${{ github.ref }}
+
+      - name: Generate repository metrics
+        env:
+          GITHUB_TOKEN: ${{ secrets.METRICS_TOKEN || github.token }}
+        run: |
+          python .github/scripts/generate_repository_metrics.py \
+            --repo Mai-with-u/MaiBot \
+            --output depends-data/repository-metrics.svg
+
+      - name: Commit repository metrics
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add depends-data/repository-metrics.svg
+          if git diff --cached --quiet; then
+            echo "No metrics changes."
+          else
+            git commit -m "docs: 更新仓库状态图"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
