@@ -220,8 +220,19 @@ export interface BehaviorRetrievalDebugInfo {
   locked_direct_spread_factor?: number
 }
 
+export interface BehaviorScenarioDebugProfile {
+  summary: string
+  confidence: number
+  tag_clusters: Array<{
+    kind: string
+    tags: string[]
+  }>
+}
+
 export interface BehaviorRetrievalDebugPayload {
   retrieval_mode: string
+  input_mode?: string
+  scenario_profile?: BehaviorScenarioDebugProfile
   descriptors: BehaviorDescriptor[]
   matched_clusters: BehaviorMatchedCluster[]
   candidate_scores: Array<{ behavior_id: number; score: number }>
@@ -234,6 +245,7 @@ export interface BehaviorRetrievalDebugRequest {
   session_id?: string
   include_global: boolean
   retrieval_mode?: string
+  scene_text?: string
   summary?: string
   tag_clusters: Array<{ tag_name: string; tag_aliases: string[] }>
   need: { tag_name: string; tag_aliases: string[] }
