@@ -11,6 +11,7 @@ permissions:
 jobs:
   github-metrics:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: lowlighter/metrics@latest
         with:
@@ -20,5 +21,5 @@ jobs:
           user: Mai-with-u
           repo: MaiBot
           base: header, activity, repositories, metadata
+          plugins_errors_fatal: yes
           plugin_followup: yes
-          plugin_contributors: yes
