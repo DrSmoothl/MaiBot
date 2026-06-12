@@ -320,7 +320,7 @@ def _format_large_number(num: float | int, html: bool = False) -> str:
 
         if html:
             # HTML输出：K着色为主题色并加粗大写
-            return f"{number_part}<span style='color: #8b5cf6; font-weight: bold;'>K</span>"
+            return f"{number_part}<span style='color: var(--statistics-primary); font-weight: bold;'>K</span>"
         else:
             # 控制台输出：纯文本，K大写
             return f"{number_part}{k_suffix}"
@@ -1565,7 +1565,7 @@ class StatisticOutputTask(AsyncTask):
                     }});
                     
                     function createPieCharts_{div_id}() {{
-                        const colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#34495e', '#e67e22', '#95a5a6', '#f1c40f'];
+                        const colors = ['#b35b34', '#0d4b50', '#cfa54b', '#6f665b', '#dfc79a', '#8f4b38', '#74825a', '#854f46', '#2f5f62', '#b98556'];
                         
                         // 模型花费分布饼图
                         const modelLabels = {list(sorted(stat_data[COST_BY_MODEL].keys())) if stat_data[COST_BY_MODEL] else []};
@@ -1764,28 +1764,57 @@ class StatisticOutputTask(AsyncTask):
     <title>MaiBot运行统计报告</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        :root {
+            --statistics-background: hsl(35.4 61.9% 87.6%);
+            --statistics-foreground: hsl(189 72% 18.2%);
+            --statistics-card: hsl(36 66% 89.6%);
+            --statistics-card-strong: hsl(34.1 54.8% 81.8%);
+            --statistics-muted: hsl(34.9 48.3% 82.5%);
+            --statistics-muted-foreground: hsl(39.1 11.6% 39%);
+            --statistics-primary: hsl(15.6 68.7% 45.1%);
+            --statistics-primary-foreground: hsl(39.5 100% 92%);
+            --statistics-accent: hsl(34.7 45.6% 75.5%);
+            --statistics-border: hsl(188.1 74% 19.6%);
+            --statistics-ring: hsl(15.6 68.7% 45.1%);
+            --statistics-row-alt: hsl(34.1 54.8% 81.8% / 0.42);
+        }
+
+        html {
+            box-sizing: border-box;
+        }
+
+        *, *::before, *::after {
+            box-sizing: inherit;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-family: "Bahnschrift Condensed", "Agency FB", "Arial Narrow", "Microsoft YaHei UI", system-ui, sans-serif;
             margin: 0;
             padding: 20px;
-            background-color: #faf7ff;
-            color: #3a2f57;
+            background:
+                linear-gradient(90deg, hsl(188.1 74% 19.6% / 0.05) 1px, transparent 1px),
+                linear-gradient(0deg, hsl(188.1 74% 19.6% / 0.04) 1px, transparent 1px),
+                var(--statistics-background);
+            background-size: 28px 28px;
+            color: var(--statistics-foreground);
             line-height: 1.6;
         }
         .container {
-            max-width: 900px;
+            width: 100%;
+            max-width: none;
             margin: 20px auto;
-            background-color: #ffffff;
+            background-color: hsl(36 66% 89.6% / 0.94);
             padding: 25px;
-            border-radius: 10px;
-            box-shadow: 0 10px 28px rgba(122, 98, 182, 0.12);
-            border: 1px solid #e5dcff;
+            border-radius: 4px;
+            box-shadow: none;
+            border: 2px solid var(--statistics-border);
         }
         h1, h2 {
-            color: #473673;
-            border-bottom: 2px solid #9f8efb;
+            color: var(--statistics-foreground);
+            border-bottom: 2px solid var(--statistics-border);
             padding-bottom: 10px;
             margin-top: 0;
+            letter-spacing: 0;
         }
         h1 {
             text-align: center;
@@ -1799,39 +1828,40 @@ class StatisticOutputTask(AsyncTask):
             margin-bottom: 10px;
         }
         .info-item {
-            background-color: #f3eeff;
+            background-color: var(--statistics-muted);
             padding: 8px 12px;
-            border-radius: 6px;
+            border: 1px solid var(--statistics-border);
+            border-radius: 3px;
             margin-bottom: 8px;
             font-size: 0.95em;
         }
         .info-item strong {
-            color: #7162bf;
+            color: var(--statistics-primary);
         }
         /* 新增：顶部工具条与按钮 */
-        .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+        .toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
         .toolbar .right { display: flex; gap: 8px; align-items: center; }
         .btn {
-            border: 1px solid #e3daff;
-            background-color: #fbf9ff;
-            color: #4a3c75;
+            border: 1px solid var(--statistics-border);
+            background-color: var(--statistics-card);
+            color: var(--statistics-foreground);
             padding: 8px 12px;
-            border-radius: 6px;
+            border-radius: 3px;
             cursor: pointer;
             transition: all .2s ease;
         }
-        .btn:hover { border-color: #9f8efb; color: #7c6bcf; background-color: #f1ecff; }
+        .btn:hover { border-color: var(--statistics-ring); color: var(--statistics-primary); background-color: var(--statistics-accent); }
         /* 新增：KPI 卡片 */
-        .kpi-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 12px 0 6px; }
+        .kpi-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0 6px; }
         .kpi-card {
-            background: linear-gradient(145deg, #ffffff 0%, #f6f2ff 100%);
-            border: 1px solid #e3dbff;
-            border-radius: 10px;
+            background: var(--statistics-card);
+            border: 2px solid var(--statistics-border);
+            border-radius: 4px;
             padding: 14px 16px;
-            box-shadow: 0 6px 16px rgba(113, 98, 191, 0.1);
+            box-shadow: none;
         }
-        .kpi-title { font-size: 12px; color: #8579a6; letter-spacing: .3px; margin-bottom: 6px; }
-        .kpi-value { font-size: 20px; font-weight: 700; letter-spacing: .2px; color: #8b5cf6; }
+        .kpi-title { font-size: 12px; color: var(--statistics-muted-foreground); letter-spacing: 0; margin-bottom: 6px; }
+        .kpi-value { font-size: 20px; font-weight: 800; letter-spacing: 0; color: var(--statistics-primary); }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -1839,60 +1869,64 @@ class StatisticOutputTask(AsyncTask):
             font-size: 0.9em;
         }
         /* 新增：表格包裹容器，支持横向滚动 */
-        .table-wrap { width: 100%; overflow-x: auto; border-radius: 6px; }
+        .table-wrap { width: 100%; overflow-x: auto; border-radius: 3px; border: 1px solid var(--statistics-border); }
         th, td {
-            border: 1px solid #e6ddff;
+            border: 1px solid hsl(188.1 74% 19.6% / 0.35);
             padding: 10px;
             text-align: left;
         }
         th {
-            background-color: #9f8efb;
-            color: white;
+            background-color: var(--statistics-border);
+            color: var(--statistics-primary-foreground);
             font-weight: bold;
             position: sticky;
             top: 0;
             z-index: 1;
         }
         tr:nth-child(even) {
-            background-color: #f6f1ff;
+            background-color: var(--statistics-row-alt);
         }
         .footer {
             text-align: center;
             margin-top: 30px;
             font-size: 0.8em;
-            color: #7f8c8d;
+            color: var(--statistics-muted-foreground);
         }
         .tabs {
             overflow: hidden;
-            background: #f9f6ff;
+            background: var(--statistics-card-strong);
             display: flex;
-            border: 1px solid #e4dcff;
-            border-radius: 10px;
-            box-shadow: 0 8px 18px rgba(120, 101, 179, 0.08);
+            flex-wrap: wrap;
+            border: 2px solid var(--statistics-border);
+            border-radius: 4px;
+            box-shadow: none;
         }
         .tabs button {
             background: inherit; border: none; outline: none;
             padding: 12px 14px; cursor: pointer;
             transition: 0.2s; font-size: 15px;
-            color: #52467a;
+            color: var(--statistics-foreground);
         }
         .tabs button:hover {
-            background-color: #efe9ff;
+            background-color: var(--statistics-accent);
         }
         .tabs button.active {
-            background-color: rgba(159, 142, 251, 0.25);
-            color: #6253a9;
+            background-color: var(--statistics-primary);
+            color: var(--statistics-primary-foreground);
         }
         .tab-content {
             display: none;
             padding: 20px;
-            background-color: #fefcff;
-            border: 1px solid #e4dcff;
+            background-color: hsl(36 66% 89.6% / 0.76);
+            border: 2px solid var(--statistics-border);
             border-top: none;
-            border-radius: 0 0 10px 10px;
+            border-radius: 0 0 4px 4px;
         }
         .tab-content.active {
             display: block;
+        }
+        canvas {
+            max-width: 100%;
         }
     </style>
 </head>
@@ -2053,16 +2087,16 @@ class StatisticOutputTask(AsyncTask):
 
         # 生成不同颜色的调色板
         colors = [
-            "#8b5cf6",
-            "#9f8efb",
-            "#b5a6ff",
-            "#c7bbff",
-            "#d9ceff",
-            "#a78bfa",
-            "#9073d8",
-            "#bfaefc",
-            "#cabdfd",
-            "#e6e0ff",
+            "#b35b34",
+            "#0d4b50",
+            "#cfa54b",
+            "#6f665b",
+            "#dfc79a",
+            "#8f4b38",
+            "#74825a",
+            "#854f46",
+            "#2f5f62",
+            "#b98556",
         ]
 
         # 默认使用24小时数据生成数据集
@@ -2146,25 +2180,25 @@ class StatisticOutputTask(AsyncTask):
             
             <style>
                 .time-range-btn {{
-                    background-color: #ecf0f1;
-                    border: 1px solid #bdc3c7;
-                    color: #2c3e50;
+                    background-color: var(--statistics-card);
+                    border: 1px solid var(--statistics-border);
+                    color: var(--statistics-foreground);
                     padding: 8px 16px;
                     margin: 0 5px;
-                    border-radius: 4px;
+                    border-radius: 3px;
                     cursor: pointer;
                     font-size: 14px;
                     transition: all 0.3s ease;
                 }}
                 
                 .time-range-btn:hover {{
-                    background-color: #d5dbdb;
+                    background-color: var(--statistics-accent);
                 }}
                 
                 .time-range-btn.active {{
-                    background-color: #3498db;
-                    color: white;
-                    border-color: #2980b9;
+                    background-color: var(--statistics-primary);
+                    color: var(--statistics-primary-foreground);
+                    border-color: var(--statistics-ring);
                 }}
             </style>
             
@@ -2247,7 +2281,7 @@ class StatisticOutputTask(AsyncTask):
                 
                 function createChart(chartType, data, timeRange) {{
                     const config = chartConfigs[chartType];
-                    const colors = ['#8b5cf6', '#9f8efb', '#b5a6ff', '#c7bbff', '#d9ceff', '#a78bfa', '#9073d8', '#bfaefc', '#cabdfd', '#e6e0ff'];
+                    const colors = ['#b35b34', '#0d4b50', '#cfa54b', '#6f665b', '#dfc79a', '#8f4b38', '#74825a', '#854f46', '#2f5f62', '#b98556'];
                     
                     let datasets = [];
                     
@@ -2256,7 +2290,7 @@ class StatisticOutputTask(AsyncTask):
                             label: config.title,
                             data: data[config.dataKey],
                             borderColor: colors[0],
-                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                            backgroundColor: 'rgba(179, 91, 52, 0.12)',
                             tension: 0.4,
                             fill: config.fill
                         }}];
@@ -2456,10 +2490,10 @@ class StatisticOutputTask(AsyncTask):
     def _generate_metrics_tab(self, metrics_data: dict[str, object]) -> str:
         """生成指标趋势图表选项卡HTML内容"""
         colors = {
-            "cost_per_100_messages": "#8b5cf6",
-            "cost_per_hour": "#9f8efb",
-            "tokens_per_hour": "#c7bbff",
-            "cost_per_100_replies": "#d9ceff",
+            "cost_per_100_messages": "#b35b34",
+            "cost_per_hour": "#0d4b50",
+            "tokens_per_hour": "#cfa54b",
+            "cost_per_100_replies": "#74825a",
         }
 
         return f"""
@@ -2491,25 +2525,25 @@ class StatisticOutputTask(AsyncTask):
             
             <style>
                 .time-scale-btn {{
-                    background-color: #ecf0f1;
-                    border: 1px solid #bdc3c7;
-                    color: #2c3e50;
+                    background-color: var(--statistics-card);
+                    border: 1px solid var(--statistics-border);
+                    color: var(--statistics-foreground);
                     padding: 8px 16px;
                     margin: 0 5px;
-                    border-radius: 4px;
+                    border-radius: 3px;
                     cursor: pointer;
                     font-size: 14px;
                     transition: all 0.3s ease;
                 }}
                 
                 .time-scale-btn:hover {{
-                    background-color: #d5dbdb;
+                    background-color: var(--statistics-accent);
                 }}
                 
                 .time-scale-btn.active {{
-                    background-color: #8b5cf6;
-                    color: white;
-                    border-color: #7c6bcf;
+                    background-color: var(--statistics-primary);
+                    color: var(--statistics-primary-foreground);
+                    border-color: var(--statistics-ring);
                 }}
             </style>
             
