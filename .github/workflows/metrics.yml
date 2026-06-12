@@ -20,6 +20,10 @@ jobs:
           template: repository
           user: Mai-with-u
           repo: MaiBot
-          base: header, activity, repositories, metadata
+          base: header, activity, metadata
+          repositories: 1
+          repositories_batch: 1
+          config_animations: no
           plugins_errors_fatal: yes
           plugin_followup: yes
+          plugin_followup_archived: no
