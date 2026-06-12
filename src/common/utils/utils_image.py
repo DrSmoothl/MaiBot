@@ -1,19 +1,79 @@
+from math import ceil
 from pathlib import Path
 from typing import Optional, Union
-
-from PIL import Image as PILImage, ImageOps as PILImageOps, ImageSequence
 
 import base64
 import io
 
+from PIL import Image as PILImage, ImageOps as PILImageOps, ImageSequence
 import numpy as np
 
 from src.common.logger import get_logger
 
 logger = get_logger("image_utils")
 
+MODEL_MIN_IMAGE_SIDE = 64
+MODEL_MAX_UPSCALED_IMAGE_SIDE = 2048
+
 
 class ImageUtils:
+    @staticmethod
+    def normalize_image_base64_for_model(
+        image_base64: str,
+        image_format: str,
+        *,
+        min_side: int = MODEL_MIN_IMAGE_SIDE,
+        max_upscaled_side: int = MODEL_MAX_UPSCALED_IMAGE_SIDE,
+    ) -> tuple[str, str, bool]:
+        """确保发给视觉模型的图片不低于常见最小识别尺寸。"""
+        if min_side <= 0:
+            raise ValueError("模型图片最小边长必须大于0")
+
+        image_bytes = base64.b64decode(image_base64, validate=True)
+        with PILImage.open(io.BytesIO(image_bytes)) as image:
+            normalized_image = PILImageOps.exif_transpose(image)
+            width, height = normalized_image.size
+            if width <= 0 or height <= 0:
+                raise ValueError("图片尺寸无效，无法发送给视觉模型")
+            if width >= min_side and height >= min_side:
+                return image_base64, image_format, False
+
+            if normalized_image.mode in ("RGBA", "LA") or (
+                normalized_image.mode == "P" and "transparency" in normalized_image.info
+            ):
+                working_image = normalized_image.convert("RGBA")
+                canvas_mode = "RGBA"
+                background_color = (255, 255, 255, 0)
+            else:
+                working_image = normalized_image.convert("RGB")
+                canvas_mode = "RGB"
+                background_color = (255, 255, 255)
+
+            scale = max(1, ceil(min_side / min(width, height)))
+            if max_upscaled_side > 0:
+                max_scale = max(1, max_upscaled_side // max(width, height))
+                scale = min(scale, max_scale)
+
+            resized_width = max(1, width * scale)
+            resized_height = max(1, height * scale)
+            resized_image = working_image.resize((resized_width, resized_height), PILImage.Resampling.NEAREST)
+
+            canvas_width = max(min_side, resized_width)
+            canvas_height = max(min_side, resized_height)
+            if (canvas_width, canvas_height) != resized_image.size:
+                canvas = PILImage.new(canvas_mode, (canvas_width, canvas_height), background_color)
+                paste_box = ((canvas_width - resized_width) // 2, (canvas_height - resized_height) // 2)
+                if resized_image.mode == "RGBA":
+                    canvas.paste(resized_image, paste_box, resized_image)
+                else:
+                    canvas.paste(resized_image, paste_box)
+                resized_image = canvas
+
+            output_buffer = io.BytesIO()
+            resized_image.save(output_buffer, format="PNG")
+            resized_base64 = base64.b64encode(output_buffer.getvalue()).decode("utf-8")
+            return resized_base64, "png", True
+
     @staticmethod
     def gif_2_static_image(gif_bytes: bytes, similarity_threshold: float = 1000.0, max_frames: int = 15) -> bytes:
         """

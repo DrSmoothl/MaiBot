@@ -1,4 +1,4 @@
-"""图片发送内置动作。"""
+﻿"""图片发送内置动作。"""
 
 from base64 import b64encode
 from typing import Any, Optional
@@ -6,7 +6,7 @@ from typing import Any, Optional
 from src.common.data_models.message_component_data_model import ImageComponent, MessageSequence
 from src.common.logger import get_logger
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
-from src.maisaka.context_messages import SessionBackedMessage
+from src.maisaka.context.messages import SessionBackedMessage
 from src.services import send_service
 
 from .context import BuiltinToolRuntimeContext

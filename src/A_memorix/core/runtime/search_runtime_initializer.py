@@ -192,6 +192,12 @@ def build_search_runtime(
             ppr_concurrency_limit=_get_config_value(
                 plugin_config, "retrieval.ppr_concurrency_limit", 4
             ),
+            ppr_local_enabled=_get_config_value(plugin_config, "retrieval.ppr_local_enabled", True),
+            ppr_local_max_nodes=_get_config_value(plugin_config, "retrieval.ppr_local_max_nodes", 256),
+            ppr_local_hops=_get_config_value(plugin_config, "retrieval.ppr_local_hops", 2),
+            ppr_local_min_graph_nodes=_get_config_value(
+                plugin_config, "retrieval.ppr_local_min_graph_nodes", 128
+            ),
             enable_parallel=_get_config_value(plugin_config, "retrieval.enable_parallel", True),
             retrieval_strategy=RetrievalStrategy.DUAL_PATH,
             debug=_resolve_debug_enabled(plugin_config),

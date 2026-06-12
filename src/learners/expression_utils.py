@@ -11,7 +11,7 @@ from src.services.llm_service import LLMServiceClient
 
 logger = get_logger("expression_utils")
 
-judge_llm = LLMServiceClient(task_name="learner", request_type="expression_check")
+judge_llm = LLMServiceClient(task_name="learner", request_type="expression.check")
 
 
 def _normalize_repair_json_result(repaired_result: Any) -> str:

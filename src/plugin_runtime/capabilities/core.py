@@ -1,5 +1,7 @@
-from datetime import datetime
+﻿from datetime import datetime
 from typing import Any, Dict, List
+
+import base64
 
 from src.common.logger import get_logger
 from src.config.config import global_config
@@ -99,6 +101,27 @@ def _embedding_result_to_payload(result: Any) -> Dict[str, Any]:
     }
 
 
+def _normalize_audio_base64_arg(args: Dict[str, Any]) -> str | None:
+    """校验并规范化插件传入的音频 Base64。"""
+
+    audio_base64 = (
+        str(args.get("audio_base64") or "").strip()
+        or str(args.get("voice_base64") or "").strip()
+        or str(args.get("base64") or "").strip()
+    )
+    if not audio_base64:
+        return None
+
+    if audio_base64.startswith("data:") and ";base64," in audio_base64:
+        audio_base64 = audio_base64.split(";base64,", maxsplit=1)[1].strip()
+
+    try:
+        base64.b64decode(audio_base64, validate=True)
+    except Exception as exc:
+        raise ValueError("音频 Base64 数据不合法") from exc
+    return audio_base64
+
+
 def _normalize_context_segment(raw_segment: Any) -> Dict[str, Any] | None:
     """将插件传入的上下文消息段规范化为宿主消息段结构。"""
 
@@ -161,8 +184,8 @@ class RuntimeCoreCapabilityMixin:
 
         try:
             from src.chat.heart_flow.heartflow_manager import heartflow_manager
-            from src.maisaka.context_messages import SessionBackedMessage
-            from src.maisaka.message_adapter import build_visible_text_from_sequence
+            from src.maisaka.context.messages import SessionBackedMessage
+            from src.maisaka.context.message_adapter import build_visible_text_from_sequence
             from src.plugin_runtime.host.message_utils import PluginMessageUtils
 
             runtime = await heartflow_manager.get_or_create_heartflow_chat(stream_id)
@@ -625,6 +648,35 @@ class RuntimeCoreCapabilityMixin:
             }
         except Exception as exc:
             logger.error(f"[cap.llm.embed] 执行失败: {exc}", exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    async def _cap_llm_transcribe_audio(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """执行语音识别能力。"""
+
+        del capability
+        from src.services.llm_service import LLMServiceClient, resolve_task_name
+
+        try:
+            audio_base64 = _normalize_audio_base64_arg(args)
+            if audio_base64 is None:
+                return {"success": False, "error": "缺少必要参数 audio_base64 或 voice_base64"}
+
+            task_name = resolve_task_name(
+                str(args.get("task_name", "") or args.get("model", "") or args.get("model_name", "") or "voice")
+            )
+            asr_client = LLMServiceClient(
+                task_name=task_name,
+                request_type=f"plugin.{plugin_id}.asr",
+            )
+            result = await asr_client.transcribe_audio(audio_base64)
+            text = result.text or ""
+            return {
+                "success": bool(text),
+                "text": text,
+                "content": text,
+            }
+        except Exception as exc:
+            logger.error(f"[cap.llm.transcribe_audio] 执行失败: {exc}", exc_info=True)
             return {"success": False, "error": str(exc)}
 
     async def _cap_llm_get_available_models(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:

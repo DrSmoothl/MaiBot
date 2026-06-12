@@ -747,6 +747,26 @@ async def _notify_memory_automation_on_message_sent(message: SessionMessage) -> 
         logger.warning(f"[{session_id}] 长期记忆人物事实写回注册失败: {exc}")
 
 
+def _record_sent_emoji_usage(message: SessionMessage) -> None:
+    """在消息真实发送成功后记录其中表情包的使用次数。"""
+
+    emoji_hashes = [
+        component.binary_hash.strip()
+        for component in message.raw_message.components
+        if isinstance(component, EmojiComponent) and component.binary_hash.strip()
+    ]
+    if not emoji_hashes:
+        return
+
+    try:
+        from src.emoji_system.emoji_manager import emoji_manager
+
+        for emoji_hash in emoji_hashes:
+            emoji_manager.update_emoji_usage_by_hash(emoji_hash, log_missing=False)
+    except Exception as exc:
+        logger.warning(f"[SendService] 记录表情包使用次数失败: {exc}")
+
+
 def _sync_sent_message_to_maisaka_history(
     message: SessionMessage,
     *,
@@ -877,6 +897,7 @@ async def _send_via_platform_io(
     )
 
     if delivery_batch.has_success:
+        _record_sent_emoji_usage(message)
         if storage_message:
             await _store_sent_message(message)
         await _notify_memory_automation_on_message_sent(message)

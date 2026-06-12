@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import { Card } from '@/components/ui/card'
@@ -38,6 +38,8 @@ interface MirrorConfig {
   updated_at?: string
 }
 
+const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
+
 export function PluginMirrorsPage() {
   const navigate = useNavigate()
   const { toast } = useToast()
@@ -47,8 +49,11 @@ export function PluginMirrorsPage() {
   const [editingMirror, setEditingMirror] = useState<MirrorConfig | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [showCompatibleOnly, setShowCompatibleOnly] = useState(
+    () => localStorage.getItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY) !== 'false'
+  )
 
-  // 表单状态
+  // 琛ㄥ崟鐘舵€?
   const [formData, setFormData] = useState({
     id: '',
     name: '',
@@ -88,6 +93,10 @@ export function PluginMirrorsPage() {
   useEffect(() => {
     loadMirrors()
   }, [loadMirrors])
+
+  useEffect(() => {
+    localStorage.setItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY, String(showCompatibleOnly))
+  }, [showCompatibleOnly])
 
   // 添加镜像源
   const handleAddMirror = async () => {
@@ -191,7 +200,7 @@ export function PluginMirrorsPage() {
     }
   }
 
-  // 切换启用状态
+  // 鍒囨崲鍚敤鐘舵€?
   const handleToggleEnabled = async (mirror: MirrorConfig) => {
     try {
       const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${mirror.id}`, {
@@ -259,7 +268,7 @@ export function PluginMirrorsPage() {
   return (
     <ScrollArea className="h-full">
       <div className="space-y-6 p-4 sm:p-6">
-        {/* 标题栏 */}
+        {/* 鏍囬鏍?*/}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-4">
             <Button
@@ -270,9 +279,9 @@ export function PluginMirrorsPage() {
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div>
-              <h1 className="text-2xl sm:text-3xl font-bold">镜像源配置</h1>
+              <h1 className="text-2xl sm:text-3xl font-bold">插件商店设置</h1>
               <p className="text-sm text-muted-foreground mt-1">
-                管理 Git 克隆和文件下载的镜像源
+                管理插件市场筛选偏好和插件安装镜像源
               </p>
             </div>
           </div>
@@ -281,6 +290,24 @@ export function PluginMirrorsPage() {
             添加镜像源
           </Button>
         </div>
+
+        <Card className="p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <Label htmlFor="plugin-market-compatible-only" className="text-sm font-medium">
+                仅显示当前版本
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                在插件市场默认隐藏不兼容当前麦麦版本的插件
+              </p>
+            </div>
+            <Switch
+              id="plugin-market-compatible-only"
+              checked={showCompatibleOnly}
+              onCheckedChange={setShowCompatibleOnly}
+            />
+          </div>
+        </Card>
 
         {/* 加载状态 */}
         {loading ? (
@@ -300,7 +327,7 @@ export function PluginMirrorsPage() {
           </Card>
         ) : (
           <Card>
-            {/* 桌面端表格 */}
+            {/* 妗岄潰绔〃鏍?*/}
             <div className="hidden md:block">
               <Table aria-label="插件镜像源列表">
                 <TableHeader>

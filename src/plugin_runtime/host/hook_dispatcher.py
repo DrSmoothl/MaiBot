@@ -24,8 +24,11 @@ import asyncio
 import contextlib
 
 from src.common.logger import get_logger
+from src.common.shutdown import is_shutdown_requested
 from src.config.config import global_config
+from src.plugin_runtime.protocol.errors import ErrorCode, RPCError
 
+from .circuit_breaker import get_plugin_circuit_breaker
 from .hook_spec_registry import HookSpec, HookSpecRegistry
 
 if TYPE_CHECKING:
@@ -200,17 +203,23 @@ class HookDispatcher:
             HookDispatchResult: 聚合后的 Hook 调用结果。
         """
 
-        resolved_supervisors = list(supervisors) if supervisors is not None else list(self._resolve_supervisors())
         normalized_hook_name = self._normalize_hook_name(hook_name)
-        hook_spec = self.get_hook_spec(normalized_hook_name)
         current_kwargs: Dict[str, Any] = dict(kwargs)
         dispatch_result = HookDispatchResult(hook_name=normalized_hook_name, kwargs=dict(current_kwargs))
+        if is_shutdown_requested():
+            return dispatch_result
+
+        resolved_supervisors = list(supervisors) if supervisors is not None else list(self._resolve_supervisors())
+        hook_spec = self.get_hook_spec(normalized_hook_name)
         invocation_targets = self._collect_invocation_targets(normalized_hook_name, resolved_supervisors)
 
         if not invocation_targets:
             return dispatch_result
 
         for target in invocation_targets:
+            if is_shutdown_requested():
+                return dispatch_result
+
             if target.entry.is_observe:
                 self._schedule_observe_handler(
                     hook_name=normalized_hook_name,
@@ -418,6 +427,22 @@ class HookDispatcher:
 
         timeout_ms = self._resolve_timeout_ms(hook_spec, target)
         request_args: Dict[str, Any] = {"hook_name": hook_name, **dict(kwargs)}
+        if is_shutdown_requested():
+            return HookHandlerExecutionResult(
+                handler_name=target.entry.full_name,
+                plugin_id=target.entry.plugin_id,
+            )
+
+        circuit_permit = get_plugin_circuit_breaker().try_acquire(
+            target.entry.plugin_id,
+            target.entry.full_name,
+            f"hook:{hook_name}",
+        )
+        if not circuit_permit.allowed:
+            return HookHandlerExecutionResult(
+                handler_name=target.entry.full_name,
+                plugin_id=target.entry.plugin_id,
+            )
 
         try:
             response_envelope = await asyncio.wait_for(
@@ -431,10 +456,22 @@ class HookDispatcher:
                 timeout=max(timeout_ms / 1000.0, 0.001),
             )
         except asyncio.TimeoutError:
+            get_plugin_circuit_breaker().record_failure(circuit_permit, f"HookHandler 超时 {timeout_ms}ms")
             error_message = (
                 f"HookHandler {target.entry.full_name} 执行超时，已超过 {timeout_ms}ms"
             )
             logger.error(error_message)
+            return HookHandlerExecutionResult(
+                handler_name=target.entry.full_name,
+                plugin_id=target.entry.plugin_id,
+                success=False,
+                error_message=error_message,
+            )
+        except RPCError as exc:
+            if self._should_record_circuit_failure(exc):
+                get_plugin_circuit_breaker().record_failure(circuit_permit, str(exc))
+            error_message = f"HookHandler {target.entry.full_name} 执行失败: {exc}"
+            logger.error(error_message, exc_info=True)
             return HookHandlerExecutionResult(
                 handler_name=target.entry.full_name,
                 plugin_id=target.entry.plugin_id,
@@ -451,6 +488,7 @@ class HookDispatcher:
                 error_message=error_message,
             )
 
+        get_plugin_circuit_breaker().record_success(circuit_permit)
         response_payload = response_envelope.payload
         if not isinstance(response_payload, dict):
             return HookHandlerExecutionResult(
@@ -468,6 +506,12 @@ class HookDispatcher:
             custom_result=response_payload.get("custom_result"),
             error_message=str(response_payload.get("error_message", "") or ""),
         )
+
+    @staticmethod
+    def _should_record_circuit_failure(exc: RPCError) -> bool:
+        """判断 RPC 异常是否应计入插件熔断。"""
+
+        return exc.code in {ErrorCode.E_TIMEOUT, ErrorCode.E_PLUGIN_CRASHED}
 
     @staticmethod
     def _extract_modified_kwargs(raw_value: Any) -> Optional[Dict[str, Any]]:
@@ -603,6 +647,8 @@ class HookDispatcher:
 
         if not hook_spec.allow_observe:
             logger.warning(f"Hook {hook_name} 不允许 observe 处理器，已跳过 {target.entry.full_name}")
+            return
+        if is_shutdown_requested():
             return
 
         task = asyncio.create_task(

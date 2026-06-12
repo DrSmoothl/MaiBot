@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence
 import tomlkit
 
 from src.common.logger import get_logger
+from src.common.utils.utils_config import AMemorixConfigUtils
 from src.config.official_configs import AMemorixConfig
 from src.webui.utils.toml_utils import _update_toml_doc
 
@@ -184,12 +185,14 @@ class AMemorixHostService:
         if component_name == "search_memory":
             from .core.runtime.sdk_memory_kernel import KernelSearchRequest
 
+            chat_id = str(payload.get("chat_id", "") or "").strip()
             return await kernel.search_memory(
                 KernelSearchRequest(
                     query=str(payload.get("query", "") or ""),
                     limit=int(payload.get("limit", 5) or 5),
                     mode=str(payload.get("mode", "search") or "search"),
-                    chat_id=str(payload.get("chat_id", "") or ""),
+                    chat_id=chat_id,
+                    shared_chat_ids=tuple(AMemorixConfigUtils.get_shared_memory_session_ids(chat_id)),
                     person_id=str(payload.get("person_id", "") or ""),
                     time_start=payload.get("time_start"),
                     time_end=payload.get("time_end"),

@@ -1,5 +1,9 @@
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import json
+import pickle
 import pytest
 
 from src.services.memory_service import MemorySearchResult
@@ -7,6 +11,174 @@ from src.webui.dependencies import require_auth
 from src.webui.routers import memory as memory_router_module
 from src.webui.routers.memory import compat_router
 from src.webui.routes import router as main_router
+
+
+class _FakeDbContext:
+    def __init__(self, db_session):
+        self.db_session = db_session
+
+    def __enter__(self):
+        return self.db_session
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeMemoryMetadataStore:
+    def __init__(self):
+        self.paragraph_rows = [
+            {
+                "hash": "p-source",
+                "content": "来源命中的聊天摘要段落",
+                "created_at": 100.0,
+                "updated_at": 105.0,
+                "metadata": {},
+                "source": "chat_summary:chat-1",
+                "is_deleted": 0,
+                "deleted_at": None,
+            },
+            {
+                "hash": "p-meta",
+                "content": "metadata 命中的聊天历史段落",
+                "created_at": 110.0,
+                "updated_at": 110.0,
+                "metadata": {"chat_id": "chat-1"},
+                "source": "external",
+                "is_deleted": 0,
+                "deleted_at": None,
+            },
+            {
+                "hash": "p-other",
+                "content": "其他聊天流段落",
+                "created_at": 120.0,
+                "updated_at": 120.0,
+                "metadata": {"chat_id": "chat-2"},
+                "source": "chat_summary:chat-2",
+                "is_deleted": 0,
+                "deleted_at": None,
+            },
+        ]
+        self.episode_rows = [
+            {
+                "episode_id": "ep-1",
+                "source": "chat_summary:chat-1",
+                "title": "聊天摘要 Episode",
+                "summary": "Episode 摘要",
+                "paragraph_count": 2,
+                "created_at": 130.0,
+                "updated_at": 130.0,
+                "event_time_start": 100.0,
+                "event_time_end": 130.0,
+            }
+        ]
+        self.feedback_rows = [
+            {
+                "id": 7,
+                "query_tool_id": "tool-7",
+                "session_id": "chat-1",
+                "query_timestamp": 140.0,
+                "status": "applied",
+                "decision_json": '{"profile_person_ids":["person-1"]}',
+                "query_snapshot_json": "{}",
+                "rollback_plan_json": "{}",
+                "rollback_result_json": "{}",
+                "created_at": 139.0,
+                "updated_at": 145.0,
+                "rolled_back_at": 150.0,
+                "rollback_reason": "测试回滚",
+            }
+        ]
+        self.delete_rows = [
+            {
+                "operation_id": "op-1",
+                "mode": "source",
+                "selector": '{"sources":["chat_summary:chat-1"]}',
+                "reason": "清理来源",
+                "requested_by": "tester",
+                "status": "restored",
+                "created_at": 160.0,
+                "restored_at": 170.0,
+                "summary_json": '{"sources":["chat_summary:chat-1"]}',
+            }
+        ]
+        self.delete_item_rows = [
+            {
+                "item_type": "paragraph",
+                "item_hash": "p-source",
+                "item_key": "chat_summary:chat-1",
+                "payload_json": '{"source":"chat_summary:chat-1","paragraph_hash":"p-source"}',
+                "created_at": 160.0,
+            }
+        ]
+
+    def query(self, sql: str, params=None):
+        if "FROM paragraphs" in sql and "WHERE hash = ?" in sql:
+            wanted_hash = params[0]
+            return [row for row in self.paragraph_rows if row["hash"] == wanted_hash]
+        if "FROM paragraphs" in sql and "ORDER BY COALESCE(updated_at" in sql:
+            return list(self.paragraph_rows)
+        if "FROM episodes" in sql:
+            return list(self.episode_rows)
+        if "FROM memory_feedback_tasks" in sql:
+            return list(self.feedback_rows)
+        if "FROM delete_operations" in sql:
+            return list(self.delete_rows)
+        if "FROM delete_operation_items" in sql:
+            return list(self.delete_item_rows)
+        if "person_profile" in sql or "FROM relations" in sql:
+            return []
+        return []
+
+
+class _CountingTimelineMetadataStore(_FakeMemoryMetadataStore):
+    def __init__(self):
+        super().__init__()
+        self.delete_item_query_count = 0
+        self.profile_paragraph_query_count = 0
+        self.paragraph_rows.append(
+            {
+                "hash": "p-zero",
+                "content": "零时间戳段落",
+                "created_at": 0.0,
+                "updated_at": 0.0,
+                "metadata": json.dumps({"chat_id": "chat-1"}).encode("utf-8"),
+                "source": "external",
+                "is_deleted": 0,
+                "deleted_at": None,
+            }
+        )
+        self.paragraph_rows.append(
+            {
+                "hash": "p-pickle",
+                "content": "pickle metadata 不应在请求路径反序列化",
+                "created_at": 180.0,
+                "updated_at": 180.0,
+                "metadata": pickle.dumps({"chat_id": "chat-1"}),
+                "source": "external",
+                "is_deleted": 0,
+                "deleted_at": None,
+            }
+        )
+        self.delete_rows.append(
+            {
+                "operation_id": "op-2",
+                "mode": "source",
+                "selector": '{"sources":["chat_summary:chat-1"]}',
+                "reason": "第二次清理",
+                "requested_by": "tester",
+                "status": "done",
+                "created_at": 175.0,
+                "restored_at": None,
+                "summary_json": '{"sources":["chat_summary:chat-1"]}',
+            }
+        )
+
+    def query(self, sql: str, params=None):
+        if "FROM delete_operation_items" in sql:
+            self.delete_item_query_count += 1
+        if "FROM paragraph_entities" in sql and "JOIN paragraphs" in sql:
+            self.profile_paragraph_query_count += 1
+        return super().query(sql, params)
 
 
 @pytest.fixture
@@ -435,6 +607,163 @@ def test_webui_memory_episode_list_prefers_explicit_person_id(client: TestClient
     assert response.json()["items"] == []
 
 
+def test_webui_memory_timeline_returns_chat_scoped_events(client: TestClient, monkeypatch):
+    monkeypatch.setattr(
+        memory_router_module,
+        "_find_real_chat_session",
+        lambda chat_id: SimpleNamespace(
+            session_id=chat_id,
+            platform="qq",
+            group_id="100",
+            user_id=None,
+            group_name="测试群",
+            user_cardname=None,
+            user_nickname=None,
+        )
+        if chat_id == "chat-1"
+        else None,
+    )
+    monkeypatch.setattr(memory_router_module, "_get_memory_metadata_store", lambda: _FakeMemoryMetadataStore())
+    monkeypatch.setattr(memory_router_module, "_prefetch_latest_messages_by_session", lambda db_session, session_ids: {})
+    monkeypatch.setattr(memory_router_module._chat_manager, "get_session_name", lambda chat_id: "测试群")
+
+    response = client.get(
+        "/api/webui/memory/timeline",
+        params={"chat_id": "chat-1", "time_start": 90, "time_end": 180, "limit": 50},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    event_types = {item["event_type"] for item in payload["items"]}
+    assert payload["success"] is True
+    assert payload["chat"]["chat_id"] == "chat-1"
+    assert "paragraph_created" in event_types
+    assert "episode_created" in event_types
+    assert "feedback_correction_applied" in event_types
+    assert "feedback_correction_rollback" in event_types
+    assert "delete_executed" in event_types
+    assert "delete_restored" in event_types
+    assert any(item["key_id"] == "p-meta" and item["attribution"] == "metadata.chat_id" for item in payload["items"])
+    assert any(item["key_id"] == "p-source" and item["attribution"] == "source" for item in payload["items"])
+    assert all(item["jump_target"]["tab"] in {"delete", "episodes", "feedback", "profiles"} for item in payload["items"])
+    assert payload["range"]["min_time"] == 100.0
+    assert payload["range"]["max_time"] == 170.0
+
+
+def test_webui_memory_timeline_filters_types_and_limit(client: TestClient, monkeypatch):
+    monkeypatch.setattr(
+        memory_router_module,
+        "_find_real_chat_session",
+        lambda chat_id: SimpleNamespace(
+            session_id=chat_id,
+            platform="qq",
+            group_id="100",
+            user_id=None,
+            group_name="测试群",
+            user_cardname=None,
+            user_nickname=None,
+        ),
+    )
+    monkeypatch.setattr(memory_router_module, "_get_memory_metadata_store", lambda: _FakeMemoryMetadataStore())
+    monkeypatch.setattr(memory_router_module, "_prefetch_latest_messages_by_session", lambda db_session, session_ids: {})
+
+    response = client.get(
+        "/api/webui/memory/timeline",
+        params={"chat_id": "chat-1", "types": "episode", "limit": 1},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["category"] == "episode"
+    assert payload["items"][0]["jump_target"]["params"]["episode_id"] == "ep-1"
+
+
+def test_webui_memory_timeline_uses_latest_message_snapshot(client: TestClient, monkeypatch):
+    monkeypatch.setattr(
+        memory_router_module,
+        "_find_real_chat_session",
+        lambda chat_id: SimpleNamespace(
+            session_id=chat_id,
+            platform="qq",
+            group_id=None,
+            user_id="user-1",
+            group_name=None,
+            user_cardname=None,
+            user_nickname=None,
+        ),
+    )
+    monkeypatch.setattr(memory_router_module, "_get_memory_metadata_store", lambda: _FakeMemoryMetadataStore())
+    monkeypatch.setattr(
+        memory_router_module,
+        "_prefetch_latest_messages_by_session",
+        lambda db_session, session_ids: {
+            "chat-1": {
+                "group_id": None,
+                "group_name": None,
+                "user_id": "user-1",
+                "user_cardname": "测试名片",
+                "user_nickname": "测试昵称",
+            }
+        },
+    )
+    monkeypatch.setattr(memory_router_module._chat_manager, "get_session_name", lambda chat_id: "")
+
+    response = client.get("/api/webui/memory/timeline", params={"chat_id": "chat-1", "limit": 1})
+
+    assert response.status_code == 200
+    assert response.json()["chat"]["chat_name"] == "测试名片的私聊"
+
+
+def test_webui_memory_timeline_rejects_unknown_chat(client: TestClient, monkeypatch):
+    def fake_find_real_chat_session(chat_id: str):
+        assert chat_id == "missing-chat"
+        return None
+
+    monkeypatch.setattr(memory_router_module, "_find_real_chat_session", fake_find_real_chat_session)
+    monkeypatch.setattr(memory_router_module, "_get_memory_metadata_store", lambda: _FakeMemoryMetadataStore())
+
+    response = client.get("/api/webui/memory/timeline", params={"chat_id": "missing-chat"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "聊天流不存在: missing-chat"
+
+
+def test_webui_memory_timeline_handles_json_bytes_zero_timestamp_and_batches_items(
+    client: TestClient,
+    monkeypatch,
+):
+    store = _CountingTimelineMetadataStore()
+    monkeypatch.setattr(
+        memory_router_module,
+        "_find_real_chat_session",
+        lambda chat_id: SimpleNamespace(
+            session_id=chat_id,
+            platform="qq",
+            group_id="100",
+            user_id=None,
+            group_name="测试群",
+            user_cardname=None,
+            user_nickname=None,
+        ),
+    )
+    monkeypatch.setattr(memory_router_module, "_get_memory_metadata_store", lambda: store)
+    monkeypatch.setattr(memory_router_module, "_prefetch_latest_messages_by_session", lambda db_session, session_ids: {})
+
+    response = client.get("/api/webui/memory/timeline", params={"chat_id": "chat-1", "limit": 50})
+
+    assert response.status_code == 200
+    payload = response.json()
+    paragraph_ids = {
+        item["key_id"]
+        for item in payload["items"]
+        if item["event_type"] == "paragraph_created"
+    }
+    assert "p-zero" in paragraph_ids
+    assert "p-pickle" not in paragraph_ids
+    assert store.delete_item_query_count == 2
+
+
 def test_compat_aggregate_route(client: TestClient, monkeypatch):
     async def fake_search(query: str, **kwargs):
         assert kwargs["mode"] == "aggregate"
@@ -614,9 +943,15 @@ def test_import_guide_route(client: TestClient, monkeypatch):
 
 def test_import_upload_route(client: TestClient, monkeypatch, tmp_path):
     monkeypatch.setattr(memory_router_module, "STAGING_ROOT", tmp_path)
+    monkeypatch.setattr(
+        memory_router_module._chat_manager,
+        "get_existing_session_by_session_id",
+        lambda chat_id: SimpleNamespace(session_id=chat_id) if chat_id == "session-1" else None,
+    )
 
     async def fake_import_admin(*, action: str, **kwargs):
         assert action == "create_upload"
+        assert kwargs["chat_id"] == "session-1"
         staged_files = kwargs["staged_files"]
         assert len(staged_files) == 1
         assert staged_files[0]["filename"] == "demo.txt"
@@ -627,13 +962,68 @@ def test_import_upload_route(client: TestClient, monkeypatch, tmp_path):
 
     response = client.post(
         "/api/import/upload",
-        data={"payload_json": "{\"source\": \"upload\"}"},
+        data={"payload_json": "{\"source\": \"upload\", \"chat_id\": \"session-1\"}"},
         files=[("files", ("demo.txt", b"hello world", "text/plain"))],
     )
 
     assert response.status_code == 200
     assert response.json() == {"success": True, "task_id": "task-1"}
     assert list(tmp_path.iterdir()) == []
+
+
+def test_import_upload_route_rejects_unknown_chat_id(client: TestClient, monkeypatch, tmp_path):
+    monkeypatch.setattr(memory_router_module, "STAGING_ROOT", tmp_path)
+    monkeypatch.setattr(memory_router_module._chat_manager, "get_existing_session_by_session_id", lambda chat_id: None)
+    monkeypatch.setattr(
+        memory_router_module,
+        "get_db_session",
+        lambda: _FakeDbContext(SimpleNamespace(exec=lambda statement: SimpleNamespace(first=lambda: None))),
+    )
+
+    response = client.post(
+        "/api/import/upload",
+        data={"payload_json": "{\"chat_id\": \"missing-session\"}"},
+        files=[("files", ("demo.txt", b"hello world", "text/plain"))],
+    )
+
+    assert response.status_code == 400
+    assert "聊天流不存在" in response.json()["detail"]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_import_chat_targets_route(client: TestClient, monkeypatch):
+    chat_session = SimpleNamespace(
+        session_id="session-1",
+        platform="qq",
+        group_id="10001",
+        group_name="测试群",
+        user_id="20002",
+        account_id="bot-1",
+        scope="default",
+        user_nickname=None,
+        user_cardname=None,
+        last_active_timestamp=None,
+    )
+    monkeypatch.setattr(memory_router_module._chat_manager, "get_session_name", lambda chat_id: "")
+    monkeypatch.setattr(
+        memory_router_module,
+        "get_db_session",
+        lambda: _FakeDbContext(
+            SimpleNamespace(exec=lambda statement: SimpleNamespace(all=lambda: [chat_session], first=lambda: None))
+        ),
+    )
+
+    response = client.get("/api/webui/memory/import/chat-targets")
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["data"][0]["chat_id"] == "session-1"
+    assert response.json()["data"][0]["chat_name"] == "测试群"
+    assert response.json()["data"][0]["platform"] == "qq"
+    assert response.json()["data"][0]["group_id"] == "10001"
+    assert response.json()["data"][0]["user_id"] == "20002"
+    assert response.json()["data"][0]["account_id"] == "bot-1"
+    assert response.json()["data"][0]["scope"] == "default"
 
 
 def test_v5_status_route(client: TestClient, monkeypatch):

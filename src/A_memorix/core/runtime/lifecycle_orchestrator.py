@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Any, Callable, Coroutine, cast
 
 from src.common.logger import get_logger
@@ -155,6 +154,7 @@ async def initialize_storage_async(plugin: Any) -> None:
         max_concurrent=plugin.get_config("embedding.max_concurrent", 5),
         default_dimension=plugin.get_config("embedding.dimension", 1024),
         model_name=plugin.get_config("embedding.model_name", "auto"),
+        dimension_request_mode=plugin.get_config("embedding.dimension_request_mode", "explicit"),
         retry_config=plugin.get_config("embedding.retry", {}),
     )
     logger.info("嵌入 API 适配器初始化完成")
@@ -228,7 +228,25 @@ async def initialize_storage_async(plugin: Any) -> None:
         f"tokenizer={sparse_cfg.tokenizer_mode}"
     )
     if sparse_cfg.enabled and not sparse_cfg.lazy_load:
-        plugin.sparse_index.ensure_loaded()
+        try:
+            warmup_summary = plugin.sparse_index.warmup()
+        except Exception as e:
+            logger.warning(f"稀疏索引预热异常，后续检索将按需重试: {e}")
+            warmup_summary = {"ok": False, "error": str(e)}
+        if warmup_summary.get("ok"):
+            logger.info(
+                "稀疏索引预热完成: "
+                f"backend={warmup_summary.get('backend')}, "
+                f"docs={warmup_summary.get('doc_count')}, "
+                f"paragraph_probe={warmup_summary.get('paragraph_probe_count')}, "
+                f"relation_probe={warmup_summary.get('relation_probe_count')}, "
+                f"duration_ms={float(warmup_summary.get('duration_ms', 0.0)):.2f}"
+            )
+        else:
+            logger.warning(
+                "稀疏索引预热失败，后续检索将按需重试: "
+                f"{warmup_summary.get('error', 'unknown')}"
+            )
 
     if plugin.vector_store.has_data():
         try:

@@ -46,6 +46,18 @@ export function parseOptionalPositiveInt(input: string): number | undefined {
   return parsed
 }
 
+export function parseOptionalNonNegativeInt(input: string): number | undefined {
+  const value = input.trim()
+  if (!value) {
+    return undefined
+  }
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return undefined
+  }
+  return parsed
+}
+
 export function parseCommaSeparatedList(input: string): string[] {
   return input
     .split(',')

@@ -252,6 +252,71 @@ function getPluginConfigHref(pluginId: string, tabId?: string): string {
   return `/plugin-config?${params.toString()}`
 }
 
+function buildBasePluginShortcut(plugin: InstalledPlugin, t: TFunction): QuickShortcutDefinition {
+  const pluginName = plugin.manifest.name || plugin.id
+  return {
+    id: getPluginShortcutId(plugin.id),
+    category: 'plugin',
+    label: t('home.pluginShortcuts.baseLabel', { plugin: pluginName }),
+    description: t('home.pluginShortcuts.baseDescription', { plugin: pluginName }),
+    icon: Puzzle,
+    href: getPluginConfigHref(plugin.id),
+  }
+}
+
+async function loadPluginTabShortcuts(
+  plugin: InstalledPlugin,
+  t: TFunction,
+  selectedTabIds?: Set<string>
+): Promise<QuickShortcutDefinition[]> {
+  const schemaResult = await getPluginConfigSchema(plugin.id)
+  if (!schemaResult.success || !schemaResult.data) {
+    return []
+  }
+
+  const pluginName = plugin.manifest.name || plugin.id
+  const schema = schemaResult.data as PluginConfigSchema
+  const schemaTabs = schema.layout.type === 'tabs' ? schema.layout.tabs : []
+  const tabs = selectedTabIds ? schemaTabs.filter((tab) => selectedTabIds.has(tab.id)) : schemaTabs
+  return tabs.map((tab) => ({
+    id: getPluginShortcutId(plugin.id, tab.id),
+    category: 'plugin' as const,
+    label: `${pluginName} / ${tab.title || tab.id}`,
+    description: t('home.pluginShortcuts.tabDescription', {
+      plugin: pluginName,
+      tab: tab.title || tab.id,
+    }),
+    icon: Puzzle,
+    href: getPluginConfigHref(plugin.id, tab.id),
+  }))
+}
+
+function getSelectedPluginTabIds(ids: string[]): Map<string, Set<string>> {
+  const selectedTabs = new Map<string, Set<string>>()
+  for (const id of ids) {
+    const parsed = parsePluginShortcutId(id)
+    if (!parsed?.tabId) {
+      continue
+    }
+
+    const pluginTabs = selectedTabs.get(parsed.pluginId) ?? new Set<string>()
+    pluginTabs.add(parsed.tabId)
+    selectedTabs.set(parsed.pluginId, pluginTabs)
+  }
+  return selectedTabs
+}
+
+function getSelectedPluginIds(ids: string[]): Set<string> {
+  const selectedPluginIds = new Set<string>()
+  for (const id of ids) {
+    const parsed = parsePluginShortcutId(id)
+    if (parsed) {
+      selectedPluginIds.add(parsed.pluginId)
+    }
+  }
+  return selectedPluginIds
+}
+
 function getFallbackPluginShortcut(id: string, t: TFunction): QuickShortcutDefinition | null {
   const parsed = parsePluginShortcutId(id)
   if (!parsed) {
@@ -637,6 +702,14 @@ function IndexPageContent() {
     let cancelled = false
 
     const loadPluginShortcuts = async () => {
+      const selectedPluginIds = getSelectedPluginIds(quickShortcutIds)
+      const selectedPluginTabIds = getSelectedPluginTabIds(quickShortcutIds)
+      if (!quickShortcutDialogOpen && selectedPluginIds.size === 0) {
+        setPluginShortcuts([])
+        setIsPluginShortcutsLoading(false)
+        return
+      }
+
       setIsPluginShortcutsLoading(true)
       try {
         const installedResult = await getInstalledPlugins()
@@ -648,43 +721,39 @@ function IndexPageContent() {
           .filter((plugin) => plugin.disabled !== true && plugin.enabled !== false)
           .filter((plugin, index, all) => index === all.findIndex((item) => item.id === plugin.id))
 
-        const shortcuts = await Promise.all(
-          enabledPlugins.map(async (plugin: InstalledPlugin): Promise<QuickShortcutDefinition[]> => {
-            const pluginName = plugin.manifest.name || plugin.id
-            const baseShortcut: QuickShortcutDefinition = {
-              id: getPluginShortcutId(plugin.id),
-              category: 'plugin',
-              label: t('home.pluginShortcuts.baseLabel', { plugin: pluginName }),
-              description: t('home.pluginShortcuts.baseDescription', { plugin: pluginName }),
-              icon: Puzzle,
-              href: getPluginConfigHref(plugin.id),
-            }
+        const visiblePlugins = quickShortcutDialogOpen
+          ? enabledPlugins
+          : enabledPlugins.filter((plugin) => selectedPluginIds.has(plugin.id))
+        const baseShortcuts = visiblePlugins.map((plugin) => buildBasePluginShortcut(plugin, t))
+        if (!cancelled) {
+          setPluginShortcuts(baseShortcuts)
+        }
 
-            const schemaResult = await getPluginConfigSchema(plugin.id)
-            if (!schemaResult.success || !schemaResult.data) {
-              return [baseShortcut]
-            }
+        if (selectedPluginTabIds.size === 0) {
+          return
+        }
 
-            const schema = schemaResult.data as PluginConfigSchema
-            const tabs = schema.layout.type === 'tabs' ? schema.layout.tabs : []
-            const tabShortcuts = tabs.map((tab) => ({
-              id: getPluginShortcutId(plugin.id, tab.id),
-              category: 'plugin' as const,
-              label: `${pluginName} / ${tab.title || tab.id}`,
-              description: t('home.pluginShortcuts.tabDescription', {
-                plugin: pluginName,
-                tab: tab.title || tab.id,
-              }),
-              icon: Puzzle,
-              href: getPluginConfigHref(plugin.id, tab.id),
-            }))
+        const enabledPluginMap = new Map(enabledPlugins.map((plugin) => [plugin.id, plugin]))
+        const tabShortcuts = (
+          await Promise.all(
+            Array.from(selectedPluginTabIds.entries()).map(async ([pluginId, selectedTabIds]) => {
+              const plugin = enabledPluginMap.get(pluginId)
+              if (!plugin) {
+                return []
+              }
 
-            return [baseShortcut, ...tabShortcuts]
-          })
-        )
+              try {
+                return await loadPluginTabShortcuts(plugin, t, selectedTabIds)
+              } catch (error) {
+                console.warn(`加载插件 ${plugin.id} 已选配置页签快捷入口失败:`, error)
+                return []
+              }
+            })
+          )
+        ).flat()
 
         if (!cancelled) {
-          setPluginShortcuts(shortcuts.flat())
+          setPluginShortcuts([...baseShortcuts, ...tabShortcuts])
         }
       } catch (error) {
         console.error('加载插件快捷入口失败:', error)
@@ -700,7 +769,7 @@ function IndexPageContent() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [quickShortcutDialogOpen, quickShortcutIds, t])
 
   const quickShortcutOptions = useMemo<QuickShortcutDefinition[]>(
     () => [
@@ -1178,7 +1247,7 @@ function IndexPageContent() {
         {/* 机器人状态卡片 */}
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
               <FileText className="h-4 w-4" />
               {t('home.versionCard.title')}
             </CardTitle>
@@ -1242,7 +1311,7 @@ function IndexPageContent() {
 
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
               <Power className="h-4 w-4" />
               {t('home.botStatus.title')}
             </CardTitle>
@@ -1368,8 +1437,8 @@ function IndexPageContent() {
 
         {/* 快速操作卡片 */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
               <Zap className="h-4 w-4" />
               {t('home.quickActions.title')}
             </CardTitle>
@@ -1397,23 +1466,32 @@ function IndexPageContent() {
                   const content = (
                     <>
                       <Icon className={`h-4 w-4 ${shortcut.id === 'action:restart' && isRestarting ? 'animate-spin' : ''}`} />
-                      {shortcut.label}
+                      <span className="min-w-0 flex-1 truncate text-left">
+                        {shortcut.label}
+                      </span>
                       {shortcut.badge && (
-                        <span className="ml-1 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs text-white">
+                        <span className="ml-1 shrink-0 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs text-white">
                           {shortcut.badge}
                         </span>
                       )}
-                      {shortcut.external && <ExternalLink className="h-3.5 w-3.5" />}
+                      {shortcut.external && <ExternalLink className="h-3.5 w-3.5 shrink-0" />}
                     </>
                   )
 
                   if (shortcut.href) {
                     return (
-                      <Button key={shortcut.id} variant="outline" size="sm" asChild className="gap-2">
+                      <Button
+                        key={shortcut.id}
+                        variant="outline"
+                        size="sm"
+                        asChild
+                        className="max-w-[14rem] justify-start gap-2 overflow-hidden sm:max-w-[18rem]"
+                      >
                         <a
                           href={shortcut.href}
                           target={shortcut.external ? '_blank' : undefined}
                           rel={shortcut.external ? 'noopener noreferrer' : undefined}
+                          title={shortcut.label}
                         >
                           {content}
                         </a>
@@ -1428,7 +1506,8 @@ function IndexPageContent() {
                       size="sm"
                       onClick={shortcut.action}
                       disabled={shortcut.disabled}
-                      className="gap-2"
+                      className="max-w-[14rem] justify-start gap-2 overflow-hidden sm:max-w-[18rem]"
+                      title={shortcut.label}
                     >
                       {content}
                     </Button>
@@ -1446,7 +1525,7 @@ function IndexPageContent() {
         <Card>
           <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1.5">
-              <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
                 <BarChart3 className="h-4 w-4" />
                 {t('home.stats.overviewTitle')}
               </CardTitle>
@@ -1586,7 +1665,7 @@ function IndexPageContent() {
 
         <Card className="xl:self-stretch">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
               <HardDrive className="h-4 w-4" />
               {t('home.storage.title')}
             </CardTitle>

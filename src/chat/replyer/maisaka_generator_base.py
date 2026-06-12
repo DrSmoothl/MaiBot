@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+﻿from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
@@ -38,7 +38,7 @@ from src.config.config import global_config
 from src.config.model_configs import ModelInfo
 from src.core.types import ActionInfo
 from src.llm_models.payload_content.message import Message, MessageBuilder, RoleType
-from src.maisaka.context_messages import (
+from src.maisaka.context.messages import (
     AssistantMessage,
     LLMContextMessage,
     ReferenceMessage,
@@ -47,9 +47,9 @@ from src.maisaka.context_messages import (
     build_llm_message_from_context,
 )
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
-from src.maisaka.message_adapter import parse_speaker_content
-from src.maisaka.planner_message_utils import extract_quote_ids_from_message_sequence
-from src.maisaka.visual_message_limiter import limit_latest_images_in_messages
+from src.maisaka.context.message_adapter import parse_speaker_content
+from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
+from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.plugin_runtime.hook_payloads import deserialize_prompt_messages, serialize_prompt_messages
 
 from .maisaka_expression_selector import maisaka_expression_selector
@@ -66,6 +66,7 @@ class MaisakaReplyContext:
 
     expression_habits: str = ""
     selected_expression_ids: List[int] = field(default_factory=list)
+    selected_expressions: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class BaseMaisakaReplyGenerator:
@@ -75,7 +76,7 @@ class BaseMaisakaReplyGenerator:
         self,
         *,
         chat_stream: Optional[BotChatSession] = None,
-        request_type: str = "maisaka_replyer",
+        request_type: str = "maisaka.replyer",
         llm_client_cls: Any,
         load_prompt_func: Callable[..., str],
         enable_visual_message: Optional[bool],
@@ -265,7 +266,7 @@ class BaseMaisakaReplyGenerator:
         """构建 replyer 的最终输出格式说明。"""
 
         locale = BaseMaisakaReplyGenerator._get_prompt_locale()
-        if not getattr(global_config.chat, "enable_replyer_format_output", False):
+        if not global_config.experimental.enable_replyer_format_output:
             if locale.startswith("en"):
                 return (
                     "Please do not output any extra content (including unnecessary prefixes or suffixes, "
@@ -417,13 +418,11 @@ class BaseMaisakaReplyGenerator:
         self,
         reply_message: Optional[SessionMessage],
         reply_reason: str,
-        reference_info: str = "",
         expression_habits: str = "",
         stream_id: Optional[str] = None,
     ) -> str:
         del reply_message
         del reply_reason
-        del reference_info
         del expression_habits
         session_id = self._resolve_session_id(stream_id)
 
@@ -442,7 +441,7 @@ class BaseMaisakaReplyGenerator:
         return system_prompt
 
     def _build_reply_instruction(self) -> str:
-        if getattr(global_config.chat, "enable_replyer_format_output", False):
+        if global_config.experimental.enable_replyer_format_output:
             return self._build_replyer_output_instruction()
         return "请自然地回复。不要输出多余说明、括号、@ 或额外标记，只输出实际要发送的内容。"
 
@@ -450,8 +449,8 @@ class BaseMaisakaReplyGenerator:
         self,
         reply_message: Optional[SessionMessage],
         reply_reason: str,
-        reference_info: str = "",
         expression_habits: str = "",
+        reply_requirements: str = "",
         keywords_reaction_prompt: str = "",
     ) -> str:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -464,10 +463,10 @@ class BaseMaisakaReplyGenerator:
         reply_reference_lines: List[str] = []
         if reply_reason.strip():
             reply_reference_lines.append(f"【最新推理】\n{reply_reason.strip()}")
-        if reference_info.strip():
-            reply_reference_lines.append(f"【参考信息】\n{reference_info.strip()}")
         if reply_reference_lines:
             sections.append("【回复信息参考】\n" + "\n\n".join(reply_reference_lines))
+        if reply_requirements.strip():
+            sections.append(reply_requirements.strip())
         if keywords_reaction_prompt.strip():
             sections.append(keywords_reaction_prompt.strip())
         sections.append(self._build_reply_instruction())
@@ -514,8 +513,8 @@ class BaseMaisakaReplyGenerator:
         chat_history: List[LLMContextMessage],
         reply_message: Optional[SessionMessage],
         reply_reason: str,
-        reference_info: str = "",
         expression_habits: str = "",
+        reply_requirements: str = "",
         stream_id: Optional[str] = None,
         enable_visual_message: bool = False,
     ) -> List[Message]:
@@ -527,15 +526,14 @@ class BaseMaisakaReplyGenerator:
         system_prompt = self._build_system_prompt(
             reply_message=reply_message,
             reply_reason=reply_reason,
-            reference_info=reference_info,
             expression_habits=expression_habits,
             stream_id=stream_id,
         )
         final_user_message = self._build_final_user_message(
             reply_message=reply_message,
             reply_reason=reply_reason,
-            reference_info=reference_info,
             expression_habits=expression_habits,
+            reply_requirements=reply_requirements,
             keywords_reaction_prompt=keywords_reaction_prompt,
         )
 
@@ -561,7 +559,6 @@ class BaseMaisakaReplyGenerator:
         retry_count: int,
         reply_message: Optional[SessionMessage],
         reply_reason: str,
-        reference_info: str,
         selected_expression_ids: List[int],
         reply_tool_args: Dict[str, Any],
     ) -> List[Message]:
@@ -582,7 +579,6 @@ class BaseMaisakaReplyGenerator:
                 max_retries=REPLYER_MAX_HOOK_RETRIES,
                 reply_message_id=str(reply_message.message_id if reply_message is not None else ""),
                 reply_reason=reply_reason or "",
-                reference_info=reference_info,
                 selected_expression_ids=list(selected_expression_ids),
                 reply_tool_args=dict(reply_tool_args),
             )
@@ -638,30 +634,18 @@ class BaseMaisakaReplyGenerator:
         return dict(raw_value) if isinstance(raw_value, dict) else {}
 
     @staticmethod
-    def _append_extra_prompt(reference_info: str, extra_prompt: str) -> str:
-        """将 Hook 返回的额外提示追加到本次 replyer 参考信息中。"""
+    def _build_reply_requirements(extra_prompt: str, retry_constraints: List[str]) -> str:
+        """构建 replyer 本轮额外回复要求。"""
 
-        normalized_reference_info = reference_info.strip()
+        blocks: List[str] = []
         normalized_extra_prompt = extra_prompt.strip()
-        if not normalized_extra_prompt:
-            return normalized_reference_info
-        extra_prompt_block = f"【额外回复要求】\n{normalized_extra_prompt}"
-        if normalized_reference_info:
-            return f"{normalized_reference_info}\n\n{extra_prompt_block}"
-        return extra_prompt_block
-
-    @staticmethod
-    def _build_retry_reference_info(reference_info: str, retry_constraints: List[str]) -> str:
-        normalized_reference_info = reference_info.strip()
-        if not retry_constraints:
-            return normalized_reference_info
-
-        retry_lines = ["【重生成约束】"]
-        retry_lines.extend(retry_constraints[-REPLYER_MAX_HOOK_RETRIES:])
-        retry_block = "\n".join(retry_lines)
-        if normalized_reference_info:
-            return f"{normalized_reference_info}\n\n{retry_block}"
-        return retry_block
+        if normalized_extra_prompt:
+            blocks.append(f"【额外回复要求】\n{normalized_extra_prompt}")
+        if retry_constraints:
+            retry_lines = ["【重生成约束】"]
+            retry_lines.extend(retry_constraints[-REPLYER_MAX_HOOK_RETRIES:])
+            blocks.append("\n".join(retry_lines))
+        return "\n\n".join(blocks)
 
     @staticmethod
     def _build_retry_constraint_sentence(retry_reason: str, rejected_response: str) -> str:
@@ -741,13 +725,13 @@ class BaseMaisakaReplyGenerator:
         return MaisakaReplyContext(
             expression_habits=selection_result.expression_habits,
             selected_expression_ids=selection_result.selected_expression_ids,
+            selected_expressions=selection_result.selected_expressions,
         )
 
     async def generate_reply_with_context(
         self,
         extra_info: str = "",
         reply_reason: str = "",
-        reference_info: str = "",
         available_actions: Optional[Dict[str, ActionInfo]] = None,
         chosen_actions: Optional[List[object]] = None,
         from_plugin: bool = True,
@@ -760,6 +744,7 @@ class BaseMaisakaReplyGenerator:
         chat_history: Optional[List[LLMContextMessage]] = None,
         expression_habits: str = "",
         selected_expression_ids: Optional[List[int]] = None,
+        selected_expressions: Optional[List[Dict[str, Any]]] = None,
         sub_agent_runner: Optional[Callable[[str], Awaitable[str]]] = None,
         reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, ReplyGenerationResult]:
@@ -825,6 +810,11 @@ class BaseMaisakaReplyGenerator:
             if selected_expression_ids is not None
             else list(reply_context.selected_expression_ids)
         )
+        result.selected_expression_details = (
+            list(selected_expressions)
+            if selected_expressions is not None
+            else list(reply_context.selected_expressions)
+        )
 
         # logger.info(
         #     f"回复上下文完成 流={stream_id} 已选表达={result.selected_expression_ids!r}"
@@ -845,7 +835,6 @@ class BaseMaisakaReplyGenerator:
         default_task_name = str(getattr(self.express_model, "task_name", "") or "replyer").strip() or "replyer"
 
         while True:
-            effective_reference_info = self._build_retry_reference_info(reference_info or "", retry_constraints)
             try:
                 before_request_result = await self._get_runtime_manager().invoke_hook(
                     "maisaka.replyer.before_request",
@@ -859,7 +848,6 @@ class BaseMaisakaReplyGenerator:
                     max_retries=REPLYER_MAX_HOOK_RETRIES,
                     reply_message_id=str(reply_message.message_id if reply_message is not None else ""),
                     reply_reason=reply_reason or "",
-                    reference_info=effective_reference_info,
                     selected_expression_ids=list(result.selected_expression_ids),
                     reply_tool_args=dict(active_reply_tool_args),
                 )
@@ -874,10 +862,9 @@ class BaseMaisakaReplyGenerator:
             if not active_task_name:
                 active_task_name = default_task_name
             active_model_name = str(before_request_kwargs.get("model_name") or "").strip() or None
-            active_reference_info = str(before_request_kwargs.get("reference_info") or effective_reference_info)
-            active_reference_info = self._append_extra_prompt(
-                active_reference_info,
+            active_reply_requirements = self._build_reply_requirements(
                 str(before_request_kwargs.get("extra_prompt") or ""),
+                retry_constraints,
             )
 
             prompt_started_at = time.perf_counter()
@@ -886,8 +873,8 @@ class BaseMaisakaReplyGenerator:
                     chat_history=filtered_history,
                     reply_message=reply_message,
                     reply_reason=reply_reason or "",
-                    reference_info=active_reference_info,
                     expression_habits=merged_expression_habits,
+                    reply_requirements=active_reply_requirements,
                     stream_id=stream_id,
                 )
             except Exception as exc:
@@ -906,7 +893,7 @@ class BaseMaisakaReplyGenerator:
             async def message_factory(
                 _client: object,
                 model_info: Optional[ModelInfo] = None,
-                reference_info_for_attempt: str = active_reference_info,
+                reply_requirements_for_attempt: str = active_reply_requirements,
                 active_task_name_for_attempt: str = active_task_name,
                 active_model_name_for_attempt: Optional[str] = active_model_name,
                 retry_count_for_attempt: int = retry_count,
@@ -919,8 +906,8 @@ class BaseMaisakaReplyGenerator:
                     chat_history=filtered_history,
                     reply_message=reply_message,
                     reply_reason=reply_reason or "",
-                    reference_info=reference_info_for_attempt,
                     expression_habits=merged_expression_habits,
+                    reply_requirements=reply_requirements_for_attempt,
                     stream_id=stream_id,
                     enable_visual_message=self._resolve_enable_visual_message(model_info),
                 )
@@ -934,7 +921,6 @@ class BaseMaisakaReplyGenerator:
                     retry_count=retry_count_for_attempt,
                     reply_message=reply_message,
                     reply_reason=reply_reason or "",
-                    reference_info=reference_info_for_attempt,
                     selected_expression_ids=list(selected_expression_ids_for_attempt),
                     reply_tool_args=dict(reply_tool_args_for_attempt),
                 )

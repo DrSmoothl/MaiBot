@@ -43,6 +43,11 @@ export interface PluginDisplay {
   icon?: PluginDisplayIcon
 }
 
+export interface PluginAssets {
+  /** 插件市场缓存的 64x64 图标资源地址 */
+  icon_64?: string
+}
+
 export interface PluginManifest {
   /** 清单文件版本 */
   manifest_version: number
@@ -98,6 +103,8 @@ export interface PluginInfo {
   marketplace_order?: number
   /** 插件清单 */
   manifest: PluginManifest
+  /** 插件市场生成的派生资源 */
+  assets?: PluginAssets
   /** 下载量 */
   downloads: number
   /** 评分 (0-5) */

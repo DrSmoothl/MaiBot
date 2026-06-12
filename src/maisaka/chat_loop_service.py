@@ -1,4 +1,4 @@
-"""Maisaka 对话循环服务。"""
+﻿"""Maisaka 对话循环服务。"""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,24 +32,32 @@ from src.plugin_runtime.hook_schema_utils import build_object_schema
 from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistry
 from src.services.llm_service import LLMServiceClient
 
-from .builtin_tool import get_builtin_tools
-from .context_messages import (
+from src.maisaka.builtin_tool import get_builtin_tools
+from src.maisaka.context.messages import (
     AssistantMessage,
     LLMContextMessage,
     TIMING_GATE_INVALID_TOOL_HINT_SOURCE,
     ToolResultMessage,
     build_llm_message_from_context,
 )
-from .history_utils import drop_orphan_tool_results, normalize_tool_result_order
-from .mid_term_memory import is_mid_term_memory_message
-from .display.prompt_cli_renderer import PromptCLIVisualizer
-from .visual_message_limiter import limit_latest_images_in_messages
-from .visual_mode_utils import resolve_enable_visual_planner
+from src.maisaka.context.history import normalize_tool_call_result_pairs
+from src.maisaka.memory.mid_term import is_mid_term_memory_message
+from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
+from src.maisaka.focus import focus_mode_manager
+from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
+from src.maisaka.visual.mode_utils import resolve_enable_visual_planner, resolve_enable_visual_timing_gate
 
 TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
+PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue", "wait"}
+PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
-    "planner": "maisaka_planner",
-    "timing_gate": "maisaka_timing_gate",
+    "behavior_scenario_analyzer": "behavior.scenario_analyzer",
+    "emotion": "emoji.selector",
+    "expression_selector": "expression.selector",
+    "planner": "maisaka.planner",
+    "reply_effect_judge": "reply.effect_judge",
+    "sub_agent": "maisaka.sub_agent",
+    "timing_gate": "maisaka.timing_gate",
 }
 MODEL_TASK_NAME_BY_REQUEST_KIND = {
     "timing_gate": "timing_gate",
@@ -59,6 +67,7 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "timing_gate": "timing_gate",
     "reply_effect_judge": "reply_effect_judge",
     "expression_selector": "expression_selector",
+    "behavior_scenario_analyzer": "behavior_scenario_analyzer",
     "emotion": "emotion",
     "sub_agent": "sub_agent",
 }
@@ -247,17 +256,13 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                             "type": "string",
                             "description": "本次 replyer 生成的回复理由。",
                         },
-                        "reference_info": {
-                            "type": "string",
-                            "description": "本次 replyer 生成使用的参考信息。",
-                        },
                         "selected_expression_ids": {
                             "type": "array",
                             "description": "本次 replyer 选中的表达方式编号列表。",
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote、reference_info 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
                         },
                     },
                     required=[
@@ -271,7 +276,6 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         "max_retries",
                         "reply_message_id",
                         "reply_reason",
-                        "reference_info",
                         "selected_expression_ids",
                         "reply_tool_args",
                     ],
@@ -333,17 +337,13 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                             "type": "string",
                             "description": "本次 replyer 生成的回复理由。",
                         },
-                        "reference_info": {
-                            "type": "string",
-                            "description": "本次 replyer 生成使用的参考信息。",
-                        },
                         "selected_expression_ids": {
                             "type": "array",
                             "description": "本次 replyer 选中的表达方式编号列表。",
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote、reference_info 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
                         },
                     },
                     required=[
@@ -359,7 +359,6 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         "max_retries",
                         "reply_message_id",
                         "reply_reason",
-                        "reference_info",
                         "selected_expression_ids",
                         "reply_tool_args",
                     ],
@@ -415,7 +414,7 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote、reference_info 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
                         },
                         "prompt_tokens": {
                             "type": "integer",
@@ -513,10 +512,12 @@ class MaisakaChatLoopService:
         """根据 Maisaka 请求类型解析 LLM 统计口径。"""
 
         normalized_request_kind = str(request_kind or "").strip()
-        return REQUEST_TYPE_BY_REQUEST_KIND.get(
-            normalized_request_kind,
-            f"maisaka_{normalized_request_kind}" if normalized_request_kind else "maisaka_planner",
-        )
+        if not normalized_request_kind:
+            normalized_request_kind = "planner"
+        request_type = REQUEST_TYPE_BY_REQUEST_KIND.get(normalized_request_kind)
+        if request_type is None:
+            raise ValueError(f"未注册的 Maisaka LLM request_kind: {normalized_request_kind}")
+        return request_type
 
     @staticmethod
     def _resolve_prompt_preview_category(request_kind: str) -> str:
@@ -715,13 +716,12 @@ class MaisakaChatLoopService:
         except Exception:
             return f"{self.personality_prompt}\n\nYou are a helpful AI assistant."
 
-    @staticmethod
-    def _get_chat_prompt_name() -> str:
-        """根据独立 Timing Gate 配置选择 Planner 模板。"""
+    def _get_chat_prompt_name(self) -> str:
+        """选择当前聊天使用的 Planner 模板。"""
 
-        if global_config.chat.enable_independent_timing_gate:
-            return "maisaka_chat"
-        return "maisaka_chat_merged_timing"
+        if focus_mode_manager.is_enabled_for_chat(is_group_chat=self._is_group_chat):
+            return "maisaka_chat_focus"
+        return "maisaka_chat"
 
     def build_prompt_template_context(self, tools_section: str = "") -> dict[str, str]:
         """构造 Maisaka prompt 模板的公共渲染参数。"""
@@ -753,37 +753,31 @@ class MaisakaChatLoopService:
             if private_chat_prompt := str(global_config.chat.private_chat_prompts or "").strip():
                 prompt_lines.append(f"通用注意事项：\n{private_chat_prompt}")
 
-        if self._session_id:
-            if chat_prompt := self._get_chat_prompt_for_chat(self._session_id, self._is_group_chat).strip():
-                prompt_lines.append(f"当前聊天额外注意事项：\n{chat_prompt}")
-
         if not prompt_lines:
             return ""
 
         return "在该聊天中的注意事项：\n" + "\n\n".join(prompt_lines) + "\n"
+
+    def _build_current_chat_attention_tail_message(self) -> str:
+        """构建追加到请求末尾的当前聊天专属注意事项。"""
+
+        if not self._session_id:
+            return ""
+        chat_prompt = self._get_chat_prompt_for_chat(self._session_id, self._is_group_chat).strip()
+        if not chat_prompt:
+            return ""
+        return f"当前聊天额外注意事项：\n{chat_prompt}"
 
     def _build_timing_gate_wait_rule(self) -> str:
         """构造 Timing Gate 中 wait 工具的场景说明。"""
 
         locale = get_locale()
         if locale == "en-US":
-            if self._is_group_chat is True:
-                return ""
-            if self._is_group_chat is False:
-                return "- wait: wait for a fixed period, then judge again"
-            return "- wait: available only in private chats; if this is a group chat, do not call it"
+            return "- wait: wait for a fixed period, then judge again"
         if locale == "ja-JP":
-            if self._is_group_chat is True:
-                return ""
-            if self._is_group_chat is False:
-                return "- wait：一定時間待ってから再判断する"
-            return "- wait：個人チャットでのみ利用できます。現在がグループチャットなら呼び出さないでください"
+            return "- wait：一定時間待ってから再判断する"
 
-        if self._is_group_chat is True:
-            return ""
-        if self._is_group_chat is False:
-            return "- wait：固定再等待一段时间，时间到后再重新判断"
-        return "- wait：仅私聊可用；如果当前是群聊，不要调用"
+        return "- wait：固定再等待一段时间，时间到后再重新判断"
 
     @staticmethod
     def _get_chat_prompt_for_chat(chat_id: str, is_group_chat: Optional[bool]) -> str:
@@ -818,6 +812,7 @@ class MaisakaChatLoopService:
         *,
         enable_visual_message: bool,
         injected_user_messages: Sequence[str] | None = None,
+        tail_user_messages: Sequence[str] | None = None,
         system_prompt: Optional[str] = None,
     ) -> List[Message]:
         """构造发给大模型的消息列表。
@@ -849,9 +844,12 @@ class MaisakaChatLoopService:
                 messages.append(llm_message)
 
         normalized_injected_messages: List[Message] = []
+        current_chat_attention = self._build_current_chat_attention_tail_message()
         final_user_messages = [
             *(injected_user_messages or []),
             self._build_current_time_user_message(),
+            *(tail_user_messages or []),
+            current_chat_attention,
         ]
         for injected_message in final_user_messages:
             normalized_message = str(injected_message or "").strip()
@@ -877,6 +875,9 @@ class MaisakaChatLoopService:
         request_kind: str = "planner",
         response_format: RespFormat | None = None,
         tool_definitions: Sequence[ToolDefinitionInput] | None = None,
+        max_context_size: Optional[int] = None,
+        system_prompt: Optional[str] = None,
+        tail_user_messages: Sequence[str] | None = None,
     ) -> ChatResponse:
         """执行一轮 Maisaka 规划器请求。
 
@@ -892,11 +893,15 @@ class MaisakaChatLoopService:
             chat_history,
             request_kind=request_kind,
             enable_visual_message=enable_visual_message,
+            max_context_size=max_context_size,
+            is_group_chat=self._is_group_chat,
         )
         built_messages = self._build_request_messages(
             selected_history,
             enable_visual_message=enable_visual_message,
             injected_user_messages=injected_user_messages,
+            tail_user_messages=tail_user_messages,
+            system_prompt=system_prompt,
         )
         if enable_visual_message:
             built_messages = limit_latest_images_in_messages(
@@ -1049,33 +1054,19 @@ class MaisakaChatLoopService:
         }
 
         if global_config.debug.show_maisaka_thinking:
-            output_parts = []
-            if final_response.strip():
-                output_parts.append(final_response.strip())
-            if final_tool_calls:
-                output_parts.append(
-                    "工具调用:\n"
-                    + json.dumps(
-                        [self._format_tool_call_for_preview(tool_call) for tool_call in final_tool_calls],
-                        ensure_ascii=False,
-                        indent=2,
-                        default=str,
-                    )
-                )
             prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
                 built_messages,
                 category=self._resolve_prompt_preview_category(request_kind),
                 chat_id=self._session_id,
                 request_kind=request_kind,
                 selection_reason=prompt_selection_reason,
-                folded=global_config.debug.fold_maisaka_thinking,
                 tool_definitions=list(all_tools),
-                output_content="\n\n".join(output_parts).strip(),
+                output_content=final_response.strip(),
+                output_tool_calls=final_tool_calls,
                 metadata=prompt_metadata,
             )
             prompt_section = prompt_section_result.panel
-            if prompt_section_result.preview_access is not None:
-                prompt_html_uri = prompt_section_result.preview_access.viewer_web_uri
+            prompt_html_uri = prompt_section_result.preview_access.viewer_web_uri
 
         raw_message = AssistantMessage(
             content=final_response,
@@ -1100,22 +1091,13 @@ class MaisakaChatLoopService:
         )
 
     @staticmethod
-    def _format_tool_call_for_preview(tool_call: ToolCall) -> dict[str, Any]:
-        """构造 HTML 顶部输出区里的工具调用摘要。"""
-
-        return {
-            "id": tool_call.call_id,
-            "name": tool_call.func_name,
-            "arguments": tool_call.args,
-        }
-
-    @staticmethod
     def select_llm_context_messages(
         chat_history: List[LLMContextMessage],
         *,
         enable_visual_message: Optional[bool] = None,
         request_kind: str = "planner",
         max_context_size: Optional[int] = None,
+        is_group_chat: Optional[bool] = None,
     ) -> tuple[List[LLMContextMessage], str]:
         """选择LLM上下文消息"""
 
@@ -1173,8 +1155,7 @@ class MaisakaChatLoopService:
             return [], "实际发送 0 条消息（tool 0 条，普通消息 0 条）"
 
         selected_history = [filtered_history[index] for index in selected_indices]
-        selected_history, _ = drop_orphan_tool_results(selected_history)
-        selected_history, _ = normalize_tool_result_order(selected_history)
+        selected_history, _ = normalize_tool_call_result_pairs(selected_history)
         tool_message_count = sum(1 for message in selected_history if isinstance(message, ToolResultMessage))
         normal_message_count = len(selected_history) - tool_message_count
         pinned_message_count = sum(1 for message in selected_history if is_mid_term_memory_message(message))
@@ -1209,6 +1190,9 @@ class MaisakaChatLoopService:
             }
             filtered_history: List[LLMContextMessage] = []
             for message in selected_history:
+                if message.source in {PLANNER_TOOL_HINT_SOURCE, "behavior_pattern"}:
+                    continue
+
                 if isinstance(message, ToolResultMessage):
                     if message.tool_name in TIMING_GATE_TOOL_NAMES or message.tool_call_id in allowed_tool_call_ids:
                         filtered_history.append(message)
@@ -1252,23 +1236,33 @@ class MaisakaChatLoopService:
         ]
 
         if request_kind != "planner":
-            return selected_history
-
-        if not global_config.chat.enable_independent_timing_gate:
-            return selected_history
+            return [
+                message
+                for message in selected_history
+                if message.source != "behavior_pattern"
+            ]
 
         filtered_history: List[LLMContextMessage] = []
         for message in selected_history:
-            if isinstance(message, ToolResultMessage) and message.tool_name in TIMING_GATE_TOOL_NAMES:
+            if isinstance(message, ToolResultMessage) and message.tool_name in PLANNER_FILTERED_TIMING_TOOL_NAMES:
                 continue
 
             if isinstance(message, AssistantMessage) and message.tool_calls:
                 kept_tool_calls = [
                     tool_call
                     for tool_call in message.tool_calls
-                    if tool_call.func_name not in TIMING_GATE_TOOL_NAMES
+                    if tool_call.func_name not in PLANNER_FILTERED_TIMING_TOOL_NAMES
                 ]
                 if not kept_tool_calls:
+                    if message.content.strip():
+                        filtered_history.append(
+                            AssistantMessage(
+                                content=message.content,
+                                timestamp=message.timestamp,
+                                tool_calls=[],
+                                source_kind=message.source_kind,
+                            )
+                        )
                     continue
                 if len(kept_tool_calls) != len(message.tool_calls):
                     filtered_history.append(
@@ -1287,9 +1281,11 @@ class MaisakaChatLoopService:
 
     @staticmethod
     def _resolve_enable_visual_message(request_kind: str) -> bool:
-        if request_kind in {"planner", "timing_gate"}:
+        if request_kind == "planner":
             return resolve_enable_visual_planner()
-        if request_kind in {"expression_selector", "reply_effect_judge"}:
+        if request_kind == "timing_gate":
+            return resolve_enable_visual_timing_gate()
+        if request_kind in {"expression_selector", "reply_effect_judge", "behavior_scenario_analyzer"}:
             return False
         return True
 

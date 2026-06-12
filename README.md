@@ -199,7 +199,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 ## 📊 仓库状态
 <sub><sup>Repository Status</sup></sub>
 
-![Alt](https://repobeats.axiom.co/api/embed/9faca9fccfc467931b87dd357b60c6362b5cfae0.svg "麦麦仓库状态")
+![Alt](assets/repository-metrics.svg "麦麦仓库状态")
 
 ### Star 趋势
 <sub><sup>Star History</sup></sub>

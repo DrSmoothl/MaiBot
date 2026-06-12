@@ -1,19 +1,23 @@
 from __future__ import annotations
 
-import json
-import shutil
-import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import tomlkit
+import json
+import shutil
+import uuid
+
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlmodel import col, select
+import tomlkit
 
 from src.A_memorix.host_service import a_memorix_host_service
+from src.A_memorix.runtime_registry import get_runtime_kernel
+from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
 from src.common.database.database import get_db_session
-from src.common.database.database_model import PersonInfo
+from src.common.database.database_model import ChatSession, Messages, PersonInfo
 from src.person_info.person_info import resolve_person_id_for_memory
 from src.services.memory_service import MemorySearchResult, memory_service
 from src.webui.dependencies import require_auth
@@ -86,6 +90,71 @@ class ProfileEvidenceCorrectRequest(BaseModel):
     reason: str = "profile_evidence_correction"
     refresh: bool = True
     limit: int = Field(12, ge=1, le=100)
+
+
+class ImportChatTarget(BaseModel):
+    """记忆导入可选择的聊天流。"""
+
+    chat_id: str
+    chat_name: str
+    platform: Optional[str] = None
+    group_id: Optional[str] = None
+    user_id: Optional[str] = None
+    account_id: Optional[str] = None
+    scope: Optional[str] = None
+    is_group: bool = False
+    last_active_at: Optional[float] = None
+
+
+class ImportChatTargetsResponse(BaseModel):
+    success: bool
+    data: list[ImportChatTarget]
+
+
+class MemoryTimelineChat(BaseModel):
+    chat_id: str
+    chat_name: str
+    platform: Optional[str] = None
+    group_id: Optional[str] = None
+    user_id: Optional[str] = None
+    is_group: bool = False
+
+
+class MemoryTimelineRange(BaseModel):
+    time_start: Optional[float] = None
+    time_end: Optional[float] = None
+    min_time: Optional[float] = None
+    max_time: Optional[float] = None
+
+
+class MemoryTimelineJumpTarget(BaseModel):
+    tab: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryTimelineEvent(BaseModel):
+    event_id: str
+    event_type: str
+    category: str
+    occurred_at: float
+    chat_id: str
+    chat_name: str
+    title: str
+    summary: str
+    object_count: int = 1
+    key_id: str = ""
+    source: str = ""
+    attribution: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    jump_target: MemoryTimelineJumpTarget
+
+
+class MemoryTimelineResponse(BaseModel):
+    success: bool
+    chat: MemoryTimelineChat
+    range: MemoryTimelineRange
+    items: list[MemoryTimelineEvent]
+    summary: dict[str, Any]
 
 
 class MaintainRequest(BaseModel):
@@ -187,6 +256,988 @@ def _unwrap_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(nested, dict):
         return dict(nested)
     return dict(raw)
+
+
+def _get_chat_name_from_latest_message(message: Optional[dict[str, Any]]) -> Optional[str]:
+    if not message:
+        return None
+    group_id = str(message.get("group_id") or "").strip()
+    if group_id:
+        return str(message.get("group_name") or "").strip() or f"群聊{group_id}"
+    user_id = str(message.get("user_id") or "").strip()
+    private_name = str(
+        message.get("user_cardname") or message.get("user_nickname") or (f"用户{user_id}" if user_id else "")
+    ).strip()
+    return f"{private_name}的私聊" if private_name else None
+
+
+def _get_chat_name(chat_session: ChatSession, latest_messages: dict[str, dict[str, Any]]) -> str:
+    chat_id = str(chat_session.session_id or "").strip()
+    try:
+        if name := _chat_manager.get_session_name(chat_id):
+            return name
+    except Exception:
+        pass
+    if name := _get_chat_name_from_latest_message(latest_messages.get(chat_id)):
+        return name
+    if chat_session.group_name:
+        return chat_session.group_name
+    if chat_session.group_id:
+        return f"群聊{chat_session.group_id}"
+    private_name = chat_session.user_cardname or chat_session.user_nickname or (
+        f"用户{chat_session.user_id}" if chat_session.user_id else ""
+    )
+    return f"{private_name}的私聊" if private_name else chat_id
+
+
+def _prefetch_latest_messages_by_session(db_session: Any, session_ids: list[str]) -> dict[str, dict[str, Any]]:
+    if not session_ids:
+        return {}
+
+    statement = (
+        select(Messages)
+        .where(col(Messages.session_id).in_(session_ids))
+        .order_by(col(Messages.session_id).asc(), col(Messages.timestamp).desc())
+    )
+    latest: dict[str, dict[str, Any]] = {}
+    for message in db_session.exec(statement).all():
+        chat_id = str(message.session_id or "").strip()
+        if chat_id and chat_id not in latest:
+            latest[chat_id] = {
+                "group_id": message.group_id,
+                "group_name": message.group_name,
+                "user_id": message.user_id,
+                "user_cardname": message.user_cardname,
+                "user_nickname": message.user_nickname,
+            }
+    return latest
+
+
+def _validate_import_chat_id(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    chat_id = str(normalized.get("chat_id") or "").strip()
+    if not chat_id:
+        normalized.pop("chat_id", None)
+        return normalized
+    try:
+        if _chat_manager.get_existing_session_by_session_id(chat_id) is not None:
+            normalized["chat_id"] = chat_id
+            return normalized
+    except Exception:
+        pass
+    with get_db_session() as session:
+        chat_session = session.exec(select(ChatSession).where(col(ChatSession.session_id) == chat_id)).first()
+    if chat_session is None:
+        raise HTTPException(status_code=400, detail=f"聊天流不存在: {chat_id}")
+    normalized["chat_id"] = chat_id
+    return normalized
+
+
+def _find_real_chat_session(chat_id: str) -> Optional[ChatSession]:
+    token = str(chat_id or "").strip()
+    if not token:
+        return None
+    try:
+        managed_session = _chat_manager.get_existing_session_by_session_id(token)
+        if managed_session is not None:
+            return managed_session
+    except Exception:
+        pass
+    with get_db_session() as session:
+        return session.exec(select(ChatSession).where(col(ChatSession.session_id) == token)).first()
+
+
+def _timeline_chat_from_session(chat_session: ChatSession) -> MemoryTimelineChat:
+    chat_id = str(chat_session.session_id or "").strip()
+    latest_messages: dict[str, dict[str, Any]] = {}
+    try:
+        with get_db_session() as session:
+            latest_messages = _prefetch_latest_messages_by_session(session, [chat_id])
+    except Exception:
+        latest_messages = {}
+    return MemoryTimelineChat(
+        chat_id=chat_id,
+        chat_name=_get_chat_name(chat_session, latest_messages),
+        platform=getattr(chat_session, "platform", None),
+        group_id=getattr(chat_session, "group_id", None),
+        user_id=getattr(chat_session, "user_id", None),
+        is_group=bool(getattr(chat_session, "group_id", None)),
+    )
+
+
+def _timeline_sources_for_chat(chat_id: str) -> set[str]:
+    token = str(chat_id or "").strip()
+    if not token:
+        return set()
+    return {
+        f"chat_summary:{token}",
+        f"maibot.chat_history:{token}",
+    }
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in {float("inf"), float("-inf")}:
+        return None
+    return parsed
+
+
+def _first_float(*values: Any) -> Optional[float]:
+    for value in values:
+        parsed = _safe_float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _decode_metadata_payload(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, bytes):
+        try:
+            decoded = json.loads(raw.decode("utf-8"))
+            return dict(decoded) if isinstance(decoded, dict) else {}
+        except Exception:
+            return {}
+    if isinstance(raw, str) and raw.strip():
+        try:
+            decoded = json.loads(raw)
+            return dict(decoded) if isinstance(decoded, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _decode_json_payload(raw: Any, fallback: Any) -> Any:
+    if isinstance(raw, (dict, list)):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            return json.loads(raw)
+        except Exception:
+            return fallback
+    return fallback
+
+
+def _metadata_matches_chat(metadata: dict[str, Any], chat_id: str) -> bool:
+    token = str(chat_id or "").strip()
+    if not token:
+        return False
+    direct_keys = ("chat_id", "session_id", "stream_id")
+    if any(str(metadata.get(key) or "").strip() == token for key in direct_keys):
+        return True
+    nested_candidates = [
+        metadata.get("chat"),
+        metadata.get("chat_target"),
+        metadata.get("source_context"),
+        metadata.get("import_context"),
+    ]
+    for candidate in nested_candidates:
+        if isinstance(candidate, dict) and any(str(candidate.get(key) or "").strip() == token for key in direct_keys):
+            return True
+    return False
+
+
+def _source_matches_chat(source: Any, chat_id: str) -> bool:
+    token = str(source or "").strip()
+    return bool(token and token in _timeline_sources_for_chat(chat_id))
+
+
+def _paragraph_matches_chat(row: dict[str, Any], chat_id: str) -> tuple[bool, str]:
+    metadata = _decode_metadata_payload(row.get("metadata"))
+    if _metadata_matches_chat(metadata, chat_id):
+        return True, "metadata.chat_id"
+    if _source_matches_chat(row.get("source"), chat_id):
+        return True, "source"
+    return False, ""
+
+
+def _event_in_range(occurred_at: float, time_start: Optional[float], time_end: Optional[float]) -> bool:
+    if time_start is not None and occurred_at < time_start:
+        return False
+    if time_end is not None and occurred_at > time_end:
+        return False
+    return True
+
+
+def _types_match(event: MemoryTimelineEvent, accepted_types: set[str]) -> bool:
+    if not accepted_types:
+        return True
+    return event.event_type in accepted_types or event.category in accepted_types
+
+
+def _timeline_event(
+    *,
+    event_type: str,
+    category: str,
+    occurred_at: float,
+    chat: MemoryTimelineChat,
+    title: str,
+    summary: str,
+    jump_target: dict[str, Any],
+    object_count: int = 1,
+    key_id: str = "",
+    source: str = "",
+    attribution: str = "",
+    metadata: Optional[dict[str, Any]] = None,
+) -> MemoryTimelineEvent:
+    safe_key = key_id or source or title
+    event_id = f"{event_type}:{safe_key}:{occurred_at:.3f}"
+    return MemoryTimelineEvent(
+        event_id=event_id,
+        event_type=event_type,
+        category=category,
+        occurred_at=occurred_at,
+        chat_id=chat.chat_id,
+        chat_name=chat.chat_name,
+        title=title,
+        summary=summary,
+        object_count=max(1, int(object_count or 1)),
+        key_id=str(key_id or ""),
+        source=str(source or ""),
+        attribution=str(attribution or ""),
+        metadata=metadata or {},
+        jump_target=MemoryTimelineJumpTarget(
+            tab=str(jump_target.get("tab") or "timeline"),
+            params=dict(jump_target.get("params") or {}),
+        ),
+    )
+
+
+def _get_memory_metadata_store() -> Any:
+    kernel = get_runtime_kernel()
+    return getattr(kernel, "metadata_store", None) if kernel is not None else None
+
+
+def _query_memory_rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    metadata_store = _get_memory_metadata_store()
+    if metadata_store is None or not hasattr(metadata_store, "query"):
+        return []
+    try:
+        return list(metadata_store.query(sql, params))
+    except Exception:
+        return []
+
+
+def _timeline_query_limit(limit: int, multiplier: int, minimum: int) -> Optional[int]:
+    if limit <= 0:
+        return None
+    return max(limit * multiplier, minimum)
+
+
+def _append_limit(sql: str, limit: Optional[int]) -> str:
+    if limit is None:
+        return sql
+    return f"{sql}\n        LIMIT ?"
+
+
+def _timeline_paragraph_events(
+    *,
+    chat: MemoryTimelineChat,
+    time_start: Optional[float],
+    time_end: Optional[float],
+    accepted_types: set[str],
+    limit: int,
+) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 5, 200)
+    rows = _query_memory_rows(
+        _append_limit(
+            """
+        SELECT hash, content, created_at, updated_at, metadata, source, is_deleted, deleted_at
+        FROM paragraphs
+        ORDER BY COALESCE(updated_at, created_at, 0) DESC
+        """,
+            query_limit,
+        ),
+        (query_limit,) if query_limit is not None else (),
+    )
+    events: list[MemoryTimelineEvent] = []
+    for row in rows:
+        matched, attribution = _paragraph_matches_chat(row, chat.chat_id)
+        if not matched:
+            continue
+        paragraph_hash = str(row.get("hash") or "").strip()
+        source = str(row.get("source") or "").strip()
+        content = str(row.get("content") or "").strip()
+        preview = content[:80] + ("..." if len(content) > 80 else "")
+        created_at = _safe_float(row.get("created_at"))
+        updated_at = _safe_float(row.get("updated_at"))
+        deleted_at = _safe_float(row.get("deleted_at"))
+        is_deleted = bool(int(row.get("is_deleted") or 0))
+        if created_at is not None and _event_in_range(created_at, time_start, time_end):
+            events.append(
+                _timeline_event(
+                    event_type="paragraph_created",
+                    category="paragraph",
+                    occurred_at=created_at,
+                    chat=chat,
+                    title="段落新增",
+                    summary=preview or "新增长期记忆段落",
+                    key_id=paragraph_hash,
+                    source=source,
+                    attribution=attribution,
+                    metadata={"paragraph_hash": paragraph_hash},
+                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                )
+            )
+        if (
+            updated_at is not None
+            and created_at is not None
+            and abs(updated_at - created_at) > 1.0
+            and _event_in_range(updated_at, time_start, time_end)
+        ):
+            events.append(
+                _timeline_event(
+                    event_type="paragraph_updated",
+                    category="paragraph",
+                    occurred_at=updated_at,
+                    chat=chat,
+                    title="段落更新",
+                    summary=preview or "长期记忆段落内容或元数据更新",
+                    key_id=paragraph_hash,
+                    source=source,
+                    attribution=attribution,
+                    metadata={"paragraph_hash": paragraph_hash},
+                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                )
+            )
+        if is_deleted and deleted_at is not None and _event_in_range(deleted_at, time_start, time_end):
+            events.append(
+                _timeline_event(
+                    event_type="paragraph_deleted",
+                    category="paragraph",
+                    occurred_at=deleted_at,
+                    chat=chat,
+                    title="段落被标记删除",
+                    summary=preview or "长期记忆段落进入删除状态",
+                    key_id=paragraph_hash,
+                    source=source,
+                    attribution=attribution,
+                    metadata={"paragraph_hash": paragraph_hash},
+                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                )
+            )
+    return [event for event in events if _types_match(event, accepted_types)]
+
+
+def _timeline_episode_events(
+    *,
+    chat: MemoryTimelineChat,
+    time_start: Optional[float],
+    time_end: Optional[float],
+    accepted_types: set[str],
+    limit: int,
+) -> list[MemoryTimelineEvent]:
+    sources = sorted(_timeline_sources_for_chat(chat.chat_id))
+    if not sources:
+        return []
+    placeholders = ",".join("?" for _ in sources)
+    query_limit = _timeline_query_limit(limit, 3, 100)
+    rows = _query_memory_rows(
+        _append_limit(
+            f"""
+        SELECT episode_id, source, title, summary, paragraph_count, created_at, updated_at, event_time_start, event_time_end
+        FROM episodes
+        WHERE source IN ({placeholders})
+        ORDER BY COALESCE(updated_at, created_at, event_time_start, 0) DESC
+        """,
+            query_limit,
+        ),
+        (*sources, *((query_limit,) if query_limit is not None else ())),
+    )
+    events: list[MemoryTimelineEvent] = []
+    for row in rows:
+        episode_id = str(row.get("episode_id") or "").strip()
+        source = str(row.get("source") or "").strip()
+        created_at = _safe_float(row.get("created_at"))
+        updated_at = _safe_float(row.get("updated_at"))
+        summary = str(row.get("summary") or row.get("title") or "Episode 已生成").strip()
+        title = str(row.get("title") or "Episode").strip()
+        paragraph_count = int(row.get("paragraph_count") or 1)
+        if created_at is not None and _event_in_range(created_at, time_start, time_end):
+            events.append(
+                _timeline_event(
+                    event_type="episode_created",
+                    category="episode",
+                    occurred_at=created_at,
+                    chat=chat,
+                    title=f"Episode 新增：{title}",
+                    summary=summary,
+                    object_count=paragraph_count,
+                    key_id=episode_id,
+                    source=source,
+                    attribution="source",
+                    metadata={"episode_id": episode_id},
+                    jump_target={"tab": "episodes", "params": {"episode_id": episode_id, "source": source}},
+                )
+            )
+        if (
+            updated_at is not None
+            and created_at is not None
+            and abs(updated_at - created_at) > 1.0
+            and _event_in_range(updated_at, time_start, time_end)
+        ):
+            events.append(
+                _timeline_event(
+                    event_type="episode_updated",
+                    category="episode",
+                    occurred_at=updated_at,
+                    chat=chat,
+                    title=f"Episode 更新：{title}",
+                    summary=summary,
+                    object_count=paragraph_count,
+                    key_id=episode_id,
+                    source=source,
+                    attribution="source",
+                    metadata={"episode_id": episode_id},
+                    jump_target={"tab": "episodes", "params": {"episode_id": episode_id, "source": source}},
+                )
+            )
+    return [event for event in events if _types_match(event, accepted_types)]
+
+
+def _feedback_person_ids(task: dict[str, Any]) -> list[str]:
+    candidates: list[Any] = []
+    for key in ("decision_payload", "rollback_plan", "rollback_result", "query_snapshot"):
+        value = task.get(key)
+        if isinstance(value, dict):
+            candidates.extend(value.get("person_ids") or [])
+            candidates.extend(value.get("profile_person_ids") or [])
+            profile_payload = value.get("profile")
+            if isinstance(profile_payload, dict):
+                candidates.append(profile_payload.get("person_id"))
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        token = str(candidate or "").strip()
+        if token and token not in seen:
+            seen.add(token)
+            normalized.append(token)
+    return normalized
+
+
+def _timeline_feedback_events(
+    *,
+    chat: MemoryTimelineChat,
+    time_start: Optional[float],
+    time_end: Optional[float],
+    accepted_types: set[str],
+    limit: int,
+) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 3, 100)
+    rows = _query_memory_rows(
+        _append_limit(
+            """
+        SELECT *
+        FROM memory_feedback_tasks
+        WHERE session_id = ?
+        ORDER BY COALESCE(updated_at, query_timestamp, created_at, 0) DESC
+        """,
+            query_limit,
+        ),
+        (chat.chat_id, *((query_limit,) if query_limit is not None else ())),
+    )
+    events: list[MemoryTimelineEvent] = []
+    for row in rows:
+        task = dict(row)
+        task["query_snapshot"] = _decode_json_payload(task.get("query_snapshot_json"), {})
+        task["decision_payload"] = _decode_json_payload(task.get("decision_json"), {})
+        task["rollback_plan"] = _decode_json_payload(task.get("rollback_plan_json"), {})
+        task["rollback_result"] = _decode_json_payload(task.get("rollback_result_json"), {})
+        task_id = str(task.get("id") or "").strip()
+        query_tool_id = str(task.get("query_tool_id") or "").strip()
+        status = str(task.get("status") or "").strip()
+        updated_at = _first_float(task.get("updated_at"), task.get("query_timestamp"), task.get("created_at"))
+        if updated_at is not None and _event_in_range(updated_at, time_start, time_end):
+            events.append(
+                _timeline_event(
+                    event_type="feedback_correction_applied",
+                    category="feedback",
+                    occurred_at=updated_at,
+                    chat=chat,
+                    title="反馈纠错处理",
+                    summary=f"纠错任务状态：{status or '未知'}",
+                    object_count=1,
+                    key_id=task_id,
+                    source=query_tool_id,
+                    attribution="feedback.session_id",
+                    metadata={"task_id": task_id, "query_tool_id": query_tool_id, "status": status},
+                    jump_target={"tab": "feedback", "params": {"task_id": task_id}},
+                )
+            )
+        rolled_back_at = _safe_float(task.get("rolled_back_at"))
+        if rolled_back_at is not None and _event_in_range(rolled_back_at, time_start, time_end):
+            events.append(
+                _timeline_event(
+                    event_type="feedback_correction_rollback",
+                    category="feedback",
+                    occurred_at=rolled_back_at,
+                    chat=chat,
+                    title="反馈纠错回滚",
+                    summary=str(task.get("rollback_reason") or "纠错任务已回滚"),
+                    object_count=1,
+                    key_id=task_id,
+                    source=query_tool_id,
+                    attribution="feedback.session_id",
+                    metadata={"task_id": task_id, "query_tool_id": query_tool_id},
+                    jump_target={"tab": "feedback", "params": {"task_id": task_id}},
+                )
+            )
+        for person_id in _feedback_person_ids(task):
+            if updated_at is not None and _event_in_range(updated_at, time_start, time_end):
+                events.append(
+                    _timeline_event(
+                        event_type="profile_updated",
+                        category="profile",
+                        occurred_at=updated_at,
+                        chat=chat,
+                        title="相关画像变更",
+                        summary="画像操作由该聊天流的反馈纠错记录关联触发",
+                        object_count=1,
+                        key_id=person_id,
+                        source=query_tool_id,
+                        attribution="feedback.session_id",
+                        metadata={"person_id": person_id, "task_id": task_id},
+                        jump_target={"tab": "profiles", "params": {"person_id": person_id}},
+                    )
+                )
+    return [event for event in events if _types_match(event, accepted_types)]
+
+
+def _operation_payload_matches_chat(value: Any, chat_id: str) -> bool:
+    if isinstance(value, dict):
+        if _metadata_matches_chat(value, chat_id):
+            return True
+        source = value.get("source") or value.get("item_key")
+        if _source_matches_chat(source, chat_id):
+            return True
+        paragraph_hash = str(value.get("paragraph_hash") or value.get("item_hash") or value.get("hash") or "").strip()
+        if paragraph_hash:
+            rows = _query_memory_rows(
+                "SELECT hash, metadata, source FROM paragraphs WHERE hash = ? LIMIT 1",
+                (paragraph_hash,),
+            )
+            if rows and _paragraph_matches_chat(rows[0], chat_id)[0]:
+                return True
+        return any(_operation_payload_matches_chat(item, chat_id) for item in value.values())
+    if isinstance(value, list):
+        return any(_operation_payload_matches_chat(item, chat_id) for item in value)
+    if isinstance(value, str):
+        return _source_matches_chat(value, chat_id)
+    return False
+
+
+def _timeline_delete_events(
+    *,
+    chat: MemoryTimelineChat,
+    time_start: Optional[float],
+    time_end: Optional[float],
+    accepted_types: set[str],
+    limit: int,
+) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 4, 200)
+    rows = _query_memory_rows(
+        _append_limit(
+            """
+        SELECT operation_id, mode, selector, reason, requested_by, status, created_at, restored_at, summary_json
+        FROM delete_operations
+        ORDER BY COALESCE(restored_at, created_at, 0) DESC
+        """,
+            query_limit,
+        ),
+        (query_limit,) if query_limit is not None else (),
+    )
+    operation_ids = [str(row.get("operation_id") or "").strip() for row in rows]
+    operation_ids = [operation_id for operation_id in operation_ids if operation_id]
+    items_by_operation: dict[str, list[dict[str, Any]]] = {operation_id: [] for operation_id in operation_ids}
+    if operation_ids:
+        placeholders = ",".join("?" for _ in operation_ids)
+        item_rows = _query_memory_rows(
+            f"""
+            SELECT operation_id, item_type, item_hash, item_key, payload_json, created_at
+            FROM delete_operation_items
+            WHERE operation_id IN ({placeholders})
+            ORDER BY operation_id ASC, id ASC
+            """,
+            tuple(operation_ids),
+        )
+        for item in item_rows:
+            operation_id = str(item.get("operation_id") or "").strip()
+            if operation_id in items_by_operation:
+                items_by_operation[operation_id].append(dict(item))
+
+    events: list[MemoryTimelineEvent] = []
+    for row in rows:
+        operation_id = str(row.get("operation_id") or "").strip()
+        if not operation_id:
+            continue
+        decoded_items = [
+            {
+                **dict(item),
+                "payload": _decode_json_payload(item.get("payload_json"), {}),
+            }
+            for item in items_by_operation.get(operation_id, [])
+        ]
+        summary_payload = _decode_json_payload(row.get("summary_json"), {})
+        selector_payload = _decode_json_payload(row.get("selector"), row.get("selector"))
+        if not any(
+            _operation_payload_matches_chat(candidate, chat.chat_id)
+            for candidate in (summary_payload, selector_payload, decoded_items)
+        ):
+            continue
+        item_count = max(1, len(decoded_items))
+        created_at = _safe_float(row.get("created_at"))
+        restored_at = _safe_float(row.get("restored_at"))
+        mode = str(row.get("mode") or "").strip()
+        reason = str(row.get("reason") or "").strip()
+        if created_at is not None and _event_in_range(created_at, time_start, time_end):
+            events.append(
+                _timeline_event(
+                    event_type="delete_executed",
+                    category="delete",
+                    occurred_at=created_at,
+                    chat=chat,
+                    title="删除操作执行",
+                    summary=reason or f"删除模式：{mode or '未知'}",
+                    object_count=item_count,
+                    key_id=operation_id,
+                    source=mode,
+                    attribution="delete_operation.items",
+                    metadata={"operation_id": operation_id, "mode": mode},
+                    jump_target={"tab": "delete", "params": {"operation_id": operation_id}},
+                )
+            )
+        if restored_at is not None and _event_in_range(restored_at, time_start, time_end):
+            events.append(
+                _timeline_event(
+                    event_type="delete_restored",
+                    category="delete",
+                    occurred_at=restored_at,
+                    chat=chat,
+                    title="删除操作恢复",
+                    summary=f"已恢复删除操作：{operation_id}",
+                    object_count=item_count,
+                    key_id=operation_id,
+                    source=mode,
+                    attribution="delete_operation.items",
+                    metadata={"operation_id": operation_id, "mode": mode},
+                    jump_target={"tab": "delete", "params": {"operation_id": operation_id}},
+                )
+            )
+    return [event for event in events if _types_match(event, accepted_types)]
+
+
+def _timeline_profile_events(
+    *,
+    chat: MemoryTimelineChat,
+    time_start: Optional[float],
+    time_end: Optional[float],
+    accepted_types: set[str],
+    limit: int,
+) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 3, 100)
+    rows = _query_memory_rows(
+        _append_limit(
+            """
+        SELECT DISTINCT pps.person_id, pps.profile_version, pps.updated_at, pps.source_note
+        FROM person_profile_snapshots pps
+        JOIN paragraph_entities pe ON pe.entity_hash = pps.person_id OR pe.entity_hash IN (
+            SELECT hash FROM entities WHERE name = pps.person_id
+        )
+        JOIN paragraphs p ON p.hash = pe.paragraph_hash
+        ORDER BY pps.updated_at DESC
+        """,
+            query_limit,
+        ),
+        (query_limit,) if query_limit is not None else (),
+    )
+    person_ids = [str(row.get("person_id") or "").strip() for row in rows]
+    person_ids = [person_id for person_id in person_ids if person_id]
+    paragraphs_by_person: dict[str, list[dict[str, Any]]] = {person_id: [] for person_id in person_ids}
+    if person_ids:
+        placeholders = ",".join("?" for _ in person_ids)
+        paragraph_rows = _query_memory_rows(
+            f"""
+            SELECT pe.entity_hash, e.name AS entity_name, p.hash, p.metadata, p.source
+            FROM paragraph_entities pe
+            LEFT JOIN entities e ON e.hash = pe.entity_hash
+            JOIN paragraphs p ON p.hash = pe.paragraph_hash
+            WHERE pe.entity_hash IN ({placeholders}) OR e.name IN ({placeholders})
+            """,
+            (*person_ids, *person_ids),
+        )
+        person_id_set = set(person_ids)
+        for paragraph in paragraph_rows:
+            entity_hash = str(paragraph.get("entity_hash") or "").strip()
+            entity_name = str(paragraph.get("entity_name") or "").strip()
+            for candidate in (entity_hash, entity_name):
+                if candidate in person_id_set:
+                    paragraphs_by_person[candidate].append(dict(paragraph))
+
+    events: list[MemoryTimelineEvent] = []
+    for row in rows:
+        person_id = str(row.get("person_id") or "").strip()
+        paragraph_rows = paragraphs_by_person.get(person_id, [])
+        if not any(_paragraph_matches_chat(paragraph, chat.chat_id)[0] for paragraph in paragraph_rows):
+            continue
+        updated_at = _safe_float(row.get("updated_at"))
+        if updated_at is None or not _event_in_range(updated_at, time_start, time_end):
+            continue
+        events.append(
+            _timeline_event(
+                event_type="profile_updated",
+                category="profile",
+                occurred_at=updated_at,
+                chat=chat,
+                title="相关画像变更",
+                summary="人物画像证据包含该聊天流的长期记忆段落",
+                object_count=max(1, len(paragraph_rows)),
+                key_id=person_id,
+                source=str(row.get("source_note") or ""),
+                attribution="profile.evidence_paragraph",
+                metadata={"person_id": person_id, "profile_version": row.get("profile_version")},
+                jump_target={"tab": "profiles", "params": {"person_id": person_id}},
+            )
+        )
+    override_limit = _timeline_query_limit(limit, 1, 100)
+    override_rows = _query_memory_rows(
+        _append_limit(
+            """
+        SELECT person_id, updated_at, updated_by, source
+        FROM person_profile_overrides
+        ORDER BY updated_at DESC
+        """,
+            override_limit,
+        ),
+        (override_limit,) if override_limit is not None else (),
+    )
+    for row in override_rows:
+        source = str(row.get("source") or "").strip()
+        person_id = str(row.get("person_id") or "").strip()
+        updated_at = _safe_float(row.get("updated_at"))
+        if updated_at is None or not _event_in_range(updated_at, time_start, time_end):
+            continue
+        if not _source_matches_chat(source, chat.chat_id) and chat.chat_id not in source:
+            continue
+        events.append(
+            _timeline_event(
+                event_type="profile_override_set",
+                category="profile",
+                occurred_at=updated_at,
+                chat=chat,
+                title="画像覆写设置",
+                summary="人物画像手动覆写与该聊天流来源相关",
+                key_id=person_id,
+                source=source,
+                attribution="profile.override.source",
+                metadata={"person_id": person_id},
+                jump_target={"tab": "profiles", "params": {"person_id": person_id}},
+            )
+        )
+    return [event for event in events if _types_match(event, accepted_types)]
+
+
+def _timeline_maintenance_events(
+    *,
+    chat: MemoryTimelineChat,
+    time_start: Optional[float],
+    time_end: Optional[float],
+    accepted_types: set[str],
+    limit: int,
+) -> list[MemoryTimelineEvent]:
+    query_limit = _timeline_query_limit(limit, 4, 200)
+    rows = _query_memory_rows(
+        _append_limit(
+            """
+        SELECT r.hash, r.subject, r.predicate, r.object, r.source_paragraph, r.last_reinforced,
+               r.inactive_since, r.protected_until, r.metadata, p.source, p.metadata AS paragraph_metadata
+        FROM relations r
+        LEFT JOIN paragraphs p ON p.hash = r.source_paragraph
+        ORDER BY COALESCE(r.last_reinforced, r.inactive_since, r.protected_until, r.created_at, 0) DESC
+        """,
+            query_limit,
+        ),
+        (query_limit,) if query_limit is not None else (),
+    )
+    events: list[MemoryTimelineEvent] = []
+    for row in rows:
+        paragraph_row = {"metadata": row.get("paragraph_metadata"), "source": row.get("source")}
+        relation_hash = str(row.get("hash") or "").strip()
+        matched, attribution = _paragraph_matches_chat(paragraph_row, chat.chat_id)
+        if not matched:
+            continue
+        relation_text = " ".join(str(row.get(key) or "").strip() for key in ("subject", "predicate", "object")).strip()
+        source = str(row.get("source") or "").strip()
+        for event_type, timestamp_key, title in (
+            ("relation_reinforced", "last_reinforced", "关系强化"),
+            ("relation_frozen", "inactive_since", "关系冻结"),
+            ("relation_protected", "protected_until", "关系保护"),
+        ):
+            occurred_at = _safe_float(row.get(timestamp_key))
+            if occurred_at is None or not _event_in_range(occurred_at, time_start, time_end):
+                continue
+            events.append(
+                _timeline_event(
+                    event_type=event_type,
+                    category="maintenance",
+                    occurred_at=occurred_at,
+                    chat=chat,
+                    title=title,
+                    summary=relation_text or "维护操作影响了该聊天流证据关系",
+                    key_id=relation_hash,
+                    source=source,
+                    attribution=attribution,
+                    metadata={"relation_hash": relation_hash, "source_paragraph": row.get("source_paragraph")},
+                    jump_target={"tab": "maintenance", "params": {"target": relation_hash or relation_text}},
+                )
+            )
+    return [event for event in events if _types_match(event, accepted_types)]
+
+
+def _dedupe_timeline_events(events: list[MemoryTimelineEvent]) -> list[MemoryTimelineEvent]:
+    seen: set[str] = set()
+    deduped: list[MemoryTimelineEvent] = []
+    for event in events:
+        key = event.event_id
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(event)
+    return deduped
+
+
+async def _memory_timeline(
+    *,
+    chat_id: str,
+    time_start: Optional[float],
+    time_end: Optional[float],
+    types: str,
+    limit: int,
+) -> MemoryTimelineResponse:
+    clean_chat_id = str(chat_id or "").strip()
+    if not clean_chat_id:
+        raise HTTPException(status_code=400, detail="chat_id 不能为空")
+    chat_session = _find_real_chat_session(clean_chat_id)
+    if chat_session is None:
+        raise HTTPException(status_code=400, detail=f"聊天流不存在: {clean_chat_id}")
+    if time_start is not None and time_end is not None and time_start > time_end:
+        raise HTTPException(status_code=400, detail="time_start 不能晚于 time_end")
+
+    chat = _timeline_chat_from_session(chat_session)
+    safe_limit = max(1, min(500, int(limit or 100)))
+    accepted_types = {
+        token.strip()
+        for token in str(types or "").split(",")
+        if token.strip() and token.strip() != "all"
+    }
+    collectors = (
+        _timeline_paragraph_events,
+        _timeline_episode_events,
+        _timeline_feedback_events,
+        _timeline_delete_events,
+        _timeline_profile_events,
+        _timeline_maintenance_events,
+    )
+    bound_events: list[MemoryTimelineEvent] = []
+    for collector in collectors:
+        bound_events.extend(
+            collector(
+                chat=chat,
+                time_start=None,
+                time_end=None,
+                accepted_types=set(),
+                limit=0,
+            )
+        )
+    bound_events = _dedupe_timeline_events(bound_events)
+    bound_times = [event.occurred_at for event in bound_events if event.occurred_at is not None]
+    min_time = min(bound_times) if bound_times else None
+    max_time = max(bound_times) if bound_times else None
+
+    events: list[MemoryTimelineEvent] = []
+    for collector in collectors:
+        events.extend(
+            collector(
+                chat=chat,
+                time_start=time_start,
+                time_end=time_end,
+                accepted_types=accepted_types,
+                limit=safe_limit,
+            )
+        )
+
+    events = _dedupe_timeline_events(events)
+    events.sort(key=lambda item: item.occurred_at, reverse=True)
+    items = events[:safe_limit]
+    by_type: dict[str, int] = {}
+    for event in items:
+        by_type[event.category] = by_type.get(event.category, 0) + 1
+        by_type[event.event_type] = by_type.get(event.event_type, 0) + 1
+
+    if min_time is None or max_time is None:
+        now = datetime.now(tz=timezone.utc)
+        fallback_start = (now - timedelta(days=7)).timestamp()
+        fallback_end = now.timestamp()
+        min_time = min_time or fallback_start
+        max_time = max_time or fallback_end
+
+    return MemoryTimelineResponse(
+        success=True,
+        chat=chat,
+        range=MemoryTimelineRange(
+            time_start=time_start,
+            time_end=time_end,
+            min_time=min_time,
+            max_time=max_time,
+        ),
+        items=items,
+        summary={
+            "total": len(items),
+            "by_type": by_type,
+        },
+    )
+
+
+async def _import_chat_targets() -> ImportChatTargetsResponse:
+    try:
+        with get_db_session() as session:
+            rows = list(
+                session.exec(
+                    select(ChatSession).order_by(
+                        col(ChatSession.last_active_timestamp).desc(),
+                        col(ChatSession.created_timestamp).desc(),
+                    )
+                ).all()
+            )
+            session_ids = [str(chat_session.session_id or "").strip() for chat_session in rows]
+            latest_messages = _prefetch_latest_messages_by_session(session, [item for item in session_ids if item])
+            targets = [
+                ImportChatTarget(
+                    chat_id=chat_session.session_id,
+                    chat_name=_get_chat_name(chat_session, latest_messages),
+                    platform=chat_session.platform,
+                    group_id=chat_session.group_id,
+                    user_id=chat_session.user_id,
+                    account_id=chat_session.account_id,
+                    scope=chat_session.scope,
+                    is_group=bool(chat_session.group_id),
+                    last_active_at=chat_session.last_active_timestamp.timestamp()
+                    if chat_session.last_active_timestamp
+                    else None,
+                )
+                for chat_session in rows
+                if str(chat_session.session_id or "").strip()
+            ]
+        return ImportChatTargetsResponse(success=True, data=targets)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"获取导入聊天流失败: {exc}") from exc
 
 
 async def _graph_get(limit: int) -> dict:
@@ -764,7 +1815,7 @@ async def _import_resolve_path(payload: dict[str, Any]) -> dict:
 
 
 async def _import_create(action: str, payload: dict[str, Any]) -> dict:
-    return await memory_service.import_admin(action=action, **_unwrap_payload(payload))
+    return await memory_service.import_admin(action=action, **_validate_import_chat_id(_unwrap_payload(payload)))
 
 
 async def _import_list(limit: int) -> dict:
@@ -991,6 +2042,23 @@ async def query_memory_aggregate(
         person_id=person_id,
         time_start=time_start,
         time_end=time_end,
+    )
+
+
+@router.get("/timeline", response_model=MemoryTimelineResponse)
+async def get_memory_timeline(
+    chat_id: str = Query(..., min_length=1),
+    time_start: float | None = Query(None),
+    time_end: float | None = Query(None),
+    types: str = Query(""),
+    limit: int = Query(100, ge=1, le=500),
+):
+    return await _memory_timeline(
+        chat_id=chat_id,
+        time_start=time_start,
+        time_end=time_end,
+        types=types,
+        limit=limit,
     )
 
 
@@ -1288,6 +2356,11 @@ async def get_memory_import_path_aliases():
     return await _import_path_aliases()
 
 
+@router.get("/import/chat-targets", response_model=ImportChatTargetsResponse)
+async def get_memory_import_chat_targets():
+    return await _import_chat_targets()
+
+
 @router.get("/import/guide")
 async def get_memory_import_guide():
     return await _import_guide()
@@ -1507,6 +2580,23 @@ async def compat_query_aggregate(
         person_id=person_id,
         time_start=time_start,
         time_end=time_end,
+    )
+
+
+@compat_router.get("/timeline", response_model=MemoryTimelineResponse)
+async def compat_get_memory_timeline(
+    chat_id: str = Query(..., min_length=1),
+    time_start: float | None = Query(None),
+    time_end: float | None = Query(None),
+    types: str = Query(""),
+    limit: int = Query(100, ge=1, le=500),
+):
+    return await _memory_timeline(
+        chat_id=chat_id,
+        time_start=time_start,
+        time_end=time_end,
+        types=types,
+        limit=limit,
     )
 
 

@@ -83,6 +83,19 @@ export const DebugSection = React.memo(function DebugSection({ config, onChange 
 
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
+            <Label>JSON 保留图片 Base64</Label>
+            <p className="text-sm text-muted-foreground">默认关闭，关闭时 Prompt 预览 JSON 只保存图片文件引用</p>
+          </div>
+          <Switch
+            checked={config.keep_prompt_preview_json_base64}
+            onCheckedChange={(checked) =>
+              onChange({ ...config, keep_prompt_preview_json_base64: checked })
+            }
+          />
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
             <Label>显示 LPMM 相关文段</Label>
             <p className="text-sm text-muted-foreground">是否显示 LPMM 知识库找到的相关文段日志</p>
           </div>

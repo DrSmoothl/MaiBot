@@ -28,6 +28,7 @@ from src.common.data_models.message_component_data_model import (
     VoiceComponent,
 )
 from src.common.logger import get_logger
+from src.common.utils.image_path import resolve_stored_image_path, serialize_stored_image_path
 from src.config.config import global_config
 
 from .math_utils import number_to_short_id, TimestampMode, translate_timestamp_to_human_readable
@@ -274,7 +275,7 @@ class MessageUtils:
 
         statement = select(images_model).filter_by(image_hash=image_hash, image_type=image_type_model.IMAGE).limit(1)
         existing_record = session.exec(statement).first()
-        if existing_record is not None and Path(existing_record.full_path).is_file():
+        if existing_record is not None and resolve_stored_image_path(existing_record.full_path).is_file():
             existing_record.no_file_flag = False
             existing_record.last_used_time = datetime.now()
             session.add(existing_record)
@@ -289,7 +290,7 @@ class MessageUtils:
 
         if existing_record is not None:
             existing_record.description = component.content.strip()
-            existing_record.full_path = str(image_path.absolute().resolve())
+            existing_record.full_path = serialize_stored_image_path(image_path)
             existing_record.no_file_flag = False
             existing_record.last_used_time = datetime.now()
             existing_record.vlm_processed = bool(component.content.strip())
@@ -299,7 +300,7 @@ class MessageUtils:
                 images_model(
                     image_hash=image_hash,
                     description=component.content.strip(),
-                    full_path=str(image_path.absolute().resolve()),
+                    full_path=serialize_stored_image_path(image_path),
                     image_type=image_type_model.IMAGE,
                     last_used_time=datetime.now(),
                     vlm_processed=bool(component.content.strip()),

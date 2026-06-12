@@ -7,6 +7,8 @@ import io
 import pytest
 
 from src.common.data_models.image_data_model import MaiEmoji, MaiImage
+from src.common.utils import image_path as image_path_utils
+from src.common.utils.image_path import StoredImagePathError
 
 
 def _build_test_image_bytes(image_format: str) -> bytes:
@@ -88,10 +90,12 @@ async def test_calculate_hash_format_reuses_existing_hashed_file_when_tmp_was_co
     ],
 )
 def test_from_db_instance_restores_image_format_from_path(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     model_cls: type[MaiEmoji] | type[MaiImage],
     extra_fields: dict[str, object],
 ) -> None:
+    monkeypatch.setattr(image_path_utils, "PROJECT_ROOT", tmp_path.resolve())
     image_path = tmp_path / "cached.png"
     image_path.write_bytes(_build_test_image_bytes("PNG"))
 
@@ -107,3 +111,15 @@ def test_from_db_instance_restores_image_format_from_path(
     assert image.full_path == image_path.resolve()
     assert image.file_name == image_path.name
     assert image.image_format == "png"
+
+
+def test_to_db_instance_rejects_project_external_path(tmp_path: Path) -> None:
+    image_path = tmp_path / "external.png"
+    image_bytes = _build_test_image_bytes("PNG")
+    image_path.write_bytes(image_bytes)
+
+    emoji = MaiEmoji(full_path=image_path, image_bytes=image_bytes)
+    emoji.file_hash = "hash"
+
+    with pytest.raises(StoredImagePathError):
+        emoji.to_db_instance()

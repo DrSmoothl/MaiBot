@@ -362,6 +362,10 @@ export interface MemoryImportSettings {
   max_paste_chars?: number
   default_file_concurrency?: number
   default_chunk_concurrency?: number
+  default_narrative_window_size?: number
+  default_narrative_overlap?: number
+  default_factual_target_size?: number
+  max_chunk_chars?: number
   max_file_concurrency?: number
   max_chunk_concurrency?: number
   poll_interval_ms?: number
@@ -381,6 +385,69 @@ export interface MemoryImportSettingsPayload {
 export interface MemoryImportPathAliasesPayload {
   success: boolean
   path_aliases: Record<string, string>
+}
+
+export interface MemoryImportChatTargetPayload {
+  chat_id: string
+  chat_name: string
+  platform?: string | null
+  group_id?: string | null
+  user_id?: string | null
+  account_id?: string | null
+  scope?: string | null
+  is_group: boolean
+  last_active_at?: number | null
+}
+
+export interface MemoryImportChatTargetsPayload {
+  success: boolean
+  data: MemoryImportChatTargetPayload[]
+}
+
+export type MemoryTimelineEventCategory =
+  | 'paragraph'
+  | 'episode'
+  | 'profile'
+  | 'feedback'
+  | 'delete'
+  | 'maintenance'
+
+export interface MemoryTimelineJumpTargetPayload {
+  tab: 'graph' | 'episodes' | 'profiles' | 'feedback' | 'delete' | 'maintenance' | 'timeline'
+  params: Record<string, string | number | boolean | null | undefined>
+}
+
+export interface MemoryTimelineEventPayload {
+  event_id: string
+  event_type: string
+  category: MemoryTimelineEventCategory
+  occurred_at: number
+  chat_id: string
+  chat_name: string
+  title: string
+  summary: string
+  object_count: number
+  key_id?: string
+  source?: string
+  attribution?: string
+  metadata?: Record<string, unknown>
+  jump_target: MemoryTimelineJumpTargetPayload
+}
+
+export interface MemoryTimelinePayload {
+  success: boolean
+  chat: Pick<MemoryImportChatTargetPayload, 'chat_id' | 'chat_name' | 'platform' | 'group_id' | 'user_id' | 'is_group'>
+  range: {
+    time_start?: number | null
+    time_end?: number | null
+    min_time?: number | null
+    max_time?: number | null
+  }
+  items: MemoryTimelineEventPayload[]
+  summary: {
+    total: number
+    by_type: Record<string, number>
+  }
 }
 
 export interface MemoryImportResolvePathPayload {
@@ -985,6 +1052,30 @@ export async function getMemorySources(): Promise<MemorySourceListPayload> {
   return requestJson<MemorySourceListPayload>('/sources')
 }
 
+export async function getMemoryTimeline(options: {
+  chatId: string
+  timeStart?: number
+  timeEnd?: number
+  types?: string[]
+  limit?: number
+}): Promise<MemoryTimelinePayload> {
+  const params = new URLSearchParams({
+    chat_id: options.chatId,
+    limit: String(options.limit ?? 100),
+  })
+  if (options.timeStart !== undefined) {
+    params.set('time_start', String(options.timeStart))
+  }
+  if (options.timeEnd !== undefined) {
+    params.set('time_end', String(options.timeEnd))
+  }
+  const cleanTypes = (options.types ?? []).map((item) => item.trim()).filter(Boolean)
+  if (cleanTypes.length > 0) {
+    params.set('types', cleanTypes.join(','))
+  }
+  return requestJson<MemoryTimelinePayload>(`/timeline?${params.toString()}`)
+}
+
 export async function getMemoryEpisodes(options?: {
   query?: string
   limit?: number
@@ -1225,6 +1316,10 @@ export async function getMemoryImportSettings(): Promise<MemoryImportSettingsPay
 
 export async function getMemoryImportPathAliases(): Promise<MemoryImportPathAliasesPayload> {
   return requestJson<MemoryImportPathAliasesPayload>('/import/path-aliases')
+}
+
+export async function getMemoryImportChatTargets(): Promise<MemoryImportChatTargetsPayload> {
+  return requestJson<MemoryImportChatTargetsPayload>('/import/chat-targets')
 }
 
 export async function resolveMemoryImportPath(payload: {

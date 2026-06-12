@@ -5,10 +5,15 @@ import { parseResponse } from '@/lib/api-helpers'
 
 import type { InstalledPlugin, LegacyInstalledPlugin } from './types'
 
+const INSTALLED_PLUGINS_CACHE_TTL = 1500
+
+let installedPluginsCache: { timestamp: number; result: ApiResponse<InstalledPlugin[]> } | null = null
+let installedPluginsRequest: Promise<ApiResponse<InstalledPlugin[]>> | null = null
+
 /**
  * 获取已安装插件列表
  */
-export async function getInstalledPlugins(): Promise<ApiResponse<InstalledPlugin[]>> {
+async function fetchInstalledPluginsUncached(): Promise<ApiResponse<InstalledPlugin[]>> {
   const response = await fetchWithAuth('/api/webui/plugins/installed', {
     headers: getAuthHeaders()
   })
@@ -34,6 +39,29 @@ export async function getInstalledPlugins(): Promise<ApiResponse<InstalledPlugin
     success: true,
     data: result.plugins || []
   }
+}
+
+export async function getInstalledPlugins(options: { forceRefresh?: boolean } = {}): Promise<ApiResponse<InstalledPlugin[]>> {
+  if (
+    !options.forceRefresh
+    && installedPluginsCache
+    && Date.now() - installedPluginsCache.timestamp < INSTALLED_PLUGINS_CACHE_TTL
+  ) {
+    return installedPluginsCache.result
+  }
+
+  if (!installedPluginsRequest || options.forceRefresh) {
+    installedPluginsRequest = fetchInstalledPluginsUncached()
+      .then((result) => {
+        installedPluginsCache = { timestamp: Date.now(), result }
+        return result
+      })
+      .finally(() => {
+        installedPluginsRequest = null
+      })
+  }
+
+  return installedPluginsRequest
 }
 
 /**

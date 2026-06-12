@@ -1,3 +1,13 @@
+[behavior_scene_analyze]
+display_name = "行動シーン分析"
+advanced = true
+description = "直近のチャット文脈を再利用可能な行動シーン断片に分割し、領域タグ、行動ニーズ、相互作用の特徴を抽出するテンプレート。"
+
+[consolidate_behavior]
+display_name = "行動表現の統合"
+advanced = true
+description = "行動表現ライブラリ内の意味的に重複する項目を見つけ、保持対象と統合対象のプランを出力するテンプレート。"
+
 [maisaka_chat]
 display_name = "Planner"
 advanced = false
@@ -72,6 +82,16 @@ description = "用于结合上下文推理术语含义的模板。"
 display_name = "表达风格学习"
 advanced = true
 description = "用于从聊天内容中学习表达风格的模板。"
+
+[learn_behavior]
+display_name = "行動表現学習"
+advanced = true
+description = "実際のチャットから再利用可能なシーン・行動・結果のパターンを抽出し、観察学習と自己フィードバックを扱うテンプレート。"
+
+[maisaka_chat_focus]
+display_name = "Focus Planner"
+advanced = true
+description = "Focus モード用の Maisaka 計画テンプレート。現在注目しているチャットとチャット横断概要をもとに次の行動を選択する。"
 
 [maisaka_timing_gate]
 display_name = "Timing Gate"

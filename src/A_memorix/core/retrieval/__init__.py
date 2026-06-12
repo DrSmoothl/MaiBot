@@ -21,8 +21,11 @@ from .threshold import (
     ThresholdConfig,
 )
 from .sparse_bm25 import (
-    SparseBM25Index,
+    ExperimentalExternalInvertedIndexBackend,
     SparseBM25Config,
+    SparseBM25Index,
+    SparseSearchBackend,
+    SQLiteFTS5SparseBackend,
 )
 from .graph_relation_recall import (
     GraphRelationRecallConfig,
@@ -50,6 +53,9 @@ __all__ = [
     # Sparse BM25
     "SparseBM25Index",
     "SparseBM25Config",
+    "SparseSearchBackend",
+    "SQLiteFTS5SparseBackend",
+    "ExperimentalExternalInvertedIndexBackend",
     # Graph relation recall
     "GraphRelationRecallConfig",
     "GraphRelationRecallService",

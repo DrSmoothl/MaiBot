@@ -108,7 +108,11 @@ function formatEvidenceScore(item: MemoryProfileEvidenceItemPayload): string {
   return '-'
 }
 
-export function MemoryProfileManager() {
+export interface MemoryProfileManagerProps {
+  initialPersonId?: string
+}
+
+export function MemoryProfileManager({ initialPersonId = '' }: MemoryProfileManagerProps) {
   const { toast } = useToast()
   const [profiles, setProfiles] = useState<MemoryProfileItemPayload[]>([])
   const [profileListMode, setProfileListMode] = useState<'library' | 'search'>('library')
@@ -131,6 +135,7 @@ export function MemoryProfileManager() {
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const [correctingEvidenceKey, setCorrectingEvidenceKey] = useState('')
   const initialLoadedRef = useRef(false)
+  const initialPersonAppliedRef = useRef('')
 
   const selectedProfile = useMemo(
     () => profiles.find((item) => item.person_id === selectedPersonId) ?? null,
@@ -297,6 +302,64 @@ export function MemoryProfileManager() {
       setQuerying(false)
     }
   }, [forceRefresh, loadProfileEvidence, queryKeyword, queryLimit, queryPersonId, queryPlatform, queryUserId, showAdvancedPersonId, toast])
+
+  useEffect(() => {
+    const cleanPersonId = initialPersonId.trim()
+    if (!cleanPersonId || cleanPersonId === initialPersonAppliedRef.current) {
+      return
+    }
+    initialPersonAppliedRef.current = cleanPersonId
+    setShowAdvancedPersonId(true)
+    setQueryPersonId(cleanPersonId)
+    setSelectedPersonId(cleanPersonId)
+    setQueryResult(null)
+    setProfileEvidence(null)
+    setShowAutoProfile(false)
+
+    let cancelled = false
+    const loadInitialProfile = async () => {
+      setQuerying(true)
+      try {
+        const [queryPayload, searchPayload] = await Promise.all([
+          queryMemoryProfile({
+            personId: cleanPersonId,
+            personKeyword: '',
+            platform: '',
+            userId: '',
+            limit: parsePositiveInt(queryLimit, 12),
+            forceRefresh: false,
+          }),
+          searchMemoryProfiles({
+            personId: cleanPersonId,
+            limit: 80,
+          }),
+        ])
+        if (cancelled) {
+          return
+        }
+        setQueryResult(queryPayload)
+        setProfiles(searchPayload.items ?? [])
+        setProfileListMode('search')
+        await loadProfileEvidence(cleanPersonId)
+      } catch (error) {
+        if (!cancelled) {
+          toast({
+            title: '定位人物画像失败',
+            description: error instanceof Error ? error.message : String(error),
+            variant: 'destructive',
+          })
+        }
+      } finally {
+        if (!cancelled) {
+          setQuerying(false)
+        }
+      }
+    }
+    void loadInitialProfile()
+    return () => {
+      cancelled = true
+    }
+  }, [initialPersonId, loadProfileEvidence, queryLimit, toast])
 
   const selectProfile = useCallback((personId: string) => {
     setSelectedPersonId(personId)

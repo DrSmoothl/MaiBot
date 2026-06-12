@@ -12,7 +12,10 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="no_action",
-        description="本轮不进行任何动作，等待其他用户的新消息；也用于用户可能还没说完、需要先把发言权交还给用户的场景。",
+        description=(
+            "本轮暂时不进行任何动作，等待新的外部消息；在 Planner 中使用时会保留连续 Planner 状态，"
+            "下一条消息直接继续交给 Planner，只有 finish 会结束连续 Planner。"
+        ),
         provider_name="maisaka_builtin",
         provider_type="builtin",
     )

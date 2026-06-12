@@ -14,12 +14,16 @@ from src.A_memorix.core.runtime.sdk_memory_kernel import SDKMemoryKernel
 class _FakeEmbeddingManager:
     def __init__(self, dimension: int = 8) -> None:
         self.default_dimension = dimension
+        self.encode_calls: list[Any] = []
+        self.detect_calls = 0
 
     async def _detect_dimension(self) -> int:
+        self.detect_calls += 1
         return self.default_dimension
 
     async def encode(self, text: Any, **kwargs: Any) -> np.ndarray:
         del kwargs
+        self.encode_calls.append(text)
 
         def _encode_one(raw: Any) -> np.ndarray:
             content = str(raw or "")
@@ -228,13 +232,22 @@ async def test_initialize_dimension_mismatch_keeps_vector_store_empty_until_rebu
     )
     await second_kernel.initialize()
     assert second_kernel.vector_store is not None
-    assert second_kernel.vector_store.dimension == second_embedding_manager.default_dimension
-    assert second_kernel.vector_store.num_vectors == 0
-    assert "old-dimension-vector" not in second_kernel.vector_store
+    assert second_kernel.vector_store.dimension == first_embedding_manager.default_dimension
+    assert second_kernel.vector_store.num_vectors == 1
+    assert "old-dimension-vector" in second_kernel.vector_store
 
     config = await second_kernel.memory_runtime_admin(action="get_config")
+    assert config["vector_rebuild_required"] is False
+
+    recover = await second_kernel.memory_runtime_admin(action="recover_embedding")
+    assert recover["success"] is False
+    assert recover["detail"] == "dimension_mismatch"
+
+    config = await second_kernel.memory_runtime_admin(action="get_config")
+    assert config["embedding_dimension"] == second_embedding_manager.default_dimension
     assert config["vector_rebuild_required"] is True
     assert config["stored_vector_dimension"] == first_embedding_manager.default_dimension
+    assert config["embedding_degraded"] is True
 
     await second_kernel.shutdown()
 
@@ -244,12 +257,13 @@ async def test_initialize_dimension_mismatch_keeps_vector_store_empty_until_rebu
     )
     await third_kernel.initialize()
     assert third_kernel.vector_store is not None
-    assert third_kernel.vector_store.dimension == second_embedding_manager.default_dimension
-    assert third_kernel.vector_store.num_vectors == 0
+    assert third_kernel.vector_store.dimension == first_embedding_manager.default_dimension
 
     config = await third_kernel.memory_runtime_admin(action="get_config")
-    assert config["vector_rebuild_required"] is True
-    assert config["stored_vector_dimension"] == first_embedding_manager.default_dimension
+    assert config["vector_rebuild_required"] is False
+
+    recover = await third_kernel.memory_runtime_admin(action="recover_embedding")
+    assert recover["detail"] == "dimension_mismatch"
 
     result = await third_kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2)
     assert result["success"] is True
@@ -267,3 +281,96 @@ async def test_initialize_dimension_mismatch_keeps_vector_store_empty_until_rebu
     assert config["stored_vector_dimension"] == second_embedding_manager.default_dimension
 
     await fourth_kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_initialize_defers_real_embedding_self_check(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    self_check_calls: list[dict[str, Any]] = []
+
+    async def _recording_runtime_self_check(**kwargs: Any) -> dict[str, Any]:
+        self_check_calls.append(kwargs)
+        return await _fake_runtime_self_check(**kwargs)
+
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _recording_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+
+    await kernel.initialize()
+    try:
+        assert fake_embedding_manager.encode_calls == []
+        assert fake_embedding_manager.detect_calls == 0
+        assert self_check_calls == []
+        report = kernel._runtime_facade._runtime_self_check_report
+        assert report["code"] == "startup_self_check_deferred"
+
+        result = await kernel.memory_runtime_admin(action="self_check")
+        assert result["success"] is True
+        assert len(self_check_calls) == 1
+    finally:
+        await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_deferred_self_check_marks_dimension_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=12)
+    data_dir = tmp_path / "a_memorix_data"
+
+    async def _dimension_mismatch_self_check(**kwargs: Any) -> dict[str, Any]:
+        vector_store = kwargs["vector_store"]
+        return {
+            "ok": False,
+            "message": "dimension mismatch",
+            "configured_dimension": 12,
+            "requested_dimension": 12,
+            "vector_store_dimension": int(vector_store.dimension),
+            "detected_dimension": 12,
+            "encoded_dimension": 12,
+            "elapsed_ms": 0.0,
+            "sample_text": "test",
+            "checked_at": 1_777_000_000.0,
+        }
+
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _dimension_mismatch_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_kernel_config(data_dir, 8),
+    )
+
+    await kernel.initialize()
+    try:
+        assert kernel.vector_store is not None
+        assert kernel.vector_store.dimension == 8
+        assert kernel._is_embedding_degraded() is False
+
+        result = await kernel.memory_runtime_admin(action="self_check")
+        assert result["success"] is False
+
+        config = await kernel.memory_runtime_admin(action="get_config")
+        assert config["embedding_dimension"] == 12
+        assert config["vector_rebuild_required"] is True
+        assert config["stored_vector_dimension"] == 8
+        assert config["embedding_degraded"] is True
+    finally:
+        await kernel.shutdown()

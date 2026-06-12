@@ -7,7 +7,7 @@ import { BackgroundLayer } from '@/components/background-layer'
 
 import { LogoArea } from './LogoArea'
 import { NavItem } from './NavItem'
-import { menuSections } from './constants'
+import { useMenuSections } from './use-menu-sections'
 
 interface SidebarProps {
   sidebarOpen: boolean
@@ -25,6 +25,7 @@ export function Sidebar({
   const { t } = useTranslation()
   const { config: sidebarBg, inheritedFrom } = useBackground('sidebar')
   const inheritsPageBackground = inheritedFrom === 'page'
+  const menuSections = useMenuSections()
 
   return (
     <aside
@@ -60,7 +61,7 @@ export function Sidebar({
           <ul
             className={cn(
               // 移动端始终使用正常间距,桌面端根据 sidebarOpen 切换
-              'space-y-6',
+              'space-y-4',
               !sidebarOpen && 'lg:w-full lg:space-y-3'
             )}
           >
@@ -76,7 +77,7 @@ export function Sidebar({
                     !sidebarOpen && 'lg:invisible lg:mb-1'
                   )}
                 >
-                  <h3 className="text-muted-foreground/60 text-xs font-semibold tracking-wider whitespace-nowrap uppercase">
+                  <h3 className="text-muted-foreground/60 text-sm font-semibold tracking-wider whitespace-nowrap uppercase">
                     {t(section.title)}
                   </h3>
                 </div>

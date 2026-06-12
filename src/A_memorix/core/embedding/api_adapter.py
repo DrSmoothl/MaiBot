@@ -2,8 +2,8 @@
 请求式嵌入 API 适配器。
 
 统一记忆插件内部的维度控制语义：
-- 对外仅公开 `embedding.dimension`
-- 默认请求维度来自当前运行时的 canonical dimension
+- 对外公开 `embedding.dimension` 与 `embedding.dimension_request_mode`
+- 维度请求是否随默认 encode 发送由 `embedding.dimension_request_mode` 控制
 - provider-specific 字段在适配层内部完成映射
 """
 
@@ -39,6 +39,7 @@ class EmbeddingAPIAdapter:
         default_dimension: int = 1024,
         enable_cache: bool = False,
         model_name: str = "auto",
+        dimension_request_mode: str = "explicit",
         retry_config: Optional[dict] = None,
     ) -> None:
         self.batch_size = max(1, int(batch_size))
@@ -46,6 +47,7 @@ class EmbeddingAPIAdapter:
         self.default_dimension = max(1, int(default_dimension))
         self.enable_cache = bool(enable_cache)
         self.model_name = str(model_name or "auto")
+        self.dimension_request_mode = self._normalize_dimension_request_mode(dimension_request_mode)
 
         self.retry_config = retry_config or {}
         self.max_attempts = max(1, int(self.retry_config.get("max_attempts", 5)))
@@ -64,7 +66,8 @@ class EmbeddingAPIAdapter:
             f"batch={self.batch_size}, "
             f"concurrent={self.max_concurrent}, "
             f"dim={self.default_dimension}, "
-            f"model={self.model_name}"
+            f"model={self.model_name}, "
+            f"dimension_request_mode={self.dimension_request_mode}"
         )
 
     def _get_current_model_config(self):
@@ -109,6 +112,27 @@ class EmbeddingAPIAdapter:
         if override is not None:
             return override
         return self.get_requested_dimension()
+
+    @staticmethod
+    def _normalize_dimension_request_mode(mode: str) -> str:
+        normalized = str(mode or "explicit").strip().lower()
+        if normalized in {"auto", "explicit", "on_demand", "on-demand"}:
+            return "explicit"
+        if normalized in {"always", "force", "forced"}:
+            return "always"
+        if normalized in {"never", "none", "natural"}:
+            return "never"
+        logger.warning(f"未知 embedding.dimension_request_mode={mode!r}，回退 explicit")
+        return "explicit"
+
+    def _should_include_dimension(self, dimensions: Optional[int], include_dimension: bool) -> bool:
+        if not include_dimension:
+            return False
+        if self.dimension_request_mode == "never":
+            return False
+        if self.dimension_request_mode == "always":
+            return True
+        return dimensions is not None
 
     @staticmethod
     def _strip_dimension_control_keys(extra_params: dict) -> dict:
@@ -205,12 +229,17 @@ class EmbeddingAPIAdapter:
                 api_provider = self._find_provider(model_info.api_provider)
                 client = client_registry.get_client_class_instance(api_provider, force_new=True)
 
-                requested_dimension = self._resolve_canonical_dimension(dimensions) if include_dimension else None
+                should_include_dimension = self._should_include_dimension(dimensions, include_dimension)
+                requested_dimension = (
+                    self._resolve_canonical_dimension(dimensions)
+                    if should_include_dimension
+                    else None
+                )
                 extra_params = self._build_request_extra_params(
                     api_provider=api_provider,
                     base_extra_params=dict(getattr(model_info, "extra_params", {}) or {}),
                     requested_dimension=requested_dimension,
-                    include_dimension=include_dimension,
+                    include_dimension=should_include_dimension,
                 )
 
                 response = await self._request_with_retry(
@@ -241,6 +270,7 @@ class EmbeddingAPIAdapter:
             [
                 str(self.model_name or "auto"),
                 str(self.default_dimension),
+                str(self.dimension_request_mode),
                 ",".join(candidate_names),
             ]
         )
@@ -262,24 +292,25 @@ class EmbeddingAPIAdapter:
             return self._dimension
 
         logger.info("检测嵌入维度...")
-        try:
-            target_dim = self.default_dimension
-            logger.debug(f"尝试请求指定维度: {target_dim}")
-            test_embedding = await self._get_embedding_direct("test", dimensions=target_dim)
-            if test_embedding and isinstance(test_embedding, list):
-                detected_dim = len(test_embedding)
-                if detected_dim == target_dim:
-                    logger.info(f"嵌入维度: {detected_dim}")
-                else:
-                    logger.warning(
-                        f"requested_dimension={target_dim} 但模型返回 detected_dimension={detected_dim}，将使用真实输出维度"
-                    )
-                self._dimension = detected_dim
-                self._dimension_detected = True
-                self._GLOBAL_DIMENSION_CACHE[cache_key] = int(detected_dim)
-                return detected_dim
-        except Exception as exc:
-            logger.debug(f"带维度参数探测失败: {exc}，尝试不带维度参数探测")
+        if self.dimension_request_mode == "always":
+            try:
+                target_dim = self.default_dimension
+                logger.debug(f"尝试请求指定维度: {target_dim}")
+                test_embedding = await self._get_embedding_direct("test", dimensions=target_dim)
+                if test_embedding and isinstance(test_embedding, list):
+                    detected_dim = len(test_embedding)
+                    if detected_dim == target_dim:
+                        logger.info(f"嵌入维度: {detected_dim}")
+                    else:
+                        logger.warning(
+                            f"requested_dimension={target_dim} 但模型返回 detected_dimension={detected_dim}，将使用真实输出维度"
+                        )
+                    self._dimension = detected_dim
+                    self._dimension_detected = True
+                    self._GLOBAL_DIMENSION_CACHE[cache_key] = int(detected_dim)
+                    return detected_dim
+            except Exception as exc:
+                logger.debug(f"带维度参数探测失败: {exc}，尝试不带维度参数探测")
 
         try:
             test_embedding = await self._get_embedding_direct("test", include_dimension=False)
@@ -311,9 +342,9 @@ class EmbeddingAPIAdapter:
         del normalize
 
         start_time = time.time()
-        if dimensions is None:
+        if dimensions is None or self.dimension_request_mode == "never":
             target_dim = int(await self._detect_dimension())
-            requested_dimension = self._resolve_canonical_dimension()
+            requested_dimension = None if self.dimension_request_mode != "always" else self._resolve_canonical_dimension()
         else:
             target_dim = self._resolve_canonical_dimension(dimensions)
             requested_dimension = target_dim
@@ -448,6 +479,7 @@ class EmbeddingAPIAdapter:
             "requested_dimension": int(self.get_requested_dimension()),
             "detected_dimension": int(self._dimension or 0),
             "dimension_detected": self._dimension_detected,
+            "dimension_request_mode": self.dimension_request_mode,
             "batch_size": self.batch_size,
             "max_concurrent": self.max_concurrent,
             "total_encoded": self._total_encoded,
@@ -468,6 +500,7 @@ class EmbeddingAPIAdapter:
             f"configured={self.default_dimension}, "
             f"requested={self.get_requested_dimension()}, "
             f"detected={self._dimension or 0}, "
+            f"dimension_request_mode={self.dimension_request_mode}, "
             f"encoded={self._total_encoded})"
         )
 
@@ -478,6 +511,7 @@ def create_embedding_api_adapter(
     default_dimension: int = 1024,
     enable_cache: bool = False,
     model_name: str = "auto",
+    dimension_request_mode: str = "explicit",
     retry_config: Optional[dict] = None,
 ) -> EmbeddingAPIAdapter:
     return EmbeddingAPIAdapter(
@@ -486,5 +520,6 @@ def create_embedding_api_adapter(
         default_dimension=default_dimension,
         enable_cache=enable_cache,
         model_name=model_name,
+        dimension_request_mode=dimension_request_mode,
         retry_config=retry_config,
     )

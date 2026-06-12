@@ -495,12 +495,14 @@ class ImportTaskManager:
         content: str,
         source: str,
         knowledge_type: str,
+        metadata: Optional[Dict[str, Any]] = None,
         time_meta: Optional[Dict[str, Any]] = None,
     ) -> str:
         async with self._storage_lock:
             para_hash = self.plugin.metadata_store.add_paragraph(
                 content=content,
                 source=source,
+                metadata=metadata,
                 knowledge_type=knowledge_type,
                 time_meta=time_meta,
             )
@@ -639,6 +641,19 @@ class ImportTaskManager:
 
     def _default_chunk_concurrency(self) -> int:
         return max(1, self._cfg_int("web.import.default_chunk_concurrency", 4))
+
+    def _default_narrative_window_size(self) -> int:
+        return max(200, self._cfg_int("web.import.default_narrative_window_size", 1600))
+
+    def _default_narrative_overlap(self) -> int:
+        window_size = self._default_narrative_window_size()
+        return _clamp(self._cfg_int("web.import.default_narrative_overlap", 400), 0, max(0, window_size - 1))
+
+    def _default_factual_target_size(self) -> int:
+        return max(200, self._cfg_int("web.import.default_factual_target_size", 1200))
+
+    def _max_import_chunk_chars(self) -> int:
+        return max(200, self._cfg_int("web.import.max_chunk_chars", 3200))
 
     def _max_file_concurrency(self) -> int:
         return max(1, self._cfg_int("web.import.max_file_concurrency", 6))
@@ -1023,8 +1038,34 @@ class ImportTaskManager:
 
         chat_log = _coerce_bool(payload.get("chat_log"), False)
         chat_reference_time = str(payload.get("chat_reference_time") or "").strip() or None
+        chat_id = str(payload.get("chat_id") or "").strip()
         force = _coerce_bool(payload.get("force"), False)
         clear_manifest = _coerce_bool(payload.get("clear_manifest"), False)
+        max_chunk_chars = self._max_import_chunk_chars()
+        narrative_window_size = _clamp(
+            _coerce_int(
+                payload.get("narrative_window_size", self._default_narrative_window_size()),
+                self._default_narrative_window_size(),
+            ),
+            200,
+            max_chunk_chars,
+        )
+        narrative_overlap = _clamp(
+            _coerce_int(
+                payload.get("narrative_overlap", self._default_narrative_overlap()),
+                self._default_narrative_overlap(),
+            ),
+            0,
+            max(0, narrative_window_size - 1),
+        )
+        factual_target_size = _clamp(
+            _coerce_int(
+                payload.get("factual_target_size", self._default_factual_target_size()),
+                self._default_factual_target_size(),
+            ),
+            200,
+            max_chunk_chars,
+        )
 
         return {
             "input_mode": input_mode,
@@ -1034,9 +1075,13 @@ class ImportTaskManager:
             "strategy_override": strategy_override,
             "chat_log": chat_log,
             "chat_reference_time": chat_reference_time,
+            "chat_id": chat_id,
             "force": force,
             "clear_manifest": clear_manifest,
             "dedupe_policy": dedupe_policy,
+            "narrative_window_size": narrative_window_size,
+            "narrative_overlap": narrative_overlap,
+            "factual_target_size": factual_target_size,
         }
 
     def _normalize_params(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1216,6 +1261,10 @@ class ImportTaskManager:
             "max_paste_chars": self._max_paste_chars(),
             "default_file_concurrency": self._default_file_concurrency(),
             "default_chunk_concurrency": self._default_chunk_concurrency(),
+            "default_narrative_window_size": self._default_narrative_window_size(),
+            "default_narrative_overlap": self._default_narrative_overlap(),
+            "default_factual_target_size": self._default_factual_target_size(),
+            "max_chunk_chars": self._max_import_chunk_chars(),
             "max_file_concurrency": self._max_file_concurrency(),
             "max_chunk_concurrency": self._max_chunk_concurrency(),
             "poll_interval_ms": max(200, self._cfg_int("web.import.poll_interval_ms", 1000)),
@@ -2895,6 +2944,7 @@ class ImportTaskManager:
             content,
             task.params["strategy_override"],
             chat_log=bool(task.params.get("chat_log")),
+            import_params=task.params,
         )
         await self._set_file_strategy(task_id, file_record.file_id, strategy)
         await self._set_file_state(task_id, file_record.file_id, "splitting", "splitting")
@@ -2940,6 +2990,7 @@ class ImportTaskManager:
                         chunk_semaphore=chunk_semaphore,
                         chat_log=bool(task.params.get("chat_log")),
                         chat_reference_time=str(task.params.get("chat_reference_time") or "").strip() or None,
+                        paragraph_metadata=self._chat_metadata_from_params(task.params),
                     )
                 )
             )
@@ -2986,6 +3037,7 @@ class ImportTaskManager:
         chunk_semaphore: asyncio.Semaphore,
         chat_log: bool = False,
         chat_reference_time: Optional[str] = None,
+        paragraph_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         async with chunk_semaphore:
             chunk_id = chunk.chunk.chunk_id
@@ -3030,7 +3082,12 @@ class ImportTaskManager:
                         resolved_model,
                         reference_time=chat_reference_time,
                     )
-                await self._persist_processed_chunk(file_record, processed, time_meta=time_meta)
+                await self._persist_processed_chunk(
+                    file_record,
+                    processed,
+                    metadata=paragraph_metadata,
+                    time_meta=time_meta,
+                )
                 await self._set_chunk_completed(task_id, file_record.file_id, chunk_id)
             except Exception as e:
                 await self._set_chunk_failed(task_id, file_record.file_id, chunk_id, f"写入失败: {e}")
@@ -3057,6 +3114,13 @@ class ImportTaskManager:
             if task:
                 task.schema_detected = schema
                 task.updated_at = _now()
+        task_params: Dict[str, Any] = {}
+        async with self._lock:
+            task = self._tasks.get(task_id)
+            if task:
+                task_params = dict(task.params)
+        paragraph_metadata = self._chat_metadata_from_params(task_params)
+
         units, build_warnings = self._build_json_units(data, file_record.file_id, file_record.name, schema)
         if build_warnings:
             await self._append_file_warnings(task_id, file_record.file_id, build_warnings)
@@ -3064,7 +3128,15 @@ class ImportTaskManager:
 
         await self._set_file_state(task_id, file_record.file_id, "extracting", "extracting")
         jobs = [
-            asyncio.create_task(self._process_json_unit(task_id, file_record, unit, chunk_semaphore))
+            asyncio.create_task(
+                self._process_json_unit(
+                    task_id,
+                    file_record,
+                    unit,
+                    chunk_semaphore,
+                    paragraph_metadata=paragraph_metadata,
+                )
+            )
             for unit in units
         ]
         await asyncio.gather(*jobs, return_exceptions=True)
@@ -3265,6 +3337,7 @@ class ImportTaskManager:
         file_record: ImportFileRecord,
         unit: Dict[str, Any],
         chunk_semaphore: asyncio.Semaphore,
+        paragraph_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         chunk_id = unit["chunk_id"]
         async with chunk_semaphore:
@@ -3297,6 +3370,7 @@ class ImportTaskManager:
                             file_record=file_record,
                             content=content,
                             source=source,
+                            metadata=paragraph_metadata,
                             knowledge_type=k_type,
                             time_meta=unit.get("time_meta"),
                         )
@@ -3377,6 +3451,13 @@ class ImportTaskManager:
         if source_text not in imported_sources:
             imported_sources.append(source_text)
 
+    @staticmethod
+    def _chat_metadata_from_params(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        chat_id = str(params.get("chat_id") or "").strip()
+        if not chat_id:
+            return None
+        return {"chat_id": chat_id}
+
     async def _ensure_embedding_runtime_ready(self) -> None:
         report = await ensure_runtime_self_check(self.plugin)
         if bool(report.get("ok", False)):
@@ -3400,6 +3481,7 @@ class ImportTaskManager:
         file_record: ImportFileRecord,
         processed: ProcessedChunk,
         *,
+        metadata: Optional[Dict[str, Any]] = None,
         time_meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         content = str(processed.chunk.text or "")
@@ -3412,6 +3494,7 @@ class ImportTaskManager:
             file_record=file_record,
             content=content,
             source=source,
+            metadata=metadata,
             knowledge_type=_storage_type_from_strategy(processed.type),
             time_meta=time_meta,
         )
@@ -3705,20 +3788,39 @@ JSON schema:
             return QuoteStrategy(filename)
         return None
 
-    def _instantiate_strategy(self, filename: str, strategy: ImportStrategy) -> Any:
+    def _instantiate_strategy(
+        self,
+        filename: str,
+        strategy: ImportStrategy,
+        *,
+        import_params: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        params = import_params or {}
         if strategy == ImportStrategy.FACTUAL:
-            return FactualStrategy(filename)
+            return FactualStrategy(filename, target_size=_coerce_int(params.get("factual_target_size"), 1200))
         if strategy == ImportStrategy.QUOTE:
             return QuoteStrategy(filename)
-        return NarrativeStrategy(filename)
+        return NarrativeStrategy(
+            filename,
+            window_size=_coerce_int(params.get("narrative_window_size"), 1600),
+            overlap=_coerce_int(params.get("narrative_overlap"), 400),
+        )
 
-    def _determine_strategy(self, filename: str, content: str, override: str, *, chat_log: bool = False) -> Any:
+    def _determine_strategy(
+        self,
+        filename: str,
+        content: str,
+        override: str,
+        *,
+        chat_log: bool = False,
+        import_params: Optional[Dict[str, Any]] = None,
+    ) -> Any:
         strategy = select_import_strategy(
             content,
             override=override,
             chat_log=chat_log,
         )
-        return self._instantiate_strategy(filename, strategy)
+        return self._instantiate_strategy(filename, strategy, import_params=import_params)
 
     async def _set_file_strategy(self, task_id: str, file_id: str, strategy: Any) -> None:
         if isinstance(strategy, str):

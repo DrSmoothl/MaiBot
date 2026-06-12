@@ -201,6 +201,7 @@ class ToolExecutionResult:
     error_message: str = ""
     structured_content: Any = None
     content_items: list[ToolContentItem] = field(default_factory=list)
+    post_history_messages: list[Any] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def get_history_content(self) -> str:

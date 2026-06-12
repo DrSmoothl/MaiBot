@@ -36,7 +36,10 @@
           "retrieval",
           "retrieval.sparse",
           "threshold",
-          "filter"
+          "filter",
+          "filter.retrieval.chat_stream",
+          "filter.retrieval.chat_summary",
+          "filter.retrieval.episode"
         ],
         "order": 3
       },
@@ -153,6 +156,25 @@
           "step": 1,
           "choices": null
         },
+        "dimension_request_mode": {
+          "name": "dimension_request_mode",
+          "type": "string",
+          "default": "explicit",
+          "description": "是否在请求中携带向量维度参数",
+          "label": "维度请求模式",
+          "ui_type": "select",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 3,
+          "hint": "explicit 仅在显式指定 dimensions 时传递；always 总是传递；never 始终不传。",
+          "choices": [
+            "explicit",
+            "always",
+            "never"
+          ],
+          "advanced": true
+        },
         "batch_size": {
           "name": "batch_size",
           "type": "integer",
@@ -163,7 +185,7 @@
           "required": false,
           "hidden": false,
           "disabled": false,
-          "order": 3,
+          "order": 4,
           "hint": "批量过大可能放大模型或网络波动。",
           "min": 1,
           "max": 1024,
@@ -180,7 +202,7 @@
           "required": false,
           "hidden": false,
           "disabled": false,
-          "order": 4,
+          "order": 5,
           "hint": "用于限制并行 embedding 请求数量。",
           "min": 1,
           "max": 128,
@@ -197,7 +219,7 @@
           "required": false,
           "hidden": false,
           "disabled": false,
-          "order": 5,
+          "order": 6,
           "hint": "适合重复写入较多的场景，默认关闭以保持路径更直观。",
           "choices": null
         },
@@ -211,7 +233,7 @@
           "required": false,
           "hidden": false,
           "disabled": false,
-          "order": 6,
+          "order": 7,
           "hint": "当前 vNext 主路径仅支持 int8(SQ8)。",
           "choices": [
             "int8"
@@ -1267,6 +1289,78 @@
           "max": 128,
           "step": 1,
           "choices": null
+        },
+        "default_narrative_window_size": {
+          "name": "default_narrative_window_size",
+          "type": "integer",
+          "default": 1600,
+          "description": "默认叙事抽取窗口字符数",
+          "label": "默认叙事抽取窗口",
+          "ui_type": "number",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 8,
+          "hint": "控制 narrative/聊天日志导入时单个 LLM 抽取分块的目标窗口长度。",
+          "min": 200,
+          "max": 3200,
+          "step": 100,
+          "choices": null,
+          "advanced": true
+        },
+        "default_narrative_overlap": {
+          "name": "default_narrative_overlap",
+          "type": "integer",
+          "default": 400,
+          "description": "默认叙事窗口重叠字符数",
+          "label": "默认叙事重叠字符",
+          "ui_type": "number",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 9,
+          "hint": "控制 narrative/聊天日志相邻抽取分块保留多少重叠上下文。",
+          "min": 0,
+          "max": 1600,
+          "step": 50,
+          "choices": null,
+          "advanced": true
+        },
+        "default_factual_target_size": {
+          "name": "default_factual_target_size",
+          "type": "integer",
+          "default": 1200,
+          "description": "默认事实分块目标字符数",
+          "label": "默认事实分块目标",
+          "ui_type": "number",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 10,
+          "hint": "控制 factual 策略结构感知切分时的目标分块长度。",
+          "min": 200,
+          "max": 3200,
+          "step": 100,
+          "choices": null,
+          "advanced": true
+        },
+        "max_chunk_chars": {
+          "name": "max_chunk_chars",
+          "type": "integer",
+          "default": 3200,
+          "description": "单个抽取分块的字符上限",
+          "label": "分块字符上限",
+          "ui_type": "number",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 11,
+          "hint": "限制导入任务可指定的 narrative/factual 分块长度上限。",
+          "min": 200,
+          "max": 10000,
+          "step": 100,
+          "choices": null,
+          "advanced": true
         }
       }
     },
@@ -1489,6 +1583,183 @@
           "min": 0.1,
           "max": 600,
           "step": 0.1,
+          "choices": null
+        }
+      }
+    },
+    "filter.retrieval.chat_stream": {
+      "name": "filter.retrieval.chat_stream",
+      "title": "普通聊天流检索过滤",
+      "description": "按群组、私聊用户或聊天流裁剪普通 paragraph/relation 检索命中。",
+      "icon": null,
+      "collapsed": true,
+      "order": 9.1,
+      "fields": {
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "是否启用该类型的检索结果后置过滤。",
+          "label": "启用结果过滤",
+          "ui_type": "switch",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 1,
+          "hint": "仅影响已经召回的检索结果，不影响写入、摘要生成、Episode 生成或人物画像。",
+          "choices": null
+        },
+        "mode": {
+          "name": "mode",
+          "type": "string",
+          "default": "blacklist",
+          "description": "过滤模式",
+          "label": "过滤模式",
+          "ui_type": "select",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 2,
+          "hint": "blacklist 为移除列表中的来源；whitelist 为仅保留列表中的来源。",
+          "choices": [
+            "blacklist",
+            "whitelist"
+          ]
+        },
+        "chats": {
+          "name": "chats",
+          "type": "array",
+          "default": [],
+          "description": "聊天流列表",
+          "label": "聊天流列表",
+          "ui_type": "list",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 3,
+          "hint": "示例：group:123、user:456、private:456、stream:abc；裸字符串会匹配 stream/group/user 任一 token。",
+          "item_type": "string",
+          "min_items": 0,
+          "max_items": 500,
+          "placeholder": "group:123",
+          "choices": null
+        }
+      }
+    },
+    "filter.retrieval.chat_summary": {
+      "name": "filter.retrieval.chat_summary",
+      "title": "聊天总结检索过滤",
+      "description": "按群组、私聊用户或聊天流裁剪 chat_summary 来源的检索命中。",
+      "icon": null,
+      "collapsed": true,
+      "order": 9.2,
+      "fields": {
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "是否启用该类型的检索结果后置过滤。",
+          "label": "启用结果过滤",
+          "ui_type": "switch",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 1,
+          "hint": "仅影响已经召回的检索结果，不影响写入、摘要生成、Episode 生成或人物画像。",
+          "choices": null
+        },
+        "mode": {
+          "name": "mode",
+          "type": "string",
+          "default": "blacklist",
+          "description": "过滤模式",
+          "label": "过滤模式",
+          "ui_type": "select",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 2,
+          "hint": "blacklist 为移除列表中的来源；whitelist 为仅保留列表中的来源。",
+          "choices": [
+            "blacklist",
+            "whitelist"
+          ]
+        },
+        "chats": {
+          "name": "chats",
+          "type": "array",
+          "default": [],
+          "description": "聊天流列表",
+          "label": "聊天流列表",
+          "ui_type": "list",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 3,
+          "hint": "示例：group:123、user:456、private:456、stream:abc；裸字符串会匹配 stream/group/user 任一 token。",
+          "item_type": "string",
+          "min_items": 0,
+          "max_items": 500,
+          "placeholder": "group:123",
+          "choices": null
+        }
+      }
+    },
+    "filter.retrieval.episode": {
+      "name": "filter.retrieval.episode",
+      "title": "Episode 检索过滤",
+      "description": "按群组、私聊用户或聊天流裁剪 Episode 检索命中。",
+      "icon": null,
+      "collapsed": true,
+      "order": 9.3,
+      "fields": {
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "是否启用该类型的检索结果后置过滤。",
+          "label": "启用结果过滤",
+          "ui_type": "switch",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 1,
+          "hint": "仅影响已经召回的检索结果，不影响写入、摘要生成、Episode 生成或人物画像。",
+          "choices": null
+        },
+        "mode": {
+          "name": "mode",
+          "type": "string",
+          "default": "blacklist",
+          "description": "过滤模式",
+          "label": "过滤模式",
+          "ui_type": "select",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 2,
+          "hint": "blacklist 为移除列表中的来源；whitelist 为仅保留列表中的来源。",
+          "choices": [
+            "blacklist",
+            "whitelist"
+          ]
+        },
+        "chats": {
+          "name": "chats",
+          "type": "array",
+          "default": [],
+          "description": "聊天流列表",
+          "label": "聊天流列表",
+          "ui_type": "list",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 3,
+          "hint": "示例：group:123、user:456、private:456、stream:abc；裸字符串会匹配 stream/group/user 任一 token。",
+          "item_type": "string",
+          "min_items": 0,
+          "max_items": 500,
+          "placeholder": "group:123",
           "choices": null
         }
       }

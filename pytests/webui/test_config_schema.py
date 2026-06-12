@@ -83,8 +83,17 @@ def test_all_top_level_sections_have_ui_metadata():
 
     for section_name, section_schema in schema["nested"].items():
         has_parent = bool(section_schema.get("uiParent"))
-        has_host_meta = bool(section_schema.get("uiLabel")) and bool(section_schema.get("uiIcon"))
+        has_host_meta = bool(section_schema.get("uiLabel"))
         assert has_parent or has_host_meta, f"{section_name} 缺少 UI 元数据"
+
+
+def test_tab_advanced_visibility_comes_from_config_metadata():
+    """配置页 Tab 是否默认收起应由配置类元信息决定。"""
+    schema = ConfigSchemaGenerator.generate_schema(Config)
+
+    assert schema["nested"]["bot"].get("uiAdvanced") is False
+    assert schema["nested"]["experimental"].get("uiAdvanced") is True
+    assert schema["nested"]["message_receive"].get("uiAdvanced") is True
 
 
 def test_maisaka_is_host_tab_and_mcp_is_attached_to_it():
@@ -96,7 +105,6 @@ def test_maisaka_is_host_tab_and_mcp_is_attached_to_it():
 
     assert maisaka_schema.get("uiParent") is None
     assert maisaka_schema.get("uiLabel") == "MaiSaka"
-    assert maisaka_schema.get("uiIcon") == "message-circle"
     assert mcp_schema.get("uiParent") == "maisaka"
 
 

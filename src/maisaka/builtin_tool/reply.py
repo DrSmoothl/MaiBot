@@ -1,4 +1,4 @@
-"""reply 内置工具。"""
+﻿"""reply 内置工具。"""
 
 from typing import Any, Optional
 
@@ -10,12 +10,13 @@ from src.common.data_models.reply_generation_data_models import ReplyGenerationR
 from src.common.logger import get_logger
 from src.config import config as config_module
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
-from src.maisaka.message_adapter import build_visible_text_from_sequence
+from src.maisaka.context.message_adapter import build_visible_text_from_sequence
 from src.services import send_service
 
 from .context import BuiltinToolRuntimeContext
 
 logger = get_logger("maisaka_builtin_reply")
+_REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote", "reference_info"}
 
 
 async def _run_expression_selector(tool_ctx: BuiltinToolRuntimeContext, system_prompt: str) -> str:
@@ -44,11 +45,6 @@ def get_tool_spec() -> ToolSpec:
                 "set_quote": {
                     "type": "boolean",
                     "description": "以引用回复的方式发送这条回复，不用每句都引用。",
-                    "default": True,
-                },
-                "reference_info": {
-                    "type": "string",
-                    "description": "有助于回复的信息，之前搜集得到的事实性信息，记忆等，使用平文本格式。",
                     "default": True,
                 },
             },
@@ -87,15 +83,6 @@ def _build_send_result(
     }
 
 
-def _get_selected_expression_habits(reply_result: ReplyGenerationResult) -> str:
-    """读取 replyer 本轮实际使用的表达方式说明。"""
-
-    extra = reply_result.metrics.extra
-    if not isinstance(extra, dict):
-        return ""
-    return str(extra.get("selected_expression_habits") or "").strip()
-
-
 async def handle_tool(
     tool_ctx: BuiltinToolRuntimeContext,
     invocation: ToolInvocation,
@@ -104,13 +91,12 @@ async def handle_tool(
     """执行 reply 内置工具。"""
 
     latest_thought = context.reasoning if context is not None else invocation.reasoning
-    reference_info = str(invocation.arguments.get("reference_info") or "").strip()
     target_message_id = str(invocation.arguments.get("msg_id") or "").strip()
     set_quote = bool(invocation.arguments.get("set_quote", True))
     reply_tool_args = {
         key: value
         for key, value in dict(invocation.arguments or {}).items()
-        if key not in {"msg_id", "set_quote", "reference_info"}
+        if key not in _REPLY_TOOL_INTERNAL_ARGUMENTS
     }
     enable_reply_quote = bool(config_module.global_config.chat.enable_reply_quote)
     effective_set_quote = set_quote and enable_reply_quote
@@ -131,7 +117,7 @@ async def handle_tool(
     try:
         replyer = replyer_manager.get_replyer(
             chat_stream=tool_ctx.runtime.chat_stream,
-            request_type="maisaka_replyer",
+            request_type="maisaka.replyer",
             replyer_type="maisaka",
         )
     except Exception:
@@ -152,11 +138,9 @@ async def handle_tool(
         )
 
     replyer_chat_history = list(tool_ctx.runtime._chat_history)
-
     try:
         success, reply_result = await replyer.generate_reply_with_context(
             reply_reason=latest_thought,
-            reference_info=reference_info,
             stream_id=tool_ctx.runtime.session_id,
             reply_message=target_message,
             chat_history=replyer_chat_history,
@@ -217,7 +201,7 @@ async def handle_tool(
                     stream_id=tool_ctx.runtime.session_id,
                     processed_plain_text=segment,
                     set_reply=segment_set_quote,
-                    reply_message=target_message if segment_set_quote else None,
+                    reply_message=target_message,
                     selected_expressions=reply_result.selected_expression_ids or None,
                     typing=index > 0,
                     sync_to_maisaka_history=True,
@@ -276,10 +260,6 @@ async def handle_tool(
 
     if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
-    tool_ctx.append_replyer_expression_annotation(
-        selected_expression_ids=reply_result.selected_expression_ids,
-        expression_habits=_get_selected_expression_habits(reply_result),
-    )
     reply_metadata["sent_message_ids"] = sent_message_ids
     reply_metadata["send_results"] = send_results
     track_reply_effect = getattr(tool_ctx.runtime, "track_reply_effect", None)
@@ -291,7 +271,6 @@ async def handle_tool(
             reply_text=combined_reply_text,
             reply_segments=reply_segments,
             planner_reasoning=latest_thought,
-            reference_info=reference_info,
             tool_context={
                 "tool_name": invocation.tool_name,
                 "call_id": invocation.call_id,

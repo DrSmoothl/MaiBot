@@ -30,12 +30,14 @@ _HTTP_URL_PATTERN = re.compile(r"^https?://.+$")
 _ICON_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _HEX_COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _LOCAL_ICON_SUFFIXES = {".jpg", ".jpeg", ".png", ".svg", ".webp"}
-_RESERVED_PLUGIN_DIRECTORY_NAMES = {"data"}
+_RESERVED_PLUGIN_DIRECTORY_NAMES = {"data", "__pycache__"}  # 条目需为 casefold 形式
+
 
 
 def is_reserved_plugin_directory(path: Path) -> bool:
-    """Return True when a plugins/ child directory is reserved for runtime data."""
-    return path.name.casefold() in _RESERVED_PLUGIN_DIRECTORY_NAMES
+    """判断 plugins/ 子目录是否为保留目录：data、__pycache__（不区分大小写）及 ``.`` 开头的隐藏目录。"""
+    name = path.name.casefold()
+    return name in _RESERVED_PLUGIN_DIRECTORY_NAMES or name.startswith(".")
 
 
 class VersionComparator:
@@ -797,7 +799,7 @@ class ManifestValidator:
         """
         return self.parse_manifest(manifest) is not None
 
-    def parse_manifest(self, manifest: Dict[str, Any]) -> Optional[PluginManifest]:
+    def parse_manifest(self, manifest: Dict[str, Any], source: Optional[str] = None) -> Optional[PluginManifest]:
         """解析并校验 manifest 字典。
 
         Args:
@@ -809,16 +811,23 @@ class ManifestValidator:
         self.errors.clear()
         self.warnings.clear()
 
+        manifest_version = manifest.get("manifest_version")
+        if manifest_version not in self.SUPPORTED_MANIFEST_VERSIONS:
+            supported_versions = ", ".join(str(version) for version in self.SUPPORTED_MANIFEST_VERSIONS)
+            self.errors.append(f"Manifest 版本不兼容: manifest_version={manifest_version!r}，仅支持 {supported_versions}")
+            self._log_errors(source=source)
+            return None
+
         try:
             parsed_manifest = PluginManifest.model_validate(manifest)
         except ValidationError as exc:
             self.errors.extend(self._format_validation_errors(exc))
-            self._log_errors()
+            self._log_errors(source=source)
             return None
 
         self._validate_runtime_compatibility(parsed_manifest)
         if self.errors:
-            self._log_errors()
+            self._log_errors(source=source or parsed_manifest.id)
             return None
 
         return parsed_manifest
@@ -841,9 +850,11 @@ class ManifestValidator:
 
         if not manifest_path.is_file():
             self.errors.append("缺少 _manifest.json")
+            self._log_errors(source=str(plugin_path))
             return None
         if require_entrypoint and not entrypoint_path.is_file():
             self.errors.append("缺少 plugin.py")
+            self._log_errors(source=str(plugin_path))
             return None
 
         try:
@@ -851,15 +862,16 @@ class ManifestValidator:
                 manifest_data = json.load(manifest_file)
         except Exception as exc:
             self.errors.append(f"manifest 解析失败: {exc}")
-            self._log_errors()
+            self._log_errors(source=str(plugin_path))
             return None
 
         if not isinstance(manifest_data, dict):
             self.errors.append("manifest 顶层必须为 JSON 对象")
-            self._log_errors()
+            self._log_errors(source=str(plugin_path))
             return None
 
-        return self.parse_manifest(manifest_data)
+        manifest_id = str(manifest_data.get("id") or plugin_path.name).strip() or plugin_path.name
+        return self.parse_manifest(manifest_data, source=manifest_id)
 
     def iter_plugin_manifests(
         self,
@@ -1095,10 +1107,16 @@ class ManifestValidator:
 
         return cls._requirements_may_overlap(left, right)
 
-    def _log_errors(self) -> None:
+    def _log_errors(self, source: Optional[str] = None) -> None:
         """输出当前累计的 Manifest 校验错误。"""
-        for error_message in self.errors:
-            logger.error(f"Manifest 校验失败: {error_message}")
+        if not self.errors:
+            return
+
+        error_summary = "；".join(self.errors)
+        if source:
+            logger.error(f"Manifest 校验失败 [{source}]: 共 {len(self.errors)} 项，{error_summary}")
+            return
+        logger.error(f"Manifest 校验失败: 共 {len(self.errors)} 项，{error_summary}")
 
     @classmethod
     def _resolve_project_root(cls) -> Path:

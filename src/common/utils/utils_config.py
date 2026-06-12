@@ -66,6 +66,27 @@ class ExpressionConfigUtils:
         return next(iter(session_ids), None)
 
 
+class BehaviorConfigUtils:
+    @staticmethod
+    def get_behavior_config_for_chat(session_id: Optional[str] = None) -> tuple[bool, bool]:
+        """
+        根据聊天会话 ID 获取行为表现配置。
+
+        行为表现当前复用表达学习的聊天流作用域，但默认值明确保持开启；
+        没有任何匹配配置的新聊天流会自动启用行为表现调用，学习总开关由 experimental.enable_behavior_learning 控制。
+        """
+
+        enable_behavior_learning = bool(global_config.experimental.enable_behavior_learning)
+        config_item = ExpressionConfigUtils._find_expression_config_item(session_id)
+        if config_item is None:
+            return True, enable_behavior_learning
+
+        return (
+            config_item.use,
+            config_item.learn and enable_behavior_learning,
+        )
+
+
 class JargonConfigUtils:
     @staticmethod
     def _is_global_default_item(config_item) -> bool:
@@ -556,3 +577,23 @@ class ChatConfigUtils:
             return sh * 60 + sm, eh * 60 + em
         except Exception:
             return None
+
+
+class AMemorixConfigUtils:
+    @staticmethod
+    def get_shared_memory_session_ids(session_id: Optional[str]) -> set[str]:
+        """获取与当前聊天流共享长期记忆检索范围的真实聊天流 ID。"""
+        clean_session_id = str(session_id or "").strip()
+        if not clean_session_id:
+            return set()
+
+        shared_groups = getattr(global_config.a_memorix, "shared_memory_groups", []) or []
+        resolved_session_ids: set[str] = set()
+        for group in shared_groups:
+            targets = getattr(group, "targets", []) or []
+            group_session_ids: set[str] = set()
+            for target in targets:
+                group_session_ids.update(ChatConfigUtils.get_target_session_ids(target))
+            if clean_session_id in group_session_ids:
+                resolved_session_ids.update(group_session_ids)
+        return resolved_session_ids or {clean_session_id}

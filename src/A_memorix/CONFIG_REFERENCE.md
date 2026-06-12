@@ -22,6 +22,7 @@ data_dir = "data/a-memorix"
 [embedding]
 model_name = "auto"
 dimension = 1024
+dimension_request_mode = "explicit"
 batch_size = 32
 max_concurrent = 5
 enable_cache = false
@@ -106,6 +107,10 @@ max_file_size_mb = 20
 max_paste_chars = 200000
 default_file_concurrency = 2
 default_chunk_concurrency = 4
+default_narrative_window_size = 1600
+default_narrative_overlap = 400
+default_factual_target_size = 1200
+max_chunk_chars = 3200
 
 [web.import.timeout]
 llm_call_seconds = 240
@@ -147,7 +152,9 @@ default_sample_size = 24
 - `embedding.model_name` (默认 `auto`)
 : embedding 模型选择。
 - `embedding.dimension` (默认 `1024`)
-: 唯一公开的维度控制项。A_Memorix 内部会自动映射为 provider 所需请求字段，并在运行时做真实探测与校验。
+: 期望的向量维度，用于初始化新向量库、运行时自检和显式维度请求。
+- `embedding.dimension_request_mode` (默认 `explicit`)
+: 是否在 embedding 请求中携带维度参数。`explicit` 仅在调用方显式指定 `dimensions` 时携带；`always` 保持旧行为，默认 encode 也会向 OpenAI 传 `dimensions`、向 Gemini 传 `output_dimensionality`；`never` 始终不传，让模型返回自然维度。
 - `embedding.batch_size` (默认 `32`)
 - `embedding.max_concurrent` (默认 `5`)
 - `embedding.enable_cache` (默认 `false`)
@@ -270,6 +277,21 @@ default_sample_size = 24
 enabled = true
 mode = "blacklist" # blacklist / whitelist
 chats = ["group:123", "user:456", "stream:abc"]
+
+[filter.retrieval.chat_stream]
+enabled = false
+mode = "blacklist"
+chats = []
+
+[filter.retrieval.chat_summary]
+enabled = false
+mode = "blacklist"
+chats = []
+
+[filter.retrieval.episode]
+enabled = false
+mode = "blacklist"
+chats = []
 ```
 
 规则：
@@ -279,6 +301,40 @@ chats = ["group:123", "user:456", "stream:abc"]
 - 列表为空时：
   - `blacklist` => 全允许
   - `whitelist` => 全拒绝
+- `chats` 支持 `group:<group_id>`、`user:<user_id>`、`private:<user_id>`、
+  `stream:<session_id>`；裸字符串会匹配 stream/group/user 任一 token。
+- `filter.retrieval.*` 只在检索结果后置过滤阶段生效，不影响写入、聊天摘要生成、
+  Episode 生成、人物画像刷新或画像快照。
+- `chat_stream` 裁剪普通 paragraph/relation 命中；`chat_summary` 裁剪
+  `source_type=chat_summary` 或 `source=chat_summary:<session_id>` 命中；
+  `episode` 裁剪 Episode 命中。
+- 人物画像当前保持全局聚合与缓存，不按群组隔离。
+
+### `shared_memory_groups`
+
+用于配置多个聊天流共享同一长期记忆检索范围。写入仍保留原始
+`chat_id`，只在检索时把当前聊天流扩展为同组允许范围。
+
+```toml
+[[shared_memory_groups]]
+
+[[shared_memory_groups.targets]]
+platform = "qq"
+item_id = "123"
+rule_type = "group"
+
+[[shared_memory_groups.targets]]
+platform = "qq"
+item_id = "456"
+rule_type = "group"
+```
+
+注意：
+
+- `filter.whitelist` 只控制哪些聊天流允许读写记忆。
+- `filter.retrieval.*` 只裁剪已经召回的检索结果，不会扩大检索范围。
+- `shared_memory_groups` 才控制哪些聊天流互相共享检索范围。
+- 成员会解析为系统已知的真实聊天流 ID；解析不到的目标不会生效。
 
 ## 5. Episode
 
@@ -342,6 +398,10 @@ chats = ["group:123", "user:456", "stream:abc"]
 - `web.import.max_paste_chars` (默认 `200000`)
 - `web.import.default_file_concurrency` (默认 `2`)
 - `web.import.default_chunk_concurrency` (默认 `4`)
+- `web.import.default_narrative_window_size` (默认 `1600`)
+- `web.import.default_narrative_overlap` (默认 `400`)
+- `web.import.default_factual_target_size` (默认 `1200`)
+- `web.import.max_chunk_chars` (默认 `3200`)
 - `web.import.max_file_concurrency` (默认 `6`)
 - `web.import.max_chunk_concurrency` (默认 `12`)
 - `web.import.poll_interval_ms` (默认 `1000`)

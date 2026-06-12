@@ -1,8 +1,26 @@
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit, Eye, Trash2 } from 'lucide-react'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Edit,
+  Eye,
+  ListFilter,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import {
@@ -14,8 +32,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
 
 import type { Expression } from '@/types/expression'
+
+type ReviewFilter = 'all' | 'user_checked' | 'unchecked'
 
 /**
  * 表达方式列表组件（桌面端Table + 移动端Card视图 + 分页）
@@ -29,9 +50,13 @@ export function ExpressionList({
   selectedIds,
   chatNameMap,
   hideChatColumn = false,
+  reviewFilter,
+  className,
   onEdit,
   onViewDetail,
   onDelete,
+  onReviewFilterChange,
+  onToggleReviewStatus,
   onToggleSelect,
   onToggleSelectAll,
   onPageChange,
@@ -45,15 +70,20 @@ export function ExpressionList({
   selectedIds: Set<number>
   chatNameMap: Map<string, string>
   hideChatColumn?: boolean
+  reviewFilter: ReviewFilter
+  className?: string
   onEdit: (expression: Expression) => void
   onViewDetail: (expression: Expression) => void
   onDelete: (expression: Expression) => void
+  onReviewFilterChange: (filter: ReviewFilter) => void
+  onToggleReviewStatus: (expression: Expression) => Promise<void>
   onToggleSelect: (id: number) => void
   onToggleSelectAll: () => void
   onPageChange: (newPage: number) => void
   onJumpToPage: (targetPage: string) => void
 }) {
   const { toast } = useToast()
+  const [updatingReviewIds, setUpdatingReviewIds] = useState<Set<number>>(new Set())
 
   const getChatName = (expression: Expression): string => {
     return expression.chat_name || chatNameMap.get(expression.chat_id) || expression.chat_id
@@ -62,21 +92,31 @@ export function ExpressionList({
   const getReviewBadge = (expression: Expression) => {
     const modifier = expression.modified_by?.toLowerCase()
 
-    if (!expression.checked) {
-      if (modifier === 'ai') {
-        return <Badge variant="secondary" className="whitespace-nowrap">AI预检通过</Badge>
-      }
-      return <Badge variant="outline" className="whitespace-nowrap text-muted-foreground">未审核</Badge>
+    if (expression.checked && modifier === 'user') {
+      return <Badge className="bg-green-600 whitespace-nowrap hover:bg-green-600">通过</Badge>
     }
-
-    if (modifier === 'user') {
-      return <Badge className="whitespace-nowrap bg-green-600 hover:bg-green-600">人工通过</Badge>
-    }
-    return <Badge className="whitespace-nowrap bg-green-600 hover:bg-green-600">已通过</Badge>
+    return null
   }
 
   const totalPages = Math.ceil(total / pageSize)
   const tableColSpan = hideChatColumn ? 5 : 6
+
+  const isUserApproved = (expression: Expression) => {
+    return expression.checked && expression.modified_by === 'user'
+  }
+
+  const handleToggleReviewStatus = async (expression: Expression) => {
+    setUpdatingReviewIds((current) => new Set(current).add(expression.id))
+    try {
+      await onToggleReviewStatus(expression)
+    } finally {
+      setUpdatingReviewIds((current) => {
+        const next = new Set(current)
+        next.delete(expression.id)
+        return next
+      })
+    }
+  }
 
   const handleJumpToPage = (jumpToPage: string) => {
     const targetPage = parseInt(jumpToPage)
@@ -92,9 +132,9 @@ export function ExpressionList({
   }
 
   return (
-    <div className="rounded-lg border bg-card">
+    <div className={cn('bg-card flex min-h-0 flex-col rounded-lg border', className)}>
       {/* 桌面端表格视图 */}
-      <div className="hidden md:block">
+      <div className="hidden min-h-0 flex-1 overflow-auto md:block">
         <Table aria-label="表达方式列表">
           <TableHeader>
             <TableRow>
@@ -107,20 +147,52 @@ export function ExpressionList({
               <TableHead>情境</TableHead>
               <TableHead>风格</TableHead>
               {!hideChatColumn && <TableHead>聊天</TableHead>}
-              <TableHead>审核</TableHead>
+              <TableHead>
+                <div className="flex items-center gap-1.5">
+                  <span>审核</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        title="筛选审核状态"
+                        aria-label="筛选审核状态"
+                      >
+                        <ListFilter className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuRadioGroup
+                        value={reviewFilter}
+                        onValueChange={(value) => onReviewFilterChange(value as ReviewFilter)}
+                      >
+                        <DropdownMenuRadioItem value="all">全部</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="user_checked">仅人工通过</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="unchecked">未人工检查</DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </TableHead>
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={tableColSpan} className="text-center py-8 text-muted-foreground">
+                <TableCell
+                  colSpan={tableColSpan}
+                  className="text-muted-foreground py-8 text-center"
+                >
                   <ThinkingIllustration size="sm" className="mx-auto" />
                 </TableCell>
               </TableRow>
             ) : expressions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={tableColSpan} className="text-center py-8 text-muted-foreground">
+                <TableCell
+                  colSpan={tableColSpan}
+                  className="text-muted-foreground py-8 text-center"
+                >
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -133,7 +205,7 @@ export function ExpressionList({
                       onCheckedChange={() => onToggleSelect(expression.id)}
                     />
                   </TableCell>
-                  <TableCell className="font-medium max-w-xs truncate">
+                  <TableCell className="max-w-xs truncate font-medium">
                     {expression.situation}
                   </TableCell>
                   <TableCell className="max-w-xs truncate">{expression.style}</TableCell>
@@ -143,7 +215,7 @@ export function ExpressionList({
                       title={getChatName(expression)}
                       style={{ wordBreak: 'keep-all' }}
                     >
-                      <span className="whitespace-nowrap overflow-hidden text-ellipsis block">
+                      <span className="block overflow-hidden text-ellipsis whitespace-nowrap">
                         {getChatName(expression)}
                       </span>
                     </TableCell>
@@ -156,12 +228,29 @@ export function ExpressionList({
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
                       <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => onEdit(expression)}
+                        variant={isUserApproved(expression) ? 'outline' : 'default'}
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => handleToggleReviewStatus(expression)}
+                        disabled={updatingReviewIds.has(expression.id)}
+                        title={isUserApproved(expression) ? '拒绝' : '通过'}
+                        aria-label={isUserApproved(expression) ? '拒绝' : '通过'}
                       >
-                        <Edit className="h-4 w-4 mr-1" />
-                        编辑
+                        {isUserApproved(expression) ? (
+                          <X className="h-4 w-4" />
+                        ) : (
+                          <Check className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="default"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => onEdit(expression)}
+                        title="编辑"
+                        aria-label="编辑"
+                      >
+                        <Edit className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="outline"
@@ -173,12 +262,13 @@ export function ExpressionList({
                         <Eye className="h-4 w-4" />
                       </Button>
                       <Button
-                        size="sm"
+                        size="icon"
                         onClick={() => onDelete(expression)}
-                        className="bg-red-600 hover:bg-red-700 text-white"
+                        className="h-8 w-8 bg-red-600 text-white hover:bg-red-700"
+                        title="删除"
+                        aria-label="删除"
                       >
-                        <Trash2 className="h-4 w-4 mr-1" />
-                        删除
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
@@ -192,16 +282,17 @@ export function ExpressionList({
       {/* 移动端卡片视图 */}
       <div className="space-y-4 p-4 md:hidden">
         {loading ? (
-          <div className="text-center py-8 text-muted-foreground">
+          <div className="text-muted-foreground py-8 text-center">
             <ThinkingIllustration size="sm" className="mx-auto" />
           </div>
         ) : expressions.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            暂无数据
-          </div>
+          <div className="text-muted-foreground py-8 text-center">暂无数据</div>
         ) : (
           expressions.map((expression) => (
-            <div key={expression.id} className="space-y-4 overflow-hidden rounded-lg border bg-card p-4">
+            <div
+              key={expression.id}
+              className="bg-card space-y-4 overflow-hidden rounded-lg border p-4"
+            >
               {/* 复选框和情境 */}
               <div className="flex items-start gap-3">
                 <Checkbox
@@ -211,14 +302,20 @@ export function ExpressionList({
                 />
                 <div className="min-w-0 flex-1 space-y-3 overflow-hidden">
                   <div>
-                    <div className="text-xs text-muted-foreground mb-1">情境</div>
-                    <h3 className="line-clamp-3 w-full break-all text-sm font-semibold leading-relaxed" title={expression.situation}>
+                    <div className="text-muted-foreground mb-1 text-xs">情境</div>
+                    <h3
+                      className="line-clamp-3 w-full text-sm leading-relaxed font-semibold break-all"
+                      title={expression.situation}
+                    >
                       {expression.situation}
                     </h3>
                   </div>
                   <div>
-                    <div className="text-xs text-muted-foreground mb-1">风格</div>
-                    <p className="line-clamp-3 w-full break-all text-sm leading-relaxed" title={expression.style}>
+                    <div className="text-muted-foreground mb-1 text-xs">风格</div>
+                    <p
+                      className="line-clamp-3 w-full text-sm leading-relaxed break-all"
+                      title={expression.style}
+                    >
                       {expression.style}
                     </p>
                   </div>
@@ -227,35 +324,51 @@ export function ExpressionList({
 
               {/* 聊天名称 */}
               {!hideChatColumn && (
-              <div className="text-sm">
-                <div className="text-xs text-muted-foreground mb-1">聊天</div>
-                <p 
-                  className="truncate text-sm leading-relaxed"
-                  title={getChatName(expression)}
-                  style={{ wordBreak: 'keep-all' }}
-                >
-                  {getChatName(expression)}
-                </p>
-              </div>
+                <div className="text-sm">
+                  <div className="text-muted-foreground mb-1 text-xs">聊天</div>
+                  <p
+                    className="truncate text-sm leading-relaxed"
+                    title={getChatName(expression)}
+                    style={{ wordBreak: 'keep-all' }}
+                  >
+                    {getChatName(expression)}
+                  </p>
+                </div>
               )}
 
               <div className="text-sm">
-                <div className="text-xs text-muted-foreground mb-1">审核</div>
+                <div className="text-muted-foreground mb-1 text-xs">审核</div>
                 <div className="flex flex-wrap items-center gap-2">
                   {getReviewBadge(expression)}
                 </div>
               </div>
 
               {/* 操作按钮 */}
-              <div className="grid grid-cols-3 gap-2 overflow-hidden border-t pt-3">
+              <div className="grid grid-cols-4 gap-2 overflow-hidden border-t pt-3">
+                <Button
+                  variant={isUserApproved(expression) ? 'outline' : 'default'}
+                  size="icon"
+                  onClick={() => handleToggleReviewStatus(expression)}
+                  disabled={updatingReviewIds.has(expression.id)}
+                  className="h-9 w-full justify-center"
+                  title={isUserApproved(expression) ? '拒绝' : '通过'}
+                  aria-label={isUserApproved(expression) ? '拒绝' : '通过'}
+                >
+                  {isUserApproved(expression) ? (
+                    <X className="h-3 w-3" />
+                  ) : (
+                    <Check className="h-3 w-3" />
+                  )}
+                </Button>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={() => onEdit(expression)}
-                  className="h-9 justify-center px-2 text-xs"
+                  className="h-9 w-full justify-center"
+                  title="编辑"
+                  aria-label="编辑"
                 >
-                  <Edit className="h-3 w-3 mr-1" />
-                  编辑
+                  <Edit className="h-3 w-3" />
                 </Button>
                 <Button
                   variant="outline"
@@ -270,9 +383,9 @@ export function ExpressionList({
                   variant="outline"
                   size="sm"
                   onClick={() => onDelete(expression)}
-                  className="h-9 justify-center px-2 text-xs text-destructive hover:text-destructive"
+                  className="text-destructive hover:text-destructive h-9 justify-center px-2 text-xs"
                 >
-                  <Trash2 className="h-3 w-3 mr-1" />
+                  <Trash2 className="mr-1 h-3 w-3" />
                   删除
                 </Button>
               </div>
@@ -323,7 +436,7 @@ function Pagination({
 
   return (
     <div className="flex flex-col items-center justify-between gap-4 border-t px-4 py-4 sm:flex-row sm:py-3">
-      <div className="text-sm text-muted-foreground">
+      <div className="text-muted-foreground text-sm">
         共 {total} 条记录，第 {page} / {totalPages} 页
       </div>
       <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:w-auto sm:flex-nowrap">
@@ -337,7 +450,7 @@ function Pagination({
         >
           <ChevronsLeft className="h-4 w-4" />
         </Button>
-        
+
         {/* 上一页 */}
         <Button
           variant="outline"
@@ -371,7 +484,7 @@ function Pagination({
             跳转
           </Button>
         </div>
-        
+
         {/* 下一页 */}
         <Button
           variant="outline"
@@ -397,4 +510,3 @@ function Pagination({
     </div>
   )
 }
-

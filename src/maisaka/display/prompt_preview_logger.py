@@ -34,7 +34,7 @@ class PromptPreviewLogger:
         base_stem = str(int(time.time() * 1000))
         candidate_stem = base_stem
         suffix_index = 1
-        while any((chat_dir / f"{candidate_stem}{suffix}").exists() for suffix in (".html", ".txt")):
+        while any((chat_dir / f"{candidate_stem}{suffix}").exists() for suffix in (".html", ".json", ".txt")):
             candidate_stem = f"{base_stem}_{suffix_index}"
             suffix_index += 1
         return candidate_stem

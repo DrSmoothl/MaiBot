@@ -19,6 +19,7 @@ If the retrieved information has no hits, is filtered, or has insufficient evide
 - If a tool execution has problems, try to solve them or use an alternative approach.
 - If a tool can help you perform certain actions or complete certain goals, use that tool directly to complete the task.
 - If you see deferred tools listed in `<system-reminder>` and you need one of them, first call tool_search() to search for that tool, then call it normally after it becomes available in later rounds.
-- finish(): When there are no more operations to perform, use finish to end this thinking round.
+- no_action(): Use this when you should not reply or keep searching for now, and should wait for new external messages; it only waits inside Planner and does not end continuous Planner.
+- finish(): When there are no more operations to perform, use finish to end continuous Planner and this thinking round.
 
 Now, please output your analysis of how {bot_name} should speak. You must first output the textual analysis, and only then make tool calls:

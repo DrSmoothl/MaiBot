@@ -1,5 +1,7 @@
-import { useEffect, useState, useRef } from 'react'
+import { useRouterState } from '@tanstack/react-router'
 import { ArrowUp } from 'lucide-react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
+
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
@@ -7,6 +9,9 @@ export function BackToTop() {
   const [progress, setProgress] = useState(0)
   const [visible, setVisible] = useState(false)
   const scrollerRef = useRef<HTMLElement | null>(null)
+  const locationKey = useRouterState({
+    select: (state) => state.location.pathname,
+  })
 
   useEffect(() => {
     const handleScroll = (e: Event) => {
@@ -27,10 +32,28 @@ export function BackToTop() {
       }
     }
 
+    const handleNavigation = () => {
+      scrollerRef.current = null
+      setProgress(0)
+      setVisible(false)
+    }
+
     // 使用捕获阶段监听所有滚动事件，因为 scroll 事件不冒泡
     window.addEventListener('scroll', handleScroll, { capture: true, passive: true })
-    return () => window.removeEventListener('scroll', handleScroll, { capture: true })
+    window.addEventListener('popstate', handleNavigation)
+    window.addEventListener('hashchange', handleNavigation)
+    return () => {
+      window.removeEventListener('scroll', handleScroll, { capture: true })
+      window.removeEventListener('popstate', handleNavigation)
+      window.removeEventListener('hashchange', handleNavigation)
+    }
   }, [])
+
+  useEffect(() => {
+    scrollerRef.current = null
+    setProgress(0)
+    setVisible(false)
+  }, [locationKey])
 
   const scrollToTop = () => {
     scrollerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -40,6 +63,10 @@ export function BackToTop() {
   const radius = 18
   const circumference = 2 * Math.PI * radius
   const strokeDashoffset = circumference - (progress / 100) * circumference
+  const squareProgress = Math.max(0, Math.min(101, progress >= 99.5 ? 101 : progress))
+  const squareProgressStyle = {
+    '--back-to-top-progress': `${squareProgress}%`,
+  } as CSSProperties
 
   return (
     <div 
@@ -51,6 +78,7 @@ export function BackToTop() {
       <Button
         variant="outline"
         size="icon"
+        data-dashboard-back-to-top="true"
         className={cn(
           "relative h-12 w-12 rounded-full shadow-xl",
           "bg-background/80 backdrop-blur-md border-border/50",
@@ -62,7 +90,11 @@ export function BackToTop() {
         aria-label="回到顶部"
       >
         {/* 进度环背景 */}
-        <svg className="absolute inset-0 h-full w-full -rotate-90 transform p-1" viewBox="0 0 44 44">
+        <svg
+          data-dashboard-back-to-top-progress="circle"
+          className="absolute inset-0 h-full w-full -rotate-90 transform p-1"
+          viewBox="0 0 44 44"
+        >
           <circle
             className="text-muted-foreground/10"
             strokeWidth="3"
@@ -86,6 +118,12 @@ export function BackToTop() {
             cy="22"
           />
         </svg>
+
+        <div
+          data-dashboard-back-to-top-progress="square"
+          className="pointer-events-none absolute inset-0 hidden"
+          style={squareProgressStyle}
+        />
         
         {/* 图标 */}
         <ArrowUp 
@@ -94,7 +132,10 @@ export function BackToTop() {
         />
         
         {/* 内部发光效果 (仅在 dark 模式下明显) */}
-        <div className="absolute inset-0 rounded-full bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div
+          data-dashboard-back-to-top-glow="true"
+          className="absolute inset-0 rounded-full bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+        />
       </Button>
     </div>
   )

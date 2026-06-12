@@ -6,6 +6,9 @@ import numpy as np
 import pytest
 
 from src.A_memorix.core.strategies.base import ChunkContext, KnowledgeType, ProcessedChunk, SourceInfo
+from src.A_memorix.core.strategies.factual import FactualStrategy
+from src.A_memorix.core.strategies.narrative import NarrativeStrategy
+from src.A_memorix.core.storage.knowledge_types import ImportStrategy
 from src.A_memorix.core.utils.web_import_manager import (
     ImportChunkRecord,
     ImportFileRecord,
@@ -171,6 +174,76 @@ def _test_manifest_path(name: str) -> Path:
     return path
 
 
+def test_import_params_include_configurable_chunk_windows() -> None:
+    manager, _ = _build_manager()
+
+    params = manager._normalize_common_import_params({}, default_dedupe="content_hash")
+
+    assert params["narrative_window_size"] == 1600
+    assert params["narrative_overlap"] == 400
+    assert params["factual_target_size"] == 1200
+
+    customized = manager._normalize_common_import_params(
+        {
+            "narrative_window_size": 2400,
+            "narrative_overlap": 600,
+            "factual_target_size": 1400,
+        },
+        default_dedupe="content_hash",
+    )
+
+    assert customized["narrative_window_size"] == 2400
+    assert customized["narrative_overlap"] == 600
+    assert customized["factual_target_size"] == 1400
+
+
+def test_import_strategy_uses_configurable_chunk_windows() -> None:
+    manager, _ = _build_manager()
+
+    narrative = manager._instantiate_strategy(
+        "demo.txt",
+        strategy=ImportStrategy.NARRATIVE,
+        import_params={"narrative_window_size": 2400, "narrative_overlap": 600},
+    )
+    factual = manager._instantiate_strategy(
+        "demo.txt",
+        strategy=ImportStrategy.FACTUAL,
+        import_params={"factual_target_size": 1400},
+    )
+
+    assert isinstance(narrative, NarrativeStrategy)
+    assert narrative.window_size == 2400
+    assert narrative.overlap == 600
+    assert isinstance(factual, FactualStrategy)
+    assert factual.target_size == 1400
+
+
+def test_narrative_split_progresses_with_high_overlap_and_newline_backoff() -> None:
+    manager, _ = _build_manager()
+    narrative = manager._instantiate_strategy(
+        "demo.txt",
+        strategy=ImportStrategy.NARRATIVE,
+        import_params={"narrative_window_size": 200, "narrative_overlap": 199},
+    )
+    assert isinstance(narrative, NarrativeStrategy)
+
+    text = (
+        "第一段内容" * 30
+        + "\n"
+        + "第二段内容" * 30
+        + "\n"
+        + "第三段内容" * 30
+    )
+
+    chunks = narrative.split(text)
+    offsets = [chunk.source.offset_start for chunk in chunks]
+
+    assert chunks
+    assert len(chunks) < len(text)
+    assert offsets == sorted(offsets)
+    assert len(set(offsets)) == len(offsets)
+
+
 def test_manifest_hit_requires_existing_live_source() -> None:
     manager, metadata_store = _build_manager()
     manager._manifest_path = _test_manifest_path("manifest_hit.json")
@@ -311,6 +384,21 @@ async def test_persist_processed_chunk_skips_invalid_nested_items() -> None:
     assert len(metadata_store.paragraphs) == 1
     assert set(metadata_store.entities) >= {"Alice", "地图"}
     assert metadata_store.relations == [("Alice", "持有", "地图")]
+
+
+@pytest.mark.asyncio
+async def test_persist_processed_chunk_writes_chat_id_metadata() -> None:
+    manager, metadata_store = _build_manager()
+    file_record = SimpleNamespace(source_path="", source_kind="paste", name="demo.txt")
+
+    await manager._persist_processed_chunk(
+        file_record,
+        _build_chunk({"entities": ["Alice"]}),
+        metadata={"chat_id": "session-1"},
+    )
+
+    assert metadata_store.paragraphs[0]["metadata"] == {"chat_id": "session-1"}
+    assert metadata_store.paragraphs[0]["source"] == "web_import:demo.txt"
 
 
 @pytest.mark.asyncio

@@ -25,7 +25,6 @@ export interface ChatConfig {
   mentioned_bot_reply: boolean
   max_context_size: number
   enable_context_optimization: boolean
-  enable_independent_timing_gate: boolean
   planner_smooth: number
   think_mode: 'classic' | 'deep' | 'dynamic'
   plan_reply_log_max_per_chat: number
@@ -38,11 +37,18 @@ export interface ChatConfig {
   }>
 }
 
+export interface ExperimentalConfig {
+  enable_behavior_learning: boolean
+  enable_replyer_format_output: boolean
+  focus_mode: boolean
+  focus_cool_time: number
+}
+
 export interface TargetItem {
   platform: string
   item_id: string
-  type?: 'group' | 'private'
   rule_type?: 'group' | 'private'
+  type?: 'group' | 'private'
 }
 
 export interface LearningItem {
@@ -59,7 +65,8 @@ export interface LearningItem {
 
 export interface ChatStreamGroup {
   targets?: TargetItem[]
-  expression_groups: TargetItem[]
+  expression_groups?: TargetItem[]
+  jargon_groups?: TargetItem[]
 }
 
 export type ExpressionGroup = ChatStreamGroup
@@ -182,6 +189,7 @@ export interface DebugConfig {
   show_memory_prompt: boolean
   show_planner_prompt: boolean
   show_lpmm_paragraph: boolean
+  keep_prompt_preview_json_base64: boolean
 }
 
 export interface MaimMessageConfig {
@@ -222,6 +230,7 @@ export interface AllBotConfigs {
   botConfig: BotConfig | null
   personalityConfig: PersonalityConfig | null
   chatConfig: ChatConfig | null
+  experimentalConfig: ExperimentalConfig | null
   expressionConfig: ExpressionConfig | null
   jargonConfig: JargonConfig | null
   emojiConfig: EmojiConfig | null
@@ -245,6 +254,7 @@ export type ConfigSectionName =
   | 'bot'
   | 'personality'
   | 'chat'
+  | 'experimental'
   | 'expression'
   | 'jargon'
   | 'emoji'
@@ -265,5 +275,6 @@ export type ConfigSectionName =
   | 'webui'
   | 'database'
   | 'mcp'
+  | 'plugin'
   | 'plugin_runtime'
   | 'a_memorix'

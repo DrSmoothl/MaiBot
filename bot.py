@@ -1,12 +1,14 @@
 # raise RuntimeError("System Not Ready")
 from pathlib import Path
 from rich.traceback import install
+from typing import TypeVar
 
 import asyncio
 import hashlib
 import os
 import platform
 # import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -15,6 +17,7 @@ import traceback
 from src.common.i18n import set_locale, t, tn
 from src.common.logger import get_logger, initialize_logging, shutdown_logging
 from src.common.runtime_loop import set_main_loop
+from src.common.shutdown import request_shutdown
 from src.config.legacy_upgrade_confirmation import require_legacy_upgrade_confirmation
 
 # 设置工作目录为脚本所在目录
@@ -31,6 +34,10 @@ logger = get_logger("main")
 
 # 定义重启退出码
 RESTART_EXIT_CODE = 42
+_active_main_loop: asyncio.AbstractEventLoop | None = None
+_active_main_task: asyncio.Task[None] | None = None
+_shutdown_signal_count: int = 0
+_RunResultT = TypeVar("_RunResultT")
 # print("-----------------------------------------")
 # print("\n\n\n\n\n")
 # print(t("startup.dev_branch_warning"))
@@ -42,6 +49,30 @@ def _print_interrupt_exit_notice() -> None:
     """在日志系统不可用或正在退出时，用最小输出提示 Ctrl+C 退出。"""
 
     print("\n收到 Ctrl+C，中断退出。")
+
+
+def _mark_shutdown_and_interrupt(_signum: int, _frame: object) -> None:
+    """收到中断信号时标记关停，并请求主任务取消。"""
+
+    global _shutdown_signal_count
+    _shutdown_signal_count += 1
+    request_shutdown("signal")
+    main_loop = _active_main_loop
+    if main_loop is None or main_loop.is_closed():
+        return
+
+    try:
+        main_loop.call_soon_threadsafe(_cancel_active_main_task_from_signal)
+    except RuntimeError:
+        return
+
+
+def _cancel_active_main_task_from_signal() -> None:
+    """在事件循环线程中取消当前主任务。"""
+
+    if _active_main_task is None or _active_main_task.done():
+        return
+    _active_main_task.cancel()
 
 
 def run_runner_process():
@@ -176,33 +207,43 @@ def easter_egg():
     print(rainbow_text)
 
 
-async def graceful_shutdown():  # sourcery skip: use-named-expression
+async def graceful_shutdown(main_system: MainSystem | None = None):  # sourcery skip: use-named-expression
     try:
+        request_shutdown("graceful_shutdown")
         logger.info(t("startup.shutdown_started"))
 
         # 关闭 WebUI 服务器
-        # try:
-        #     from src.webui.webui_server import get_webui_server
-
-        #     webui_server = get_webui_server()
-        #     if webui_server and webui_server._server:
-        #         await webui_server.shutdown()
-        # except Exception as e:
-        #     logger.warning(f"关闭 WebUI 服务器时出错: {e}")
+        try:
+            if main_system is not None and main_system.webui_server is not None:
+                await main_system.webui_server.shutdown()
+        except Exception as e:
+            logger.warning(f"关闭 WebUI 服务器时出错: {e}")
 
         from src.core.event_bus import event_bus
         from src.core.types import EventType
 
         # 触发 ON_STOP 事件
-        await event_bus.emit(event_type=EventType.ON_STOP)
+        await _await_shutdown_step(
+            event_bus.emit(event_type=EventType.ON_STOP),
+            timeout=5.0,
+            step_name="触发 ON_STOP 事件",
+        )
 
         # 停止新版本插件运行时
         from src.plugin_runtime.integration import get_plugin_runtime_manager
 
-        await get_plugin_runtime_manager().stop()
+        await _await_shutdown_step(
+            get_plugin_runtime_manager().stop(),
+            timeout=8.0,
+            step_name="停止插件运行时",
+        )
 
         # 停止所有异步任务
-        await async_task_manager.stop_and_wait_all_tasks()
+        await _await_shutdown_step(
+            async_task_manager.stop_and_wait_all_tasks(),
+            timeout=5.0,
+            step_name="停止异步任务管理器任务",
+        )
 
         # 获取所有剩余任务，排除当前任务
         remaining_tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
@@ -217,7 +258,7 @@ async def graceful_shutdown():  # sourcery skip: use-named-expression
 
             # 等待所有任务完成，设置超时
             try:
-                await asyncio.wait_for(asyncio.gather(*remaining_tasks, return_exceptions=True), timeout=15.0)
+                await asyncio.wait_for(asyncio.gather(*remaining_tasks, return_exceptions=True), timeout=5.0)
                 logger.info(t("startup.remaining_tasks_cancelled"))
             except asyncio.TimeoutError:
                 logger.warning(t("startup.remaining_tasks_cancel_timeout"))
@@ -228,6 +269,78 @@ async def graceful_shutdown():  # sourcery skip: use-named-expression
 
     except Exception as e:
         logger.error(t("startup.shutdown_failed", error=e), exc_info=True)
+
+
+async def _await_shutdown_step(awaitable, *, timeout: float, step_name: str):
+    """为关停步骤设置硬超时，避免单个组件阻塞 Ctrl+C 退出。"""
+
+    try:
+        return await asyncio.wait_for(awaitable, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning(f"{step_name} 超时，继续执行后续关停步骤")
+        return None
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(f"{step_name} 失败，继续执行后续关停步骤: {exc}", exc_info=True)
+        return None
+
+
+def _cancel_main_task(main_loop: asyncio.AbstractEventLoop | None, main_task: asyncio.Task[None] | None) -> None:
+    """取消主调度任务，并等待取消结果落地。"""
+    if main_loop is None or main_task is None or main_task.done() or main_loop.is_closed():
+        return
+
+    main_task.cancel()
+    try:
+        _run_until_complete(main_loop, main_task)
+    except asyncio.CancelledError:
+        pass
+
+
+def _is_windows_proactor_cancel_race(error: BaseException) -> bool:
+    """判断是否为 Windows Proactor 在连接取消时产生的事件循环内部竞态。"""
+    if sys.platform != "win32" or not isinstance(error, asyncio.InvalidStateError):
+        return False
+
+    return any(
+        frame.f_code.co_filename.replace("\\", "/").lower().endswith("/asyncio/windows_events.py")
+        for frame, _ in traceback.walk_tb(error.__traceback__)
+    )
+
+
+def _run_until_complete(
+    main_loop: asyncio.AbstractEventLoop,
+    future: asyncio.Future[_RunResultT],
+) -> _RunResultT:
+    """运行 Future；在 Windows Proactor 瞬时状态竞争时继续驱动事件循环。"""
+    while not future.done():
+        try:
+            main_loop.run_until_complete(future)
+        except asyncio.InvalidStateError as e:
+            if not _is_windows_proactor_cancel_race(e):
+                raise
+            logger.debug("忽略 Windows Proactor 瞬时 InvalidStateError，继续运行事件循环。", exc_info=True)
+    return future.result()
+
+
+def _run_graceful_shutdown(
+    main_loop: asyncio.AbstractEventLoop | None,
+    main_system: MainSystem | None,
+) -> bool:
+    """在同步入口中执行异步优雅关闭。"""
+    if main_loop is None or main_loop.is_closed():
+        return False
+
+    try:
+        shutdown_task = main_loop.create_task(graceful_shutdown(main_system))
+        _run_until_complete(main_loop, shutdown_task)
+        return True
+    except KeyboardInterrupt:
+        _print_interrupt_exit_notice()
+    except Exception as ge:
+        logger.error(t("startup.graceful_shutdown_error", error=ge))
+    return False
 
 
 def _calculate_file_hash(file_path: Path, file_type: str) -> str:
@@ -343,6 +456,9 @@ def raw_main():
 
 if __name__ == "__main__":
     exit_code = 0  # 用于记录程序最终的退出状态
+    main_system: MainSystem | None = None
+    main_tasks: asyncio.Task[None] | None = None
+    shutdown_completed = False
     try:
         # 获取MainSystem实例
         main_system = raw_main()
@@ -351,6 +467,8 @@ if __name__ == "__main__":
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         set_main_loop(loop)
+        _active_main_loop = loop
+        signal.signal(signal.SIGINT, _mark_shutdown_and_interrupt)
 
         # 初始化 WebSocket 日志推送
         from src.common.logger import initialize_ws_handler
@@ -359,34 +477,35 @@ if __name__ == "__main__":
 
         try:
             # 执行初始化和任务调度
-            loop.run_until_complete(main_system.initialize())
+            initialize_task = loop.create_task(main_system.initialize())
+            _active_main_task = initialize_task
+            _run_until_complete(loop, initialize_task)
             # Schedule tasks returns a future that runs forever.
             # We can run console_input_loop concurrently.
             main_tasks = loop.create_task(main_system.schedule_tasks())
-            loop.run_until_complete(main_tasks)
+            _active_main_task = main_tasks
+            _run_until_complete(loop, main_tasks)
 
         except KeyboardInterrupt:
+            request_shutdown("keyboard_interrupt")
             try:
                 logger.warning(t("startup.interrupt_received"))
             except KeyboardInterrupt:
                 raise
 
             # 取消主任务
-            if "main_tasks" in locals() and main_tasks and not main_tasks.done():
-                main_tasks.cancel()
-                try:
-                    loop.run_until_complete(main_tasks)
-                except asyncio.CancelledError:
-                    pass
+            _cancel_main_task(loop, main_tasks)
 
             # 执行优雅关闭
-            if loop and not loop.is_closed():
-                try:
-                    loop.run_until_complete(graceful_shutdown())
-                except KeyboardInterrupt:
-                    _print_interrupt_exit_notice()
-                except Exception as ge:
-                    logger.error(t("startup.graceful_shutdown_error", error=ge))
+            shutdown_completed = _run_graceful_shutdown(loop, main_system)
+        except asyncio.CancelledError:
+            request_shutdown("task_cancelled")
+            try:
+                logger.warning(t("startup.interrupt_received"))
+            except KeyboardInterrupt:
+                pass
+
+            shutdown_completed = _run_graceful_shutdown(loop, main_system)
         # 新增：检测外部请求关闭
 
     except SystemExit as e:
@@ -399,17 +518,23 @@ if __name__ == "__main__":
             logger.info(t("startup.restart_signal_received"))
 
     except KeyboardInterrupt:
+        request_shutdown("keyboard_interrupt")
         _print_interrupt_exit_notice()
     except Exception as e:
         try:
             logger.error(t("startup.main_error", error=f"{str(e)} {str(traceback.format_exc())}"))
         except KeyboardInterrupt:
             _print_interrupt_exit_notice()
+        if not shutdown_completed:
+            _cancel_main_task(loop, main_tasks)
+            shutdown_completed = _run_graceful_shutdown(loop, main_system)
         exit_code = 1  # 标记发生错误
     finally:
         try:
             # 确保 loop 在任何情况下都尝试关闭（如果存在且未关闭）
             if "loop" in locals() and loop and not loop.is_closed():
+                _active_main_task = None
+                _active_main_loop = None
                 set_main_loop(None)
                 loop.close()
                 print(t("startup.event_loop_closed"))

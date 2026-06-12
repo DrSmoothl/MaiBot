@@ -20,7 +20,7 @@ FOCUSED_TASK_NAMES = {"replyer", "planner"}
 EXCLUDED_REQUEST_TYPES = {
     "A_Memorix.ChatSummarization",
     "expression.learner",
-    "maisaka_reply_effect_judge",
+    "reply.effect_judge",
 }
 REPORT_INTERVAL_SECONDS = 300
 REPORT_INTERVAL_CALLS = 50

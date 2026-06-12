@@ -249,7 +249,7 @@ export function PromptManagementPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] flex-col gap-3 p-3 sm:h-[calc(100vh-140px)] sm:gap-4 sm:p-6">
+    <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center justify-between gap-2">
           <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">Prompt 管理</h1>
@@ -301,7 +301,9 @@ export function PromptManagementPage() {
         <Card className="flex max-h-52 min-h-0 flex-col overflow-hidden sm:max-h-none">
           <CardHeader className="shrink-0 p-3 pb-2 sm:p-6 sm:pb-3">
             <div className="flex items-center gap-2">
-              <Badge variant="secondary" className="shrink-0">{filteredFiles.length}</Badge>
+              <div className="flex h-10 shrink-0 items-center px-1 text-4xl font-bold leading-none text-foreground sm:h-9">
+                {filteredFiles.length}
+              </div>
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -413,7 +415,7 @@ export function PromptManagementPage() {
       </div>
 
       <Dialog open={defaultPromptOpen} onOpenChange={setDefaultPromptOpen}>
-        <DialogContent className="max-w-[min(96vw,1100px)]">
+        <DialogContent className="h-[calc(100dvh-2rem)] max-w-[min(96vw,1100px)]">
           <DialogHeader>
             <DialogTitle>默认 Prompt</DialogTitle>
             <DialogDescription>
@@ -421,17 +423,20 @@ export function PromptManagementPage() {
             </DialogDescription>
           </DialogHeader>
           {loadingDefaultPrompt ? (
-            <div className="flex h-[520px] items-center justify-center gap-2 text-sm text-muted-foreground">
+            <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
               <ThinkingIllustration />
             </div>
           ) : (
-            <CodeEditor
-              value={defaultPromptContent}
-              readOnly
-              language="text"
-              height="min(62vh, 620px)"
-              minHeight="420px"
-            />
+            <div className="min-h-0 flex-1">
+              <CodeEditor
+                value={defaultPromptContent}
+                readOnly
+                language="text"
+                height="100%"
+                minHeight="0"
+                className="h-full"
+              />
+            </div>
           )}
         </DialogContent>
       </Dialog>

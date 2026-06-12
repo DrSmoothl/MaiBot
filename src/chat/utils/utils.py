@@ -434,6 +434,25 @@ def split_into_sentences_w_remove_punctuation(text: str) -> list[str]:
     return final_sentences
 
 
+def merge_sentences_to_max_count(sentences: list[str], max_count: int) -> list[str]:
+    """按顺序将分句合并到指定条数以内。"""
+
+    if len(sentences) <= max_count:
+        return sentences
+
+    merged_sentences: list[str] = []
+    sentence_count = len(sentences)
+    start_index = 0
+    for group_index in range(max_count):
+        remaining_sentences = sentence_count - start_index
+        remaining_groups = max_count - group_index
+        group_size = (remaining_sentences + remaining_groups - 1) // remaining_groups
+        merged_sentences.append("".join(sentences[start_index : start_index + group_size]))
+        start_index += group_size
+
+    return merged_sentences
+
+
 def random_remove_punctuation(text: str) -> str:
     """随机处理标点符号，模拟人类打字习惯
 
@@ -500,6 +519,7 @@ def process_llm_response(text: str, enable_splitter: bool = True, enable_chinese
     # 对清理后的文本进行进一步处理
     max_length = global_config.response_splitter.max_length * 2
     max_sentence_num = global_config.response_splitter.max_sentence_num
+    max_split_num = global_config.response_splitter.max_split_num
     # 如果基本上是中文，则进行长度过滤
     if get_western_ratio(cleaned_text) < 0.1 and len(cleaned_text) > max_length:
         logger.warning(f"回复过长 ({len(cleaned_text)} 字符)，返回默认回复")
@@ -541,6 +561,8 @@ def process_llm_response(text: str, enable_splitter: bool = True, enable_chinese
         else:
             logger.warning(f"分割后消息数量过多 ({len(sentences)} 条)，返回默认回复")
             return [_get_random_default_reply()]
+
+    sentences = merge_sentences_to_max_count(sentences, max_split_num)
 
     # if extracted_contents:
     #     for content in extracted_contents:

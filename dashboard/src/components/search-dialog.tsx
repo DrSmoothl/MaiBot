@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ShortcutKbd } from '@/components/ui/kbd'
-import { menuSections } from '@/components/layout/constants'
+import { useMenuSections } from '@/components/layout/use-menu-sections'
 import { registeredRoutePaths } from '@/router'
 import { getBotConfigSchema, getModelConfigSchema } from '@/lib/config-api'
 import { getAllLocalizedText, resolveFieldLabel } from '@/lib/config-label'
@@ -131,6 +131,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const { i18n, t } = useTranslation()
+  const menuSections = useMenuSections()
 
   useEffect(() => {
     setConfigSearchItems([])
@@ -225,7 +226,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
             ].join(' '),
           }))
       ),
-    [t]
+    [menuSections, t]
   )
 
   // 过滤搜索结果
@@ -286,7 +287,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
         <div className="border-t">
           <DialogBody className="h-100" viewportClassName="px-0">
             {filteredItems.length > 0 ? (
-              <div className="p-2">
+              <div className="space-y-1.5 p-2">
                 {filteredItems.map((item, index) => {
                   const Icon = item.icon
                   return (
@@ -295,20 +296,20 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
                       onClick={() => handleNavigate(item.path)}
                       onMouseEnter={() => setSelectedIndex(index)}
                       className={cn(
-                        'w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-left transition-colors',
+                        'w-full flex items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors',
                         index === selectedIndex
                           ? 'bg-accent text-accent-foreground'
                           : 'hover:bg-accent/50'
                       )}
                     >
                       <Icon className="h-5 w-5 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm">{item.title}</div>
-                        <div className="text-xs text-muted-foreground truncate">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{item.title}</div>
+                        <div className="truncate text-xs text-muted-foreground">
                           {item.description}
                         </div>
                       </div>
-                      <div className="text-xs text-muted-foreground px-2 py-1 bg-muted rounded">
+                      <div className="max-w-28 shrink-0 truncate rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
                         {item.category}
                       </div>
                     </button>

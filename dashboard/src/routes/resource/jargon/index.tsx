@@ -296,51 +296,43 @@ export function JargonManagementPage() {
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
-      <div className="mb-4 flex justify-end sm:mb-6">
-        <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
-          <Plus className="h-4 w-4" />
-          新增黑话
-        </Button>
-      </div>
-
       <ScrollArea className="flex-1">
         <div className="space-y-4 sm:space-y-6 pr-4">
 
-          {/* 统计卡片 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">总数量</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1">{stats.total}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">已确认黑话</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-green-600">{stats.confirmed_jargon}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">确认非黑话</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-gray-500">{stats.confirmed_not_jargon}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">待判定</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-yellow-600">{stats.pending}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">全局黑话</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-blue-600">{stats.global_count}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">推断完成</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-purple-600">{stats.complete_count}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">关联聊天数</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1">{stats.chat_count}</div>
-            </div>
+          {/* 统计标签 */}
+          <div className="grid grid-cols-2 overflow-hidden rounded-md border bg-muted/40 sm:grid-cols-4 lg:grid-cols-7">
+            {[
+              { label: '总数量', value: stats.total, className: 'text-foreground' },
+              { label: '已确认黑话', value: stats.confirmed_jargon, className: 'text-green-600' },
+              { label: '确认非黑话', value: stats.confirmed_not_jargon, className: 'text-gray-500' },
+              { label: '待判定', value: stats.pending, className: 'text-yellow-600' },
+              { label: '全局黑话', value: stats.global_count, className: 'text-blue-600' },
+              { label: '推断完成', value: stats.complete_count, className: 'text-purple-600' },
+              { label: '关联聊天数', value: stats.chat_count, className: 'text-foreground' },
+            ].map((item, index) => (
+              <div
+                key={item.label}
+                className={`flex h-9 min-w-0 items-center justify-center gap-2 px-3 text-sm ${
+                  index % 2 === 1 ? 'border-l' : ''
+                } ${
+                  index >= 2 ? 'border-t sm:border-t-0' : ''
+                } ${
+                  index > 0 ? 'sm:border-l' : ''
+                } ${
+                  index >= 4 ? 'sm:border-t lg:border-t-0' : ''
+                }`}
+              >
+                <span className="truncate text-muted-foreground">{item.label}</span>
+                <span className={`shrink-0 font-semibold leading-none ${item.className}`}>
+                  {item.value}
+                </span>
+              </div>
+            ))}
           </div>
 
           {/* 搜索和筛选 */}
           <div className="rounded-lg border bg-card p-3">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
               <div className="space-y-1">
                 <Label htmlFor="search">搜索</Label>
                 <div className="relative">
@@ -388,6 +380,10 @@ export function JargonManagementPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <Button onClick={() => setIsCreateDialogOpen(true)} className="h-8 gap-2">
+                <Plus className="h-4 w-4" />
+                新增黑话
+              </Button>
             </div>
 
             {/* 批量操作工具栏 */}
@@ -414,8 +410,8 @@ export function JargonManagementPage() {
           </div>
 
           {/* 黑话列表 */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
-            <aside className="rounded-lg border bg-card lg:sticky lg:top-0 lg:max-h-[calc(100vh-18rem)]">
+          <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-19rem)] lg:min-h-[30rem] lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-stretch">
+            <aside className="flex min-h-0 flex-col rounded-lg border bg-card lg:h-full lg:self-stretch lg:overflow-hidden">
               <div className="space-y-2 border-b px-3 py-2">
                 <h2 className="text-sm font-medium">范围</h2>
                 <div className="grid grid-cols-3 gap-1 rounded-md bg-muted p-1">
@@ -448,7 +444,7 @@ export function JargonManagementPage() {
                   </button>
                 </div>
               </div>
-              <div className="max-h-56 space-y-1 overflow-y-auto p-2 lg:max-h-[calc(100vh-21rem)]">
+              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
                 {scopeFilter === 'global' ? (
                   <div className="px-2 py-6 text-center text-sm text-muted-foreground">
                     全局黑话不按聊天划分
@@ -476,16 +472,9 @@ export function JargonManagementPage() {
                             ? 'bg-primary text-primary-foreground'
                             : 'text-foreground hover:bg-muted'
                         }`}
-                        title={`${chat.chat_name} (${chat.session_id})`}
+                        title={chat.chat_name}
                       >
                         <span className="block truncate">{chat.chat_name}</span>
-                        <span
-                          className={`block truncate text-xs ${
-                            filterChatId === chat.session_id ? 'text-primary-foreground/75' : 'text-muted-foreground'
-                          }`}
-                        >
-                          {chat.session_id}
-                        </span>
                       </button>
                     ))}
                   </>
@@ -493,22 +482,25 @@ export function JargonManagementPage() {
               </div>
             </aside>
 
-            <JargonList
-              jargons={jargons}
-              loading={loading}
-              total={total}
-              page={page}
-              pageSize={pageSize}
-              selectedIds={selectedIds}
-              hideChatColumn={scopeFilter === 'global' || filterChatId !== 'all'}
-              onEdit={handleEdit}
-              onViewDetail={handleViewDetail}
-              onDelete={(jargon) => setDeleteConfirmJargon(jargon)}
-              onToggleSelect={toggleSelect}
-              onToggleSelectAll={toggleSelectAll}
-              onPageChange={setPage}
-              onJumpToPage={handleJumpToPage}
-            />
+            <div className="min-h-0 lg:h-full">
+              <JargonList
+                jargons={jargons}
+                loading={loading}
+                total={total}
+                page={page}
+                pageSize={pageSize}
+                selectedIds={selectedIds}
+                hideChatColumn={scopeFilter === 'global' || filterChatId !== 'all'}
+                className="lg:h-full"
+                onEdit={handleEdit}
+                onViewDetail={handleViewDetail}
+                onDelete={(jargon) => setDeleteConfirmJargon(jargon)}
+                onToggleSelect={toggleSelect}
+                onToggleSelectAll={toggleSelectAll}
+                onPageChange={setPage}
+                onJumpToPage={handleJumpToPage}
+              />
+            </div>
           </div>
         </div>
       </ScrollArea>

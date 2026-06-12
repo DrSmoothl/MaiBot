@@ -8,6 +8,7 @@ from src.chat.message_receive.chat_manager import chat_manager
 from src.cli.maisaka_cli_sender import CLI_PLATFORM_NAME, render_cli_message
 from src.common.data_models.image_data_model import MaiEmoji
 from src.common.logger import get_logger
+from src.common.utils.image_path import resolve_stored_image_path
 from src.common.utils.utils_image import ImageUtils
 from src.services import send_service
 
@@ -207,7 +208,7 @@ async def send_emoji_for_maisaka(
         )
 
     try:
-        emoji_base64 = ImageUtils.image_path_to_base64(str(selected_emoji.full_path))
+        emoji_base64 = ImageUtils.image_path_to_base64(str(resolve_stored_image_path(selected_emoji.full_path)))
         if not emoji_base64:
             raise ValueError("表情图片转换为 base64 失败")
     except Exception as exc:
@@ -230,8 +231,10 @@ async def send_emoji_for_maisaka(
                 else "[表情包]"
             )
             render_cli_message(preview_message)
+            record_usage_locally = True
             sent = True
         else:
+            record_usage_locally = False
             sent_message = await send_service.emoji_to_stream_with_message(
                 emoji_base64=emoji_base64,
                 stream_id=stream_id,
@@ -264,7 +267,8 @@ async def send_emoji_for_maisaka(
             matched_emotion=matched_emotion,
         )
 
-    emoji_manager.update_emoji_usage(selected_emoji)
+    if record_usage_locally:
+        emoji_manager.update_emoji_usage(selected_emoji)
     success_message = (
         f"已发送表情包：{description}（情绪：{', '.join(emotions)}）"
         if emotions

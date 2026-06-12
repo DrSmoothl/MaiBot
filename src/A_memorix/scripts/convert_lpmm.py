@@ -176,6 +176,7 @@ class LPMMConverter:
                 max_concurrent=int(emb_cfg.get("max_concurrent", 5)),
                 default_dimension=int(emb_cfg.get("dimension", self.dimension)),
                 model_name=str(emb_cfg.get("model_name", "auto")),
+                dimension_request_mode=str(emb_cfg.get("dimension_request_mode", "explicit")),
                 retry_config=emb_cfg.get("retry", {}) if isinstance(emb_cfg.get("retry", {}), dict) else {},
             )
             self.relation_write_service = RelationWriteService(

@@ -11,7 +11,9 @@ interface UpdatesTabProps {
   maimaiVersion: MaimaiVersion | null
   pluginStats: Record<string, PluginStatsData>
   loadProgress: PluginLoadProgress | null
+  likingPluginIds: Set<string>
   onInstall: (plugin: PluginInfo) => void
+  onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
   onUninstall: (plugin: PluginInfo) => void
   checkPluginCompatibility: (plugin: PluginInfo) => boolean
@@ -29,7 +31,9 @@ export function UpdatesTab({
   maimaiVersion,
   pluginStats,
   loadProgress,
+  likingPluginIds,
   onInstall,
+  onLike,
   onUpdate,
   onUninstall,
   checkPluginCompatibility,
@@ -76,7 +80,9 @@ export function UpdatesTab({
           maimaiVersion={maimaiVersion}
           pluginStats={pluginStats}
           loadProgress={loadProgress}
+          likingPluginIds={likingPluginIds}
           onInstall={onInstall}
+          onLike={onLike}
           onUpdate={onUpdate}
           onUninstall={onUninstall}
           checkPluginCompatibility={checkPluginCompatibility}

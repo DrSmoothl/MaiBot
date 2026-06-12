@@ -20,6 +20,7 @@ export type XWidgetType =
   | 'select'
   | 'slider'
   | 'switch'
+  | 'tags'
   | 'talk-time'
   | 'textarea'
 
@@ -45,8 +46,10 @@ export interface FieldSchema {
   'x-layout'?: 'inline-right'
   'x-input-width'?: string
   'x-description-display'?: DescriptionDisplayMode
+  'x-collapsed-by-default'?: boolean
   'x-option-descriptions'?: Record<string, string>
   'x-row'?: string
+  'x-display-as-section'?: boolean
   'x-textarea-min-height'?: number
   'x-textarea-rows'?: number
   advanced?: boolean
@@ -60,7 +63,7 @@ export interface ConfigSchema {
   nested?: Record<string, ConfigSchema>
   uiParent?: string
   uiLabel?: string
-  uiIcon?: string
+  uiAdvanced?: boolean
 }
 
 export interface ConfigSchemaResponse {

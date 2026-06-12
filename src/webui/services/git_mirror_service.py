@@ -43,12 +43,12 @@ def set_update_progress_callback(callback):
 class MirrorType(str, Enum):
     """镜像源类型"""
 
-    GH_PROXY = "gh-proxy"  # gh-proxy 主节点
-    HK_GH_PROXY = "hk-gh-proxy"  # gh-proxy 香港节点
-    CDN_GH_PROXY = "cdn-gh-proxy"  # gh-proxy CDN 节点
-    EDGEONE_GH_PROXY = "edgeone-gh-proxy"  # gh-proxy EdgeOne 节点
-    MEYZH_GITHUB = "meyzh-github"  # Meyzh GitHub 镜像
-    GITHUB = "github"  # GitHub 官方源（兜底）
+    GITPROXY_MRHJX = "gitproxy-mrhjx"  # gitproxy.mrhjx.cn 镜像
+    GHPROXY_VIP = "ghproxy-vip"  # ghproxy.vip 镜像
+    GITHUB = "github"  # GitHub 官方源
+    GH_PROXY_COM = "gh-proxy-com"  # gh-proxy.com 镜像
+    V6_GH_PROXY = "v6-gh-proxy"  # v6.gh-proxy.org 镜像
+    CDN_GH_PROXY_COM = "cdn-gh-proxy-com"  # cdn.gh-proxy.com 镜像
     CUSTOM = "custom"  # 自定义镜像源
 
 
@@ -57,61 +57,69 @@ class GitMirrorConfig:
 
     # 配置文件路径
     CONFIG_FILE = Path("data/webui.json")
+    LEGACY_DEFAULT_MIRROR_PRIORITIES = {
+        "gh-proxy": 1,
+        "hk-gh-proxy": 2,
+        "cdn-gh-proxy": 3,
+        "edgeone-gh-proxy": 4,
+        "meyzh-github": 5,
+        "github": 999,
+    }
 
     # 默认镜像源配置
     DEFAULT_MIRRORS = [
         {
-            "id": "gh-proxy",
-            "name": "gh-proxy 镜像",
-            "raw_prefix": "https://gh-proxy.org/https://raw.githubusercontent.com",
-            "clone_prefix": "https://gh-proxy.org/https://github.com",
+            "id": "gitproxy-mrhjx",
+            "name": "gitproxy.mrhjx.cn 镜像",
+            "raw_prefix": "https://gitproxy.mrhjx.cn/https://raw.githubusercontent.com",
+            "clone_prefix": "https://gitproxy.mrhjx.cn/https://github.com",
             "enabled": True,
             "priority": 1,
             "created_at": None,
         },
         {
-            "id": "hk-gh-proxy",
-            "name": "gh-proxy 香港节点",
-            "raw_prefix": "https://hk.gh-proxy.org/https://raw.githubusercontent.com",
-            "clone_prefix": "https://hk.gh-proxy.org/https://github.com",
+            "id": "ghproxy-vip",
+            "name": "ghproxy.vip 镜像",
+            "raw_prefix": "https://ghproxy.vip/https://raw.githubusercontent.com",
+            "clone_prefix": "https://ghproxy.vip/https://github.com",
             "enabled": True,
             "priority": 2,
             "created_at": None,
         },
         {
-            "id": "cdn-gh-proxy",
-            "name": "gh-proxy CDN 节点",
-            "raw_prefix": "https://cdn.gh-proxy.org/https://raw.githubusercontent.com",
-            "clone_prefix": "https://cdn.gh-proxy.org/https://github.com",
+            "id": "github",
+            "name": "GitHub 官方源",
+            "raw_prefix": "https://raw.githubusercontent.com",
+            "clone_prefix": "https://github.com",
             "enabled": True,
             "priority": 3,
             "created_at": None,
         },
         {
-            "id": "edgeone-gh-proxy",
-            "name": "gh-proxy EdgeOne 节点",
-            "raw_prefix": "https://edgeone.gh-proxy.org/https://raw.githubusercontent.com",
-            "clone_prefix": "https://edgeone.gh-proxy.org/https://github.com",
+            "id": "gh-proxy-com",
+            "name": "gh-proxy.com 镜像",
+            "raw_prefix": "https://gh-proxy.com/https://raw.githubusercontent.com",
+            "clone_prefix": "https://gh-proxy.com/https://github.com",
             "enabled": True,
             "priority": 4,
             "created_at": None,
         },
         {
-            "id": "meyzh-github",
-            "name": "Meyzh GitHub 镜像",
-            "raw_prefix": "https://meyzh.github.io/https://raw.githubusercontent.com",
-            "clone_prefix": "https://meyzh.github.io/https://github.com",
+            "id": "v6-gh-proxy",
+            "name": "v6.gh-proxy.org 镜像",
+            "raw_prefix": "https://v6.gh-proxy.org/https://raw.githubusercontent.com",
+            "clone_prefix": "https://v6.gh-proxy.org/https://github.com",
             "enabled": True,
             "priority": 5,
             "created_at": None,
         },
         {
-            "id": "github",
-            "name": "GitHub 官方源（兜底）",
-            "raw_prefix": "https://raw.githubusercontent.com",
-            "clone_prefix": "https://github.com",
+            "id": "cdn-gh-proxy-com",
+            "name": "cdn.gh-proxy.com 镜像",
+            "raw_prefix": "https://cdn.gh-proxy.com/https://raw.githubusercontent.com",
+            "clone_prefix": "https://cdn.gh-proxy.com/https://github.com",
             "enabled": True,
-            "priority": 999,
+            "priority": 6,
             "created_at": None,
         },
     ]
@@ -135,7 +143,11 @@ class GitMirrorConfig:
                     self._init_default_mirrors()
                 else:
                     self.mirrors = data["git_mirrors"]
-                    logger.info(f"已加载 {len(self.mirrors)} 个镜像源配置")
+                    if self._is_legacy_default_mirrors(self.mirrors):
+                        logger.info("检测到旧默认镜像源配置，更新为新的默认配置")
+                        self._init_default_mirrors()
+                    else:
+                        logger.info(f"已加载 {len(self.mirrors)} 个镜像源配置")
             else:
                 logger.info("配置文件不存在，创建默认配置")
                 self._init_default_mirrors()
@@ -155,6 +167,24 @@ class GitMirrorConfig:
 
         self._save_config()
         logger.info(f"已初始化 {len(self.mirrors)} 个默认镜像源")
+
+    def _is_legacy_default_mirrors(self, mirrors: List[Dict[str, Any]]) -> bool:
+        """判断当前配置是否为未手动修改过的旧默认镜像源列表。"""
+        if len(mirrors) != len(self.LEGACY_DEFAULT_MIRROR_PRIORITIES):
+            return False
+
+        for mirror in mirrors:
+            mirror_id = mirror.get("id")
+            if mirror_id not in self.LEGACY_DEFAULT_MIRROR_PRIORITIES:
+                return False
+            if mirror.get("updated_at"):
+                return False
+            if mirror.get("enabled") is not True:
+                return False
+            if mirror.get("priority") != self.LEGACY_DEFAULT_MIRROR_PRIORITIES[mirror_id]:
+                return False
+
+        return True
 
     def _save_config(self) -> None:
         """保存配置到文件"""

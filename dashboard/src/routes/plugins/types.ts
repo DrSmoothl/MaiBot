@@ -49,6 +49,6 @@ export function getPluginTypeLabel(plugin: { manifest?: { plugin_type?: PluginTy
 }
 
 // 导出类型
-export type MarketplaceSortKey = 'default' | 'downloads' | 'likes' | 'rating'
+export type MarketplaceSortKey = 'default' | 'downloads' | 'likes' | 'rating' | 'latest'
 
 export type { PluginInfo, PluginType, GitStatus, MaimaiVersion, PluginLoadProgress, PluginStatsData }

@@ -920,6 +920,7 @@ class MigrationRunner:
         emb_batch_size = max(1, _safe_int(emb_cfg.get("batch_size"), 32))
         emb_default_dim = max(1, _safe_int(emb_cfg.get("dimension"), 1024))
         emb_model_name = str(emb_cfg.get("model_name", "auto"))
+        emb_dimension_request_mode = str(emb_cfg.get("dimension_request_mode", "explicit"))
         emb_retry = emb_cfg.get("retry", {}) if isinstance(emb_cfg.get("retry", {}), dict) else {}
 
         if require_embedding:
@@ -941,6 +942,7 @@ class MigrationRunner:
                 max_concurrent=self.embed_workers,
                 default_dimension=emb_default_dim,
                 model_name=emb_model_name,
+                dimension_request_mode=emb_dimension_request_mode,
                 retry_config=emb_retry,
             )
 

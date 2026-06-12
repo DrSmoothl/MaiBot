@@ -1,15 +1,15 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from maim_message import Seg, UserInfo, MessageBase, BaseMessageInfo
-from pathlib import Path
+from maim_message import BaseMessageInfo, MessageBase, Seg, UserInfo
 from sqlmodel import select
-from typing import Optional, List, Union, Dict, Any
+from typing import Any, Dict, List, Optional, Union
 
 import asyncio
-import hashlib
 import base64
+import hashlib
 
 from src.common.logger import get_logger
+from src.common.utils.image_path import resolve_stored_image_path
 
 logger = get_logger("base_message_component_model")
 
@@ -75,7 +75,7 @@ class ImageComponent(BaseMessageComponentModel, ByteComponent):
             with get_db_session() as db:
                 statement = select(Images).filter_by(image_hash=self.binary_hash, image_type=ImageType.IMAGE).limit(1)
                 if image_record := db.exec(statement).first():
-                    image_path = Path(image_record.full_path)
+                    image_path = resolve_stored_image_path(image_record.full_path)
                 else:
                     raise ValueError(f"无法通过 image_hash 加载图片二进制数据: {self.binary_hash}")
             self.binary_data = await asyncio.to_thread(image_path.read_bytes)
@@ -112,7 +112,7 @@ class EmojiComponent(BaseMessageComponentModel, ByteComponent):
             with get_db_session() as db:
                 statement = select(Images).filter_by(image_hash=self.binary_hash, image_type=ImageType.EMOJI).limit(1)
                 if image_record := db.exec(statement).first():
-                    image_path = Path(image_record.full_path)
+                    image_path = resolve_stored_image_path(image_record.full_path)
                 else:
                     raise ValueError(f"无法通过 emoji_hash 加载表情二进制数据: {self.binary_hash}")
             self.binary_data = await asyncio.to_thread(image_path.read_bytes)
@@ -412,6 +412,8 @@ class MessageSequence:
             )
         elif item_type == "reply":
             return ReplyComponent(target_message_id=item["data"])
+        elif item_type == "dict":
+            return DictComponent(data=item.get("data") or {})
         elif item_type == "forward":
             forward_components = []
             for fc in item["data"]:

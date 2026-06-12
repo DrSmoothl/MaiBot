@@ -12,6 +12,7 @@ import numpy as np
 import pickle
 import time
 
+from src.chat.message_receive.chat_manager import chat_manager
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.services import message_service as message_api
@@ -31,7 +32,7 @@ from ..utils.person_profile_service import PersonProfileService
 from ..utils.relation_write_service import RelationWriteService
 from ..utils.retrieval_tuning_manager import RetrievalTuningManager
 from ..utils.runtime_self_check import run_embedding_runtime_self_check
-from ..utils.search_execution_service import SearchExecutionRequest, SearchExecutionService
+from ..utils.search_execution_service import SearchExecutionRequest, SearchExecutionResult, SearchExecutionService
 from ..utils.summary_importer import SummaryImporter
 from ..utils.time_parser import format_timestamp, parse_query_datetime_to_timestamp
 from ..utils.web_import_manager import ImportTaskManager
@@ -46,6 +47,7 @@ class KernelSearchRequest:
     limit: int = 5
     mode: str = "search"
     chat_id: str = ""
+    shared_chat_ids: Sequence[str] = ()
     person_id: str = ""
     time_start: Optional[str | float] = None
     time_end: Optional[str | float] = None
@@ -246,6 +248,23 @@ class SDKMemoryKernel:
         if not isinstance(filter_config, dict) or not filter_config:
             return True
 
+        return self._chat_filter_config_allows(
+            filter_config,
+            stream_id=stream_id,
+            group_id=group_id,
+            user_id=user_id,
+            default_when_empty=True,
+        )
+
+    @staticmethod
+    def _chat_filter_config_allows(
+        filter_config: Dict[str, Any],
+        *,
+        stream_id: str = "",
+        group_id: str = "",
+        user_id: str = "",
+        default_when_empty: bool = True,
+    ) -> bool:
         if not bool(filter_config.get("enabled", True)):
             return True
 
@@ -255,7 +274,7 @@ class SDKMemoryKernel:
             patterns = []
 
         if not patterns:
-            return mode == "blacklist"
+            return bool(default_when_empty) if mode == "blacklist" else False
 
         stream_token = str(stream_id or "").strip()
         group_token = str(group_id or "").strip()
@@ -431,6 +450,66 @@ class SDKMemoryKernel:
         self._embedding_degraded["last_check"] = checked_at
         return report
 
+    def _mark_startup_self_check_deferred(self) -> None:
+        """记录启动阶段跳过真实 embedding encode 自检，避免阻塞主启动流程。"""
+        configured_dimension = max(
+            1,
+            int(self._cfg("embedding.dimension", self.embedding_dimension) or self.embedding_dimension),
+        )
+        requested_dimension = int(self.embedding_dimension)
+        vector_store_dimension = int(getattr(self.vector_store, "dimension", 0) or 0)
+        degraded = self._embedding_degraded_snapshot()
+        is_degraded = bool(degraded.get("active", False))
+        self._runtime_facade._runtime_self_check_report = {
+            "ok": not is_degraded,
+            "code": "startup_self_check_deferred_degraded" if is_degraded else "startup_self_check_deferred",
+            "message": str(degraded.get("reason", "") or "").strip()
+            or "启动阶段已跳过真实 embedding encode 自检，将由后台探测或手动 self_check 执行",
+            "configured_dimension": configured_dimension,
+            "requested_dimension": requested_dimension,
+            "vector_store_dimension": vector_store_dimension,
+            "detected_dimension": requested_dimension,
+            "encoded_dimension": 0,
+            "elapsed_ms": 0.0,
+            "sample_text": "",
+            "checked_at": None,
+        }
+
+    def _is_startup_self_check_deferred(self) -> bool:
+        report = self._runtime_facade._runtime_self_check_report
+        code = str(report.get("code", "") or "") if isinstance(report, dict) else ""
+        return code in {"startup_self_check_deferred", "startup_self_check_deferred_degraded"}
+
+    @staticmethod
+    def _self_check_effective_dimension(report: Dict[str, Any]) -> int:
+        for key in ("encoded_dimension", "detected_dimension", "requested_dimension"):
+            try:
+                value = int(report.get(key, 0) or 0)
+            except Exception:
+                value = 0
+            if value > 0:
+                return value
+        return 0
+
+    def _apply_self_check_dimension_result(self, report: Dict[str, Any]) -> str:
+        detected_dimension = self._self_check_effective_dimension(report)
+        if detected_dimension <= 0:
+            return ""
+
+        self.embedding_dimension = int(detected_dimension)
+        vector_dimension = int(getattr(self.vector_store, "dimension", 0) or 0)
+        if vector_dimension <= 0 or vector_dimension == detected_dimension:
+            return ""
+
+        stored_dimension = self._stored_vector_dimension() or vector_dimension
+        message = self._vector_mismatch_error(
+            stored_dimension=int(stored_dimension),
+            detected_dimension=int(detected_dimension),
+        )
+        self._vector_persist_blocked_until_rebuild = True
+        self._vector_rebuild_source_dimension = int(stored_dimension)
+        return message
+
     def _enqueue_paragraph_vector_backfill(self, paragraph_hash: str, *, error: str = "") -> None:
         if self.metadata_store is None:
             return
@@ -565,15 +644,13 @@ class SDKMemoryKernel:
             self.metadata_store.mark_paragraph_vector_backfill_running(pending_hashes)
 
         done_hashes: List[str] = []
-        failed_count = 0
-        for row in rows:
-            paragraph_hash = str(row.get("paragraph_hash", "") or "").strip()
-            if not paragraph_hash:
-                continue
+        encode_items: List[tuple[str, str]] = []
+        paragraph_map = self.metadata_store.get_paragraphs_by_hashes(pending_hashes)
+        for paragraph_hash in pending_hashes:
             if paragraph_hash in self.vector_store:
                 done_hashes.append(paragraph_hash)
                 continue
-            paragraph = self.metadata_store.get_paragraph(paragraph_hash)
+            paragraph = paragraph_map.get(paragraph_hash)
             if paragraph is None:
                 done_hashes.append(paragraph_hash)
                 continue
@@ -581,17 +658,18 @@ class SDKMemoryKernel:
             if not content:
                 done_hashes.append(paragraph_hash)
                 continue
-            try:
-                embedding = await self.embedding_manager.encode(content)
-                if getattr(embedding, "ndim", 1) == 1:
-                    embedding = embedding.reshape(1, -1)
-                self.vector_store.add(vectors=embedding, ids=[paragraph_hash])
-                done_hashes.append(paragraph_hash)
-            except Exception as exc:
-                failed_count += 1
-                self.metadata_store.mark_paragraph_vector_backfill_failed(paragraph_hash, str(exc))
-                if self._embedding_fallback_enabled():
-                    self._set_embedding_degraded(active=True, reason=str(exc)[:500], checked_at=time.time())
+            encode_items.append((paragraph_hash, content))
+
+        done_count, failed_count, last_error, encoded_done_hashes, failed_hashes = await self._encode_and_add_rebuild_vectors(
+            items=encode_items,
+            batch_size=safe_limit,
+        )
+        del done_count
+        done_hashes.extend(encoded_done_hashes)
+        for paragraph_hash in failed_hashes:
+            self.metadata_store.mark_paragraph_vector_backfill_failed(paragraph_hash, last_error)
+        if failed_hashes and self._embedding_fallback_enabled():
+            self._set_embedding_degraded(active=True, reason=last_error[:500], checked_at=time.time())
 
         if done_hashes:
             self.metadata_store.mark_paragraph_vector_backfill_done(done_hashes)
@@ -955,6 +1033,16 @@ class SDKMemoryKernel:
         report = await self._refresh_runtime_self_check(sample_text=sample_text)
         checked_at = float(report.get("checked_at") or time.time())
         ok = bool(report.get("ok", False))
+        dimension_mismatch = self._apply_self_check_dimension_result(report)
+        if dimension_mismatch:
+            self._set_embedding_degraded(active=True, reason=dimension_mismatch, checked_at=checked_at)
+            return {
+                "success": False,
+                "recovered": False,
+                "report": report,
+                "detail": "dimension_mismatch",
+            }
+
         if ok:
             self._set_embedding_degraded(active=False, checked_at=checked_at)
             backfill_result: Dict[str, Any] = {}
@@ -1000,14 +1088,12 @@ class SDKMemoryKernel:
             default_dimension=self.embedding_dimension,
             enable_cache=bool(self._cfg("embedding.enable_cache", False)),
             model_name=str(self._cfg("embedding.model_name", "auto") or "auto"),
+            dimension_request_mode=str(self._cfg("embedding.dimension_request_mode", "explicit") or "explicit"),
             retry_config=self._cfg("embedding.retry", {}) or {},
         )
-        dimension_detection_task = asyncio.create_task(
-            asyncio.to_thread(lambda: asyncio.run(self.embedding_manager._detect_dimension()))
-        )
-        await asyncio.sleep(0)
         stored_dimension = self._stored_vector_dimension()
         provisional_dimension = stored_dimension or self.embedding_dimension
+        self.embedding_dimension = int(provisional_dimension)
 
         matrix_format = str(self._cfg("graph.sparse_matrix_format", "csr") or "csr").strip().lower()
         graph_format = SparseMatrixFormat.CSC if matrix_format == "csc" else SparseMatrixFormat.CSR
@@ -1033,41 +1119,19 @@ class SDKMemoryKernel:
             sparse_cfg = SparseBM25Config()
         self.sparse_index = SparseBM25Index(metadata_store=self.metadata_store, config=sparse_cfg)
         if getattr(self.sparse_index.config, "enabled", False):
-            self.sparse_index.ensure_loaded()
-
-        try:
-            detected_dimension = int(await dimension_detection_task)
-        except Exception:
-            if not dimension_detection_task.done():
-                dimension_detection_task.cancel()
-            raise
-        self.embedding_dimension = detected_dimension
-
-        if stored_dimension is not None and stored_dimension != detected_dimension:
-            message = self._vector_mismatch_error(
-                stored_dimension=stored_dimension,
-                detected_dimension=detected_dimension,
-            )
-            logger.warning(f"{message} 将以空向量库启动，等待手动重建。")
-            self.vector_store = VectorStore(
-                dimension=detected_dimension,
-                quantization_type=QuantizationType.INT8,
-                data_dir=self.data_dir / "vectors",
-            )
-            self._vector_persist_blocked_until_rebuild = True
-            self._vector_rebuild_source_dimension = stored_dimension
-            skip_vector_load = True
-            self._set_embedding_degraded(
-                active=True,
-                reason=message,
-                checked_at=time.time(),
-            )
-        elif self.vector_store.dimension != detected_dimension:
-            self.vector_store = VectorStore(
-                dimension=detected_dimension,
-                quantization_type=QuantizationType.INT8,
-                data_dir=self.data_dir / "vectors",
-            )
+            warmup_summary = self.sparse_index.warmup()
+            if warmup_summary.get("ok"):
+                logger.info(
+                    "[sdk] 稀疏索引预热完成: "
+                    f"backend={warmup_summary.get('backend')}, "
+                    f"docs={warmup_summary.get('doc_count')}, "
+                    f"duration_ms={float(warmup_summary.get('duration_ms', 0.0)):.2f}"
+                )
+            else:
+                logger.warning(
+                    "[sdk] 稀疏索引预热失败，后续检索将按需重试: "
+                    f"{warmup_summary.get('error', 'unknown')}"
+                )
 
         if not skip_vector_load and self.vector_store.has_data():
             self.vector_store.load()
@@ -1102,16 +1166,7 @@ class SDKMemoryKernel:
             import_write_blocked_provider=self.import_task_manager.is_write_blocked,
         )
 
-        report = await self._refresh_runtime_self_check(sample_text="A_Memorix runtime self check")
-        if not bool(report.get("ok", False)):
-            message = str(report.get("message", "runtime self-check failed") or "runtime self-check failed")
-            checked_at = float(report.get("checked_at") or time.time())
-            if self._embedding_fallback_enabled():
-                self._set_embedding_degraded(active=True, reason=message, checked_at=checked_at)
-            else:
-                raise RuntimeError(f"{message}；请改回原 embedding 配置，或执行重嵌入/重建向量。")
-        elif not self._is_embedding_degraded():
-            self._set_embedding_degraded(active=False, checked_at=float(report.get("checked_at") or time.time()))
+        self._mark_startup_self_check_deferred()
 
         self._initialized = True
         await self._start_background_tasks()
@@ -1484,6 +1539,8 @@ class SDKMemoryKernel:
         mode = str(request.mode or "search").strip().lower() or "search"
         query = str(request.query or "").strip()
         limit = max(1, int(request.limit or 5))
+        shared_chat_ids = tuple(str(item or "").strip() for item in request.shared_chat_ids if str(item or "").strip())
+        scoped_limit = self._scoped_search_limit(limit, chat_id=request.chat_id, shared_chat_ids=shared_chat_ids)
         supported_modes = {"search", "time", "hybrid", "episode", "aggregate"}
         if mode not in supported_modes:
             return {
@@ -1500,59 +1557,57 @@ class SDKMemoryKernel:
             return {"summary": "", "hits": [], "error": str(exc)}
 
         if mode == "episode":
-            rows = await self.episode_retriever.query(
+            rows = await self._episode_query_for_chat_scope(
                 query=query,
-                top_k=limit,
+                top_k=scoped_limit,
                 time_from=time_window.numeric_start,
                 time_to=time_window.numeric_end,
                 person=request.person_id or None,
-                source=self._chat_source(request.chat_id),
+                chat_id=request.chat_id,
+                shared_chat_ids=shared_chat_ids,
             )
             hits = self._filter_episode_hits([self._episode_hit(row) for row in rows])
+            hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)
+            if request.respect_filter:
+                hits = self._filter_hits_by_retrieval_type_scope(hits)
+            hits = hits[:limit]
             return {"summary": self._summary(hits), "hits": hits}
 
         if mode == "aggregate":
             payload = await self.aggregate_query_service.execute(
                 query=query,
-                top_k=limit,
+                top_k=scoped_limit,
                 mix=True,
-                mix_top_k=limit,
+                mix_top_k=scoped_limit,
                 time_from=time_window.query_start,
                 time_to=time_window.query_end,
-                search_runner=lambda: self._aggregate_search(query, limit, request),
-                time_runner=lambda: self._aggregate_time(query, limit, request, time_window),
-                episode_runner=lambda: self._aggregate_episode(query, limit, request, time_window),
+                search_runner=lambda: self._aggregate_search(query, scoped_limit, request),
+                time_runner=lambda: self._aggregate_time(query, scoped_limit, request, time_window),
+                episode_runner=lambda: self._aggregate_episode(query, scoped_limit, request, time_window),
             )
             hits = [dict(item) for item in payload.get("mixed_results", []) if isinstance(item, dict)]
             for item in hits:
                 item.setdefault("metadata", {})
             filtered = self._filter_hits(hits, request.person_id)
             filtered = self._filter_user_visible_hits(filtered)
+            filtered = self._filter_hits_by_chat_scope(filtered, request.chat_id, shared_chat_ids)
+            if request.respect_filter:
+                filtered = self._filter_hits_by_retrieval_type_scope(filtered)
+            filtered = filtered[:limit]
             return {"summary": self._summary(filtered), "hits": filtered}
 
         query_type = mode
         runtime_config = self._build_runtime_config()
-        result = await SearchExecutionService.execute(
-            retriever=self.retriever,
-            threshold_filter=self.threshold_filter,
+        result = await self._search_execution_for_chat_scope(
+            caller="sdk_memory_kernel",
+            query_type=query_type,
+            query=query,
+            top_k=scoped_limit,
+            request=request,
+            time_from=time_window.query_start,
+            time_to=time_window.query_end,
             plugin_config=runtime_config,
-            request=SearchExecutionRequest(
-                caller="sdk_memory_kernel",
-                stream_id=str(request.chat_id or "") or None,
-                group_id=str(request.group_id or "") or None,
-                user_id=str(request.user_id or "") or None,
-                query_type=query_type,
-                query=query,
-                top_k=limit,
-                time_from=time_window.query_start,
-                time_to=time_window.query_end,
-                person=str(request.person_id or "") or None,
-                source=self._chat_source(request.chat_id),
-                use_threshold=True,
-                enable_ppr=bool(self._cfg("retrieval.enable_ppr", True)),
-            ),
             enforce_chat_filter=bool(request.respect_filter),
-            reinforce_access=True,
         )
         if not result.success:
             return {"summary": "", "hits": [], "error": result.error}
@@ -1562,6 +1617,10 @@ class SDKMemoryKernel:
         hits = [self._retrieval_result_hit(item) for item in result.results]
         filtered = self._filter_hits(hits, request.person_id)
         filtered = self._filter_user_visible_hits(filtered)
+        filtered = self._filter_hits_by_chat_scope(filtered, request.chat_id, shared_chat_ids)
+        if request.respect_filter:
+            filtered = self._filter_hits_by_retrieval_type_scope(filtered)
+        filtered = filtered[:limit]
         return {"summary": self._summary(filtered), "hits": filtered}
 
     @staticmethod
@@ -2221,7 +2280,10 @@ class SDKMemoryKernel:
                 sample_text=str(kwargs.get("sample_text", "") or "A_Memorix runtime self check")
             )
             checked_at = float(report.get("checked_at") or time.time())
-            if bool(report.get("ok", False)):
+            dimension_mismatch = self._apply_self_check_dimension_result(report)
+            if dimension_mismatch:
+                self._set_embedding_degraded(active=True, reason=dimension_mismatch, checked_at=checked_at)
+            elif bool(report.get("ok", False)):
                 self._set_embedding_degraded(active=False, checked_at=checked_at)
             elif self._embedding_fallback_enabled():
                 self._set_embedding_degraded(
@@ -2504,25 +2566,18 @@ class SDKMemoryKernel:
         return self.retrieval_tuning_manager
 
     async def _aggregate_search(self, query: str, limit: int, request: KernelSearchRequest) -> Dict[str, Any]:
-        result = await SearchExecutionService.execute(
-            retriever=self.retriever,
-            threshold_filter=self.threshold_filter,
+        shared_chat_ids = tuple(str(item or "").strip() for item in request.shared_chat_ids if str(item or "").strip())
+        result = await self._search_execution_for_chat_scope(
+            caller="sdk_memory_kernel.aggregate",
+            query_type="search",
+            query=query,
+            top_k=limit,
+            request=request,
             plugin_config=self._build_runtime_config(),
-            request=SearchExecutionRequest(
-                caller="sdk_memory_kernel.aggregate",
-                stream_id=str(request.chat_id or "") or None,
-                query_type="search",
-                query=query,
-                top_k=limit,
-                person=str(request.person_id or "") or None,
-                source=self._chat_source(request.chat_id),
-                use_threshold=True,
-                enable_ppr=bool(self._cfg("retrieval.enable_ppr", True)),
-            ),
             enforce_chat_filter=False,
-            reinforce_access=True,
         )
         hits = [self._retrieval_result_hit(item) for item in result.results] if result.success else []
+        hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)
         return {"success": result.success, "results": hits, "count": len(hits), "query_type": "search", "error": result.error}
 
     async def _aggregate_time(
@@ -2532,27 +2587,20 @@ class SDKMemoryKernel:
         request: KernelSearchRequest,
         time_window: _NormalizedSearchTimeWindow,
     ) -> Dict[str, Any]:
-        result = await SearchExecutionService.execute(
-            retriever=self.retriever,
-            threshold_filter=self.threshold_filter,
+        shared_chat_ids = tuple(str(item or "").strip() for item in request.shared_chat_ids if str(item or "").strip())
+        result = await self._search_execution_for_chat_scope(
+            caller="sdk_memory_kernel.aggregate",
+            query_type="time",
+            query=query,
+            top_k=limit,
+            request=request,
+            time_from=time_window.query_start,
+            time_to=time_window.query_end,
             plugin_config=self._build_runtime_config(),
-            request=SearchExecutionRequest(
-                caller="sdk_memory_kernel.aggregate",
-                stream_id=str(request.chat_id or "") or None,
-                query_type="time",
-                query=query,
-                top_k=limit,
-                time_from=time_window.query_start,
-                time_to=time_window.query_end,
-                person=str(request.person_id or "") or None,
-                source=self._chat_source(request.chat_id),
-                use_threshold=True,
-                enable_ppr=bool(self._cfg("retrieval.enable_ppr", True)),
-            ),
             enforce_chat_filter=False,
-            reinforce_access=True,
         )
         hits = [self._retrieval_result_hit(item) for item in result.results] if result.success else []
+        hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)
         return {"success": result.success, "results": hits, "count": len(hits), "query_type": "time", "error": result.error}
 
     async def _aggregate_episode(
@@ -2563,15 +2611,18 @@ class SDKMemoryKernel:
         time_window: _NormalizedSearchTimeWindow,
     ) -> Dict[str, Any]:
         assert self.episode_retriever
-        rows = await self.episode_retriever.query(
+        shared_chat_ids = tuple(str(item or "").strip() for item in request.shared_chat_ids if str(item or "").strip())
+        rows = await self._episode_query_for_chat_scope(
             query=query,
             top_k=limit,
             time_from=time_window.numeric_start,
             time_to=time_window.numeric_end,
             person=request.person_id or None,
-            source=self._chat_source(request.chat_id),
+            chat_id=request.chat_id,
+            shared_chat_ids=shared_chat_ids,
         )
         hits = self._filter_episode_hits([self._episode_hit(row) for row in rows])
+        hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)
         return {"success": True, "results": hits, "count": len(hits), "query_type": "episode"}
 
     def _persist(self) -> None:
@@ -2661,9 +2712,10 @@ class SDKMemoryKernel:
                 await asyncio.sleep(self._embedding_probe_interval_seconds())
                 if self._background_stopping:
                     break
-                if not self._embedding_fallback_enabled():
+                startup_deferred = self._is_startup_self_check_deferred()
+                if not self._embedding_fallback_enabled() and not startup_deferred:
                     continue
-                if not self._is_embedding_degraded():
+                if not self._is_embedding_degraded() and not startup_deferred:
                     continue
                 try:
                     await self._recover_embedding_once()
@@ -5482,6 +5534,448 @@ class SDKMemoryKernel:
     def _chat_source(chat_id: str) -> Optional[str]:
         clean = str(chat_id or "").strip()
         return f"chat_summary:{clean}" if clean else None
+
+    @classmethod
+    def _chat_source_for_search_scope(cls, chat_id: str, shared_chat_ids: Sequence[str] = ()) -> Optional[str]:
+        allowed_chat_ids = cls._resolve_allowed_chat_ids(chat_id, shared_chat_ids)
+        if len(allowed_chat_ids) > 1:
+            return None
+        return cls._chat_source(chat_id)
+
+    @staticmethod
+    def _scoped_search_limit(limit: int, *, chat_id: str, shared_chat_ids: Sequence[str] = ()) -> int:
+        safe_limit = max(1, int(limit or 5))
+        allowed_chat_ids = SDKMemoryKernel._resolve_allowed_chat_ids(chat_id, shared_chat_ids)
+        if not allowed_chat_ids:
+            return safe_limit
+        multiplier = max(5, len(allowed_chat_ids) * 5)
+        return min(50, max(safe_limit, safe_limit * multiplier))
+
+    @classmethod
+    def _resolve_allowed_chat_ids(cls, chat_id: str, shared_chat_ids: Sequence[str] = ()) -> set[str]:
+        allowed_chat_ids = {str(item or "").strip() for item in shared_chat_ids if str(item or "").strip()}
+        clean_chat_id = str(chat_id or "").strip()
+        if clean_chat_id:
+            allowed_chat_ids.add(clean_chat_id)
+        return allowed_chat_ids
+
+    @staticmethod
+    def _rank_score_from_item(item: Any) -> float:
+        if isinstance(item, dict):
+            raw_score = item.get("score", item.get("final_score", item.get("relevance", 0.0)))
+        else:
+            raw_score = getattr(item, "score", 0.0)
+        try:
+            return float(raw_score or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @classmethod
+    def _dedupe_ranked_items(cls, items: Sequence[Any], *, limit: int) -> List[Any]:
+        ranked: Dict[str, Any] = {}
+        for index, item in enumerate(items):
+            if isinstance(item, dict):
+                item_hash = str(item.get("hash", "") or "").strip()
+                item_type = str(item.get("type", "") or "").strip()
+                content = str(item.get("content", "") or "").strip()
+            else:
+                item_hash = str(getattr(item, "hash_value", "") or "").strip()
+                item_type = str(getattr(item, "result_type", "") or "").strip()
+                content = str(getattr(item, "content", "") or "").strip()
+            key = item_hash or f"{item_type}:{content}"
+            if not key:
+                key = f"item:{index}"
+            current = ranked.get(key)
+            if current is None or cls._rank_score_from_item(item) > cls._rank_score_from_item(current):
+                ranked[key] = item
+        return sorted(ranked.values(), key=cls._rank_score_from_item, reverse=True)[: max(1, int(limit or 5))]
+
+    async def _search_execution_once(
+        self,
+        *,
+        caller: str,
+        query_type: str,
+        query: str,
+        top_k: int,
+        request: KernelSearchRequest,
+        plugin_config: dict,
+        source: Optional[str],
+        time_from: Optional[str] = None,
+        time_to: Optional[str] = None,
+        enforce_chat_filter: bool,
+    ) -> SearchExecutionResult:
+        return await SearchExecutionService.execute(
+            retriever=self.retriever,
+            threshold_filter=self.threshold_filter,
+            plugin_config=plugin_config,
+            request=SearchExecutionRequest(
+                caller=caller,
+                stream_id=str(request.chat_id or "") or None,
+                group_id=str(request.group_id or "") or None,
+                user_id=str(request.user_id or "") or None,
+                query_type=query_type,
+                query=query,
+                top_k=top_k,
+                time_from=time_from,
+                time_to=time_to,
+                person=str(request.person_id or "") or None,
+                source=source,
+                use_threshold=True,
+                enable_ppr=bool(self._cfg("retrieval.enable_ppr", True)),
+            ),
+            enforce_chat_filter=enforce_chat_filter,
+            reinforce_access=True,
+        )
+
+    async def _search_execution_for_chat_scope(
+        self,
+        *,
+        caller: str,
+        query_type: str,
+        query: str,
+        top_k: int,
+        request: KernelSearchRequest,
+        plugin_config: dict,
+        time_from: Optional[str] = None,
+        time_to: Optional[str] = None,
+        enforce_chat_filter: bool,
+    ) -> SearchExecutionResult:
+        allowed_chat_ids = self._resolve_allowed_chat_ids(request.chat_id, request.shared_chat_ids)
+        if len(allowed_chat_ids) <= 1:
+            search_source = self._chat_source_for_search_scope(request.chat_id, request.shared_chat_ids)
+            return await self._search_execution_once(
+                caller=caller,
+                query_type=query_type,
+                query=query,
+                top_k=top_k,
+                request=request,
+                plugin_config=plugin_config,
+                source=search_source,
+                time_from=time_from,
+                time_to=time_to,
+                enforce_chat_filter=enforce_chat_filter,
+            )
+
+        scoped_results: List[RetrievalResult] = []
+        errors: List[str] = []
+        chat_filtered = False
+        for chat_id in sorted(allowed_chat_ids):
+            result = await self._search_execution_once(
+                caller=caller,
+                query_type=query_type,
+                query=query,
+                top_k=top_k,
+                request=request,
+                plugin_config=plugin_config,
+                source=self._chat_source(chat_id),
+                time_from=time_from,
+                time_to=time_to,
+                enforce_chat_filter=False,
+            )
+            if result.chat_filtered:
+                chat_filtered = True
+            if not result.success:
+                if result.error:
+                    errors.append(result.error)
+                continue
+            scoped_results.extend(result.results)
+
+        merged_results = self._dedupe_ranked_items(scoped_results, limit=top_k)
+        return SearchExecutionResult(
+            success=bool(merged_results) or not errors,
+            error="; ".join(dict.fromkeys(errors)),
+            query_type=query_type,
+            query=query,
+            top_k=top_k,
+            time_from=time_from,
+            time_to=time_to,
+            person=str(request.person_id or "") or None,
+            source=None,
+            results=merged_results,
+            chat_filtered=chat_filtered and not merged_results,
+        )
+
+    async def _episode_query_for_chat_scope(
+        self,
+        *,
+        query: str,
+        top_k: int,
+        time_from: Optional[float],
+        time_to: Optional[float],
+        person: Optional[str],
+        chat_id: str,
+        shared_chat_ids: Sequence[str] = (),
+    ) -> List[Any]:
+        assert self.episode_retriever is not None
+        allowed_chat_ids = self._resolve_allowed_chat_ids(chat_id, shared_chat_ids)
+        if len(allowed_chat_ids) <= 1:
+            return await self.episode_retriever.query(
+                query=query,
+                top_k=top_k,
+                time_from=time_from,
+                time_to=time_to,
+                person=person,
+                source=self._chat_source_for_search_scope(chat_id, shared_chat_ids),
+            )
+
+        rows: List[Any] = []
+        for allowed_chat_id in sorted(allowed_chat_ids):
+            rows.extend(
+                await self.episode_retriever.query(
+                    query=query,
+                    top_k=top_k,
+                    time_from=time_from,
+                    time_to=time_to,
+                    person=person,
+                    source=self._chat_source(allowed_chat_id),
+                )
+            )
+        return self._dedupe_ranked_items(rows, limit=top_k)
+
+    @classmethod
+    def _paragraph_matches_chat_scope(cls, paragraph: Optional[Dict[str, Any]], allowed_chat_ids: set[str]) -> bool:
+        if not paragraph:
+            return False
+
+        if not allowed_chat_ids:
+            return True
+
+        metadata = coerce_metadata_dict(paragraph.get("metadata"))
+        paragraph_chat_id = str(metadata.get("chat_id", "") or "").strip()
+        if paragraph_chat_id and paragraph_chat_id in allowed_chat_ids:
+            return True
+
+        source = str(paragraph.get("source", "") or metadata.get("source", "") or "").strip()
+        return any(source == str(cls._chat_source(allowed_chat_id) or "") for allowed_chat_id in allowed_chat_ids)
+
+    @classmethod
+    def _hit_metadata_matches_chat_scope(cls, hit: Dict[str, Any], allowed_chat_ids: set[str]) -> Optional[bool]:
+        if not allowed_chat_ids:
+            return True
+
+        metadata = coerce_metadata_dict(hit.get("metadata"))
+        hit_type = str(hit.get("type", "") or "").strip()
+        metadata_chat_id = str(metadata.get("chat_id", "") or "").strip()
+        if metadata_chat_id:
+            return metadata_chat_id in allowed_chat_ids
+
+        source = str(metadata.get("source", "") or hit.get("source", "") or "").strip()
+        chat_sources = {str(cls._chat_source(allowed_chat_id) or "") for allowed_chat_id in allowed_chat_ids}
+        if hit_type == "episode":
+            return source in chat_sources
+        if source.startswith("chat_summary:"):
+            return source in chat_sources
+        return None
+
+    def _filter_hits_by_chat_scope(
+        self,
+        hits: List[Dict[str, Any]],
+        chat_id: str,
+        shared_chat_ids: Sequence[str] = (),
+    ) -> List[Dict[str, Any]]:
+        allowed_chat_ids = self._resolve_allowed_chat_ids(chat_id, shared_chat_ids)
+        if not allowed_chat_ids or self.metadata_store is None:
+            return hits
+
+        allowed_indexes: set[int] = set()
+        unresolved_paragraph_hashes: List[str] = []
+        unresolved_relation_hashes: List[str] = []
+        pending_indexes: Dict[int, Dict[str, str]] = {}
+
+        for index, item in enumerate(hits):
+            hit = dict(item)
+            hit_type = str(hit.get("type", "") or "").strip()
+            metadata_decision = self._hit_metadata_matches_chat_scope(hit, allowed_chat_ids)
+            if metadata_decision is True:
+                allowed_indexes.add(index)
+                continue
+            if metadata_decision is False:
+                continue
+
+            hit_hash = str(hit.get("hash", "") or "").strip()
+            if hit_type == "paragraph" and hit_hash:
+                unresolved_paragraph_hashes.append(hit_hash)
+                pending_indexes[index] = {"type": hit_type, "hash": hit_hash}
+                continue
+            if hit_type == "relation" and hit_hash:
+                unresolved_relation_hashes.append(hit_hash)
+                pending_indexes[index] = {"type": hit_type, "hash": hit_hash}
+
+        paragraph_map = self.metadata_store.get_paragraphs_by_hashes(unresolved_paragraph_hashes)
+        relation_paragraph_map = self.metadata_store.get_paragraphs_by_relation_hashes(unresolved_relation_hashes)
+        for index, pending in pending_indexes.items():
+            hit_hash = pending["hash"]
+            if pending["type"] == "paragraph":
+                if self._paragraph_matches_chat_scope(paragraph_map.get(hit_hash), allowed_chat_ids):
+                    allowed_indexes.add(index)
+                continue
+            if any(
+                self._paragraph_matches_chat_scope(paragraph, allowed_chat_ids)
+                for paragraph in relation_paragraph_map.get(hit_hash, [])
+            ):
+                allowed_indexes.add(index)
+
+        return [dict(hit) for index, hit in enumerate(hits) if index in allowed_indexes]
+
+    def _filter_hits_by_retrieval_type_scope(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """按检索结果类型应用可选聊天过滤，不改变写入和全局入口过滤。"""
+
+        if not hits or not self._has_enabled_retrieval_type_filter():
+            return hits
+
+        paragraph_hashes: List[str] = []
+        relation_hashes: List[str] = []
+        for item in hits:
+            item_type = str(item.get("type", "") or "").strip()
+            item_hash = str(item.get("hash", "") or "").strip()
+            if not item_hash:
+                continue
+            if item_type == "paragraph":
+                paragraph_hashes.append(item_hash)
+            elif item_type == "relation":
+                relation_hashes.append(item_hash)
+
+        paragraph_map: Dict[str, Dict[str, Any]] = {}
+        relation_paragraph_map: Dict[str, List[Dict[str, Any]]] = {}
+        if self.metadata_store is not None:
+            paragraph_map = self.metadata_store.get_paragraphs_by_hashes(paragraph_hashes)
+            relation_paragraph_map = self.metadata_store.get_paragraphs_by_relation_hashes(relation_hashes)
+
+        filtered: List[Dict[str, Any]] = []
+        for item in hits:
+            contexts = self._retrieval_filter_contexts_for_hit(
+                item,
+                paragraph_map=paragraph_map,
+                relation_paragraph_map=relation_paragraph_map,
+            )
+            if any(self._retrieval_filter_context_allowed(context) for context in contexts):
+                filtered.append(dict(item))
+        return filtered
+
+    def _has_enabled_retrieval_type_filter(self) -> bool:
+        retrieval_config = self._retrieval_type_filter_root()
+        if not retrieval_config:
+            return False
+        for kind in ("chat_stream", "chat_summary", "episode"):
+            type_config = retrieval_config.get(kind)
+            if isinstance(type_config, dict) and bool(type_config.get("enabled", False)):
+                return True
+        return False
+
+    def _retrieval_type_filter_root(self) -> Dict[str, Any]:
+        filter_config = self._cfg("filter", {}) or {}
+        if not isinstance(filter_config, dict):
+            return {}
+        retrieval_config = filter_config.get("retrieval") or {}
+        return retrieval_config if isinstance(retrieval_config, dict) else {}
+
+    def _retrieval_type_filter_config(self, kind: str) -> Dict[str, Any]:
+        retrieval_config = self._retrieval_type_filter_root()
+        type_config = retrieval_config.get(str(kind or "").strip())
+        return type_config if isinstance(type_config, dict) else {}
+
+    def _retrieval_filter_contexts_for_hit(
+        self,
+        hit: Dict[str, Any],
+        *,
+        paragraph_map: Dict[str, Dict[str, Any]],
+        relation_paragraph_map: Dict[str, List[Dict[str, Any]]],
+    ) -> List[Dict[str, str]]:
+        hit_type = str(hit.get("type", "") or "").strip()
+        hit_hash = str(hit.get("hash", "") or "").strip()
+
+        if hit_type == "paragraph" and hit_hash in paragraph_map:
+            return [self._retrieval_filter_context_from_paragraph(paragraph_map[hit_hash])]
+
+        if hit_type == "relation" and hit_hash in relation_paragraph_map:
+            contexts = [
+                self._retrieval_filter_context_from_paragraph(paragraph)
+                for paragraph in relation_paragraph_map.get(hit_hash, [])
+                if isinstance(paragraph, dict)
+            ]
+            if contexts:
+                return contexts
+
+        return [self._retrieval_filter_context_from_hit(hit)]
+
+    def _retrieval_filter_context_from_hit(self, hit: Dict[str, Any]) -> Dict[str, str]:
+        metadata = coerce_metadata_dict(hit.get("metadata"))
+        source = str(metadata.get("source", "") or hit.get("source", "") or "").strip()
+        source_type = str(metadata.get("source_type", "") or "").strip()
+        hit_type = str(hit.get("type", "") or "").strip()
+        stream_id = str(metadata.get("chat_id", "") or "").strip()
+        if not stream_id:
+            stream_id = self._source_stream_id(source)
+        return self._retrieval_filter_context(
+            kind=self._retrieval_filter_kind(hit_type=hit_type, source_type=source_type, source=source),
+            stream_id=stream_id,
+        )
+
+    def _retrieval_filter_context_from_paragraph(self, paragraph: Dict[str, Any]) -> Dict[str, str]:
+        metadata = coerce_metadata_dict(paragraph.get("metadata"))
+        source = str(paragraph.get("source", "") or metadata.get("source", "") or "").strip()
+        source_type = str(metadata.get("source_type", "") or "").strip()
+        stream_id = str(metadata.get("chat_id", "") or "").strip()
+        if not stream_id:
+            stream_id = self._source_stream_id(source)
+        return self._retrieval_filter_context(
+            kind=self._retrieval_filter_kind(hit_type="paragraph", source_type=source_type, source=source),
+            stream_id=stream_id,
+        )
+
+    @staticmethod
+    def _retrieval_filter_kind(*, hit_type: str, source_type: str, source: str) -> str:
+        if str(hit_type or "").strip() == "episode":
+            return "episode"
+        clean_source_type = str(source_type or "").strip()
+        clean_source = str(source or "").strip()
+        if clean_source_type == "chat_summary" or clean_source.startswith("chat_summary:"):
+            return "chat_summary"
+        if clean_source_type in {"chat_history", "chat_stream", "maibot.chat_history"}:
+            return "chat_stream"
+        if clean_source.startswith("chat_stream:") or clean_source.startswith("maibot.chat_history:"):
+            return "chat_stream"
+        return ""
+
+    @staticmethod
+    def _source_stream_id(source: str) -> str:
+        token = str(source or "").strip()
+        for prefix in ("chat_summary:", "chat_stream:", "maibot.chat_history:"):
+            if token.startswith(prefix):
+                return token[len(prefix):].strip()
+        return ""
+
+    @staticmethod
+    def _retrieval_filter_context(*, kind: str, stream_id: str) -> Dict[str, str]:
+        stream_token = str(stream_id or "").strip()
+        group_id = ""
+        user_id = ""
+        if stream_token:
+            session = chat_manager.get_existing_session_by_session_id(stream_token)
+            if session is not None:
+                group_id = str(getattr(session, "group_id", "") or "").strip()
+                user_id = str(getattr(session, "user_id", "") or "").strip()
+        return {
+            "kind": str(kind or "").strip(),
+            "stream_id": stream_token,
+            "group_id": group_id,
+            "user_id": user_id,
+        }
+
+    def _retrieval_filter_context_allowed(self, context: Dict[str, str]) -> bool:
+        kind = str(context.get("kind", "") or "").strip()
+        if not kind:
+            return True
+        type_config = self._retrieval_type_filter_config(kind)
+        if not type_config or not bool(type_config.get("enabled", False)):
+            return True
+        return self._chat_filter_config_allows(
+            type_config,
+            stream_id=str(context.get("stream_id", "") or "").strip(),
+            group_id=str(context.get("group_id", "") or "").strip(),
+            user_id=str(context.get("user_id", "") or "").strip(),
+            default_when_empty=True,
+        )
 
     @staticmethod
     def _resolve_knowledge_type(source_type: str) -> str:

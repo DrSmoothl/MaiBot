@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 
 import type { Jargon } from '@/types/jargon'
 
@@ -25,6 +26,7 @@ interface JargonListProps {
   pageSize: number
   selectedIds: Set<number>
   hideChatColumn?: boolean
+  className?: string
   onEdit: (jargon: Jargon) => void
   onViewDetail: (jargon: Jargon) => void
   onDelete: (jargon: Jargon) => void
@@ -74,6 +76,7 @@ export function JargonList({
   pageSize,
   selectedIds,
   hideChatColumn = false,
+  className,
   onEdit,
   onViewDetail,
   onDelete,
@@ -91,9 +94,9 @@ export function JargonList({
   }
 
   return (
-    <div className="rounded-lg border bg-card">
+    <div className={cn('flex min-h-0 flex-col rounded-lg border bg-card', className)}>
       {/* 桁面端表格视图 */}
-      <div className="hidden md:block">
+      <div className="hidden min-h-0 flex-1 overflow-auto md:block">
         <Table aria-label="黑话列表">
           <TableHeader>
             <TableRow>
@@ -107,7 +110,7 @@ export function JargonList({
               <TableHead>含义</TableHead>
               {!hideChatColumn && <TableHead>聊天</TableHead>}
               <TableHead>状态</TableHead>
-              <TableHead className="text-center">次数</TableHead>
+              <TableHead className="text-center">遇见次数</TableHead>
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
@@ -139,12 +142,20 @@ export function JargonList({
                       <span className="truncate" title={jargon.content}>{jargon.content}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="max-w-[200px] truncate" title={jargon.meaning || ''}>
-                    {jargon.meaning || <span className="text-muted-foreground">-</span>}
+                  <TableCell className="max-w-[260px]" title={jargon.meaning || ''}>
+                    {jargon.meaning ? (
+                      <span className="line-clamp-3 whitespace-normal break-words leading-5">
+                        {jargon.meaning}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
                   </TableCell>
                   {!hideChatColumn && (
-                    <TableCell className="max-w-[150px] truncate" title={formatJargonChatDisplay(jargon)}>
-                      {formatJargonChatDisplay(jargon)}
+                    <TableCell className="max-w-[220px]" title={formatJargonChatDisplay(jargon)}>
+                      <span className="line-clamp-3 whitespace-normal break-words leading-5">
+                        {formatJargonChatDisplay(jargon)}
+                      </span>
                     </TableCell>
                   )}
                   <TableCell>
@@ -158,11 +169,12 @@ export function JargonList({
                     <div className="flex justify-end gap-2">
                       <Button
                         variant="default"
-                        size="sm"
+                        size="icon"
+                        className="h-8 w-8"
                         onClick={() => onEdit(jargon)}
+                        title="编辑"
                       >
-                        <Edit className="h-4 w-4 mr-1" />
-                        编辑
+                        <Edit className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="outline"

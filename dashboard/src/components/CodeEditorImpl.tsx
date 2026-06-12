@@ -5,7 +5,7 @@ import { StreamLanguage } from '@codemirror/language'
 import { toml as tomlMode } from '@codemirror/legacy-modes/mode/toml'
 import { linter } from '@codemirror/lint'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorView } from '@codemirror/view'
+import { EditorView, ViewPlugin } from '@codemirror/view'
 import CodeMirror from '@uiw/react-codemirror'
 
 import { useTheme } from '@/components/use-theme'
@@ -20,6 +20,15 @@ const languageExtensions: Record<Language, any[]> = {
   css: [css()],
   text: [],
 }
+
+const dashboardCodeScrollerMarker = ViewPlugin.fromClass(
+  class {
+    constructor(view: EditorView) {
+      // 标记 CodeMirror 的真实 scrollDOM，避免依赖它内部 class 的注入顺序。
+      view.scrollDOM.dataset.dashboardCodeScroller = 'true'
+    }
+  }
+)
 
 export default function CodeEditorImpl({
   value,
@@ -42,6 +51,7 @@ export default function CodeEditorImpl({
     EditorView.theme({
       '&': {
         fontFamily: '"JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace',
+        minHeight: 0,
       },
       '.cm-content': {
         fontFamily: '"JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace',
@@ -51,8 +61,13 @@ export default function CodeEditorImpl({
       },
       '.cm-scroller': {
         fontFamily: '"JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace',
+        minHeight: 0,
+        overflow: 'auto !important',
+        overscrollBehavior: 'contain',
+        touchAction: 'pan-x pan-y',
       },
     }),
+    dashboardCodeScrollerMarker,
   ]
 
   if (readOnly) {
@@ -65,13 +80,15 @@ export default function CodeEditorImpl({
   return (
     <div
       data-dashboard-code-editor="true"
-      className={`custom-scrollbar overflow-hidden rounded-md border ${className}`}
+      className={`custom-scrollbar min-h-0 overflow-hidden rounded-md border ${className}`}
     >
       <CodeMirror
+        className="min-h-0"
         value={value}
         height={height}
         minHeight={minHeight}
         maxHeight={maxHeight}
+        style={{ height, minHeight, maxHeight }}
         theme={effectiveTheme === 'dark' ? oneDark : undefined}
         extensions={extensions}
         onChange={onChange}
