@@ -810,7 +810,7 @@ export function ExpressionManagementPage() {
         <div className="space-y-5 pr-3 pb-2 sm:space-y-6 sm:pr-4">
           {/* 搜索和批量操作 */}
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-            <div className="grid h-10 w-full grid-cols-3 overflow-hidden border-2 bg-transparent sm:h-8 lg:w-[24rem] lg:flex-none">
+            <div className="grid h-10 w-full grid-cols-2 overflow-hidden border-2 bg-transparent sm:h-8 lg:w-[18rem] lg:flex-none">
               <div className="flex min-w-0 flex-col items-center justify-center gap-1 px-2 text-center sm:flex-row sm:justify-between sm:gap-2 sm:px-3 sm:text-left">
                 <div className="text-muted-foreground text-[11px] sm:text-xs">总数量</div>
                 <div className="text-sm leading-none font-semibold sm:text-base">{stats.total}</div>
@@ -819,12 +819,6 @@ export function ExpressionManagementPage() {
                 <div className="text-muted-foreground text-[11px] sm:text-xs">近7天新增</div>
                 <div className="text-sm leading-none font-semibold text-green-600 sm:text-base">
                   {stats.recent_7days}
-                </div>
-              </div>
-              <div className="flex min-w-0 flex-col items-center justify-center gap-1 border-l px-2 text-center sm:flex-row sm:justify-between sm:gap-2 sm:px-3 sm:text-left">
-                <div className="text-muted-foreground text-[11px] sm:text-xs">关联聊天数</div>
-                <div className="text-sm leading-none font-semibold text-blue-600 sm:text-base">
-                  {stats.chat_count}
                 </div>
               </div>
             </div>

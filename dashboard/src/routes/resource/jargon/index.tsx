@@ -156,7 +156,6 @@ export function JargonManagementPage() {
   useEffect(() => {
     loadStats()
     loadChatList()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 查看详情
@@ -300,7 +299,10 @@ export function JargonManagementPage() {
         <div className="space-y-4 sm:space-y-6 pr-4">
 
           {/* 统计标签 */}
-          <div className="grid grid-cols-2 overflow-hidden rounded-md border bg-muted/40 sm:grid-cols-4 lg:grid-cols-7">
+          <div
+            data-dashboard-tabs-list="true"
+            className="grid h-10 grid-cols-2 overflow-hidden rounded-lg bg-muted p-1 text-muted-foreground sm:grid-cols-3 lg:grid-cols-6"
+          >
             {[
               { label: '总数量', value: stats.total, className: 'text-foreground' },
               { label: '已确认黑话', value: stats.confirmed_jargon, className: 'text-green-600' },
@@ -308,19 +310,11 @@ export function JargonManagementPage() {
               { label: '待判定', value: stats.pending, className: 'text-yellow-600' },
               { label: '全局黑话', value: stats.global_count, className: 'text-blue-600' },
               { label: '推断完成', value: stats.complete_count, className: 'text-purple-600' },
-              { label: '关联聊天数', value: stats.chat_count, className: 'text-foreground' },
-            ].map((item, index) => (
+            ].map((item) => (
               <div
                 key={item.label}
-                className={`flex h-9 min-w-0 items-center justify-center gap-2 px-3 text-sm ${
-                  index % 2 === 1 ? 'border-l' : ''
-                } ${
-                  index >= 2 ? 'border-t sm:border-t-0' : ''
-                } ${
-                  index > 0 ? 'sm:border-l' : ''
-                } ${
-                  index >= 4 ? 'sm:border-t lg:border-t-0' : ''
-                }`}
+                data-dashboard-tabs-trigger="true"
+                className="inline-flex h-10 min-w-0 items-center justify-center gap-2 px-2 text-sm font-medium whitespace-nowrap transition-all sm:px-3"
               >
                 <span className="truncate text-muted-foreground">{item.label}</span>
                 <span className={`shrink-0 font-semibold leading-none ${item.className}`}>
@@ -382,7 +376,7 @@ export function JargonManagementPage() {
               </div>
               <Button onClick={() => setIsCreateDialogOpen(true)} className="h-8 gap-2">
                 <Plus className="h-4 w-4" />
-                新增黑话
+                新增
               </Button>
             </div>
 

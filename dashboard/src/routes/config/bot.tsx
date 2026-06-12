@@ -815,13 +815,13 @@ function BotConfigPageContent() {
                 onValueChange={(v) => handleModeChange(v as 'visual' | 'source')}
                 className="w-full min-w-0 sm:w-[14rem]"
               >
-                <TabsList className="grid h-9 w-full grid-cols-2">
-                  <TabsTrigger value="visual" className="px-2 text-xs">
-                    <Layout className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+                <TabsList data-config-bot-mode-tabs="true" className="grid h-9 w-full grid-cols-2">
+                  <TabsTrigger value="visual" className="px-2 text-sm">
+                    <Layout className="mr-1 h-4 w-4" />
                     可视化
                   </TabsTrigger>
-                  <TabsTrigger value="source" className="px-2 text-xs">
-                    <Code2 className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+                  <TabsTrigger value="source" className="px-2 text-sm">
+                    <Code2 className="mr-1 h-4 w-4" />
                     源代码
                   </TabsTrigger>
                 </TabsList>
@@ -831,10 +831,11 @@ function BotConfigPageContent() {
                 disabled={saving || autoSaving || isRestarting}
                 size="sm"
                 variant="outline"
-                className="h-9 min-w-0 flex-1 sm:w-24 sm:flex-none"
+                className="h-9 w-9 flex-none px-0"
+                aria-label="刷新"
+                title="刷新"
               >
-                <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                刷新
+                <RefreshCw className="h-4 w-4" />
               </Button>
               <Button
                 onClick={editMode === 'visual' ? saveConfig : saveSourceCode}
