@@ -117,7 +117,7 @@ async def handle_tool(
     try:
         replyer = replyer_manager.get_replyer(
             chat_stream=tool_ctx.runtime.chat_stream,
-            request_type="maisaka_replyer",
+            request_type="maisaka.replyer",
             replyer_type="maisaka",
         )
     except Exception:

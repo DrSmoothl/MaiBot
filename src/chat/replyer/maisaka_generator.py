@@ -14,7 +14,7 @@ class MaisakaReplyGenerator(BaseMaisakaReplyGenerator):
     def __init__(
         self,
         chat_stream: Optional[BotChatSession] = None,
-        request_type: str = "maisaka_replyer",
+        request_type: str = "maisaka.replyer",
         llm_client_cls: Optional[Any] = None,
         load_prompt_func: Optional[Callable[..., str]] = None,
         enable_visual_message: Optional[bool] = None,

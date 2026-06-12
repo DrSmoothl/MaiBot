@@ -76,7 +76,7 @@ class BaseMaisakaReplyGenerator:
         self,
         *,
         chat_stream: Optional[BotChatSession] = None,
-        request_type: str = "maisaka_replyer",
+        request_type: str = "maisaka.replyer",
         llm_client_cls: Any,
         load_prompt_func: Callable[..., str],
         enable_visual_message: Optional[bool],
