@@ -11,7 +11,6 @@ from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Set,
 
 import json
 import re
-import tomllib
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -20,6 +19,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from src.common.logger import get_logger
+from src.plugin_runtime import detect_host_application_version
 
 logger = get_logger("plugin_runtime.runner.manifest_validator")
 
@@ -139,6 +139,25 @@ class VersionComparator:
             if VersionComparator.compare(normalized_version, normalized_max_version) > 0:
                 return False, f"版本 {normalized_version} 高于最大支持 {normalized_max_version}"
         return True, ""
+
+    @staticmethod
+    def is_same_major_higher_version(version: str, max_version: str) -> bool:
+        """判断版本是否仅在同一主版本内高于声明上限。
+
+        Args:
+            version: 当前版本号。
+            max_version: Manifest 声明的最大支持版本号。
+
+        Returns:
+            bool: 当前版本高于上限且两者主版本号相同时返回 ``True``。
+        """
+
+        if not version or not max_version:
+            return False
+
+        current_major, _current_minor, _current_patch = VersionComparator.parse_version(version)
+        max_major, _max_minor, _max_patch = VersionComparator.parse_version(max_version)
+        return current_major == max_major and VersionComparator.compare(version, max_version) > 0
 
     @staticmethod
     def is_valid_semver(version: str) -> bool:
@@ -765,6 +784,7 @@ class ManifestValidator:
     """严格的插件 Manifest v2 校验器。"""
 
     SUPPORTED_MANIFEST_VERSIONS = [2]
+    _LOGGED_WARNING_KEYS: Set[Tuple[str, str]] = set()
 
     def __init__(
         self,
@@ -829,6 +849,7 @@ class ManifestValidator:
         if self.errors:
             self._log_errors(source=source or parsed_manifest.id)
             return None
+        self._log_warnings(source=source or parsed_manifest.id)
 
         return parsed_manifest
 
@@ -992,7 +1013,16 @@ class ManifestValidator:
             manifest.host_application.max_version,
         )
         if not host_ok:
-            self.errors.append(f"Host 版本不兼容: {host_message} (当前 Host: {self._host_version})")
+            if VersionComparator.is_same_major_higher_version(
+                self._host_version,
+                manifest.host_application.max_version,
+            ):
+                self.warnings.append(
+                    f"Host {self._host_version} 超出声明上限 "
+                    f"{VersionComparator.normalize_version(manifest.host_application.max_version)}，兼容模式加载"
+                )
+            else:
+                self.errors.append(f"Host 版本不兼容: {host_message} (当前 Host: {self._host_version})")
 
         sdk_ok, sdk_message = VersionComparator.is_in_range(
             self._sdk_version,
@@ -1118,6 +1148,29 @@ class ManifestValidator:
             return
         logger.error(f"Manifest 校验失败: 共 {len(self.errors)} 项，{error_summary}")
 
+    def _log_warnings(self, source: Optional[str] = None) -> None:
+        """输出当前累计的 Manifest 兼容性警告。"""
+        if not self.warnings:
+            return
+
+        source_key = source or ""
+        pending_warnings = [
+            warning
+            for warning in self.warnings
+            if (source_key, warning) not in self._LOGGED_WARNING_KEYS
+        ]
+        if not pending_warnings:
+            return
+
+        for warning in pending_warnings:
+            self._LOGGED_WARNING_KEYS.add((source_key, warning))
+
+        warning_summary = "；".join(pending_warnings)
+        if source:
+            logger.warning(f"Manifest 兼容模式 [{source}]: 共 {len(pending_warnings)} 项，{warning_summary}")
+            return
+        logger.warning(f"Manifest 兼容模式: 共 {len(pending_warnings)} 项，{warning_summary}")
+
     @classmethod
     def _resolve_project_root(cls) -> Path:
         """推断当前项目根目录。
@@ -1138,18 +1191,7 @@ class ManifestValidator:
         Returns:
             str: 探测到的 Host 版本号；失败时返回空字符串。
         """
-        pyproject_path = project_root / "pyproject.toml"
-        try:
-            with pyproject_path.open("rb") as pyproject_file:
-                pyproject_data = tomllib.load(pyproject_file)
-        except Exception:
-            return ""
-
-        project_data = pyproject_data.get("project", {})
-        if not isinstance(project_data, dict):
-            return ""
-
-        raw_version = str(project_data.get("version", "") or "").strip()
+        raw_version = detect_host_application_version(project_root)
         if VersionComparator.is_valid_project_version(raw_version):
             return raw_version
         return ""

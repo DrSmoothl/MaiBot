@@ -2,6 +2,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import asyncio
+
 from src.common.logger import get_logger
 from src.common.utils.utils_config import BehaviorConfigUtils, ChatConfigUtils
 from src.config.config import global_config
@@ -251,7 +253,8 @@ class BehaviorPatternSelector:
             sub_agent_runner=scenario_agent_runner,
             include_context_in_prompt=include_context_in_prompt,
         )
-        candidates = self._load_behavior_candidates(
+        candidates = await asyncio.to_thread(
+            self._load_behavior_candidates,
             session_id,
             scenario_profile=scenario_profile,
             max_count=max(1, min(3, int(max_count))),

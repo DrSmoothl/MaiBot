@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional, Sequence
 
-from sqlmodel import select
+from sqlmodel import Session, select
 
 import difflib
 import json
@@ -131,10 +131,12 @@ class BehaviorPatternMaintenanceService:
                     if decay_result.decayed or decay_result.disabled:
                         session.add(pattern)
 
+                cluster_distribution_by_id = self._load_cluster_distributions(session, patterns)
                 merged_count = self._merge_similar_patterns(
                     session_patterns=patterns,
                     now=maintenance_time,
                     touched_pattern_ids=touched_pattern_ids,
+                    cluster_distribution_by_id=cluster_distribution_by_id,
                 )
 
                 result = BehaviorPatternMaintenanceResult(
@@ -340,6 +342,7 @@ class BehaviorPatternMaintenanceService:
         session_patterns: list[BehaviorExperiencePath],
         now: datetime,
         touched_pattern_ids: list[int],
+        cluster_distribution_by_id: dict[int, str],
     ) -> int:
         merged_count = 0
         merged_pattern_ids: set[int] = set()
@@ -360,7 +363,11 @@ class BehaviorPatternMaintenanceService:
                 for right_pattern in patterns[left_index + 1 :]:
                     if right_pattern.id in merged_pattern_ids or not right_pattern.enabled:
                         continue
-                    if not self._should_merge(left_pattern, right_pattern):
+                    if not self._should_merge(
+                        left_pattern,
+                        right_pattern,
+                        cluster_distribution_by_id=cluster_distribution_by_id,
+                    ):
                         continue
 
                     keeper, duplicate = self._choose_keeper(left_pattern, right_pattern)
@@ -376,6 +383,29 @@ class BehaviorPatternMaintenanceService:
                         break
 
         return merged_count
+
+    @staticmethod
+    def _load_cluster_distributions(
+        session: Session,
+        patterns: Sequence[BehaviorExperiencePath],
+    ) -> dict[int, str]:
+        cluster_ids = {
+            int(pattern.scene_cluster_id)
+            for pattern in patterns
+            if pattern.scene_cluster_id is not None
+        }
+        if not cluster_ids:
+            return {}
+
+        statement = select(BehaviorSceneCluster).where(
+            BehaviorSceneCluster.id.in_(cluster_ids)  # type: ignore[attr-defined]
+        )
+        clusters = session.exec(statement).all()
+        return {
+            int(cluster.id): str(cluster.tag_distribution or "")
+            for cluster in clusters
+            if cluster.id is not None
+        }
 
     @staticmethod
     def _text_similarity(left_text: str, right_text: str) -> float:
@@ -395,10 +425,19 @@ class BehaviorPatternMaintenanceService:
         }
 
     @staticmethod
-    def _cluster_distribution(path: BehaviorExperiencePath) -> str:
+    def _cluster_distribution(
+        path: BehaviorExperiencePath,
+        *,
+        cluster_distribution_by_id: Optional[dict[int, str]] = None,
+    ) -> str:
+        if path.scene_cluster_id is None:
+            return ""
+        cluster_id = int(path.scene_cluster_id)
+        if cluster_distribution_by_id is not None:
+            return cluster_distribution_by_id.get(cluster_id, "")
         try:
             with get_db_session(auto_commit=False) as session:
-                scene_cluster = session.get(BehaviorSceneCluster, path.scene_cluster_id)
+                scene_cluster = session.get(BehaviorSceneCluster, cluster_id)
                 if scene_cluster is None:
                     return ""
                 return str(scene_cluster.tag_distribution or "")
@@ -407,9 +446,19 @@ class BehaviorPatternMaintenanceService:
             return ""
 
     @classmethod
-    def _cluster_distribution_overlap(cls, left_pattern: BehaviorExperiencePath, right_pattern: BehaviorExperiencePath) -> float:
-        left_distribution = cls._load_cluster_distribution(cls._cluster_distribution(left_pattern))
-        right_distribution = cls._load_cluster_distribution(cls._cluster_distribution(right_pattern))
+    def _cluster_distribution_overlap(
+        cls,
+        left_pattern: BehaviorExperiencePath,
+        right_pattern: BehaviorExperiencePath,
+        *,
+        cluster_distribution_by_id: Optional[dict[int, str]] = None,
+    ) -> float:
+        left_distribution = cls._load_cluster_distribution(
+            cls._cluster_distribution(left_pattern, cluster_distribution_by_id=cluster_distribution_by_id)
+        )
+        right_distribution = cls._load_cluster_distribution(
+            cls._cluster_distribution(right_pattern, cluster_distribution_by_id=cluster_distribution_by_id)
+        )
         if not left_distribution or not right_distribution:
             return 0.0
         shared_tags = set(left_distribution) & set(right_distribution)
@@ -441,13 +490,23 @@ class BehaviorPatternMaintenanceService:
             return {}
         return {tag: probability / total_probability for tag, probability in distribution.items()}
 
-    def _should_merge(self, left_pattern: BehaviorExperiencePath, right_pattern: BehaviorExperiencePath) -> bool:
+    def _should_merge(
+        self,
+        left_pattern: BehaviorExperiencePath,
+        right_pattern: BehaviorExperiencePath,
+        *,
+        cluster_distribution_by_id: dict[int, str],
+    ) -> bool:
         if left_pattern.actor_type != right_pattern.actor_type or left_pattern.learning_type != right_pattern.learning_type:
             return False
 
         left_payload = self._path_payload(left_pattern)
         right_payload = self._path_payload(right_pattern)
-        cluster_overlap = self._cluster_distribution_overlap(left_pattern, right_pattern)
+        cluster_overlap = self._cluster_distribution_overlap(
+            left_pattern,
+            right_pattern,
+            cluster_distribution_by_id=cluster_distribution_by_id,
+        )
         if cluster_overlap < MERGE_CLUSTER_DISTRIBUTION_MIN_OVERLAP:
             return False
 
