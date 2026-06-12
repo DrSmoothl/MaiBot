@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { backendApi } from '@/lib/http'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -69,13 +69,10 @@ export function PluginMirrorsPage() {
       setLoading(true)
       setError(null)
       
-      const response = await fetchWithAuth('/api/webui/plugins/mirrors')
-      
-      if (!response.ok) {
-        throw new Error('获取镜像源列表失败')
-      }
-      
-      const data = await response.json()
+      const data = await backendApi.get<{ mirrors?: MirrorConfig[] }>(
+        '/api/webui/plugins/mirrors',
+        { errorMessage: '获取镜像源列表失败' }
+      )
       setMirrors(data.mirrors || [])
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '加载镜像源失败'
@@ -101,15 +98,10 @@ export function PluginMirrorsPage() {
   // 添加镜像源
   const handleAddMirror = async () => {
     try {
-      const response = await fetchWithAuth('/api/webui/plugins/mirrors', {
-        method: 'POST',
-        body: JSON.stringify(formData)
+      await backendApi.post('/api/webui/plugins/mirrors', {
+        body: formData,
+        errorMessage: '添加镜像源失败',
       })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || '添加镜像源失败')
-      }
 
       toast({
         title: '添加成功',
@@ -140,20 +132,16 @@ export function PluginMirrorsPage() {
     if (!editingMirror) return
 
     try {
-      const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${editingMirror.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
+      await backendApi.put(`/api/webui/plugins/mirrors/${editingMirror.id}`, {
+        body: {
           name: formData.name,
           raw_prefix: formData.raw_prefix,
           clone_prefix: formData.clone_prefix,
           enabled: formData.enabled,
           priority: formData.priority
-        })
+        },
+        errorMessage: '更新镜像源失败',
       })
-
-      if (!response.ok) {
-        throw new Error('更新镜像源失败')
-      }
 
       toast({
         title: '更新成功',
@@ -177,13 +165,9 @@ export function PluginMirrorsPage() {
     if (!confirm('确定要删除这个镜像源吗？')) return
 
     try {
-      const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${id}`, {
-        method: 'DELETE'
+      await backendApi.delete(`/api/webui/plugins/mirrors/${id}`, {
+        errorMessage: '删除镜像源失败',
       })
-
-      if (!response.ok) {
-        throw new Error('删除镜像源失败')
-      }
 
       toast({
         title: '删除成功',
@@ -203,16 +187,12 @@ export function PluginMirrorsPage() {
   // 鍒囨崲鍚敤鐘舵€?
   const handleToggleEnabled = async (mirror: MirrorConfig) => {
     try {
-      const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${mirror.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
+      await backendApi.put(`/api/webui/plugins/mirrors/${mirror.id}`, {
+        body: {
           enabled: !mirror.enabled
-        })
+        },
+        errorMessage: '更新状态失败',
       })
-
-      if (!response.ok) {
-        throw new Error('更新状态失败')
-      }
 
       loadMirrors()
     } catch (err) {
@@ -244,16 +224,12 @@ export function PluginMirrorsPage() {
     if (newPriority < 1) return
 
     try {
-      const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${mirror.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
+      await backendApi.put(`/api/webui/plugins/mirrors/${mirror.id}`, {
+        body: {
           priority: newPriority
-        })
+        },
+        errorMessage: '更新优先级失败',
       })
-
-      if (!response.ok) {
-        throw new Error('更新优先级失败')
-      }
 
       loadMirrors()
     } catch (err) {

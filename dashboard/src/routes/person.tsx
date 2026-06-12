@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronLeft,
   ChevronRight,
@@ -73,9 +74,6 @@ import { cn } from '@/lib/utils'
 import type { PersonInfo, PersonUpdateRequest } from '@/types/person'
 
 export function PersonManagementPage() {
-  const [persons, setPersons] = useState<PersonInfo[]>([])
-  const [loading, setLoading] = useState(true)
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [search, setSearch] = useState('')
@@ -85,66 +83,44 @@ export function PersonManagementPage() {
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [deleteConfirmPerson, setDeleteConfirmPerson] = useState<PersonInfo | null>(null)
-  const [stats, setStats] = useState({ total: 0, known: 0, unknown: 0, platforms: {} as Record<string, number> })
   const [selectedPersons, setSelectedPersons] = useState<Set<string>>(new Set())
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false)
   const [jumpToPage, setJumpToPage] = useState('')
   const { toast } = useToast()
+  const queryClient = useQueryClient()
 
-  // 加载人物列表
-  const loadPersons = async () => {
-    try {
-      setLoading(true)
-      const result = await getPersonList({
+  // 人物列表：查询参数即缓存键，翻页/搜索/筛选变化自动重新拉取
+  const personListQuery = useQuery({
+    queryKey: ['persons', 'list', { page, pageSize, search, filterKnown, filterPlatform }],
+    queryFn: () =>
+      getPersonList({
         page,
         page_size: pageSize,
         search: search || undefined,
         is_known: filterKnown,
         platform: filterPlatform,
-      })
-      if (!result.success) {
-        throw new Error(result.error)
-      }
-      setPersons(result.data.data)
-      setTotal(result.data.total)
-    } catch (error) {
-      toast({
-        title: '加载失败',
-        description: error instanceof Error ? error.message : '无法加载人物信息',
-        variant: 'destructive',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
+      }),
+  })
+  const persons = personListQuery.data?.data ?? []
+  const total = personListQuery.data?.total ?? 0
+  const loading = personListQuery.isPending
 
-  // 加载统计数据
-  const loadStats = async () => {
-    try {
-      const result = await getPersonStats()
-      if (result.success) {
-        setStats(result.data)
-      }
-    } catch (error) {
-      console.error('加载统计数据失败:', error)
-    }
-  }
+  // 统计卡片：失败时保持占位数值，不打断页面
+  const statsQuery = useQuery({
+    queryKey: ['persons', 'stats'],
+    queryFn: getPersonStats,
+  })
+  const stats =
+    statsQuery.data ?? { total: 0, known: 0, unknown: 0, platforms: {} as Record<string, number> }
 
-  // 初始加载
-  useEffect(() => {
-    loadPersons()
-    loadStats()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, filterKnown, filterPlatform])
+  // 任何写操作成功后，按 'persons' 前缀整体失效（列表 + 统计）
+  const invalidatePersons = () => queryClient.invalidateQueries({ queryKey: ['persons'] })
 
-  // 查看详情
+  // 查看详情（事件驱动的读取，失败用 toast 反馈用户动作）
   const handleViewDetail = async (person: PersonInfo) => {
     try {
-      const result = await getPersonDetail(person.person_id)
-      if (!result.success) {
-        throw new Error(result.error)
-      }
-      setSelectedPerson(result.data)
+      const detail = await getPersonDetail(person.person_id)
+      setSelectedPerson(detail)
       setIsDetailDialogOpen(true)
     } catch (error) {
       toast({
@@ -161,28 +137,19 @@ export function PersonManagementPage() {
     setIsEditDialogOpen(true)
   }
 
-  // 删除人物
-  const handleDelete = async (person: PersonInfo) => {
-    try {
-      const result = await deletePerson(person.person_id)
-      if (!result.success) {
-        throw new Error(result.error)
-      }
+  // 删除人物（失败由全局 mutation 错误 toast 呈现）
+  const deleteMutation = useMutation({
+    mutationFn: (person: PersonInfo) => deletePerson(person.person_id),
+    meta: { errorTitle: '删除失败' },
+    onSuccess: (_data, person) => {
       toast({
         title: '删除成功',
         description: `已删除人物信息: ${person.person_name || person.nickname || person.user_id}`,
       })
       setDeleteConfirmPerson(null)
-      loadPersons()
-      loadStats()
-    } catch (error) {
-      toast({
-        title: '删除失败',
-        description: error instanceof Error ? error.message : '无法删除人物信息',
-        variant: 'destructive',
-      })
-    }
-  }
+      invalidatePersons()
+    },
+  })
 
   // 获取平台列表
   const platforms = useMemo(() => {
@@ -222,29 +189,20 @@ export function PersonManagementPage() {
     setBatchDeleteDialogOpen(true)
   }
 
-  // 批量删除确认
-  const handleBatchDelete = async () => {
-    try {
-      const result = await batchDeletePersons(Array.from(selectedPersons))
-      if (!result.success) {
-        throw new Error(result.error)
-      }
+  // 批量删除（失败由全局 mutation 错误 toast 呈现）
+  const batchDeleteMutation = useMutation({
+    mutationFn: (personIds: string[]) => batchDeletePersons(personIds),
+    meta: { errorTitle: '批量删除失败' },
+    onSuccess: (data) => {
       toast({
         title: '批量删除完成',
-        description: result.data.message,
+        description: data.message,
       })
       setSelectedPersons(new Set())
       setBatchDeleteDialogOpen(false)
-      loadPersons()
-      loadStats()
-    } catch (error) {
-      toast({
-        title: '批量删除失败',
-        description: error instanceof Error ? error.message : '批量删除失败',
-        variant: 'destructive',
-      })
-    }
-  }
+      invalidatePersons()
+    },
+  })
 
   // 页面跳转
   const handleJumpToPage = () => {
@@ -443,6 +401,17 @@ export function PersonManagementPage() {
                     <ThinkingIllustration size="sm" className="mx-auto" />
                   </TableCell>
                 </TableRow>
+              ) : personListQuery.isError ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8">
+                    <div className="space-y-2">
+                      <p className="text-sm text-destructive">{personListQuery.error.message}</p>
+                      <Button variant="outline" size="sm" onClick={() => personListQuery.refetch()}>
+                        重试
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : persons.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
@@ -518,6 +487,13 @@ export function PersonManagementPage() {
           {loading ? (
             <div className="text-center py-8 text-muted-foreground">
               <ThinkingIllustration size="sm" className="mx-auto" />
+            </div>
+          ) : personListQuery.isError ? (
+            <div className="text-center py-8 space-y-2">
+              <p className="text-sm text-destructive">{personListQuery.error.message}</p>
+              <Button variant="outline" size="sm" onClick={() => personListQuery.refetch()}>
+                重试
+              </Button>
             </div>
           ) : persons.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
@@ -698,8 +674,7 @@ export function PersonManagementPage() {
         open={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
         onSuccess={() => {
-          loadPersons()
-          loadStats()
+          invalidatePersons()
           setIsEditDialogOpen(false)
         }}
       />
@@ -720,7 +695,7 @@ export function PersonManagementPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => deleteConfirmPerson && handleDelete(deleteConfirmPerson)}
+              onClick={() => deleteConfirmPerson && deleteMutation.mutate(deleteConfirmPerson)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               删除
@@ -742,7 +717,7 @@ export function PersonManagementPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleBatchDelete}
+              onClick={() => batchDeleteMutation.mutate(Array.from(selectedPersons))}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               批量删除
@@ -880,7 +855,6 @@ function PersonEditDialog({
   onSuccess: () => void
 }) {
   const [formData, setFormData] = useState<PersonUpdateRequest>({})
-  const [saving, setSaving] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -894,29 +868,24 @@ function PersonEditDialog({
     }
   }, [person])
 
-  const handleSave = async () => {
-    if (!person) return
-
-    try {
-      setSaving(true)
-      const result = await updatePerson(person.person_id, formData)
-      if (!result.success) {
-        throw new Error(result.error)
-      }
+  // 保存（失败由全局 mutation 错误 toast 呈现）
+  const updateMutation = useMutation({
+    mutationFn: (vars: { personId: string; data: PersonUpdateRequest }) =>
+      updatePerson(vars.personId, vars.data),
+    meta: { errorTitle: '保存失败' },
+    onSuccess: () => {
       toast({
         title: '保存成功',
         description: '人物信息已更新',
       })
       onSuccess()
-    } catch (error) {
-      toast({
-        title: '保存失败',
-        description: error instanceof Error ? error.message : '无法更新人物信息',
-        variant: 'destructive',
-      })
-    } finally {
-      setSaving(false)
-    }
+    },
+  })
+  const saving = updateMutation.isPending
+
+  const handleSave = () => {
+    if (!person) return
+    updateMutation.mutate({ personId: person.person_id, data: formData })
   }
 
   if (!person) return null

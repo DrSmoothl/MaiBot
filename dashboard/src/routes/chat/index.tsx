@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { useToast } from '@/hooks/use-toast'
 import { chatWsClient } from '@/lib/chat-ws-client'
-import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { ApiError, backendApi } from '@/lib/http'
 
 import { ChatComposer } from './ChatComposer'
 import { ChatHeaderBar } from './ChatHeaderBar'
@@ -189,36 +189,33 @@ export function ChatPage() {
   const fetchPlatforms = useCallback(async () => {
     setIsLoadingPlatforms(true)
     try {
-      const response = await fetchWithAuth('/api/chat/platforms')
-      if (response.ok) {
-        const contentType = response.headers.get('content-type')
-        if (contentType && contentType.includes('application/json')) {
-          const data = await response.json()
-          setPlatforms(data.platforms || [])
-        } else {
-          const text = await response.text()
-          console.error('[Chat] 获取平台列表失败: 非 JSON 响应:', text.substring(0, 200))
-          toast({
-            title: t('chat.toast.connectionFailed'),
-            description: t('chat.toast.backendUnavailable'),
-            variant: 'destructive',
-          })
-        }
-      } else {
-        console.error('[Chat] 获取平台列表失败: HTTP', response.status)
+      const data = await backendApi.get<{ platforms?: PlatformInfo[] }>('/api/chat/platforms')
+      setPlatforms(data.platforms || [])
+    } catch (e) {
+      if (e instanceof ApiError && e.status !== undefined && (e.status < 200 || e.status >= 300)) {
+        // HTTP 层失败
+        console.error('[Chat] 获取平台列表失败: HTTP', e.status)
         toast({
           title: t('chat.toast.platformFailed'),
-          description: t('chat.toast.serverError', { status: response.status }),
+          description: t('chat.toast.serverError', { status: e.status }),
+          variant: 'destructive',
+        })
+      } else if (e instanceof ApiError && e.status !== undefined) {
+        // HTTP 成功但响应不是合法 JSON（后端不可用，命中了前端页面等）
+        console.error('[Chat] 获取平台列表失败: 非 JSON 响应:', e.message)
+        toast({
+          title: t('chat.toast.connectionFailed'),
+          description: t('chat.toast.backendUnavailable'),
+          variant: 'destructive',
+        })
+      } else {
+        console.error('[Chat] 获取平台列表失败:', e)
+        toast({
+          title: t('chat.toast.networkError'),
+          description: t('chat.toast.backendUnavailableShort'),
           variant: 'destructive',
         })
       }
-    } catch (e) {
-      console.error('[Chat] 获取平台列表失败:', e)
-      toast({
-        title: t('chat.toast.networkError'),
-        description: t('chat.toast.backendUnavailableShort'),
-        variant: 'destructive',
-      })
     } finally {
       setIsLoadingPlatforms(false)
     }
@@ -228,21 +225,14 @@ export function ChatPage() {
   const fetchPersons = useCallback(async (platform: string, search?: string) => {
     setIsLoadingPersons(true)
     try {
-      const params = new URLSearchParams()
-      if (platform) params.append('platform', platform)
-      if (search) params.append('search', search)
-      params.append('limit', '50')
-
-      const response = await fetchWithAuth(`/api/chat/persons?${params.toString()}`)
-      if (response.ok) {
-        const contentType = response.headers.get('content-type')
-        if (contentType && contentType.includes('application/json')) {
-          const data = await response.json()
-          setPersons(data.persons || [])
-        } else {
-          console.error('[Chat] 获取用户列表失败: 后端返回非 JSON 响应')
-        }
-      }
+      const data = await backendApi.get<{ persons?: PersonInfo[] }>('/api/chat/persons', {
+        query: {
+          platform: platform || undefined,
+          search: search || undefined,
+          limit: 50,
+        },
+      })
+      setPersons(data.persons || [])
     } catch (e) {
       console.error('[Chat] 获取用户列表失败:', e)
     } finally {
