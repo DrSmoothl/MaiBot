@@ -484,7 +484,7 @@ function TalkValueTimelineOverview({
 
   return (
     <div className="overflow-hidden rounded-lg border bg-muted/20">
-      <div className="border-b bg-background/70 px-4 py-3">
+      <div className="border-b bg-background/70 px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <h5 className="text-sm font-semibold">时间轴视图</h5>
           <Badge variant="secondary">聊天区域 {timelineGroups.length}</Badge>
@@ -492,10 +492,10 @@ function TalkValueTimelineOverview({
         </div>
       </div>
       <div className="overflow-x-auto">
-        <div className="min-w-[760px] p-4">
-          <div className="grid grid-cols-[9rem_minmax(28rem,1fr)_12rem] gap-3 pb-2 text-xs text-muted-foreground">
+        <div className="min-w-[540px] p-2.5">
+          <div className="grid grid-cols-[5.5rem_minmax(16rem,1fr)_6.5rem] gap-2 pb-1.5 text-[11px] text-muted-foreground">
             <div>轨道</div>
-            <div className="relative h-5 px-1">
+            <div className="relative h-4 px-1">
               {TIMELINE_TICKS.map((hour) => (
                 <span
                   key={hour}
@@ -508,11 +508,11 @@ function TalkValueTimelineOverview({
             </div>
             <div>频率</div>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-2.5">
             {timelineGroups.map((group) => (
               <div key={group.key} className="overflow-hidden rounded-lg border bg-card/60">
-                <div className="flex flex-wrap items-center gap-2 border-b bg-background/70 px-3 py-2">
-                  <div className="min-w-0 flex-1 truncate text-sm font-semibold">{group.label}</div>
+                <div className="flex flex-wrap items-center gap-1.5 border-b bg-background/70 px-2 py-1.5">
+                  <div className="min-w-0 flex-1 truncate text-xs font-semibold">{group.label}</div>
                   <Badge variant="secondary">{group.scopeLabel}</Badge>
                   <Badge variant="outline">{group.items.length} 轨道</Badge>
                   <div className="ml-auto flex flex-wrap gap-1">
@@ -520,38 +520,41 @@ function TalkValueTimelineOverview({
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="h-7 px-2 text-xs"
                       onClick={() => onAddItem(createTalkRuleForGroup(group, '00:00-23:59'))}
                     >
-                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      <Plus className="mr-1 h-3 w-3" />
                       时间段
                     </Button>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="h-7 px-2 text-xs"
                       disabled={group.hasFallback}
                       onClick={() => onAddItem(createTalkRuleForGroup(group, ''))}
                     >
-                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      <Plus className="mr-1 h-3 w-3" />
                       兜底
                     </Button>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="h-7 px-2 text-xs"
                       disabled={group.hasWildcard}
                       onClick={() => onAddItem(createTalkRuleForGroup(group, '*'))}
                     >
-                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      <Plus className="mr-1 h-3 w-3" />
                       *
                     </Button>
                   </div>
                 </div>
-                <div className="space-y-2 p-3">
+                <div className="space-y-1.5 p-2">
                   {group.items.map((item, trackIndex) => (
                     <div
                       key={item.index}
-                      className="grid min-h-16 grid-cols-[9rem_minmax(28rem,1fr)_12rem] items-center gap-3 rounded-md bg-muted/25 px-3 py-2"
+                      className="grid min-h-12 grid-cols-[5.5rem_minmax(16rem,1fr)_6.5rem] items-center gap-2 rounded-md bg-muted/25 px-2 py-1.5"
                       onDragOver={(event) => {
                         if (item.range && draggingTrackRef.current?.groupKey === item.groupKey) {
                           event.preventDefault()
@@ -567,7 +570,7 @@ function TalkValueTimelineOverview({
                           type="button"
                           draggable={Boolean(item.range)}
                           disabled={!item.range}
-                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
                           aria-label={`拖动${group.label}轨道 ${trackIndex + 1} 调整顺序`}
                           onDragEnd={() => {
                             draggingTrackRef.current = null
@@ -584,19 +587,19 @@ function TalkValueTimelineOverview({
                             event.dataTransfer.effectAllowed = 'move'
                           }}
                         >
-                          <GripVertical className="h-4 w-4" />
+                          <GripVertical className="h-3.5 w-3.5" />
                         </button>
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">轨道 {trackIndex + 1}</div>
+                          <div className="truncate text-xs font-medium">轨道 {trackIndex + 1}</div>
                         <div
-                          className={item.invalidTime ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}
+                          className={item.invalidTime ? 'text-[11px] text-destructive' : 'text-[11px] text-muted-foreground'}
                         >
                           {item.timeLabel}
                         </div>
                         </div>
                       </div>
                       <div
-                        className="relative h-9 rounded-md border bg-background"
+                        className="relative h-7 rounded-md border bg-background"
                         data-talk-timeline-track
                       >
                         {TIMELINE_TICKS.slice(1, -1).map((hour) => (
@@ -609,7 +612,7 @@ function TalkValueTimelineOverview({
                         {item.segments.map((segment, segmentIndex) => (
                           <span
                             key={segmentIndex}
-                            className={`absolute top-1/2 h-5 -translate-y-1/2 rounded-sm ${talkValueColor(item.value)} ${
+                            className={`absolute top-1/2 h-4 -translate-y-1/2 rounded-sm ${talkValueColor(item.value)} ${
                               item.invalidTime ? 'opacity-35' : 'opacity-85'
                             }`}
                             style={{
@@ -623,7 +626,7 @@ function TalkValueTimelineOverview({
                           <>
                             <button
                               type="button"
-                              className="absolute top-1/2 h-7 w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-background bg-foreground/80 shadow-sm cursor-ew-resize"
+                              className="absolute top-1/2 h-6 w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-background bg-foreground/80 shadow-sm cursor-ew-resize"
                               style={{ left: `${(item.range.start / DAY_MINUTES) * 100}%` }}
                               aria-label={`调整${group.label}轨道 ${trackIndex + 1} 开始时间`}
                               onPointerDown={(event) => startRangeDrag(event, item, 'start')}
@@ -639,7 +642,7 @@ function TalkValueTimelineOverview({
                             />
                             <button
                               type="button"
-                              className="absolute top-1/2 h-7 w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-background bg-foreground/80 shadow-sm cursor-ew-resize"
+                              className="absolute top-1/2 h-6 w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-background bg-foreground/80 shadow-sm cursor-ew-resize"
                               style={{ left: `${((item.range.end + 1) / DAY_MINUTES) * 100}%` }}
                               aria-label={`调整${group.label}轨道 ${trackIndex + 1} 结束时间`}
                               onPointerDown={(event) => startRangeDrag(event, item, 'end')}
@@ -656,7 +659,7 @@ function TalkValueTimelineOverview({
                           </>
                         )}
                       </div>
-                      <div className="grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-2">
+                      <div className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-1.5">
                         <div>
                           <Slider
                             value={[item.value]}
@@ -672,11 +675,11 @@ function TalkValueTimelineOverview({
                           type="button"
                           size="icon"
                           variant="ghost"
-                          className="text-destructive hover:text-destructive"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
                           aria-label={`删除${group.label} 轨道 ${trackIndex + 1}`}
                           onClick={() => onRemoveItem(item.index)}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </div>
@@ -1296,14 +1299,17 @@ export const ChatPromptsHook = createListItemEditorHook({
   helperText: '为指定平台和聊天流添加额外提示。platform、item_id 和 prompt 同时留空时表示空条目；填写任意一项后这三项都需要填写。',
   emptyText: '尚未配置任何聊天额外 Prompt。',
   addButtonPlacement: 'top',
-  fieldRows: [['platform', 'item_id', 'rule_type']],
+  fieldRows: [
+    ['platform', 'item_id'],
+    ['rule_type'],
+  ],
   fieldSchemaOverrides: {
     item_id: {
-      'x-input-width': '8rem',
+      'x-input-width': '6.5rem',
       'x-layout': 'inline-right',
     },
     platform: {
-      'x-input-width': '8rem',
+      'x-input-width': '5.5rem',
       'x-layout': 'inline-right',
     },
     prompt: {
@@ -1311,14 +1317,13 @@ export const ChatPromptsHook = createListItemEditorHook({
       'x-textarea-rows': 1,
     },
     rule_type: {
-      'x-input-width': '8rem',
+      'x-input-width': '5.5rem',
       'x-layout': 'inline-right',
     },
   },
   iconName: 'file-text',
   itemTitle: (item) => {
-    const prompt = typeof item.prompt === 'string' ? item.prompt.trim() : ''
-    return `${platformLabel(item)} · ${ruleTypeLabel(item.rule_type)} · ${prompt ? truncate(prompt) : '未填写 Prompt'}`
+    return `${platformLabel(item)} · ${ruleTypeLabel(item.rule_type)}`
   },
 })
 
@@ -1466,11 +1471,19 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 space-y-1">
           <Label className="text-[15px] font-semibold leading-6">平台账号</Label>
         </div>
-        <Button type="button" size="icon" variant="outline" aria-label="添加平台" title="添加平台" onClick={addRow}>
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className="shrink-0"
+          aria-label="添加平台"
+          title="添加平台"
+          onClick={addRow}
+        >
           <Plus className="h-4 w-4" />
         </Button>
       </div>

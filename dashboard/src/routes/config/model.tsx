@@ -1204,11 +1204,22 @@ function ModelConfigPageContent() {
 
         {/* 标签页 */}
         <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="providers" className="w-full" data-tour="providers-tab-trigger">模型厂商设置</TabsTrigger>
-            <TabsTrigger value="models" className="w-full" data-tour="models-tab-trigger">模型列表</TabsTrigger>
-            <TabsTrigger value="tasks" className="w-full" data-tour="tasks-tab-trigger">为模型分配功能</TabsTrigger>
-          </TabsList>
+          <div className="flex w-full items-stretch gap-2">
+            <TabsList className="grid h-9 min-w-0 flex-1 grid-cols-3">
+              <TabsTrigger value="providers" className="w-full" data-tour="providers-tab-trigger">模型厂商设置</TabsTrigger>
+              <TabsTrigger value="models" className="w-full" data-tour="models-tab-trigger">模型列表</TabsTrigger>
+              <TabsTrigger value="tasks" className="w-full" data-tour="tasks-tab-trigger">为模型分配功能</TabsTrigger>
+            </TabsList>
+            {activeTab === 'models' && (
+              <SharePackDialog
+                trigger={
+                  <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" aria-label="分享配置">
+                    <Share2 className="h-4 w-4" />
+                  </Button>
+                }
+              />
+            )}
+          </div>
           {/* 模型厂商设置标签页 */}
           <TabsContent value="providers" className="space-y-4 mt-0">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1327,13 +1338,6 @@ function ModelConfigPageContent() {
 
           {/* 模型列表 - 移动端卡片视图 */}
             <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:justify-end">
-              <SharePackDialog 
-                trigger={
-                  <Button variant="outline" size="icon" className="w-full sm:h-8 sm:w-8" aria-label="分享配置">
-                    <Share2 className="h-4 w-4" />
-                  </Button>
-                }
-              />
               <Button 
                 onClick={saveConfig} 
                 disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting} 
@@ -1400,8 +1404,8 @@ function ModelConfigPageContent() {
         </TabsContent>
 
         {/* 模型任务配置标签页 */}
-        <TabsContent value="tasks" className="space-y-6 mt-0">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <TabsContent value="tasks" className="mt-0 space-y-3">
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
               为不同的任务配置使用的模型和参数
             </p>
@@ -1418,7 +1422,7 @@ function ModelConfigPageContent() {
           </div>
 
           {taskConfig && taskConfigSchema && (
-            <div className="grid gap-4 sm:gap-6">
+            <div className="divide-y">
               {taskConfigSchema.fields
                 .filter(f => f.type === 'object' && (advancedTaskSettingsVisible || !f.advanced))
                 .map((field, index) => {

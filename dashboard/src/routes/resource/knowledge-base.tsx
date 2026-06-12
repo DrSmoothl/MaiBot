@@ -2306,16 +2306,16 @@ export function KnowledgeBasePage() {
                   自检
                 </Button>
               </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                 {runtimeBadges.map((item) => (
                   <div
                     key={item.label}
                     className={cn(
-                      'flex items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors',
+                      'min-w-0 overflow-hidden rounded-lg border px-2 py-1.5 transition-colors sm:flex sm:items-center sm:gap-2 sm:px-2.5',
                       item.className,
                     )}
                   >
-                    <div className="flex-none rounded-md border bg-background/70 p-1 shadow-sm">
+                    <div className="mb-1 w-fit flex-none rounded-md border bg-background/70 p-1 shadow-sm sm:mb-0">
                       <item.icon className={cn('h-3.5 w-3.5', item.iconClassName)} />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -2462,7 +2462,7 @@ export function KnowledgeBasePage() {
                     { value: 'episodes', label: '情景记忆', description: '查看和重建情景记忆' },
                     { value: 'profiles', label: '人物画像', description: '查询和维护人物画像' },
                   ]}
-                  className="w-fit max-w-full"
+                  className="h-[30px] w-fit max-w-full"
                   triggerClassName="px-3"
                 />
                 <MemoryMiniTabs
@@ -2472,7 +2472,7 @@ export function KnowledgeBasePage() {
                     { value: 'delete', label: '删除', description: '批量删除与历史回溯' },
                     { value: 'feedback', label: '纠错历史', description: '查看反馈与回滚' },
                   ]}
-                  className="w-fit max-w-full"
+                  className="h-[30px] w-fit max-w-full"
                   triggerClassName="px-3"
                 />
               </div>

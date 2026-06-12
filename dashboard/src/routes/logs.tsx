@@ -777,7 +777,7 @@ export function LogViewerPage({ defaultTab = 'terminal' }: LogViewerPageProps) {
 
   return (
     <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'terminal' | 'reasoning')} className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex shrink-0 flex-col gap-2 border-b px-3 py-2 lg:flex-row lg:items-start lg:justify-between lg:px-4">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-2 lg:px-4">
         <TabsList>
           <TabsTrigger value="terminal" className="gap-1.5">
             <Terminal className="h-4 w-4" />
@@ -788,13 +788,13 @@ export function LogViewerPage({ defaultTab = 'terminal' }: LogViewerPageProps) {
             推理过程
           </TabsTrigger>
         </TabsList>
-        <div id={toolbarContainerId} className="min-w-0 flex-1 lg:flex lg:justify-end" />
+        <div id={toolbarContainerId} className="flex min-w-0 flex-1 justify-end" />
       </div>
 
       <TabsContent value="terminal" className="m-0 min-h-0 flex-1 overflow-hidden">
         <LogTerminalPane toolbarContainerId={toolbarContainerId} toolbarVisible={activeTab === 'terminal'} />
       </TabsContent>
-      <TabsContent value="reasoning" className="m-0 min-h-0 flex-1 overflow-hidden p-3 lg:p-4">
+      <TabsContent value="reasoning" className="m-0 min-h-0 flex-1 overflow-hidden p-2 lg:p-4">
         <ReasoningProcessPage
           embedded
           toolbarContainerId={toolbarContainerId}

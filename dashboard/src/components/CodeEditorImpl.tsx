@@ -5,7 +5,7 @@ import { StreamLanguage } from '@codemirror/language'
 import { toml as tomlMode } from '@codemirror/legacy-modes/mode/toml'
 import { linter } from '@codemirror/lint'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorView } from '@codemirror/view'
+import { EditorView, ViewPlugin } from '@codemirror/view'
 import CodeMirror from '@uiw/react-codemirror'
 
 import { useTheme } from '@/components/use-theme'
@@ -20,6 +20,15 @@ const languageExtensions: Record<Language, any[]> = {
   css: [css()],
   text: [],
 }
+
+const dashboardCodeScrollerMarker = ViewPlugin.fromClass(
+  class {
+    constructor(view: EditorView) {
+      // 标记 CodeMirror 的真实 scrollDOM，避免依赖它内部 class 的注入顺序。
+      view.scrollDOM.dataset.dashboardCodeScroller = 'true'
+    }
+  }
+)
 
 export default function CodeEditorImpl({
   value,
@@ -58,6 +67,7 @@ export default function CodeEditorImpl({
         touchAction: 'pan-x pan-y',
       },
     }),
+    dashboardCodeScrollerMarker,
   ]
 
   if (readOnly) {

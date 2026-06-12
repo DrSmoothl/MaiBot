@@ -371,6 +371,7 @@
   --retro-rust-dark: #913a1d;
   --retro-gold: #c99a3e;
   --retro-line: rgb(13 70 80 / 0.82);
+  --retro-scrollbar-thumb: #0a4550;
   --retro-stroke: 2px;
   --retro-recessed: rgb(73 48 22 / 0.055);
   --retro-recessed-strong: rgb(73 48 22 / 0.085);
@@ -390,6 +391,7 @@
   --retro-rust-dark: #b86f4a;
   --retro-gold: #9f8450;
   --retro-line: rgb(210 192 169 / 0.38);
+  --retro-scrollbar-thumb: #0d6170;
   --retro-stroke: 1.25px;
   --retro-recessed: rgb(210 192 169 / 0.04);
   --retro-recessed-strong: rgb(210 192 169 / 0.065);
@@ -643,6 +645,76 @@
   box-shadow: inset 0 0 0 2px hsl(var(--background)) !important;
 }
 
+:root[data-dashboard-style='future-retro'] [data-dashboard-topbar-toggle='true'] {
+  position: relative;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-topbar-toggle='true']::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(4rem, 72%);
+  height: 2px;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--retro-line) 58%, transparent);
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-topbar-toggle='true']:hover::before {
+  background: var(--retro-line);
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-back-to-top='true'] {
+  border-radius: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-back-to-top-glow='true'] {
+  border-radius: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-back-to-top='true'] circle {
+  stroke-linecap: square;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-back-to-top-progress='circle'] {
+  display: none;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-back-to-top-progress='square'] {
+  display: block;
+  background:
+    linear-gradient(var(--retro-line), var(--retro-line)) padding-box,
+    conic-gradient(
+      from -90deg,
+      var(--retro-rust) 0 var(--back-to-top-progress, 0%),
+      color-mix(in srgb, var(--retro-rust) 24%, transparent) var(--back-to-top-progress, 0%) 100%
+    )
+    border-box;
+  border: 3px solid transparent;
+  border-radius: 0;
+  -webkit-mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+[data-dashboard-tab-scroll='true'] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+[data-dashboard-tab-scroll='true']::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 :root[data-dashboard-style='future-retro'] [data-dashboard-button='true']:not(:disabled) {
   border: var(--retro-stroke) solid var(--retro-line);
 }
@@ -784,6 +856,18 @@
   height: 1.65rem;
   transform: translateY(-50%);
   background: var(--retro-line);
+  pointer-events: none;
+}
+
+@media (max-width: 639px) {
+  :root[data-dashboard-style='future-retro']
+    [data-dashboard-tabs-trigger='true']
+    + [data-dashboard-tabs-trigger='true']::before {
+    left: 0;
+    width: 1px;
+    height: min(1.1rem, calc(100% - 0.9rem));
+    background: color-mix(in srgb, var(--retro-line) 52%, transparent);
+  }
 }
 
 :root[data-dashboard-style='future-retro']
@@ -997,27 +1081,6 @@
   color: var(--retro-paper);
 }
 
-:root[data-dashboard-style='future-retro'] .custom-scrollbar,
-:root[data-dashboard-style='future-retro'] * {
-  scrollbar-color: var(--retro-rust) transparent;
-}
-
-:root[data-dashboard-style='future-retro'] ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-:root[data-dashboard-style='future-retro'] ::-webkit-scrollbar-track {
-  background: var(--retro-paper-deep);
-  border-left: 1px solid var(--retro-line);
-}
-
-:root[data-dashboard-style='future-retro'] ::-webkit-scrollbar-thumb {
-  background: var(--retro-rust);
-  border: 2px solid var(--retro-paper-deep);
-  border-radius: 0;
-}
-
 @layer utilities {
   .bg-primary-gradient {
     background: var(--color-primary-gradient, hsl(var(--color-primary)));
@@ -1143,6 +1206,157 @@
 
 .custom-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* 未来复古滚动条：
+   Chromium/WebKit 和 Firefox 的滚动条绘制路径不同。不要在 WebKit 目标上设置
+   scrollbar-color/width；Chromium 会改走标准滚动条绘制，只吃颜色，不吃
+   ::-webkit-scrollbar-thumb 的直角形状。 */
+:root[data-dashboard-style='future-retro']
+  :is(
+    [data-dashboard-main='true'],
+    [data-dashboard-code-scroller='true'],
+    .custom-scrollbar,
+    .overflow-auto,
+    .overflow-scroll,
+    .overflow-y-auto,
+    .overflow-y-scroll
+  ) {
+  scrollbar-width: auto !important;
+  scrollbar-color: auto !important;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  :root[data-dashboard-style='future-retro']
+    :is(
+      [data-dashboard-main='true'],
+      [data-dashboard-code-scroller='true'],
+      .custom-scrollbar,
+      .overflow-auto,
+      .overflow-scroll,
+      .overflow-y-auto,
+      .overflow-y-scroll
+    ) {
+    scrollbar-width: thin !important;
+    scrollbar-color: var(--retro-scrollbar-thumb) transparent !important;
+  }
+}
+
+:root[data-dashboard-style='future-retro']
+  :is(
+    [data-dashboard-main='true'],
+    [data-dashboard-code-scroller='true'],
+    .custom-scrollbar,
+    .overflow-auto,
+    .overflow-scroll,
+    .overflow-y-auto,
+    .overflow-y-scroll
+  )::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  :is(
+    [data-dashboard-main='true'],
+    [data-dashboard-code-scroller='true'],
+    .custom-scrollbar,
+    .overflow-auto,
+    .overflow-scroll,
+    .overflow-y-auto,
+    .overflow-y-scroll
+  )::-webkit-scrollbar-track,
+:root[data-dashboard-style='future-retro']
+  :is(
+    [data-dashboard-main='true'],
+    [data-dashboard-code-scroller='true'],
+    .custom-scrollbar,
+    .overflow-auto,
+    .overflow-scroll,
+    .overflow-y-auto,
+    .overflow-y-scroll
+  )::-webkit-scrollbar-track-piece {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  :is(
+    [data-dashboard-main='true'],
+    [data-dashboard-code-scroller='true'],
+    .custom-scrollbar,
+    .overflow-auto,
+    .overflow-scroll,
+    .overflow-y-auto,
+    .overflow-y-scroll
+  )::-webkit-scrollbar-thumb,
+:root[data-dashboard-style='future-retro']
+  :is(
+    [data-dashboard-main='true'],
+    [data-dashboard-code-scroller='true'],
+    .custom-scrollbar,
+    .overflow-auto,
+    .overflow-scroll,
+    .overflow-y-auto,
+    .overflow-y-scroll
+  )::-webkit-scrollbar-thumb:hover {
+  background-color: var(--retro-scrollbar-thumb) !important;
+  background-clip: content-box !important;
+  border: 0 solid transparent !important;
+  border-right-width: 2px !important;
+  border-radius: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  :is(
+    [data-dashboard-main='true'],
+    [data-dashboard-code-scroller='true'],
+    .custom-scrollbar,
+    .overflow-auto,
+    .overflow-scroll,
+    .overflow-y-auto,
+    .overflow-y-scroll
+  )::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-scrollbar-viewport='true'] {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-scrollbar-viewport='true']::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-scrollbar='true'] {
+  background: transparent !important;
+  border-color: transparent !important;
+  border-width: 0 !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-scrollbar='true'][data-orientation='vertical'] {
+  width: 8px !important;
+  padding-right: 2px !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-scrollbar='true'][data-orientation='horizontal'] {
+  height: 8px !important;
+  padding-bottom: 2px !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-scrollbar-thumb='true'] {
+  background-color: var(--retro-scrollbar-thumb) !important;
+  border-radius: 0 !important;
 }
 
 /* 长期记忆控制台密度优化：只收紧记忆页局部布局，不影响全局组件默认尺寸。 */
@@ -1277,7 +1491,7 @@
 /* 2. 触控目标最小尺寸 44×44px（WCAG 2.5.8）
    pointer: coarse = 触控设备（手指精度低）*/
 @media (pointer: coarse) {
-  button,
+  button:not([role='checkbox']):not([role='switch']),
   [role='button'],
   a,
   input[type='checkbox'],

@@ -68,6 +68,8 @@ function shouldShowSectionCollapse(sectionKey: string, schema: ConfigSchema) {
   return sectionKey === 'a_memorix' && countSectionItems(schema) > 1
 }
 
+const CHAT_TALK_RULE_FIELD_NAMES = new Set(['enable_talk_value_rules', 'talk_value_rules'])
+
 export function AdvancedSettingsButton({
   active,
   onClick,
@@ -479,11 +481,38 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
     </>
   )
 
+  const renderVisibleFields = () => {
+    if (basePath !== 'chat') {
+      return renderFieldList(visibleFields)
+    }
+
+    const talkRuleFields = visibleFields.filter((field) => CHAT_TALK_RULE_FIELD_NAMES.has(field.name))
+    if (talkRuleFields.length === 0) {
+      return renderFieldList(visibleFields)
+    }
+
+    const commonFields = visibleFields.filter((field) => !CHAT_TALK_RULE_FIELD_NAMES.has(field.name))
+    if (commonFields.length === 0) {
+      return renderFieldList(talkRuleFields)
+    }
+
+    return (
+      <div className="grid min-w-0 items-start gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="min-w-0">
+          {renderFieldList(commonFields)}
+        </div>
+        <div className="min-w-0">
+          {renderFieldList(talkRuleFields)}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-w-0 space-y-4">
       {visibleFields.length > 0 && (
         <div>
-          {renderFieldList(visibleFields)}
+          {renderVisibleFields()}
         </div>
       )}
 

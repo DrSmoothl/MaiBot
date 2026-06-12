@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Tabs } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 
@@ -68,7 +69,6 @@ import type { StatsData } from './types'
 
 type IndicatorStatus = 'on' | 'off' | 'mixed'
 type ExpressionReviewFilter = 'all' | 'user_checked' | 'unchecked'
-type ExpressionSortMode = 'time'
 
 interface ExpressionLearningScopeStatus {
   label: string
@@ -90,7 +90,6 @@ export function ExpressionManagementPage() {
   const [browserPanelCollapsed, setBrowserPanelCollapsed] = useState(false)
   const [showLegacyExpressions, setShowLegacyExpressions] = useState(false)
   const [reviewFilter, setReviewFilter] = useState<ExpressionReviewFilter>('all')
-  const [sortMode, setSortMode] = useState<ExpressionSortMode>('time')
   const [selectedChatId, setSelectedChatId] = useState('')
   const [selectedGroupIndex, setSelectedGroupIndex] = useState<number | null>(null)
   const [selectedExpression, setSelectedExpression] = useState<Expression | null>(null)
@@ -151,7 +150,6 @@ export function ExpressionManagementPage() {
         chat_ids: selectedGroup && !selectedGroup.is_global ? selectedGroup.chat_ids : undefined,
         include_legacy: showLegacyExpressions,
         review_filter: reviewFilter,
-        sort_by: sortMode,
       })
       if (result.success) {
         setExpressions(result.data.data)
@@ -254,7 +252,6 @@ export function ExpressionManagementPage() {
     selectedGroupIndex,
     showLegacyExpressions,
     reviewFilter,
-    sortMode,
   ])
 
   // 查看详情
@@ -524,8 +521,8 @@ export function ExpressionManagementPage() {
     setSelectedIds(new Set())
   }
 
-  const handleToggleLegacyExpressions = () => {
-    setShowLegacyExpressions((current) => !current)
+  const handleLegacyExpressionsChange = (checked: boolean) => {
+    setShowLegacyExpressions(checked)
     setSelectedChatId('')
     setSelectedGroupIndex(null)
     setPage(1)
@@ -575,15 +572,20 @@ export function ExpressionManagementPage() {
   }
 
   const scopeStatus = getScopeStatus()
-  const renderStatusIndicator = (label: string, status: IndicatorStatus) => {
-    const statusText = status === 'mixed' ? '部分开启' : status === 'on' ? '已开启' : '已关闭'
+  const renderStatusIndicator = (label: string, status: IndicatorStatus, separated = true) => {
+    const statusLabel = label.replace(/^开启/, '')
+    const statusText =
+      status === 'mixed'
+        ? `部分${statusLabel}`
+        : status === 'on'
+          ? `开启${statusLabel}`
+          : `关闭${statusLabel}`
     const dotClass =
       status === 'mixed' ? 'bg-amber-500' : status === 'on' ? 'bg-green-500' : 'bg-muted-foreground'
 
     return (
-      <div className="bg-background flex items-center gap-2 rounded-md border px-3 py-2 text-sm sm:py-1.5">
+      <div className={`flex items-center gap-2 px-3 py-2 text-sm sm:py-1.5 ${separated ? 'border-l' : ''}`}>
         <span className={`h-2.5 w-2.5 rounded-full ${dotClass}`} />
-        <span className="text-muted-foreground">{label}</span>
         <span className="font-medium">{statusText}</span>
       </div>
     )
@@ -752,12 +754,12 @@ export function ExpressionManagementPage() {
             onValueChange={(value) => handleActiveViewChange(value as 'list' | 'quick')}
             className="-mx-1 w-[calc(100%+0.5rem)] px-1 sm:mx-0 sm:w-auto sm:p-0"
           >
-            <DashboardTabBar className="sm:w-fit">
-              <DashboardTabTrigger value="list" className="h-10 flex-1 gap-2 sm:h-8 sm:flex-none">
+            <DashboardTabBar className="h-10 sm:w-fit">
+              <DashboardTabTrigger value="list" className="h-10 flex-1 gap-2 sm:h-9 sm:flex-none">
                 <MessageSquare className="h-4 w-4" />
                 <span>表达</span>
               </DashboardTabTrigger>
-              <DashboardTabTrigger value="quick" className="h-10 flex-1 gap-2 sm:h-8 sm:flex-none">
+              <DashboardTabTrigger value="quick" className="h-10 flex-1 gap-2 sm:h-9 sm:flex-none">
                 <Zap className="h-4 w-4" />
                 <span>快速审核</span>
                 {uncheckedCount > 0 && (
@@ -768,31 +770,37 @@ export function ExpressionManagementPage() {
               </DashboardTabTrigger>
             </DashboardTabBar>
           </Tabs>
-          {activeView === 'list' && (
+          {(activeView === 'list' || activeView === 'quick') && (
             <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center lg:justify-end">
-              <Button
-                variant="outline"
-                onClick={() => handleActiveViewChange('logs')}
-                className="h-10 justify-center gap-2 sm:h-9"
-              >
-                <FileClock className="h-4 w-4" />
-                AI审核记录
-              </Button>
-              <Button
-                onClick={() => setIsCreateDialogOpen(true)}
-                className="h-10 justify-center gap-2 sm:h-9"
-              >
-                <Plus className="h-4 w-4" />
-                新增表达方式
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setIsLegacyImportOpen(true)}
-                className="h-10 justify-center gap-2 sm:h-9"
-              >
-                <Upload className="h-4 w-4" />
-                从旧版本导入
-              </Button>
+              {activeView === 'quick' && (
+                <Button
+                  variant="outline"
+                  onClick={() => handleActiveViewChange('logs')}
+                  className="h-10 justify-center gap-2 sm:h-9"
+                >
+                  <FileClock className="h-4 w-4" />
+                  AI审核记录
+                </Button>
+              )}
+              {activeView === 'list' && (
+                <>
+                  <Button
+                    onClick={() => setIsCreateDialogOpen(true)}
+                    className="h-10 justify-center gap-2 sm:h-9"
+                  >
+                    <Plus className="h-4 w-4" />
+                    新增表达方式
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsLegacyImportOpen(true)}
+                    className="h-10 justify-center gap-2 sm:h-9"
+                  >
+                    <Upload className="h-4 w-4" />
+                    从旧版本导入
+                  </Button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -802,18 +810,18 @@ export function ExpressionManagementPage() {
         <div className="space-y-5 pr-3 pb-2 sm:space-y-6 sm:pr-4">
           {/* 搜索和批量操作 */}
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-            <div className="bg-card/80 grid w-full grid-cols-3 overflow-hidden rounded-md border sm:h-9 lg:w-[24rem] lg:flex-none">
-              <div className="flex min-h-11 min-w-0 flex-col items-center justify-center gap-1 px-2 text-center sm:min-h-0 sm:flex-row sm:justify-between sm:gap-2 sm:px-3 sm:text-left">
+            <div className="grid h-10 w-full grid-cols-3 overflow-hidden border-2 bg-transparent sm:h-8 lg:w-[24rem] lg:flex-none">
+              <div className="flex min-w-0 flex-col items-center justify-center gap-1 px-2 text-center sm:flex-row sm:justify-between sm:gap-2 sm:px-3 sm:text-left">
                 <div className="text-muted-foreground text-[11px] sm:text-xs">总数量</div>
                 <div className="text-sm leading-none font-semibold sm:text-base">{stats.total}</div>
               </div>
-              <div className="flex min-h-11 min-w-0 flex-col items-center justify-center gap-1 border-l px-2 text-center sm:min-h-0 sm:flex-row sm:justify-between sm:gap-2 sm:px-3 sm:text-left">
+              <div className="flex min-w-0 flex-col items-center justify-center gap-1 border-l px-2 text-center sm:flex-row sm:justify-between sm:gap-2 sm:px-3 sm:text-left">
                 <div className="text-muted-foreground text-[11px] sm:text-xs">近7天新增</div>
                 <div className="text-sm leading-none font-semibold text-green-600 sm:text-base">
                   {stats.recent_7days}
                 </div>
               </div>
-              <div className="flex min-h-11 min-w-0 flex-col items-center justify-center gap-1 border-l px-2 text-center sm:min-h-0 sm:flex-row sm:justify-between sm:gap-2 sm:px-3 sm:text-left">
+              <div className="flex min-w-0 flex-col items-center justify-center gap-1 border-l px-2 text-center sm:flex-row sm:justify-between sm:gap-2 sm:px-3 sm:text-left">
                 <div className="text-muted-foreground text-[11px] sm:text-xs">关联聊天数</div>
                 <div className="text-sm leading-none font-semibold text-blue-600 sm:text-base">
                   {stats.chat_count}
@@ -837,15 +845,6 @@ export function ExpressionManagementPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground h-9 px-3 text-xs sm:h-8 sm:px-2"
-                    title="显示旧格式的表达方式（这些项目会在运行中被转换为新格式）"
-                    onClick={handleToggleLegacyExpressions}
-                  >
-                    {showLegacyExpressions ? '隐藏旧格式' : '显示旧格式'}
-                  </Button>
                   <Label htmlFor="page-size" className="text-sm whitespace-nowrap">
                     每页显示
                   </Label>
@@ -918,15 +917,15 @@ export function ExpressionManagementPage() {
 
           {/* 表达方式列表 */}
           <div
-            className={`grid grid-cols-1 gap-5 transition-[grid-template-columns] duration-200 sm:gap-4 ${
+            className={`grid grid-cols-1 items-stretch gap-5 transition-[grid-template-columns] duration-200 sm:gap-4 lg:h-[calc(100vh-17rem)] lg:min-h-[30rem] ${
               browserPanelCollapsed
                 ? 'lg:grid-cols-[3.25rem_minmax(0,1fr)]'
-                : 'lg:grid-cols-[16rem_minmax(0,1fr)]'
+                : 'lg:grid-cols-[13.5rem_minmax(0,1fr)]'
             }`}
           >
-            <aside className="bg-card rounded-lg border lg:sticky lg:top-0 lg:flex lg:max-h-[calc(100vh-18rem)] lg:flex-col lg:overflow-hidden">
+            <aside className="bg-card rounded-lg border lg:flex lg:h-full lg:self-stretch lg:flex-col lg:overflow-hidden">
               <div className="border-b px-4 py-3 sm:px-3 sm:py-2">
-                <div className="grid w-64 grid-cols-[2rem_minmax(0,1fr)] items-center gap-2">
+                <div className="grid w-full grid-cols-[2rem_minmax(0,1fr)] items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setBrowserPanelCollapsed((collapsed) => !collapsed)}
@@ -978,7 +977,7 @@ export function ExpressionManagementPage() {
                   </div>
                 </div>
               </div>
-              <div className="max-h-72 w-64 space-y-2 overflow-y-auto p-3 sm:max-h-56 sm:space-y-1 sm:p-2 lg:max-h-none lg:min-h-0 lg:flex-1">
+              <div className="max-h-72 w-full space-y-2 overflow-y-auto p-3 sm:max-h-56 sm:space-y-1 sm:p-2 lg:max-h-none lg:min-h-0 lg:flex-1">
                 {browseMode === 'chat' ? (
                   <>
                     {chatList.map((chat) => (
@@ -994,15 +993,6 @@ export function ExpressionManagementPage() {
                         title={`${chat.chat_name} (${chat.chat_id})`}
                       >
                         <span className="block truncate">{chat.chat_name}</span>
-                        <span
-                          className={`block truncate text-xs ${
-                            selectedChatId === chat.chat_id
-                              ? 'text-primary-foreground/75'
-                              : 'text-muted-foreground'
-                          }`}
-                        >
-                          {chat.chat_id}
-                        </span>
                       </button>
                     ))}
                   </>
@@ -1049,55 +1039,26 @@ export function ExpressionManagementPage() {
                   </div>
                 )}
               </div>
+              <div
+                className="flex w-full items-center justify-between gap-3 border-t px-4 py-3 sm:px-3 sm:py-2"
+                title="显示旧格式的表达方式（这些项目会在运行中被转换为新格式）"
+              >
+                <Label htmlFor="show-legacy-expressions" className="cursor-pointer text-sm">
+                  显示旧格式
+                </Label>
+                <Switch
+                  id="show-legacy-expressions"
+                  checked={showLegacyExpressions}
+                  onCheckedChange={handleLegacyExpressionsChange}
+                />
+              </div>
             </aside>
 
-            <div className="space-y-4 sm:space-y-3">
+            <div className="flex min-h-0 flex-col space-y-4 sm:space-y-3">
               {scopeStatus && (
                 <div className="bg-card flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 sm:gap-2 sm:px-3 sm:py-2">
-                  <div className="min-w-0 text-sm font-medium sm:mr-2">
-                    <span className="text-muted-foreground">当前范围：</span>
-                    <span>{scopeStatus.label}</span>
-                  </div>
-                  {renderStatusIndicator('开启学习', scopeStatus.enableLearning)}
+                  {renderStatusIndicator('开启学习', scopeStatus.enableLearning, false)}
                   {renderStatusIndicator('开启使用', scopeStatus.useExpression)}
-                  <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground text-sm">筛选</span>
-                      <Select
-                        value={reviewFilter}
-                        onValueChange={(value) => {
-                          setReviewFilter(value as ExpressionReviewFilter)
-                          setPage(1)
-                        }}
-                      >
-                        <SelectTrigger className="h-9 w-full min-w-[8.5rem] sm:h-8 sm:w-[8.5rem]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">全部</SelectItem>
-                          <SelectItem value="user_checked">仅人工通过</SelectItem>
-                          <SelectItem value="unchecked">未人工检查</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground text-sm">排序</span>
-                      <Select
-                        value={sortMode}
-                        onValueChange={(value) => {
-                          setSortMode(value as ExpressionSortMode)
-                          setPage(1)
-                        }}
-                      >
-                        <SelectTrigger className="h-9 w-full min-w-[7rem] sm:h-8 sm:w-28">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="time">按时间</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
                   {currentChat && (
                     <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto sm:flex-wrap sm:items-center">
                       <Button
@@ -1126,7 +1087,7 @@ export function ExpressionManagementPage() {
                         onClick={() => importInputRef.current?.click()}
                       >
                         <Upload className="h-4 w-4" />
-                        导入 JSON
+                        导入
                       </Button>
                       <Button
                         variant="destructive"
@@ -1149,6 +1110,7 @@ export function ExpressionManagementPage() {
               )}
 
               <ExpressionList
+                className="lg:min-h-0 lg:flex-1"
                 expressions={expressions}
                 loading={loading}
                 total={total}
@@ -1160,6 +1122,11 @@ export function ExpressionManagementPage() {
                   (browseMode === 'chat' && selectedChatId !== '') ||
                   (browseMode === 'group' && selectedGroupIndex !== null)
                 }
+                reviewFilter={reviewFilter}
+                onReviewFilterChange={(filter) => {
+                  setReviewFilter(filter)
+                  setPage(1)
+                }}
                 onEdit={handleEdit}
                 onViewDetail={handleViewDetail}
                 onDelete={(expression) => setDeleteConfirmExpression(expression)}

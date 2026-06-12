@@ -26,6 +26,7 @@ import { fieldTitleClassName } from "./fieldStyle"
 const ARRAY_DRAFT_LINE_PATTERN = /\r\n|\n|\r/
 const TAG_DRAFT_SPLIT_PATTERN = /[\r\n,，;；]+/
 const VISUAL_INLINE_FIELD_NAMES = new Set([
+  'no_action_backoff_base_seconds',
   'planner_mode',
   'replyer_mode',
   'wait_image_recognize_max_time',

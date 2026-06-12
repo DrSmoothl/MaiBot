@@ -7,6 +7,7 @@ from fastapi import APIRouter, Cookie, HTTPException
 import tomlkit
 
 from src.common.logger import get_logger
+from src.common.runtime_loop import run_on_main_loop
 from src.plugin_runtime.protocol.envelope import InspectPluginConfigResultPayload
 from src.webui.utils.toml_utils import save_toml_with_format
 
@@ -290,10 +291,12 @@ async def _inspect_plugin_config_via_runtime(
     from src.plugin_runtime.integration import get_plugin_runtime_manager
 
     runtime_manager = get_plugin_runtime_manager()
-    return await runtime_manager.inspect_plugin_config(
-        plugin_id,
-        config_data,
-        use_provided_config=use_provided_config,
+    return await run_on_main_loop(
+        runtime_manager.inspect_plugin_config(
+            plugin_id,
+            config_data,
+            use_provided_config=use_provided_config,
+        )
     )
 
 
@@ -315,7 +318,7 @@ async def _validate_plugin_config_via_runtime(plugin_id: str, config_data: Dict[
     from src.plugin_runtime.integration import get_plugin_runtime_manager
 
     runtime_manager = get_plugin_runtime_manager()
-    return await runtime_manager.validate_plugin_config(plugin_id, config_data)
+    return await run_on_main_loop(runtime_manager.validate_plugin_config(plugin_id, config_data))
 
 
 @router.get("/config/{plugin_id}/schema")

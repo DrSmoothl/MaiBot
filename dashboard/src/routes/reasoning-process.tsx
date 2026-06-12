@@ -479,7 +479,7 @@ export function ReasoningProcessPage({
       size="sm"
       onClick={() => setRefreshKey((current) => current + 1)}
       disabled={loading}
-      className="h-10 shrink-0 justify-start"
+      className="h-9 shrink-0 justify-start sm:h-10"
     >
       <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
       刷新
@@ -490,7 +490,7 @@ export function ReasoningProcessPage({
       <Button
         variant="outline"
         size="sm"
-        className="h-10 shrink-0 justify-start"
+        className="h-9 shrink-0 justify-start sm:h-10"
         onClick={() => setBrowsingStage(false)}
       >
         <ArrowLeft className="h-4 w-4" />
@@ -502,7 +502,7 @@ export function ReasoningProcessPage({
         onValueChange={(value) => resetToFirstPage(() => setSession(value))}
         disabled={sessions.length === 0 && loading}
       >
-        <SelectTrigger className={cn('h-10', inToolbar ? 'w-[240px]' : undefined)}>
+        <SelectTrigger className={cn('h-9 sm:h-10', inToolbar ? 'w-full sm:w-[240px]' : undefined)}>
           <SelectValue placeholder="会话" />
         </SelectTrigger>
         <SelectContent>
@@ -527,21 +527,25 @@ export function ReasoningProcessPage({
         </SelectContent>
       </Select>
 
-      <div className={cn('relative', inToolbar ? 'min-w-[300px] flex-1 max-w-[520px]' : undefined)}>
+      <div
+        className={cn(
+          'relative',
+          inToolbar ? 'min-w-0 flex-[1_1_220px] sm:min-w-[300px] sm:max-w-[520px]' : undefined
+        )}
+      >
         <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
         <Input
           value={search}
           onChange={(event) => resetToFirstPage(() => setSearch(event.target.value))}
-          className="h-10 pl-9"
+          className="h-9 pl-9 sm:h-10"
           placeholder="搜索会话显示名、真实会话、文件名或 replyer 回复内容"
         />
       </div>
     </>
   )
   const toolbarContent = (
-    <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
+    <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
       {renderRefreshButton()}
-      {browsingStage && renderBrowsingControls(true)}
     </div>
   )
   const toolbarPortal = embedded && toolbarVisible && toolbarRoot ? createPortal(toolbarContent, toolbarRoot) : null
@@ -553,7 +557,7 @@ export function ReasoningProcessPage({
       className={cn(
         'flex flex-col justify-between rounded-md border text-left transition-colors',
         'hover:border-primary hover:bg-primary/10 focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
-        compact ? 'min-h-20 p-3' : 'min-h-32 p-4'
+        compact ? 'min-h-16 p-2.5 sm:min-h-20 sm:p-3' : 'min-h-24 p-3 sm:min-h-32 sm:p-4'
       )}
     >
       <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
@@ -572,7 +576,7 @@ export function ReasoningProcessPage({
   )
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col gap-3 overflow-hidden', embedded ? 'p-0' : 'p-3 lg:p-4')}>
+    <div className={cn('flex h-full min-h-0 flex-col gap-2 overflow-hidden sm:gap-3', embedded ? 'p-0' : 'p-2 lg:p-4')}>
       {toolbarPortal}
 
       {!embedded && (
@@ -585,8 +589,8 @@ export function ReasoningProcessPage({
         </div>
       )}
 
-      {!embedded && browsingStage && (
-        <div className="grid flex-shrink-0 grid-cols-1 gap-2 md:grid-cols-[auto_minmax(220px,320px)_1fr]">
+      {browsingStage && (
+        <div className="grid flex-shrink-0 grid-cols-[auto_minmax(0,1fr)] gap-2 [&>div:last-child]:col-span-2 sm:grid-cols-[auto_minmax(220px,320px)_1fr] sm:[&>div:last-child]:col-span-1">
           {renderBrowsingControls()}
         </div>
       )}
@@ -599,14 +603,14 @@ export function ReasoningProcessPage({
 
       {!browsingStage ? (
         <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border">
-          <div className="flex h-12 flex-shrink-0 items-center gap-2 border-b px-4">
+          <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b px-3 sm:h-12 sm:px-4">
             <Layers className="text-muted-foreground h-4 w-4" />
             <div className="text-sm font-medium">选择推理类型</div>
           </div>
           <ScrollArea className="min-h-0 flex-1">
-            <div className="space-y-4 p-3">
+            <div className="space-y-3 p-2 sm:space-y-4 sm:p-3">
               {primaryStageCards.length > 0 && (
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-2 sm:gap-3 xl:grid-cols-3">
                   {primaryStageCards.map((item) => renderStageCard(item))}
                 </div>
               )}
@@ -626,16 +630,16 @@ export function ReasoningProcessPage({
           </ScrollArea>
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[360px_1fr]">
-          <div className="bg-background flex min-h-0 flex-col overflow-hidden rounded-md border">
-            <div className="text-muted-foreground flex h-11 flex-shrink-0 items-center justify-between border-b px-3 text-sm">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 lg:grid-cols-[360px_1fr] lg:gap-3">
+          <div className="bg-background flex h-[32vh] min-h-[180px] flex-col overflow-hidden rounded-md border lg:h-auto lg:min-h-0">
+            <div className="text-muted-foreground flex h-10 flex-shrink-0 items-center justify-between border-b px-3 text-sm lg:h-11">
               <span>{total} 条记录</span>
               <span>
                 第 {page} / {totalPages} 页
               </span>
             </div>
             <ScrollArea className="min-h-0 flex-1">
-              <div className="space-y-1 p-2">
+              <div className="space-y-1 p-1.5 sm:p-2">
                 {items.map((item) => {
                   const active =
                     selected?.stage === item.stage &&
@@ -651,7 +655,7 @@ export function ReasoningProcessPage({
                       type="button"
                       onClick={() => setSelected(item)}
                       className={cn(
-                        'flex w-full flex-col gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors',
+                        'flex w-full flex-col gap-1.5 rounded-md border px-2.5 py-2 text-left text-sm transition-colors sm:gap-2 sm:px-3',
                         active
                           ? 'border-primary bg-primary/10 text-foreground'
                           : 'hover:border-border hover:bg-muted/60 border-transparent'
@@ -705,7 +709,7 @@ export function ReasoningProcessPage({
                 )}
               </div>
             </ScrollArea>
-            <div className="flex h-12 flex-shrink-0 items-center justify-between border-t px-3">
+            <div className="flex h-11 flex-shrink-0 items-center justify-between border-t px-3 lg:h-12">
               <Button
                 variant="outline"
                 size="sm"
@@ -733,7 +737,7 @@ export function ReasoningProcessPage({
             >
               <ScrollArea className="h-full">
                 <div className="min-h-full">
-                  <div className="flex min-h-14 flex-col gap-3 border-b px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex min-h-12 flex-col gap-2 border-b px-3 py-2 sm:min-h-14 sm:px-4 sm:py-3 xl:flex-row xl:items-center xl:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">
                         {selected
@@ -744,7 +748,7 @@ export function ReasoningProcessPage({
                             )}/${selected.stem}`
                           : '未选择记录'}
                       </div>
-                      <div className="text-muted-foreground text-xs">
+                      <div className="text-muted-foreground truncate text-xs">
                         {selected
                           ? `${formatSize(selected.size)} · ${formatTime(selected.timestamp, selected.modified_at)}`
                           : '从左侧列表选择一条记录'}
@@ -849,9 +853,9 @@ export function ReasoningProcessPage({
                         <ThinkingIllustration />
                       </div>
                     ) : structuredPrompt ? (
-                      <div className="space-y-3 p-3">
+                      <div className="space-y-2 p-2 sm:space-y-3 sm:p-3">
                         {structuredPrompt.request?.selection_reason && (
-                          <div className="rounded-md border p-3">
+                          <div className="rounded-md border p-2.5 sm:p-3">
                             <div className="text-muted-foreground text-xs">选择原因</div>
                             <pre className="text-foreground mt-2 text-sm break-words whitespace-pre-wrap">
                               {structuredPrompt.request.selection_reason}
@@ -860,7 +864,7 @@ export function ReasoningProcessPage({
                         )}
 
                         {structuredPrompt.output && (
-                          <div className="rounded-md border p-3">
+                          <div className="rounded-md border p-2.5 sm:p-3">
                             <Badge variant="secondary" className="mb-2">
                               {structuredPrompt.output.title || '输出结果'}
                             </Badge>
@@ -871,7 +875,7 @@ export function ReasoningProcessPage({
                             </pre>
                             {structuredPrompt.output.tool_calls &&
                               structuredPrompt.output.tool_calls.length > 0 && (
-                                <pre className="bg-background/60 mt-3 rounded-md border p-3 font-mono text-xs leading-5 whitespace-pre-wrap">
+                                <pre className="bg-background/60 mt-2 rounded-md border p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap sm:mt-3 sm:p-3">
                                   {JSON.stringify(structuredPrompt.output.tool_calls, null, 2)}
                                 </pre>
                               )}
@@ -884,7 +888,7 @@ export function ReasoningProcessPage({
                             return (
                               <div
                                 key={`${message.index ?? index}-${message.role ?? 'unknown'}`}
-                                className={cn('rounded-md border p-3', roleStyle.containerClassName)}
+                                className={cn('rounded-md border p-2.5 sm:p-3', roleStyle.containerClassName)}
                               >
                                 <div className="mb-2 flex flex-wrap items-center gap-2">
                                   <Badge variant="outline">#{message.index ?? index + 1}</Badge>
@@ -903,7 +907,7 @@ export function ReasoningProcessPage({
                                     '空内容'}
                                 </pre>
                                 {message.tool_calls && message.tool_calls.length > 0 && (
-                                  <pre className="bg-background/60 mt-3 rounded-md border p-3 font-mono text-xs leading-5 whitespace-pre-wrap">
+                                  <pre className="bg-background/60 mt-2 rounded-md border p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap sm:mt-3 sm:p-3">
                                     {JSON.stringify(message.tool_calls, null, 2)}
                                   </pre>
                                 )}
@@ -914,7 +918,7 @@ export function ReasoningProcessPage({
 
                         {structuredPrompt.tool_definitions &&
                           structuredPrompt.tool_definitions.length > 0 && (
-                            <div className="rounded-md border p-3">
+                            <div className="rounded-md border p-2.5 sm:p-3">
                               <Badge variant="secondary" className="mb-2">
                                 工具定义
                               </Badge>
@@ -937,7 +941,7 @@ export function ReasoningProcessPage({
                         <ThinkingIllustration />
                       </div>
                     ) : (
-                      <pre className="text-foreground min-h-[360px] p-4 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
+                      <pre className="text-foreground min-h-[280px] p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap sm:min-h-[360px] sm:p-4">
                         {textContent || '没有文本内容'}
                       </pre>
                     )}
@@ -949,7 +953,7 @@ export function ReasoningProcessPage({
                         title="推理过程 HTML 预览"
                         src={htmlPreviewUrl}
                         sandbox=""
-                        className="h-[70vh] min-h-[420px] w-full border-0 bg-white"
+                        className="h-[58vh] min-h-[320px] w-full border-0 bg-white sm:h-[70vh] sm:min-h-[420px]"
                       />
                     ) : (
                       <div className="text-muted-foreground flex min-h-[360px] items-center justify-center text-sm">

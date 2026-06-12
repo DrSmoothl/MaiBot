@@ -6,6 +6,7 @@ import {
   ChevronsRight,
   Edit,
   Eye,
+  ListFilter,
   Trash2,
   X,
 } from 'lucide-react'
@@ -13,6 +14,13 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import {
@@ -24,8 +32,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
 
 import type { Expression } from '@/types/expression'
+
+type ReviewFilter = 'all' | 'user_checked' | 'unchecked'
 
 /**
  * 表达方式列表组件（桌面端Table + 移动端Card视图 + 分页）
@@ -39,9 +50,12 @@ export function ExpressionList({
   selectedIds,
   chatNameMap,
   hideChatColumn = false,
+  reviewFilter,
+  className,
   onEdit,
   onViewDetail,
   onDelete,
+  onReviewFilterChange,
   onToggleReviewStatus,
   onToggleSelect,
   onToggleSelectAll,
@@ -56,9 +70,12 @@ export function ExpressionList({
   selectedIds: Set<number>
   chatNameMap: Map<string, string>
   hideChatColumn?: boolean
+  reviewFilter: ReviewFilter
+  className?: string
   onEdit: (expression: Expression) => void
   onViewDetail: (expression: Expression) => void
   onDelete: (expression: Expression) => void
+  onReviewFilterChange: (filter: ReviewFilter) => void
   onToggleReviewStatus: (expression: Expression) => Promise<void>
   onToggleSelect: (id: number) => void
   onToggleSelectAll: () => void
@@ -76,7 +93,7 @@ export function ExpressionList({
     const modifier = expression.modified_by?.toLowerCase()
 
     if (expression.checked && modifier === 'user') {
-      return <Badge className="bg-green-600 whitespace-nowrap hover:bg-green-600">人工通过</Badge>
+      return <Badge className="bg-green-600 whitespace-nowrap hover:bg-green-600">通过</Badge>
     }
     return null
   }
@@ -115,9 +132,9 @@ export function ExpressionList({
   }
 
   return (
-    <div className="bg-card rounded-lg border">
+    <div className={cn('bg-card flex min-h-0 flex-col rounded-lg border', className)}>
       {/* 桌面端表格视图 */}
-      <div className="hidden md:block">
+      <div className="hidden min-h-0 flex-1 overflow-auto md:block">
         <Table aria-label="表达方式列表">
           <TableHeader>
             <TableRow>
@@ -130,7 +147,33 @@ export function ExpressionList({
               <TableHead>情境</TableHead>
               <TableHead>风格</TableHead>
               {!hideChatColumn && <TableHead>聊天</TableHead>}
-              <TableHead>审核</TableHead>
+              <TableHead>
+                <div className="flex items-center gap-1.5">
+                  <span>审核</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        title="筛选审核状态"
+                        aria-label="筛选审核状态"
+                      >
+                        <ListFilter className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuRadioGroup
+                        value={reviewFilter}
+                        onValueChange={(value) => onReviewFilterChange(value as ReviewFilter)}
+                      >
+                        <DropdownMenuRadioItem value="all">全部</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="user_checked">仅人工通过</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="unchecked">未人工检查</DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </TableHead>
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
@@ -219,12 +262,13 @@ export function ExpressionList({
                         <Eye className="h-4 w-4" />
                       </Button>
                       <Button
-                        size="sm"
+                        size="icon"
                         onClick={() => onDelete(expression)}
-                        className="bg-red-600 text-white hover:bg-red-700"
+                        className="h-8 w-8 bg-red-600 text-white hover:bg-red-700"
+                        title="删除"
+                        aria-label="删除"
                       >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        删除
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>

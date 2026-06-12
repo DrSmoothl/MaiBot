@@ -1478,8 +1478,8 @@ function PluginConfigPageContent() {
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-0 flex-1 basis-72">
+        <div className="flex flex-nowrap items-center gap-2 sm:gap-3">
+          <div className="relative min-w-0 flex-1 basis-0 sm:basis-72">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="搜索插件..."
@@ -1490,7 +1490,7 @@ function PluginConfigPageContent() {
           </div>
           <div
             data-dashboard-input="true"
-            className="border-input flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-md border bg-transparent px-3 py-1 text-sm font-medium shadow-sm transition-colors"
+            className="border-input flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border bg-transparent px-2 py-1 text-sm font-medium shadow-sm transition-colors sm:gap-2 sm:px-3"
           >
             <Label htmlFor="show-update-only" className="cursor-pointer text-sm font-medium">
               有更新
@@ -1505,6 +1505,7 @@ function PluginConfigPageContent() {
           <Button
             variant="outline"
             size="icon"
+            className="shrink-0"
             onClick={loadPlugins}
             aria-label="刷新"
             title="刷新"
@@ -1611,7 +1612,7 @@ function PluginConfigPageContent() {
               return (
               <div
                 key={plugin.id}
-                className={`relative flex min-h-32 cursor-pointer flex-col justify-between gap-3 py-3 transition-colors hover:bg-muted/50 sm:min-h-0 sm:flex-row sm:items-center sm:px-2 ${
+                className={`relative flex cursor-pointer flex-col justify-between gap-2 py-2.5 transition-colors hover:bg-muted/50 sm:min-h-0 sm:flex-row sm:items-center sm:gap-3 sm:px-2 sm:py-3 ${
                   isPluginDisabled(plugin) ? 'opacity-70' : ''
                 }`}
                 role="button"
@@ -1647,13 +1648,14 @@ function PluginConfigPageContent() {
                     </p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2 border-t pt-3 sm:flex sm:flex-shrink-0 sm:items-center sm:justify-end sm:border-t-0 sm:pt-0">
-                  <Button variant="ghost" size="sm" className="min-w-24 sm:min-w-0">
+                <div className="flex items-center justify-end gap-2 border-t pt-2 sm:flex-shrink-0 sm:border-t-0 sm:pt-0">
+                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" title="配置" aria-label="配置">
                     <Settings className="h-4 w-4" />
                   </Button>
                   <div
-                    className="flex min-w-24 items-center justify-center gap-2 sm:min-w-0"
+                    className="flex h-9 w-9 items-center justify-center"
                     onClick={(event) => event.stopPropagation()}
+                    title={pluginDisabled ? '启动插件' : '关闭插件'}
                   >
                     {pluginActing && <Loader2 className="h-4 w-4 animate-spin" />}
                     <Switch

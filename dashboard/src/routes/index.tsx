@@ -252,6 +252,71 @@ function getPluginConfigHref(pluginId: string, tabId?: string): string {
   return `/plugin-config?${params.toString()}`
 }
 
+function buildBasePluginShortcut(plugin: InstalledPlugin, t: TFunction): QuickShortcutDefinition {
+  const pluginName = plugin.manifest.name || plugin.id
+  return {
+    id: getPluginShortcutId(plugin.id),
+    category: 'plugin',
+    label: t('home.pluginShortcuts.baseLabel', { plugin: pluginName }),
+    description: t('home.pluginShortcuts.baseDescription', { plugin: pluginName }),
+    icon: Puzzle,
+    href: getPluginConfigHref(plugin.id),
+  }
+}
+
+async function loadPluginTabShortcuts(
+  plugin: InstalledPlugin,
+  t: TFunction,
+  selectedTabIds?: Set<string>
+): Promise<QuickShortcutDefinition[]> {
+  const schemaResult = await getPluginConfigSchema(plugin.id)
+  if (!schemaResult.success || !schemaResult.data) {
+    return []
+  }
+
+  const pluginName = plugin.manifest.name || plugin.id
+  const schema = schemaResult.data as PluginConfigSchema
+  const schemaTabs = schema.layout.type === 'tabs' ? schema.layout.tabs : []
+  const tabs = selectedTabIds ? schemaTabs.filter((tab) => selectedTabIds.has(tab.id)) : schemaTabs
+  return tabs.map((tab) => ({
+    id: getPluginShortcutId(plugin.id, tab.id),
+    category: 'plugin' as const,
+    label: `${pluginName} / ${tab.title || tab.id}`,
+    description: t('home.pluginShortcuts.tabDescription', {
+      plugin: pluginName,
+      tab: tab.title || tab.id,
+    }),
+    icon: Puzzle,
+    href: getPluginConfigHref(plugin.id, tab.id),
+  }))
+}
+
+function getSelectedPluginTabIds(ids: string[]): Map<string, Set<string>> {
+  const selectedTabs = new Map<string, Set<string>>()
+  for (const id of ids) {
+    const parsed = parsePluginShortcutId(id)
+    if (!parsed?.tabId) {
+      continue
+    }
+
+    const pluginTabs = selectedTabs.get(parsed.pluginId) ?? new Set<string>()
+    pluginTabs.add(parsed.tabId)
+    selectedTabs.set(parsed.pluginId, pluginTabs)
+  }
+  return selectedTabs
+}
+
+function getSelectedPluginIds(ids: string[]): Set<string> {
+  const selectedPluginIds = new Set<string>()
+  for (const id of ids) {
+    const parsed = parsePluginShortcutId(id)
+    if (parsed) {
+      selectedPluginIds.add(parsed.pluginId)
+    }
+  }
+  return selectedPluginIds
+}
+
 function getFallbackPluginShortcut(id: string, t: TFunction): QuickShortcutDefinition | null {
   const parsed = parsePluginShortcutId(id)
   if (!parsed) {
@@ -637,6 +702,14 @@ function IndexPageContent() {
     let cancelled = false
 
     const loadPluginShortcuts = async () => {
+      const selectedPluginIds = getSelectedPluginIds(quickShortcutIds)
+      const selectedPluginTabIds = getSelectedPluginTabIds(quickShortcutIds)
+      if (!quickShortcutDialogOpen && selectedPluginIds.size === 0) {
+        setPluginShortcuts([])
+        setIsPluginShortcutsLoading(false)
+        return
+      }
+
       setIsPluginShortcutsLoading(true)
       try {
         const installedResult = await getInstalledPlugins()
@@ -648,43 +721,39 @@ function IndexPageContent() {
           .filter((plugin) => plugin.disabled !== true && plugin.enabled !== false)
           .filter((plugin, index, all) => index === all.findIndex((item) => item.id === plugin.id))
 
-        const shortcuts = await Promise.all(
-          enabledPlugins.map(async (plugin: InstalledPlugin): Promise<QuickShortcutDefinition[]> => {
-            const pluginName = plugin.manifest.name || plugin.id
-            const baseShortcut: QuickShortcutDefinition = {
-              id: getPluginShortcutId(plugin.id),
-              category: 'plugin',
-              label: t('home.pluginShortcuts.baseLabel', { plugin: pluginName }),
-              description: t('home.pluginShortcuts.baseDescription', { plugin: pluginName }),
-              icon: Puzzle,
-              href: getPluginConfigHref(plugin.id),
-            }
+        const visiblePlugins = quickShortcutDialogOpen
+          ? enabledPlugins
+          : enabledPlugins.filter((plugin) => selectedPluginIds.has(plugin.id))
+        const baseShortcuts = visiblePlugins.map((plugin) => buildBasePluginShortcut(plugin, t))
+        if (!cancelled) {
+          setPluginShortcuts(baseShortcuts)
+        }
 
-            const schemaResult = await getPluginConfigSchema(plugin.id)
-            if (!schemaResult.success || !schemaResult.data) {
-              return [baseShortcut]
-            }
+        if (selectedPluginTabIds.size === 0) {
+          return
+        }
 
-            const schema = schemaResult.data as PluginConfigSchema
-            const tabs = schema.layout.type === 'tabs' ? schema.layout.tabs : []
-            const tabShortcuts = tabs.map((tab) => ({
-              id: getPluginShortcutId(plugin.id, tab.id),
-              category: 'plugin' as const,
-              label: `${pluginName} / ${tab.title || tab.id}`,
-              description: t('home.pluginShortcuts.tabDescription', {
-                plugin: pluginName,
-                tab: tab.title || tab.id,
-              }),
-              icon: Puzzle,
-              href: getPluginConfigHref(plugin.id, tab.id),
-            }))
+        const enabledPluginMap = new Map(enabledPlugins.map((plugin) => [plugin.id, plugin]))
+        const tabShortcuts = (
+          await Promise.all(
+            Array.from(selectedPluginTabIds.entries()).map(async ([pluginId, selectedTabIds]) => {
+              const plugin = enabledPluginMap.get(pluginId)
+              if (!plugin) {
+                return []
+              }
 
-            return [baseShortcut, ...tabShortcuts]
-          })
-        )
+              try {
+                return await loadPluginTabShortcuts(plugin, t, selectedTabIds)
+              } catch (error) {
+                console.warn(`加载插件 ${plugin.id} 已选配置页签快捷入口失败:`, error)
+                return []
+              }
+            })
+          )
+        ).flat()
 
         if (!cancelled) {
-          setPluginShortcuts(shortcuts.flat())
+          setPluginShortcuts([...baseShortcuts, ...tabShortcuts])
         }
       } catch (error) {
         console.error('加载插件快捷入口失败:', error)
@@ -700,7 +769,7 @@ function IndexPageContent() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [quickShortcutDialogOpen, quickShortcutIds, t])
 
   const quickShortcutOptions = useMemo<QuickShortcutDefinition[]>(
     () => [

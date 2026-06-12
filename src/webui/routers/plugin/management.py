@@ -268,9 +268,10 @@ async def _release_plugin_runtime_before_delete(plugin_id: str, plugin_path: Pat
     try:
         _write_plugin_disabled_for_uninstall(plugin_path)
 
+        from src.common.runtime_loop import run_on_main_loop
         from src.plugin_runtime.integration import get_plugin_runtime_manager
 
-        return await get_plugin_runtime_manager().reload_plugins_globally([plugin_id], reason="uninstall")
+        return await run_on_main_loop(get_plugin_runtime_manager().reload_plugins_globally([plugin_id], reason="uninstall"))
     except Exception as exc:
         logger.warning(f"插件 {plugin_id} 删除前运行时卸载失败，将继续尝试删除文件: {exc}")
         return False

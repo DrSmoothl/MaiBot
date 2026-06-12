@@ -21,6 +21,7 @@ const ScrollArea = React.forwardRef<
   >
     <ScrollAreaPrimitive.Viewport
       ref={viewportRef}
+      data-dashboard-scrollbar-viewport="true"
       className={cn(
         "h-full w-full overscroll-contain rounded-[inherit] [&>div]:!block [&>div]:!min-w-0 [&>div]:w-full",
         viewportClassName
@@ -42,6 +43,7 @@ const ScrollBar = React.forwardRef<
   <ScrollAreaPrimitive.ScrollAreaScrollbar
     ref={ref}
     orientation={orientation}
+    data-dashboard-scrollbar="true"
     className={cn(
       "flex touch-none select-none transition-colors",
       orientation === "vertical" &&
@@ -52,7 +54,10 @@ const ScrollBar = React.forwardRef<
     )}
     {...props}
   >
-    <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
+    <ScrollAreaPrimitive.ScrollAreaThumb
+      data-dashboard-scrollbar-thumb="true"
+      className="relative flex-1 rounded-full bg-border"
+    />
   </ScrollAreaPrimitive.ScrollAreaScrollbar>
 ))
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName

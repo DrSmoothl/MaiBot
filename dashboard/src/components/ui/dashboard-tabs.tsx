@@ -46,6 +46,7 @@ function DashboardTabBar({
 
   return (
     <div
+      data-dashboard-tab-scroll="true"
       className={cn(
         '-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:overflow-x-visible sm:px-0 sm:pb-0',
         wrapperClassName

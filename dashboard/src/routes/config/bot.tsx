@@ -815,7 +815,7 @@ function BotConfigPageContent() {
                 onValueChange={(v) => handleModeChange(v as 'visual' | 'source')}
                 className="w-full min-w-0 sm:w-[14rem]"
               >
-                <TabsList className="grid h-8 w-full grid-cols-2 sm:h-9">
+                <TabsList className="grid h-9 w-full grid-cols-2">
                   <TabsTrigger value="visual" className="px-2 text-xs">
                     <Layout className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
                     可视化
@@ -831,7 +831,7 @@ function BotConfigPageContent() {
                 disabled={saving || autoSaving || isRestarting}
                 size="sm"
                 variant="outline"
-                className="min-w-0 flex-1 sm:w-24 sm:flex-none"
+                className="h-9 min-w-0 flex-1 sm:w-24 sm:flex-none"
               >
                 <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                 刷新
@@ -841,7 +841,7 @@ function BotConfigPageContent() {
                 disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting}
                 size="sm"
                 variant="outline"
-                className="min-w-0 flex-1 sm:w-24 sm:flex-none"
+                className="h-9 min-w-0 flex-1 sm:w-24 sm:flex-none"
               >
                 <Save className="h-4 w-4 flex-shrink-0" strokeWidth={2} fill="none" />
                 <span className="ml-1 truncate text-xs sm:text-sm">
@@ -853,7 +853,7 @@ function BotConfigPageContent() {
                   <Button
                     disabled={saving || autoSaving || isRestarting}
                     size="sm"
-                    className="min-w-0 flex-1 sm:w-28 sm:flex-none"
+                    className="h-9 min-w-0 flex-1 sm:w-28 sm:flex-none"
                   >
                     <Power className="h-4 w-4 flex-shrink-0" />
                     <span className="ml-1 truncate text-xs sm:text-sm">
