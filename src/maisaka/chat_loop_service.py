@@ -45,14 +45,19 @@ from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.focus import focus_mode_manager
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
-from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
+from src.maisaka.visual.mode_utils import resolve_enable_visual_planner, resolve_enable_visual_timing_gate
 
 TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
 PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue", "wait"}
 PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
-    "planner": "maisaka_planner",
-    "timing_gate": "maisaka_timing_gate",
+    "behavior_scenario_analyzer": "behavior.scenario_analyzer",
+    "emotion": "emoji.selector",
+    "expression_selector": "expression.selector",
+    "planner": "maisaka.planner",
+    "reply_effect_judge": "reply.effect_judge",
+    "sub_agent": "maisaka.sub_agent",
+    "timing_gate": "maisaka.timing_gate",
 }
 MODEL_TASK_NAME_BY_REQUEST_KIND = {
     "timing_gate": "timing_gate",
@@ -507,10 +512,12 @@ class MaisakaChatLoopService:
         """根据 Maisaka 请求类型解析 LLM 统计口径。"""
 
         normalized_request_kind = str(request_kind or "").strip()
-        return REQUEST_TYPE_BY_REQUEST_KIND.get(
-            normalized_request_kind,
-            f"maisaka_{normalized_request_kind}" if normalized_request_kind else "maisaka_planner",
-        )
+        if not normalized_request_kind:
+            normalized_request_kind = "planner"
+        request_type = REQUEST_TYPE_BY_REQUEST_KIND.get(normalized_request_kind)
+        if request_type is None:
+            raise ValueError(f"未注册的 Maisaka LLM request_kind: {normalized_request_kind}")
+        return request_type
 
     @staticmethod
     def _resolve_prompt_preview_category(request_kind: str) -> str:
@@ -1274,8 +1281,10 @@ class MaisakaChatLoopService:
 
     @staticmethod
     def _resolve_enable_visual_message(request_kind: str) -> bool:
-        if request_kind in {"planner", "timing_gate"}:
+        if request_kind == "planner":
             return resolve_enable_visual_planner()
+        if request_kind == "timing_gate":
+            return resolve_enable_visual_timing_gate()
         if request_kind in {"expression_selector", "reply_effect_judge", "behavior_scenario_analyzer"}:
             return False
         return True
