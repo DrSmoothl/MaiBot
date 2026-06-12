@@ -1087,11 +1087,15 @@
 }
 
 [data-plugin-list-switch='true'][data-state='checked'] [data-dashboard-switch-thumb='true'] {
+  --tw-translate-x: 0 !important;
+  --tw-translate-y: 1rem !important;
   translate: 0 1rem !important;
   transform: none !important;
 }
 
 [data-plugin-list-switch='true'][data-state='unchecked'] [data-dashboard-switch-thumb='true'] {
+  --tw-translate-x: 0 !important;
+  --tw-translate-y: 0 !important;
   translate: 0 0 !important;
   transform: none !important;
 }
