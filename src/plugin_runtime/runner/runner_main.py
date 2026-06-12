@@ -36,6 +36,7 @@ from src.plugin_runtime import (
     ENV_HOST_VERSION,
     ENV_IPC_ADDRESS,
     ENV_PLUGIN_DIRS,
+    ENV_RUNNER_GROUP,
     ENV_SESSION_TOKEN,
 )
 from src.plugin_runtime.protocol.envelope import (
@@ -74,6 +75,9 @@ _PLUGIN_ALLOWED_RAW_HOST_METHODS = frozenset(
         "host.update_message_gateway_state",
     }
 )
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_RUNNER_DEBUG_FILE_PATH = _PROJECT_ROOT / "logs" / "plugin_runtime_debug" / "runner_rpc_debug.jsonl"
 
 
 class _ContextAwarePlugin(Protocol):
@@ -156,6 +160,20 @@ class PluginActivationStatus(str, Enum):
     LOADED = "loaded"
     INACTIVE = "inactive"
     FAILED = "failed"
+
+
+@dataclass(slots=True)
+class InFlightRPC:
+    """记录 Runner 内当前正在执行的 RPC 调用。"""
+
+    request_id: int
+    method: str
+    plugin_id: str
+    component_name: str
+    timeout_ms: int
+    started_at_epoch: float
+    started_at_monotonic: float
+    payload_summary: Dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -318,6 +336,7 @@ class PluginRunner:
         plugin_dirs: List[str],
         external_available_plugins: Optional[Dict[str, str]] = None,
         blocked_plugin_reasons: Optional[Dict[str, str]] = None,
+        runner_group: str = "unknown",
     ) -> None:
         """初始化 Runner。
 
@@ -327,10 +346,12 @@ class PluginRunner:
             plugin_dirs: 当前 Runner 负责扫描的插件目录列表。
             external_available_plugins: 视为已满足的外部依赖插件版本映射。
             blocked_plugin_reasons: 需要拒绝加载的插件及原因映射。
+            runner_group: 当前 Runner 所属运行时分组名称。
         """
         self._host_address: str = host_address
         self._session_token: str = session_token
         self._plugin_dirs: List[str] = plugin_dirs
+        self._runner_group: str = str(runner_group or "unknown").strip() or "unknown"
         self._external_available_plugins: Dict[str, str] = {
             str(plugin_id or "").strip(): str(plugin_version or "").strip()
             for plugin_id, plugin_version in (external_available_plugins or {}).items()
@@ -348,6 +369,7 @@ class PluginRunner:
         self._start_time: float = time.monotonic()
         self._shutting_down: bool = False
         self._reload_lock: asyncio.Lock = asyncio.Lock()
+        self._inflight_rpcs: Dict[int, InFlightRPC] = {}
 
         # IPC 日志 Handler：握手成功后安装，将所有 stdlib logging 转发到 Host
         self._log_handler: Optional[RunnerIPCLogHandler] = None
@@ -474,6 +496,152 @@ class PluginRunner:
             if handler not in stdlib_logging.root.handlers:
                 stdlib_logging.root.addHandler(handler)
         self._suspended_console_handlers.clear()
+
+    @staticmethod
+    def _debug_file_path() -> Path:
+        """返回独立的 Runner RPC 诊断文件路径。"""
+
+        return _RUNNER_DEBUG_FILE_PATH.resolve()
+
+    @staticmethod
+    def _summarize_envelope_payload(payload: Any) -> Dict[str, Any]:
+        """提取 RPC payload 的轻量摘要，避免把完整消息内容写入诊断文件。"""
+
+        if not isinstance(payload, dict):
+            return {"payload_type": type(payload).__name__}
+
+        summary: Dict[str, Any] = {"payload_keys": sorted(str(key) for key in payload.keys())}
+        component_name = str(payload.get("component_name") or "").strip()
+        if component_name:
+            summary["component_name"] = component_name
+
+        args = payload.get("args")
+        if isinstance(args, dict):
+            summary["args_keys"] = sorted(str(key) for key in args.keys())
+            summary["args_count"] = len(args)
+        if client_type := str(payload.get("client_type") or "").strip():
+            summary["client_type"] = client_type
+        if operation := str(payload.get("operation") or "").strip():
+            summary["operation"] = operation
+        return summary
+
+    def _write_debug_event_sync(self, event: str, payload: Dict[str, Any]) -> None:
+        """把 Runner 诊断事件追加到独立 JSONL 文件。"""
+
+        record = {
+            "event": event,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+            "timestamp_epoch": time.time(),
+            "pid": os.getpid(),
+            "runner_group": self._runner_group,
+            "plugin_dirs": list(self._plugin_dirs),
+            **payload,
+        }
+        try:
+            debug_file = self._debug_file_path()
+            debug_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(debug_file, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        except Exception as exc:
+            logger.warning(f"写入 Runner RPC 诊断文件失败: {exc}")
+
+    async def _write_debug_event(self, event: str, payload: Dict[str, Any]) -> None:
+        """异步追加 Runner 诊断事件，避免诊断文件 IO 阻塞事件循环。"""
+
+        await asyncio.to_thread(self._write_debug_event_sync, event, payload)
+
+    def _schedule_debug_event(self, event: str, payload: Dict[str, Any]) -> None:
+        """调度一次诊断事件写入。"""
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._write_debug_event(event, payload))
+        except RuntimeError:
+            self._write_debug_event_sync(event, payload)
+
+    def _start_inflight_rpc(self, envelope: Envelope, component_name: str = "") -> InFlightRPC:
+        """登记一个正在执行的 Host -> Runner RPC。"""
+
+        record = InFlightRPC(
+            request_id=envelope.request_id,
+            method=str(envelope.method or ""),
+            plugin_id=str(envelope.plugin_id or ""),
+            component_name=str(component_name or "").strip(),
+            timeout_ms=int(envelope.timeout_ms or 0),
+            started_at_epoch=time.time(),
+            started_at_monotonic=time.monotonic(),
+            payload_summary=self._summarize_envelope_payload(envelope.payload),
+        )
+        self._inflight_rpcs[record.request_id] = record
+        return record
+
+    def _finish_inflight_rpc(self, record: InFlightRPC) -> None:
+        """注销已完成 RPC，并在超出 RPC timeout 时写诊断记录。"""
+
+        self._inflight_rpcs.pop(record.request_id, None)
+        duration_ms = int((time.monotonic() - record.started_at_monotonic) * 1000)
+        timeout_ms = max(record.timeout_ms, 1)
+        if duration_ms <= timeout_ms:
+            return
+
+        self._schedule_debug_event(
+            "rpc_completed_after_timeout",
+            {
+                "request": self._inflight_record_to_dict(record),
+                "duration_ms": duration_ms,
+            },
+        )
+
+    def _inflight_record_to_dict(self, record: InFlightRPC) -> Dict[str, Any]:
+        """序列化单个 in-flight RPC 记录。"""
+
+        return {
+            "request_id": record.request_id,
+            "method": record.method,
+            "plugin_id": record.plugin_id,
+            "component_name": record.component_name,
+            "timeout_ms": record.timeout_ms,
+            "started_at_epoch": record.started_at_epoch,
+            "duration_ms": int((time.monotonic() - record.started_at_monotonic) * 1000),
+            "payload_summary": dict(record.payload_summary),
+        }
+
+    def _inflight_snapshot(self, min_duration_ms: int = 0) -> List[Dict[str, Any]]:
+        """返回当前未完成 RPC 调用快照。"""
+
+        records = [
+            self._inflight_record_to_dict(record)
+            for record in self._inflight_rpcs.values()
+            if int((time.monotonic() - record.started_at_monotonic) * 1000) >= min_duration_ms
+        ]
+        records.sort(key=lambda item: int(item.get("duration_ms", 0)), reverse=True)
+        return records
+
+    async def _dump_inflight_debug(self, reason: str, *, min_duration_ms: int = 0) -> None:
+        """将当前未完成 RPC 快照写入独立诊断文件。"""
+
+        snapshot = self._inflight_snapshot(min_duration_ms=min_duration_ms)
+        if not snapshot:
+            return
+        await self._write_debug_event(
+            "inflight_rpc_snapshot",
+            {
+                "reason": reason,
+                "inflight_count": len(snapshot),
+                "inflight": snapshot,
+            },
+        )
+
+    async def _invoke_plugin_callable(self, handler_method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """调用插件函数；同步函数放到线程中执行，避免阻塞 Runner 事件循环。"""
+
+        if inspect.iscoroutinefunction(handler_method):
+            return await handler_method(*args, **kwargs)
+
+        result = await asyncio.to_thread(handler_method, *args, **kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     def _inject_context(self, plugin_id: str, instance: object) -> None:
         """为插件实例创建并注入 PluginContext。
@@ -1249,9 +1417,7 @@ class PluginRunner:
             return True
 
         try:
-            result = instance.on_load()
-            if asyncio.iscoroutine(result):
-                await result
+            await self._invoke_plugin_callable(instance.on_load)
             return True
         except Exception as exc:
             logger.error(f"插件 {meta.plugin_id} on_load 失败: {exc}", exc_info=True)
@@ -1268,9 +1434,7 @@ class PluginRunner:
             return
 
         try:
-            result = instance.on_unload()
-            if asyncio.iscoroutine(result):
-                await result
+            await self._invoke_plugin_callable(instance.on_unload)
         except Exception as exc:
             logger.error(f"插件 {meta.plugin_id} on_unload 失败: {exc}", exc_info=True)
 
@@ -1722,36 +1886,40 @@ class PluginRunner:
 
         component_name = invoke.component_name
         handler_method = self._resolve_component_handler(meta, component_name)
+        inflight = self._start_inflight_rpc(envelope, component_name)
 
-        # 回退: 旧版 LegacyPluginAdapter 通过 invoke_component 统一桥接
-        if (handler_method is None or not callable(handler_method)) and hasattr(meta.instance, "invoke_component"):
+        try:
+            # 回退: 旧版 LegacyPluginAdapter 通过 invoke_component 统一桥接
+            if (handler_method is None or not callable(handler_method)) and hasattr(meta.instance, "invoke_component"):
+                try:
+                    result = await self._invoke_plugin_callable(
+                        meta.instance.invoke_component,
+                        component_name,
+                        **invoke.args,
+                    )
+                    resp_payload = InvokeResultPayload(success=True, result=result)
+                    return envelope.make_response(payload=resp_payload.model_dump())
+                except Exception as e:
+                    logger.error(f"插件 {plugin_id} 组件 {component_name} (legacy) 执行异常: {e}", exc_info=True)
+                    resp_payload = InvokeResultPayload(success=False, result=str(e))
+                    return envelope.make_response(payload=resp_payload.model_dump())
+
+            if handler_method is None or not callable(handler_method):
+                return envelope.make_error_response(
+                    ErrorCode.E_METHOD_NOT_ALLOWED.value,
+                    f"插件 {plugin_id} 无组件: {component_name}",
+                )
+
             try:
-                result = await meta.instance.invoke_component(component_name, **invoke.args)
+                result = await self._invoke_plugin_callable(handler_method, **invoke.args)
                 resp_payload = InvokeResultPayload(success=True, result=result)
                 return envelope.make_response(payload=resp_payload.model_dump())
             except Exception as e:
-                logger.error(f"插件 {plugin_id} 组件 {component_name} (legacy) 执行异常: {e}", exc_info=True)
+                logger.error(f"插件 {plugin_id} 组件 {component_name} 执行异常: {e}", exc_info=True)
                 resp_payload = InvokeResultPayload(success=False, result=str(e))
                 return envelope.make_response(payload=resp_payload.model_dump())
-
-        if handler_method is None or not callable(handler_method):
-            return envelope.make_error_response(
-                ErrorCode.E_METHOD_NOT_ALLOWED.value,
-                f"插件 {plugin_id} 无组件: {component_name}",
-            )
-
-        try:
-            result = (
-                await handler_method(**invoke.args)
-                if inspect.iscoroutinefunction(handler_method)
-                else handler_method(**invoke.args)
-            )
-            resp_payload = InvokeResultPayload(success=True, result=result)
-            return envelope.make_response(payload=resp_payload.model_dump())
-        except Exception as e:
-            logger.error(f"插件 {plugin_id} 组件 {component_name} 执行异常: {e}", exc_info=True)
-            resp_payload = InvokeResultPayload(success=False, result=str(e))
-            return envelope.make_response(payload=resp_payload.model_dump())
+        finally:
+            self._finish_inflight_rpc(inflight)
 
     async def _handle_llm_provider_invoke(self, envelope: Envelope) -> Envelope:
         """处理 LLM Provider 调用请求。
@@ -1783,10 +1951,13 @@ class PluginRunner:
                 f"插件 {plugin_id} 未注册 LLM Provider: {invoke.client_type}",
             )
 
+        inflight = self._start_inflight_rpc(envelope, f"llm_provider:{invoke.client_type}")
         try:
-            result = handler_method(operation=invoke.operation, request=invoke.request)
-            if inspect.isawaitable(result):
-                result = await result
+            result = await self._invoke_plugin_callable(
+                handler_method,
+                operation=invoke.operation,
+                request=invoke.request,
+            )
             resp_payload = InvokeResultPayload(success=True, result=result)
             return envelope.make_response(payload=resp_payload.model_dump())
         except Exception as exc:
@@ -1796,6 +1967,8 @@ class PluginRunner:
             )
             resp_payload = InvokeResultPayload(success=False, result=str(exc))
             return envelope.make_response(payload=resp_payload.model_dump())
+        finally:
+            self._finish_inflight_rpc(inflight)
 
     async def _handle_event_invoke(self, envelope: Envelope) -> Envelope:
         """处理 EventHandler 调用请求
@@ -1826,12 +1999,9 @@ class PluginRunner:
                 f"插件 {plugin_id} 无组件: {component_name}",
             )
 
+        inflight = self._start_inflight_rpc(envelope, component_name)
         try:
-            raw = (
-                await handler_method(**invoke.args)
-                if inspect.iscoroutinefunction(handler_method)
-                else handler_method(**invoke.args)
-            )
+            raw = await self._invoke_plugin_callable(handler_method, **invoke.args)
 
             # 规范化返回值：将 EventHandler 返回展平到 payload 顶层
             if raw is None:
@@ -1853,6 +2023,8 @@ class PluginRunner:
         except Exception as e:
             logger.error(f"插件 {plugin_id} event_handler {component_name} 执行异常: {e}", exc_info=True)
             return envelope.make_response(payload={"success": False, "continue_processing": True})
+        finally:
+            self._finish_inflight_rpc(inflight)
 
     async def _handle_hook_invoke(self, envelope: Envelope) -> Envelope:
         """处理 HookHandler 调用请求。
@@ -1884,38 +2056,48 @@ class PluginRunner:
                 f"插件 {plugin_id} 无组件: {component_name}",
             )
 
+        inflight = self._start_inflight_rpc(envelope, component_name)
         try:
-            raw = (
-                await handler_method(**invoke.args)
-                if inspect.iscoroutinefunction(handler_method)
-                else handler_method(**invoke.args)
-            )
-        except Exception as exc:
-            logger.error(f"插件 {plugin_id} hook_handler {component_name} 执行异常: {exc}", exc_info=True)
-            return envelope.make_response(
-                payload={
-                    "success": False,
-                    "action": "continue",
-                    "error_message": str(exc),
+            try:
+                raw = await self._invoke_plugin_callable(handler_method, **invoke.args)
+            except Exception as exc:
+                logger.error(f"插件 {plugin_id} hook_handler {component_name} 执行异常: {exc}", exc_info=True)
+                return envelope.make_response(
+                    payload={
+                        "success": False,
+                        "action": "continue",
+                        "error_message": str(exc),
+                    }
+                )
+
+            if raw is None:
+                result = {"success": True, "action": "continue"}
+            elif isinstance(raw, dict):
+                result = {
+                    "success": True,
+                    "action": str(raw.get("action", "continue") or "continue").strip().lower() or "continue",
+                    "modified_kwargs": raw.get("modified_kwargs"),
+                    "custom_result": raw.get("custom_result"),
                 }
-            )
+            else:
+                result = {"success": True, "action": "continue", "custom_result": raw}
 
-        if raw is None:
-            result = {"success": True, "action": "continue"}
-        elif isinstance(raw, dict):
-            result = {
-                "success": True,
-                "action": str(raw.get("action", "continue") or "continue").strip().lower() or "continue",
-                "modified_kwargs": raw.get("modified_kwargs"),
-                "custom_result": raw.get("custom_result"),
-            }
-        else:
-            result = {"success": True, "action": "continue", "custom_result": raw}
-
-        return envelope.make_response(payload=result)
+            return envelope.make_response(payload=result)
+        finally:
+            self._finish_inflight_rpc(inflight)
 
     async def _handle_health(self, envelope: Envelope) -> Envelope:
         """处理健康检查"""
+        inflight = self._inflight_snapshot()
+        await self._write_debug_event(
+            "runner_health_received",
+            {
+                "request_id": envelope.request_id,
+                "inflight_count": len(inflight),
+                "max_inflight_duration_ms": int(inflight[0].get("duration_ms", 0)) if inflight else 0,
+            },
+        )
+        await self._dump_inflight_debug("health_check", min_duration_ms=5000)
         uptime_ms = int((time.monotonic() - self._start_time) * 1000)
         health = HealthPayload(
             healthy=True,
@@ -1927,11 +2109,13 @@ class PluginRunner:
     async def _handle_prepare_shutdown(self, envelope: Envelope) -> Envelope:
         """处理准备关停"""
         logger.info("收到 prepare_shutdown 信号")
+        await self._dump_inflight_debug("prepare_shutdown")
         return envelope.make_response(payload={"acknowledged": True})
 
     async def _handle_shutdown(self, envelope: Envelope) -> Envelope:
         """处理关停 — 调用所有插件的 on_unload 后退出"""
         logger.info("收到 shutdown 信号，开始调用 on_unload")
+        await self._dump_inflight_debug("shutdown")
         for plugin_id in list(self._loader.list_plugins()):
             meta = self._loader.get_plugin(plugin_id)
             if meta is not None:
@@ -1948,6 +2132,7 @@ class PluginRunner:
 
         plugin_id = envelope.plugin_id
         if meta := self._loader.get_plugin(plugin_id):
+            inflight = self._start_inflight_rpc(envelope, "on_config_update")
             try:
                 config_scope = payload.config_scope.value
                 if config_scope == "self":
@@ -1955,16 +2140,17 @@ class PluginRunner:
                 if not hasattr(meta.instance, "on_config_update"):
                     raise AttributeError("插件缺少 on_config_update() 实现")
 
-                ret = meta.instance.on_config_update(
+                await self._invoke_plugin_callable(
+                    meta.instance.on_config_update,
                     config_scope,
                     payload.config_data,
                     payload.config_version,
                 )
-                if asyncio.iscoroutine(ret):
-                    await ret
             except Exception as e:
                 logger.error(f"插件 {plugin_id} 配置更新失败: {e}")
                 return envelope.make_error_response(ErrorCode.E_UNKNOWN.value, str(e))
+            finally:
+                self._finish_inflight_rpc(inflight)
         return envelope.make_response(payload={"acknowledged": True})
 
     async def _handle_inspect_plugin_config(self, envelope: Envelope) -> Envelope:
@@ -2116,6 +2302,7 @@ async def _async_main() -> None:
     external_plugin_ids_raw = os.environ.get(ENV_EXTERNAL_PLUGIN_IDS, "")
     session_token = os.environ.pop(ENV_SESSION_TOKEN, "")
     plugin_dirs_str = os.environ.get(ENV_PLUGIN_DIRS, "")
+    runner_group = os.environ.get(ENV_RUNNER_GROUP, "unknown")
 
     if not host_address or not session_token:
         logger.error(f"缺少必要的环境变量: {ENV_IPC_ADDRESS}, {ENV_SESSION_TOKEN}")
@@ -2154,7 +2341,14 @@ async def _async_main() -> None:
         host_address,
         session_token,
         plugin_dirs,
+        runner_group=runner_group,
         **runner_kwargs,
+    )
+    await runner._write_debug_event(
+        "runner_started",
+        {
+            "debug_file": str(runner._debug_file_path()),
+        },
     )
 
     # 注册信号处理

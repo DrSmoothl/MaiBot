@@ -2,9 +2,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Cookie, HTTPException
 import json
 import shutil
+
+from fastapi import APIRouter, Cookie, HTTPException
 import tomlkit
 
 from src.common.logger import get_logger
@@ -100,6 +101,26 @@ def _get_runtime_plugin_load_statuses() -> Dict[str, str]:
     except Exception as exc:
         logger.warning(f"获取插件运行时加载状态失败: {exc}")
         return {}
+
+
+def _get_runtime_plugin_circuit_statuses() -> Dict[str, Dict[str, Any]]:
+    try:
+        from src.plugin_runtime.integration import get_plugin_runtime_manager
+
+        return get_plugin_runtime_manager().get_plugin_circuit_statuses()
+    except Exception as exc:
+        logger.warning(f"获取插件熔断状态失败: {exc}")
+        return {}
+
+
+def _is_runtime_loading() -> bool:
+    try:
+        from src.plugin_runtime.integration import get_plugin_runtime_manager
+
+        return bool(get_plugin_runtime_manager().is_loading)
+    except Exception as exc:
+        logger.warning(f"获取插件运行时加载中状态失败: {exc}")
+        return False
 
 
 def _build_update_work_path(plugin_path: Path, plugin_id: str, directory_name: str) -> Path:
@@ -636,6 +657,8 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
     try:
         installed_plugins: List[Dict[str, Any]] = []
         runtime_statuses = _get_runtime_plugin_load_statuses()
+        circuit_statuses = _get_runtime_plugin_circuit_statuses()
+        runtime_loading = _is_runtime_loading()
         for plugin_path in iter_plugin_directories():
             folder_name = plugin_path.name
             if folder_name.startswith(".") or folder_name.startswith("__"):
@@ -657,6 +680,9 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
                 plugin_id = _infer_plugin_id(folder_name, manifest, manifest_path)
                 enabled = _read_plugin_enabled(plugin_id, plugin_path)
                 load_status = runtime_statuses.get(plugin_id, "unknown")
+                if enabled and load_status == "unknown" and runtime_loading:
+                    load_status = "loading"
+                circuit_status = circuit_statuses.get(plugin_id)
                 installed_plugins.append(
                     {
                         "id": plugin_id,
@@ -666,6 +692,7 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
                         "disabled": not enabled,
                         "loaded": load_status == "success",
                         "load_status": "disabled" if not enabled else load_status,
+                        "circuit_status": circuit_status,
                     }
                 )
             except json.JSONDecodeError as e:

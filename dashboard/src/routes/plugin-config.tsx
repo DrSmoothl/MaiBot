@@ -37,6 +37,7 @@ import {
 import {
   Settings,
   AlertCircle,
+  AlertTriangle,
   Package,
   ArrowUp,
   RefreshCw,
@@ -1114,7 +1115,6 @@ function PluginConfigPageContent() {
     if (!loading) {
       void checkPluginUpdates()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
 
   useEffect(() => {
@@ -1167,20 +1167,42 @@ function PluginConfigPageContent() {
   const isPluginLoadSuccess = (plugin: InstalledPlugin) => !isPluginDisabled(plugin) && (
     plugin.load_status === 'success' || plugin.loaded === true
   )
-  const isPluginLoadFailed = (plugin: InstalledPlugin) => !isPluginDisabled(plugin) && !isPluginLoadSuccess(plugin)
+  const isPluginLoading = (plugin: InstalledPlugin) => !isPluginDisabled(plugin) && plugin.load_status === 'loading'
+  const isPluginCircuitOpen = (plugin: InstalledPlugin) => !isPluginDisabled(plugin) && plugin.circuit_status?.state === 'open'
+  const isPluginCircuitHalfOpen = (plugin: InstalledPlugin) => !isPluginDisabled(plugin) && plugin.circuit_status?.state === 'half_open'
+  const isPluginCircuitActive = (plugin: InstalledPlugin) => isPluginCircuitOpen(plugin) || isPluginCircuitHalfOpen(plugin)
+  const isPluginLoadFailed = (plugin: InstalledPlugin) => (
+    !isPluginDisabled(plugin)
+    && !isPluginLoading(plugin)
+    && !isPluginLoadSuccess(plugin)
+  )
   const installedCount = plugins.length
   const disabledCount = plugins.filter(isPluginDisabled).length
   const loadSuccessCount = plugins.filter(isPluginLoadSuccess).length
+  const loadingCount = plugins.filter(isPluginLoading).length
+  const circuitOpenCount = plugins.filter(isPluginCircuitOpen).length
+  const circuitActiveCount = plugins.filter(isPluginCircuitActive).length
   const loadFailedCount = plugins.filter(isPluginLoadFailed).length
-  const enabledCount = loadSuccessCount
-  const loadTotalCount = loadSuccessCount + loadFailedCount
+  const enabledCount = installedCount - disabledCount
+  const loadTotalCount = loadSuccessCount + loadFailedCount + loadingCount + circuitActiveCount
   const loadSuccessPercent = loadTotalCount > 0 ? (loadSuccessCount / loadTotalCount) * 100 : 0
   const loadFailedPercent = loadTotalCount > 0 ? (loadFailedCount / loadTotalCount) * 100 : 0
+  const loadingPercent = loadTotalCount > 0 ? (loadingCount / loadTotalCount) * 100 : 0
+  const circuitPercent = loadTotalCount > 0 ? (circuitActiveCount / loadTotalCount) * 100 : 0
   const isModernDashboardStyle = themeConfig.dashboardStyle === 'modern'
   const isFutureRetroDashboardStyle = themeConfig.dashboardStyle === 'future-retro'
   const getPluginStatusBarClassName = (plugin: InstalledPlugin) => {
     if (isPluginDisabled(plugin)) {
       return 'bg-muted-foreground/45'
+    }
+    if (isPluginCircuitOpen(plugin)) {
+      return 'bg-orange-500'
+    }
+    if (isPluginCircuitHalfOpen(plugin)) {
+      return 'bg-yellow-500'
+    }
+    if (isPluginLoading(plugin)) {
+      return 'bg-sky-500'
     }
     if (isPluginLoadFailed(plugin)) {
       return 'bg-red-500'
@@ -1191,6 +1213,16 @@ function PluginConfigPageContent() {
     if (isPluginDisabled(plugin)) {
       return '已禁用'
     }
+    if (isPluginCircuitOpen(plugin)) {
+      const remainingSec = Math.ceil(plugin.circuit_status?.remaining_sec ?? 0)
+      return remainingSec > 0 ? `熔断中 ${remainingSec}s` : '熔断中'
+    }
+    if (isPluginCircuitHalfOpen(plugin)) {
+      return '半开测试'
+    }
+    if (isPluginLoading(plugin)) {
+      return '加载中'
+    }
     if (isPluginLoadFailed(plugin)) {
       return '启动失败'
     }
@@ -1200,10 +1232,40 @@ function PluginConfigPageContent() {
     if (isPluginDisabled(plugin)) {
       return { dotClassName: 'bg-muted-foreground/45', label: '已禁用' }
     }
-    if (isPluginLoadSuccess(plugin)) {
-      return { dotClassName: 'bg-emerald-500', label: '加载成功' }
+    if (isPluginCircuitOpen(plugin)) {
+      const remainingSec = Math.ceil(plugin.circuit_status?.remaining_sec ?? 0)
+      return {
+        dotClassName: 'bg-orange-500',
+        label: remainingSec > 0 ? `熔断中 ${remainingSec}s` : '熔断中',
+        badgeClassName: 'border-orange-600 text-orange-600',
+        icon: 'circuit' as const,
+      }
     }
-    return { dotClassName: 'bg-red-500', label: '加载失败' }
+    if (isPluginCircuitHalfOpen(plugin)) {
+      return {
+        dotClassName: 'bg-yellow-500',
+        label: '半开测试',
+        badgeClassName: 'border-yellow-600 text-yellow-700',
+        icon: 'warning' as const,
+      }
+    }
+    if (isPluginLoading(plugin)) {
+      return {
+        dotClassName: 'bg-sky-500',
+        label: '加载中',
+        badgeClassName: 'border-sky-600 text-sky-600',
+        icon: 'loading' as const,
+      }
+    }
+    if (isPluginLoadSuccess(plugin)) {
+      return { dotClassName: 'bg-emerald-500', label: '加载成功', icon: 'success' as const }
+    }
+    return {
+      dotClassName: 'bg-red-500',
+      label: '加载失败',
+      badgeClassName: 'border-red-600 text-red-600',
+      icon: 'warning' as const,
+    }
   }
   const getPluginRepositoryUrl = (plugin: InstalledPlugin): string | undefined => {
     const marketPlugin = marketPluginsById[plugin.id] || (plugin.manifest.id ? marketPluginsById[plugin.manifest.id] : undefined)
@@ -1525,15 +1587,21 @@ function PluginConfigPageContent() {
                 </span>
                 <span>已启用 <strong className="text-emerald-600">{enabledCount}</strong> 个</span>
                 <span>已禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个</span>
+                <span>加载中 <strong className="text-sky-600">{loadingCount}</strong> 个</span>
+                <span>熔断中 <strong className="text-orange-600">{circuitOpenCount}</strong> 个</span>
               </div>
               <div
                 className="flex items-center gap-3 border-t pt-3 text-sm"
-                aria-label={`加载成功 ${loadSuccessCount} 个，加载失败 ${loadFailedCount} 个`}
+                aria-label={`加载成功 ${loadSuccessCount} 个，加载中 ${loadingCount} 个，熔断中 ${circuitOpenCount} 个，加载失败 ${loadFailedCount} 个`}
               >
-                <span className="sr-only">加载成功 {loadSuccessCount} 个，加载失败 {loadFailedCount} 个</span>
+                <span className="sr-only">
+                  加载成功 {loadSuccessCount} 个，加载中 {loadingCount} 个，熔断中 {circuitOpenCount} 个，加载失败 {loadFailedCount} 个
+                </span>
                 <strong className="w-8 text-right text-emerald-600">{loadSuccessCount}</strong>
                 <div className="flex h-3 min-w-28 flex-1 overflow-hidden bg-muted" aria-hidden="true">
                   <div className="bg-emerald-500" style={{ width: `${loadSuccessPercent}%` }} />
+                  <div className="bg-sky-500" style={{ width: `${loadingPercent}%` }} />
+                  <div className="bg-orange-500" style={{ width: `${circuitPercent}%` }} />
                   <div className="bg-red-500" style={{ width: `${loadFailedPercent}%` }} />
                 </div>
                 <strong className="w-8 text-red-600">{loadFailedCount}</strong>
@@ -1544,10 +1612,10 @@ function PluginConfigPageContent() {
           <div className="space-y-3">
             <div
               className="space-y-2"
-              aria-label={`已安装 ${installedCount} 个插件，已启用 ${enabledCount} 个，已禁用 ${disabledCount} 个，启动失败 ${loadFailedCount} 个`}
+              aria-label={`已安装 ${installedCount} 个插件，已启用 ${enabledCount} 个，已禁用 ${disabledCount} 个，加载中 ${loadingCount} 个，熔断中 ${circuitOpenCount} 个，启动失败 ${loadFailedCount} 个`}
             >
               <span className="sr-only">
-                已启用 {enabledCount} 个，已禁用 {disabledCount} 个，启动失败 {loadFailedCount} 个
+                已启用 {enabledCount} 个，已禁用 {disabledCount} 个，加载中 {loadingCount} 个，熔断中 {circuitOpenCount} 个，启动失败 {loadFailedCount} 个
               </span>
               <div className="flex h-3 w-full overflow-hidden bg-muted" aria-hidden="true">
                 {plugins.length > 0 ? (
@@ -1575,6 +1643,14 @@ function PluginConfigPageContent() {
                 <span className="flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full bg-muted-foreground/45" />
                   禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-sky-500" />
+                  加载中 <strong className="text-sky-600">{loadingCount}</strong> 个
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-orange-500" />
+                  熔断中 <strong className="text-orange-600">{circuitOpenCount}</strong> 个
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full bg-red-500" />
@@ -1642,6 +1718,15 @@ function PluginConfigPageContent() {
                       <Badge variant="outline" className="text-xs flex-shrink-0">
                         {getPluginTypeLabel(plugin)}
                       </Badge>
+                      <Badge
+                        variant="outline"
+                        className={`text-xs flex-shrink-0 gap-1 ${statusMeta.badgeClassName ?? ''}`}
+                      >
+                        {statusMeta.icon === 'loading' && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {statusMeta.icon === 'warning' && <AlertCircle className="h-3 w-3" />}
+                        {statusMeta.icon === 'circuit' && <AlertTriangle className="h-3 w-3" />}
+                        {statusMeta.label}
+                      </Badge>
                     </div>
                     <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:truncate sm:leading-normal">
                       {plugin.manifest.description || '暂无描述'}
@@ -1654,7 +1739,6 @@ function PluginConfigPageContent() {
                   </Button>
                   <div
                     className="flex h-9 w-9 items-center justify-center"
-                    onClick={(event) => event.stopPropagation()}
                     title={pluginDisabled ? '启动插件' : '关闭插件'}
                   >
                     {pluginActing && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -1662,6 +1746,7 @@ function PluginConfigPageContent() {
                       checked={!pluginDisabled}
                       disabled={pluginActing}
                       aria-label={pluginDisabled ? '启动插件' : '关闭插件'}
+                      onClick={(event) => event.stopPropagation()}
                       onCheckedChange={() => void performTogglePlugin(plugin)}
                     />
                   </div>

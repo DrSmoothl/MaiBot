@@ -209,7 +209,10 @@ const chatEmbedRoute = createRoute({
 const pluginsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/plugins',
-  component: lazyRouteComponent(() => import('./routes/plugins/index'), 'PluginsPage'),
+  component: lazyRouteComponent(
+    () => import('./routes/plugins/PluginMarketplacePage'),
+    'PluginMarketplacePage'
+  ),
 })
 
 // 插件详情路由

@@ -7,8 +7,10 @@ import contextlib
 import json
 import os
 import sys
+import time
 
 from src.common.logger import get_logger
+from src.common.shutdown import is_shutdown_requested
 from src.config.config import global_config
 from src.platform_io import DriverKind, InboundMessageEnvelope, RouteBinding, RouteKey, get_platform_io_manager
 from src.platform_io.drivers import PluginPlatformDriver
@@ -19,6 +21,7 @@ from src.plugin_runtime import (
     ENV_HOST_VERSION,
     ENV_IPC_ADDRESS,
     ENV_PLUGIN_DIRS,
+    ENV_RUNNER_GROUP,
     ENV_SESSION_TOKEN,
 )
 from src.plugin_runtime.protocol.envelope import (
@@ -64,6 +67,9 @@ if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
 
 logger = get_logger("plugin_runtime.host.runner_manager")
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_RUNNER_DEBUG_FILE_PATH = _PROJECT_ROOT / "logs" / "plugin_runtime_debug" / "runner_rpc_debug.jsonl"
 
 
 @dataclass(slots=True)
@@ -188,6 +194,42 @@ class PluginRunnerSupervisor:
         """返回底层 RPC 服务端。"""
         return self._rpc_server
 
+    def _ensure_accepting_runner_rpc(self) -> None:
+        """确保当前 Supervisor 仍可接受新的 Runner RPC。"""
+
+        if not self._running or is_shutdown_requested():
+            raise RPCError(ErrorCode.E_SHUTTING_DOWN, "插件运行时正在关停，已拒绝新的 Runner RPC")
+
+    @staticmethod
+    def _debug_file_path() -> Path:
+        """返回插件运行时独立诊断文件路径。"""
+
+        return _RUNNER_DEBUG_FILE_PATH.resolve()
+
+    def _write_debug_event_sync(self, event: str, payload: Dict[str, Any]) -> None:
+        """将 Host 侧插件运行时诊断事件写入独立 JSONL 文件。"""
+
+        record = {
+            "event": event,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+            "timestamp_epoch": time.time(),
+            "pid": os.getpid(),
+            "supervisor_group": self._group_name,
+            **payload,
+        }
+        try:
+            debug_file = self._debug_file_path()
+            debug_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(debug_file, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        except Exception as exc:
+            logger.warning(f"写入插件运行时 Host 诊断文件失败: {exc}")
+
+    async def _write_debug_event(self, event: str, payload: Dict[str, Any]) -> None:
+        """异步写入 Host 侧插件运行时诊断事件。"""
+
+        await asyncio.to_thread(self._write_debug_event_sync, event, payload)
+
     def set_external_available_plugins(self, plugin_versions: Dict[str, str]) -> None:
         """设置当前 Runner 启动/重载时可视为已满足的外部依赖版本映射。
 
@@ -226,6 +268,12 @@ class PluginRunnerSupervisor:
         for plugin_id in self._registered_plugins:
             statuses[plugin_id] = "success"
         return statuses
+
+    @property
+    def is_loading(self) -> bool:
+        """返回当前 Runner 是否仍处于插件加载阶段。"""
+
+        return self._running and not self._runner_ready_events.is_set()
 
     def set_blocked_plugin_reasons(self, blocked_plugin_reasons: Dict[str, str]) -> None:
         """设置当前 Runner 启动时应拒绝加载的插件列表。
@@ -362,6 +410,7 @@ class PluginRunnerSupervisor:
             return
 
         self._running = False
+        self._rpc_server.abort_pending_requests("PluginRunnerSupervisor 正在停止")
 
         if self._health_task is not None:
             self._health_task.cancel()
@@ -397,6 +446,7 @@ class PluginRunnerSupervisor:
         Returns:
             Envelope: RPC 响应信封。
         """
+        self._ensure_accepting_runner_rpc()
         return await self._rpc_server.send_request(
             method,
             plugin_id,
@@ -451,6 +501,7 @@ class PluginRunnerSupervisor:
         Returns:
             Envelope: Runner 返回的响应信封。
         """
+        self._ensure_accepting_runner_rpc()
         payload = LLMProviderInvokePayload(
             client_type=client_type,
             operation=operation,
@@ -506,6 +557,10 @@ class PluginRunnerSupervisor:
         Returns:
             bool: 是否重载成功。
         """
+        if is_shutdown_requested():
+            logger.info(f"插件 {plugin_id} 重载请求已跳过：主程序正在关停")
+            return False
+
         try:
             response = await self._rpc_server.send_request(
                 "plugin.reload",
@@ -542,6 +597,10 @@ class PluginRunnerSupervisor:
         Returns:
             bool: 是否全部重载成功。
         """
+        if is_shutdown_requested():
+            logger.info("插件批量重载请求已跳过：主程序正在关停")
+            return False
+
         ordered_plugin_ids = self._normalize_reload_plugin_ids(plugin_ids)
         if not ordered_plugin_ids:
             ordered_plugin_ids = list(self._registered_plugins.keys())
@@ -592,6 +651,10 @@ class PluginRunnerSupervisor:
         Returns:
             bool: 请求是否成功送达并被 Runner 接受。
         """
+        if is_shutdown_requested():
+            logger.info(f"插件 {plugin_id} 配置更新通知已跳过：主程序正在关停")
+            return False
+
         try:
             normalized_scope = ConfigReloadScope(config_scope)
         except ValueError:
@@ -630,6 +693,7 @@ class PluginRunnerSupervisor:
         Raises:
             ValueError: 插件拒绝该配置或校验失败时抛出。
         """
+        self._ensure_accepting_runner_rpc()
 
         payload = ValidatePluginConfigPayload(config_data=config_data)
         try:
@@ -670,6 +734,7 @@ class PluginRunnerSupervisor:
         Raises:
             ValueError: Runner 无法解析插件或返回了错误响应时抛出。
         """
+        self._ensure_accepting_runner_rpc()
 
         payload = InspectPluginConfigPayload(
             config_data=config_data or {},
@@ -1425,6 +1490,7 @@ class PluginRunnerSupervisor:
             ENV_HOST_VERSION: PROTOCOL_VERSION,
             ENV_IPC_ADDRESS: self._transport.get_address(),
             ENV_PLUGIN_DIRS: os.pathsep.join(str(path) for path in self._plugin_dirs),
+            ENV_RUNNER_GROUP: self._group_name,
             ENV_SESSION_TOKEN: self._rpc_server.session_token,
         }
 
@@ -1484,20 +1550,45 @@ class PluginRunnerSupervisor:
         if process is None:
             return
 
-        payload = ShutdownPayload(reason=reason)
+        shutdown_requested = is_shutdown_requested()
+        drain_timeout_ms = 1500 if shutdown_requested else ShutdownPayload().drain_timeout_ms
+        terminate_timeout_sec = 2.0 if shutdown_requested else 5.0
+        kill_timeout_sec = 1.0 if shutdown_requested else 5.0
+        payload = ShutdownPayload(reason=reason, drain_timeout_ms=drain_timeout_ms)
+        logger.info(f"准备关闭 Runner: reason={reason}")
 
         if process.returncode is None and self._rpc_server.is_connected:
-            with contextlib.suppress(Exception):
+            try:
                 await self._rpc_server.send_request(
                     "plugin.prepare_shutdown",
                     payload=payload.model_dump(),
                     timeout_ms=payload.drain_timeout_ms,
                 )
-            with contextlib.suppress(Exception):
+            except Exception as exc:
+                logger.warning(f"Runner prepare_shutdown 请求失败: reason={reason} error={exc}")
+                await self._write_debug_event(
+                    "host_prepare_shutdown_failed",
+                    {
+                        "reason": reason,
+                        "error": str(exc),
+                        "pending_requests": self._rpc_server.get_pending_request_snapshot(),
+                    },
+                )
+            try:
                 await self._rpc_server.send_request(
                     "plugin.shutdown",
                     payload=payload.model_dump(),
                     timeout_ms=payload.drain_timeout_ms,
+                )
+            except Exception as exc:
+                logger.warning(f"Runner shutdown 请求失败: reason={reason} error={exc}")
+                await self._write_debug_event(
+                    "host_shutdown_failed",
+                    {
+                        "reason": reason,
+                        "error": str(exc),
+                        "pending_requests": self._rpc_server.get_pending_request_snapshot(),
+                    },
                 )
 
         if process.returncode is None:
@@ -1507,12 +1598,12 @@ class PluginRunnerSupervisor:
                 logger.warning("Runner 优雅退出超时，尝试 terminate")
                 process.terminate()
                 try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                    await asyncio.wait_for(process.wait(), timeout=terminate_timeout_sec)
                 except asyncio.TimeoutError:
                     logger.warning("Runner terminate 超时，尝试 kill")
                     process.kill()
                     with contextlib.suppress(Exception):
-                        await asyncio.wait_for(process.wait(), timeout=5.0)
+                        await asyncio.wait_for(process.wait(), timeout=kill_timeout_sec)
 
         self._runner_process = None
 
@@ -1538,12 +1629,16 @@ class PluginRunnerSupervisor:
 
             if not self._running:
                 return
+            if is_shutdown_requested():
+                return
 
             process = self._runner_process
             if process is None or process.returncode is not None:
                 reason = "runner_process_exited" if process is not None else "runner_process_missing"
                 restarted = await self._restart_runner(reason=reason)
                 if not restarted:
+                    if self._should_keep_health_loop_after_restart_failure():
+                        continue
                     return
                 continue
 
@@ -1553,14 +1648,39 @@ class PluginRunnerSupervisor:
                 if not health.healthy:
                     restarted = await self._restart_runner(reason="health_check_unhealthy")
                     if not restarted:
+                        if self._should_keep_health_loop_after_restart_failure():
+                            continue
                         return
             except asyncio.CancelledError:
                 return
             except (RPCError, Exception) as exc:
                 logger.warning(f"Runner 健康检查失败: {exc}")
+                await self._write_debug_event(
+                    "host_health_check_failed",
+                    {
+                        "reason": "health_check_failed",
+                        "error": str(exc),
+                        "pending_requests": self._rpc_server.get_pending_request_snapshot(),
+                    },
+                )
                 restarted = await self._restart_runner(reason="health_check_failed")
                 if not restarted:
+                    if self._should_keep_health_loop_after_restart_failure():
+                        continue
                     return
+
+    def _should_keep_health_loop_after_restart_failure(self) -> bool:
+        """判断重启失败后健康检查循环是否应继续等待下一次尝试。"""
+        if not self._running or is_shutdown_requested():
+            return False
+        if self._restart_count >= self._max_restart_attempts:
+            return False
+        logger.warning(
+            "Runner 本次重启未成功，将等待下一轮健康检查继续尝试: attempts=%s/%s",
+            self._restart_count,
+            self._max_restart_attempts,
+        )
+        return True
 
     async def _restart_runner(self, reason: str) -> bool:
         """在 Runner 异常时执行整进程级重启。
@@ -1573,6 +1693,9 @@ class PluginRunnerSupervisor:
         """
         if not self._running:
             return False
+        if is_shutdown_requested():
+            logger.info(f"已进入关停流程，跳过 Runner 自动重启: reason={reason}")
+            return False
 
         if self._restart_count >= self._max_restart_attempts:
             logger.error(f"Runner 自动重启次数已达上限，停止重启。reason={reason}")
@@ -1582,6 +1705,9 @@ class PluginRunnerSupervisor:
         logger.warning(f"准备重启 Runner，第 {self._restart_count} 次，reason={reason}")
 
         await self._shutdown_runner(reason=reason)
+        if is_shutdown_requested():
+            logger.info(f"关停流程已开始，取消 Runner 重启: reason={reason}")
+            return False
 
         try:
             await self._spawn_runner()

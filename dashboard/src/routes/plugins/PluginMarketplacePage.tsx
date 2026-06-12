@@ -43,17 +43,53 @@ import { getPluginType, PLUGIN_TYPE_OPTIONS } from './types'
 
 const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
 
-// 主导出组件：包装 RestartProvider
-export function PluginsPage() {
+const resolvePluginStats = (
+  plugin: PluginInfo,
+  statsSummary: Record<string, PluginStatsData>
+): PluginStatsData | undefined => {
+  const statsIds = [
+    plugin.manifest?.id,
+  ].filter((id): id is string => Boolean(id))
+
+  return statsIds.map(id => statsSummary[id]).find(Boolean)
+}
+
+const buildPluginStatsMap = (
+  pluginList: PluginInfo[],
+  statsSummary: Record<string, PluginStatsData>
+): Record<string, PluginStatsData> => {
+  const statsMap: Record<string, PluginStatsData> = {}
+
+  for (const plugin of pluginList) {
+    const stats = resolvePluginStats(plugin, statsSummary)
+    if (!stats) {
+      continue
+    }
+
+    const statsIds = [
+      plugin.manifest?.id,
+      stats.plugin_id,
+    ].filter((id): id is string => Boolean(id))
+
+    for (const statsId of statsIds) {
+      statsMap[statsId] = stats
+    }
+  }
+
+  return statsMap
+}
+
+// 插件市场页：只展示市场索引、安装状态和版本信息
+export function PluginMarketplacePage() {
   return (
     <RestartProvider>
-      <PluginsPageContent />
+      <PluginMarketplacePageContent />
     </RestartProvider>
   )
 }
 
 // 内部组件：实际内容
-function PluginsPageContent() {
+function PluginMarketplacePageContent() {
   const navigate = useNavigate()
   const [restartNoticeVisible, setRestartNoticeVisible] = useState(
     () => localStorage.getItem('plugins-restart-notice-dismissed') !== 'true'
@@ -87,59 +123,27 @@ function PluginsPageContent() {
     setRestartNoticeVisible(false)
   }
 
-  const resolvePluginStats = (
-    plugin: PluginInfo,
-    statsSummary: Record<string, PluginStatsData>
-  ): PluginStatsData | undefined => {
-    const statsIds = [
-      plugin.manifest?.id,
-    ].filter((id): id is string => Boolean(id))
-
-    return statsIds.map(id => statsSummary[id]).find(Boolean)
-  }
-
-  const buildPluginStatsMap = (
-    pluginList: PluginInfo[],
-    statsSummary: Record<string, PluginStatsData>
-  ): Record<string, PluginStatsData> => {
-    const statsMap: Record<string, PluginStatsData> = {}
-
-    for (const plugin of pluginList) {
-      const stats = resolvePluginStats(plugin, statsSummary)
-      if (!stats) {
-        continue
-      }
-
-      const statsIds = [
-        plugin.manifest?.id,
-        stats.plugin_id,
-      ].filter((id): id is string => Boolean(id))
-
-      for (const statsId of statsIds) {
-        statsMap[statsId] = stats
-      }
-    }
-
-    return statsMap
-  }
-
   const mergeInstalledPluginInfo = (
     marketPlugins: PluginInfo[],
     installed: InstalledPlugin[]
   ): PluginInfo[] => {
     const mergedData = marketPlugins.map(plugin => {
-      const isInstalled = checkPluginInstalled(plugin.id, installed)
-      const installedVersion = getInstalledPluginVersion(plugin.id, installed)
+      const installedPlugin = installed.find(item => item.id === plugin.id || item.manifest?.id === plugin.id)
+      const isInstalled = Boolean(installedPlugin) || checkPluginInstalled(plugin.id, installed)
+      const installedVersion = installedPlugin?.manifest?.version ?? getInstalledPluginVersion(plugin.id, installed)
 
       return {
         ...plugin,
         installed: isInstalled,
-        installed_version: installedVersion
+        installed_version: installedVersion,
       }
     })
 
     for (const installedPlugin of installed) {
-      const existsInMarket = mergedData.some(p => p.id === installedPlugin.id)
+      const installedManifestId = installedPlugin.manifest?.id
+      const existsInMarket = mergedData.some(
+        p => p.id === installedPlugin.id || p.id === installedManifestId || p.manifest?.id === installedPlugin.id
+      )
       if (!existsInMarket && installedPlugin.manifest) {
         const urls = installedPlugin.manifest.urls as PluginInfo['manifest']['urls'] | undefined
         // 添加本地安装但不在市场的插件

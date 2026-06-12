@@ -221,7 +221,12 @@ class WebSocketLogHandler(logging.Handler):
         try:
             from src.webui.logs_ws import broadcast_log
 
-            task = target_loop.create_task(broadcast_log(log_data))
+            broadcast_coro = broadcast_log(log_data)
+            try:
+                task = target_loop.create_task(broadcast_coro)
+            except Exception:
+                broadcast_coro.close()
+                raise
             task.add_done_callback(self._consume_broadcast_result)
         except RuntimeError:
             pass

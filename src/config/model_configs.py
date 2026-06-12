@@ -406,7 +406,7 @@ class TaskConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """慢请求阈值（秒），超过此值会输出警告日志"""
+    """超时警告时间（秒），超过此时间会输出警告日志"""
 
     selection_strategy: str = Field(
         default="balance",

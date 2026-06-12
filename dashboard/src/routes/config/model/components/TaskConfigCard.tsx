@@ -73,7 +73,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
   return (
     <div
       className={cn(
-        'space-y-3 py-3 sm:py-4',
+        'space-y-3 pb-5 pt-3 sm:pb-6 sm:pt-4',
         advanced && 'bg-amber-50/30 px-2 dark:bg-amber-500/10',
       )}
     >
@@ -165,14 +165,14 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
         {showAdvancedSettings && (
           <div className="flex min-w-0 items-center gap-3 rounded-md border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
             <div className="flex shrink-0 items-center gap-1.5">
-              <Label>慢请求阈值 (秒)</Label>
+              <Label>超时警告时间 (秒)</Label>
               <TooltipProvider delayDuration={150}>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Info className="h-3.5 w-3.5 cursor-help text-muted-foreground" />
                   </TooltipTrigger>
                   <TooltipContent side="top" align="start" className="max-w-64">
-                    模型响应时间超过此阈值将输出警告日志
+                    模型响应时间超过此时间将输出警告日志
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>

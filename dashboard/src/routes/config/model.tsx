@@ -1422,7 +1422,7 @@ function ModelConfigPageContent() {
           </div>
 
           {taskConfig && taskConfigSchema && (
-            <div className="divide-y">
+            <div className="divide-y-2">
               {taskConfigSchema.fields
                 .filter(f => f.type === 'object' && (advancedTaskSettingsVisible || !f.advanced))
                 .map((field, index) => {

@@ -31,6 +31,7 @@ import inspect
 import tomlkit
 
 from src.common.logger import get_logger
+from src.common.shutdown import is_shutdown_requested
 from src.config.config import config_manager
 from src.config.file_watcher import FileChange, FileWatcher
 from src.platform_io import DeliveryBatch, InboundMessageEnvelope, get_platform_io_manager
@@ -556,6 +557,8 @@ class PluginRuntimeManager(
         if self._config_reload_callback_registered:
             config_manager.unregister_reload_callback(self._config_reload_callback)
             self._config_reload_callback_registered = False
+        if is_shutdown_requested():
+            await self._hook_dispatcher.stop()
 
         coroutines: List[Coroutine[Any, Any, None]] = []
         if self._builtin_supervisor:
@@ -709,6 +712,19 @@ class PluginRuntimeManager(
         for supervisor in self.supervisors:
             statuses.update(supervisor.get_plugin_load_statuses())
         return statuses
+
+    def get_plugin_circuit_statuses(self) -> Dict[str, Dict[str, Any]]:
+        """返回当前插件熔断状态。"""
+
+        from src.plugin_runtime.host.circuit_breaker import get_plugin_circuit_breaker
+
+        return get_plugin_circuit_breaker().get_plugin_statuses()
+
+    @property
+    def is_loading(self) -> bool:
+        """返回插件运行时是否仍有 Supervisor 处于加载阶段。"""
+
+        return any(bool(getattr(supervisor, "is_loading", False)) for supervisor in self.supervisors)
 
     def _build_external_available_plugins_for_supervisor(self, target_supervisor: "PluginSupervisor") -> Dict[str, str]:
         """收集某个 Supervisor 可用的外部插件版本映射。"""
