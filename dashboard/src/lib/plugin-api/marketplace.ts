@@ -1,7 +1,6 @@
-import type { ApiResponse } from '@/types/api'
 import type { PluginInfo, PluginType } from '@/types/plugin'
 
-import { ApiError, backendApi, toApiResponse } from '@/lib/http'
+import { ApiError, backendApi } from '@/lib/http'
 import { pluginProgressClient } from '@/lib/plugin-progress-client'
 import type { GitStatus, MaimaiVersion } from './types'
 
@@ -30,8 +29,8 @@ const PLUGIN_TYPES = new Set<PluginType>([
   'other',
 ])
 
-let pluginListCache: { timestamp: number; result: ApiResponse<PluginInfo[]> } | null = null
-let pluginListRequest: Promise<ApiResponse<PluginInfo[]>> | null = null
+let pluginListCache: { timestamp: number; result: PluginInfo[] } | null = null
+let pluginListRequest: Promise<PluginInfo[]> | null = null
 
 interface PluginListStorageCache {
   timestamp: number
@@ -204,8 +203,8 @@ function writePluginListStorageCache(data: PluginInfo[]): void {
 }
 
 export function getCachedPluginList(): PluginInfo[] | null {
-  if (pluginListCache?.result.success) {
-    return pluginListCache.result.data
+  if (pluginListCache) {
+    return pluginListCache.result
   }
 
   const storedCache = readPluginListStorageCache()
@@ -213,38 +212,36 @@ export function getCachedPluginList(): PluginInfo[] | null {
     return null
   }
 
-  const result: ApiResponse<PluginInfo[]> = { success: true, data: storedCache.data }
-  pluginListCache = { timestamp: storedCache.timestamp, result }
+  pluginListCache = { timestamp: storedCache.timestamp, result: storedCache.data }
   return storedCache.data
 }
 
 /**
  * 从远程获取插件列表(通过后端代理避免 CORS)
  */
-async function fetchPluginListUncached(): Promise<ApiResponse<PluginInfo[]>> {
-  return toApiResponse(async () => {
-    const result = await backendApi.post<{ success: boolean; data: string; error?: string }>(
-      '/api/webui/plugins/fetch-raw',
-      {
-        body: {
-          owner: PLUGIN_REPO_OWNER,
-          repo: PLUGIN_REPO_NAME,
-          branch: PLUGIN_REPO_BRANCH,
-          file_path: PLUGIN_DETAILS_FILE
-        },
-        errorMessage: '获取插件列表失败',
-      }
-    )
-
-    // 业务级失败：该 endpoint 的错误字段是 error 而非 message，不走 requireSuccess
-    if (!result.success || !result.data) {
-      throw new ApiError(result.error || '获取插件列表失败', { detail: result })
+async function fetchPluginListUncached(): Promise<PluginInfo[]> {
+  const result = await backendApi.post<{ success: boolean; data: string; error?: string }>(
+    '/api/webui/plugins/fetch-raw',
+    {
+      body: {
+        owner: PLUGIN_REPO_OWNER,
+        repo: PLUGIN_REPO_NAME,
+        branch: PLUGIN_REPO_BRANCH,
+        file_path: PLUGIN_DETAILS_FILE
+      },
+      errorMessage: '获取插件列表失败',
     }
+  )
 
-    const data: PluginApiResponse[] = JSON.parse(result.data)
+  // 业务级失败：该 endpoint 的错误字段是 error 而非 message，不走 requireSuccess
+  if (!result.success || !result.data) {
+    throw new ApiError(result.error || '获取插件列表失败', { detail: result })
+  }
 
-    const pluginList = data
-      .filter(item => {
+  const data: PluginApiResponse[] = JSON.parse(result.data)
+
+  const pluginList = data
+    .filter(item => {
         if (!item?.manifest) {
           console.warn('跳过无效插件数据:', item)
           return false
@@ -282,11 +279,10 @@ async function fetchPluginListUncached(): Promise<ApiResponse<PluginInfo[]>> {
         }
       })
 
-    return pluginList
-  })
+  return pluginList
 }
 
-export async function fetchPluginList(options: { forceRefresh?: boolean } = {}): Promise<ApiResponse<PluginInfo[]>> {
+export async function fetchPluginList(options: { forceRefresh?: boolean } = {}): Promise<PluginInfo[]> {
   if (
     !options.forceRefresh
     && pluginListCache
@@ -298,19 +294,17 @@ export async function fetchPluginList(options: { forceRefresh?: boolean } = {}):
   if (!options.forceRefresh && !pluginListCache) {
     const storedCache = readPluginListStorageCache()
     if (storedCache && Date.now() - storedCache.timestamp < PLUGIN_LIST_CACHE_TTL) {
-      const result: ApiResponse<PluginInfo[]> = { success: true, data: storedCache.data }
-      pluginListCache = { timestamp: storedCache.timestamp, result }
-      return result
+      pluginListCache = { timestamp: storedCache.timestamp, result: storedCache.data }
+      return storedCache.data
     }
   }
 
   if (!pluginListRequest || options.forceRefresh) {
+    // 仅在成功（fetchPluginListUncached 未抛错）时写入内存/本地缓存
     pluginListRequest = fetchPluginListUncached()
       .then((result) => {
-        if (result.success) {
-          pluginListCache = { timestamp: Date.now(), result }
-          writePluginListStorageCache(result.data)
-        }
+        pluginListCache = { timestamp: Date.now(), result }
+        writePluginListStorageCache(result)
         return result
       })
       .finally(() => {
@@ -324,21 +318,17 @@ export async function fetchPluginList(options: { forceRefresh?: boolean } = {}):
 /**
  * 检查本机 Git 安装状态
  */
-export async function checkGitStatus(): Promise<ApiResponse<GitStatus>> {
+export async function checkGitStatus(): Promise<GitStatus> {
   try {
-    const data = await backendApi.get<GitStatus>('/api/webui/plugins/git-status', {
+    return await backendApi.get<GitStatus>('/api/webui/plugins/git-status', {
       errorMessage: '无法检测 Git 安装状态',
     })
-    return { success: true, data }
   } catch (error) {
     // 保持原有行为：HTTP 错误 / 响应解析失败时按“无法检测”处理；网络层失败与认证失效（401）仍向上抛出
     if (error instanceof ApiError && error.status !== undefined && error.status !== 401) {
       return {
-        success: true,
-        data: {
-          installed: false,
-          error: '无法检测 Git 安装状态'
-        }
+        installed: false,
+        error: '无法检测 Git 安装状态'
       }
     }
     throw error
@@ -348,23 +338,19 @@ export async function checkGitStatus(): Promise<ApiResponse<GitStatus>> {
 /**
  * 获取麦麦版本信息
  */
-export async function getMaimaiVersion(): Promise<ApiResponse<MaimaiVersion>> {
+export async function getMaimaiVersion(): Promise<MaimaiVersion> {
   try {
-    const data = await backendApi.get<MaimaiVersion>('/api/webui/plugins/version', {
+    return await backendApi.get<MaimaiVersion>('/api/webui/plugins/version', {
       errorMessage: '获取麦麦版本信息失败',
     })
-    return { success: true, data }
   } catch (error) {
     // 保持原有行为：HTTP 错误 / 响应解析失败时回退为 0.0.0；网络层失败与认证失效（401）仍向上抛出
     if (error instanceof ApiError && error.status !== undefined && error.status !== 401) {
       return {
-        success: true,
-        data: {
-          version: '0.0.0',
-          version_major: 0,
-          version_minor: 0,
-          version_patch: 0
-        }
+        version: '0.0.0',
+        version_major: 0,
+        version_minor: 0,
+        version_patch: 0
       }
     }
     throw error

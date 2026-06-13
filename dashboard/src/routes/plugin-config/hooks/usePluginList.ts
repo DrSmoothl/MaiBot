@@ -95,18 +95,10 @@ export function usePluginList() {
   const loadPlugins = async () => {
     setLoading(true)
     try {
-      const installedResult = await getInstalledPlugins()
-      if (!installedResult.success) {
-        toast({
-          title: '加载插件列表失败',
-          description: installedResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
-      setPlugins(installedResult.data)
+      const installed = await getInstalledPlugins()
+      setPlugins(installed)
       if (!selectedPlugin && initialTarget.pluginId) {
-        const targetPlugin = installedResult.data.find((plugin) => plugin.id === initialTarget.pluginId)
+        const targetPlugin = installed.find((plugin) => plugin.id === initialTarget.pluginId)
         if (targetPlugin) {
           openPluginConfig(targetPlugin, initialTarget.tabId)
         }
@@ -125,15 +117,9 @@ export function usePluginList() {
   const checkPluginUpdates = async () => {
     setCheckingUpdates(true)
     try {
-      const marketResult = await fetchPluginList()
-      if (!marketResult.success) {
-        console.warn('加载插件市场版本信息失败:', marketResult.error)
-        setMarketPluginsById({})
-        return
-      }
-
+      const marketPlugins = await fetchPluginList()
       const nextMarketPluginsById: Record<string, PluginInfo> = {}
-      for (const marketPlugin of marketResult.data) {
+      for (const marketPlugin of marketPlugins) {
         nextMarketPluginsById[marketPlugin.id] = marketPlugin
         if (marketPlugin.manifest.id) {
           nextMarketPluginsById[marketPlugin.manifest.id] = marketPlugin
@@ -330,18 +316,9 @@ export function usePluginList() {
     setActingPluginId(plugin.id)
     try {
       const toggleResult = await togglePlugin(plugin.id)
-      if (!toggleResult.success) {
-        toast({
-          title: '切换插件状态失败',
-          description: toggleResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
-
       toast({
-        title: toggleResult.data.enabled ? '插件已启动' : '插件已关闭',
-        description: toggleResult.data.message || `${plugin.manifest.name} 状态已更新`
+        title: toggleResult.enabled ? '插件已启动' : '插件已关闭',
+        description: toggleResult.message || `${plugin.manifest.name} 状态已更新`
       })
       await loadPlugins()
     } catch (error) {

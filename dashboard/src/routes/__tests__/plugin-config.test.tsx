@@ -73,17 +73,16 @@ function makePlugin(id: string, name: string) {
 }
 
 beforeEach(() => {
-  vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue({ success: true, data: [makePlugin('test.emoji', 'Emoji Plugin')] } as never)
-  vi.mocked(pluginApi.fetchPluginList).mockResolvedValue({ success: true, data: [] } as never)
+  vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([makePlugin('test.emoji', 'Emoji Plugin')] as never)
+  vi.mocked(pluginApi.fetchPluginList).mockResolvedValue([] as never)
   vi.mocked(pluginApi.getPluginConfigSchema).mockResolvedValue({
-    success: true,
-    data: { plugin_info: { name: 'Emoji Plugin', version: '1.0.0', description: 'desc' }, sections: {}, layout: { type: 'auto' } },
+    plugin_info: { name: 'Emoji Plugin', version: '1.0.0', description: 'desc' }, sections: {}, layout: { type: 'auto' },
   } as never)
-  vi.mocked(pluginApi.getPluginConfig).mockResolvedValue({ success: true, data: {} } as never)
-  vi.mocked(pluginApi.getPluginConfigRaw).mockResolvedValue({ success: true, data: 'key = "value"\n' } as never)
-  vi.mocked(pluginApi.updatePluginConfigRaw).mockResolvedValue({ success: true, data: {} } as never)
-  vi.mocked(pluginApi.updatePluginConfig).mockResolvedValue({ success: true, data: {} } as never)
-  vi.mocked(pluginApi.togglePlugin).mockResolvedValue({ success: true, data: { enabled: false, message: '已禁用插件' } } as never)
+  vi.mocked(pluginApi.getPluginConfig).mockResolvedValue({} as never)
+  vi.mocked(pluginApi.getPluginConfigRaw).mockResolvedValue('key = "value"\n' as never)
+  vi.mocked(pluginApi.updatePluginConfigRaw).mockResolvedValue({ success: true, message: 'ok' } as never)
+  vi.mocked(pluginApi.updatePluginConfig).mockResolvedValue({ success: true, message: 'ok' } as never)
+  vi.mocked(pluginApi.togglePlugin).mockResolvedValue({ success: true, enabled: false, message: '已禁用插件' } as never)
 })
 
 describe('PluginConfigPage 特征化', () => {
@@ -94,7 +93,7 @@ describe('PluginConfigPage 特征化', () => {
   })
 
   it('无插件时显示空态提示', async () => {
-    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue({ success: true, data: [] } as never)
+    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([] as never)
     render(<PluginConfigPage />)
     await waitFor(() => expect(screen.getByText('暂无已安装的插件')).toBeInTheDocument())
   })

@@ -28,20 +28,21 @@ export function useFeatureStatus() {
 
   const fetchFeatureStatus = useCallback(async () => {
     try {
-      const [botConfigResult, modelConfigResult] = await Promise.all([
+      // 用 allSettled：模型配置可独立失败而不影响主配置（保留原 modelConfigResult.success 容错）
+      const [botConfigResult, modelConfigResult] = await Promise.allSettled([
         getBotConfigCached(),
         getModelConfigCached(),
       ])
 
-      if (!isMountedRef.current || !botConfigResult.success) return
+      if (!isMountedRef.current || botConfigResult.status !== 'fulfilled') return
 
-      const botPayload = botConfigResult.data as { config?: Record<string, unknown> } & Record<string, unknown>
+      const botPayload = botConfigResult.value as { config?: Record<string, unknown> } & Record<string, unknown>
       const botConfig = (botPayload.config ?? botPayload) as Record<string, unknown>
       const memorixConfig = (botConfig.a_memorix ?? {}) as Record<string, unknown>
       const memorixPlugin = (memorixConfig.plugin ?? {}) as Record<string, unknown>
 
-      const modelPayload = modelConfigResult.success
-        ? (modelConfigResult.data as { config?: Record<string, unknown> } & Record<string, unknown>)
+      const modelPayload = modelConfigResult.status === 'fulfilled'
+        ? (modelConfigResult.value as { config?: Record<string, unknown> } & Record<string, unknown>)
         : {}
       const modelConfig = (modelPayload.config ?? modelPayload) as Record<string, unknown>
       const taskConfig = (modelConfig.model_task_config ?? {}) as Record<string, unknown>

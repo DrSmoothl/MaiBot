@@ -121,13 +121,15 @@ async function loadPluginTabShortcuts(
   t: TFunction,
   selectedTabIds?: Set<string>
 ): Promise<QuickShortcutDefinition[]> {
-  const schemaResult = await getPluginConfigSchema(plugin.id)
-  if (!schemaResult.success || !schemaResult.data) {
+  // 单个插件 schema 拉取失败不应中断整体快捷入口加载，按空处理
+  let schema: PluginConfigSchema
+  try {
+    schema = await getPluginConfigSchema(plugin.id)
+  } catch {
     return []
   }
 
   const pluginName = plugin.manifest.name || plugin.id
-  const schema = schemaResult.data as PluginConfigSchema
   const schemaTabs = schema.layout.type === 'tabs' ? schema.layout.tabs : []
   const tabs = selectedTabIds ? schemaTabs.filter((tab) => selectedTabIds.has(tab.id)) : schemaTabs
   return tabs.map((tab) => ({
@@ -223,12 +225,12 @@ export function useQuickShortcuts({
 
       setIsPluginShortcutsLoading(true)
       try {
-        const installedResult = await getInstalledPlugins()
-        if (!installedResult.success || cancelled) {
+        const installed = await getInstalledPlugins()
+        if (cancelled) {
           return
         }
 
-        const enabledPlugins = installedResult.data
+        const enabledPlugins = installed
           .filter((plugin) => plugin.disabled !== true && plugin.enabled !== false)
           .filter((plugin, index, all) => index === all.findIndex((item) => item.id === plugin.id))
 

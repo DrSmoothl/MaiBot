@@ -23,8 +23,8 @@ export function useReviewStats() {
   const fetchReviewStats = useCallback(async () => {
     try {
       const result = await getReviewStats()
-      if (result.success && isMountedRef.current) {
-        setUncheckedCount(result.data.unchecked)
+      if (isMountedRef.current) {
+        setUncheckedCount(result.unchecked)
       }
     } catch (error) {
       console.error('获取审核统计失败:', error)

@@ -123,26 +123,7 @@ export function usePluginLifecycle(options: UsePluginLifecycleOptions) {
       loaded_plugins: 0,
     })
     try {
-      const updateResult = await updatePlugin(updatingPlugin.id, repositoryUrl, 'main')
-      if (!updateResult.success) {
-        setUpdateProgress({
-          operation: 'update',
-          stage: 'error',
-          progress: 0,
-          message: updateResult.error || '更新插件失败',
-          error: updateResult.error || '更新插件失败',
-          plugin_id: updatingPlugin.id,
-          total_plugins: 1,
-          loaded_plugins: 0,
-        })
-        toast({
-          title: '更新插件失败',
-          description: updateResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
-
+      await updatePlugin(updatingPlugin.id, repositoryUrl, 'main')
       toast({
         title: '更新插件成功',
         description: `${updatingPlugin.manifest.name} 已完成更新/升级`
@@ -210,26 +191,7 @@ export function usePluginLifecycle(options: UsePluginLifecycleOptions) {
       loaded_plugins: 0,
     })
     try {
-      const uninstallResult = await uninstallPlugin(deletingPlugin.id)
-      if (!uninstallResult.success) {
-        setDeleteProgress({
-          operation: 'uninstall',
-          stage: 'error',
-          progress: 0,
-          message: uninstallResult.error || '删除插件失败',
-          error: uninstallResult.error || '删除插件失败',
-          plugin_id: deletingPlugin.id,
-          total_plugins: 1,
-          loaded_plugins: 0,
-        })
-        toast({
-          title: '删除插件失败',
-          description: uninstallResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
-
+      await uninstallPlugin(deletingPlugin.id)
       toast({
         title: '删除插件成功',
         description: `${deletingPlugin.manifest.name} 已删除`

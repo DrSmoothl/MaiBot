@@ -30,7 +30,6 @@ import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
 import { getBotConfig, getBotConfigSchema, updateBotConfigSection } from '@/lib/config-api'
 import { fieldHooks } from '@/lib/field-hooks'
-import { unwrapApiResponse } from '@/lib/http'
 import { generateId } from '@/lib/id'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import type { ConfigSchema } from '@/types/config-schema'
@@ -471,16 +470,16 @@ function MCPSettingsPageContent() {
     }
   }, [])
 
-  // config + schema 并行加载；config-api 仍返回 ApiResponse，用 unwrapApiResponse 桥接为 throw 契约
+  // config + schema 并行加载（config-api 已是 throw 契约）
   const [configQuery, schemaQuery] = useQueries({
     queries: [
       {
         queryKey: ['mcp-settings', 'config'],
-        queryFn: () => getBotConfig().then(unwrapApiResponse),
+        queryFn: () => getBotConfig(),
       },
       {
         queryKey: ['mcp-settings', 'schema'],
-        queryFn: () => getBotConfigSchema().then(unwrapApiResponse),
+        queryFn: () => getBotConfigSchema(),
       },
     ],
   })
@@ -519,7 +518,7 @@ function MCPSettingsPageContent() {
           return rest
         })
       }
-      return updateBotConfigSection('mcp', configToSave).then(unwrapApiResponse)
+      return updateBotConfigSection('mcp', configToSave)
     },
     meta: { errorTitle: '保存失败' },
     onSuccess: () => {

@@ -96,24 +96,26 @@ export function useExpressionImportExport({
         return
       }
 
-      const result = await exportExpressions({
-        chat_id: chatId,
-        ids: onlySelected ? Array.from(selectedIds) : undefined,
-      })
-      if (!result.success) {
+      let result
+      try {
+        result = await exportExpressions({
+          chat_id: chatId,
+          ids: onlySelected ? Array.from(selectedIds) : undefined,
+        })
+      } catch (error) {
         toast({
           title: '导出失败',
-          description: result.error,
+          description: error instanceof Error ? error.message : '导出表达方式失败',
           variant: 'destructive',
         })
         return
       }
 
       const filename = `expressions-${sanitizeFilename(currentChat.chat_name)}-${onlySelected ? 'selected' : 'all'}.json`
-      downloadJson(filename, result.data)
+      downloadJson(filename, result)
       toast({
         title: '导出成功',
-        description: `已导出 ${result.data.count} 个表达方式`,
+        description: `已导出 ${result.count} 个表达方式`,
       })
     },
     [currentChat, downloadJson, getImportExportChatId, sanitizeFilename, selectedIds, toast]
@@ -157,18 +159,9 @@ export function useExpressionImportExport({
           chat_id: chatId,
           expressions: expressionsToImport,
         })
-        if (!result.success) {
-          toast({
-            title: '导入失败',
-            description: result.error,
-            variant: 'destructive',
-          })
-          return
-        }
-
         toast({
           title: '导入成功',
-          description: `成功 ${result.data.imported_count} 个，跳过 ${result.data.skipped_count} 个，失败 ${result.data.failed_count} 个`,
+          description: `成功 ${result.imported_count} 个，跳过 ${result.skipped_count} 个，失败 ${result.failed_count} 个`,
         })
         onChanged()
       } catch (error) {
@@ -186,11 +179,13 @@ export function useExpressionImportExport({
     const chatId = getImportExportChatId()
     if (!chatId) return
 
-    const result = await clearExpressions({ chat_id: chatId })
-    if (!result.success) {
+    let result
+    try {
+      result = await clearExpressions({ chat_id: chatId })
+    } catch (error) {
       toast({
         title: '清除失败',
-        description: result.error,
+        description: error instanceof Error ? error.message : '清除表达方式失败',
         variant: 'destructive',
       })
       return
@@ -198,7 +193,7 @@ export function useExpressionImportExport({
 
     toast({
       title: '清除成功',
-      description: result.data.message,
+      description: result.message,
     })
     onClearSelection()
     onCloseClearConfirm()

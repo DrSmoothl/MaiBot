@@ -191,17 +191,18 @@ export function useModelConfig() {
   const loadConfig = useCallback(async () => {
     try {
       setLoading(true)
-      const [result, schemaResult] = await Promise.all([getModelConfigCached(), getModelConfigSchema()])
-      if (!result.success) {
+      // 用 allSettled：模型配置为必需，schema 为可选，二者失败互不影响
+      const [result, schemaResult] = await Promise.allSettled([getModelConfigCached(), getModelConfigSchema()])
+      if (result.status !== 'fulfilled') {
         toast({
           title: '加载失败',
-          description: result.error,
+          description: result.reason instanceof Error ? result.reason.message : '加载模型配置失败',
           variant: 'destructive',
         })
         setLoading(false)
         return
       }
-      const config = unwrapModelConfig(result.data)
+      const config = unwrapModelConfig(result.value)
       const modelList = (config.models as ModelInfo[]) || []
       setModels(modelList)
       setModelNames(modelList.map((m) => m.name))
@@ -218,8 +219,8 @@ export function useModelConfig() {
 
       // 解析 model_task_config 的 schema
       let nextTaskConfigSchema: ConfigSchema | null = null
-      if (schemaResult.success && schemaResult.data) {
-        const schema = (schemaResult.data as unknown as Record<string, unknown>).schema as ConfigSchema
+      if (schemaResult.status === 'fulfilled' && schemaResult.value) {
+        const schema = (schemaResult.value as unknown as Record<string, unknown>).schema as ConfigSchema
         nextTaskConfigSchema = schema.nested?.model_task_config ?? null
         taskConfigSchemaRef.current = nextTaskConfigSchema
         setTaskConfigSchema(nextTaskConfigSchema)
@@ -356,23 +357,13 @@ export function useModelConfig() {
     const { models: nextModels, taskConfig: nextTaskConfig } = removeModelsForProviders(models, taskConfig, affectedModels)
 
     if (context === 'auto' && affectedModels.length === 0) {
-      const result = await updateModelConfigSection('api_providers', cleanedProviders)
-      if (!result.success) {
-        throw new Error(result.error || '保存提供商失败')
-      }
+      await updateModelConfigSection('api_providers', cleanedProviders)
     } else {
-      const resultGet = await getModelConfig()
-      if (!resultGet.success) {
-        throw new Error(resultGet.error || '加载模型配置失败')
-      }
-      const config = unwrapModelConfig(resultGet.data)
+      const config = unwrapModelConfig(await getModelConfig())
       config.api_providers = cleanedProviders
       config.models = nextModels.map(cleanModelForSave)
       config.model_task_config = nextTaskConfig
-      const resultUpdate = await updateModelConfig(config)
-      if (!resultUpdate.success) {
-        throw new Error(resultUpdate.error || '保存模型配置失败')
-      }
+      await updateModelConfig(config)
     }
 
     syncProviderState(cleanedProviders)
@@ -469,31 +460,12 @@ export function useModelConfig() {
         clearTimeout(providerAutoSaveTimerRef.current)
       }
 
-      const resultGet = await getModelConfig()
-      if (!resultGet.success) {
-        toast({
-          title: '保存失败',
-          description: resultGet.error,
-          variant: 'destructive',
-        })
-        setSaving(false)
-        return
-      }
-      const config = unwrapModelConfig(resultGet.data)
+      const config = unwrapModelConfig(await getModelConfig())
       // 清理每个模型中的 null 值
       config.api_providers = apiProviders.map(cleanProviderData)
       config.models = models.map(cleanModelForSave)
       config.model_task_config = taskConfig
-      const resultUpdate = await updateModelConfig(config)
-      if (!resultUpdate.success) {
-        toast({
-          title: '保存失败',
-          description: resultUpdate.error,
-          variant: 'destructive',
-        })
-        setSaving(false)
-        return
-      }
+      await updateModelConfig(config)
       resetSnapshots(config.models as ModelInfo[], taskConfig)
       providersSnapshotRef.current = JSON.stringify(config.api_providers)
       setHasUnsavedChanges(false)
@@ -830,16 +802,7 @@ export function useModelConfig() {
   const handleTestProviderConnection = useCallback(async (providerName: string) => {
     setTestingProviders((prev) => new Set(prev).add(providerName))
     try {
-      const result = await testProviderConnection(providerName)
-      if (!result.success) {
-        toast({
-          title: '测试失败',
-          description: result.error,
-          variant: 'destructive',
-        })
-        return
-      }
-      const testResult = result.data
+      const testResult = await testProviderConnection(providerName)
       setTestResults((prev) => new Map(prev).set(providerName, testResult))
       if (testResult.network_ok && testResult.api_key_valid !== false) {
         toast({

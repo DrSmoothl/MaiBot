@@ -70,44 +70,17 @@ export function usePluginConfigEditor(options: UsePluginConfigEditorOptions) {
   const loadConfig = useCallback(async () => {
     setLoading(true)
     try {
-      const [schemaResult, configResult, rawResult] = await Promise.all([
+      const [schemaData, configData, rawData] = await Promise.all([
         getPluginConfigSchema(plugin.id),
         getPluginConfig(plugin.id),
         getPluginConfigRaw(plugin.id)
       ])
 
-      if (!schemaResult.success) {
-        toast({
-          title: '加载配置架构失败',
-          description: schemaResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
-
-      if (!configResult.success) {
-        toast({
-          title: '加载配置数据失败',
-          description: configResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
-
-      if (!rawResult.success) {
-        toast({
-          title: '加载原始配置失败',
-          description: rawResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
-
-      setSchema(schemaResult.data)
-      setConfig(configResult.data)
-      setOriginalConfig(JSON.parse(JSON.stringify(configResult.data)))
-      setSourceCode(rawResult.data)
-      setOriginalSourceCode(rawResult.data)
+      setSchema(schemaData)
+      setConfig(configData)
+      setOriginalConfig(JSON.parse(JSON.stringify(configData)))
+      setSourceCode(rawData)
+      setOriginalSourceCode(rawData)
     } catch (error) {
       toast({
         title: '加载配置失败',
@@ -220,15 +193,7 @@ export function usePluginConfigEditor(options: UsePluginConfigEditorOptions) {
   // 重置配置
   const handleReset = useCallback(async () => {
     try {
-      const resetResult = await resetPluginConfig(plugin.id)
-      if (!resetResult.success) {
-        toast({
-          title: '重置失败',
-          description: resetResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
+      await resetPluginConfig(plugin.id)
       toast({
         title: '配置已重置',
         description: '下次加载插件时将使用默认配置'
@@ -248,17 +213,9 @@ export function usePluginConfigEditor(options: UsePluginConfigEditorOptions) {
   const handleToggle = useCallback(async () => {
     try {
       const toggleResult = await togglePlugin(plugin.id)
-      if (!toggleResult.success) {
-        toast({
-          title: '切换失败',
-          description: toggleResult.error,
-          variant: 'destructive'
-        })
-        return
-      }
       toast({
-        title: toggleResult.data.message,
-        description: toggleResult.data.note
+        title: toggleResult.message,
+        description: toggleResult.note
       })
       loadConfig()
     } catch (error) {

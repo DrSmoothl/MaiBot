@@ -70,11 +70,11 @@ beforeEach(() => {
     if (path.includes('/statistics/dashboard')) return Promise.resolve(dashboardData) as never
     return Promise.resolve({}) as never
   })
-  vi.mocked(configApi.getBotConfigCached).mockResolvedValue({ success: true, data: {} } as never)
-  vi.mocked(configApi.getModelConfigCached).mockResolvedValue({ success: true, data: {} } as never)
-  vi.mocked(expressionApi.getReviewStats).mockResolvedValue({ success: true, data: { unchecked: 3, passed: 10 } } as never)
+  vi.mocked(configApi.getBotConfigCached).mockResolvedValue({} as never)
+  vi.mocked(configApi.getModelConfigCached).mockResolvedValue({} as never)
+  vi.mocked(expressionApi.getReviewStats).mockResolvedValue({ unchecked: 3, passed: 10 } as never)
   vi.mocked(systemApi.getLocalCacheStats).mockResolvedValue({ directories: [], database: { total_size: 0, files: [], tables: [] } } as never)
-  vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue({ success: true, data: [] } as never)
+  vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([] as never)
   // 一言 + GitHub 版本走原生 fetch
   vi.stubGlobal('fetch', vi.fn((url: string) => {
     if (typeof url === 'string' && url.includes('github')) {

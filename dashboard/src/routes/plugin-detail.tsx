@@ -24,7 +24,7 @@ import {
   Info,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { backendApi, unwrapApiResponse } from '@/lib/http'
+import { backendApi } from '@/lib/http'
 import type { PluginInfo } from '@/types/plugin'
 import {
   checkGitStatus,
@@ -61,7 +61,7 @@ export function PluginDetailPage() {
     queryKey: ['plugin-detail', pluginId],
     enabled: !!pluginId,
     queryFn: async () => {
-      const list = await fetchPluginList().then(unwrapApiResponse)
+      const list = await fetchPluginList()
       const foundPlugin = list.find((p) => p.id === pluginId || p.marketplace_id === pluginId)
       if (!foundPlugin) {
         throw new Error('未找到该插件')
@@ -84,15 +84,15 @@ export function PluginDetailPage() {
     queries: [
       {
         queryKey: ['plugin-git-status'],
-        queryFn: () => checkGitStatus().then(unwrapApiResponse),
+        queryFn: () => checkGitStatus(),
       },
       {
         queryKey: ['plugin-maimai-version'],
-        queryFn: () => getMaimaiVersion().then(unwrapApiResponse),
+        queryFn: () => getMaimaiVersion(),
       },
       {
         queryKey: ['plugin-installed-list'],
-        queryFn: () => getInstalledPlugins({ forceRefresh: true }).then(unwrapApiResponse),
+        queryFn: () => getInstalledPlugins({ forceRefresh: true }),
       },
     ],
   })
@@ -199,7 +199,7 @@ export function PluginDetailPage() {
     mutationFn: (vars: { plugin: PluginInfo }) => {
       const repositoryUrl =
         vars.plugin.manifest.repository_url || vars.plugin.manifest.urls?.repository || ''
-      return installPlugin(vars.plugin.id, repositoryUrl, 'main').then(unwrapApiResponse)
+      return installPlugin(vars.plugin.id, repositoryUrl, 'main')
     },
     meta: { errorTitle: '安装失败' },
     onSuccess: (_data, vars) => {
@@ -223,7 +223,7 @@ export function PluginDetailPage() {
   // 卸载插件（失败由全局 mutation 错误 toast 呈现）
   const uninstallMutation = useMutation({
     mutationFn: (vars: { plugin: PluginInfo }) =>
-      uninstallPlugin(vars.plugin.id).then(unwrapApiResponse),
+      uninstallPlugin(vars.plugin.id),
     meta: { errorTitle: '卸载失败' },
     onSuccess: (_data, vars) => {
       toast({
@@ -241,7 +241,7 @@ export function PluginDetailPage() {
     mutationFn: (vars: { plugin: PluginInfo }) => {
       const repositoryUrl =
         vars.plugin.manifest.repository_url || vars.plugin.manifest.urls?.repository || ''
-      return updatePlugin(vars.plugin.id, repositoryUrl, 'main').then(unwrapApiResponse)
+      return updatePlugin(vars.plugin.id, repositoryUrl, 'main')
     },
     meta: { errorTitle: '更新失败' },
     onSuccess: (data, vars) => {
