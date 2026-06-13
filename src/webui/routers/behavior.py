@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import col, func, select
 
+from src.common.data_models.llm_service_data_models import LLMGenerationOptions
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
     BehaviorAction,
@@ -20,15 +21,23 @@ from src.common.database.database_model import (
     BehaviorSceneTagCluster,
     ChatSession,
 )
-from src.learners.behavior_scenario import BehaviorScenarioProfile, parse_behavior_scenario_response
+from src.learners.behavior_scenario import (
+    BehaviorScenarioProfile,
+    BehaviorScenarioTagCluster,
+    behavior_scenario_analyzer,
+    parse_behavior_scenario_response,
+)
 from src.learners.behavior_scene_cluster_store import (
     _load_cluster_distribution,
     debug_retrieve_behavior_scores_from_scene_clusters,
     format_scene_cluster_distribution,
 )
+from src.llm_models.payload_content.message import Message, MessageBuilder, RoleType
+from src.services.llm_service import LLMServiceClient
 from src.webui.dependencies import require_auth
 
 router = APIRouter(prefix="/behavior", tags=["Behavior"], dependencies=[Depends(require_auth)])
+behavior_scene_debug_model = LLMServiceClient(task_name="learner", request_type="behavior.scene_analyzer")
 
 
 class BehaviorChatInfo(BaseModel):
@@ -142,6 +151,7 @@ class BehaviorScenarioDebugRequest(BaseModel):
     session_id: Optional[str] = Field(default=None)
     include_global: bool = Field(default=True)
     retrieval_mode: str = Field(default="tag_cluster_spread_1")
+    scene_text: str = Field(default="")
     summary: str = Field(default="")
     tag_clusters: list[dict[str, Any]] = Field(default_factory=list)
     need: dict[str, Any] = Field(default_factory=dict)
@@ -216,6 +226,82 @@ def _cluster_payload(
         score=float(cluster.score or 0.0),
         update_time=_isoformat(cluster.update_time),
     )
+
+
+async def _analyze_debug_scene_text(scene_text: str) -> BehaviorScenarioProfile:
+    """使用主程序行为场景概括提示，把一句话调试输入转换为场景 tag 簇。"""
+
+    normalized_scene_text = " ".join(scene_text.split()).strip()
+    if not normalized_scene_text:
+        return BehaviorScenarioProfile()
+
+    async def run_scene_prompt(system_prompt: str) -> str:
+        scene_messages = _build_debug_scene_messages(normalized_scene_text, system_prompt)
+        generation_result = await behavior_scene_debug_model.generate_response_with_messages(
+            lambda _client: scene_messages,
+            options=LLMGenerationOptions(temperature=0.2),
+        )
+        return generation_result.response or ""
+
+    profile = await behavior_scenario_analyzer.analyze(
+        context_text=normalized_scene_text,
+        sub_agent_runner=run_scene_prompt,
+    )
+    if not profile.summary:
+        profile = BehaviorScenarioProfile(
+            summary=normalized_scene_text,
+            tag_clusters=profile.tag_clusters,
+            confidence=profile.confidence,
+        )
+    return profile
+
+
+def _build_debug_scene_messages(scene_text: str, system_prompt: str) -> list[Message]:
+    """把 WebUI 调试输入包装成场景概括模型熟悉的多消息格式。"""
+
+    return [
+        MessageBuilder()
+        .set_role(RoleType.System)
+        .add_text_content(
+            f"{system_prompt}\n\n"
+            "注意：聊天场景会在后续 user message 中给出。该消息是 WebUI 调试输入的一句话场景描述，"
+            "不是数据库中的真实聊天记录；请仍按主程序行为学习场景概括的 JSON 结构输出 tag 簇。"
+        )
+        .build(),
+        MessageBuilder()
+        .set_role(RoleType.User)
+        .add_text_content(
+            "\n".join(
+                [
+                    "[source_id:webui-debug-1]",
+                    "[speaker:USER]",
+                    "[name:WebUI 调试输入]",
+                    "[content]",
+                    scene_text,
+                ]
+            )
+        )
+        .build(),
+        MessageBuilder()
+        .set_role(RoleType.User)
+        .add_text_content("请根据以上聊天场景描述输出场景片段 JSON。")
+        .build(),
+    ]
+
+
+def _profile_debug_payload(profile: BehaviorScenarioProfile) -> dict[str, Any]:
+    return {
+        "summary": profile.summary,
+        "confidence": profile.confidence,
+        "tag_clusters": [_tag_cluster_debug_payload(cluster) for cluster in profile.tag_clusters],
+    }
+
+
+def _tag_cluster_debug_payload(cluster: BehaviorScenarioTagCluster) -> dict[str, Any]:
+    return {
+        "kind": cluster.kind,
+        "tags": cluster.all_values(),
+    }
 
 
 def _split_tag_ref(tag_ref: str) -> tuple[str, str]:
@@ -657,20 +743,28 @@ async def get_behavior_path_detail(path_id: int) -> BehaviorPathDetailResponse:
 async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dict[str, Any]:
     """按输入场景模拟一次本地场景簇检索。"""
 
-    profile = BehaviorScenarioProfile(
-        summary=" ".join(request.summary.split()).strip(),
-        tag_clusters=parse_behavior_scenario_response(
-            json.dumps(
-                {
-                    "tag_clusters": request.tag_clusters,
-                    "need": request.need,
-                    "other_traits": request.other_traits,
-                },
-                ensure_ascii=False,
-            )
-        ).tag_clusters,
-        confidence=1.0 if request.tag_clusters or request.need or request.other_traits else 0.0,
-    )
+    scene_text = " ".join(request.scene_text.split()).strip()
+    if scene_text:
+        profile = await _analyze_debug_scene_text(scene_text)
+        input_mode = "llm_scene_text"
+        error = "" if profile.has_signal else "LLM 没有生成有效场景 tag 簇，请调整一句话场景描述后重试。"
+    else:
+        profile = BehaviorScenarioProfile(
+            summary=" ".join(request.summary.split()).strip(),
+            tag_clusters=parse_behavior_scenario_response(
+                json.dumps(
+                    {
+                        "tag_clusters": request.tag_clusters,
+                        "need": request.need,
+                        "other_traits": request.other_traits,
+                    },
+                    ensure_ascii=False,
+                )
+            ).tag_clusters,
+            confidence=1.0 if request.tag_clusters or request.need or request.other_traits else 0.0,
+        )
+        input_mode = "manual_tags"
+        error = ""
     debug_payload = debug_retrieve_behavior_scores_from_scene_clusters(
         session_ids=_session_scope(request.session_id),
         include_global=request.include_global,
@@ -689,6 +783,9 @@ async def debug_behavior_retrieval(request: BehaviorScenarioDebugRequest) -> dic
         "success": True,
         "data": {
             **debug_payload,
+            "input_mode": input_mode,
+            "scenario_profile": _profile_debug_payload(profile),
+            "error": error or debug_payload.get("error", ""),
             "matched_clusters": matched_clusters,
             "candidates": [
                 {

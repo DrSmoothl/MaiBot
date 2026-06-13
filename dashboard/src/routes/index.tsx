@@ -40,7 +40,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import axios from 'axios'
 
 import { ExpressionReviewer } from '@/components/expression-reviewer'
 import { RestartOverlay } from '@/components/restart-overlay'
@@ -74,7 +73,7 @@ import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import { ZoomableChart } from '@/components/ui/zoomable-chart'
 import { getBotConfigCached, getModelConfigCached } from '@/lib/config-api'
 import { getReviewStats } from '@/lib/expression-api'
-import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { backendApi } from '@/lib/http'
 import {
   getInstalledPlugins,
   getPluginConfigSchema,
@@ -484,7 +483,6 @@ function IndexPageContent() {
   const [botStatus, setBotStatus] = useState<BotStatus | null>(botStatusCache?.data ?? null)
   const [isBotStatusLoading, setIsBotStatusLoading] = useState(!botStatusCache)
   const [maibotStableRelease, setMaibotStableRelease] = useState<ReleaseStatus | null>(null)
-  const [maibotTestRelease, setMaibotTestRelease] = useState<ReleaseStatus | null>(null)
   const [featureStatus, setFeatureStatus] = useState<FeatureStatus>({
     memoryEnabled: false,
     visualEnabled: false,
@@ -530,18 +528,11 @@ function IndexPageContent() {
         }>
         const visibleReleases = releases.filter((release) => !release.draft)
         const stableRelease = visibleReleases.find((release) => !release.prerelease)
-        const testRelease = visibleReleases[0]
         if (mounted) {
           if (stableRelease?.tag_name) {
             setMaibotStableRelease({
               version: String(stableRelease.tag_name).replace(/^v/i, '').trim(),
               url: stableRelease.html_url || 'https://github.com/Mai-with-u/MaiBot/releases',
-            })
-          }
-          if (testRelease?.tag_name) {
-            setMaibotTestRelease({
-              version: String(testRelease.tag_name).replace(/^v/i, '').trim(),
-              url: testRelease.html_url || 'https://github.com/Mai-with-u/MaiBot/releases',
             })
           }
         }
@@ -574,11 +565,15 @@ function IndexPageContent() {
   const fetchHitokoto = useCallback(async () => {
     try {
       setHitokotoLoading(true)
-      const response = await axios.get('https://v1.hitokoto.cn/?c=a&c=b&c=c&c=d&c=h&c=i&c=k')
+      const response = await fetch('https://v1.hitokoto.cn/?c=a&c=b&c=c&c=d&c=h&c=i&c=k')
+      if (!response.ok) {
+        throw new Error(`一言接口返回 HTTP ${response.status}`)
+      }
+      const data = await response.json()
       if (isMountedRef.current) {
         setHitokoto({
-          hitokoto: response.data.hitokoto,
-          from: response.data.from || response.data.from_who || t('home.unknownSource')
+          hitokoto: data.hitokoto,
+          from: data.from || data.from_who || t('home.unknownSource')
         })
       }
     } catch (error) {
@@ -607,15 +602,10 @@ function IndexPageContent() {
 
     setIsBotStatusLoading(true)
     try {
-      const response = await fetchWithAuth('/api/webui/system/status')
+      const data = await backendApi.get<BotStatus>('/api/webui/system/status')
       if (!isMountedRef.current) return
-      if (response.ok) {
-        const data = await response.json()
-        botStatusCache = { timestamp: Date.now(), data }
-        setBotStatus(data)
-      } else if (!botStatusCache) {
-        setBotStatus(null)
-      }
+      botStatusCache = { timestamp: Date.now(), data }
+      setBotStatus(data)
     } catch (error) {
       console.error('获取机器人状态失败:', error)
       if (isMountedRef.current && !botStatusCache) {
@@ -962,13 +952,12 @@ function IndexPageContent() {
       } else {
         setLoading(true)
       }
-      const response = await fetchWithAuth(`/api/webui/statistics/dashboard?hours=${timeRange}`)
+      const data = await backendApi.get<DashboardData>('/api/webui/statistics/dashboard', {
+        query: { hours: timeRange },
+      })
       if (!isMountedRef.current) return
-      if (response.ok) {
-        const data = await response.json()
-        dashboardDataCache.set(timeRange, { timestamp: Date.now(), data })
-        setDashboardData(data)
-      }
+      dashboardDataCache.set(timeRange, { timestamp: Date.now(), data })
+      setDashboardData(data)
       setLoading(false)
       setLoadingProgress(100)
     } catch (error) {
@@ -1243,7 +1232,10 @@ function IndexPageContent() {
       </div>
 
       {/* 机器人状态和快速操作 */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
+      <div
+        data-home-summary-cards="true"
+        className="grid items-stretch gap-4 grid-cols-1 lg:grid-cols-[minmax(14rem,0.8fr)_minmax(16rem,1fr)_minmax(0,1.6fr)]"
+      >
         {/* 机器人状态卡片 */}
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
@@ -1256,27 +1248,23 @@ function IndexPageContent() {
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm text-muted-foreground">{t('home.versionCard.mainVersion')}</span>
-                <Badge variant="secondary" className="border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary">
+                <Badge
+                  variant="secondary"
+                  data-dashboard-version-value="true"
+                  className="border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary"
+                >
                   {botStatus?.version ? `v${botStatus.version}` : t('home.versionCard.unknown')}
                 </Badge>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm text-muted-foreground">{t('home.versionCard.webuiVersion')}</span>
-                <Badge variant="secondary" className="border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary">
+                <Badge
+                  variant="secondary"
+                  data-dashboard-version-value="true"
+                  className="border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary"
+                >
                   v{APP_VERSION}
                 </Badge>
-              </div>
-              <div className="hidden">
-                <a
-                  href={maibotTestRelease?.url || 'https://github.com/Mai-with-u/MaiBot/releases'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 transition-colors hover:text-muted-foreground"
-                >
-                  {t('home.versionCard.latestVersion')}{' '}
-                  {maibotTestRelease ? `v${maibotTestRelease.version}` : t('home.versionCard.githubReleases')}
-                  <ExternalLink className="h-3 w-3" />
-                </a>
               </div>
               <div className="space-y-1 border-t border-border/50 pt-2 text-xs text-muted-foreground/60">
                 <a
@@ -1291,19 +1279,6 @@ function IndexPageContent() {
                     <ExternalLink className="h-3 w-3" />
                   </span>
                 </a>
-                <a
-                  href={maibotTestRelease?.url || 'https://github.com/Mai-with-u/MaiBot/releases'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between gap-2 transition-colors hover:text-muted-foreground"
-                >
-                  <span>{t('home.versionCard.testLatest')}</span>
-                  <span className="inline-flex items-center gap-1">
-                    {maibotTestRelease ? `v${maibotTestRelease.version}` : t('home.versionCard.githubReleases')}
-                    <ExternalLink className="h-3 w-3" />
-                  </span>
-                </a>
-
               </div>
             </div>
           </CardContent>
@@ -1447,6 +1422,7 @@ function IndexPageContent() {
               size="icon"
               onClick={() => setQuickShortcutDialogOpen(true)}
               aria-label={t('home.quickActions.customize')}
+              className="h-8 w-8"
             >
               <Plus className="h-4 w-4" />
             </Button>

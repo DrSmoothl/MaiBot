@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from '@tanstack/react-router'
 
 import { cn } from '@/lib/utils'
-import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { ApiError, backendApi } from '@/lib/http'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
@@ -199,13 +199,12 @@ export function OtherTab() {
 
     try {
       // 调用后端API重置首次配置状态
-      const response = await fetchWithAuth('/api/webui/setup/reset', {
-        method: 'POST',
-      })
+      const data = await backendApi.post<{ success: boolean; message?: string }>(
+        '/api/webui/setup/reset',
+        { errorMessage: t('settings.other.clearStorageFailed') }
+      )
 
-      const data = await response.json()
-
-      if (response.ok && data.success) {
+      if (data.success) {
         toast({
           title: t('settings.other.resetSuccess'),
           description: t('settings.other.clearStorageSuccess'),
@@ -226,7 +225,11 @@ export function OtherTab() {
       console.error('重置配置状态错误:', error)
       toast({
         title: t('settings.other.resetFailed'),
-        description: t('settings.other.clearStorageFailed'),
+        // HTTP 层失败展示后端给出的错误信息；网络层失败保持原有固定文案
+        description:
+          error instanceof ApiError && error.status !== undefined
+            ? error.message
+            : t('settings.other.clearStorageFailed'),
         variant: 'destructive',
       })
     } finally {

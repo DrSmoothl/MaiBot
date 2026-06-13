@@ -92,6 +92,16 @@ interface FieldRendererProps {
   sectionName: string
 }
 
+type PluginStatusIcon = 'loading' | 'warning' | 'circuit'
+
+interface PluginStatusMeta {
+  dotClassName: string
+  label: string
+  badgeClassName?: string
+  icon?: PluginStatusIcon
+  showsBadge?: boolean
+}
+
 function getLocaleCandidates(language: string): string[] {
   const normalized = (language || 'zh').replace('-', '_')
   const base = normalized.split('_')[0]
@@ -475,6 +485,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
   const { i18n } = useTranslation()
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
   const [editMode, setEditMode] = useState<'visual' | 'source'>('visual')
+  const [pluginPageTab, setPluginPageTab] = useState<'settings' | 'details'>('settings')
   const [schema, setSchema] = useState<PluginConfigSchema | null>(null)
   const [activeConfigTab, setActiveConfigTab] = useState<string | undefined>(initialTab)
   const [config, setConfig] = useState<Record<string, unknown>>({})
@@ -745,6 +756,23 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
     schema.plugin_info.i18n,
     'name',
   )
+  const manifestUrls = plugin.manifest.urls as {
+    repository?: string
+    homepage?: string
+    documentation?: string
+    issues?: string
+  } | undefined
+  const pluginHomepageUrl = plugin.manifest.homepage_url || manifestUrls?.homepage
+  const pluginRepositoryUrl = plugin.manifest.repository_url || manifestUrls?.repository
+  const pluginDetailItems = [
+    { label: '插件 ID', value: plugin.manifest.id || plugin.id },
+    { label: '版本', value: schema.plugin_info.version || plugin.manifest.version },
+    { label: '类型', value: getPluginTypeLabel(plugin) },
+    { label: '作者', value: plugin.manifest.author?.name },
+    { label: '许可证', value: plugin.manifest.license },
+    { label: '最低麦麦版本', value: plugin.manifest.host_application?.min_version },
+    { label: '安装路径', value: plugin.path },
+  ].filter((item): item is { label: string; value: string } => typeof item.value === 'string' && item.value.trim().length > 0)
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -755,7 +783,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold" data-plugin-config-title>
+            <h1 className="text-xl font-bold sm:text-2xl" data-plugin-config-title>
               {pluginName}
             </h1>
             <div className="flex items-center gap-2 mt-1">
@@ -840,88 +868,138 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
         </Card>
       )}
 
-      {/* 源代码模式 */}
-      {editMode === 'source' && (
-        <div className="space-y-4">
-          <Alert>
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>源代码模式（高级功能）：</strong>直接编辑 TOML 配置文件。保存时会验证格式，只有格式正确才能保存。
-              {hasTomlError && (
-                <span className="text-destructive font-semibold ml-2">⚠️ 上次保存失败，请检查 TOML 格式</span>
-              )}
-            </AlertDescription>
-          </Alert>
-          
-            <CodeEditor
-              value={sourceCode}
-              onChange={(value) => {
-                setSourceCode(value)
-                if (hasTomlError) {
-                  setHasTomlError(false)
-                }
-              }}
-              language="toml"
-              height="calc(100vh - 350px)"
-              minHeight="500px"
-              placeholder="TOML 配置内容"
-            />
-        </div>
-      )}
+      <Tabs value={pluginPageTab} onValueChange={(value) => setPluginPageTab(value as 'settings' | 'details')}>
+        <TabsList>
+          <TabsTrigger value="settings">设置</TabsTrigger>
+          <TabsTrigger value="details">详情</TabsTrigger>
+        </TabsList>
+        <TabsContent value="settings" className="mt-4">
+          {/* 源代码模式 */}
+          {editMode === 'source' && (
+            <div className="space-y-4">
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>源代码模式（高级功能）：</strong>直接编辑 TOML 配置文件。保存时会验证格式，只有格式正确才能保存。
+                  {hasTomlError && (
+                    <span className="text-destructive font-semibold ml-2">⚠️ 上次保存失败，请检查 TOML 格式</span>
+                  )}
+                </AlertDescription>
+              </Alert>
 
-      {/* 可视化模式 */}
-      {editMode === 'visual' && (
-      <>
-      {/* 配置区域 */}
-      {schema.layout.type === 'tabs' && schemaTabs.length > 0 ? (
-        // 标签页布局
-        <Tabs value={selectedConfigTab} onValueChange={handleConfigTabChange}>
-          <TabsList>
-            {schemaTabs.map(tab => (
-              <TabsTrigger key={tab.id} value={tab.id}>
-                {resolveLocalizedText(tab.title, language, tab.id, tab.i18n, 'title')}
-                {tab.badge && (
-                  <Badge variant="secondary" className="ml-2 text-xs">
-                    {tab.badge}
-                  </Badge>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          {schemaTabs.map(tab => (
-            <TabsContent key={tab.id} value={tab.id} className="space-y-4 mt-4">
-              {tab.sections.map(sectionName => {
-                const section = schema.sections[sectionName]
-                if (!section) return null
-                return (
-                  <SectionRenderer
-                    key={sectionName}
-                    sectionName={sectionName}
-                    section={section}
-                    config={config}
-                    onChange={handleFieldChange}
-                  />
-                )
-              })}
-            </TabsContent>
-          ))}
-        </Tabs>
-      ) : (
-        // 自动布局
-        <div className="space-y-4">
-          {sortedSections.map(([sectionName, section]) => (
-            <SectionRenderer
-              key={sectionName}
-              sectionName={sectionName}
-              section={section}
-              config={config}
-              onChange={handleFieldChange}
-            />
-          ))}
-        </div>
-      )}
-      </>
-      )}
+              <CodeEditor
+                value={sourceCode}
+                onChange={(value) => {
+                  setSourceCode(value)
+                  if (hasTomlError) {
+                    setHasTomlError(false)
+                  }
+                }}
+                language="toml"
+                height="calc(100vh - 350px)"
+                minHeight="500px"
+                placeholder="TOML 配置内容"
+              />
+            </div>
+          )}
+
+          {/* 可视化模式 */}
+          {editMode === 'visual' && (
+          <>
+          {/* 配置区域 */}
+          {schema.layout.type === 'tabs' && schemaTabs.length > 0 ? (
+            // 标签页布局
+            <Tabs value={selectedConfigTab} onValueChange={handleConfigTabChange}>
+              <TabsList>
+                {schemaTabs.map(tab => (
+                  <TabsTrigger key={tab.id} value={tab.id}>
+                    {resolveLocalizedText(tab.title, language, tab.id, tab.i18n, 'title')}
+                    {tab.badge && (
+                      <Badge variant="secondary" className="ml-2 text-xs">
+                        {tab.badge}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              {schemaTabs.map(tab => (
+                <TabsContent key={tab.id} value={tab.id} className="space-y-4 mt-4">
+                  {tab.sections.map(sectionName => {
+                    const section = schema.sections[sectionName]
+                    if (!section) return null
+                    return (
+                      <SectionRenderer
+                        key={sectionName}
+                        sectionName={sectionName}
+                        section={section}
+                        config={config}
+                        onChange={handleFieldChange}
+                      />
+                    )
+                  })}
+                </TabsContent>
+              ))}
+            </Tabs>
+          ) : (
+            // 自动布局
+            <div className="space-y-4">
+              {sortedSections.map(([sectionName, section]) => (
+                <SectionRenderer
+                  key={sectionName}
+                  sectionName={sectionName}
+                  section={section}
+                  config={config}
+                  onChange={handleFieldChange}
+                />
+              ))}
+            </div>
+          )}
+          </>
+          )}
+        </TabsContent>
+        <TabsContent value="details" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>插件详情</CardTitle>
+              <CardDescription>{plugin.manifest.description || '暂无描述'}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {pluginDetailItems.map((item) => (
+                  <div key={item.label} className="min-w-0 rounded-md border bg-muted/20 px-3 py-2">
+                    <div className="text-xs font-medium text-muted-foreground">{item.label}</div>
+                    <div className="mt-1 break-words text-sm">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+              {(pluginHomepageUrl || pluginRepositoryUrl || manifestUrls?.documentation || manifestUrls?.issues) && (
+                <div className="flex flex-wrap gap-2">
+                  {pluginHomepageUrl && (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={pluginHomepageUrl} target="_blank" rel="noreferrer">主页</a>
+                    </Button>
+                  )}
+                  {pluginRepositoryUrl && (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={pluginRepositoryUrl} target="_blank" rel="noreferrer">仓库</a>
+                    </Button>
+                  )}
+                  {manifestUrls?.documentation && (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={manifestUrls.documentation} target="_blank" rel="noreferrer">文档</a>
+                    </Button>
+                  )}
+                  {manifestUrls?.issues && (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={manifestUrls.issues} target="_blank" rel="noreferrer">问题反馈</a>
+                    </Button>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog
         open={internalLeavePromptOpen || navigationBlocker.status === 'blocked'}
@@ -1189,6 +1267,21 @@ function PluginConfigPageContent() {
   const loadFailedPercent = loadTotalCount > 0 ? (loadFailedCount / loadTotalCount) * 100 : 0
   const loadingPercent = loadTotalCount > 0 ? (loadingCount / loadTotalCount) * 100 : 0
   const circuitPercent = loadTotalCount > 0 ? (circuitActiveCount / loadTotalCount) * 100 : 0
+  const showsCircuitSummary = circuitOpenCount > 0
+  const modernLoadSummaryLabel = [
+    `加载成功 ${loadSuccessCount} 个`,
+    `加载中 ${loadingCount} 个`,
+    showsCircuitSummary ? `熔断中 ${circuitOpenCount} 个` : '',
+    `加载失败 ${loadFailedCount} 个`,
+  ].filter(Boolean).join('，')
+  const futureRetroPluginSummaryLabel = [
+    `已安装 ${installedCount} 个插件`,
+    `已启用 ${enabledCount} 个`,
+    `已禁用 ${disabledCount} 个`,
+    `加载中 ${loadingCount} 个`,
+    showsCircuitSummary ? `熔断中 ${circuitOpenCount} 个` : '',
+    `启动失败 ${loadFailedCount} 个`,
+  ].filter(Boolean).join('，')
   const isModernDashboardStyle = themeConfig.dashboardStyle === 'modern'
   const isFutureRetroDashboardStyle = themeConfig.dashboardStyle === 'future-retro'
   const getPluginStatusBarClassName = (plugin: InstalledPlugin) => {
@@ -1228,7 +1321,7 @@ function PluginConfigPageContent() {
     }
     return '已启用'
   }
-  const getPluginStatusMeta = (plugin: InstalledPlugin) => {
+  const getPluginStatusMeta = (plugin: InstalledPlugin): PluginStatusMeta => {
     if (isPluginDisabled(plugin)) {
       return { dotClassName: 'bg-muted-foreground/45', label: '已禁用' }
     }
@@ -1258,7 +1351,7 @@ function PluginConfigPageContent() {
       }
     }
     if (isPluginLoadSuccess(plugin)) {
-      return { dotClassName: 'bg-emerald-500', label: '加载成功', icon: 'success' as const }
+      return { dotClassName: 'bg-emerald-500', label: '加载成功', showsBadge: false }
     }
     return {
       dotClassName: 'bg-red-500',
@@ -1588,14 +1681,16 @@ function PluginConfigPageContent() {
                 <span>已启用 <strong className="text-emerald-600">{enabledCount}</strong> 个</span>
                 <span>已禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个</span>
                 <span>加载中 <strong className="text-sky-600">{loadingCount}</strong> 个</span>
-                <span>熔断中 <strong className="text-orange-600">{circuitOpenCount}</strong> 个</span>
+                {showsCircuitSummary && (
+                  <span>熔断中 <strong className="text-orange-600">{circuitOpenCount}</strong> 个</span>
+                )}
               </div>
               <div
                 className="flex items-center gap-3 border-t pt-3 text-sm"
-                aria-label={`加载成功 ${loadSuccessCount} 个，加载中 ${loadingCount} 个，熔断中 ${circuitOpenCount} 个，加载失败 ${loadFailedCount} 个`}
+                aria-label={modernLoadSummaryLabel}
               >
                 <span className="sr-only">
-                  加载成功 {loadSuccessCount} 个，加载中 {loadingCount} 个，熔断中 {circuitOpenCount} 个，加载失败 {loadFailedCount} 个
+                  {modernLoadSummaryLabel}
                 </span>
                 <strong className="w-8 text-right text-emerald-600">{loadSuccessCount}</strong>
                 <div className="flex h-3 min-w-28 flex-1 overflow-hidden bg-muted" aria-hidden="true">
@@ -1612,10 +1707,10 @@ function PluginConfigPageContent() {
           <div className="space-y-3">
             <div
               className="space-y-2"
-              aria-label={`已安装 ${installedCount} 个插件，已启用 ${enabledCount} 个，已禁用 ${disabledCount} 个，加载中 ${loadingCount} 个，熔断中 ${circuitOpenCount} 个，启动失败 ${loadFailedCount} 个`}
+              aria-label={futureRetroPluginSummaryLabel}
             >
               <span className="sr-only">
-                已启用 {enabledCount} 个，已禁用 {disabledCount} 个，加载中 {loadingCount} 个，熔断中 {circuitOpenCount} 个，启动失败 {loadFailedCount} 个
+                {futureRetroPluginSummaryLabel}
               </span>
               <div className="flex h-3 w-full overflow-hidden bg-muted" aria-hidden="true">
                 {plugins.length > 0 ? (
@@ -1648,10 +1743,12 @@ function PluginConfigPageContent() {
                   <span className="h-2 w-2 rounded-full bg-sky-500" />
                   加载中 <strong className="text-sky-600">{loadingCount}</strong> 个
                 </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-orange-500" />
-                  熔断中 <strong className="text-orange-600">{circuitOpenCount}</strong> 个
-                </span>
+                {showsCircuitSummary && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-orange-500" />
+                    熔断中 <strong className="text-orange-600">{circuitOpenCount}</strong> 个
+                  </span>
+                )}
                 <span className="flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full bg-red-500" />
                   启动失败 <strong className="text-red-600">{loadFailedCount}</strong> 个
@@ -1688,7 +1785,8 @@ function PluginConfigPageContent() {
               return (
               <div
                 key={plugin.id}
-                className={`relative flex cursor-pointer flex-col justify-between gap-2 py-2.5 transition-colors hover:bg-muted/50 sm:min-h-0 sm:flex-row sm:items-center sm:gap-3 sm:px-2 sm:py-3 ${
+                data-plugin-list-item="true"
+                className={`relative flex cursor-pointer flex-col justify-between gap-2 py-2.5 transition-all duration-150 ease-out hover:-translate-y-0.5 hover:bg-muted/55 hover:shadow-md focus-visible:-translate-y-0.5 focus-visible:bg-muted/55 focus-visible:outline-none focus-visible:shadow-md sm:min-h-0 sm:flex-row sm:items-center sm:gap-3 sm:px-2 sm:py-3 ${
                   isPluginDisabled(plugin) ? 'opacity-70' : ''
                 }`}
                 role="button"
@@ -1718,15 +1816,17 @@ function PluginConfigPageContent() {
                       <Badge variant="outline" className="text-xs flex-shrink-0">
                         {getPluginTypeLabel(plugin)}
                       </Badge>
-                      <Badge
-                        variant="outline"
-                        className={`text-xs flex-shrink-0 gap-1 ${statusMeta.badgeClassName ?? ''}`}
-                      >
-                        {statusMeta.icon === 'loading' && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {statusMeta.icon === 'warning' && <AlertCircle className="h-3 w-3" />}
-                        {statusMeta.icon === 'circuit' && <AlertTriangle className="h-3 w-3" />}
-                        {statusMeta.label}
-                      </Badge>
+                      {statusMeta.showsBadge !== false && (
+                        <Badge
+                          variant="outline"
+                          className={`text-xs flex-shrink-0 gap-1 ${statusMeta.badgeClassName ?? ''}`}
+                        >
+                          {statusMeta.icon === 'loading' && <Loader2 className="h-3 w-3 animate-spin" />}
+                          {statusMeta.icon === 'warning' && <AlertCircle className="h-3 w-3" />}
+                          {statusMeta.icon === 'circuit' && <AlertTriangle className="h-3 w-3" />}
+                          {statusMeta.label}
+                        </Badge>
+                      )}
                     </div>
                     <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:truncate sm:leading-normal">
                       {plugin.manifest.description || '暂无描述'}
@@ -1734,7 +1834,14 @@ function PluginConfigPageContent() {
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 border-t pt-2 sm:flex-shrink-0 sm:border-t-0 sm:pt-0">
-                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" title="配置" aria-label="配置">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 w-9 p-0"
+                    title="配置"
+                    aria-label="配置"
+                    onClick={() => openPluginConfig(plugin)}
+                  >
                     <Settings className="h-4 w-4" />
                   </Button>
                   <div
@@ -1743,6 +1850,7 @@ function PluginConfigPageContent() {
                   >
                     {pluginActing && <Loader2 className="h-4 w-4 animate-spin" />}
                     <Switch
+                      data-plugin-list-switch="true"
                       checked={!pluginDisabled}
                       disabled={pluginActing}
                       aria-label={pluginDisabled ? '启动插件' : '关闭插件'}

@@ -545,10 +545,12 @@ export function ReasoningProcessPage({
   )
   const toolbarContent = (
     <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
+      {browsingStage && renderBrowsingControls(true)}
       {renderRefreshButton()}
     </div>
   )
   const toolbarPortal = embedded && toolbarVisible && toolbarRoot ? createPortal(toolbarContent, toolbarRoot) : null
+  const showBrowsingControlsInline = browsingStage && (!embedded || !toolbarVisible || !toolbarRoot)
   const renderStageCard = (item: ReasoningPromptStageInfo, compact = false) => (
     <button
       key={item.name}
@@ -589,7 +591,7 @@ export function ReasoningProcessPage({
         </div>
       )}
 
-      {browsingStage && (
+      {showBrowsingControlsInline && (
         <div className="grid flex-shrink-0 grid-cols-[auto_minmax(0,1fr)] gap-2 [&>div:last-child]:col-span-2 sm:grid-cols-[auto_minmax(220px,320px)_1fr] sm:[&>div:last-child]:col-span-1">
           {renderBrowsingControls()}
         </div>
@@ -602,7 +604,7 @@ export function ReasoningProcessPage({
       )}
 
       {!browsingStage ? (
-        <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border">
+        <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-md">
           <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b px-3 sm:h-12 sm:px-4">
             <Layers className="text-muted-foreground h-4 w-4" />
             <div className="text-sm font-medium">选择推理类型</div>

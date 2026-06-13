@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import {
   debugBehaviorRetrieval,
@@ -457,7 +458,6 @@ export function BehaviorLearningPage() {
   const [selectedSessionId, setSelectedSessionId] = useState('all')
   const [search, setSearch] = useState('')
   const [enabledFilter, setEnabledFilter] = useState('all')
-  const [actorFilter, setActorFilter] = useState('all')
   const [learningTypeFilter, setLearningTypeFilter] = useState('all')
   const [sortBy, setSortBy] = useState<BehaviorPathSortBy>('update_time')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
@@ -474,6 +474,7 @@ export function BehaviorLearningPage() {
   const [debugLoading, setDebugLoading] = useState(false)
   const [debugResult, setDebugResult] = useState<BehaviorRetrievalDebugPayload | null>(null)
   const [debugForm, setDebugForm] = useState({
+    sceneText: '',
     domainTags: '',
     behaviorNeeds: '',
     otherTraits: '',
@@ -544,7 +545,6 @@ export function BehaviorLearningPage() {
         session_id: selectedSessionId,
         search,
         enabled: enabledFilter,
-        actor_type: actorFilter,
         learning_type: learningTypeFilter,
         sort_by: sortBy,
         sort_order: sortOrder,
@@ -609,6 +609,7 @@ export function BehaviorLearningPage() {
         session_id: selectedSessionId === 'all' || selectedSessionId === '__global__' ? undefined : selectedSessionId,
         include_global: selectedSessionId === 'all',
         retrieval_mode: 'tag_cluster_spread_1',
+        scene_text: debugForm.sceneText,
         tag_clusters: splitTags(debugForm.domainTags).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
         need: { tag_name: splitTags(debugForm.behaviorNeeds)[0] ?? '', tag_aliases: [] },
         other_traits: splitTags(debugForm.otherTraits).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
@@ -632,7 +633,7 @@ export function BehaviorLearningPage() {
 
   useEffect(() => {
     loadPaths()
-  }, [selectedSessionId, enabledFilter, actorFilter, learningTypeFilter, sortBy, sortOrder, page])
+  }, [selectedSessionId, enabledFilter, learningTypeFilter, sortBy, sortOrder, page])
 
   useEffect(() => {
     if (activeTab === 'scene-network' || activeTab === 'tag-network') {
@@ -705,19 +706,19 @@ export function BehaviorLearningPage() {
         </DashboardTabBar>
 
         <TabsContent value="paths" className="mt-4 min-h-0 space-y-4">
-          <div className="grid gap-2 rounded-lg border bg-background p-3 md:grid-cols-[minmax(16rem,1fr)_repeat(6,minmax(7.5rem,auto))] md:items-center">
-            <div className="relative flex-1">
+          <div className="grid min-w-0 gap-2 rounded-lg border bg-background p-3 md:grid-cols-[minmax(9rem,1fr)_repeat(4,minmax(6.75rem,8rem))_auto] md:items-center">
+            <div className="relative min-w-0">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') applySearch() }}
                 placeholder="搜索场景簇 tag、行为、结果"
-                className="pl-9"
+                className="min-w-0 pl-9"
               />
             </div>
             <Select value={enabledFilter} onValueChange={(value) => { setEnabledFilter(value); setPage(1) }}>
-              <SelectTrigger>
+              <SelectTrigger className="min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -726,19 +727,8 @@ export function BehaviorLearningPage() {
                 <SelectItem value="false">已停用</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={actorFilter} onValueChange={(value) => { setActorFilter(value); setPage(1) }}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部来源</SelectItem>
-                <SelectItem value="other_user">他人观察</SelectItem>
-                <SelectItem value="group_collective">群体观察</SelectItem>
-                <SelectItem value="maibot_self">自身反馈</SelectItem>
-              </SelectContent>
-            </Select>
             <Select value={learningTypeFilter} onValueChange={(value) => { setLearningTypeFilter(value); setPage(1) }}>
-              <SelectTrigger>
+              <SelectTrigger className="min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -748,7 +738,7 @@ export function BehaviorLearningPage() {
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={(value) => { setSortBy(value as BehaviorPathSortBy); setPage(1) }}>
-              <SelectTrigger>
+              <SelectTrigger className="min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -758,7 +748,7 @@ export function BehaviorLearningPage() {
               </SelectContent>
             </Select>
             <Select value={sortOrder} onValueChange={(value) => { setSortOrder(value as SortOrder); setPage(1) }}>
-              <SelectTrigger>
+              <SelectTrigger className="min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -833,6 +823,14 @@ export function BehaviorLearningPage() {
         <TabsContent value="debug" className="mt-4 grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
           <div className="space-y-3 rounded-lg border bg-background p-4">
             <h2 className="text-base font-semibold">输入场景画像</h2>
+            <Field label="用一句话描述聊天场景">
+              <Textarea
+                value={debugForm.sceneText}
+                onChange={(event) => setDebugForm({ ...debugForm, sceneText: event.target.value })}
+                placeholder="例如：群里有人焦虑地追问插件启动失败，其他人正在帮他排查配置。"
+                className="min-h-20"
+              />
+            </Field>
             <Field label="领域标签">
               <Input value={debugForm.domainTags} onChange={(event) => setDebugForm({ ...debugForm, domainTags: event.target.value })} placeholder="用逗号分隔" />
             </Field>
@@ -1849,6 +1847,26 @@ function RetrievalDebugView({ result }: { result: BehaviorRetrievalDebugPayload 
           {result.error}
         </div>
       )}
+      {result.scenario_profile && (
+        <Panel title={result.input_mode === 'llm_scene_text' ? 'LLM 场景画像' : '手动场景画像'}>
+          <div className="space-y-3 text-sm">
+            {result.scenario_profile.summary && (
+              <p className="text-muted-foreground">{result.scenario_profile.summary}</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {result.scenario_profile.tag_clusters.length === 0 ? (
+                <span className="text-muted-foreground">没有生成 tag 簇</span>
+              ) : (
+                result.scenario_profile.tag_clusters.map((cluster, index) => (
+                  <Badge key={`${cluster.kind}-${index}`} variant="outline" className="max-w-full whitespace-normal break-all">
+                    {scenarioTagKindLabel(cluster.kind)}：{cluster.tags.join(' / ')}
+                  </Badge>
+                ))
+              )}
+            </div>
+          </div>
+        </Panel>
+      )}
       <Panel title="检索概览">
         <div className="grid gap-2 text-sm sm:grid-cols-2">
           <Metric label="检索模式" value={retrievalModeLabel(result.retrieval_mode)} />
@@ -1893,6 +1911,13 @@ function RetrievalDebugView({ result }: { result: BehaviorRetrievalDebugPayload 
       </Panel>
     </div>
   )
+}
+
+function scenarioTagKindLabel(kind: string): string {
+  if (kind === 'domain') return '领域'
+  if (kind === 'need') return '需求'
+  if (kind === 'attitude') return '他人特点/态度'
+  return kind
 }
 
 function retrievalModeLabel(mode: string): string {
