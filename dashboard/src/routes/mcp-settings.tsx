@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query'
+
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,6 +30,7 @@ import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
 import { getBotConfig, getBotConfigSchema, updateBotConfigSection } from '@/lib/config-api'
 import { fieldHooks } from '@/lib/field-hooks'
+import { unwrapApiResponse } from '@/lib/http'
 import { generateId } from '@/lib/id'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import type { ConfigSchema } from '@/types/config-schema'
@@ -441,16 +444,16 @@ export function MCPSettingsPage() {
 }
 
 function MCPSettingsPageContent() {
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  // 本地可编辑草稿：服务端加载的 config 拷贝进来后由用户编辑，保存前不回写 query 缓存
   const [mcpConfig, setMcpConfig] = useState<ConfigSectionData>({})
   const [mcpSchema, setMcpSchema] = useState<ConfigSchema | null>(null)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [restartNoticeVisible, setRestartNoticeVisible] = useState(
     () => localStorage.getItem('mcp-settings-restart-notice-dismissed') !== 'true',
   )
   const { toast } = useToast()
   const { triggerRestart, isRestarting } = useRestart()
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     const hookEntries = [
@@ -468,56 +471,46 @@ function MCPSettingsPageContent() {
     }
   }, [])
 
-  const loadConfig = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [configResult, schemaResult] = await Promise.all([getBotConfig(), getBotConfigSchema()])
+  // config + schema 并行加载；config-api 仍返回 ApiResponse，用 unwrapApiResponse 桥接为 throw 契约
+  const [configQuery, schemaQuery] = useQueries({
+    queries: [
+      {
+        queryKey: ['mcp-settings', 'config'],
+        queryFn: () => getBotConfig().then(unwrapApiResponse),
+      },
+      {
+        queryKey: ['mcp-settings', 'schema'],
+        queryFn: () => getBotConfigSchema().then(unwrapApiResponse),
+      },
+    ],
+  })
 
-      if (!configResult.success) {
-        toast({
-          title: '加载失败',
-          description: configResult.error,
-          variant: 'destructive',
-        })
-        return
-      }
+  const loading = configQuery.isPending || schemaQuery.isPending
+  const loadError = configQuery.error ?? schemaQuery.error
 
-      if (!schemaResult.success) {
-        toast({
-          title: '加载失败',
-          description: schemaResult.error,
-          variant: 'destructive',
-        })
-        return
-      }
+  // 把 query.data 作为草稿的初始值/重置来源：数据到达（或重新拉取）后回填本地编辑 state。
+  // 用「渲染期重置」模式（React 官方推荐）替代 effect，以 query 的更新时间戳为版本标记，
+  // 避免在 effect 里 setState 触发的级联渲染。
+  const dataVersion =
+    configQuery.data !== undefined && schemaQuery.data !== undefined
+      ? `${configQuery.dataUpdatedAt}:${schemaQuery.dataUpdatedAt}`
+      : null
+  const [seededVersion, setSeededVersion] = useState<string | null>(null)
+  if (dataVersion !== null && dataVersion !== seededVersion) {
+    const configPayload = configQuery.data as { config?: Record<string, unknown> } & Record<string, unknown>
+    const fullConfig = (configPayload.config ?? configPayload) as Record<string, unknown>
+    const schemaPayload = schemaQuery.data as { schema?: ConfigSchema } & ConfigSchema
+    const fullSchema = (schemaPayload.schema ?? schemaPayload) as ConfigSchema
 
-      const configPayload = configResult.data as { config?: Record<string, unknown> } & Record<string, unknown>
-      const fullConfig = (configPayload.config ?? configPayload) as Record<string, unknown>
-      const schemaPayload = schemaResult.data as { schema?: ConfigSchema } & ConfigSchema
-      const fullSchema = (schemaPayload.schema ?? schemaPayload) as ConfigSchema
+    setSeededVersion(dataVersion)
+    setMcpConfig((fullConfig.mcp ?? {}) as ConfigSectionData)
+    setMcpSchema(fullSchema.nested?.mcp ?? null)
+    setHasUnsavedChanges(false)
+  }
 
-      setMcpConfig((fullConfig.mcp ?? {}) as ConfigSectionData)
-      setMcpSchema(fullSchema.nested?.mcp ?? null)
-      setHasUnsavedChanges(false)
-    } catch (error) {
-      console.error('加载 MCP 设置失败:', error)
-      toast({
-        title: '加载失败',
-        description: (error as Error).message,
-        variant: 'destructive',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }, [toast])
-
-  useEffect(() => {
-    void loadConfig()
-  }, [loadConfig])
-
-  const saveConfig = useCallback(async (): Promise<boolean> => {
-    try {
-      setSaving(true)
+  // 保存：失败由全局 mutation 错误 toast 呈现（meta.errorTitle 定制标题）
+  const saveMutation = useMutation({
+    mutationFn: () => {
       const configToSave = { ...mcpConfig }
       if (Array.isArray(configToSave.servers)) {
         configToSave.servers = configToSave.servers.map((server: MCPServerConfig) => {
@@ -526,35 +519,29 @@ function MCPSettingsPageContent() {
           return rest
         })
       }
-      const result = await updateBotConfigSection('mcp', configToSave)
-
-      if (!result.success) {
-        toast({
-          title: '保存失败',
-          description: result.error,
-          variant: 'destructive',
-        })
-        return false
-      }
-
+      return updateBotConfigSection('mcp', configToSave).then(unwrapApiResponse)
+    },
+    meta: { errorTitle: '保存失败' },
+    onSuccess: () => {
       setHasUnsavedChanges(false)
       toast({
         title: '保存成功',
         description: 'MCP 设置已保存，重启后生效。',
       })
+      void queryClient.invalidateQueries({ queryKey: ['mcp-settings'] })
+    },
+  })
+  const saving = saveMutation.isPending
+
+  const saveConfig = useCallback(async (): Promise<boolean> => {
+    try {
+      await saveMutation.mutateAsync()
       return true
-    } catch (error) {
-      console.error('保存 MCP 设置失败:', error)
-      toast({
-        title: '保存失败',
-        description: (error as Error).message,
-        variant: 'destructive',
-      })
+    } catch {
+      // 失败已由全局 mutation 错误 toast 呈现
       return false
-    } finally {
-      setSaving(false)
     }
-  }, [mcpConfig, toast])
+  }, [saveMutation])
 
   const saveAndRestart = useCallback(async () => {
     const saved = await saveConfig()
@@ -640,7 +627,23 @@ function MCPSettingsPageContent() {
           </div>
         )}
 
-        {!loading && (
+        {!loading && loadError && (
+          <div className="flex h-64 flex-col items-center justify-center gap-2">
+            <p className="text-sm text-destructive">{loadError.message}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void configQuery.refetch()
+                void schemaQuery.refetch()
+              }}
+            >
+              重试
+            </Button>
+          </div>
+        )}
+
+        {!loading && !loadError && (
           <MCPServersBlockEditor
             servers={mcpServers}
             onChange={(servers) => {
@@ -653,7 +656,7 @@ function MCPSettingsPageContent() {
           />
         )}
 
-        {!loading && formSchema && (
+        {!loading && !loadError && formSchema && (
           <DynamicConfigForm
             schema={formSchema}
             values={{ mcp: mcpConfig }}
@@ -670,7 +673,7 @@ function MCPSettingsPageContent() {
           />
         )}
 
-        {!loading && !formSchema && (
+        {!loading && !loadError && !formSchema && (
           <Alert>
             <Info className="h-4 w-4" />
             <AlertDescription>当前配置 schema 中没有找到 MCP 设置。</AlertDescription>
