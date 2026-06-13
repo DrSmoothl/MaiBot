@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -58,11 +60,7 @@ import {
 import { EmojiList } from './EmojiList'
 
 export function EmojiManagementPage() {
-  const [emojiList, setEmojiList] = useState<Emoji[]>([])
-  const [stats, setStats] = useState<EmojiStats | null>(null)
-  const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
   const [pageSize, setPageSize] = useState(20)
   const [statusFilter, setStatusFilter] = useState<EmojiStatus | 'all'>('adopted')
   const [formatFilter, setFormatFilter] = useState<string>('all')
@@ -83,62 +81,9 @@ export function EmojiManagementPage() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
 
   const { toast } = useToast()
+  const queryClient = useQueryClient()
 
-  // 加载表情包列表
-  const loadEmojiList = useCallback(async () => {
-    try {
-      setLoading(true)
-      const response = await getEmojiList({
-        page,
-        page_size: pageSize,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        format: formatFilter === 'all' ? undefined : formatFilter,
-        search: searchKeyword || undefined,
-        sort_by: sortBy,
-        sort_order: sortOrder,
-      })
-      setEmojiList(response.data)
-      setTotal(response.total)
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : '加载表情包列表失败'
-      toast({
-        title: '错误',
-        description: message,
-        variant: 'destructive',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }, [
-    page,
-    pageSize,
-    statusFilter,
-    formatFilter,
-    searchKeyword,
-    sortBy,
-    sortOrder,
-    toast,
-  ])
-
-  // 加载统计数据
-  const loadStats = async () => {
-    try {
-      const response = await getEmojiStats()
-      setStats(response.data)
-    } catch (error) {
-      console.error('加载统计数据失败:', error)
-    }
-  }
-
-  useEffect(() => {
-    loadEmojiList()
-  }, [loadEmojiList])
-
-  useEffect(() => {
-    loadStats()
-  }, [])
-
+  // 搜索 debounce：输入稳定 300ms 后才更新关键词（关键词进入 queryKey 触发重新拉取）
   useEffect(() => {
     const debounceTimer = window.setTimeout(() => {
       setSearchKeyword(searchInput.trim())
@@ -146,6 +91,38 @@ export function EmojiManagementPage() {
 
     return () => window.clearTimeout(debounceTimer)
   }, [searchInput])
+
+  // 表情包列表：查询参数即缓存键，翻页/筛选/排序/搜索变化自动重新拉取
+  const emojiListQuery = useQuery({
+    queryKey: [
+      'emoji',
+      'list',
+      { page, pageSize, statusFilter, formatFilter, searchKeyword, sortBy, sortOrder },
+    ],
+    queryFn: () =>
+      getEmojiList({
+        page,
+        page_size: pageSize,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        format: formatFilter === 'all' ? undefined : formatFilter,
+        search: searchKeyword || undefined,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      }),
+  })
+  const emojiList = emojiListQuery.data?.data ?? []
+  const total = emojiListQuery.data?.total ?? 0
+  const loading = emojiListQuery.isPending
+
+  // 统计数据：失败时保持 null，状态切换 Tabs 自动隐藏，不打断页面
+  const statsQuery = useQuery({
+    queryKey: ['emoji', 'stats'],
+    queryFn: getEmojiStats,
+  })
+  const stats: EmojiStats | null = statsQuery.data?.data ?? null
+
+  // 任何写操作成功后，按 'emoji' 前缀整体失效（列表 + 统计）
+  const invalidateEmoji = () => queryClient.invalidateQueries({ queryKey: ['emoji'] })
 
   // 查看详情
   const handleViewDetail = async (emoji: Emoji) => {
@@ -165,68 +142,61 @@ export function EmojiManagementPage() {
     setDeleteDialogOpen(true)
   }
 
-  // 确认删除
-  const confirmDelete = async () => {
-    if (!selectedEmoji) return
-
-    try {
-      await deleteEmoji(selectedEmoji.id)
+  // 确认删除（失败由全局 mutation 错误 toast 呈现）
+  const deleteMutation = useMutation({
+    mutationFn: (emoji: Emoji) => deleteEmoji(emoji.id),
+    meta: { errorTitle: '错误' },
+    onSuccess: () => {
       toast({
         title: '成功',
         description: '表情包已删除',
       })
       setDeleteDialogOpen(false)
       setSelectedEmoji(null)
-      loadEmojiList()
-      loadStats()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '删除失败'
-      toast({
-        title: '错误',
-        description: message,
-        variant: 'destructive',
-      })
-    }
+      invalidateEmoji()
+    },
+  })
+
+  // 确认删除
+  const confirmDelete = () => {
+    if (!selectedEmoji) return
+    deleteMutation.mutate(selectedEmoji)
   }
 
-  // 快速注册
-  const handleRegister = async (emoji: Emoji) => {
-    try {
-      await registerEmoji(emoji.id)
+  // 快速注册（失败由全局 mutation 错误 toast 呈现）
+  const registerMutation = useMutation({
+    mutationFn: (emoji: Emoji) => registerEmoji(emoji.id),
+    meta: { errorTitle: '错误' },
+    onSuccess: () => {
       toast({
         title: '成功',
         description: '表情包已注册',
       })
-      loadEmojiList()
-      loadStats()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '注册失败'
-      toast({
-        title: '错误',
-        description: message,
-        variant: 'destructive',
-      })
-    }
+      invalidateEmoji()
+    },
+  })
+
+  // 快速注册
+  const handleRegister = (emoji: Emoji) => {
+    registerMutation.mutate(emoji)
   }
 
-  // 快速封禁
-  const handleBan = async (emoji: Emoji) => {
-    try {
-      await banEmoji(emoji.id)
+  // 快速封禁（失败由全局 mutation 错误 toast 呈现）
+  const banMutation = useMutation({
+    mutationFn: (emoji: Emoji) => banEmoji(emoji.id),
+    meta: { errorTitle: '错误' },
+    onSuccess: () => {
       toast({
         title: '成功',
         description: '表情包已封禁',
       })
-      loadEmojiList()
-      loadStats()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '封禁失败'
-      toast({
-        title: '错误',
-        description: message,
-        variant: 'destructive',
-      })
-    }
+      invalidateEmoji()
+    },
+  })
+
+  // 快速封禁
+  const handleBan = (emoji: Emoji) => {
+    banMutation.mutate(emoji)
   }
 
   // 切换选择
@@ -240,26 +210,24 @@ export function EmojiManagementPage() {
     setSelectedIds(newSelected)
   }
 
-  // 批量删除
-  const handleBatchDelete = async () => {
-    try {
-      const result = await batchDeleteEmojis(Array.from(selectedIds))
+  // 批量删除（失败由全局 mutation 错误 toast 呈现）
+  const batchDeleteMutation = useMutation({
+    mutationFn: (emojiIds: number[]) => batchDeleteEmojis(emojiIds),
+    meta: { errorTitle: '批量删除失败' },
+    onSuccess: (result) => {
       toast({
         title: '批量删除完成',
         description: result.message,
       })
       setSelectedIds(new Set())
       setBatchDeleteDialogOpen(false)
-      loadEmojiList()
-      loadStats()
-    } catch (error) {
-      toast({
-        title: '批量删除失败',
-        description:
-          error instanceof Error ? error.message : '批量删除失败',
-        variant: 'destructive',
-      })
-    }
+      invalidateEmoji()
+    },
+  })
+
+  // 批量删除
+  const handleBatchDelete = () => {
+    batchDeleteMutation.mutate(Array.from(selectedIds))
   }
 
   // 页面跳转
@@ -453,13 +421,13 @@ export function EmojiManagementPage() {
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={loadEmojiList}
-                    disabled={loading}
+                    onClick={() => emojiListQuery.refetch()}
+                    disabled={emojiListQuery.isFetching}
                     aria-label="刷新"
                     title="刷新"
                   >
                     <RefreshCw
-                      className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                      className={`h-4 w-4 ${emojiListQuery.isFetching ? 'animate-spin' : ''}`}
                     />
                   </Button>
 
@@ -533,25 +501,34 @@ export function EmojiManagementPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <EmojiList
-                emojiList={emojiList}
-                loading={loading}
-                total={total}
-                page={page}
-                pageSize={pageSize}
-                selectedIds={selectedIds}
-                cardSize={cardSize}
-                jumpToPage={jumpToPage}
-                onPageChange={setPage}
-                onJumpToPage={handleJumpToPage}
-                onJumpToPageChange={setJumpToPage}
-                onToggleSelect={toggleSelect}
-                onEdit={handleEdit}
-                onViewDetail={handleViewDetail}
-                onRegister={handleRegister}
-                onBan={handleBan}
-                onDelete={handleDelete}
-              />
+              {emojiListQuery.isError ? (
+                <div className="text-center py-12 space-y-2">
+                  <p className="text-sm text-destructive">{emojiListQuery.error.message}</p>
+                  <Button variant="outline" size="sm" onClick={() => emojiListQuery.refetch()}>
+                    重试
+                  </Button>
+                </div>
+              ) : (
+                <EmojiList
+                  emojiList={emojiList}
+                  loading={loading}
+                  total={total}
+                  page={page}
+                  pageSize={pageSize}
+                  selectedIds={selectedIds}
+                  cardSize={cardSize}
+                  jumpToPage={jumpToPage}
+                  onPageChange={setPage}
+                  onJumpToPage={handleJumpToPage}
+                  onJumpToPageChange={setJumpToPage}
+                  onToggleSelect={toggleSelect}
+                  onEdit={handleEdit}
+                  onViewDetail={handleViewDetail}
+                  onRegister={handleRegister}
+                  onBan={handleBan}
+                  onDelete={handleDelete}
+                />
+              )}
             </CardContent>
           </Card>
 
@@ -567,20 +544,14 @@ export function EmojiManagementPage() {
             emoji={selectedEmoji}
             open={editDialogOpen}
             onOpenChange={setEditDialogOpen}
-            onSuccess={() => {
-              loadEmojiList()
-              loadStats()
-            }}
+            onSuccess={invalidateEmoji}
           />
 
           {/* 上传对话框 */}
           <EmojiUploadDialog
             open={uploadDialogOpen}
             onOpenChange={setUploadDialogOpen}
-            onSuccess={() => {
-              loadEmojiList()
-              loadStats()
-            }}
+            onSuccess={invalidateEmoji}
           />
         </div>
       </ScrollArea>

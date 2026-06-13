@@ -22,3 +22,17 @@ export async function toApiResponse<T>(run: () => Promise<T>): Promise<ApiRespon
     throw error
   }
 }
+
+/**
+ * 迁移期桥接：把仍返回 ApiResponse 的（被多页共享、暂不能切 throw 契约的）API
+ * 解包成「成功取数据、失败抛 ApiError」，以便直接用作 TanStack Query 的 queryFn。
+ *
+ * 用法：`queryFn: () => getModelConfig().then(unwrapApiResponse)`
+ * 待该 API 的最后一个使用者迁移完成、API 自身切换 throw 契约后即可移除。
+ */
+export function unwrapApiResponse<T>(response: ApiResponse<T>): T {
+  if (response.success) {
+    return response.data
+  }
+  throw new ApiError(response.error)
+}

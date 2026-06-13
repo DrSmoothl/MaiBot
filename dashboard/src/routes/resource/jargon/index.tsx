@@ -1,5 +1,6 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Plus, Search, Trash2, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,9 +41,6 @@ import type { StatsData } from './types'
  * 黑话管理主页面
  */
 export function JargonManagementPage() {
-  const [jargons, setJargons] = useState<Jargon[]>([])
-  const [loading, setLoading] = useState(true)
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [search, setSearch] = useState('')
@@ -57,7 +55,38 @@ export function JargonManagementPage() {
   const [deleteConfirmJargon, setDeleteConfirmJargon] = useState<Jargon | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
-  const [stats, setStats] = useState<StatsData>({
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+
+  // 黑话列表：查询参数即缓存键，翻页/搜索/筛选变化自动重新拉取
+  // （TanStack Query 自带请求竞态处理——queryKey 变化时旧请求结果会被丢弃，
+  //  因此不再需要手写的请求序号竞态防护）
+  const jargonListQuery = useQuery({
+    queryKey: [
+      'jargon',
+      'list',
+      { page, pageSize, search: debouncedSearch, scopeFilter, filterChatId, filterIsJargon },
+    ],
+    queryFn: () =>
+      getJargonList({
+        page,
+        page_size: pageSize,
+        search: debouncedSearch || undefined,
+        session_id: scopeFilter !== 'global' && filterChatId !== 'all' ? filterChatId : undefined,
+        is_jargon: filterIsJargon === 'all' ? undefined : filterIsJargon === 'true' ? true : filterIsJargon === 'false' ? false : undefined,
+        is_global: scopeFilter === 'all' ? undefined : scopeFilter === 'global',
+      }),
+  })
+  const jargons = jargonListQuery.data?.data ?? []
+  const total = jargonListQuery.data?.total ?? 0
+  const loading = jargonListQuery.isPending
+
+  // 统计数据：失败时保持占位数值，不打断页面
+  const statsQuery = useQuery({
+    queryKey: ['jargon', 'stats'],
+    queryFn: getJargonStats,
+  })
+  const stats: StatsData = statsQuery.data?.data ?? {
     total: 0,
     confirmed_jargon: 0,
     confirmed_not_jargon: 0,
@@ -66,99 +95,29 @@ export function JargonManagementPage() {
     complete_count: 0,
     chat_count: 0,
     top_chats: {},
-  })
-  const [chatList, setChatList] = useState<JargonChatInfo[]>([])
-  const [formChatList, setFormChatList] = useState<JargonChatInfo[]>([])
-  const jargonListRequestSeqRef = useRef(0)
-  const { toast } = useToast()
-
-  // 加载黑话列表
-  const loadJargons = async () => {
-    const requestSeq = jargonListRequestSeqRef.current + 1
-    jargonListRequestSeqRef.current = requestSeq
-    try {
-      setLoading(true)
-      const response = await getJargonList({
-        page,
-        page_size: pageSize,
-        search: debouncedSearch || undefined,
-        session_id: scopeFilter !== 'global' && filterChatId !== 'all' ? filterChatId : undefined,
-        is_jargon: filterIsJargon === 'all' ? undefined : filterIsJargon === 'true' ? true : filterIsJargon === 'false' ? false : undefined,
-        is_global: scopeFilter === 'all' ? undefined : scopeFilter === 'global',
-      })
-      if (requestSeq !== jargonListRequestSeqRef.current) {
-        return
-      }
-      setJargons(response.data)
-      setTotal(response.total)
-    } catch (error) {
-      if (requestSeq !== jargonListRequestSeqRef.current) {
-        return
-      }
-      toast({
-        title: '加载失败',
-        description: error instanceof Error ? error.message : '无法加载黑话列表',
-        variant: 'destructive',
-      })
-    } finally {
-      if (requestSeq === jargonListRequestSeqRef.current) {
-        setLoading(false)
-      }
-    }
   }
 
-  // 加载统计数据
-  const loadStats = async () => {
-    try {
-      const response = await getJargonStats()
-      if (response?.data) {
-        setStats(response.data)
-      }
-    } catch (error) {
-      console.error('加载统计数据失败:', error)
-    }
-  }
-
-  // 加载聊天列表
-  const loadChatList = async () => {
-    try {
+  // 聊天列表：侧边栏（仅有记录的聊天）与表单（含空聊天）各取一份
+  const chatListQuery = useQuery({
+    queryKey: ['jargon', 'chats'],
+    queryFn: async () => {
       const [sidebarResponse, formResponse] = await Promise.all([
         getJargonChatList(),
         getJargonChatList({ include_empty: true }),
       ])
-      if (sidebarResponse?.data) {
-        setChatList(sidebarResponse.data)
+      return {
+        sidebar: sidebarResponse.data,
+        form: formResponse.data,
       }
-      if (formResponse?.data) {
-        setFormChatList(formResponse.data)
-      }
-    } catch (error) {
-      console.error('加载聊天列表失败:', error)
-    }
-  }
+    },
+  })
+  const chatList: JargonChatInfo[] = chatListQuery.data?.sidebar ?? []
+  const formChatList: JargonChatInfo[] = chatListQuery.data?.form ?? []
 
-  useEffect(() => {
-    const timerId = window.setTimeout(() => {
-      const normalizedSearch = search.trim()
-      setDebouncedSearch((current) => (current === normalizedSearch ? current : normalizedSearch))
-      setPage((current) => (current === 1 ? current : 1))
-      setSelectedIds((current) => (current.size === 0 ? current : new Set<number>()))
-    }, 300)
+  // 任何写操作成功后，按 'jargon' 前缀整体失效（列表 + 统计 + 聊天列表）
+  const invalidateJargon = () => queryClient.invalidateQueries({ queryKey: ['jargon'] })
 
-    return () => window.clearTimeout(timerId)
-  }, [search])
-
-  useEffect(() => {
-    loadJargons()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, debouncedSearch, scopeFilter, filterChatId, filterIsJargon])
-
-  useEffect(() => {
-    loadStats()
-    loadChatList()
-  }, [])
-
-  // 查看详情
+  // 查看详情（事件驱动的读取，失败用 toast 反馈用户动作）
   const handleViewDetail = async (jargon: Jargon) => {
     try {
       const response = await getJargonDetail(jargon.id)
@@ -179,26 +138,24 @@ export function JargonManagementPage() {
     setIsEditDialogOpen(true)
   }
 
-  // 删除黑话
-  const handleDelete = async () => {
-    if (!deleteConfirmJargon) return
-    try {
-      await deleteJargon(deleteConfirmJargon.id)
+  // 删除黑话（失败由全局 mutation 错误 toast 呈现）
+  const deleteMutation = useMutation({
+    mutationFn: (jargon: Jargon) => deleteJargon(jargon.id),
+    meta: { errorTitle: '删除失败' },
+    onSuccess: (_data, jargon) => {
       toast({
         title: '删除成功',
-        description: `已删除黑话: ${deleteConfirmJargon.content}`,
+        description: `已删除黑话: ${jargon.content}`,
       })
       setDeleteConfirmJargon(null)
-      loadJargons()
-      loadStats()
-      loadChatList()
-    } catch (error) {
-      toast({
-        title: '删除失败',
-        description: error instanceof Error ? error.message : '无法删除黑话',
-        variant: 'destructive',
-      })
-    }
+      invalidateJargon()
+    },
+  })
+
+  // 删除黑话
+  const handleDelete = () => {
+    if (!deleteConfirmJargon) return
+    deleteMutation.mutate(deleteConfirmJargon)
   }
 
   // 切换单个选择
@@ -221,47 +178,57 @@ export function JargonManagementPage() {
     }
   }
 
-  // 批量删除
-  const handleBatchDelete = async () => {
-    try {
-      await batchDeleteJargons(Array.from(selectedIds))
+  // 批量删除（失败由全局 mutation 错误 toast 呈现）
+  const batchDeleteMutation = useMutation({
+    mutationFn: (ids: number[]) => batchDeleteJargons(ids),
+    meta: { errorTitle: '批量删除失败' },
+    onSuccess: (_data, ids) => {
       toast({
         title: '批量删除成功',
-        description: `已删除 ${selectedIds.size} 个黑话`,
+        description: `已删除 ${ids.length} 个黑话`,
       })
       setSelectedIds(new Set())
       setIsBatchDeleteDialogOpen(false)
-      loadJargons()
-      loadStats()
-      loadChatList()
-    } catch (error) {
-      toast({
-        title: '批量删除失败',
-        description: error instanceof Error ? error.message : '无法批量删除黑话',
-        variant: 'destructive',
-      })
-    }
+      invalidateJargon()
+    },
+  })
+
+  // 批量删除
+  const handleBatchDelete = () => {
+    batchDeleteMutation.mutate(Array.from(selectedIds))
   }
 
-  // 批量设置为黑话
-  const handleBatchSetJargon = async (isJargon: boolean) => {
-    try {
-      await batchSetJargonStatus(Array.from(selectedIds), isJargon)
+  // 批量设置为黑话（失败由全局 mutation 错误 toast 呈现）
+  const batchSetJargonMutation = useMutation({
+    mutationFn: (vars: { ids: number[]; isJargon: boolean }) =>
+      batchSetJargonStatus(vars.ids, vars.isJargon),
+    meta: { errorTitle: '操作失败' },
+    onSuccess: (_data, vars) => {
       toast({
         title: '操作成功',
-        description: `已将 ${selectedIds.size} 个词条设为${isJargon ? '黑话' : '非黑话'}`,
+        description: `已将 ${vars.ids.length} 个词条设为${vars.isJargon ? '黑话' : '非黑话'}`,
       })
       setSelectedIds(new Set())
-      loadJargons()
-      loadStats()
-    } catch (error) {
-      toast({
-        title: '操作失败',
-        description: error instanceof Error ? error.message : '批量设置失败',
-        variant: 'destructive',
-      })
-    }
+      invalidateJargon()
+    },
+  })
+
+  // 批量设置为黑话
+  const handleBatchSetJargon = (isJargon: boolean) => {
+    batchSetJargonMutation.mutate({ ids: Array.from(selectedIds), isJargon })
   }
+
+  // 搜索防抖：稳定后写入 debouncedSearch（进入列表 queryKey）并重置页码与选择
+  useEffect(() => {
+    const timerId = window.setTimeout(() => {
+      const normalizedSearch = search.trim()
+      setDebouncedSearch((current) => (current === normalizedSearch ? current : normalizedSearch))
+      setPage((current) => (current === 1 ? current : 1))
+      setSelectedIds((current) => (current.size === 0 ? current : new Set<number>()))
+    }, 300)
+
+    return () => window.clearTimeout(timerId)
+  }, [search])
 
   // 页面跳转
   const handleJumpToPage = (jumpToPage: string) => {
@@ -477,23 +444,32 @@ export function JargonManagementPage() {
             </aside>
 
             <div className="min-h-0 lg:h-full">
-              <JargonList
-                jargons={jargons}
-                loading={loading}
-                total={total}
-                page={page}
-                pageSize={pageSize}
-                selectedIds={selectedIds}
-                hideChatColumn={scopeFilter === 'global' || filterChatId !== 'all'}
-                className="lg:h-full"
-                onEdit={handleEdit}
-                onViewDetail={handleViewDetail}
-                onDelete={(jargon) => setDeleteConfirmJargon(jargon)}
-                onToggleSelect={toggleSelect}
-                onToggleSelectAll={toggleSelectAll}
-                onPageChange={setPage}
-                onJumpToPage={handleJumpToPage}
-              />
+              {jargonListQuery.isError ? (
+                <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-2 rounded-lg border bg-card py-8">
+                  <p className="text-sm text-destructive">{jargonListQuery.error.message}</p>
+                  <Button variant="outline" size="sm" onClick={() => jargonListQuery.refetch()}>
+                    重试
+                  </Button>
+                </div>
+              ) : (
+                <JargonList
+                  jargons={jargons}
+                  loading={loading}
+                  total={total}
+                  page={page}
+                  pageSize={pageSize}
+                  selectedIds={selectedIds}
+                  hideChatColumn={scopeFilter === 'global' || filterChatId !== 'all'}
+                  className="lg:h-full"
+                  onEdit={handleEdit}
+                  onViewDetail={handleViewDetail}
+                  onDelete={(jargon) => setDeleteConfirmJargon(jargon)}
+                  onToggleSelect={toggleSelect}
+                  onToggleSelectAll={toggleSelectAll}
+                  onPageChange={setPage}
+                  onJumpToPage={handleJumpToPage}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -512,9 +488,7 @@ export function JargonManagementPage() {
         onOpenChange={setIsCreateDialogOpen}
         chatList={formChatList}
         onSuccess={() => {
-          loadJargons()
-          loadStats()
-          loadChatList()
+          invalidateJargon()
           setIsCreateDialogOpen(false)
         }}
       />
@@ -526,9 +500,7 @@ export function JargonManagementPage() {
         onOpenChange={setIsEditDialogOpen}
         chatList={formChatList}
         onSuccess={() => {
-          loadJargons()
-          loadStats()
-          loadChatList()
+          invalidateJargon()
           setIsEditDialogOpen(false)
         }}
       />
