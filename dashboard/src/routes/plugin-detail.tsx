@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -24,7 +23,7 @@ import {
   Info,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { backendApi, unwrapApiResponse } from '@/lib/http'
+import { backendApi } from '@/lib/http'
 import type { PluginInfo } from '@/types/plugin'
 import {
   checkGitStatus,
@@ -46,6 +45,77 @@ import { recordPluginDownload } from '@/lib/plugin-stats'
 import { PluginIcon } from './plugins/PluginIcon'
 import { getPluginTypeLabel } from './plugins/types'
 
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const cause = error.cause
+  return (
+    error.name === 'AbortError'
+    || (cause instanceof Error && cause.name === 'AbortError')
+  )
+}
+
+async function loadPluginReadme(
+  plugin: PluginInfo,
+  isInstalled: boolean,
+  signal: AbortSignal
+): Promise<string> {
+  const repositoryUrl = plugin.manifest.repository_url
+  if (!repositoryUrl) {
+    return ''
+  }
+
+  // 如果插件已安装，优先尝试从本地读取 README。
+  if (isInstalled) {
+    try {
+      const localResult = await backendApi.get<{ success: boolean; data?: string }>(
+        `/api/webui/plugins/local-readme/${plugin.id}`,
+        { signal }
+      )
+
+      if (localResult.success && localResult.data) {
+        return localResult.data
+      }
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error
+      }
+      // 本地未读到时继续尝试远程 README。
+    }
+  }
+
+  // 从 repository_url 解析仓库信息。
+  const match = repositoryUrl.match(/github\.com\/([^/]+)\/([^/\s]+)/)
+  if (!match) {
+    return '无法解析仓库地址'
+  }
+
+  const [, owner, repo] = match
+  const cleanRepo = repo.replace(/\.git$/, '')
+
+  const result = await backendApi.post<{ success: boolean; data?: string }>(
+    '/api/webui/plugins/fetch-raw',
+    {
+      body: {
+        owner,
+        repo: cleanRepo,
+        branch: 'main',
+        file_path: 'README.md',
+      },
+      errorMessage: '获取 README 失败',
+      signal,
+    }
+  )
+
+  if (result.success && result.data) {
+    return result.data
+  }
+
+  return '该插件暂无 README 文档'
+}
+
 export function PluginDetailPage() {
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { pluginId?: string }
@@ -53,15 +123,12 @@ export function PluginDetailPage() {
   const queryClient = useQueryClient()
   const pluginId = search.pluginId
 
-  const [readme, setReadme] = useState<string>('')
-  const [readmeLoading, setReadmeLoading] = useState(true)
-
   // 插件详情：从市场列表中筛出当前 pluginId；失败由 query 的 error 状态局部呈现
   const pluginQuery = useQuery({
     queryKey: ['plugin-detail', pluginId],
     enabled: !!pluginId,
     queryFn: async () => {
-      const list = await fetchPluginList().then(unwrapApiResponse)
+      const list = await fetchPluginList()
       const foundPlugin = list.find((p) => p.id === pluginId || p.marketplace_id === pluginId)
       if (!foundPlugin) {
         throw new Error('未找到该插件')
@@ -84,15 +151,15 @@ export function PluginDetailPage() {
     queries: [
       {
         queryKey: ['plugin-git-status'],
-        queryFn: () => checkGitStatus().then(unwrapApiResponse),
+        queryFn: () => checkGitStatus(),
       },
       {
         queryKey: ['plugin-maimai-version'],
-        queryFn: () => getMaimaiVersion().then(unwrapApiResponse),
+        queryFn: () => getMaimaiVersion(),
       },
       {
         queryKey: ['plugin-installed-list'],
-        queryFn: () => getInstalledPlugins({ forceRefresh: true }).then(unwrapApiResponse),
+        queryFn: () => getInstalledPlugins({ forceRefresh: true }),
       },
     ],
   })
@@ -105,78 +172,18 @@ export function PluginDetailPage() {
   const isInstalled = plugin ? checkPluginInstalled(plugin.id, installedPlugins) : false
   const installedVersion = plugin ? getInstalledPluginVersion(plugin.id, installedPlugins) : undefined
 
+  const readmeQuery = useQuery({
+    queryKey: ['plugin-readme', plugin?.id, isInstalled],
+    enabled: !!plugin && !installedPluginsQuery.isPending,
+    staleTime: 5 * 60 * 1000,
+    queryFn: ({ signal }) => loadPluginReadme(plugin!, isInstalled, signal),
+  })
+  const readme = readmeQuery.isError ? '加载 README 失败' : (readmeQuery.data ?? '')
+  const readmeLoading = readmeQuery.isPending
+
   // 任一写操作成功后，重新拉取已安装列表（前缀失效）
   const invalidateInstalledPlugins = () =>
     queryClient.invalidateQueries({ queryKey: ['plugin-installed-list'] })
-
-  // 加载 README
-  useEffect(() => {
-    const loadReadme = async () => {
-      if (!plugin?.manifest?.repository_url) {
-        setReadmeLoading(false)
-        return
-      }
-
-      try {
-        setReadmeLoading(true)
-
-        // 如果插件已安装，优先尝试从本地读取 README
-        if (isInstalled && search.pluginId) {
-          try {
-            const localResult = await backendApi.get<{ success: boolean; data?: string }>(
-              `/api/webui/plugins/local-readme/${plugin.id}`
-            )
-
-            if (localResult.success && localResult.data) {
-              setReadme(localResult.data)
-              setReadmeLoading(false)
-              return // 成功获取本地 README，直接返回
-            }
-          } catch {
-            // 继续执行远程获取逻辑
-          }
-        }
-
-        // 从 repository_url 解析仓库信息
-        // 格式: https://github.com/owner/repo
-        const match = plugin.manifest.repository_url.match(/github\.com\/([^/]+)\/([^/\s]+)/)
-        if (!match) {
-          setReadme('无法解析仓库地址')
-          return
-        }
-
-        const [, owner, repo] = match
-        const cleanRepo = repo.replace(/\.git$/, '')
-
-        // 使用后端代理获取 README.md
-        const result = await backendApi.post<{ success: boolean; data?: string }>(
-          '/api/webui/plugins/fetch-raw',
-          {
-            body: {
-              owner,
-              repo: cleanRepo,
-              branch: 'main',
-              file_path: 'README.md',
-            },
-            errorMessage: '获取 README 失败',
-          }
-        )
-
-        if (result.success && result.data) {
-          setReadme(result.data)
-        } else {
-          setReadme('该插件暂无 README 文档')
-        }
-      } catch (err) {
-        console.error('加载 README 失败:', err)
-        setReadme('加载 README 失败')
-      } finally {
-        setReadmeLoading(false)
-      }
-    }
-
-    loadReadme()
-  }, [plugin, isInstalled, search.pluginId])
 
   // 检查是否需要更新
   const needsUpdate = () => {
@@ -199,7 +206,7 @@ export function PluginDetailPage() {
     mutationFn: (vars: { plugin: PluginInfo }) => {
       const repositoryUrl =
         vars.plugin.manifest.repository_url || vars.plugin.manifest.urls?.repository || ''
-      return installPlugin(vars.plugin.id, repositoryUrl, 'main').then(unwrapApiResponse)
+      return installPlugin(vars.plugin.id, repositoryUrl, 'main')
     },
     meta: { errorTitle: '安装失败' },
     onSuccess: (_data, vars) => {
@@ -223,7 +230,7 @@ export function PluginDetailPage() {
   // 卸载插件（失败由全局 mutation 错误 toast 呈现）
   const uninstallMutation = useMutation({
     mutationFn: (vars: { plugin: PluginInfo }) =>
-      uninstallPlugin(vars.plugin.id).then(unwrapApiResponse),
+      uninstallPlugin(vars.plugin.id),
     meta: { errorTitle: '卸载失败' },
     onSuccess: (_data, vars) => {
       toast({
@@ -241,7 +248,7 @@ export function PluginDetailPage() {
     mutationFn: (vars: { plugin: PluginInfo }) => {
       const repositoryUrl =
         vars.plugin.manifest.repository_url || vars.plugin.manifest.urls?.repository || ''
-      return updatePlugin(vars.plugin.id, repositoryUrl, 'main').then(unwrapApiResponse)
+      return updatePlugin(vars.plugin.id, repositoryUrl, 'main')
     },
     meta: { errorTitle: '更新失败' },
     onSuccess: (data, vars) => {

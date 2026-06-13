@@ -5,14 +5,13 @@
  * 本文件只声明 endpoint、业务错误文案与响应体 success 标记的解包规则。
  */
 import { ApiError, backendApi } from '@/lib/http'
-import type { ApiResponse } from '@/types/api'
 
 import type { InstalledPlugin, LegacyInstalledPlugin } from './types'
 
 const INSTALLED_PLUGINS_CACHE_TTL = 1500
 
-let installedPluginsCache: { timestamp: number; result: ApiResponse<InstalledPlugin[]> } | null = null
-let installedPluginsRequest: Promise<ApiResponse<InstalledPlugin[]>> | null = null
+let installedPluginsCache: { timestamp: number; result: InstalledPlugin[] } | null = null
+let installedPluginsRequest: Promise<InstalledPlugin[]> | null = null
 
 /**
  * 获取已安装插件列表
@@ -20,7 +19,7 @@ let installedPluginsRequest: Promise<ApiResponse<InstalledPlugin[]>> | null = nu
  * 保持原有行为：HTTP 错误 / 响应解析失败 / 业务级失败都返回空列表而不是错误；
  * 网络层失败与认证失效（401）仍向上抛出。
  */
-async function fetchInstalledPluginsUncached(): Promise<ApiResponse<InstalledPlugin[]>> {
+async function fetchInstalledPluginsUncached(): Promise<InstalledPlugin[]> {
   let data: { success: boolean; plugins?: InstalledPlugin[]; message?: string }
   try {
     data = await backendApi.get<{ success: boolean; plugins?: InstalledPlugin[]; message?: string }>(
@@ -29,28 +28,19 @@ async function fetchInstalledPluginsUncached(): Promise<ApiResponse<InstalledPlu
     )
   } catch (error) {
     if (error instanceof ApiError && error.status !== undefined && error.status !== 401) {
-      return {
-        success: true,
-        data: []
-      }
+      return []
     }
     throw error
   }
 
   if (!data.success) {
-    return {
-      success: true,
-      data: []
-    }
+    return []
   }
 
-  return {
-    success: true,
-    data: data.plugins || []
-  }
+  return data.plugins || []
 }
 
-export async function getInstalledPlugins(options: { forceRefresh?: boolean } = {}): Promise<ApiResponse<InstalledPlugin[]>> {
+export async function getInstalledPlugins(options: { forceRefresh?: boolean } = {}): Promise<InstalledPlugin[]> {
   if (
     !options.forceRefresh
     && installedPluginsCache

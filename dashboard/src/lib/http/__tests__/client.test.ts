@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { toApiResponse } from '../compat'
 import { createApiClient } from '../client'
 import { ApiError } from '../errors'
 
@@ -269,30 +268,5 @@ describe('createApiClient', () => {
 
       await expect(client.get('/api/x')).rejects.toThrow('接口响应不是合法 JSON')
     })
-  })
-})
-
-describe('toApiResponse', () => {
-  it('成功时返回 { success: true, data }', async () => {
-    await expect(toApiResponse(async () => ({ id: 1 }))).resolves.toEqual({
-      success: true,
-      data: { id: 1 },
-    })
-  })
-
-  it('ApiError 收敛为 { success: false, error }', async () => {
-    await expect(
-      toApiResponse(async () => {
-        throw new ApiError('获取失败', { status: 500 })
-      })
-    ).resolves.toEqual({ success: false, error: '获取失败' })
-  })
-
-  it('非 ApiError 异常原样抛出，不做掩盖', async () => {
-    await expect(
-      toApiResponse(async () => {
-        throw new TypeError('编程错误')
-      })
-    ).rejects.toThrow('编程错误')
   })
 })

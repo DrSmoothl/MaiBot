@@ -8,6 +8,7 @@ import { ApiError, backendApi } from '@/lib/http'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
+import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
 import { clearLocalCache, DEFAULT_SETTINGS, exportSettings, formatBytes, getSetting, getStorageUsage, importSettings, resetAllSettings, setSetting } from '@/lib/settings-manager'
 import { logWebSocket } from '@/lib/log-websocket'
@@ -26,6 +27,7 @@ export function OtherTab() {
   const [wsReconnectInterval, setWsReconnectInterval] = useState(() => getSetting('wsReconnectInterval'))
   const [wsMaxReconnectAttempts, setWsMaxReconnectAttempts] = useState(() => getSetting('wsMaxReconnectAttempts'))
   const [dataSyncInterval, setDataSyncInterval] = useState(() => getSetting('dataSyncInterval'))
+  const [enableAvatarFetch, setEnableAvatarFetch] = useState(() => getSetting('enableAvatarFetch'))
   const [storageUsage, setStorageUsage] = useState(() => getStorageUsage())
   
   // 导入/导出状态
@@ -69,6 +71,11 @@ export function OtherTab() {
     const interval = value[0]
     setDataSyncInterval(interval)
     setSetting('dataSyncInterval', interval)
+  }
+
+  const handleAvatarFetchChange = (checked: boolean) => {
+    setEnableAvatarFetch(checked)
+    setSetting('enableAvatarFetch', checked)
   }
 
   // 清除日志缓存
@@ -140,6 +147,7 @@ export function OtherTab() {
           setWsReconnectInterval(getSetting('wsReconnectInterval'))
           setWsMaxReconnectAttempts(getSetting('wsMaxReconnectAttempts'))
           setDataSyncInterval(getSetting('dataSyncInterval'))
+          setEnableAvatarFetch(getSetting('enableAvatarFetch'))
           refreshStorageUsage()
           
           toast({
@@ -187,6 +195,7 @@ export function OtherTab() {
     setWsReconnectInterval(DEFAULT_SETTINGS.wsReconnectInterval)
     setWsMaxReconnectAttempts(DEFAULT_SETTINGS.wsMaxReconnectAttempts)
     setDataSyncInterval(DEFAULT_SETTINGS.dataSyncInterval)
+    setEnableAvatarFetch(DEFAULT_SETTINGS.enableAvatarFetch)
     refreshStorageUsage()
     toast({
       title: t('settings.other.resetDone'),
@@ -239,6 +248,29 @@ export function OtherTab() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* 展示设置 */}
+      <div className="rounded-lg border bg-card p-4 sm:p-6">
+        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">
+          {t('settings.other.display')}
+        </h3>
+        <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/50 p-3 sm:p-4">
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="enable-avatar-fetch" className="text-sm font-medium">
+              {t('settings.other.enableAvatarFetch')}
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {t('settings.other.enableAvatarFetchDesc')}
+            </p>
+          </div>
+          <Switch
+            id="enable-avatar-fetch"
+            checked={enableAvatarFetch}
+            onCheckedChange={handleAvatarFetchChange}
+            aria-label={t('settings.other.enableAvatarFetch')}
+          />
+        </div>
+      </div>
+
       {/* 性能与存储 */}
       <div className="rounded-lg border bg-card p-4 sm:p-6">
         <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center gap-2">

@@ -59,7 +59,6 @@
     "logs": "麦麦 로그"
   },
   "chat": {
-    "defaultTab": "WebUI",
     "botNameFallback": "麦麦",
     "userFallback": "사용자",
     "userNameFallback": "WebUI 사용자",
@@ -105,7 +104,6 @@
       "offline": "오프라인",
       "subtitle": "대화 {{count}}개",
       "title": "채팅",
-      "webuiBadge": "WebUI",
       "virtualBadge": "가상",
       "profileTitle": "내 신분",
       "editName": "닉네임 편집",
@@ -336,6 +334,9 @@
       "securityTip6": "최고의 보안을 위해 시스템 생성 토큰을 권장합니다"
     },
     "other": {
+      "display": "표시 설정",
+      "enableAvatarFetch": "사용자 아바타 가져오기 및 표시",
+      "enableAvatarFetchDesc": "끄면 채팅과 추론 과정 화면에서 아바타 이미지를 요청하지 않고 기본 아바타를 표시합니다.",
       "performance": "성능 & 저장소",
       "localStorage": "로컬 저장소 사용량",
       "logCache": "로그 캐시 크기",

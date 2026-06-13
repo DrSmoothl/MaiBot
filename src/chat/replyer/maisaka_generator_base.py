@@ -48,6 +48,7 @@ from src.maisaka.context.messages import (
 )
 from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
+from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.plugin_runtime.hook_payloads import deserialize_prompt_messages, serialize_prompt_messages
 
@@ -751,6 +752,14 @@ class BaseMaisakaReplyGenerator:
             selected_expressions=selection_result.selected_expressions,
         )
 
+    @staticmethod
+    def _should_keep_replyer_history_message(message: LLMContextMessage) -> bool:
+        """replyer 只接收真实聊天上下文，不接收参考、工具结果和中期摘要。"""
+
+        if isinstance(message, (ReferenceMessage, ToolResultMessage)):
+            return False
+        return not is_mid_term_memory_message(message)
+
     async def generate_reply_with_context(
         self,
         extra_info: str = "",
@@ -795,9 +804,7 @@ class BaseMaisakaReplyGenerator:
         #     f"历史条数={len(chat_history)} 目标ID={reply_message.message_id if reply_message else None}"
         # )
 
-        filtered_history = [
-            message for message in chat_history if not isinstance(message, (ReferenceMessage, ToolResultMessage))
-        ]
+        filtered_history = [message for message in chat_history if self._should_keep_replyer_history_message(message)]
 
         if self.express_model is None:
             logger.error("回复模型未初始化")

@@ -15,7 +15,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { getModelConfig } from '@/lib/config-api'
-import { unwrapApiResponse } from '@/lib/http'
 import {
   applyPromptGeneratorBlocks,
   generatePromptPersona,
@@ -145,7 +144,7 @@ export function PromptGeneratorPage() {
   // 模型列表：读取失败用局部呈现（不弹 toast），「刷新模型」按钮调 refetch
   const modelsQuery = useQuery({
     queryKey: ['promptGenerator', 'models'],
-    queryFn: () => getModelConfig().then(unwrapApiResponse),
+    queryFn: () => getModelConfig(),
   })
   const loadingModels = modelsQuery.isFetching
   const models = useMemo(() => normalizeModels(modelsQuery.data), [modelsQuery.data])
@@ -159,7 +158,7 @@ export function PromptGeneratorPage() {
   // 注入配置块（失败由全局 mutation 错误 toast 呈现）
   const applyMutation = useMutation({
     mutationFn: async (vars: { blocks: PromptGeneratorConfigBlock[]; label: string; blockId?: string }) =>
-      unwrapApiResponse(await applyPromptGeneratorBlocks(vars.blocks)),
+      applyPromptGeneratorBlocks(vars.blocks),
     meta: { errorTitle: '注入失败' },
     onMutate: (vars) => {
       setApplyingBlockId(vars.blockId ?? null)
@@ -187,7 +186,7 @@ export function PromptGeneratorPage() {
       extra_requirements: string
       temperature: number
       max_tokens: number
-    }) => unwrapApiResponse(await generatePromptPersona(vars)),
+    }) => generatePromptPersona(vars),
     meta: { errorTitle: '生成失败' },
     onSuccess: (data) => {
       setGenerated(data)
