@@ -4,13 +4,12 @@
 以及插件依赖/Python 包依赖的解析逻辑。
 """
 
+import json
+import re
 from functools import lru_cache
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Set, Tuple, Union
-
-import json
-import re
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -31,7 +30,6 @@ _ICON_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _HEX_COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _LOCAL_ICON_SUFFIXES = {".jpg", ".jpeg", ".png", ".svg", ".webp"}
 _RESERVED_PLUGIN_DIRECTORY_NAMES = {"data", "__pycache__"}  # 条目需为 casefold 形式
-
 
 
 def is_reserved_plugin_directory(path: Path) -> bool:
@@ -756,9 +754,7 @@ class PluginManifest(_StrictManifestModel):
             List[PythonPackageDependencyDefinition]: 所有 ``type=python_package`` 的依赖项。
         """
         return [
-            dependency
-            for dependency in self.dependencies
-            if isinstance(dependency, PythonPackageDependencyDefinition)
+            dependency for dependency in self.dependencies if isinstance(dependency, PythonPackageDependencyDefinition)
         ]
 
     @property
@@ -792,6 +788,7 @@ class ManifestValidator:
         sdk_version: str = "",
         project_root: Optional[Path] = None,
         validate_python_package_dependencies: bool = True,
+        log_compat_warnings: bool = True,
     ) -> None:
         """初始化 Manifest 校验器。
 
@@ -800,11 +797,13 @@ class ManifestValidator:
             sdk_version: 当前 SDK 版本号；留空时自动从运行环境中探测。
             project_root: 项目根目录；留空时自动推断。
             validate_python_package_dependencies: 是否校验 Python 包依赖与当前环境的关系。
+            log_compat_warnings: 是否输出兼容模式提示；预扫描场景可关闭以避免重复日志。
         """
         self._project_root: Path = project_root or self._resolve_project_root()
         self._host_version: str = host_version or self._detect_default_host_version(self._project_root)
         self._sdk_version: str = sdk_version or self._detect_default_sdk_version(self._project_root)
         self._validate_python_package_dependencies: bool = validate_python_package_dependencies
+        self._log_compat_warnings: bool = log_compat_warnings
         self.errors: List[str] = []
         self.warnings: List[str] = []
 
@@ -834,7 +833,9 @@ class ManifestValidator:
         manifest_version = manifest.get("manifest_version")
         if manifest_version not in self.SUPPORTED_MANIFEST_VERSIONS:
             supported_versions = ", ".join(str(version) for version in self.SUPPORTED_MANIFEST_VERSIONS)
-            self.errors.append(f"Manifest 版本不兼容: manifest_version={manifest_version!r}，仅支持 {supported_versions}")
+            self.errors.append(
+                f"Manifest 版本不兼容: manifest_version={manifest_version!r}，仅支持 {supported_versions}"
+            )
             self._log_errors(source=source)
             return None
 
@@ -1018,8 +1019,8 @@ class ManifestValidator:
                 manifest.host_application.max_version,
             ):
                 self.warnings.append(
-                    f"Host {self._host_version} 超出声明上限 "
-                    f"{VersionComparator.normalize_version(manifest.host_application.max_version)}，兼容模式加载"
+                    f"当前版本 {self._host_version} 以兼容模式加载"
+                    f"{VersionComparator.normalize_version(manifest.host_application.max_version)} 版本的插件"
                 )
             else:
                 self.errors.append(f"Host 版本不兼容: {host_message} (当前 Host: {self._host_version})")
@@ -1047,9 +1048,7 @@ class ManifestValidator:
             normalized_package_name = canonicalize_name(dependency.name)
             package_specifier = self._build_specifier_set(dependency.version_spec)
             if package_specifier is None:
-                self.errors.append(
-                    f"Python 包依赖 {dependency.name} 的版本约束无效: {dependency.version_spec}"
-                )
+                self.errors.append(f"Python 包依赖 {dependency.name} 的版本约束无效: {dependency.version_spec}")
                 continue
 
             installed_version = self._get_installed_package_version(dependency.name)
@@ -1149,15 +1148,15 @@ class ManifestValidator:
         logger.error(f"Manifest 校验失败: 共 {len(self.errors)} 项，{error_summary}")
 
     def _log_warnings(self, source: Optional[str] = None) -> None:
-        """输出当前累计的 Manifest 兼容性警告。"""
+        """输出当前累计的 Manifest 兼容性提示。"""
+        if not self._log_compat_warnings:
+            return
         if not self.warnings:
             return
 
         source_key = source or ""
         pending_warnings = [
-            warning
-            for warning in self.warnings
-            if (source_key, warning) not in self._LOGGED_WARNING_KEYS
+            warning for warning in self.warnings if (source_key, warning) not in self._LOGGED_WARNING_KEYS
         ]
         if not pending_warnings:
             return
@@ -1167,9 +1166,12 @@ class ManifestValidator:
 
         warning_summary = "；".join(pending_warnings)
         if source:
-            logger.warning(f"Manifest 兼容模式 [{source}]: 共 {len(pending_warnings)} 项，{warning_summary}")
+            if len(pending_warnings) < 2:
+                logger.info(f"插件 [{source}]: {warning_summary}")
+            else:
+                logger.info(f"插件 [{source}]: 共 {len(pending_warnings)} 项，{warning_summary}")
             return
-        logger.warning(f"Manifest 兼容模式: 共 {len(pending_warnings)} 项，{warning_summary}")
+        logger.info(f"插件: 共 {len(pending_warnings)} 项，{warning_summary}")
 
     @classmethod
     def _resolve_project_root(cls) -> Path:
@@ -1332,7 +1334,9 @@ class ManifestValidator:
         """
         candidate_versions = cls._build_candidate_versions(left, right)
         for candidate_version in candidate_versions:
-            if left.contains(candidate_version, prereleases=True) and right.contains(candidate_version, prereleases=True):
+            if left.contains(candidate_version, prereleases=True) and right.contains(
+                candidate_version, prereleases=True
+            ):
                 return True
         return False
 

@@ -642,11 +642,11 @@
         "multipleReplyStyle": {
           "label": "备用表达风格",
           "placeholder": "每行输入一种备用表达风格",
-          "description": "当列表不为空时，麦麦会按概率从这些风格中随机替换默认表达风格"
+          "description": "当列表不为空时，麦麦会按概率从这些风格中随机注入一次性表达提示"
         },
         "multipleProbability": {
-          "label": "备用风格触发概率",
-          "description": "每次构建回复时，从备用表达风格中随机替换默认表达风格的概率"
+          "label": "临时风格注入概率",
+          "description": "每次构建回复时，从备用表达风格中随机注入一次性表达提示的概率"
         }
       },
       "emoji": {

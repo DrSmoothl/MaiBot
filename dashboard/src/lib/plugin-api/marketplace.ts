@@ -371,9 +371,34 @@ export async function getMaimaiVersion(): Promise<ApiResponse<MaimaiVersion>> {
   }
 }
 
+type VersionTuple = [number, number, number]
+
+function parseVersionTuple(version: string | undefined): VersionTuple {
+  if (!version) {
+    return [0, 0, 0]
+  }
+
+  const normalizedVersion = version.trim().replace(/-snapshot\.\d+$/, '')
+  const parts = normalizedVersion.split('.').map(part => Number.parseInt(part, 10))
+  return [
+    Number.isFinite(parts[0]) ? parts[0] : 0,
+    Number.isFinite(parts[1]) ? parts[1] : 0,
+    Number.isFinite(parts[2]) ? parts[2] : 0,
+  ]
+}
+
+function compareVersionTuple(left: VersionTuple, right: VersionTuple): number {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] < right[index]) return -1
+    if (left[index] > right[index]) return 1
+  }
+
+  return 0
+}
+
 /**
  * 比较版本号
- * 
+ *
  * @param pluginMinVersion 插件要求的最小版本
  * @param pluginMaxVersion 插件要求的最大版本(可选)
  * @param maimaiVersion 麦麦当前版本
@@ -384,33 +409,28 @@ export function isPluginCompatible(
   pluginMaxVersion: string | undefined,
   maimaiVersion: MaimaiVersion
 ): boolean {
-  // 解析插件最小版本
-  const minParts = pluginMinVersion.split('.').map(p => parseInt(p) || 0)
-  const minMajor = minParts[0] || 0
-  const minMinor = minParts[1] || 0
-  const minPatch = minParts[2] || 0
-  
-  // 检查最小版本
-  if (maimaiVersion.version_major < minMajor) return false
-  if (maimaiVersion.version_major === minMajor && maimaiVersion.version_minor < minMinor) return false
-  if (maimaiVersion.version_major === minMajor && 
-      maimaiVersion.version_minor === minMinor && 
-      maimaiVersion.version_patch < minPatch) return false
-  
+  const currentVersion: VersionTuple = [
+    maimaiVersion.version_major,
+    maimaiVersion.version_minor,
+    maimaiVersion.version_patch,
+  ]
+  const minVersion = parseVersionTuple(pluginMinVersion)
+
+  if (compareVersionTuple(currentVersion, minVersion) < 0) {
+    return false
+  }
+
   // 检查最大版本(如果有)
   if (pluginMaxVersion) {
-    const maxParts = pluginMaxVersion.split('.').map(p => parseInt(p) || 0)
-    const maxMajor = maxParts[0] || 0
-    const maxMinor = maxParts[1] || 0
-    const maxPatch = maxParts[2] || 0
-    
-    if (maimaiVersion.version_major > maxMajor) return false
-    if (maimaiVersion.version_major === maxMajor && maimaiVersion.version_minor > maxMinor) return false
-    if (maimaiVersion.version_major === maxMajor && 
-        maimaiVersion.version_minor === maxMinor && 
-        maimaiVersion.version_patch > maxPatch) return false
+    const maxVersion = parseVersionTuple(pluginMaxVersion)
+    const isHigherThanMax = compareVersionTuple(currentVersion, maxVersion) > 0
+
+    // 与运行时 manifest 校验保持一致：同一主版本内高于声明上限时，以兼容模式允许。
+    if (isHigherThanMax && currentVersion[0] !== maxVersion[0]) {
+      return false
+    }
   }
-  
+
   return true
 }
 

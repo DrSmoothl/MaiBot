@@ -642,11 +642,11 @@
         "multipleReplyStyle": {
           "label": "代替返信スタイル",
           "placeholder": "1行につき1つの代替返信スタイルを入力",
-          "description": "リストが空でない場合、MaiBot は下の確率でデフォルトの返信スタイルをランダムに置き換えます"
+          "description": "リストが空でない場合、MaiBot は下の確率で代替スタイルを一時的な返信ヒントとして注入します"
         },
         "multipleProbability": {
-          "label": "代替スタイルの発動確率",
-          "description": "返信を構築するたびに、代替返信スタイルでデフォルトを置き換える確率です"
+          "label": "一時スタイル注入確率",
+          "description": "返信を構築するたびに、一時的な代替スタイルヒントを注入する確率です"
         }
       },
       "emoji": {
