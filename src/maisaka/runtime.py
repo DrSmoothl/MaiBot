@@ -398,6 +398,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
             user_info = message.message_info.user_info
             speaker_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
+            include_chat_id = self._is_focus_mode_active_for_current_chat()
             planner_prefix = build_planner_prefix(
                 timestamp=message.timestamp,
                 user_name=speaker_name,
@@ -406,6 +407,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                 chat_id=message.session_id,
                 quote_ids=extract_quote_ids_from_message_sequence(message.raw_message),
                 include_message_id=not message.is_notify and bool(message.message_id),
+                include_chat_id=include_chat_id,
+                is_self_message=source_kind == "guided_reply" and global_config.chat.self_message_special_mark,
             )
             history_message = SessionBackedMessage.from_session_message(
                 message,

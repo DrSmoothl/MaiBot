@@ -513,6 +513,21 @@ class ChatConfig(ConfigBase):
     )
     """是否启用at必回复"""
 
+    self_message_special_mark: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "自身消息特殊标注",
+                "en_US": "Special mark for self messages",
+                "ja_JP": "自分のメッセージ特別マーク",
+            },
+            "x-widget": "switch",
+            "x-icon": "badge-check",
+            "x-row": "reply-switches",
+        },
+    )
+    """在原有基础上进一步强调哪些消息是自己发送的，减少bot认错的情况，不是高级设置"""
+
     max_context_size: int = Field(
         default=40,
         json_schema_extra={
