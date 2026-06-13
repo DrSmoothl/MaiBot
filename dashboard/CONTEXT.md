@@ -58,8 +58,10 @@ _Avoid_: 列表容器、表格组件（DataList 是状态/数据 hook，不是 U
 「submit 待定 → 对话框确认 → 执行」同构流程的通用模块（embedding 换模型、向量重建预览、删除预览均属此类）；提供 submit/confirm/cancel/pending，替代散落的 `pendingXxxRef + dialogOpen` 双 state。
 
 **配置表单编排（useConfigForm）**：
-「并行加载配置 + schema → seed 可编辑草稿 → 脏跟踪」这条配置编辑脊梁的通用模块。内部自持两个**查询**——config（必需，驱动草稿）与 schema（可选，仅供渲染字段，失败不阻塞）；以 config 查询的 `dataUpdatedAt` 作版本标记在**渲染期**重置草稿（规避 effect 内 setState），是本模块的核心 leverage。对外给出 `draft/schema/setDraft/isDirty/reset/reload/isLoading/error`；`isDirty` 用 `JSON.stringify(draft) !== seededSnapshot`。**保存、自动保存、源码(raw)模式、级联删除留在各页面**，不进 hook。适配 mcp-settings、config/bot、plugin-config；config/model 的多草稿 + 按草稿 autosave 快照超出本脊梁，仍由 `useModelConfig` 承载，不纳入。
-_Avoid_: 把保存/autosave/raw 塞进来变成开关汤（那会让它退化为浅壳，删除测试不通过）
+「并行加载配置 + schema → seed 可编辑草稿 → 脏跟踪」这条配置编辑脊梁的通用模块。内部自持两个**查询**——config（必需，驱动草稿）与 schema（可选，仅供渲染字段，失败不阻塞）；以 config 查询的 `dataUpdatedAt` 作版本标记在**渲染期**重置草稿（规避 effect 内 setState），是本模块的核心 leverage。对外给出 `draft/schema/setDraft/isDirty/reset/reload/isLoading/error`；`isDirty` 用 `JSON.stringify(draft) !== seededSnapshot`。**保存、自动保存、源码(raw)模式、级联删除留在各页面**，不进 hook。
+
+**当前仅 mcp-settings 接入**（单节草稿 + 手动保存，干净全适配）。落地时发现其余配置页均非干净适配，暂不强接：config/bot 是 24 个分节草稿 + 按节 autosave + 手动 `hasUnsavedChanges`（单快照 isDirty 无法表达"已 autosave 的节"，且并节为单 TDraft 是无测试页上的大改）；plugin-config 是 visual config + source raw 双草稿、mode-dependent dirty（useConfigForm 只能覆盖 config+schema，raw 仍要重复 seed 模式）；config/model 多草稿 + 按草稿快照，由 `useModelConfig` 承载。按"两个适配器才算真 seam"，本模块暂为单适配器（假设性 seam），待下一个"单节草稿 + 手动保存"配置页出现再坐实。
+_Avoid_: 把保存/autosave/raw/第二草稿塞进来变成开关汤（那会让它退化为浅壳，删除测试不通过）；为凑适配器把 bot/plugin 强接成部分适配
 
 ### 配置与设置
 
