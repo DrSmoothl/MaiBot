@@ -291,22 +291,20 @@ class BehaviorPatternSelector:
             outcome = str(behavior.get("outcome") or "").strip()
             priority_label = BehaviorPatternSelector._format_priority_label(index, total_count)
             reference_items.append(
-                f"{index}. <behavior_pattern_reference id=\"{behavior_id}\">\n"
+                f"{index}.\n"
+                f"behavior_id：{behavior_id}\n"
                 f"优先级：{priority_label}\n"
                 f"行为：{action}\n"
-                f"预期结果：{outcome}\n"
-                "</behavior_pattern_reference>"
+                f"预期结果：{outcome}"
             )
 
         scenario_text = BehaviorPatternSelector._build_compact_scenario_text(scenario_profile)
         return (
-            "<behavior_pattern_reference_group>\n"
             "以下是基于本轮 planner 已裁切上下文召回的行为表现参考，不是强制任务；"
             "只有在当前情境自然匹配时才采纳。\n"
             f"当前场景画像：\n{scenario_text}\n\n"
             "候选行为表现：\n"
-            f"{chr(10).join(reference_items)}\n\n"
-            "</behavior_pattern_reference_group>"
+            f"{chr(10).join(reference_items)}"
         )
 
     async def retrieve_for_planner(

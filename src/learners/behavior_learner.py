@@ -42,7 +42,7 @@ behavior_learn_model = LLMServiceClient(task_name="learner", request_type="behav
 behavior_scene_model = LLMServiceClient(task_name="learner", request_type="behavior.scene_analyzer")
 behavior_feedback_model = LLMServiceClient(task_name="learner", request_type="behavior.feedback")
 
-BEHAVIOR_REFERENCE_ID_PATTERN = re.compile(r'<behavior_pattern_reference\s+id=["\']?(\d+)["\']?', re.IGNORECASE)
+BEHAVIOR_REFERENCE_ID_PATTERN = re.compile(r"\bbehavior_id\s*[：:]\s*(\d+)\b", re.IGNORECASE)
 FEEDBACK_STATUS_SUCCESS = "success"
 FEEDBACK_STATUS_PARTIAL_SUCCESS = "partial_success"
 FEEDBACK_STATUS_FAILED = "failed"
