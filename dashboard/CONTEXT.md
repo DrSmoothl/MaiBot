@@ -43,6 +43,20 @@ _Avoid_: ApiResponse（迁移期遗留的判别联合，最终淘汰）
 对服务端集合的「分页 + 搜索 + 筛选 + 多选」视图，由 `useDataList` hook 统一承载。hook 内部包一个列表 **查询**（queryKey 从分页/搜索/筛选状态派生），对外给出 items/total 与全部控件状态；筛选/搜索/翻页变化时自动重置页码并清空选中集。对话框与具体渲染（表格/卡片）留在各页面，不进 hook。
 _Avoid_: 列表容器、表格组件（DataList 是状态/数据 hook，不是 UI 组件）
 
+### 页面逻辑下沉
+
+**领域 hook（Domain Hook）**：
+从巨型页面抽出的、承载某一 tab/领域完整状态机（state + 副作用 + API）的 hook；抽出后页面/tab 退化为消费 hook 的展示层。读多的服务端态走 TanStack Query，本地草稿态留在 hook 内。
+
+**导入队列（useImportQueue）**：
+知识库导入任务的服务端态领域 hook——任务列表、详情、取消/重试。列表用 useQuery；进度更新以 WebSocket 推送（`memoryProgressClient`）为主，轮询仅在 WS 断线时兜底。
+
+**导入表单（useImportForm）**：
+知识库导入创建的本地草稿领域 hook——7 种导入模式的参数 + 提交。参数默认值在 `importSettings` 首次到达时 seed 一次，之后用户编辑始终生效。
+
+**待定操作（usePendingOperation）**：
+「submit 待定 → 对话框确认 → 执行」同构流程的通用模块（embedding 换模型、向量重建预览、删除预览均属此类）；提供 submit/confirm/cancel/pending，替代散落的 `pendingXxxRef + dialogOpen` 双 state。
+
 ### 配置与设置
 
 **配置（Config）**：
