@@ -44,7 +44,6 @@ import {
   getExpressionStats,
   getReviewStats,
 } from '@/lib/expression-api'
-import { unwrapApiResponse } from '@/lib/http'
 
 import { useExpressionImportExport } from './hooks/useExpressionImportExport'
 import { useExpressionReview } from './hooks/useExpressionReview'
@@ -150,7 +149,7 @@ export function ExpressionManagementPage() {
           selectedGroup && !selectedGroup.is_global ? selectedGroup.chat_ids : undefined,
         include_legacy: filters.showLegacyExpressions,
         review_filter: filters.reviewFilter,
-      }).then(unwrapApiResponse)
+      })
       return { items: response.data, total: response.total }
     },
   })
@@ -163,14 +162,14 @@ export function ExpressionManagementPage() {
   const statsQuery = useQuery({
     queryKey: ['expression', 'stats', { include_legacy: showLegacyExpressions }],
     queryFn: () =>
-      getExpressionStats({ include_legacy: showLegacyExpressions }).then(unwrapApiResponse),
+      getExpressionStats({ include_legacy: showLegacyExpressions }),
   })
   const stats: StatsData = statsQuery.data ?? DEFAULT_STATS
 
   // 审核统计：uncheckedCount 由此派生
   const reviewStatsQuery = useQuery({
     queryKey: ['expression', 'review-stats'],
-    queryFn: () => getReviewStats().then(unwrapApiResponse),
+    queryFn: () => getReviewStats(),
   })
   const uncheckedCount = reviewStatsQuery.data?.unchecked ?? 0
 
@@ -178,7 +177,7 @@ export function ExpressionManagementPage() {
   const chatListQuery = useQuery({
     queryKey: ['expression', 'chats', { include_legacy: showLegacyExpressions }],
     queryFn: () =>
-      getChatList({ include_legacy: showLegacyExpressions }).then(unwrapApiResponse),
+      getChatList({ include_legacy: showLegacyExpressions }),
   })
   const chatList: ChatInfo[] = chatListQuery.data ?? []
   const chatNameMap = new Map<string, string>()
@@ -188,7 +187,7 @@ export function ExpressionManagementPage() {
   const groupsQuery = useQuery({
     queryKey: ['expression', 'groups', { include_legacy: showLegacyExpressions }],
     queryFn: () =>
-      getExpressionGroups({ include_legacy: showLegacyExpressions }).then(unwrapApiResponse),
+      getExpressionGroups({ include_legacy: showLegacyExpressions }),
   })
   const groups: ExpressionGroupInfo[] = groupsQuery.data ?? []
 
@@ -238,16 +237,8 @@ export function ExpressionManagementPage() {
   const handleViewDetail = async (expression: Expression) => {
     try {
       const result = await getExpressionDetail(expression.id)
-      if (result.success) {
-        setSelectedExpression(result.data)
-        setIsDetailDialogOpen(true)
-      } else {
-        toast({
-          title: '加载详情失败',
-          description: result.error,
-          variant: 'destructive',
-        })
-      }
+      setSelectedExpression(result)
+      setIsDetailDialogOpen(true)
     } catch (error) {
       toast({
         title: '加载详情失败',
@@ -267,21 +258,13 @@ export function ExpressionManagementPage() {
   const handleDelete = async () => {
     if (!deleteConfirmExpression) return
     try {
-      const result = await deleteExpression(deleteConfirmExpression.id)
-      if (result.success) {
-        toast({
-          title: '删除成功',
-          description: `已删除表达方式: ${deleteConfirmExpression.situation}`,
-        })
-        setDeleteConfirmExpression(null)
-        refreshAll()
-      } else {
-        toast({
-          title: '删除失败',
-          description: result.error,
-          variant: 'destructive',
-        })
-      }
+      await deleteExpression(deleteConfirmExpression.id)
+      toast({
+        title: '删除成功',
+        description: `已删除表达方式: ${deleteConfirmExpression.situation}`,
+      })
+      setDeleteConfirmExpression(null)
+      refreshAll()
     } catch (error) {
       toast({
         title: '删除失败',
@@ -294,22 +277,14 @@ export function ExpressionManagementPage() {
   // 批量删除（成功后清空选中并 invalidate 刷新）
   const handleBatchDelete = async () => {
     try {
-      const result = await batchDeleteExpressions(Array.from(list.selectedIds))
-      if (result.success) {
-        toast({
-          title: '批量删除成功',
-          description: `已删除 ${list.selectedCount} 个表达方式`,
-        })
-        list.clearSelection()
-        setIsBatchDeleteDialogOpen(false)
-        refreshAll()
-      } else {
-        toast({
-          title: '批量删除失败',
-          description: result.error,
-          variant: 'destructive',
-        })
-      }
+      await batchDeleteExpressions(Array.from(list.selectedIds))
+      toast({
+        title: '批量删除成功',
+        description: `已删除 ${list.selectedCount} 个表达方式`,
+      })
+      list.clearSelection()
+      setIsBatchDeleteDialogOpen(false)
+      refreshAll()
     } catch (error) {
       toast({
         title: '批量删除失败',

@@ -41,20 +41,12 @@ export function useExpressionReview({
       const nextApproved = !isUserApproved
 
       try {
-        const result = await updateExpressionReviewStatus(expression.id, nextApproved)
-        if (result.success) {
-          toast({
-            title: nextApproved ? '已通过' : '已拒绝',
-            description: nextApproved ? '已设为人工通过' : '已取消人工通过',
-          })
-          onChanged()
-          return
-        }
+        await updateExpressionReviewStatus(expression.id, nextApproved)
         toast({
-          title: '更新审核状态失败',
-          description: result.error,
-          variant: 'destructive',
+          title: nextApproved ? '已通过' : '已拒绝',
+          description: nextApproved ? '已设为人工通过' : '已取消人工通过',
         })
+        onChanged()
       } catch (error) {
         toast({
           title: '更新审核状态失败',
@@ -73,12 +65,13 @@ export function useExpressionReview({
       }
 
       try {
-        const results = await Promise.all(
+        // 用 allSettled 而非 all：单条失败不应中断其余项，仍需汇总成功/失败数
+        const results = await Promise.allSettled(
           expressionIds.map((expressionId) =>
             updateExpressionReviewStatus(expressionId, approved)
           )
         )
-        const updatedCount = results.filter((result) => result.success).length
+        const updatedCount = results.filter((result) => result.status === 'fulfilled').length
         const failedCount = results.length - updatedCount
 
         if (updatedCount > 0) {

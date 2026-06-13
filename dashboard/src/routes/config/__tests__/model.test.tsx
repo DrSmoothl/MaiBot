@@ -96,14 +96,13 @@ function baseSchema() {
 }
 
 beforeEach(() => {
-  vi.mocked(configApi.getModelConfigCached).mockResolvedValue({ success: true, data: baseConfig() } as never)
-  vi.mocked(configApi.getModelConfig).mockResolvedValue({ success: true, data: baseConfig() } as never)
-  vi.mocked(configApi.getModelConfigSchema).mockResolvedValue({ success: true, data: baseSchema() } as never)
-  vi.mocked(configApi.updateModelConfig).mockResolvedValue({ success: true, data: baseConfig() } as never)
-  vi.mocked(configApi.updateModelConfigSection).mockResolvedValue({ success: true, data: baseConfig() } as never)
+  vi.mocked(configApi.getModelConfigCached).mockResolvedValue(baseConfig() as never)
+  vi.mocked(configApi.getModelConfig).mockResolvedValue(baseConfig() as never)
+  vi.mocked(configApi.getModelConfigSchema).mockResolvedValue(baseSchema() as never)
+  vi.mocked(configApi.updateModelConfig).mockResolvedValue(baseConfig() as never)
+  vi.mocked(configApi.updateModelConfigSection).mockResolvedValue(baseConfig() as never)
   vi.mocked(configApi.testProviderConnection).mockResolvedValue({
-    success: true,
-    data: { network_ok: true, api_key_valid: true, latency_ms: 120, error: null, http_status: 200 },
+    network_ok: true, api_key_valid: true, latency_ms: 120, error: null, http_status: 200,
   } as never)
 })
 

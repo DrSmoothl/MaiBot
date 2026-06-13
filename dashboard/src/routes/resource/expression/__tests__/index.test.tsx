@@ -112,28 +112,21 @@ function makeWrapper() {
 
 beforeEach(() => {
   vi.mocked(expressionApi.getExpressionList).mockResolvedValue({
-    success: true,
-    data: { success: true, total: 2, page: 1, page_size: 20, data: [makeExpr(1, '情境A'), makeExpr(2, '情境B')] },
+    success: true, total: 2, page: 1, page_size: 20, data: [makeExpr(1, '情境A'), makeExpr(2, '情境B')],
   } as never)
   vi.mocked(expressionApi.getExpressionStats).mockResolvedValue({
-    success: true,
-    data: { total: 2, recent_7days: 1, chat_count: 1, top_chats: {} },
+    total: 2, recent_7days: 1, chat_count: 1, top_chats: {},
   } as never)
   vi.mocked(expressionApi.getReviewStats).mockResolvedValue({
-    success: true,
-    data: { total: 2, unchecked: 1, passed: 1, ai_checked: 0, user_checked: 1 },
+    total: 2, unchecked: 1, passed: 1, ai_checked: 0, user_checked: 1,
   } as never)
-  vi.mocked(expressionApi.getChatList).mockResolvedValue({
-    success: true,
-    data: [{ chat_id: 'chat-1', chat_name: 'Chat 1', is_group: false, use_expression: true, enable_learning: true, platform: null }],
-  } as never)
-  vi.mocked(expressionApi.getExpressionGroups).mockResolvedValue({ success: true, data: [] } as never)
-  vi.mocked(expressionApi.deleteExpression).mockResolvedValue({ success: true, message: 'ok' } as never)
-  vi.mocked(expressionApi.batchDeleteExpressions).mockResolvedValue({ success: true, message: 'ok' } as never)
-  vi.mocked(expressionApi.updateExpressionReviewStatus).mockResolvedValue({
-    success: true,
-    data: makeExpr(1, '情境A'),
-  } as never)
+  vi.mocked(expressionApi.getChatList).mockResolvedValue(
+    [{ chat_id: 'chat-1', chat_name: 'Chat 1', is_group: false, use_expression: true, enable_learning: true, platform: null }] as never
+  )
+  vi.mocked(expressionApi.getExpressionGroups).mockResolvedValue([] as never)
+  vi.mocked(expressionApi.deleteExpression).mockResolvedValue({} as never)
+  vi.mocked(expressionApi.batchDeleteExpressions).mockResolvedValue({} as never)
+  vi.mocked(expressionApi.updateExpressionReviewStatus).mockResolvedValue(makeExpr(1, '情境A') as never)
 })
 
 async function renderPage() {
