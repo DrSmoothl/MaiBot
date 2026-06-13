@@ -336,6 +336,23 @@ def build_profile_tag_distribution(
     return _tag_weights_to_distribution(tag_weights)
 
 
+def build_profile_tag_mapping(profile: BehaviorScenarioProfile) -> dict[str, float]:
+    """构建带现有 tag 簇映射的完整画像分布，用于行为路径细粒度调制。"""
+
+    if not profile.has_signal:
+        return {}
+    try:
+        with get_db_session(auto_commit=False) as session:
+            tag_lookup = _load_tag_cluster_lookup(session)
+            return _distribution_to_mapping(
+                build_profile_tag_distribution(profile, tag_lookup=tag_lookup),
+                tag_lookup=tag_lookup,
+            )
+    except Exception as exc:
+        logger.debug(f"构建行为画像 tag 映射失败: error={exc}")
+        return {}
+
+
 def _tag_weights_to_distribution(tag_weights: dict[str, float]) -> list[dict[str, float | str]]:
     total_weight = sum(tag_weights.values())
     if total_weight <= 0:
@@ -812,10 +829,11 @@ def apply_behavior_scene_feedback(
     score_delta: float,
     status: str,
 ) -> None:
-    """反馈行为效果时，同步强化或削弱行为所属场景簇。"""
+    """反馈行为效果时，仅刷新行为所属场景簇的更新时间。"""
 
     if experience_path_id <= 0:
         return
+    del score_delta
     del status
     now = datetime.now()
 
@@ -827,7 +845,6 @@ def apply_behavior_scene_feedback(
             cluster = session.get(BehaviorSceneCluster, path.scene_cluster_id)
             if cluster is None:
                 return
-            cluster.score = _clamp(float(cluster.score or 0.0) + float(score_delta) * 0.08, -4.0, 6.0)
             cluster.update_time = now
             session.add(cluster)
 

@@ -47,9 +47,11 @@ import {
   getBehaviorGraphData,
   getBehaviorPathDetail,
   listBehaviorChats,
+  listBehaviorClusters,
   listBehaviorPaths,
   type BehaviorGraphData,
   type BehaviorChatInfo,
+  type BehaviorClusterItem,
   type BehaviorClusterTag,
   type BehaviorPathDetail,
   type BehaviorPathItem,
@@ -59,16 +61,14 @@ import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 20
 
-type ActiveTab = 'paths' | 'scene-network' | 'tag-network' | 'debug' | 'graph'
+type ActiveTab = 'paths' | 'scene-browser' | 'scene-network' | 'tag-network' | 'debug' | 'graph'
 
 interface BehaviorSceneGroup {
   key: string
-  trigger: string
   sceneClusterId: number | null
   clusterName: string
   clusterTags: BehaviorClusterTag[]
   clusterSourceCount: number
-  clusterScore: number
   chatName: string
   paths: BehaviorPathItem[]
   latestUpdate: string | null
@@ -133,13 +133,18 @@ type BehaviorPathSortBy =
   | 'failure_count'
   | 'last_active_time'
   | 'last_feedback_time'
-  | 'scene_cluster_score'
   | 'scene_cluster_source_count'
   | 'score'
   | 'success_count'
   | 'update_time'
 
 type SortOrder = 'asc' | 'desc'
+type BehaviorClusterGroupMode = 'count' | 'none'
+type BehaviorClusterSortBy =
+  | 'activation_count'
+  | 'path_count'
+  | 'source_count'
+  | 'update_time'
 
 const DEFAULT_CANVAS_NETWORK_SETTINGS: CanvasNetworkSettings = {
   showLabels: true,
@@ -156,11 +161,17 @@ const PATH_SORT_LABELS: Record<BehaviorPathSortBy, string> = {
   failure_count: '负向反馈',
   last_active_time: '最近使用',
   last_feedback_time: '最近反馈',
-  scene_cluster_score: '场景簇分',
   scene_cluster_source_count: '场景样本',
   score: '路径分数',
   success_count: '正向反馈',
   update_time: '最近更新',
+}
+
+const CLUSTER_SORT_LABELS: Record<BehaviorClusterSortBy, string> = {
+  update_time: '最近更新',
+  path_count: '路径数量',
+  source_count: '学习样本',
+  activation_count: '使用次数',
 }
 
 const BehaviorGraphNode = memo(({ data }: NodeProps<BehaviorFlowNodeData>) => {
@@ -287,7 +298,6 @@ function clusterTitle(name: string, tags: BehaviorClusterTag[]): string {
 function sceneGroupSortValue(group: BehaviorSceneGroup, sortBy: BehaviorPathSortBy): number | string {
   if (sortBy === 'activation_count') return group.activationCount
   if (sortBy === 'failure_count') return group.failureCount
-  if (sortBy === 'scene_cluster_score') return group.clusterScore
   if (sortBy === 'scene_cluster_source_count') return group.clusterSourceCount
   if (sortBy === 'score') return group.bestScore
   if (sortBy === 'success_count') return group.successCount
@@ -314,6 +324,39 @@ function compareSceneGroups(
     return (leftValue - rightValue) * direction
   }
   return String(leftValue).localeCompare(String(rightValue)) * direction
+}
+
+function clusterCountBucket(pathCount: number): string {
+  if (pathCount <= 0) return '未连接行为路径'
+  if (pathCount === 1) return '1 条路径'
+  if (pathCount <= 4) return '2-4 条路径'
+  if (pathCount <= 9) return '5-9 条路径'
+  return '10 条以上路径'
+}
+
+function clusterGroupLabel(cluster: BehaviorClusterItem, groupMode: BehaviorClusterGroupMode): string {
+  if (groupMode === 'count') return clusterCountBucket(cluster.path_count)
+  return '全部场景簇'
+}
+
+function groupedClusters(
+  clusters: BehaviorClusterItem[],
+  groupMode: BehaviorClusterGroupMode
+): Array<{ key: string; label: string; clusters: BehaviorClusterItem[] }> {
+  const groups = new Map<string, { key: string; label: string; clusters: BehaviorClusterItem[] }>()
+  clusters.forEach((cluster) => {
+    const label = clusterGroupLabel(cluster, groupMode)
+    const key = groupMode === 'count'
+        ? `count:${clusterCountBucket(cluster.path_count)}`
+        : 'all'
+    const group = groups.get(key) ?? { key, label, clusters: [] }
+    group.clusters.push(cluster)
+    groups.set(key, group)
+  })
+  return Array.from(groups.values()).sort((left, right) => {
+    const order = ['未连接行为路径', '1 条路径', '2-4 条路径', '5-9 条路径', '10 条以上路径']
+    return order.indexOf(left.label) - order.indexOf(right.label)
+  })
 }
 
 function stableHash(value: string): number {
@@ -462,6 +505,14 @@ export function BehaviorLearningPage() {
   const [sortBy, setSortBy] = useState<BehaviorPathSortBy>('update_time')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [paths, setPaths] = useState<BehaviorPathItem[]>([])
+  const [clusters, setClusters] = useState<BehaviorClusterItem[]>([])
+  const [clusterSearch, setClusterSearch] = useState('')
+  const [clusterSortBy, setClusterSortBy] = useState<BehaviorClusterSortBy>('update_time')
+  const [clusterSortOrder, setClusterSortOrder] = useState<SortOrder>('desc')
+  const [clusterGroupMode, setClusterGroupMode] = useState<BehaviorClusterGroupMode>('none')
+  const [clusterPage, setClusterPage] = useState(1)
+  const [clusterTotal, setClusterTotal] = useState(0)
+  const [clusterLoading, setClusterLoading] = useState(false)
   const [graphData, setGraphData] = useState<BehaviorGraphData | null>(null)
   const [openSceneGroups, setOpenSceneGroups] = useState<Set<string>>(new Set())
   const [total, setTotal] = useState(0)
@@ -481,6 +532,7 @@ export function BehaviorLearningPage() {
   })
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const clusterTotalPages = Math.max(1, Math.ceil(clusterTotal / PAGE_SIZE))
   const selectedChatName = useMemo(() => {
     if (selectedSessionId === 'all') return '全部聊天流'
     if (selectedSessionId === '__global__') return '全局行为'
@@ -489,18 +541,16 @@ export function BehaviorLearningPage() {
   const sceneGroups = useMemo(() => {
     const groups = new Map<string, BehaviorSceneGroup>()
     paths.forEach((path) => {
-      const clusterKey = path.scene_cluster_id ?? (path.scene_cluster_name || path.trigger)
+      const clusterKey = path.scene_cluster_id ?? path.scene_cluster_name
       const key = `${path.session_id || '__global__'}::cluster:${clusterKey}`
       const existing = groups.get(key)
       if (!existing) {
         groups.set(key, {
           key,
-          trigger: path.trigger,
           sceneClusterId: path.scene_cluster_id,
-          clusterName: path.scene_cluster_name || path.trigger,
+          clusterName: path.scene_cluster_name,
           clusterTags: path.scene_cluster_tags,
           clusterSourceCount: path.scene_cluster_source_count,
-          clusterScore: path.scene_cluster_score,
           chatName: path.chat_name,
           paths: [path],
           latestUpdate: path.update_time,
@@ -524,6 +574,7 @@ export function BehaviorLearningPage() {
     sortedGroups.sort((left, right) => compareSceneGroups(left, right, sortBy, sortOrder))
     return sortedGroups
   }, [paths, sortBy, sortOrder])
+  const clusterGroups = useMemo(() => groupedClusters(clusters, clusterGroupMode), [clusterGroupMode, clusters])
 
   const loadChats = async () => {
     try {
@@ -565,6 +616,31 @@ export function BehaviorLearningPage() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadClusters = async (targetPage = clusterPage) => {
+    try {
+      setClusterLoading(true)
+      const result = await listBehaviorClusters({
+        session_id: selectedSessionId,
+        search: clusterSearch,
+        sort_by: clusterSortBy,
+        sort_order: clusterSortOrder,
+        page: targetPage,
+        page_size: PAGE_SIZE,
+      })
+      const clusterData = result.data
+      setClusters(clusterData)
+      setClusterTotal(result.total ?? clusterData.length)
+    } catch (error) {
+      toast({
+        title: '加载场景簇失败',
+        description: error instanceof Error ? error.message : '无法读取行为场景簇',
+        variant: 'destructive',
+      })
+    } finally {
+      setClusterLoading(false)
     }
   }
 
@@ -636,6 +712,12 @@ export function BehaviorLearningPage() {
   }, [selectedSessionId, enabledFilter, learningTypeFilter, sortBy, sortOrder, page])
 
   useEffect(() => {
+    if (activeTab === 'scene-browser') {
+      loadClusters()
+    }
+  }, [activeTab, selectedSessionId, clusterSortBy, clusterSortOrder, clusterPage])
+
+  useEffect(() => {
     if (activeTab === 'scene-network' || activeTab === 'tag-network') {
       loadGraphData()
     }
@@ -650,6 +732,15 @@ export function BehaviorLearningPage() {
   const applySearch = () => {
     setPage(1)
     loadPaths(1)
+  }
+  const applyClusterSearch = () => {
+    setClusterPage(1)
+    loadClusters(1)
+  }
+  const handleSessionChange = (value: string) => {
+    setSelectedSessionId(value)
+    setPage(1)
+    setClusterPage(1)
   }
   const toggleSceneGroup = (groupKey: string) => {
     setOpenSceneGroups((current) => {
@@ -672,10 +763,7 @@ export function BehaviorLearningPage() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Select
             value={selectedSessionId}
-            onValueChange={(value) => {
-              setSelectedSessionId(value)
-              setPage(1)
-            }}
+            onValueChange={handleSessionChange}
           >
             <SelectTrigger className="w-full sm:w-64">
               <SelectValue placeholder="选择聊天流" />
@@ -689,7 +777,7 @@ export function BehaviorLearningPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => { loadChats(); loadPaths(); loadGraphData() }}>
+          <Button variant="outline" onClick={() => { loadChats(); loadPaths(); loadClusters(); loadGraphData() }}>
             <RefreshCw className="mr-2 h-4 w-4" />
             刷新
           </Button>
@@ -697,8 +785,9 @@ export function BehaviorLearningPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)} className="min-h-0 flex-1">
-        <DashboardTabBar variant="grid" className="max-w-5xl grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+        <DashboardTabBar variant="grid" className="max-w-6xl grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
           <DashboardTabTrigger value="paths">经验路径</DashboardTabTrigger>
+          <DashboardTabTrigger value="scene-browser">场景簇浏览</DashboardTabTrigger>
           <DashboardTabTrigger value="scene-network">场景簇图谱</DashboardTabTrigger>
           <DashboardTabTrigger value="tag-network">Tag簇网络</DashboardTabTrigger>
           <DashboardTabTrigger value="debug">检索调试</DashboardTabTrigger>
@@ -796,6 +885,112 @@ export function BehaviorLearningPage() {
                 size="sm"
                 disabled={page >= totalPages}
                 onClick={() => setPage((value) => value + 1)}
+              >
+                下一页
+                <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="scene-browser" className="mt-4 min-h-0 space-y-4">
+          <div className="grid min-w-0 gap-2 rounded-lg border bg-background p-3 md:grid-cols-[minmax(9rem,1fr)_minmax(11rem,16rem)_repeat(3,minmax(6.75rem,8.5rem))_auto] md:items-center">
+            <div className="relative min-w-0">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={clusterSearch}
+                onChange={(event) => setClusterSearch(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') applyClusterSearch() }}
+                placeholder="搜索场景簇 tag"
+                className="min-w-0 pl-9"
+              />
+            </div>
+            <Select value={selectedSessionId} onValueChange={handleSessionChange}>
+              <SelectTrigger className="min-w-0">
+                <SelectValue placeholder="选择聊天流" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部聊天流</SelectItem>
+                {chats.map((chat) => (
+                  <SelectItem key={chat.session_id || '__global__'} value={chat.session_id || '__global__'}>
+                    {chat.display_name} · {chat.cluster_count} 簇
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={clusterGroupMode} onValueChange={(value) => setClusterGroupMode(value as BehaviorClusterGroupMode)}>
+              <SelectTrigger className="min-w-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不分层</SelectItem>
+                <SelectItem value="count">按路径数量分层</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={clusterSortBy} onValueChange={(value) => { setClusterSortBy(value as BehaviorClusterSortBy); setClusterPage(1) }}>
+              <SelectTrigger className="min-w-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(CLUSTER_SORT_LABELS) as Array<[BehaviorClusterSortBy, string]>).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={clusterSortOrder} onValueChange={(value) => { setClusterSortOrder(value as SortOrder); setClusterPage(1) }}>
+              <SelectTrigger className="min-w-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="desc">降序</SelectItem>
+                <SelectItem value="asc">升序</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={applyClusterSearch}>搜索</Button>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="flex items-center justify-between border-b px-4 py-3 text-sm text-muted-foreground">
+              <span>{selectedChatName} · {clusterTotal} 个场景簇</span>
+              {clusterLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+            </div>
+            <ScrollArea className="h-[620px]">
+              {clusters.length === 0 && !clusterLoading ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">暂无场景簇</div>
+              ) : (
+                <div className="divide-y">
+                  {clusterGroups.map((group) => (
+                    <div key={group.key} className="space-y-2 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-semibold">{group.label}</div>
+                        {clusterGroupMode !== 'none' && <Badge variant="outline">{group.clusters.length} 个场景簇</Badge>}
+                      </div>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        {group.clusters.map((cluster) => (
+                          <SceneClusterCard key={cluster.id ?? `${cluster.session_id}:${cluster.name}`} cluster={cluster} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+            <div className="flex items-center justify-between border-t px-4 py-3">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={clusterPage <= 1}
+                onClick={() => setClusterPage((value) => value - 1)}
+              >
+                <ChevronLeft className="mr-1 h-4 w-4" />
+                上一页
+              </Button>
+              <span className="text-sm text-muted-foreground">{clusterPage} / {clusterTotalPages}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={clusterPage >= clusterTotalPages}
+                onClick={() => setClusterPage((value) => value + 1)}
               >
                 下一页
                 <ChevronRight className="ml-1 h-4 w-4" />
@@ -1580,7 +1775,7 @@ function SceneNetworkDetail({ node }: { node: BehaviorGraphData['scene_cluster_n
         <Metric label="路径" value={String(node.path_count)} />
         <Metric label="样本" value={String(node.source_count)} />
         <Metric label="使用" value={String(node.activation_count)} />
-        <Metric label="簇分" value={formatScore(node.score)} />
+        <Metric label="正向" value={String(node.success_count)} />
       </div>
       <Panel title="Tag 分布">
         <ReadableTagList tags={node.tags} />
@@ -1619,6 +1814,62 @@ function TagNetworkDetail({ node }: { node: BehaviorGraphData['tag_network']['no
           </div>
         )}
       </Panel>
+    </div>
+  )
+}
+
+function SceneClusterCard({ cluster }: { cluster: BehaviorClusterItem }) {
+  const visibleTags = topClusterTags(cluster.tags, 8)
+  return (
+    <div className="min-w-0 rounded-lg border bg-background p-3 transition hover:border-primary/40">
+      <div className="mb-3 flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+            {cluster.id !== null && <Badge variant="secondary">#{cluster.id}</Badge>}
+            <Badge variant="outline">{cluster.chat_name || cluster.session_id || '全局行为'}</Badge>
+          </div>
+          <h3 className="line-clamp-2 break-words text-sm font-semibold leading-6">
+            {clusterTitle(cluster.name, cluster.tags)}
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">更新 {formatTime(cluster.update_time)}</p>
+        </div>
+        <div className="grid shrink-0 grid-cols-2 gap-1 text-right text-[11px] text-muted-foreground">
+          <span>{cluster.path_count} 路径</span>
+          <span>{cluster.source_count} 样本</span>
+          <span>{cluster.activation_count} 使用</span>
+          <span>{cluster.enabled_path_count} 启用</span>
+        </div>
+      </div>
+      <div className="mb-3 grid grid-cols-3 gap-2 text-xs">
+        <Metric label="启用" value={String(cluster.enabled_path_count)} />
+        <Metric label="观察" value={String(cluster.observed_path_count)} />
+        <Metric label="自身" value={String(cluster.self_reflection_path_count)} />
+      </div>
+      <div className="mb-3 grid grid-cols-3 gap-2 text-xs">
+        <Metric label="正向" value={String(cluster.success_count)} />
+        <Metric label="负向" value={String(cluster.failure_count)} />
+        <Metric label="最近使用" value={formatTime(cluster.last_active_time)} />
+      </div>
+      {visibleTags.length === 0 ? (
+        <p className="text-sm text-muted-foreground">暂无 tag 分布</p>
+      ) : (
+        <div className="space-y-2">
+          {visibleTags.map((item) => (
+            <div key={item.tag} className="grid gap-2 text-sm sm:grid-cols-[minmax(0,1fr)_4rem] sm:items-center">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="break-words text-xs text-foreground">{tagDisplayText(item)}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{formatProbability(item.probability)}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-primary" style={{ width: formatProbability(item.probability) }} />
+                </div>
+              </div>
+              <span className="hidden text-right text-xs text-muted-foreground sm:block">{item.probability.toFixed(3)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -1705,7 +1956,6 @@ function SceneGroupRow({
               name={group.clusterName}
               tags={group.clusterTags}
               sourceCount={group.clusterSourceCount}
-              score={group.clusterScore}
               compact
             />
             {group.paths.map((path) => {
@@ -1781,13 +2031,11 @@ function ClusterDistributionPanel({
   name,
   tags,
   sourceCount,
-  score,
   compact = false,
 }: {
   name: string
   tags: BehaviorClusterTag[]
   sourceCount?: number
-  score?: number
   compact?: boolean
 }) {
   const visibleTags = topClusterTags(tags, compact ? 8 : 12)
@@ -1796,7 +2044,6 @@ function ClusterDistributionPanel({
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">场景簇</span>
         {sourceCount !== undefined && <Badge variant="outline">样本 {sourceCount}</Badge>}
-        {score !== undefined && <Badge variant="outline">簇分 {formatScore(score)}</Badge>}
       </div>
       <p className="mb-3 break-words text-sm font-medium leading-6">{clusterTitle(name, tags)}</p>
       {visibleTags.length === 0 ? (
@@ -2173,10 +2420,9 @@ function PathGraphView({ detail, loading }: { detail: BehaviorPathDetail | null;
           </div>
         </div>
         <ClusterDistributionPanel
-          name={detail.scene_cluster.name || detail.path.scene_cluster_name || detail.path.trigger}
+          name={detail.scene_cluster.name || detail.path.scene_cluster_name}
           tags={sceneClusterTags.length > 0 ? sceneClusterTags : pathClusterTags}
           sourceCount={detail.scene_cluster.source_count || detail.path.scene_cluster_source_count}
-          score={detail.scene_cluster.score || detail.path.scene_cluster_score}
         />
         <div className="grid gap-3 md:grid-cols-2">
           <PathBlock title="行为" content={detail.path.action} />

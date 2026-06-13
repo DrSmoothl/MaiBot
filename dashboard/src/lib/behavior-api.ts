@@ -31,7 +31,6 @@ export interface BehaviorSceneCluster {
   name: string
   tags: BehaviorClusterTag[]
   source_count: number
-  score: number
   update_time: string | null
 }
 
@@ -52,12 +51,10 @@ export interface BehaviorPathItem {
   id: number
   session_id: string | null
   chat_name: string
-  trigger: string
   scene_cluster_id: number | null
   scene_cluster_name: string
   scene_cluster_tags: BehaviorClusterTag[]
   scene_cluster_source_count: number
-  scene_cluster_score: number
   actor_type: string
   learning_type: string
   action: string
@@ -194,7 +191,6 @@ export interface BehaviorMatchedCluster {
   score: number
   tags: BehaviorClusterTag[]
   source_count: number
-  cluster_score: number
 }
 
 export interface BehaviorRetrievalCandidate {
@@ -287,6 +283,8 @@ export async function listBehaviorPaths(params: {
 export async function listBehaviorClusters(params: {
   session_id?: string
   search?: string
+  sort_by?: string
+  sort_order?: string
   page?: number
   page_size?: number
 }): Promise<BehaviorClusterListResponse> {
@@ -295,6 +293,8 @@ export async function listBehaviorClusters(params: {
     query: {
       session_id: params.session_id || undefined,
       search: params.search || undefined,
+      sort_by: params.sort_by || undefined,
+      sort_order: params.sort_order || undefined,
       page: params.page,
       page_size: params.page_size,
     },

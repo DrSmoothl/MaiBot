@@ -62,7 +62,6 @@ class BehaviorSceneClusterPayload(BaseModel):
     name: str = ""
     tags: list[BehaviorClusterTag] = Field(default_factory=list)
     source_count: int = 0
-    score: float = 0.0
     update_time: Optional[str] = None
 
 
@@ -70,12 +69,10 @@ class BehaviorPathItem(BaseModel):
     id: int
     session_id: Optional[str] = None
     chat_name: str = ""
-    trigger: str = ""
     scene_cluster_id: Optional[int] = None
     scene_cluster_name: str = ""
     scene_cluster_tags: list[BehaviorClusterTag] = Field(default_factory=list)
     scene_cluster_source_count: int = 0
-    scene_cluster_score: float = 0.0
     actor_type: str = "other_user"
     learning_type: str = "observed_behavior"
     action: str = ""
@@ -223,7 +220,6 @@ def _cluster_payload(
         or format_scene_cluster_distribution(_load_cluster_distribution(cluster.tag_distribution)),
         tags=tags,
         source_count=int(cluster.source_count or 0),
-        score=float(cluster.score or 0.0),
         update_time=_isoformat(cluster.update_time),
     )
 
@@ -444,7 +440,6 @@ def _build_behavior_graph_data(session: Any, session_id: Optional[str]) -> dict[
                 "short_label": label.split("｜", 1)[1] if "｜" in label else label,
                 "session_id": cluster.session_id or "__global__",
                 "source_count": int(cluster.source_count or 0),
-                "score": float(cluster.score or 0.0),
                 "path_count": len(cluster_paths),
                 "activation_count": sum(int(path.activation_count or 0) for path in cluster_paths),
                 "success_count": sum(int(path.success_count or 0) for path in cluster_paths),
@@ -651,7 +646,7 @@ async def list_behavior_paths(
                 for item in path_items
                 if normalized_search
                 in (
-                    f"{item.scene_cluster_name}\n{item.trigger}\n{item.action}\n{item.outcome}\n"
+                    f"{item.scene_cluster_name}\n{item.action}\n{item.outcome}\n"
                     f"{item.actor_type}\n{item.learning_type}\n{item.chat_name}\n"
                     + "\n".join(f"{tag.tag}\n{tag.display}" for tag in item.scene_cluster_tags)
                 ).lower()
@@ -667,6 +662,8 @@ async def list_behavior_paths(
 async def list_behavior_clusters(
     session_id: Annotated[Optional[str], Query()] = None,
     search: Annotated[str, Query()] = "",
+    sort_by: Annotated[str, Query()] = "update_time",
+    sort_order: Annotated[str, Query()] = "desc",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=5000)] = 20,
 ) -> BehaviorClusterListResponse:
@@ -693,6 +690,7 @@ async def list_behavior_clusters(
                     + "\n".join(f"{tag.tag}\n{tag.display}" for tag in item.tags)
                 ).lower()
             ]
+        cluster_items = _sort_behavior_cluster_items(cluster_items, sort_by=sort_by, sort_order=sort_order)
         total = len(cluster_items)
         start = (page - 1) * page_size
         data = cluster_items[start : start + page_size]
@@ -815,9 +813,37 @@ def _sort_behavior_path_items(
         "activation_count",
         "count",
         "failure_count",
-        "scene_cluster_score",
         "scene_cluster_source_count",
         "score",
+        "success_count",
+    }
+    allowed_fields = text_fields | time_fields | number_fields
+    if normalized_sort_by not in allowed_fields:
+        normalized_sort_by = "update_time"
+
+    if normalized_sort_by in text_fields | time_fields:
+        return sorted(items, key=lambda item: str(getattr(item, normalized_sort_by) or ""), reverse=reverse)
+    return sorted(items, key=lambda item: float(getattr(item, normalized_sort_by) or 0), reverse=reverse)
+
+
+def _sort_behavior_cluster_items(
+    items: list[BehaviorClusterItem],
+    *,
+    sort_by: str,
+    sort_order: str,
+) -> list[BehaviorClusterItem]:
+    normalized_sort_by = str(sort_by or "").strip()
+    reverse = str(sort_order or "").strip().lower() != "asc"
+    text_fields = {"chat_name", "name", "session_id"}
+    time_fields = {"last_active_time", "update_time"}
+    number_fields = {
+        "activation_count",
+        "enabled_path_count",
+        "failure_count",
+        "observed_path_count",
+        "path_count",
+        "self_reflection_path_count",
+        "source_count",
         "success_count",
     }
     allowed_fields = text_fields | time_fields | number_fields
@@ -858,12 +884,10 @@ def _build_path_items(session: Any, paths: list[BehaviorExperiencePath]) -> list
                 id=path.id or 0,
                 session_id=path.session_id,
                 chat_name=_chat_display_name(chat_sessions.get(path.session_id), path.session_id),
-                trigger=cluster_name,
                 scene_cluster_id=cluster_payload.id,
                 scene_cluster_name=cluster_name,
                 scene_cluster_tags=cluster_payload.tags,
                 scene_cluster_source_count=cluster_payload.source_count,
-                scene_cluster_score=cluster_payload.score,
                 actor_type=str(path.actor_type or "other_user"),
                 learning_type=str(path.learning_type or "observed_behavior"),
                 action=action_nodes[path.action_id].action if path.action_id in action_nodes else "",
@@ -905,7 +929,6 @@ def _enrich_debug_clusters(session: Any, matched_clusters: Any) -> list[dict[str
                 "name": cluster_payload.name or str(item.get("name") or ""),
                 "tags": [tag.model_dump() for tag in cluster_payload.tags],
                 "source_count": cluster_payload.source_count,
-                "cluster_score": cluster_payload.score,
             }
         )
     return enriched_clusters
