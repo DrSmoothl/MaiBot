@@ -26,6 +26,7 @@ vi.mock('reactflow', () => ({
 vi.mock('@/lib/behavior-api', () => ({
   listBehaviorChats: vi.fn(),
   listBehaviorPaths: vi.fn(),
+  listBehaviorClusters: vi.fn(),
   getBehaviorGraphData: vi.fn(),
   getBehaviorPathDetail: vi.fn(),
   debugBehaviorRetrieval: vi.fn(),

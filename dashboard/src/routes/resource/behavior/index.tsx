@@ -41,16 +41,9 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { useToast } from '@/hooks/use-toast'
 import {
-  debugBehaviorRetrieval,
-  getBehaviorGraphData,
-  getBehaviorPathDetail,
-  listBehaviorChats,
   listBehaviorClusters,
-  listBehaviorPaths,
   type BehaviorGraphData,
-  type BehaviorChatInfo,
   type BehaviorClusterItem,
   type BehaviorClusterTag,
   type BehaviorPathDetail,
@@ -58,6 +51,13 @@ import {
   type BehaviorRetrievalDebugPayload,
 } from '@/lib/behavior-api'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/hooks/use-toast'
+
+import { useBehaviorChats } from './hooks/useBehaviorChats'
+import { useBehaviorDebug } from './hooks/useBehaviorDebug'
+import { useBehaviorGraph } from './hooks/useBehaviorGraph'
+import { useBehaviorPathDetail } from './hooks/useBehaviorPathDetail'
+import { useBehaviorPaths } from './hooks/useBehaviorPaths'
 
 const PAGE_SIZE = 20
 
@@ -495,41 +495,53 @@ function edgeWeight(edge: BehaviorNetworkEdge): number {
 }
 
 export function BehaviorLearningPage() {
-  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<ActiveTab>('paths')
-  const [chats, setChats] = useState<BehaviorChatInfo[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState('all')
+  // searchInput 为输入框内的草稿值，search 为已提交（点搜索/回车）的查询参数
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [enabledFilter, setEnabledFilter] = useState('all')
   const [learningTypeFilter, setLearningTypeFilter] = useState('all')
   const [sortBy, setSortBy] = useState<BehaviorPathSortBy>('update_time')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
-  const [paths, setPaths] = useState<BehaviorPathItem[]>([])
-  const [clusters, setClusters] = useState<BehaviorClusterItem[]>([])
+  // 场景簇浏览（同事新增功能）：列表数据与控制态保留为本地内联管理
   const [clusterSearch, setClusterSearch] = useState('')
   const [clusterSortBy, setClusterSortBy] = useState<BehaviorClusterSortBy>('update_time')
   const [clusterSortOrder, setClusterSortOrder] = useState<SortOrder>('desc')
   const [clusterGroupMode, setClusterGroupMode] = useState<BehaviorClusterGroupMode>('none')
   const [clusterPage, setClusterPage] = useState(1)
+  const [clusters, setClusters] = useState<BehaviorClusterItem[]>([])
   const [clusterTotal, setClusterTotal] = useState(0)
   const [clusterLoading, setClusterLoading] = useState(false)
-  const [graphData, setGraphData] = useState<BehaviorGraphData | null>(null)
   const [openSceneGroups, setOpenSceneGroups] = useState<Set<string>>(new Set())
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(false)
-  const [graphLoading, setGraphLoading] = useState(false)
   const [selectedPathId, setSelectedPathId] = useState<number | null>(null)
-  const [detail, setDetail] = useState<BehaviorPathDetail | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [debugLoading, setDebugLoading] = useState(false)
-  const [debugResult, setDebugResult] = useState<BehaviorRetrievalDebugPayload | null>(null)
   const [debugForm, setDebugForm] = useState({
     sceneText: '',
     domainTags: '',
     behaviorNeeds: '',
     otherTraits: '',
   })
+
+  // 聊天流 / 路径 / 图谱 / 详情均为只读服务端态，下沉到领域 hook（边下沉边转 Query）
+  const { toast } = useToast()
+  const { chats, refetch: refetchChats } = useBehaviorChats()
+  const { paths, total, loading, refetch: refetchPaths } = useBehaviorPaths({
+    sessionId: selectedSessionId,
+    search,
+    enabledFilter,
+    learningTypeFilter,
+    sortBy,
+    sortOrder,
+    page,
+  })
+  const isNetworkTab = activeTab === 'scene-network' || activeTab === 'tag-network'
+  const { graphData, loading: graphLoading } = useBehaviorGraph({
+    sessionId: selectedSessionId,
+    enabled: isNetworkTab,
+  })
+  const { detail, loading: detailLoading } = useBehaviorPathDetail(selectedPathId)
+  const { runDebug, result: debugResult, loading: debugLoading } = useBehaviorDebug()
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const clusterTotalPages = Math.max(1, Math.ceil(clusterTotal / PAGE_SIZE))
@@ -576,49 +588,28 @@ export function BehaviorLearningPage() {
   }, [paths, sortBy, sortOrder])
   const clusterGroups = useMemo(() => groupedClusters(clusters, clusterGroupMode), [clusterGroupMode, clusters])
 
-  const loadChats = async () => {
-    try {
-      const result = await listBehaviorChats()
-      if (result.success) setChats(result.data)
-    } catch (error) {
-      toast({
-        title: '加载聊天流失败',
-        description: error instanceof Error ? error.message : '无法读取行为学习聊天流',
-        variant: 'destructive',
-      })
-    }
+  // 默认选中首条路径：保留原 loadPaths 内「无选中且有数据则选第一条」的行为。
+  // 用「渲染期版本标记」模式（React 官方推荐）替代 effect 内 setState，避免级联渲染告警。
+  if (selectedPathId === null && paths.length > 0) {
+    setSelectedPathId(paths[0].id)
   }
 
-  const loadPaths = async (targetPage = page) => {
-    try {
-      setLoading(true)
-      const result = await listBehaviorPaths({
-        session_id: selectedSessionId,
-        search,
-        enabled: enabledFilter,
-        learning_type: learningTypeFilter,
-        sort_by: sortBy,
-        sort_order: sortOrder,
-        page: targetPage,
-        page_size: PAGE_SIZE,
-      })
-      const pathData = result.data
-      setPaths(pathData)
-      setTotal(result.total ?? pathData.length)
-      if (!selectedPathId && pathData.length > 0) {
-        setSelectedPathId(pathData[0].id)
-      }
-    } catch (error) {
-      toast({
-        title: '加载行为路径失败',
-        description: error instanceof Error ? error.message : '无法读取行为经验路径',
-        variant: 'destructive',
-      })
-    } finally {
-      setLoading(false)
-    }
+  // 检索调试：组装请求并触发 mutation（写失败由 query.ts 弹全局 toast）
+  const handleRunDebug = () => {
+    runDebug({
+      session_id: selectedSessionId === 'all' || selectedSessionId === '__global__' ? undefined : selectedSessionId,
+      include_global: selectedSessionId === 'all',
+      retrieval_mode: 'tag_cluster_spread_1',
+      scene_text: debugForm.sceneText,
+      tag_clusters: splitTags(debugForm.domainTags).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
+      need: { tag_name: splitTags(debugForm.behaviorNeeds)[0] ?? '', tag_aliases: [] },
+      other_traits: splitTags(debugForm.otherTraits).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
+      max_count: 20,
+    })
   }
 
+  // 场景簇浏览（同事新增功能）：列表加载保留内联实现
+  // 路径/图谱/详情/调试已由各自 useQuery hook 管理，不再内联
   const loadClusters = async (targetPage = clusterPage) => {
     try {
       setClusterLoading(true)
@@ -644,94 +635,25 @@ export function BehaviorLearningPage() {
     }
   }
 
-  const loadGraphData = async () => {
-    setGraphLoading(true)
-    try {
-      const result = await getBehaviorGraphData({
-        session_id: selectedSessionId === 'all' ? undefined : selectedSessionId,
-      })
-      if (result.success) setGraphData(result.data ?? null)
-    } catch (error) {
-      toast({
-        title: '加载行为图谱失败',
-        description: error instanceof Error ? error.message : '无法读取行为学习图谱数据',
-        variant: 'destructive',
-      })
-    } finally {
-      setGraphLoading(false)
-    }
-  }
-
-  const loadDetail = async (pathId: number) => {
-    try {
-      setDetailLoading(true)
-      const result = await getBehaviorPathDetail(pathId)
-      setDetail(result.data)
-    } catch (error) {
-      toast({
-        title: '加载局部图谱失败',
-        description: error instanceof Error ? error.message : '无法读取行为路径详情',
-        variant: 'destructive',
-      })
-    } finally {
-      setDetailLoading(false)
-    }
-  }
-
-  const runDebug = async () => {
-    try {
-      setDebugLoading(true)
-      const result = await debugBehaviorRetrieval({
-        session_id: selectedSessionId === 'all' || selectedSessionId === '__global__' ? undefined : selectedSessionId,
-        include_global: selectedSessionId === 'all',
-        retrieval_mode: 'tag_cluster_spread_1',
-        scene_text: debugForm.sceneText,
-        tag_clusters: splitTags(debugForm.domainTags).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
-        need: { tag_name: splitTags(debugForm.behaviorNeeds)[0] ?? '', tag_aliases: [] },
-        other_traits: splitTags(debugForm.otherTraits).map((tag) => ({ tag_name: tag, tag_aliases: [] })),
-        max_count: 20,
-      })
-      setDebugResult(result.data)
-    } catch (error) {
-      toast({
-        title: '检索调试失败',
-        description: error instanceof Error ? error.message : '无法完成行为检索调试',
-        variant: 'destructive',
-      })
-    } finally {
-      setDebugLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadChats()
-  }, [])
-
-  useEffect(() => {
-    loadPaths()
-  }, [selectedSessionId, enabledFilter, learningTypeFilter, sortBy, sortOrder, page])
-
+  // 场景簇浏览 tab 激活时加载（搜索经 applyClusterSearch 手动提交，故不入依赖）
   useEffect(() => {
     if (activeTab === 'scene-browser') {
       loadClusters()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedSessionId, clusterSortBy, clusterSortOrder, clusterPage])
 
-  useEffect(() => {
-    if (activeTab === 'scene-network' || activeTab === 'tag-network') {
-      loadGraphData()
-    }
-  }, [activeTab, selectedSessionId])
+  // 手动刷新：重拉聊天流/路径/场景簇（图谱由其 query 在网络 tab 激活时管理）
+  const handleRefresh = () => {
+    refetchChats()
+    refetchPaths()
+    loadClusters()
+  }
 
-  useEffect(() => {
-    if (selectedPathId !== null) {
-      loadDetail(selectedPathId)
-    }
-  }, [selectedPathId])
-
+  // 搜索：提交草稿值并重置分页（page=1），保留原 applySearch 的重置行为
   const applySearch = () => {
+    setSearch(searchInput)
     setPage(1)
-    loadPaths(1)
   }
   const applyClusterSearch = () => {
     setClusterPage(1)
@@ -777,7 +699,8 @@ export function BehaviorLearningPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => { loadChats(); loadPaths(); loadClusters(); loadGraphData() }}>
+          <Button variant="outline" onClick={handleRefresh}>
+
             <RefreshCw className="mr-2 h-4 w-4" />
             刷新
           </Button>
@@ -799,8 +722,8 @@ export function BehaviorLearningPage() {
             <div className="relative min-w-0">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') applySearch() }}
                 placeholder="搜索场景簇 tag、行为、结果"
                 className="min-w-0 pl-9"
@@ -1035,7 +958,7 @@ export function BehaviorLearningPage() {
             <Field label="他人特点/态度">
               <Input value={debugForm.otherTraits} onChange={(event) => setDebugForm({ ...debugForm, otherTraits: event.target.value })} placeholder="用逗号分隔" />
             </Field>
-            <Button className="w-full" onClick={runDebug} disabled={debugLoading}>
+            <Button className="w-full" onClick={handleRunDebug} disabled={debugLoading}>
               {debugLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GitBranch className="mr-2 h-4 w-4" />}
               试跑检索
             </Button>
