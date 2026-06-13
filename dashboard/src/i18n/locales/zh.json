@@ -59,7 +59,6 @@
     "logs": "麦麦日志"
   },
   "chat": {
-    "defaultTab": "WebUI",
     "botNameFallback": "麦麦",
     "userFallback": "用户",
     "userNameFallback": "WebUI用户",
@@ -107,7 +106,6 @@
       "offline": "离线",
       "subtitle": "{{count}} 个会话",
       "title": "聊天",
-      "webuiBadge": "WebUI",
       "virtualBadge": "虚拟",
       "profileTitle": "我的身份",
       "editName": "编辑昵称",
@@ -344,6 +342,9 @@
       "securityTip6": "建议使用系统生成的 Token 以获得最高安全性"
     },
     "other": {
+      "display": "展示设置",
+      "enableAvatarFetch": "获取并显示用户头像",
+      "enableAvatarFetchDesc": "关闭后，聊天页和推理过程不再请求头像接口，界面会显示默认头像。",
       "performance": "性能与存储",
       "localStorage": "本地存储使用",
       "logCache": "日志缓存大小",

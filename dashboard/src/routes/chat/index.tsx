@@ -6,7 +6,6 @@ import { chatWsClient } from '@/lib/chat-ws-client'
 import { ApiError, backendApi } from '@/lib/http'
 
 import { ChatComposer } from './ChatComposer'
-import { ChatHeaderBar } from './ChatHeaderBar'
 import { ChatTabBar } from './ChatTabBar'
 import { ChatWorkspaceSidebar } from './ChatWorkspaceSidebar'
 import { MessageList } from './MessageList'
@@ -90,11 +89,11 @@ function readImageFile(file: File, id: string): Promise<ChatImageAttachment> {
 export function ChatPage() {
   const { t, i18n } = useTranslation()
 
-  // 默认 WebUI 标签页
+  // 默认本地聊天标签页
   const defaultTab: ChatTab = {
     id: 'webui-default',
     type: 'webui',
-    label: t('chat.defaultTab'),
+    label: t('chat.botNameFallback'),
     messages: [],
     isConnected: false,
     isTyping: false,
@@ -134,7 +133,6 @@ export function ChatPage() {
   // 通用状态
   const [inputValue, setInputValue] = useState('')
   const [selectedImages, setSelectedImages] = useState<ChatImageAttachment[]>([])
-  const [isConnecting, setIsConnecting] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [userName, setUserName] = useState(getStoredUserName())
 
@@ -471,7 +469,7 @@ export function ChatPage() {
   // 用于追踪组件是否已卸载
   const isUnmountedRef = useRef(false)
 
-  // 初始化连接（默认 WebUI 标签页）
+  // 初始化连接（默认本地聊天标签页）
   useEffect(() => {
     isUnmountedRef.current = false
 
@@ -492,12 +490,6 @@ export function ChatPage() {
       )
     })
 
-    const unsubscribeStatus = chatWsClient.onStatusChange((status) => {
-      if (!isUnmountedRef.current) {
-        setIsConnecting(status === 'connecting')
-      }
-    })
-
     tabs.forEach((tab) => {
       processedMessagesMapRef.current.set(tab.id, new Set())
       void openSessionForTab(tab.id, tab.type, tab.virtualConfig)
@@ -506,7 +498,6 @@ export function ChatPage() {
     return () => {
       isUnmountedRef.current = true
       unsubscribeConnection()
-      unsubscribeStatus()
 
       sessionUnsubscribeMap.forEach((unsubscribe) => {
         unsubscribe()
@@ -656,11 +647,6 @@ export function ChatPage() {
     [activeTab?.isConnected, activeTabId, t]
   )
 
-  // 重新连接当前标签页
-  const handleReconnect = () => {
-    void chatWsClient.restart()
-  }
-
   // 打开虚拟身份配置对话框（新建标签页用）
   const openVirtualConfig = () => {
     setTempVirtualConfig({
@@ -744,7 +730,7 @@ export function ChatPage() {
   const closeTab = (tabId: string, e?: React.MouseEvent | React.KeyboardEvent) => {
     e?.stopPropagation()
 
-    // 不能关闭默认 WebUI 标签页
+    // 不能关闭默认本地聊天标签页
     if (tabId === 'webui-default') {
       return
     }
@@ -797,8 +783,6 @@ export function ChatPage() {
     }))
   }
 
-  const botDisplayName = activeTab?.sessionInfo.bot_name || t('chat.botNameFallback')
-
   return (
     <div className="bg-background flex h-full min-h-0">
       {/* 虚拟身份配置对话框 */}
@@ -842,18 +826,10 @@ export function ChatPage() {
           />
         </div>
 
-        <ChatHeaderBar
-          activeTab={activeTab}
-          botDisplayName={botDisplayName}
-          isConnecting={isConnecting}
-          isLoadingHistory={isLoadingHistory}
-          onReconnect={handleReconnect}
-        />
-
         <MessageList
           messages={activeTab?.messages ?? []}
           isLoadingHistory={isLoadingHistory}
-          botDisplayName={botDisplayName}
+          botDisplayName={activeTab?.sessionInfo.bot_name || t('chat.botNameFallback')}
           botQq={activeTab?.sessionInfo.bot_qq}
           userName={userName}
           language={i18n.language}
