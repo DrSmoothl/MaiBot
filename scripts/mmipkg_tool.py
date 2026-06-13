@@ -453,7 +453,7 @@ class MMIPKGUnpacker:
 
             # 如果未指定输出目录，使用默认的已注册表情包目录
             if output_dir is None:
-                output_dir = os.path.join(PROJECT_ROOT, "data", "emoji_registed")
+                output_dir = os.path.join(PROJECT_ROOT, "data", "emoji_registered")
 
             os.makedirs(output_dir, exist_ok=True)
 
@@ -996,7 +996,7 @@ def interactive_import():
 
     # 获取输出目录
     console.print("\n[yellow]2. 输出目录设置[/yellow]")
-    default_output_dir = os.path.join(PROJECT_ROOT, "data", "emoji_registed")
+    default_output_dir = os.path.join(PROJECT_ROOT, "data", "emoji_registered")
     output_dir = get_input("  输出目录", default_output_dir)
 
     # 导入选项
