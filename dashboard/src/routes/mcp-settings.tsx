@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -27,6 +27,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import { DynamicConfigForm } from '@/components/dynamic-form'
 import { RestartOverlay } from '@/components/restart-overlay'
+import { useConfigForm } from '@/hooks/useConfigForm'
 import { useToast } from '@/hooks/use-toast'
 import { getBotConfig, getBotConfigSchema, updateBotConfigSection } from '@/lib/config-api'
 import { fieldHooks } from '@/lib/field-hooks'
@@ -443,10 +444,6 @@ export function MCPSettingsPage() {
 }
 
 function MCPSettingsPageContent() {
-  // 本地可编辑草稿：服务端加载的 config 拷贝进来后由用户编辑，保存前不回写 query 缓存
-  const [mcpConfig, setMcpConfig] = useState<ConfigSectionData>({})
-  const [mcpSchema, setMcpSchema] = useState<ConfigSchema | null>(null)
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [restartNoticeVisible, setRestartNoticeVisible] = useState(
     () => localStorage.getItem('mcp-settings-restart-notice-dismissed') !== 'true',
   )
@@ -470,42 +467,29 @@ function MCPSettingsPageContent() {
     }
   }, [])
 
-  // config + schema 并行加载（config-api 已是 throw 契约）
-  const [configQuery, schemaQuery] = useQueries({
-    queries: [
-      {
-        queryKey: ['mcp-settings', 'config'],
-        queryFn: () => getBotConfig(),
-      },
-      {
-        queryKey: ['mcp-settings', 'schema'],
-        queryFn: () => getBotConfigSchema(),
-      },
-    ],
+  // 配置表单编排：config + schema 并行加载、渲染期 seed 草稿、脏跟踪统一由 useConfigForm 承载。
+  // 草稿仅取 mcp 节；mcpSchema 为展示派生数据（非草稿），从 schema 另行派生。
+  const form = useConfigForm<ConfigSectionData, Record<string, unknown>, ConfigSchema>({
+    queryKey: ['mcp-settings'],
+    loadConfig: () => getBotConfig(),
+    loadSchema: () => getBotConfigSchema(),
+    seed: (config) => {
+      const configPayload = config as { config?: Record<string, unknown> } & Record<string, unknown>
+      const fullConfig = (configPayload.config ?? configPayload) as Record<string, unknown>
+      return (fullConfig.mcp ?? {}) as ConfigSectionData
+    },
   })
+  const mcpConfig = form.draft ?? {}
+  const hasUnsavedChanges = form.isDirty
+  const loading = form.isLoading
+  const loadError = form.error
 
-  const loading = configQuery.isPending || schemaQuery.isPending
-  const loadError = configQuery.error ?? schemaQuery.error
-
-  // 把 query.data 作为草稿的初始值/重置来源：数据到达（或重新拉取）后回填本地编辑 state。
-  // 用「渲染期重置」模式（React 官方推荐）替代 effect，以 query 的更新时间戳为版本标记，
-  // 避免在 effect 里 setState 触发的级联渲染。
-  const dataVersion =
-    configQuery.data !== undefined && schemaQuery.data !== undefined
-      ? `${configQuery.dataUpdatedAt}:${schemaQuery.dataUpdatedAt}`
-      : null
-  const [seededVersion, setSeededVersion] = useState<string | null>(null)
-  if (dataVersion !== null && dataVersion !== seededVersion) {
-    const configPayload = configQuery.data as { config?: Record<string, unknown> } & Record<string, unknown>
-    const fullConfig = (configPayload.config ?? configPayload) as Record<string, unknown>
-    const schemaPayload = schemaQuery.data as { schema?: ConfigSchema } & ConfigSchema
+  const mcpSchema = useMemo<ConfigSchema | null>(() => {
+    if (!form.schema) return null
+    const schemaPayload = form.schema as { schema?: ConfigSchema } & ConfigSchema
     const fullSchema = (schemaPayload.schema ?? schemaPayload) as ConfigSchema
-
-    setSeededVersion(dataVersion)
-    setMcpConfig((fullConfig.mcp ?? {}) as ConfigSectionData)
-    setMcpSchema(fullSchema.nested?.mcp ?? null)
-    setHasUnsavedChanges(false)
-  }
+    return fullSchema.nested?.mcp ?? null
+  }, [form.schema])
 
   // 保存：失败由全局 mutation 错误 toast 呈现（meta.errorTitle 定制标题）
   const saveMutation = useMutation({
@@ -522,11 +506,11 @@ function MCPSettingsPageContent() {
     },
     meta: { errorTitle: '保存失败' },
     onSuccess: () => {
-      setHasUnsavedChanges(false)
       toast({
         title: '保存成功',
         description: 'MCP 设置已保存，重启后生效。',
       })
+      // 失效 ['mcp-settings'] 前缀（含 config/schema 子查询）→ config 重拉 → 渲染期重新 seed → isDirty 归零
       void queryClient.invalidateQueries({ queryKey: ['mcp-settings'] })
     },
   })
@@ -626,16 +610,13 @@ function MCPSettingsPageContent() {
           </div>
         )}
 
-        {!loading && loadError && (
+        {!loading && Boolean(loadError) && (
           <div className="flex h-64 flex-col items-center justify-center gap-2">
-            <p className="text-sm text-destructive">{loadError.message}</p>
+            <p className="text-sm text-destructive">{loadError instanceof Error ? loadError.message : '加载配置失败'}</p>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                void configQuery.refetch()
-                void schemaQuery.refetch()
-              }}
+              onClick={() => form.reload()}
             >
               重试
             </Button>
@@ -646,11 +627,10 @@ function MCPSettingsPageContent() {
           <MCPServersBlockEditor
             servers={mcpServers}
             onChange={(servers) => {
-              setMcpConfig((currentConfig) => ({
+              form.setDraft((currentConfig) => ({
                 ...currentConfig,
                 servers,
               }))
-              setHasUnsavedChanges(true)
             }}
           />
         )}
@@ -665,8 +645,7 @@ function MCPSettingsPageContent() {
                 ? (value as ConfigSectionData)
                 : updateNestedValue(mcpConfig, restPath, value)
 
-              setMcpConfig(nextConfig)
-              setHasUnsavedChanges(true)
+              form.setDraft(nextConfig)
             }}
             hooks={fieldHooks}
           />
