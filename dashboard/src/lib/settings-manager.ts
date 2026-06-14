@@ -48,7 +48,7 @@ export const DEFAULT_SETTINGS = {
   logLevelFilter: 'INFO' as 'all' | 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL',
   logFontSize: 'xs' as 'xs' | 'sm' | 'base',
   logLineSpacing: 4,
-  logColumnWidthExtra: 0,
+  logColumnWidthExtra: 48,
   dataSyncInterval: 30, // 秒
   wsReconnectInterval: 3000, // 毫秒
   wsMaxReconnectAttempts: 10,
