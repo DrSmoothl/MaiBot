@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from io import BytesIO
-from json import dumps
 from random import sample
 from typing import Any, Dict, Optional
 
@@ -27,7 +26,6 @@ from src.maisaka.context.messages import (
     ReferenceMessageType,
     SessionBackedMessage,
 )
-from src.plugin_runtime.hook_payloads import serialize_prompt_messages
 from src.prompt.prompt_manager import prompt_manager
 
 from .context import BuiltinToolRuntimeContext
@@ -210,7 +208,7 @@ async def _build_emoji_candidate_message(emojis: list[MaiEmoji]) -> SessionBacke
 
 def _build_send_emoji_monitor_detail(
     *,
-    request_messages: Optional[list[dict[str, Any]]] = None,
+    request_message_count: int = 0,
     reasoning_text: str = "",
     output_text: str = "",
     metrics: Optional[Dict[str, Any]] = None,
@@ -219,9 +217,9 @@ def _build_send_emoji_monitor_detail(
     """构建 send_emoji 工具统一监控详情。"""
 
     detail: Dict[str, Any] = {}
-    if isinstance(request_messages, list) and request_messages:
-        detail["request_messages"] = request_messages
-        detail["prompt_text"] = dumps(request_messages, ensure_ascii=False, indent=2)
+    if request_message_count > 0:
+        detail["prompt_omitted"] = True
+        detail["request_message_count"] = request_message_count
     if reasoning_text.strip():
         detail["reasoning_text"] = reasoning_text.strip()
     if output_text.strip():
@@ -376,7 +374,6 @@ async def _select_emoji_with_sub_agent(
     candidate_llm_message = candidate_to_llm_message() if callable(candidate_to_llm_message) else None
     if candidate_llm_message is not None:
         request_messages.append(candidate_llm_message)
-    serialized_request_messages = serialize_prompt_messages(request_messages)
 
     model_task_name = _resolve_emoji_selector_model_task_name()
     if model_task_name == "vlm" and not _is_vlm_task_configured():
@@ -406,7 +403,7 @@ async def _select_emoji_with_sub_agent(
         logger.warning(f"{tool_ctx.runtime.log_prefix} 表情包子代理结果解析失败，将回退到候选首项: {exc}")
         if selection_metadata is not None:
             selection_metadata["monitor_detail"] = _build_send_emoji_monitor_detail(
-                request_messages=serialized_request_messages,
+                request_message_count=len(request_messages),
                 output_text=response.content or "",
                 metrics=selection_metrics,
                 extra_sections=[{
@@ -420,7 +417,7 @@ async def _select_emoji_with_sub_agent(
     if selection_metadata is not None:
         selection_metadata["reason"] = selection.reason.strip()
         selection_metadata["monitor_detail"] = _build_send_emoji_monitor_detail(
-            request_messages=serialized_request_messages,
+            request_message_count=len(request_messages),
             reasoning_text=selection.reason,
             output_text=response.content or "",
             metrics=selection_metrics,
