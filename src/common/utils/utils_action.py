@@ -12,7 +12,7 @@ class ActionUtils:
         """
         将动作列表转换为可读的文本格式。
 
-        格式: `在`time`，你使用了`action_name`，具体内容是：`action_prompt_display`
+        格式: `在`time`，你使用了`tool_name`
 
         Args:
             action_records: 动作记录字典列表。
@@ -27,6 +27,6 @@ class ActionUtils:
         output_lines = []
         for record in action_records:
             timestamp_str = translate_timestamp_to_human_readable(record.timestamp.timestamp(), mode=timestamp_mode)
-            line = f"在{timestamp_str}，你使用了{record.tool_name}，具体内容是：{record.tool_display_prompt}"
+            line = f"在{timestamp_str}，你使用了{record.tool_name}"
             output_lines.append(line)
         return "\n".join(output_lines)

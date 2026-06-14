@@ -32,6 +32,7 @@ from .v23_to_v24 import migrate_v23_to_v24
 from .v24_to_v25 import migrate_v24_to_v25
 from .v25_to_v26 import migrate_v25_to_v26
 from .v26_to_v27 import migrate_v26_to_v27
+from .v27_to_v28 import migrate_v27_to_v28
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -62,7 +63,8 @@ V24_SCHEMA_VERSION = 24
 V25_SCHEMA_VERSION = 25
 V26_SCHEMA_VERSION = 26
 V27_SCHEMA_VERSION = 27
-LATEST_SCHEMA_VERSION = 27
+V28_SCHEMA_VERSION = 28
+LATEST_SCHEMA_VERSION = 28
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -599,6 +601,12 @@ class LatestSchemaVersionDetector(BaseSchemaVersionDetector):
             return None
         if snapshot.has_column("behavior_scene_clusters", "score"):
             return None
+        if not snapshot.has_table("one_time_maintenance_tasks"):
+            return None
+        if snapshot.has_column("tool_records", "tool_builtin_prompt"):
+            return None
+        if snapshot.has_column("tool_records", "tool_display_prompt"):
+            return None
         if any(snapshot.has_table(table_name) for table_name in LEGACY_V1_CLEANUP_TABLES):
             return None
         return LATEST_SCHEMA_VERSION
@@ -617,6 +625,8 @@ class V27SchemaVersionDetector(BaseSchemaVersionDetector):
         if not _detect_v26_base_schema(snapshot):
             return None
         if snapshot.has_column("behavior_scene_clusters", "score"):
+            return None
+        if snapshot.has_table("one_time_maintenance_tasks"):
             return None
         if any(snapshot.has_table(table_name) for table_name in LEGACY_V1_CLEANUP_TABLES):
             return None
@@ -1590,6 +1600,13 @@ def build_default_migration_registry() -> MigrationRegistry:
                 name="v26_to_v27",
                 description="移除行为场景簇不再使用的 score 字段。",
                 handler=migrate_v26_to_v27,
+            ),
+            MigrationStep(
+                version_from=V27_SCHEMA_VERSION,
+                version_to=V28_SCHEMA_VERSION,
+                name="v27_to_v28",
+                description="新增一次性维护任务状态表，并移除工具 prompt 冗余列。",
+                handler=migrate_v27_to_v28,
             ),
         ]
     )

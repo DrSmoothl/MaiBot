@@ -978,7 +978,7 @@ class BaseMaisakaReplyGenerator:
                 return finalize(False)
 
             result.completion.request_prompt = prompt_preview
-            result.request_messages = serialize_prompt_messages(request_messages)
+            result.request_message_count = len(request_messages)
             self._save_debug_reply_request_body(
                 stream_id=preview_chat_id,
                 model_name=generation_result.model_name or "",

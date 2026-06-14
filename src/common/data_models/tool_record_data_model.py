@@ -19,8 +19,6 @@ class MaiToolRecord(BaseDatabaseDataModel[ToolRecord]):
         tool_name: str,
         tool_reasoning: Optional[str] = None,
         tool_data: Optional[Dict] = None,
-        tool_builtin_prompt: Optional[str] = None,
-        tool_display_prompt: Optional[str] = None,
     ):
         self.tool_id = tool_id
         self.timestamp = timestamp
@@ -28,8 +26,6 @@ class MaiToolRecord(BaseDatabaseDataModel[ToolRecord]):
         self.tool_name = tool_name
         self.tool_reasoning = tool_reasoning
         self.tool_data = tool_data or {}
-        self.tool_builtin_prompt = tool_builtin_prompt
-        self.tool_display_prompt = tool_display_prompt
 
     @classmethod
     def from_db_instance(cls, db_record: ToolRecord):
@@ -41,8 +37,6 @@ class MaiToolRecord(BaseDatabaseDataModel[ToolRecord]):
             tool_name=db_record.tool_name,
             tool_reasoning=db_record.tool_reasoning,
             tool_data=json.loads(db_record.tool_data) if db_record.tool_data else None,
-            tool_builtin_prompt=db_record.tool_builtin_prompt,
-            tool_display_prompt=db_record.tool_display_prompt,
         )
 
     def to_db_instance(self):
@@ -54,6 +48,4 @@ class MaiToolRecord(BaseDatabaseDataModel[ToolRecord]):
             tool_name=self.tool_name,
             tool_reasoning=self.tool_reasoning,
             tool_data=json.dumps(self.tool_data) if self.tool_data else None,
-            tool_builtin_prompt=self.tool_builtin_prompt,
-            tool_display_prompt=self.tool_display_prompt,
         )

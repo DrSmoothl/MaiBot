@@ -2,8 +2,6 @@
 
 from typing import Any, Dict, List, Optional
 
-import json
-
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 
 from .context import BuiltinToolRuntimeContext
@@ -71,7 +69,6 @@ async def handle_tool(
             invocation.tool_name,
             "未找到匹配的 deferred tools，请尝试更完整的工具名、前缀或其他关键词。",
             structured_content=structured_content,
-            metadata={"record_display_prompt": "tool_search 未找到匹配工具。"},
         )
 
     newly_discovered_tool_name_set = set(newly_discovered_tool_names)
@@ -90,6 +87,5 @@ async def handle_tool(
         metadata={
             "matched_tool_names": matched_tool_names,
             "newly_discovered_tool_names": newly_discovered_tool_names,
-            "record_display_prompt": json.dumps(structured_content, ensure_ascii=False),
         },
     )

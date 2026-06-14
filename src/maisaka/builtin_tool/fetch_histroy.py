@@ -57,6 +57,5 @@ async def handle_tool(
         invocation.tool_name,
         content,
         structured_content=structured_content,
-        metadata={"record_display_prompt": content},
         post_history_messages=post_history_messages,
     )

@@ -10,7 +10,6 @@ from rich.panel import Panel
 
 import asyncio
 import difflib
-import json
 import time
 
 from src.chat.heart_flow.heartFC_utils import CycleDetail
@@ -1848,107 +1847,6 @@ class MaisakaReasoningEngine:
             payload["title"] = tool_spec.title
         return payload
 
-    def _build_tool_display_prompt(
-        self,
-        invocation: ToolInvocation,
-        result: ToolExecutionResult,
-        tool_spec: Optional[ToolSpec],
-    ) -> str:
-        """构造展示给历史回放与 UI 的工具摘要。
-
-        Args:
-            invocation: 工具调用对象。
-            result: 工具执行结果。
-            tool_spec: 对应的工具声明。
-
-        Returns:
-            str: 用于展示的工具摘要文本。
-        """
-
-        custom_display_prompt = result.metadata.get("record_display_prompt")
-        if isinstance(custom_display_prompt, str) and custom_display_prompt.strip():
-            return custom_display_prompt.strip()
-
-        structured_content = (
-            result.structured_content
-            if isinstance(result.structured_content, dict)
-            else {}
-        )
-        history_content = self._truncate_tool_record_text(result.get_history_content(), max_length=200)
-        normalized_args = self._normalize_tool_record_value(invocation.arguments)
-
-        if invocation.tool_name == "reply":
-            target_user_name = str(structured_content.get("target_user_name") or "对方").strip() or "对方"
-            reply_text = str(structured_content.get("reply_text") or "").strip()
-            if result.success and reply_text:
-                return f"你对{target_user_name}进行了回复：{reply_text}"
-            target_message_id = str(invocation.arguments.get("msg_id") or "").strip()
-            error_text = self._truncate_tool_record_text(result.error_message or history_content, max_length=120)
-            return f"你尝试回复消息 {target_message_id or 'unknown'}，但失败了：{error_text}"
-
-        if invocation.tool_name == "send_emoji":
-            if result.success:
-                return "你发送了表情包。"
-            return f"你尝试发送表情包，但失败了：{self._truncate_tool_record_text(result.error_message or history_content, 120)}"
-
-        if invocation.tool_name == "wait":
-            wait_seconds = invocation.arguments.get("seconds", 30)
-            return f"你让当前对话先等待 {wait_seconds} 秒。"
-
-        if invocation.tool_name == "no_action":
-            return "你暂停了当前对话循环，等待新的外部消息。"
-
-        if invocation.tool_name == "finish":
-            return "你结束了本轮思考，等待新的外部消息后再继续。"
-
-        if invocation.tool_name == "continue":
-            return "你允许当前对话继续进入下一轮完整思考与工具执行。"
-
-        if invocation.tool_name == "query_jargon":
-            words = invocation.arguments.get("words", [])
-            if isinstance(words, list):
-                words_text = "、".join(str(item).strip() for item in words if str(item).strip())
-            else:
-                words_text = ""
-            if words_text:
-                return f"你查询了这些黑话或词条：{words_text}"
-            return "你查询了一次黑话或词条信息。"
-
-        if invocation.tool_name == "query_memory":
-            query_text = str(invocation.arguments.get("query") or "").strip()
-            mode = str(invocation.arguments.get("mode") or "search").strip() or "search"
-            hit_items = structured_content.get("hits")
-            hit_count = len(hit_items) if isinstance(hit_items, list) else 0
-            if query_text:
-                return f"你查询了长期记忆：{query_text}（模式：{mode}，命中 {hit_count} 条）"
-            return f"你按时间范围查询了一次长期记忆（模式：{mode}，命中 {hit_count} 条）。"
-
-        if invocation.tool_name == "view_complex_message":
-            target_message_id = str(invocation.arguments.get("msg_id") or "").strip()
-            if target_message_id:
-                return f"你查看了复杂消息 {target_message_id} 的完整内容。"
-            return "你查看了一条复杂消息的完整内容。"
-
-        description = ""
-        if tool_spec is not None:
-            description = tool_spec.description.strip()
-
-        if normalized_args:
-            arguments_text = self._truncate_tool_record_text(
-                json.dumps(normalized_args, ensure_ascii=False),
-                max_length=160,
-            )
-        else:
-            arguments_text = "{}"
-
-        if result.success:
-            if description:
-                return f"{description} 参数={arguments_text}；结果：{history_content or '执行成功'}"
-            return f"你调用了工具 {invocation.tool_name}，参数={arguments_text}；结果：{history_content or '执行成功'}"
-
-        error_text = self._truncate_tool_record_text(result.error_message or history_content, max_length=160)
-        return f"你调用了工具 {invocation.tool_name}，参数={arguments_text}；执行失败：{error_text}"
-
     async def _store_tool_execution_record(
         self,
         invocation: ToolInvocation,
@@ -1970,16 +1868,10 @@ class MaisakaReasoningEngine:
             )
             return
 
-        builtin_prompt = ""
-        if tool_spec is not None:
-            builtin_prompt = tool_spec.build_llm_description()
-
         try:
             tool_record_payload = self._build_tool_record_payload(invocation, result, tool_spec)
             saved_record = await database_api.store_tool_info(
                 chat_stream=self._runtime.chat_stream,
-                builtin_prompt=builtin_prompt,
-                display_prompt=self._build_tool_display_prompt(invocation, result, tool_spec),
                 tool_id=invocation.call_id,
                 tool_data=tool_record_payload,
                 tool_name=invocation.tool_name,

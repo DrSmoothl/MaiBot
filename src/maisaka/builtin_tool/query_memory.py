@@ -325,12 +325,7 @@ async def handle_tool(
             "提示：人物定向检索未命中，已自动降级为关键词检索。\n"
             f"{content}"
         )
-    if clean_query:
-        display_prompt = f"你查询了长期记忆：{clean_query}"
-    else:
-        display_prompt = "你按时间范围查询了长期记忆。"
-
-    metadata: Dict[str, Any] = {"record_display_prompt": display_prompt}
+    metadata: Dict[str, Any] = {}
     replyer_memory_reference = _build_replyer_memory_reference(structured_content)
     if replyer_memory_reference:
         metadata["replyer_memory_reference"] = replyer_memory_reference

@@ -642,5 +642,5 @@ class MaisakaFocusRuntimeMixin:
             "from_chat_id": self.session_id,
             "to_chat_id": target_session.session_id,
         }
-        metadata = {"pause_execution": True, "record_display_prompt": result_content}
+        metadata = {"pause_execution": True}
         return True, result_content, structured_content, metadata
