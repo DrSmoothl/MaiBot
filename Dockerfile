@@ -11,10 +11,17 @@ ENV PATH="/MaiMBot/.venv/bin:${PATH}"
 # Copy dependency metadata
 COPY pyproject.toml uv.lock ./
 
-RUN apt-get update && apt-get install -y git
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install runtime dependencies
 RUN uv sync --frozen --no-dev --no-install-project
+
+# Install system libraries required by Playwright Chromium. The browser binary
+# itself is downloaded lazily into the configured data directory at runtime.
+RUN python -m playwright install-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy project source
 COPY . .
