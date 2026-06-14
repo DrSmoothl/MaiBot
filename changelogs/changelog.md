@@ -7,6 +7,7 @@
 ## 修复
 
 - Docker无法使用playwright的问题
+- 调整了webui log 列宽默认值以适配更多浏览器情况
 
 ## 存储优化
 
