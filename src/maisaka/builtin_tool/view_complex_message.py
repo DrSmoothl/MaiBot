@@ -128,7 +128,4 @@ async def handle_tool(
             "message_type": "complex",
             "full_content": full_content,
         },
-        metadata={
-            "record_display_prompt": f"你查看了复杂消息 {target_message_id} 的完整内容。",
-        },
     )

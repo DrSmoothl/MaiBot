@@ -23,8 +23,6 @@ class MaiActionRecord(BaseDatabaseDataModel[ToolRecord]):
         action_name: str,
         action_reasoning: Optional[str] = None,
         action_data: Optional[Dict] = None,
-        action_builtin_prompt: Optional[str] = None,
-        action_display_prompt: Optional[str] = None,
     ):
         self.action_id = action_id
         self.timestamp = timestamp
@@ -32,8 +30,6 @@ class MaiActionRecord(BaseDatabaseDataModel[ToolRecord]):
         self.action_name = action_name
         self.action_reasoning = action_reasoning
         self.action_data = action_data or {}
-        self.action_builtin_prompt = action_builtin_prompt
-        self.action_display_prompt = action_display_prompt
 
     @classmethod
     def from_db_instance(cls, db_record: ToolRecord):
@@ -46,8 +42,6 @@ class MaiActionRecord(BaseDatabaseDataModel[ToolRecord]):
             action_name=db_record.tool_name,
             action_reasoning=db_record.tool_reasoning,
             action_data=json.loads(db_record.tool_data) if db_record.tool_data else None,
-            action_builtin_prompt=db_record.tool_builtin_prompt,
-            action_display_prompt=db_record.tool_display_prompt,
         )
 
     def to_db_instance(self):
@@ -60,6 +54,4 @@ class MaiActionRecord(BaseDatabaseDataModel[ToolRecord]):
             tool_name=self.action_name,
             tool_reasoning=self.action_reasoning,
             tool_data=json.dumps(self.action_data) if self.action_data else None,
-            tool_builtin_prompt=self.action_builtin_prompt,
-            tool_display_prompt=self.action_display_prompt,
         )

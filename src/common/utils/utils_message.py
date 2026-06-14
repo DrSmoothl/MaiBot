@@ -846,9 +846,8 @@ class MessageUtils:
         # 构建动作文本列表
         action_messages: List[Tuple[float, str]] = []
         for action in actions:
-            if action_display_prompt := action.tool_display_prompt or "":
-                action_time = action.timestamp.timestamp()
-                action_messages.append((action_time, action_display_prompt))
+            action_time = action.timestamp.timestamp()
+            action_messages.append((action_time, f"调用了工具 {action.tool_name}"))
 
         return action_messages
 

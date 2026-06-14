@@ -176,8 +176,6 @@ async def db_count(model_class: type[SQLModel], filters: Optional[dict[str, Any]
 
 async def store_tool_info(
     chat_stream: "BotChatSession",
-    builtin_prompt: Optional[str] = None,
-    display_prompt: str = "",
     tool_id: str = "",
     tool_data: Optional[dict[str, Any]] = None,
     tool_name: str = "",
@@ -191,8 +189,6 @@ async def store_tool_info(
             "tool_name": tool_name,
             "tool_data": json.dumps(tool_data or {}, ensure_ascii=False),
             "tool_reasoning": tool_reasoning,
-            "tool_builtin_prompt": builtin_prompt,
-            "tool_display_prompt": display_prompt,
         }
 
         saved_record = await db_save(ToolRecord, data=record_data, key_field="tool_id", key_value=record_data["tool_id"])
@@ -209,8 +205,6 @@ async def store_tool_info(
 
 async def store_action_info(
     chat_stream: "BotChatSession",
-    builtin_prompt: Optional[str] = None,
-    display_prompt: str = "",
     thinking_id: str = "",
     action_data: Optional[dict[str, Any]] = None,
     action_name: str = "",
@@ -219,8 +213,6 @@ async def store_action_info(
     """兼容旧接口，内部转发到 ``store_tool_info``。"""
     return await store_tool_info(
         chat_stream=chat_stream,
-        builtin_prompt=builtin_prompt,
-        display_prompt=display_prompt,
         tool_id=thinking_id,
         tool_data=action_data,
         tool_name=action_name,

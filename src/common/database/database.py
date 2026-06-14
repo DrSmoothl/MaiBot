@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
+from time import perf_counter
 from typing import ContextManager, Generator, TYPE_CHECKING
 
 from rich.traceback import install
@@ -10,7 +11,6 @@ from sqlmodel import SQLModel, Session, create_engine
 
 import threading
 
-from src.common.database.image_path_migration import normalize_image_storage_paths
 from src.common.database.migrations import create_database_migration_bootstrapper
 from src.common.logger import get_logger
 
@@ -92,9 +92,12 @@ def initialize_database() -> None:
             "数据库迁移准备完成，"
             f" 当前版本={migration_state.resolved_version.version}，目标版本={migration_state.target_version}"
         )
+        create_all_start_time = perf_counter()
         SQLModel.metadata.create_all(engine)
+        logger.info(f"数据库模型建表检查完成，耗时={int((perf_counter() - create_all_start_time) * 1000)}ms")
+        finalize_start_time = perf_counter()
         _migration_bootstrapper.finalize_database(migration_state)
-        normalize_image_storage_paths(engine)
+        logger.info(f"数据库 schema 版本收尾完成，耗时={int((perf_counter() - finalize_start_time) * 1000)}ms")
         _db_initialized = True
 
 

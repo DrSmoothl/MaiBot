@@ -148,8 +148,20 @@ class ToolRecord(SQLModel, table=True):
     tool_reasoning: Optional[str] = Field(default=None)  # 工具调用推理过程
     tool_data: Optional[str] = Field(default=None)  # 工具数据，JSON格式存储
 
-    tool_builtin_prompt: Optional[str] = Field(default=None)  # 内置工具提示
-    tool_display_prompt: Optional[str] = Field(default=None)  # 最终输入到 Prompt 的内容
+
+class OneTimeMaintenanceTask(SQLModel, table=True):
+    """一次性数据库维护任务状态。"""
+
+    __tablename__ = "one_time_maintenance_tasks"  # type: ignore
+
+    task_name: str = Field(primary_key=True, max_length=100)
+    phase: str = Field(max_length=50)
+    status: str = Field(max_length=50)
+    cursor_id: int = Field(default=0)
+    stats_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    completed_at: Optional[datetime] = Field(default=None, sa_column=Column(DateTime, nullable=True))
+    updated_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, index=True))
 
 
 class StatisticsAggregationCursor(SQLModel, table=True):

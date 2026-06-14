@@ -145,10 +145,8 @@ async def handle_tool(
     profile_text = structured_content["summary"]
     if not profile_text:
         profile_text = "未找到可用的人物画像。"
-    display_name = structured_content["person_name"] or structured_content["person_id"] or person_name or person_id
     return tool_ctx.build_success_result(
         invocation.tool_name,
         profile_text,
         structured_content=structured_content,
-        metadata={"record_display_prompt": f"你查询了人物画像：{display_name}"},
     )
