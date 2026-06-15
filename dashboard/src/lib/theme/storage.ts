@@ -42,6 +42,26 @@ const DEFAULT_THEME_CONFIG: UserThemeConfig = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
 
+type ImportThemeConfigRecord = Record<string, unknown> & Pick<UserThemeConfig, 'selectedPreset' | 'accentColor'>
+
+function hasRequiredImportThemeFields(
+  config: Record<string, unknown>,
+  errors: string[]
+): config is ImportThemeConfigRecord {
+  let valid = true
+
+  if (typeof config.selectedPreset !== 'string') {
+    errors.push('selectedPreset must be a string')
+    valid = false
+  }
+  if (typeof config.accentColor !== 'string') {
+    errors.push('accentColor must be a string')
+    valid = false
+  }
+
+  return valid
+}
+
 function normalizeDashboardStyle(value: unknown): DashboardStyle {
   if (value === 'modern' || value === 'future-retro') {
     return value
@@ -229,12 +249,7 @@ export function importThemeJSON(json: string): { success: boolean; errors: strin
     }
   }
 
-  if (typeof config.selectedPreset !== 'string') {
-    errors.push('selectedPreset must be a string')
-  }
-  if (typeof config.accentColor !== 'string') {
-    errors.push('accentColor must be a string')
-  }
+  const hasRequiredFields = hasRequiredImportThemeFields(config, errors)
   if (
     config.styleTokenOverrides !== undefined &&
     (typeof config.styleTokenOverrides !== 'object' || config.styleTokenOverrides === null)
@@ -266,10 +281,15 @@ export function importThemeJSON(json: string): { success: boolean; errors: strin
   if (errors.length > 0) {
     return { success: false, errors }
   }
+  const selectedPreset = config.selectedPreset
+  const accentColor = config.accentColor
+  if (!hasRequiredFields || typeof selectedPreset !== 'string' || typeof accentColor !== 'string') {
+    throw new Error('Theme import required fields were not narrowed after validation')
+  }
 
   saveThemeConfig({
-    selectedPreset: config.selectedPreset,
-    accentColor: config.accentColor,
+    selectedPreset,
+    accentColor,
     styleTokenOverrides: normalizeStyleTokenOverrides(config.styleTokenOverrides),
     styleCustomCSS: normalizeStyleCustomCSS(config.styleCustomCSS),
     styleBackgroundConfig: normalizeStyleBackgroundConfig(config.styleBackgroundConfig),
