@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'electron-vite'
 import path from 'path'
 
+import { dashboardVersionDefine } from './app-version'
+
 export default defineConfig({
   main: {
     build: {
@@ -39,6 +41,7 @@ export default defineConfig({
   },
   renderer: {
     root: '.',
+    define: dashboardVersionDefine,
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
