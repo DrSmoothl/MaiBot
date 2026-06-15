@@ -256,6 +256,16 @@ const pluginConfigEmbedRoute = createRoute({
   ),
 })
 
+// 外部程序嵌入用插件镜像源配置路由，不挂载 dashboard 顶栏和侧边栏
+const pluginMirrorsEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/plugin-mirrors/embed',
+  component: lazyRouteComponent(
+    () => import('./routes/plugin-mirrors-embed'),
+    'PluginMirrorsEmbedPage'
+  ),
+})
+
 // 插件镜像源配置路由
 const pluginMirrorsRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -324,6 +334,7 @@ const routeTree = rootRoute.addChildren([
   chatEmbedRoute,
   pluginsEmbedRoute,
   pluginConfigEmbedRoute,
+  pluginMirrorsEmbedRoute,
   protectedRoute.addChildren([
     indexRoute,
     botConfigRoute,

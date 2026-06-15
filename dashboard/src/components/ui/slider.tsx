@@ -4,7 +4,7 @@ import * as SliderPrimitive from "@radix-ui/react-slider"
 import { cn } from "@/lib/utils"
 
 type SliderProps = React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root> & {
-  "data-dashboard-slider"?: "config"
+  "data-dashboard-slider"?: "config" | "default"
   "data-dashboard-slider-value-format"?: "fixed-2"
 }
 
@@ -19,7 +19,8 @@ const Slider = React.forwardRef<
   "data-dashboard-slider-value-format": dashboardValueFormat,
   ...props
 }, ref) => {
-  const hasDashboardValue = dashboardSliderStyle === 'config'
+  const dashboardSliderVariant = dashboardSliderStyle ?? 'default'
+  const hasDashboardValue = dashboardSliderVariant === 'config'
   const currentValues = Array.isArray(value)
     ? value
     : Array.isArray(defaultValue)
@@ -40,7 +41,7 @@ const Slider = React.forwardRef<
       )}
       value={value}
       defaultValue={defaultValue}
-      data-dashboard-slider={dashboardSliderStyle}
+      data-dashboard-slider={dashboardSliderVariant}
       data-dashboard-slider-value-format={dashboardValueFormat}
       {...props}
     >

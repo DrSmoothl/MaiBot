@@ -11,20 +11,8 @@ import {
   Moon,
   Sun,
   Terminal,
-  Zap,
 } from 'lucide-react'
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -43,10 +31,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { WavesBackground } from '@/components/waves-background'
 import { useTheme } from '@/components/use-theme'
-
-import { useAnimation } from '@/hooks/use-animation'
 
 import { checkAuthStatus } from '@/lib/auth'
 import { authApi } from '@/lib/http'
@@ -61,7 +46,6 @@ export function AuthPage() {
   const [checkingAuth, setCheckingAuth] = useState(true)
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { enableWavesBackground, setEnableWavesBackground } = useAnimation()
   const { theme, setTheme } = useTheme()
   // 避免 React StrictMode 下重复触发 URL token 自动登录。
   const urlTokenHandledRef = useRef(false)
@@ -226,7 +210,6 @@ export function AuthPage() {
   if (checkingAuth) {
     return (
       <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
-        {enableWavesBackground && <WavesBackground />}
         <div className="text-muted-foreground">{t('auth.checkingAuth')}</div>
       </div>
     )
@@ -234,9 +217,6 @@ export function AuthPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
-      {/* 动态背景 - 独立控制 */}
-      {enableWavesBackground && <WavesBackground />}
-
       {/* 认证卡片 - 磨砂玻璃效果 */}
       <Card className="relative z-10 w-full max-w-md shadow-2xl backdrop-blur-xl bg-card/80 border-border/50">
         {/* 主题切换按钮 */}
@@ -384,39 +364,6 @@ export function AuthPage() {
               </DialogContent>
             </Dialog>
 
-            {/* 性能优化选项 */}
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <button className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors underline-offset-4 hover:underline flex items-center justify-center gap-1">
-                  <Zap className="h-4 w-4" strokeWidth={2} fill="none" />
-                  {t('auth.slowLink')}
-                </button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle className="flex items-center gap-2">
-                    <Zap className="h-5 w-5 text-primary" strokeWidth={2} fill="none" />
-                    {t('auth.disableAnimTitle')}
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {t('auth.disableAnimDesc')}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
-                  <p className="text-sm text-muted-foreground">
-                    {t('auth.disableAnimDetail')}
-                  </p>
-                </div>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() => setEnableWavesBackground(false)}
-                  >
-                    {t('auth.disableAnimBtn')}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
           </form>
         </CardContent>
       </Card>

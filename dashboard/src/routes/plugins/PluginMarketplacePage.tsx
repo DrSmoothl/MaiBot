@@ -43,6 +43,10 @@ import { getPluginType, PLUGIN_TYPE_OPTIONS } from './types'
 
 const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
 
+interface PluginMarketplacePageProps {
+  embedded?: boolean
+}
+
 const resolvePluginStats = (
   plugin: PluginInfo,
   statsSummary: Record<string, PluginStatsData>
@@ -80,17 +84,20 @@ const buildPluginStatsMap = (
 }
 
 // 插件市场页：只展示市场索引、安装状态和版本信息
-export function PluginMarketplacePage() {
+export function PluginMarketplacePage({ embedded = false }: PluginMarketplacePageProps) {
   return (
     <RestartProvider>
-      <PluginMarketplacePageContent />
+      <PluginMarketplacePageContent embedded={embedded} />
     </RestartProvider>
   )
 }
 
 // 内部组件：实际内容
-function PluginMarketplacePageContent() {
+function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePageProps>) {
   const navigate = useNavigate()
+  const settingsRoute: '/plugin-mirrors' | '/plugin-mirrors/embed' = embedded
+    ? '/plugin-mirrors/embed'
+    : '/plugin-mirrors'
   const [restartNoticeVisible, setRestartNoticeVisible] = useState(
     () => localStorage.getItem('plugins-restart-notice-dismissed') !== 'true'
   )
@@ -877,7 +884,7 @@ function PluginMarketplacePageContent() {
               type="button"
               variant="outline"
               className="w-full sm:ml-auto sm:w-auto"
-              onClick={() => navigate({ to: '/plugin-mirrors' })}
+              onClick={() => navigate({ to: settingsRoute })}
             >
               <Settings2 className="h-4 w-4 mr-2" />
               设置

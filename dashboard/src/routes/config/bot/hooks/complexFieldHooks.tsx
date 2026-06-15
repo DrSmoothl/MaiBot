@@ -25,6 +25,7 @@ import { Slider } from '@/components/ui/slider'
 import { Textarea } from '@/components/ui/textarea'
 import { fieldTitleClassName } from '@/components/dynamic-form/fieldStyle'
 import type { FieldHookComponent } from '@/lib/field-hooks'
+import type { ConfigSchema } from '@/types/config-schema'
 
 import { createJsonFieldHook } from './JsonFieldHookFactory'
 import { createListItemEditorHook } from './ListItemEditorHookFactory'
@@ -48,6 +49,88 @@ interface PlatformAccountRow {
 
 const PLATFORM_ACCOUNT_ROW_GRID_CLASS =
   'grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,5.5rem)_minmax(0,8.5rem)_2.5rem] md:grid-cols-[minmax(0,6rem)_minmax(0,9.5rem)_2.5rem]'
+
+const LEARNING_ITEM_FALLBACK_SCHEMA: ConfigSchema = {
+  className: 'LearningItem',
+  classDoc: '学习规则',
+  fields: [
+    {
+      name: 'platform',
+      type: 'string',
+      label: {
+        zh_CN: '平台',
+        en_US: 'Platform',
+        ja_JP: 'プラットフォーム',
+      },
+      description: '平台，与 ID 一起留空表示全局。',
+      required: false,
+      default: '',
+      'x-widget': 'input',
+      'x-icon': 'wifi',
+    },
+    {
+      name: 'item_id',
+      type: 'string',
+      label: {
+        zh_CN: '聊天流 ID',
+        en_US: 'Chat stream ID',
+        ja_JP: 'チャットストリーム ID',
+      },
+      description: '要单独配置的群号或用户 ID；留空表示默认规则。',
+      required: false,
+      default: '',
+      'x-widget': 'input',
+      'x-icon': 'hash',
+    },
+    {
+      name: 'type',
+      type: 'select',
+      label: {
+        zh_CN: '聊天类型',
+        en_US: 'Chat type',
+        ja_JP: 'チャット種別',
+      },
+      description: '这条规则作用于群聊还是私聊。',
+      required: false,
+      default: 'group',
+      options: ['group', 'private'],
+      'x-widget': 'select',
+      'x-icon': 'users',
+      'x-option-descriptions': {
+        group: '群聊',
+        private: '私聊',
+      },
+    },
+    {
+      name: 'use',
+      type: 'boolean',
+      label: {
+        zh_CN: '使用',
+        en_US: 'Use',
+        ja_JP: '使用',
+      },
+      description: '是否在这个聊天里使用已学到的内容。',
+      required: false,
+      default: true,
+      'x-widget': 'switch',
+      'x-icon': 'message-square',
+    },
+    {
+      name: 'learn',
+      type: 'boolean',
+      label: {
+        zh_CN: '学习',
+        en_US: 'Learn',
+        ja_JP: '学習',
+      },
+      description: '是否从这个聊天里继续学习新内容。',
+      required: false,
+      default: true,
+      'x-widget': 'switch',
+      'x-icon': 'graduation-cap',
+    },
+  ],
+}
 
 interface TimelineSegment {
   left: number
@@ -1114,6 +1197,8 @@ const normalizeExpressionGroups = (value: unknown): ExpressionGroupValue[] => {
       rawMembers = source.expression_groups
     } else if (Array.isArray(source.jargon_groups)) {
       rawMembers = source.jargon_groups
+    } else if (Array.isArray(source.behavior_groups)) {
+      rawMembers = source.behavior_groups
     }
     const members = rawMembers.map(normalizeExpressionTarget)
     return { targets: members }
@@ -1331,6 +1416,7 @@ export const ExpressionLearningListHook = createListItemEditorHook({
   addLabel: '添加学习规则',
   infoText: '可以单独为每个聊天开启学习和使用，留空作为兜底，*作为全部覆盖',
   emptyText: '尚未配置任何学习规则。',
+  fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
   fieldRows: [
     ['platform', 'item_id', 'type'],
     ['use', 'learn'],
@@ -1345,6 +1431,24 @@ export const ExpressionLearningListHook = createListItemEditorHook({
 })
 
 export const JargonLearningListHook = ExpressionLearningListHook
+
+export const BehaviorLearningListHook = createListItemEditorHook({
+  addLabel: '添加行为学习规则',
+  infoText: '可以单独为每个聊天开启行为经验的学习和使用，留空作为兜底，* 作为全部覆盖。',
+  emptyText: '尚未配置任何行为学习规则。',
+  fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
+  fieldRows: [
+    ['platform', 'item_id', 'type'],
+    ['use', 'learn'],
+  ],
+  itemTitle: (item) => {
+    const flags: string[] = []
+    if (item.use) flags.push('使用')
+    if (item.learn) flags.push('学习')
+    const flagText = flags.length ? flags.join(' / ') : '使用和学习均关闭'
+    return `${platformLabel(item)} · ${ruleTypeLabel(item.type)} · ${flagText}`
+  },
+})
 
 export const BotPlatformsHook: FieldHookComponent = ({ onChange, value }) => {
   const platforms = normalizePlatformAccounts(value)
@@ -1597,6 +1701,7 @@ export const RegexRulesHook = createListItemEditorHook({
 export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, schema, value }) => {
   const groups = normalizeExpressionGroups(value)
   const isJargonGroup = fieldPath?.includes('jargon') ?? false
+  const isBehaviorGroup = fieldPath?.includes('behavior') ?? false
   const isSharedMemoryGroup = fieldPath?.includes('shared_memory_groups') ?? false
   const isFocusGroup = fieldPath?.includes('focus_groups') ?? false
   const displaysAsSection =
@@ -1606,10 +1711,12 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
     ? '共享记忆组'
     : isFocusGroup
       ? 'Focus 互通组'
-      : isJargonGroup
-        ? '黑话互通组'
-        : '表达互通组'
-  const learnedContentLabel = isJargonGroup ? '黑话' : '表达方式'
+      : isBehaviorGroup
+        ? '行为互通组'
+        : isJargonGroup
+          ? '黑话互通组'
+          : '表达互通组'
+  const learnedContentLabel = isBehaviorGroup ? '行为经验' : isJargonGroup ? '黑话' : '表达方式'
   const helperText = isSharedMemoryGroup
     ? '把几个群聊或私聊放进同一组后，麦麦在其中任意一个聊天里回忆长期记忆时，会一起参考同组聊天的记忆；新产生的内容仍记在原来的聊天里。'
     : isFocusGroup
@@ -1869,6 +1976,8 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
 }
 
 export const JargonGroupsHook = ExpressionGroupsHook
+
+export const BehaviorGroupsHook = ExpressionGroupsHook
 
 export const BehaviorFocusGroupsHook = ExpressionGroupsHook
 

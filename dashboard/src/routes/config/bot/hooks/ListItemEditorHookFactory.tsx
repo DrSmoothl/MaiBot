@@ -45,6 +45,8 @@ export interface ListItemEditorOptions {
   fieldRows?: string[][]
   /** Hook-local field UI metadata overrides */
   fieldSchemaOverrides?: Record<string, Partial<FieldSchema>>
+  /** 后端 schema 暂时缺失时用于维持富编辑器可用的本地子项 schema */
+  fallbackNestedSchema?: ConfigSchema
   /** 添加按钮位置 */
   addButtonPlacement?: 'top' | 'bottom' | 'none'
   /** 根据同级配置决定是否默认折叠 */
@@ -202,6 +204,7 @@ export function createListItemEditorHook(
     parentValues,
     value,
   }) => {
+    const effectiveNestedSchema = nestedSchema ?? options.fallbackNestedSchema
     const items = useMemo<Record<string, unknown>[]>(() => {
       if (!Array.isArray(value)) return []
       return value.map((item) =>
@@ -219,16 +222,16 @@ export function createListItemEditorHook(
     )
 
     const handleAdd = useCallback(() => {
-      const next = [...items, buildDefaultItem(nestedSchema)]
+      const next = [...items, buildDefaultItem(effectiveNestedSchema)]
       emitItems(next, { addedIndex: next.length - 1 })
-    }, [emitItems, items, nestedSchema])
+    }, [effectiveNestedSchema, emitItems, items])
 
     const handleAddItem = useCallback(
       (item: Record<string, unknown> = {}) => {
-        const next = [...items, { ...buildDefaultItem(nestedSchema), ...item }]
+        const next = [...items, { ...buildDefaultItem(effectiveNestedSchema), ...item }]
         emitItems(next, { addedIndex: next.length - 1 })
       },
-      [emitItems, items, nestedSchema],
+      [effectiveNestedSchema, emitItems, items],
     )
 
     const handleRemove = useCallback(
@@ -253,14 +256,14 @@ export function createListItemEditorHook(
     )
 
     const renderItemEditor = (item: Record<string, unknown>, index: number) => {
-      if (!nestedSchema) {
+      if (!effectiveNestedSchema) {
         return null
       }
 
       if (!options.fieldRows?.length) {
         return (
           <DynamicConfigForm
-            schema={nestedSchema}
+            schema={effectiveNestedSchema}
             values={item}
             onChange={(field, fieldValue) =>
               handleItemFieldChange(index, field, fieldValue)
@@ -276,14 +279,14 @@ export function createListItemEditorHook(
         ...(options.fieldSchemaOverrides?.[field.name] ?? {}),
       })
       const fieldMap = new Map(
-        nestedSchema.fields.map((field) => [field.name, applyFieldOverride(field)]),
+        effectiveNestedSchema.fields.map((field) => [field.name, applyFieldOverride(field)]),
       )
       const rowFieldNames = new Set(options.fieldRows.flat())
-      const remainingFields = nestedSchema.fields
+      const remainingFields = effectiveNestedSchema.fields
         .filter((field) => !rowFieldNames.has(field.name))
         .map(applyFieldOverride)
       const buildRowSchema = (fields: FieldSchema[]): ConfigSchema => ({
-        ...nestedSchema,
+        ...effectiveNestedSchema,
         fields,
         nested: undefined,
       })
@@ -365,7 +368,7 @@ export function createListItemEditorHook(
       </Button>
     )
 
-    if (!nestedSchema) {
+    if (!effectiveNestedSchema) {
       return (
         <Card>
           <CardHeader>
@@ -398,7 +401,7 @@ export function createListItemEditorHook(
                     <TooltipContent
                       side="right"
                       align="center"
-                      className="max-w-80 whitespace-pre-line bg-background text-foreground border shadow-lg"
+                      className="max-w-80 whitespace-pre-line bg-popover text-popover-foreground"
                     >
                       {options.infoText}
                     </TooltipContent>

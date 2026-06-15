@@ -5,7 +5,7 @@ import { PluginMarketplacePage } from './PluginMarketplacePage'
 export function PluginMarketplaceEmbedPage() {
   return (
     <EmbedPageShell shellId="embed-plugin-marketplace" title="插件市场 - MaiBot Dashboard">
-      <PluginMarketplacePage />
+      <PluginMarketplacePage embedded />
     </EmbedPageShell>
   )
 }

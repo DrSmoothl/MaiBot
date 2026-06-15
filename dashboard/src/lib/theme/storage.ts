@@ -13,6 +13,10 @@ import type {
   BackgroundConfigMap,
   DashboardStyle,
   DashboardStyleConfig,
+  StyleBackgroundConfigMap,
+  StyleCustomCSS,
+  StyleTokenOverrides,
+  ThemeTokens,
   UserThemeConfig,
 } from './tokens'
 
@@ -25,8 +29,11 @@ export const THEME_STORAGE_KEYS = {
   PRESET: 'maibot-theme-preset',
   ACCENT: 'maibot-theme-accent',
   OVERRIDES: 'maibot-theme-overrides',
+  STYLE_OVERRIDES: 'maibot-theme-style-overrides',
   CUSTOM_CSS: 'maibot-theme-custom-css',
+  STYLE_CUSTOM_CSS: 'maibot-theme-style-custom-css',
   BACKGROUND_CONFIG: 'maibot-theme-background',
+  STYLE_BACKGROUND_CONFIG: 'maibot-theme-style-background',
   DASHBOARD_STYLE: 'maibot-theme-dashboard-style',
   STYLE_CONFIG: 'maibot-theme-style-config',
 } as const
@@ -38,14 +45,112 @@ const DEFAULT_THEME_CONFIG: UserThemeConfig = {
   selectedPreset: 'light',
   accentColor: DEFAULT_ACCENT_COLOR_HSL,
   tokenOverrides: {},
+  styleTokenOverrides: {},
   customCSS: '',
+  styleCustomCSS: {},
   backgroundConfig: {} as BackgroundConfigMap,
+  styleBackgroundConfig: {},
   dashboardStyle: DEFAULT_DASHBOARD_STYLE,
   styleConfig: DEFAULT_DASHBOARD_STYLE_CONFIG,
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+const REMOVED_LAYOUT_TOKEN_KEYS = ['space-unit', 'max-content-width']
+
+const LEGACY_GLOBAL_LAYOUT_TOKEN_KEYS = [
+  'space-unit',
+  'max-content-width',
+  'sidebar-collapsed-width',
+  'sidebar-logo-height',
+  'sidebar-logo-padding-x',
+  'sidebar-nav-padding',
+  'sidebar-nav-padding-collapsed',
+  'sidebar-section-gap',
+  'sidebar-section-title-height',
+  'sidebar-section-title-margin-bottom',
+  'sidebar-section-title-margin-bottom-collapsed',
+  'sidebar-nav-item-gap',
+  'sidebar-nav-item-height',
+  'sidebar-nav-item-padding-x',
+  'sidebar-nav-item-collapsed-width',
+]
+
+function stripLayoutTokens(
+  tokenOverrides: unknown,
+  layoutTokenKeys: string[]
+): UserThemeConfig['tokenOverrides'] {
+  if (!isRecord(tokenOverrides)) {
+    return {}
+  }
+
+  const nextOverrides = { ...(tokenOverrides as UserThemeConfig['tokenOverrides']) }
+  if (!nextOverrides.layout) {
+    return nextOverrides
+  }
+
+  const nextLayoutOverrides = { ...nextOverrides.layout }
+  for (const key of layoutTokenKeys) {
+    delete nextLayoutOverrides[key as keyof typeof nextLayoutOverrides]
+  }
+
+  nextOverrides.layout = nextLayoutOverrides
+  return nextOverrides
+}
+
+function stripLegacyGlobalLayoutTokens(tokenOverrides: unknown): UserThemeConfig['tokenOverrides'] {
+  return stripLayoutTokens(tokenOverrides, LEGACY_GLOBAL_LAYOUT_TOKEN_KEYS)
+}
+
+function stripRemovedLayoutTokens(tokenOverrides: unknown): UserThemeConfig['tokenOverrides'] {
+  return stripLayoutTokens(tokenOverrides, REMOVED_LAYOUT_TOKEN_KEYS)
+}
+
+function normalizeStyleTokenOverrides(value: unknown): StyleTokenOverrides {
+  if (!isRecord(value)) {
+    return {}
+  }
+
+  const nextOverrides: StyleTokenOverrides = {}
+  for (const style of ['modern', 'future-retro'] as const) {
+    if (isRecord(value[style])) {
+      nextOverrides[style] = stripRemovedLayoutTokens(value[style])
+    }
+  }
+
+  return nextOverrides
+}
+
+function normalizeStyleCustomCSS(value: unknown): StyleCustomCSS {
+  if (!isRecord(value)) {
+    return {}
+  }
+
+  const nextCustomCSS: StyleCustomCSS = {}
+  for (const style of ['modern', 'future-retro'] as const) {
+    if (typeof value[style] === 'string') {
+      nextCustomCSS[style] = value[style]
+    }
+  }
+
+  return nextCustomCSS
+}
+
+function normalizeStyleBackgroundConfig(value: unknown): StyleBackgroundConfigMap {
+  if (!isRecord(value)) {
+    return {}
+  }
+
+  const nextBackgroundConfig: StyleBackgroundConfigMap = {}
+  for (const style of ['modern', 'future-retro'] as const) {
+    if (isRecord(value[style])) {
+      nextBackgroundConfig[style] = value[style] as BackgroundConfigMap
+    }
+  }
+
+  return nextBackgroundConfig
+}
 
 function normalizeDashboardStyle(value: unknown): DashboardStyle {
   if (value === 'modern' || value === 'future-retro') {
@@ -83,22 +188,71 @@ export function loadThemeConfig(): UserThemeConfig {
   const preset = localStorage.getItem(THEME_STORAGE_KEYS.PRESET)
   const accent = localStorage.getItem(THEME_STORAGE_KEYS.ACCENT)
   const overridesStr = localStorage.getItem(THEME_STORAGE_KEYS.OVERRIDES)
+  const styleOverridesStr = localStorage.getItem(THEME_STORAGE_KEYS.STYLE_OVERRIDES)
   const customCSS = localStorage.getItem(THEME_STORAGE_KEYS.CUSTOM_CSS)
+  const styleCustomCSSStr = localStorage.getItem(THEME_STORAGE_KEYS.STYLE_CUSTOM_CSS)
   const dashboardStyle = localStorage.getItem(THEME_STORAGE_KEYS.DASHBOARD_STYLE)
+  const backgroundConfigStr = localStorage.getItem(THEME_STORAGE_KEYS.BACKGROUND_CONFIG)
+  const styleBackgroundConfigStr = localStorage.getItem(THEME_STORAGE_KEYS.STYLE_BACKGROUND_CONFIG)
+  const normalizedDashboardStyle = normalizeDashboardStyle(dashboardStyle)
 
   // 解析 tokenOverrides JSON
-  let tokenOverrides = {}
+  let tokenOverrides: Partial<ThemeTokens> = {}
   if (overridesStr) {
     try {
-      tokenOverrides = JSON.parse(overridesStr)
+      const parsedOverrides = JSON.parse(overridesStr)
+      tokenOverrides = stripLegacyGlobalLayoutTokens(parsedOverrides)
+      if (JSON.stringify(parsedOverrides) !== JSON.stringify(tokenOverrides)) {
+        localStorage.setItem(THEME_STORAGE_KEYS.OVERRIDES, JSON.stringify(tokenOverrides))
+      }
     } catch {
       // JSON 解析失败，使用空对象
       tokenOverrides = {}
     }
   }
 
-  // 加载 backgroundConfig
-  const backgroundConfigStr = localStorage.getItem(THEME_STORAGE_KEYS.BACKGROUND_CONFIG)
+  let styleTokenOverrides: StyleTokenOverrides = {}
+  if (styleOverridesStr) {
+    try {
+      styleTokenOverrides = normalizeStyleTokenOverrides(JSON.parse(styleOverridesStr))
+    } catch {
+      styleTokenOverrides = {}
+    }
+  }
+
+  if (Object.keys(tokenOverrides).length > 0) {
+    styleTokenOverrides = {
+      ...styleTokenOverrides,
+      [normalizedDashboardStyle]: {
+        ...styleTokenOverrides[normalizedDashboardStyle],
+        ...tokenOverrides,
+      },
+    }
+    tokenOverrides = {}
+    localStorage.setItem(THEME_STORAGE_KEYS.OVERRIDES, JSON.stringify(tokenOverrides))
+    localStorage.setItem(THEME_STORAGE_KEYS.STYLE_OVERRIDES, JSON.stringify(styleTokenOverrides))
+  }
+
+  let styleCustomCSS: StyleCustomCSS = {}
+  if (styleCustomCSSStr) {
+    try {
+      styleCustomCSS = normalizeStyleCustomCSS(JSON.parse(styleCustomCSSStr))
+    } catch {
+      styleCustomCSS = {}
+    }
+  }
+
+  let legacyCustomCSS = customCSS || ''
+  if (legacyCustomCSS.trim().length > 0) {
+    styleCustomCSS = {
+      ...styleCustomCSS,
+      [normalizedDashboardStyle]: styleCustomCSS[normalizedDashboardStyle] ?? legacyCustomCSS,
+    }
+    legacyCustomCSS = ''
+    localStorage.setItem(THEME_STORAGE_KEYS.CUSTOM_CSS, legacyCustomCSS)
+    localStorage.setItem(THEME_STORAGE_KEYS.STYLE_CUSTOM_CSS, JSON.stringify(styleCustomCSS))
+  }
+
   let backgroundConfig: BackgroundConfigMap = {}
   if (backgroundConfigStr) {
     try {
@@ -106,6 +260,28 @@ export function loadThemeConfig(): UserThemeConfig {
     } catch {
       backgroundConfig = {}
     }
+  }
+
+  let styleBackgroundConfig: StyleBackgroundConfigMap = {}
+  if (styleBackgroundConfigStr) {
+    try {
+      styleBackgroundConfig = normalizeStyleBackgroundConfig(JSON.parse(styleBackgroundConfigStr))
+    } catch {
+      styleBackgroundConfig = {}
+    }
+  }
+
+  if (Object.keys(backgroundConfig).length > 0) {
+    styleBackgroundConfig = {
+      ...styleBackgroundConfig,
+      [normalizedDashboardStyle]: styleBackgroundConfig[normalizedDashboardStyle] ?? backgroundConfig,
+    }
+    backgroundConfig = {}
+    localStorage.setItem(THEME_STORAGE_KEYS.BACKGROUND_CONFIG, JSON.stringify(backgroundConfig))
+    localStorage.setItem(
+      THEME_STORAGE_KEYS.STYLE_BACKGROUND_CONFIG,
+      JSON.stringify(styleBackgroundConfig)
+    )
   }
 
   const styleConfigStr = localStorage.getItem(THEME_STORAGE_KEYS.STYLE_CONFIG)
@@ -122,9 +298,12 @@ export function loadThemeConfig(): UserThemeConfig {
     selectedPreset: preset || DEFAULT_THEME_CONFIG.selectedPreset,
     accentColor: normalizeAccentColor(accent),
     tokenOverrides,
-    customCSS: customCSS || DEFAULT_THEME_CONFIG.customCSS,
+    styleTokenOverrides,
+    customCSS: legacyCustomCSS || DEFAULT_THEME_CONFIG.customCSS,
+    styleCustomCSS,
     backgroundConfig,
-    dashboardStyle: normalizeDashboardStyle(dashboardStyle),
+    styleBackgroundConfig,
+    dashboardStyle: normalizedDashboardStyle,
     styleConfig,
   }
 }
@@ -138,7 +317,15 @@ export function saveThemeConfig(config: UserThemeConfig): void {
   localStorage.setItem(THEME_STORAGE_KEYS.PRESET, config.selectedPreset)
   localStorage.setItem(THEME_STORAGE_KEYS.ACCENT, normalizeAccentColor(config.accentColor))
   localStorage.setItem(THEME_STORAGE_KEYS.OVERRIDES, JSON.stringify(config.tokenOverrides))
+  localStorage.setItem(
+    THEME_STORAGE_KEYS.STYLE_OVERRIDES,
+    JSON.stringify(normalizeStyleTokenOverrides(config.styleTokenOverrides))
+  )
   localStorage.setItem(THEME_STORAGE_KEYS.CUSTOM_CSS, config.customCSS)
+  localStorage.setItem(
+    THEME_STORAGE_KEYS.STYLE_CUSTOM_CSS,
+    JSON.stringify(normalizeStyleCustomCSS(config.styleCustomCSS))
+  )
   localStorage.setItem(
     THEME_STORAGE_KEYS.DASHBOARD_STYLE,
     normalizeDashboardStyle(config.dashboardStyle)
@@ -155,6 +342,10 @@ export function saveThemeConfig(config: UserThemeConfig): void {
   } else {
     localStorage.removeItem(THEME_STORAGE_KEYS.BACKGROUND_CONFIG)
   }
+  localStorage.setItem(
+    THEME_STORAGE_KEYS.STYLE_BACKGROUND_CONFIG,
+    JSON.stringify(normalizeStyleBackgroundConfig(config.styleBackgroundConfig))
+  )
 }
 
 /**
@@ -223,8 +414,20 @@ export function importThemeJSON(json: string): { success: boolean; errors: strin
   if (typeof configObj.customCSS !== 'string') {
     errors.push('customCSS must be a string')
   }
+  if (
+    configObj.styleCustomCSS !== undefined &&
+    (typeof configObj.styleCustomCSS !== 'object' || configObj.styleCustomCSS === null)
+  ) {
+    errors.push('styleCustomCSS must be an object')
+  }
   if (configObj.tokenOverrides !== undefined && typeof configObj.tokenOverrides !== 'object') {
     errors.push('tokenOverrides must be an object')
+  }
+  if (
+    configObj.styleTokenOverrides !== undefined &&
+    (typeof configObj.styleTokenOverrides !== 'object' || configObj.styleTokenOverrides === null)
+  ) {
+    errors.push('styleTokenOverrides must be an object')
   }
   if (configObj.dashboardStyle !== undefined && typeof configObj.dashboardStyle !== 'string') {
     errors.push('dashboardStyle must be a string')
@@ -235,6 +438,13 @@ export function importThemeJSON(json: string): { success: boolean; errors: strin
   ) {
     errors.push('styleConfig must be an object')
   }
+  if (
+    configObj.styleBackgroundConfig !== undefined &&
+    (typeof configObj.styleBackgroundConfig !== 'object' ||
+      configObj.styleBackgroundConfig === null)
+  ) {
+    errors.push('styleBackgroundConfig must be an object')
+  }
 
   if (errors.length > 0) {
     return { success: false, errors }
@@ -244,9 +454,24 @@ export function importThemeJSON(json: string): { success: boolean; errors: strin
   const validConfig: UserThemeConfig = {
     selectedPreset: configObj.selectedPreset as string,
     accentColor: configObj.accentColor as string,
-    tokenOverrides: (configObj.tokenOverrides as Partial<any>) || {},
-    customCSS: configObj.customCSS as string,
-    backgroundConfig: (configObj.backgroundConfig as BackgroundConfigMap) ?? {},
+    tokenOverrides: {},
+    styleTokenOverrides: normalizeStyleTokenOverrides(
+      configObj.styleTokenOverrides ?? {
+        [normalizeDashboardStyle(configObj.dashboardStyle)]: configObj.tokenOverrides,
+      }
+    ),
+    customCSS: '',
+    styleCustomCSS: normalizeStyleCustomCSS(
+      configObj.styleCustomCSS ?? {
+        [normalizeDashboardStyle(configObj.dashboardStyle)]: configObj.customCSS,
+      }
+    ),
+    backgroundConfig: {},
+    styleBackgroundConfig: normalizeStyleBackgroundConfig(
+      configObj.styleBackgroundConfig ?? {
+        [normalizeDashboardStyle(configObj.dashboardStyle)]: configObj.backgroundConfig,
+      }
+    ),
     dashboardStyle: normalizeDashboardStyle(configObj.dashboardStyle),
     styleConfig: normalizeStyleConfig(configObj.styleConfig),
   }

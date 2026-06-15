@@ -727,101 +727,103 @@ function IndexPageContent() {
               </TabsList>
             </Tabs>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-              <div className="rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                  <span>{t('home.stats.totalRequests')}</span>
-                  <Activity className="h-4 w-4" />
-                </div>
-                <div className="mt-3 text-2xl font-bold">
-                  {formatNumber(summary.total_requests).display}
-                  {formatNumber(summary.total_requests).needsExact && (
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">
-                      ({formatNumber(summary.total_requests).exact})
-                    </span>
-                  )}
+          <CardContent className="space-y-2">
+            <div className="grid gap-y-1 lg:grid-cols-4 lg:divide-x">
+              <div className="min-w-0 px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.totalRequests')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatNumber(summary.total_requests).display}
+                    {formatNumber(summary.total_requests).needsExact && (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        ({formatNumber(summary.total_requests).exact})
+                      </span>
+                    )}
+                  </span>
                 </div>
               </div>
 
-              <div className="rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                  <span>{t('home.stats.totalCost')}</span>
-                  <DollarSign className="h-4 w-4" />
+              <div className="min-w-0 px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <DollarSign className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.totalCost')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatCurrency(summary.total_cost).display}
+                    {formatCurrency(summary.total_cost).needsExact && (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        ({formatCurrency(summary.total_cost).exact})
+                      </span>
+                    )}
+                  </span>
                 </div>
-                <div className="mt-3 text-2xl font-bold">
-                  {formatCurrency(summary.total_cost).display}
-                  {formatCurrency(summary.total_cost).needsExact && (
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">
-                      ({formatCurrency(summary.total_cost).exact})
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">
                   {summary.cost_per_hour > 0
                     ? t('home.stats.perHour', { value: `¥${summary.cost_per_hour.toFixed(2)}` })
                     : t('home.stats.noData')}
                 </p>
               </div>
 
-              <div className="rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                  <span>{t('home.stats.tokenUsage')}</span>
-                  <Database className="h-4 w-4" />
+              <div className="min-w-0 px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.tokenUsage')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatNumber(summary.total_tokens).display}
+                    {formatNumber(summary.total_tokens).needsExact && (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        ({formatNumber(summary.total_tokens).exact})
+                      </span>
+                    )}
+                  </span>
                 </div>
-                <div className="mt-3 text-2xl font-bold">
-                  {formatNumber(summary.total_tokens).display}
-                  {formatNumber(summary.total_tokens).needsExact && (
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">
-                      ({formatNumber(summary.total_tokens).exact})
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">
                   {summary.tokens_per_hour > 0
                     ? t('home.stats.perHour', { value: formatNumber(summary.tokens_per_hour).display })
                     : t('home.stats.noData')}
                 </p>
               </div>
 
-              <div className="rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                  <span>{t('home.stats.avgResponse')}</span>
-                  <Zap className="h-4 w-4" />
+              <div className="min-w-0 px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <Zap className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.avgResponse')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {summary.avg_response_time.toFixed(2)}s
+                  </span>
                 </div>
-                <div className="mt-3 text-2xl font-bold">{summary.avg_response_time.toFixed(2)}s</div>
-                <p className="mt-1 text-xs text-muted-foreground">{t('home.stats.avgResponseDesc')}</p>
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">{t('home.stats.avgResponseDesc')}</p>
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                  <span>{t('home.stats.onlineTime')}</span>
-                  <Clock className="h-4 w-4" />
-                </div>
-                <div className="mt-3 text-xl font-bold">
-                  {formatTime(summary.online_time)}
-                  <span className="ml-1 text-xs font-normal text-muted-foreground">
-                    ({summary.online_time.toLocaleString()}{t('home.stats.seconds')})
+            <div className="grid gap-y-1 lg:grid-cols-3 lg:divide-x">
+              <div className="min-w-0 px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.onlineTime')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatTime(summary.online_time)}
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({summary.online_time.toLocaleString()}{t('home.stats.seconds')})
+                    </span>
                   </span>
                 </div>
               </div>
 
-              <div className="rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                  <span>{t('home.stats.messageProcessing')}</span>
-                  <MessageSquare className="h-4 w-4" />
+              <div className="min-w-0 px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.messageProcessing')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatNumber(summary.total_messages).display}
+                    {formatNumber(summary.total_messages).needsExact && (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        ({formatNumber(summary.total_messages).exact})
+                      </span>
+                    )}
+                  </span>
                 </div>
-                <div className="mt-3 text-xl font-bold">
-                  {formatNumber(summary.total_messages).display}
-                  {formatNumber(summary.total_messages).needsExact && (
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">
-                      ({formatNumber(summary.total_messages).exact})
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">
                   {t('home.stats.replied', { num: formatNumber(summary.total_replies).display })}
                   {formatNumber(summary.total_replies).needsExact && (
                     <span>({formatNumber(summary.total_replies).exact})</span>
@@ -829,17 +831,17 @@ function IndexPageContent() {
                 </p>
               </div>
 
-              <div className="rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                  <span>{t('home.stats.costEfficiency')}</span>
-                  <TrendingUp className="h-4 w-4" />
+              <div className="min-w-0 px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <TrendingUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.costEfficiency')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {summary.total_messages > 0
+                      ? `¥${((summary.total_cost / summary.total_messages) * 100).toFixed(2)}`
+                      : '¥0.00'}
+                  </span>
                 </div>
-                <div className="mt-3 text-xl font-bold">
-                  {summary.total_messages > 0
-                    ? `¥${((summary.total_cost / summary.total_messages) * 100).toFixed(2)}`
-                    : '¥0.00'}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">{t('home.stats.per100Messages')}</p>
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">{t('home.stats.per100Messages')}</p>
               </div>
             </div>
           </CardContent>
@@ -884,22 +886,20 @@ function IndexPageContent() {
 
                     return (
                       <div key={item.key} className="space-y-1.5">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span className="truncate text-sm font-medium">{item.label}</span>
-                          </div>
-                          <span className="shrink-0 text-sm font-semibold">{formatStorageBytes(item.size)}</span>
+                        <div className="flex min-w-0 items-center gap-2 text-xs">
+                          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="shrink-0 font-bold">{item.label}</span>
+                          <span className="shrink-0 font-semibold text-primary">{formatStorageBytes(item.size)}</span>
+                          <span className="min-w-0 truncate text-muted-foreground">{item.detail}</span>
+                          <span className="ml-auto shrink-0 text-muted-foreground">
+                            {percent.toFixed(percent >= 10 ? 0 : 1)}%
+                          </span>
                         </div>
                         <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                           <div
                             className="h-full rounded-full bg-primary transition-all"
                             style={{ width: `${visiblePercent}%` }}
                           />
-                        </div>
-                        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                          <span className="truncate">{item.detail}</span>
-                          <span className="shrink-0">{percent.toFixed(percent >= 10 ? 0 : 1)}%</span>
                         </div>
                       </div>
                     )

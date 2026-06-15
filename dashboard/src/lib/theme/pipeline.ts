@@ -75,15 +75,18 @@ const buildTokens = (config: UserThemeConfig, isDark: boolean): ThemeTokens => {
     }
   }
 
-  if (config.tokenOverrides) {
-    mergedTokens = mergeTokens(mergedTokens, config.tokenOverrides)
-  }
-
   if ((config.dashboardStyle ?? DEFAULT_DASHBOARD_STYLE) === 'future-retro') {
     mergedTokens = mergeTokens(
       mergedTokens,
       isDark ? futureRetroDarkTokens : futureRetroLightTokens
     )
+  }
+
+  const dashboardStyle = config.dashboardStyle ?? DEFAULT_DASHBOARD_STYLE
+  const styleTokenOverrides = config.styleTokenOverrides?.[dashboardStyle]
+
+  if (styleTokenOverrides) {
+    mergedTokens = mergeTokens(mergedTokens, styleTokenOverrides)
   }
 
   return mergedTokens
@@ -192,9 +195,13 @@ export function removeAllComponentCSS(): void {
 export function applyThemePipeline(config: UserThemeConfig, isDark: boolean): void {
   const root = document.documentElement
   const tokens = buildTokens(config, isDark)
+  const dashboardStyle = config.dashboardStyle ?? DEFAULT_DASHBOARD_STYLE
+  const customCSS = config.styleCustomCSS?.[dashboardStyle] ?? config.customCSS
+  const backgroundConfig = config.styleBackgroundConfig?.[dashboardStyle] ?? config.backgroundConfig
+
   injectTokensAsCSS(tokens, root)
-  if (config.customCSS) {
-    const sanitized = sanitizeCSS(config.customCSS)
+  if (customCSS) {
+    const sanitized = sanitizeCSS(customCSS)
     if (sanitized.css.trim().length > 0) {
       injectCustomCSS(sanitized.css)
     } else {
@@ -205,8 +212,8 @@ export function applyThemePipeline(config: UserThemeConfig, isDark: boolean): vo
   }
 
   // 应用组件级 CSS(注入顺序在全局 CSS 之后)
-  if (config.backgroundConfig) {
-    const { page, sidebar, header, card, dialog } = config.backgroundConfig
+  if (backgroundConfig) {
+    const { page, sidebar, header, card, dialog } = backgroundConfig
     ;[
       ['page', page],
       ['sidebar', sidebar],

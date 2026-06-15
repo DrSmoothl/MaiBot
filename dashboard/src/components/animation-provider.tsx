@@ -5,26 +5,17 @@ import { AnimationContext } from '@/lib/animation-context'
 type AnimationProviderProps = {
   children: ReactNode
   defaultEnabled?: boolean
-  defaultWavesEnabled?: boolean
   storageKey?: string
-  wavesStorageKey?: string
 }
 
 export function AnimationProvider({
   children,
   defaultEnabled = true,
-  defaultWavesEnabled = true,
   storageKey = 'enable-animations',
-  wavesStorageKey = 'enable-waves-background',
 }: AnimationProviderProps) {
   const [enableAnimations, setEnableAnimations] = useState<boolean>(() => {
     const stored = localStorage.getItem(storageKey)
     return stored !== null ? stored === 'true' : defaultEnabled
-  })
-
-  const [enableWavesBackground, setEnableWavesBackground] = useState<boolean>(() => {
-    const stored = localStorage.getItem(wavesStorageKey)
-    return stored !== null ? stored === 'true' : defaultWavesEnabled
   })
 
   useEffect(() => {
@@ -39,15 +30,9 @@ export function AnimationProvider({
     localStorage.setItem(storageKey, String(enableAnimations))
   }, [enableAnimations, storageKey])
 
-  useEffect(() => {
-    localStorage.setItem(wavesStorageKey, String(enableWavesBackground))
-  }, [enableWavesBackground, wavesStorageKey])
-
   const value = {
     enableAnimations,
     setEnableAnimations,
-    enableWavesBackground,
-    setEnableWavesBackground,
   }
 
   return <AnimationContext value={value}>{children}</AnimationContext>

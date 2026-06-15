@@ -13,7 +13,6 @@ export const STORAGE_KEYS = {
   /** @deprecated 使用新的主题系统 — 见 @/lib/theme/storage.ts 的 THEME_STORAGE_KEYS.ACCENT */
   ACCENT_COLOR: 'accent-color',
   ENABLE_ANIMATIONS: 'maibot-animations',
-  ENABLE_WAVES_BACKGROUND: 'maibot-waves-background',
   ENABLE_AVATAR_FETCH: 'maibot-enable-avatar-fetch',
   
   // 性能与存储设置
@@ -39,7 +38,6 @@ export const DEFAULT_SETTINGS = {
   theme: 'system' as 'light' | 'dark' | 'system',
   accentColor: DEFAULT_ACCENT_COLOR_HSL,
   enableAnimations: true,
-  enableWavesBackground: true,
   enableAvatarFetch: true,
   
   // 性能与存储
@@ -109,7 +107,6 @@ export function getAllSettings(): Settings {
     theme: getSetting('theme'),
     accentColor: getSetting('accentColor'),
     enableAnimations: getSetting('enableAnimations'),
-    enableWavesBackground: getSetting('enableWavesBackground'),
     enableAvatarFetch: getSetting('enableAvatarFetch'),
     logCacheSize: getSetting('logCacheSize'),
     logAutoScroll: getSetting('logAutoScroll'),
@@ -281,7 +278,6 @@ function getStorageKey(settingKey: keyof Settings): string {
     theme: STORAGE_KEYS.THEME,
     accentColor: STORAGE_KEYS.ACCENT_COLOR,
     enableAnimations: STORAGE_KEYS.ENABLE_ANIMATIONS,
-    enableWavesBackground: STORAGE_KEYS.ENABLE_WAVES_BACKGROUND,
     enableAvatarFetch: STORAGE_KEYS.ENABLE_AVATAR_FETCH,
     logCacheSize: STORAGE_KEYS.LOG_CACHE_SIZE,
     logAutoScroll: STORAGE_KEYS.LOG_AUTO_SCROLL,

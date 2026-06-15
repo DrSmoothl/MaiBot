@@ -1,7 +1,7 @@
 import { useTheme } from '@/components/use-theme'
 
 import type { BackgroundConfig } from '@/lib/theme/tokens'
-import { defaultBackgroundConfig } from '@/lib/theme/tokens'
+import { DEFAULT_DASHBOARD_STYLE, defaultBackgroundConfig } from '@/lib/theme/tokens'
 
 type BackgroundLayerId = 'page' | 'sidebar' | 'header' | 'card' | 'dialog'
 
@@ -19,7 +19,9 @@ type ResolvedBackgroundState = {
  */
 export function useBackground(layerId: BackgroundLayerId): ResolvedBackgroundState {
   const { themeConfig } = useTheme()
-  const bgMap = themeConfig.backgroundConfig ?? {}
+  const dashboardStyle = themeConfig.dashboardStyle ?? DEFAULT_DASHBOARD_STYLE
+  const bgMap =
+    themeConfig.styleBackgroundConfig?.[dashboardStyle] ?? themeConfig.backgroundConfig ?? {}
 
   const config = bgMap[layerId] ?? defaultBackgroundConfig
 

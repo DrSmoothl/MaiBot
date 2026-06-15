@@ -41,8 +41,13 @@ interface MirrorConfig {
 
 const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
 
-export function PluginMirrorsPage() {
+interface PluginMirrorsPageProps {
+  embedded?: boolean
+}
+
+export function PluginMirrorsPage({ embedded = false }: PluginMirrorsPageProps) {
   const navigate = useNavigate()
+  const pluginsRoute: '/plugins' | '/plugins/embed' = embedded ? '/plugins/embed' : '/plugins'
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const [editingMirror, setEditingMirror] = useState<MirrorConfig | null>(null)
@@ -234,7 +239,7 @@ export function PluginMirrorsPage() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => navigate({ to: '/plugins' })}
+              onClick={() => navigate({ to: pluginsRoute })}
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>

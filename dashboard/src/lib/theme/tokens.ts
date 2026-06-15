@@ -87,7 +87,6 @@ export type VisualTokens = {
 // ============================================================================
 
 export type LayoutTokens = {
-  'space-unit': string
   'space-xs': string
   'space-sm': string
   'space-md': string
@@ -95,8 +94,20 @@ export type LayoutTokens = {
   'space-xl': string
   'space-2xl': string
   'sidebar-width': string
+  'sidebar-logo-height': string
+  'sidebar-logo-padding-x': string
+  'sidebar-nav-padding': string
+  'sidebar-nav-padding-collapsed': string
+  'sidebar-section-gap': string
+  'sidebar-section-title-height': string
+  'sidebar-section-title-margin-bottom': string
+  'sidebar-section-title-margin-bottom-collapsed': string
+  'sidebar-nav-item-gap': string
+  'sidebar-collapsed-width': string
+  'sidebar-nav-item-height': string
+  'sidebar-nav-item-padding-x': string
+  'sidebar-nav-item-collapsed-width': string
   'header-height': string
-  'max-content-width': string
 }
 
 // ============================================================================
@@ -142,6 +153,10 @@ export type ThemePreset = {
 
 export type DashboardStyle = 'modern' | 'future-retro'
 
+export type StyleTokenOverrides = Partial<Record<DashboardStyle, Partial<ThemeTokens>>>
+export type StyleCustomCSS = Partial<Record<DashboardStyle, string>>
+export type StyleBackgroundConfigMap = Partial<Record<DashboardStyle, BackgroundConfigMap>>
+
 export type FutureRetroStyleConfig = {
   paperTexture: boolean
   strongBorders: boolean
@@ -165,9 +180,15 @@ export const DEFAULT_DASHBOARD_STYLE_CONFIG: DashboardStyleConfig = {
 export type UserThemeConfig = {
   selectedPreset: string
   accentColor: string
+  /** @deprecated 旧版全局覆盖，仅用于迁移到 styleTokenOverrides。 */
   tokenOverrides: Partial<ThemeTokens>
+  styleTokenOverrides: StyleTokenOverrides
+  /** @deprecated 旧版全局自定义 CSS，仅用于迁移到 styleCustomCSS。 */
   customCSS: string
+  styleCustomCSS: StyleCustomCSS
+  /** @deprecated 旧版全局背景配置，仅用于迁移到 styleBackgroundConfig。 */
   backgroundConfig?: BackgroundConfigMap
+  styleBackgroundConfig?: StyleBackgroundConfigMap
   dashboardStyle: DashboardStyle
   styleConfig: DashboardStyleConfig
 }
@@ -243,7 +264,6 @@ export const defaultLightTokens: ThemeTokens = {
     'opacity-overlay': 0.75,
   },
   layout: {
-    'space-unit': '0.25rem',
     'space-xs': '0.5rem',
     'space-sm': '0.75rem',
     'space-md': '1rem',
@@ -251,8 +271,20 @@ export const defaultLightTokens: ThemeTokens = {
     'space-xl': '2rem',
     'space-2xl': '3rem',
     'sidebar-width': '13rem',
+    'sidebar-logo-height': '5rem',
+    'sidebar-logo-padding-x': '1rem',
+    'sidebar-nav-padding': '1rem',
+    'sidebar-nav-padding-collapsed': '0.5rem',
+    'sidebar-section-gap': '0.75rem',
+    'sidebar-section-title-height': '1.25rem',
+    'sidebar-section-title-margin-bottom': '0.5rem',
+    'sidebar-section-title-margin-bottom-collapsed': '0.25rem',
+    'sidebar-nav-item-gap': '0.25rem',
+    'sidebar-collapsed-width': '4rem',
+    'sidebar-nav-item-height': '2.5rem',
+    'sidebar-nav-item-padding-x': '0.75rem',
+    'sidebar-nav-item-collapsed-width': '3rem',
     'header-height': '3.5rem',
-    'max-content-width': '1280px',
   },
   animation: {
     'anim-duration-fast': '150ms',
@@ -339,7 +371,6 @@ export const defaultDarkTokens: ThemeTokens = {
     'opacity-overlay': 0.75,
   },
   layout: {
-    'space-unit': '0.25rem',
     'space-xs': '0.5rem',
     'space-sm': '0.75rem',
     'space-md': '1rem',
@@ -347,8 +378,20 @@ export const defaultDarkTokens: ThemeTokens = {
     'space-xl': '2rem',
     'space-2xl': '3rem',
     'sidebar-width': '13rem',
+    'sidebar-logo-height': '5rem',
+    'sidebar-logo-padding-x': '1rem',
+    'sidebar-nav-padding': '1rem',
+    'sidebar-nav-padding-collapsed': '0.5rem',
+    'sidebar-section-gap': '0.75rem',
+    'sidebar-section-title-height': '1.25rem',
+    'sidebar-section-title-margin-bottom': '0.5rem',
+    'sidebar-section-title-margin-bottom-collapsed': '0.25rem',
+    'sidebar-nav-item-gap': '0.25rem',
+    'sidebar-collapsed-width': '4rem',
+    'sidebar-nav-item-height': '2.5rem',
+    'sidebar-nav-item-padding-x': '0.75rem',
+    'sidebar-nav-item-collapsed-width': '3rem',
     'header-height': '3.5rem',
-    'max-content-width': '1280px',
   },
   animation: {
     'anim-duration-fast': '150ms',
@@ -392,6 +435,23 @@ const futureRetroBaseVisual = {
   'shadow-xl': 'none',
 } satisfies Partial<VisualTokens>
 
+const futureRetroBaseLayout = {
+  'sidebar-width': '11rem',
+  'sidebar-logo-height': '5rem',
+  'sidebar-logo-padding-x': '0.75rem',
+  'sidebar-nav-padding': '1rem',
+  'sidebar-nav-padding-collapsed': '0.5rem',
+  'sidebar-section-gap': '0.75rem',
+  'sidebar-section-title-height': '1.25rem',
+  'sidebar-section-title-margin-bottom': '0.5rem',
+  'sidebar-section-title-margin-bottom-collapsed': '0.25rem',
+  'sidebar-nav-item-gap': '0.25rem',
+  'sidebar-collapsed-width': '4rem',
+  'sidebar-nav-item-height': '2.4rem',
+  'sidebar-nav-item-padding-x': '0.75rem',
+  'sidebar-nav-item-collapsed-width': '3rem',
+} satisfies Partial<LayoutTokens>
+
 export const futureRetroLightTokens: Partial<ThemeTokens> = {
   color: {
     ...defaultLightTokens.color,
@@ -426,6 +486,10 @@ export const futureRetroLightTokens: Partial<ThemeTokens> = {
   visual: {
     ...defaultLightTokens.visual,
     ...futureRetroBaseVisual,
+  },
+  layout: {
+    ...defaultLightTokens.layout,
+    ...futureRetroBaseLayout,
   },
 }
 
@@ -463,6 +527,10 @@ export const futureRetroDarkTokens: Partial<ThemeTokens> = {
   visual: {
     ...defaultDarkTokens.visual,
     ...futureRetroBaseVisual,
+  },
+  layout: {
+    ...defaultDarkTokens.layout,
+    ...futureRetroBaseLayout,
   },
 }
 
