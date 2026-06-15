@@ -94,7 +94,7 @@ export function JargonList({
   }
 
   return (
-    <div className={cn('flex min-h-0 flex-col rounded-lg border bg-card', className)}>
+    <div className={cn('flex min-h-0 flex-col border bg-card', className)}>
       {/* 桁面端表格视图 */}
       <div className="hidden min-h-0 flex-1 overflow-auto md:block">
         <Table aria-label="黑话列表">

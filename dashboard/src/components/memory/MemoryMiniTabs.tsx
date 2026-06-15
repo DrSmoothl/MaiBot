@@ -27,9 +27,10 @@ export function MemoryMiniTabs<TValue extends string>({
 }: MemoryMiniTabsProps<TValue>) {
   return (
     <TabsList
+      data-memory-mini-tabs="true"
       className={cn(
         'h-auto w-full flex-wrap justify-start gap-1.5 rounded-full border border-border/60',
-        'bg-gradient-to-r from-muted/40 via-background to-muted/30 p-1.5 shadow-inner',
+        'bg-transparent p-1.5 shadow-none',
         className,
       )}
     >

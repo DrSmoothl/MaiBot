@@ -268,7 +268,7 @@ export function JargonManagementPage() {
           </div>
 
           {/* 搜索和筛选 */}
-          <div className="rounded-lg border bg-card p-3">
+          <div className="border bg-card p-3">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
               <div className="space-y-1">
                 <Label htmlFor="search">搜索</Label>
@@ -347,7 +347,7 @@ export function JargonManagementPage() {
 
           {/* 黑话列表 */}
           <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-19rem)] lg:min-h-[30rem] lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-stretch">
-            <aside className="flex min-h-0 flex-col rounded-lg border bg-card lg:h-full lg:self-stretch lg:overflow-hidden">
+            <aside className="flex min-h-0 flex-col border bg-card lg:h-full lg:self-stretch lg:overflow-hidden">
               <div className="space-y-2 border-b px-3 py-2">
                 <h2 className="text-sm font-medium">范围</h2>
                 <div className="grid grid-cols-3 gap-1 rounded-md bg-muted p-1">
@@ -420,7 +420,7 @@ export function JargonManagementPage() {
 
             <div className="min-h-0 lg:h-full">
               {list.isError ? (
-                <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-2 rounded-lg border bg-card py-8">
+                <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-2 border bg-card py-8">
                   <p className="text-sm text-destructive">{list.error?.message}</p>
                   <Button variant="outline" size="sm" onClick={() => list.refetch()}>
                     重试

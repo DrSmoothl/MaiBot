@@ -292,7 +292,7 @@ export function MemoryMaintenanceManager({ initialTarget = '' }: MemoryMaintenan
             <Badge variant="outline">已加载 {items.length} 条</Badge>
             <Badge variant="secondary">当前命中 {filteredItems.length} 条</Badge>
           </div>
-          <ScrollArea className="h-[520px] rounded-lg border">
+          <ScrollArea className="h-[520px]">
             <Table>
               <TableHeader className="sticky top-0 bg-background">
                 <TableRow>

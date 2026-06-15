@@ -730,9 +730,9 @@ function IndexPageContent() {
               </TabsList>
             </Tabs>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="flex flex-col justify-center gap-2 py-3 sm:py-3">
             <div className="grid gap-y-1 lg:grid-cols-4 lg:divide-x">
-              <div className="min-w-0 px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.totalRequests')}</span>
@@ -747,7 +747,7 @@ function IndexPageContent() {
                 </div>
               </div>
 
-              <div className="min-w-0 px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <DollarSign className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.totalCost')}</span>
@@ -767,7 +767,7 @@ function IndexPageContent() {
                 </p>
               </div>
 
-              <div className="min-w-0 px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.tokenUsage')}</span>
@@ -787,7 +787,7 @@ function IndexPageContent() {
                 </p>
               </div>
 
-              <div className="min-w-0 px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <Zap className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.avgResponse')}</span>
@@ -800,7 +800,7 @@ function IndexPageContent() {
             </div>
 
             <div className="grid gap-y-1 lg:grid-cols-3 lg:divide-x">
-              <div className="min-w-0 px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.onlineTime')}</span>
@@ -813,7 +813,7 @@ function IndexPageContent() {
                 </div>
               </div>
 
-              <div className="min-w-0 px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.messageProcessing')}</span>
@@ -834,7 +834,7 @@ function IndexPageContent() {
                 </p>
               </div>
 
-              <div className="min-w-0 px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <TrendingUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.costEfficiency')}</span>

@@ -100,7 +100,9 @@ function PromptGeneratorEntryCard() {
         <Sparkles className="h-4 w-4" aria-hidden="true" />
       </span>
       <span className="min-w-0 space-y-1">
-        <span className="block text-sm font-semibold text-foreground group-hover:text-primary">人设生成器</span>
+        <span className="block text-sm font-semibold text-foreground group-hover:text-primary">
+          人设生成器（测试版）
+        </span>
         <span className="block text-xs leading-5 text-muted-foreground">
           根据人格设定生成或调整麦麦的人设描述。
         </span>

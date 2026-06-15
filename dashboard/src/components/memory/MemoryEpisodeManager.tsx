@@ -395,7 +395,7 @@ export function MemoryEpisodeManager({
               刷新 Episode
             </Button>
 
-            <ScrollArea className="h-[420px] rounded-lg border">
+            <ScrollArea className="h-[420px]">
               <Table>
                 <TableHeader className="sticky top-0 bg-background">
                   <TableRow>

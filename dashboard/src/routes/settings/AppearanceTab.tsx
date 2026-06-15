@@ -1,6 +1,16 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, Download, Monitor, RotateCcw, ScanLine, Trash2, Upload } from 'lucide-react'
+import {
+  AlertTriangle,
+  Download,
+  Monitor,
+  Moon,
+  RotateCcw,
+  ScanLine,
+  Sun,
+  Trash2,
+  Upload,
+} from 'lucide-react'
 
 import { useAnimation } from '@/hooks/use-animation'
 import { useTheme } from '@/components/use-theme'
@@ -58,8 +68,9 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-import { ThemeOption } from './ThemeOption'
 import { hslToHex } from './types'
+
+type ThemeMode = 'light' | 'dark' | 'system'
 
 const dashboardStyleOptions: Array<{
   value: DashboardStyle
@@ -78,6 +89,32 @@ const dashboardStyleOptions: Array<{
     label: '未来复古',
     description: '使用一键包外壳同款纸面颗粒、硬朗描边和切角面板。',
     icon: ScanLine,
+  },
+]
+
+const themeModeOptions: Array<{
+  value: ThemeMode
+  labelKey: string
+  descriptionKey: string
+  icon: typeof Monitor
+}> = [
+  {
+    value: 'light',
+    labelKey: 'settings.appearance.light',
+    descriptionKey: 'settings.appearance.lightDesc',
+    icon: Sun,
+  },
+  {
+    value: 'dark',
+    labelKey: 'settings.appearance.dark',
+    descriptionKey: 'settings.appearance.darkDesc',
+    icon: Moon,
+  },
+  {
+    value: 'system',
+    labelKey: 'settings.appearance.system',
+    descriptionKey: 'settings.appearance.systemDesc',
+    icon: Monitor,
   },
 ]
 
@@ -419,28 +456,46 @@ export function AppearanceTab() {
         <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">
           {t('settings.appearance.themeMode')}
         </h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
-          <ThemeOption
-            value="light"
-            current={theme}
-            onChange={setTheme}
-            label={t('settings.appearance.light')}
-            description={t('settings.appearance.lightDesc')}
-          />
-          <ThemeOption
-            value="dark"
-            current={theme}
-            onChange={setTheme}
-            label={t('settings.appearance.dark')}
-            description={t('settings.appearance.darkDesc')}
-          />
-          <ThemeOption
-            value="system"
-            current={theme}
-            onChange={setTheme}
-            label={t('settings.appearance.system')}
-            description={t('settings.appearance.systemDesc')}
-          />
+        <div
+          role="tablist"
+          aria-label={t('settings.appearance.themeMode')}
+          className="bg-muted/60 text-muted-foreground grid w-full max-w-2xl grid-cols-1 gap-1 rounded-lg border p-1 sm:grid-cols-3"
+        >
+          {themeModeOptions.map((option) => {
+            const selected = theme === option.value
+            const Icon = option.icon
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setTheme(option.value)}
+                className={cn(
+                  'group flex min-h-16 flex-col justify-center rounded-md px-3 py-2 text-left transition-all',
+                  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
+                  selected
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'hover:bg-background/60 hover:text-foreground'
+                )}
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold">
+                  <Icon
+                    className={cn(
+                      'h-4 w-4 transition-colors',
+                      selected ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'
+                    )}
+                    strokeWidth={2}
+                  />
+                  <span>{t(option.labelKey)}</span>
+                </span>
+                <span className="text-muted-foreground mt-1 block max-w-full truncate text-xs">
+                  {t(option.descriptionKey)}
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -1082,7 +1137,7 @@ export function AppearanceTab() {
       {themeConfig.dashboardStyle === 'future-retro' && (
         <div>
           <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">未来复古配置</h3>
-          <div className="space-y-2 sm:space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
             <div className="bg-card rounded-lg border p-3 sm:p-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 space-y-0.5">

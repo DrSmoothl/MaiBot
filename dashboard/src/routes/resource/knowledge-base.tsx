@@ -353,7 +353,7 @@ export function KnowledgeBasePage() {
         value: runtimeConfig.runtime_ready ? '就绪' : '未就绪',
         description: runtimeConfig.embedding_degraded ? 'Embedding 降级运行' : '运行时检查通过',
         icon: runtimeConfig.runtime_ready ? CheckCircle2 : CircleAlert,
-        className: runtimeConfig.runtime_ready ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/20 bg-amber-500/5',
+        className: runtimeConfig.runtime_ready ? 'border-emerald-500/25' : 'border-amber-500/25',
         iconClassName: runtimeConfig.runtime_ready ? 'text-emerald-500' : 'text-amber-500',
       },
       {
@@ -361,7 +361,7 @@ export function KnowledgeBasePage() {
         value: String(runtimeConfig.embedding_dimension),
         description: runtimeConfig.relation_vectors_enabled ? '关系向量已启用' : '关系向量未启用',
         icon: HardDrive,
-        className: 'border-sky-500/20 bg-sky-500/5',
+        className: 'border-sky-500/25',
         iconClassName: 'text-sky-500',
       },
       {
@@ -369,7 +369,7 @@ export function KnowledgeBasePage() {
         value: runtimeConfig.data_dir,
         description: '长期记忆存储位置',
         icon: FolderOpen,
-        className: 'border-violet-500/20 bg-violet-500/5',
+        className: 'border-violet-500/25',
         iconClassName: 'text-violet-500',
       },
     ]
@@ -412,7 +412,7 @@ export function KnowledgeBasePage() {
           </div>
           {/* 运行时状态条 —— 紧凑、常驻、一眼看完 */}
           {runtimeBadges.length > 0 ? (
-            <div className="rounded-xl border border-border/60 bg-card/60 p-3 shadow-sm backdrop-blur">
+            <div data-memory-runtime-status="true" className="border border-border/60 bg-transparent p-3">
               <div className="mb-2 flex items-center justify-end gap-2">
                 {runtimeConfig?.vector_rebuild_required ? (
                   <Button
@@ -451,11 +451,11 @@ export function KnowledgeBasePage() {
                   <div
                     key={item.label}
                     className={cn(
-                      'min-w-0 overflow-hidden rounded-lg border px-2 py-1.5 transition-colors sm:flex sm:items-center sm:gap-2 sm:px-2.5',
+                      'min-w-0 overflow-hidden border bg-transparent px-2 py-1.5 transition-colors sm:flex sm:items-center sm:gap-2 sm:px-2.5',
                       item.className,
                     )}
                   >
-                    <div className="mb-1 w-fit flex-none rounded-md border bg-background/70 p-1 shadow-sm sm:mb-0">
+                    <div className="mb-1 w-fit flex-none border bg-transparent p-1 sm:mb-0">
                       <item.icon className={cn('h-3.5 w-3.5', item.iconClassName)} />
                     </div>
                     <div className="min-w-0 flex-1">
