@@ -1,12 +1,12 @@
-﻿import { useState, useEffect } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import { AlertCircle, AlertTriangle, ArrowUpDown, CheckCircle2, Filter, Info, Loader2, Search, Settings2 } from 'lucide-react'
 
@@ -42,6 +42,23 @@ import type { GitStatus, MaimaiVersion, MarketplaceSortKey, PluginInfo, PluginLo
 import { getPluginType, PLUGIN_TYPE_OPTIONS } from './types'
 
 const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
+const PLUGIN_MARKET_VIEW_STATE_KEY = 'plugins-market-view-state'
+const PLUGIN_MARKET_SCROLL_TOP_KEY = 'plugins-market-scroll-top'
+const MARKETPLACE_SORT_KEYS: MarketplaceSortKey[] = ['default', 'latest', 'downloads', 'likes', 'rating']
+
+interface PluginMarketplaceViewState {
+  searchQuery: string
+  pluginTypeFilter: string
+  marketplaceSortBy: MarketplaceSortKey
+  showInstalledPlugins: boolean
+}
+
+const DEFAULT_PLUGIN_MARKET_VIEW_STATE: PluginMarketplaceViewState = {
+  searchQuery: '',
+  pluginTypeFilter: 'all',
+  marketplaceSortBy: 'default',
+  showInstalledPlugins: false,
+}
 
 interface PluginMarketplacePageProps {
   embedded?: boolean
@@ -83,6 +100,34 @@ const buildPluginStatsMap = (
   return statsMap
 }
 
+const readPluginMarketplaceViewState = (): PluginMarketplaceViewState => {
+  const savedState = sessionStorage.getItem(PLUGIN_MARKET_VIEW_STATE_KEY)
+  if (!savedState) {
+    return DEFAULT_PLUGIN_MARKET_VIEW_STATE
+  }
+
+  const parsed = JSON.parse(savedState) as Partial<PluginMarketplaceViewState>
+  const pluginTypeFilter = typeof parsed.pluginTypeFilter === 'string'
+    && (parsed.pluginTypeFilter === 'all' || PLUGIN_TYPE_OPTIONS.some(option => option.value === parsed.pluginTypeFilter))
+    ? parsed.pluginTypeFilter
+    : DEFAULT_PLUGIN_MARKET_VIEW_STATE.pluginTypeFilter
+  const marketplaceSortBy = parsed.marketplaceSortBy
+    && MARKETPLACE_SORT_KEYS.includes(parsed.marketplaceSortBy)
+    ? parsed.marketplaceSortBy
+    : DEFAULT_PLUGIN_MARKET_VIEW_STATE.marketplaceSortBy
+
+  return {
+    searchQuery: typeof parsed.searchQuery === 'string'
+      ? parsed.searchQuery
+      : DEFAULT_PLUGIN_MARKET_VIEW_STATE.searchQuery,
+    pluginTypeFilter,
+    marketplaceSortBy,
+    showInstalledPlugins: typeof parsed.showInstalledPlugins === 'boolean'
+      ? parsed.showInstalledPlugins
+      : DEFAULT_PLUGIN_MARKET_VIEW_STATE.showInstalledPlugins,
+  }
+}
+
 // 插件市场页：只展示市场索引、安装状态和版本信息
 export function PluginMarketplacePage({ embedded = false }: PluginMarketplacePageProps) {
   return (
@@ -95,19 +140,24 @@ export function PluginMarketplacePage({ embedded = false }: PluginMarketplacePag
 // 内部组件：实际内容
 function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePageProps>) {
   const navigate = useNavigate()
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null)
+  const scrollRestoredRef = useRef(false)
+  const initialViewStateRef = useRef(readPluginMarketplaceViewState())
   const settingsRoute: '/plugin-mirrors' | '/plugin-mirrors/embed' = embedded
     ? '/plugin-mirrors/embed'
     : '/plugin-mirrors'
   const [restartNoticeVisible, setRestartNoticeVisible] = useState(
     () => localStorage.getItem('plugins-restart-notice-dismissed') !== 'true'
   )
-  const [searchQuery, setSearchQuery] = useState('')
-  const [pluginTypeFilter, setPluginTypeFilter] = useState('all')
-  const [marketplaceSortBy, setMarketplaceSortBy] = useState<MarketplaceSortKey>('default')
+  const [searchQuery, setSearchQuery] = useState(initialViewStateRef.current.searchQuery)
+  const [pluginTypeFilter, setPluginTypeFilter] = useState(initialViewStateRef.current.pluginTypeFilter)
+  const [marketplaceSortBy, setMarketplaceSortBy] = useState<MarketplaceSortKey>(
+    initialViewStateRef.current.marketplaceSortBy
+  )
   const [showCompatibleOnly] = useState(
     () => localStorage.getItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY) !== 'false'
   )
-  const [hideInstalledPlugins, setHideInstalledPlugins] = useState(true)
+  const [showInstalledPlugins, setShowInstalledPlugins] = useState(initialViewStateRef.current.showInstalledPlugins)
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -129,6 +179,60 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     localStorage.setItem('plugins-restart-notice-dismissed', 'true')
     setRestartNoticeVisible(false)
   }
+
+  useEffect(() => {
+    sessionStorage.setItem(
+      PLUGIN_MARKET_VIEW_STATE_KEY,
+      JSON.stringify({
+        searchQuery,
+        pluginTypeFilter,
+        marketplaceSortBy,
+        showInstalledPlugins,
+      } satisfies PluginMarketplaceViewState)
+    )
+  }, [marketplaceSortBy, pluginTypeFilter, searchQuery, showInstalledPlugins])
+
+  useEffect(() => {
+    const viewport = scrollViewportRef.current
+    if (!viewport) {
+      return
+    }
+
+    const handleScroll = () => {
+      sessionStorage.setItem(PLUGIN_MARKET_SCROLL_TOP_KEY, String(viewport.scrollTop))
+    }
+
+    viewport.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      viewport.removeEventListener('scroll', handleScroll)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (scrollRestoredRef.current || loading) {
+      return
+    }
+
+    const viewport = scrollViewportRef.current
+    if (!viewport) {
+      return
+    }
+
+    const savedScrollTop = Number(sessionStorage.getItem(PLUGIN_MARKET_SCROLL_TOP_KEY) ?? 0)
+    if (!Number.isFinite(savedScrollTop) || savedScrollTop <= 0) {
+      scrollRestoredRef.current = true
+      return
+    }
+
+    const frameId = requestAnimationFrame(() => {
+      viewport.scrollTop = savedScrollTop
+      scrollRestoredRef.current = true
+    })
+
+    return () => {
+      cancelAnimationFrame(frameId)
+    }
+  }, [loading, plugins.length])
 
   const mergeInstalledPluginInfo = (
     marketPlugins: PluginInfo[],
@@ -741,7 +845,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     return plugins.filter(p => {
       if (!p.manifest) return false
       if (p.source === 'local') return false
-      if (hideInstalledPlugins && p.installed) return false
+      if (!showInstalledPlugins && p.installed) return false
       const matchesSearch = searchQuery === '' ||
         p.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -756,7 +860,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   }
 
   return (
-    <ScrollArea className="h-full">
+    <ScrollArea className="h-full" viewportRef={scrollViewportRef}>
       <div className="space-y-6 p-4 sm:p-6">
         {/* 标题 */}
         <div
@@ -882,8 +986,9 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
             <Button
               type="button"
-              variant="outline"
-              className="w-full sm:ml-auto sm:w-auto"
+              variant="ghost"
+              data-plugin-market-settings-button="true"
+              className="w-full bg-transparent shadow-none hover:bg-transparent sm:ml-auto sm:w-auto"
               onClick={() => navigate({ to: settingsRoute })}
             >
               <Settings2 className="h-4 w-4 mr-2" />
@@ -891,18 +996,18 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             </Button>
 
             {/* 兼容性筛选 */}
-            <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-2 sm:w-auto sm:min-w-fit">
-              <Checkbox
-                id="hide-installed-plugins"
-                checked={hideInstalledPlugins}
-                onCheckedChange={(checked) => setHideInstalledPlugins(checked === true)}
-              />
+            <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:min-w-fit sm:flex-col sm:items-center sm:justify-center sm:gap-1">
               <label
-                htmlFor="hide-installed-plugins"
-                className="cursor-pointer text-sm font-medium leading-none whitespace-nowrap peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                htmlFor="show-installed-plugins"
+                className="cursor-pointer text-xs font-medium leading-none text-muted-foreground whitespace-nowrap"
               >
-                排除已安装
+                显示已安装
               </label>
+              <Switch
+                id="show-installed-plugins"
+                checked={showInstalledPlugins}
+                onCheckedChange={setShowInstalledPlugins}
+              />
             </div>
           </div>
           {isFetchingMarketplace && (
@@ -963,7 +1068,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             searchQuery={searchQuery}
             pluginTypeFilter={pluginTypeFilter}
             showCompatibleOnly={showCompatibleOnly}
-            hideInstalledPlugins={hideInstalledPlugins}
+            hideInstalledPlugins={!showInstalledPlugins}
             sortBy={marketplaceSortBy}
             gitStatus={gitStatus}
             maimaiVersion={maimaiVersion}

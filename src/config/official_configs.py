@@ -1,6 +1,5 @@
-from typing import Literal, Optional
-
 import re
+from typing import Literal, Optional
 
 from .config_base import ConfigBase, Field
 
@@ -32,6 +31,8 @@ class ExampleConfig(ConfigBase):
     \"""This is an example field\"""
     - 注释前面增加_warp_标记可以实现配置文件中注释在配置项前面单独一行显示
 """
+
+
 class BotConfig(ConfigBase):
     """机器人配置类"""
 
@@ -544,7 +545,7 @@ class ChatConfig(ConfigBase):
         },
     )
     """群聊回复时参考的最近消息数量；越大越懂上下文，也更耗模型。"""
-    
+
     max_private_context_size: int = Field(
         default=60,
         json_schema_extra={
@@ -730,9 +731,9 @@ class ChatConfig(ConfigBase):
 
     group_chat_prompt: str = Field(
         default=(
-            "你正在qq群里聊天，下面是群里正在聊的内容，其中包含聊天记录和聊天中的图片和表情包。\n"
+            "你正在qq群里聊天，下面是群里正在聊的内容，聊天中包含文字，图片和表情包等消息。\n"
             "回复尽量简短一些。最好一次对一个话题进行回复，但必须考虑不同群友发言之间的交互，免得啰嗦或者回复内容太乱。请注意把握聊天内容。\n"
-            "不要总是提及自己的身份背景，根据聊天内容自由发挥，但是要日常不浮夸，不要刻意找话题，。\n"
+            "不要总是提及自己的身份背景，根据聊天内容自由发挥，但是要日常不浮夸，不要刻意找话题。\n"
             "不用刻意回复其他人发送的表情包，只要关注表情包表达的含义。你可以适当发送表情包表达情绪。控制回复的频率，不要每个人的消息都回复，优先回复你感兴趣的或者主动提及你的，适当回复其他话题。\n"
         ),
         json_schema_extra={
