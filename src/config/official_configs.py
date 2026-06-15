@@ -2357,6 +2357,20 @@ class AMemorixPersonProfileConfig(ConfigBase):
     )
     """人物画像证据分类最大输出 token 数"""
 
+    evidence_classification_temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=2.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "证据分类温度",
+                "en_US": "Evidence classification temperature",
+                "ja_JP": "証拠分類の温度",
+            },
+        },
+    )
+    """人物画像证据分类模型温度"""
+
 
 class AMemorixMemoryEvolutionConfig(ConfigBase):
     """A_Memorix 记忆演化配置"""
