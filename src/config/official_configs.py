@@ -3787,6 +3787,15 @@ class DebugConfig(ConfigBase):
     )
     """是否在 Prompt 预览 JSON 中保留内联 base64 图片，默认关闭以减少日志体积"""
 
+    record_tool_structured_content: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "braces",
+        },
+    )
+    """是否在工具调用记录中保存 structured_content，默认关闭以减少数据库体积"""
+
     enable_llm_cache_stats: bool = Field(
         default=False,
         json_schema_extra={
