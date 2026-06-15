@@ -652,7 +652,10 @@ function IndexPageContent() {
                         {shortcut.label}
                       </span>
                       {shortcut.badge && (
-                        <span className="ml-1 shrink-0 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs text-white">
+                        <span
+                          data-quick-action-badge="true"
+                          className="ml-1 shrink-0 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs text-white"
+                        >
                           {shortcut.badge}
                         </span>
                       )}

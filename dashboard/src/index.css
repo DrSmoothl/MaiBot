@@ -100,6 +100,12 @@
   }
 }
 
+@keyframes future-retro-gear-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* JetBrains Mono 字体 - 用于代码编辑器 */
 @keyframes config-tab-enter {
   from {
@@ -478,6 +484,74 @@
   color: var(--retro-ink);
 }
 
+.auth-retro-gears {
+  position: absolute;
+  inset: 0;
+  display: block;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.auth-retro-gear {
+  position: absolute;
+  display: block;
+  color: var(--retro-line);
+  opacity: 0.24;
+  transform-origin: 50% 50%;
+  animation: future-retro-gear-rotate 150s linear infinite;
+}
+
+.auth-retro-gear--primary {
+  left: max(-30rem, -32vw);
+  top: max(-24rem, -34vh);
+  width: min(72vw, 52rem);
+}
+
+.auth-retro-gear--secondary {
+  right: max(-28rem, -30vw);
+  bottom: max(-30rem, -42vh);
+  width: min(84vw, 60rem);
+  opacity: 0.22;
+  animation-duration: 210s;
+  animation-direction: reverse;
+}
+
+.auth-retro-gear__body {
+  fill: currentColor;
+  fill-opacity: 0.18;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.auth-retro-gear__ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+
+.auth-retro-gear__ring--inner {
+  stroke-width: 1.8;
+}
+
+.auth-retro-gear__cutout {
+  fill: var(--retro-paper);
+  stroke: currentColor;
+  stroke-width: 1.1;
+}
+
+:root.no-animations .auth-retro-gear {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-retro-gear {
+    animation: none;
+  }
+}
+
 @supports (height: 100dvh) {
   :root[data-dashboard-style='future-retro'] [data-dashboard-shell='true'] {
     height: 100dvh;
@@ -654,6 +728,13 @@
 :root[data-dashboard-style='future-retro'] [data-dashboard-card='true'] > * {
   position: relative;
   z-index: 1;
+}
+
+:root[data-dashboard-style='future-retro'] [data-auth-theme-toggle='true'] {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2;
 }
 
 :root[data-dashboard-style='future-retro']
@@ -958,6 +1039,19 @@
   border-radius: 2px !important;
   box-shadow: none !important;
   font-weight: 700;
+}
+
+:root[data-dashboard-style='future-retro'] [data-quick-action-badge='true'] {
+  background: transparent !important;
+  border-radius: 0 !important;
+  color: hsl(var(--primary)) !important;
+  font-size: 0.875rem;
+  font-weight: 900;
+  line-height: 1;
+  padding-inline: 0 !important;
+  text-shadow:
+    0.45px 0 currentColor,
+    -0.45px 0 currentColor;
 }
 
 :root[data-dashboard-style='future-retro'] [data-plugin-market-count-badge='true'] {

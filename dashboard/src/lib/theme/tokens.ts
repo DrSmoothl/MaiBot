@@ -180,14 +180,8 @@ export const DEFAULT_DASHBOARD_STYLE_CONFIG: DashboardStyleConfig = {
 export type UserThemeConfig = {
   selectedPreset: string
   accentColor: string
-  /** @deprecated 旧版全局覆盖，仅用于迁移到 styleTokenOverrides。 */
-  tokenOverrides: Partial<ThemeTokens>
   styleTokenOverrides: StyleTokenOverrides
-  /** @deprecated 旧版全局自定义 CSS，仅用于迁移到 styleCustomCSS。 */
-  customCSS: string
   styleCustomCSS: StyleCustomCSS
-  /** @deprecated 旧版全局背景配置，仅用于迁移到 styleBackgroundConfig。 */
-  backgroundConfig?: BackgroundConfigMap
   styleBackgroundConfig?: StyleBackgroundConfigMap
   dashboardStyle: DashboardStyle
   styleConfig: DashboardStyleConfig

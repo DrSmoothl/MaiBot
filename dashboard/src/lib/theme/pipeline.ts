@@ -196,8 +196,8 @@ export function applyThemePipeline(config: UserThemeConfig, isDark: boolean): vo
   const root = document.documentElement
   const tokens = buildTokens(config, isDark)
   const dashboardStyle = config.dashboardStyle ?? DEFAULT_DASHBOARD_STYLE
-  const customCSS = config.styleCustomCSS?.[dashboardStyle] ?? config.customCSS
-  const backgroundConfig = config.styleBackgroundConfig?.[dashboardStyle] ?? config.backgroundConfig
+  const customCSS = config.styleCustomCSS?.[dashboardStyle]
+  const backgroundConfig = config.styleBackgroundConfig?.[dashboardStyle]
 
   injectTokensAsCSS(tokens, root)
   if (customCSS) {

@@ -82,7 +82,7 @@ const dashboardStyleOptions: Array<{
 ]
 
 /**
- * 安全访问 tokenOverrides 中的子属性值
+ * 安全访问当前风格 token 覆盖中的子属性值
  * @param overrides - Partial<ThemeTokens>
  * @param section - 如 'typography', 'visual', 'layout', 'animation'
  * @param key - token 键名，如 'font-family-base'
@@ -105,10 +105,10 @@ export function AppearanceTab() {
   const { toast } = useToast()
   const { t } = useTranslation()
   const dashboardStyle = themeConfig.dashboardStyle
-  const activeCustomCSS = themeConfig.styleCustomCSS?.[dashboardStyle] ?? themeConfig.customCSS ?? ''
+  const activeCustomCSS = themeConfig.styleCustomCSS?.[dashboardStyle] ?? ''
   const activeBackgroundConfig = useMemo(
-    () => themeConfig.styleBackgroundConfig?.[dashboardStyle] ?? themeConfig.backgroundConfig ?? {},
-    [dashboardStyle, themeConfig.backgroundConfig, themeConfig.styleBackgroundConfig]
+    () => themeConfig.styleBackgroundConfig?.[dashboardStyle] ?? {},
+    [dashboardStyle, themeConfig.styleBackgroundConfig]
   )
 
   const [localCSS, setLocalCSS] = useState(activeCustomCSS)
@@ -189,7 +189,12 @@ export function AppearanceTab() {
         },
       })
     },
-    [activeTokenOverrides, themeConfig.dashboardStyle, themeConfig.styleTokenOverrides, updateThemeConfig]
+    [
+      activeTokenOverrides,
+      themeConfig.dashboardStyle,
+      themeConfig.styleTokenOverrides,
+      updateThemeConfig,
+    ]
   )
 
   const resetTokenSection = useCallback(
@@ -203,7 +208,12 @@ export function AppearanceTab() {
         },
       })
     },
-    [activeTokenOverrides, themeConfig.dashboardStyle, themeConfig.styleTokenOverrides, updateThemeConfig]
+    [
+      activeTokenOverrides,
+      themeConfig.dashboardStyle,
+      themeConfig.styleTokenOverrides,
+      updateThemeConfig,
+    ]
   )
 
   const handleCSSChange = useCallback(
@@ -215,7 +225,6 @@ export function AppearanceTab() {
       if (cssDebounceRef.current) clearTimeout(cssDebounceRef.current)
       cssDebounceRef.current = setTimeout(() => {
         updateThemeConfig({
-          customCSS: '',
           styleCustomCSS: {
             ...themeConfig.styleCustomCSS,
             [dashboardStyle]: val,
@@ -359,7 +368,6 @@ export function AppearanceTab() {
       if (bgDebounceRef.current) clearTimeout(bgDebounceRef.current)
       bgDebounceRef.current = setTimeout(() => {
         updateThemeConfig({
-          backgroundConfig: {},
           styleBackgroundConfig: {
             ...themeConfig.styleBackgroundConfig,
             [dashboardStyle]: nextConfig,
@@ -848,8 +856,7 @@ export function AppearanceTab() {
                             'visual',
                             'blur-md',
                             computedTokens.visual['blur-md']
-                          ) !==
-                          '0px'
+                          ) !== '0px'
                         }
                         onCheckedChange={(checked) => {
                           updateTokenSection('visual', {
@@ -914,7 +921,6 @@ export function AppearanceTab() {
                         }}
                       />
                     </div>
-
                   </div>
                 </AccordionContent>
               </AccordionItem>
@@ -1086,9 +1092,7 @@ export function AppearanceTab() {
                   >
                     纸面颗粒
                   </Label>
-                  <p className="text-muted-foreground text-sm">
-                    启用与一键包外壳一致的纸面噪点和复古印刷质感。
-                  </p>
+                  <p className="text-muted-foreground text-sm">启用纸面噪点。</p>
                 </div>
                 <Switch
                   id="future-retro-paper-texture"
@@ -1138,7 +1142,6 @@ export function AppearanceTab() {
             onClick={() => {
               setLocalCSS('')
               updateThemeConfig({
-                customCSS: '',
                 styleCustomCSS: {
                   ...themeConfig.styleCustomCSS,
                   [dashboardStyle]: '',

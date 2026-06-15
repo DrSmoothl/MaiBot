@@ -20,8 +20,7 @@ type ResolvedBackgroundState = {
 export function useBackground(layerId: BackgroundLayerId): ResolvedBackgroundState {
   const { themeConfig } = useTheme()
   const dashboardStyle = themeConfig.dashboardStyle ?? DEFAULT_DASHBOARD_STYLE
-  const bgMap =
-    themeConfig.styleBackgroundConfig?.[dashboardStyle] ?? themeConfig.backgroundConfig ?? {}
+  const bgMap = themeConfig.styleBackgroundConfig?.[dashboardStyle] ?? {}
 
   const config = bgMap[layerId] ?? defaultBackgroundConfig
 
