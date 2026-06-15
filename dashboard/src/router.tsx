@@ -205,6 +205,16 @@ const chatEmbedRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/chat/embed'), 'ChatEmbedPage'),
 })
 
+// 外部程序嵌入用插件市场路由，不挂载 dashboard 顶栏和侧边栏
+const pluginsEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/plugins/embed',
+  component: lazyRouteComponent(
+    () => import('./routes/plugins/embed'),
+    'PluginMarketplaceEmbedPage'
+  ),
+})
+
 // 插件市场路由
 const pluginsRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -234,6 +244,16 @@ const pluginConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/plugin-config',
   component: lazyRouteComponent(() => import('./routes/plugin-config'), 'PluginConfigPage'),
+})
+
+// 外部程序嵌入用插件配置路由，不挂载 dashboard 顶栏和侧边栏
+const pluginConfigEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/plugin-config/embed',
+  component: lazyRouteComponent(
+    () => import('./routes/plugin-config-embed'),
+    'PluginConfigEmbedPage'
+  ),
 })
 
 // 插件镜像源配置路由
@@ -302,6 +322,8 @@ const routeTree = rootRoute.addChildren([
   authRoute,
   setupRoute,
   chatEmbedRoute,
+  pluginsEmbedRoute,
+  pluginConfigEmbedRoute,
   protectedRoute.addChildren([
     indexRoute,
     botConfigRoute,
