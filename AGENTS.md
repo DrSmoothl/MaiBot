@@ -47,6 +47,7 @@
 # 配置文件修改
 如果你需要改动配置文件，不需要修改实际的bot_config.toml或者model_config.toml，只需要修改配置文件模版，并新增一个版本号即可，也不必要为配置改动创建测试文件。
 除非明确说明，否则不要擅自新增 ConfigUpgradeHook
+禁止改动 legacy_migration，此文件以固定
 
 # Webui规范
 涉及显示聊天流信息的，优先显示聊天流实际名称（群名称或 xxx的私聊），而不是session_id

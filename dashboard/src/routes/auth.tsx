@@ -234,7 +234,7 @@ export function AuthPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
-      {/* 波浪背景 - 独立控制 */}
+      {/* 动态背景 - 独立控制 */}
       {enableWavesBackground && <WavesBackground />}
 
       {/* 认证卡片 - 磨砂玻璃效果 */}

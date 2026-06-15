@@ -5,8 +5,7 @@ from typing import Any
 import asyncio
 
 from src.common.logger import get_logger
-from src.common.utils.utils_config import BehaviorConfigUtils, ChatConfigUtils
-from src.config.config import global_config
+from src.common.utils.utils_config import BehaviorConfigUtils
 
 from .behavior_pattern_maintenance import behavior_pattern_maintenance
 from .behavior_pattern_store import (
@@ -67,41 +66,8 @@ class BehaviorPatternSelector:
             logger.error(f"检查行为表现使用开关失败: {exc}")
             return False
 
-    @staticmethod
-    def _is_global_expression_group_marker(platform: str, item_id: str) -> bool:
-        return platform == "*" and item_id == "*"
-
     def _resolve_behavior_group_scope(self, session_id: str) -> tuple[set[str], bool]:
-        related_session_ids = {session_id}
-        has_global_share = False
-        expression_groups = global_config.expression.expression_groups
-
-        for expression_group in expression_groups:
-            target_items = expression_group.targets
-            group_session_ids: set[str] = set()
-            contains_current_session = False
-            contains_global_share_marker = False
-
-            for target_item in target_items:
-                platform = target_item.platform.strip()
-                item_id = target_item.item_id.strip()
-                if self._is_global_expression_group_marker(platform, item_id):
-                    contains_global_share_marker = True
-                    continue
-                if not platform or not item_id:
-                    continue
-
-                target_session_ids = ChatConfigUtils.get_target_session_ids(target_item)
-                group_session_ids.update(target_session_ids)
-                if ChatConfigUtils.target_matches_session(target_item, session_id):
-                    contains_current_session = True
-
-            if contains_global_share_marker:
-                has_global_share = True
-            if contains_current_session:
-                related_session_ids.update(group_session_ids)
-
-        return related_session_ids, has_global_share
+        return BehaviorConfigUtils.resolve_behavior_group_scope(session_id)
 
     @staticmethod
     def _candidate_weight(candidate: dict[str, Any]) -> float:
@@ -321,7 +287,7 @@ class BehaviorPatternSelector:
         if not session_id:
             return BehaviorPatternRetrievalResult()
         if not self._can_use_behaviors(session_id):
-            logger.debug(f"行为表现召回已跳过：当前会话未启用表达使用，session_id={session_id}")
+            logger.debug(f"行为表现召回已跳过：当前会话未启用行为使用，session_id={session_id}")
             return BehaviorPatternRetrievalResult()
 
         scenario_profile = await behavior_scenario_analyzer.analyze(

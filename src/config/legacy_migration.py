@@ -8,12 +8,15 @@ legacy_migration.py
 from __future__ import annotations
 
 from dataclasses import dataclass
+from json import dumps
 from typing import Any, Optional
+
+from sqlalchemy import text
 
 import os
 
 
-ENABLE_LEGACY_MIGRATION: bool = True
+LEGACY_CONFIG_MIGRATION_TASK_NAME: str = "legacy_config_migration_v1"
 
 
 @dataclass
@@ -29,6 +32,75 @@ def _as_dict(x: Any) -> Optional[dict[str, Any]]:
 
 def _as_list(x: Any) -> Optional[list[Any]]:
     return x if isinstance(x, list) else None
+
+
+def is_legacy_config_migration_completed() -> bool:
+    """读取一次性配置迁移状态，完成后不再重复运行 legacy migration。"""
+
+    from src.common.database.database import get_db_session
+
+    with get_db_session() as session:
+        row = session.exec(
+            text(
+                """
+                SELECT status
+                FROM one_time_maintenance_tasks
+                WHERE task_name = :task_name
+                """
+            ),
+            params={"task_name": LEGACY_CONFIG_MIGRATION_TASK_NAME},
+        ).first()
+    return row is not None and str(row[0] or "").strip() == "done"
+
+
+def should_apply_legacy_migration(config_file_name: str) -> bool:
+    """仅在一次性 legacy 配置迁移尚未完成时运行。"""
+
+    if config_file_name != "bot_config.toml":
+        return False
+    return not is_legacy_config_migration_completed()
+
+
+def mark_legacy_config_migration_completed(*, migrated: bool, reason: str) -> None:
+    """写入 legacy 配置迁移完成状态。"""
+
+    from src.common.database.database import get_db_session
+
+    stats_json = dumps(
+        {
+            "migrated": migrated,
+            "reason": reason,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    with get_db_session() as session:
+        session.exec(
+            text(
+                """
+                INSERT INTO one_time_maintenance_tasks (
+                    task_name, phase, status, cursor_id, stats_json,
+                    last_error, completed_at, updated_at
+                )
+                VALUES (
+                    :task_name, 'done', 'done', 0, :stats_json,
+                    NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+                ON CONFLICT(task_name) DO UPDATE SET
+                    phase = excluded.phase,
+                    status = excluded.status,
+                    cursor_id = excluded.cursor_id,
+                    stats_json = excluded.stats_json,
+                    last_error = NULL,
+                    completed_at = CURRENT_TIMESTAMP,
+                    updated_at = excluded.updated_at
+                """
+            ),
+            params={
+                "task_name": LEGACY_CONFIG_MIGRATION_TASK_NAME,
+                "stats_json": stats_json,
+            },
+        )
 
 
 def _parse_host_env(value: Any) -> Optional[str]:
@@ -245,27 +317,6 @@ def _migrate_expression_groups(expr: dict[str, Any]) -> bool:
     return True
 
 
-def _migrate_target_item_list(parent: dict[str, Any], key: str) -> bool:
-    """
-    将 list[str] 的 "platform:id:type" 迁移为 list[TargetItem]。
-    """
-    raw = _as_list(parent.get(key))
-    if raw is None or not raw:
-        return False
-    if all(isinstance(item, dict) for item in raw):
-        return False
-
-    targets: list[dict[str, str]] = []
-    for item in raw:
-        parsed = _parse_triplet_target(str(item))
-        if parsed is None:
-            return False
-        targets.append(parsed)
-
-    parent[key] = targets
-    return True
-
-
 def _drop_empty_keyword_rules(keyword_reaction: dict[str, Any], key: str) -> bool:
     raw = _as_list(keyword_reaction.get(key))
     if raw is None:
@@ -336,9 +387,6 @@ def try_migrate_legacy_bot_config_dict(data: dict[str, Any]) -> MigrationResult:
     """
     尝试修复 `bot_config.toml` 的少量旧结构，仅保留当前仍需要的兼容逻辑。
     """
-    if not ENABLE_LEGACY_MIGRATION:
-        return MigrationResult(data=data, migrated=False, reason="disabled")
-
     migrated_any = False
     reasons: list[str] = []
 
@@ -362,52 +410,6 @@ def try_migrate_legacy_bot_config_dict(data: dict[str, Any]) -> MigrationResult:
         if _migrate_expression_groups(expr):
             migrated_any = True
             reasons.append("expression.expression_groups")
-
-        if _migrate_target_item_list(expr, "allow_reflect"):
-            migrated_any = True
-            reasons.append("expression.allow_reflect")
-
-        manual_reflect_operator_id = expr.get("manual_reflect_operator_id")
-        if isinstance(manual_reflect_operator_id, str) and manual_reflect_operator_id.strip():
-            parsed = _parse_triplet_target(manual_reflect_operator_id.strip())
-            if parsed is not None:
-                expr["manual_reflect_operator_id"] = parsed
-                migrated_any = True
-                reasons.append("expression.manual_reflect_operator_id")
-
-        if isinstance(manual_reflect_operator_id, str) and not manual_reflect_operator_id.strip():
-            expr.pop("manual_reflect_operator_id", None)
-            migrated_any = True
-            reasons.append("expression.manual_reflect_operator_id_empty")
-
-    personality = _as_dict(data.get("personality"))
-    visual = _as_dict(data.get("visual"))
-    if personality is not None and "visual_style" in personality:
-        personality.pop("visual_style", None)
-        migrated_any = True
-        reasons.append("personality.visual_style_removed")
-
-    if visual is not None and "visual_style" in visual:
-        visual.pop("visual_style", None)
-        migrated_any = True
-        reasons.append("visual.visual_style_removed")
-
-    memory = _as_dict(data.pop("memory", None))
-    if memory is not None:
-        a_memorix = _as_dict(data.get("a_memorix"))
-        if a_memorix is None:
-            a_memorix = {}
-            data["a_memorix"] = a_memorix
-
-        integration = _as_dict(a_memorix.get("integration"))
-        if integration is None:
-            integration = {}
-            a_memorix["integration"] = integration
-
-        for key, value in memory.items():
-            integration.setdefault(key, value)
-        migrated_any = True
-        reasons.append("memory->a_memorix.integration")
 
     keyword_reaction = _as_dict(data.get("keyword_reaction"))
     if keyword_reaction is not None:

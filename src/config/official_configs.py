@@ -52,7 +52,7 @@ class BotConfig(ConfigBase):
             "x-row": "bot-platform-account",
         },
     )
-    """平台"""
+    """麦麦主账号所在的平台，例如 qq。"""
 
     qq_account: str = Field(
         default="",
@@ -69,7 +69,7 @@ class BotConfig(ConfigBase):
             "x-row": "bot-platform-account",
         },
     )
-    """QQ账号"""
+    """麦麦主账号 ID，用来识别哪些消息是麦麦自己发的。"""
 
     platforms: list[str] = Field(
         default_factory=lambda: [],
@@ -83,7 +83,7 @@ class BotConfig(ConfigBase):
             "x-icon": "layers",
         },
     )
-    """其他平台"""
+    """其他平台账号，格式为 platform:账号；没有多平台时不用填。"""
 
     nickname: str = Field(
         default="麦麦",
@@ -97,7 +97,7 @@ class BotConfig(ConfigBase):
             "x-icon": "user-circle",
         },
     )
-    """"""
+    """麦麦显示和自称时使用的名字。"""
 
     alias_names: list[str] = Field(
         default_factory=lambda: [],
@@ -112,7 +112,7 @@ class BotConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """别名列表"""
+    """别人可能用来称呼麦麦的名字，用于辅助识别提及。"""
 
 
 class PersonalityConfig(ConfigBase):
@@ -136,7 +136,7 @@ class PersonalityConfig(ConfigBase):
             "x-description-display": "icon",
         },
     )
-    """人格，建议200字以内，描述人格特质和身份特征；可以写完整设定。要求第二人称"""
+    """麦麦的人格和身份设定，建议简短描述她是谁、是什么性格。"""
 
     reply_style: str = Field(
         default="你的风格平淡简短。可以参考贴吧，知乎和微博的回复风格。不浮夸不长篇大论，不要过分修辞和复杂句。尽量回复的简短一些，平淡一些",
@@ -153,7 +153,7 @@ class PersonalityConfig(ConfigBase):
             "x-description-display": "icon",
         },
     )
-    """默认表达风格，描述麦麦说话的表达风格，表达习惯，如要修改，可以酌情新增内容，建议1-2行"""
+    """麦麦平时说话的风格，例如简短、温和、吐槽或正式。"""
 
     multiple_reply_style: list[str] = Field(
         default_factory=lambda: [
@@ -174,7 +174,7 @@ class PersonalityConfig(ConfigBase):
             "x-icon": "list",
         },
     )
-    """可选的多种表达风格列表，当配置不为空时可按概率作为本次回复的一次性提示注入"""
+    """备用说话风格；触发后只影响本次回复。"""
 
     multiple_probability: float = Field(
         default=0,
@@ -192,7 +192,7 @@ class PersonalityConfig(ConfigBase):
             "step": 0.1,
         },
     )
-    """每次构建回复时，从 multiple_reply_style 中随机注入一次性表达风格提示的概率（0.0-1.0）"""
+    """随机启用备用风格的概率；0 表示不随机切换。"""
 
 
 class ImageCacheCleanupConfig(ConfigBase):
@@ -210,7 +210,7 @@ class ImageCacheCleanupConfig(ConfigBase):
             },
         },
     )
-    """是否启用图片缓存自动清理。"""
+    """开启后会自动删除长期不用的图片缓存。"""
 
     check_interval_hours: float = Field(
         default=6.0,
@@ -225,7 +225,7 @@ class ImageCacheCleanupConfig(ConfigBase):
             },
         },
     )
-    """图片缓存自动清理任务的轮询间隔，单位为小时。"""
+    """每隔多少小时检查一次旧图片。"""
 
     image_file_retention_days: int = Field(
         default=14,
@@ -240,7 +240,7 @@ class ImageCacheCleanupConfig(ConfigBase):
             },
         },
     )
-    """图片文件超过该天数未使用后会被删除，但识别结果会继续保留。"""
+    """图片文件多久没被使用后可以删除。"""
 
     no_file_result_retention_days: int = Field(
         default=30,
@@ -255,7 +255,7 @@ class ImageCacheCleanupConfig(ConfigBase):
             },
         },
     )
-    """图片文件被清理或缺失后，识别结果继续保留的天数。"""
+    """图片文件删掉后，识别文字还能保留多久。"""
 
 
 class VisualConfig(ConfigBase):
@@ -274,7 +274,7 @@ class VisualConfig(ConfigBase):
             "x-row": "visual-modes",
         },
     )
-    """规划器模式，auto根据模型信息自动选择，text为纯文本模式，multimodal为多模态模式"""
+    """规划阶段是否看图片；不确定就保持 auto。"""
 
     replyer_mode: Literal["text", "multimodal", "auto"] = Field(
         default="auto",
@@ -287,7 +287,7 @@ class VisualConfig(ConfigBase):
             "x-row": "visual-modes",
         },
     )
-    """回复器模式，auto根据模型信息自动选择，text为纯文本模式，multimodal为多模态模式"""
+    """回复生成阶段是否看图片；不确定就保持 auto。"""
 
     max_image_num: int = Field(
         default=128,
@@ -303,7 +303,7 @@ class VisualConfig(ConfigBase):
             },
         },
     )
-    """多模态请求中最多保留的图片数量；只保留最新图片，超出数量的旧图片会显示为 [图片]。"""
+    """一次多模态请求最多带多少张图，太大可能更慢更贵。"""
 
     wait_image_recognize_max_time: float = Field(
         default=10,
@@ -320,7 +320,7 @@ class VisualConfig(ConfigBase):
             },
         },
     )
-    """非视觉 planner 请求前等待图片识别完成的最长秒数；为 0 时不等待，保持占位请求。"""
+    """等图片识别完成的最长秒数；0 表示不等待。"""
 
     handle_oversized_images: bool = Field(
         default=True,
@@ -336,7 +336,7 @@ class VisualConfig(ConfigBase):
             },
         },
     )
-    """开启后，接收图片会检查大小并按配置处理过大图片；关闭后跳过检查和处理。"""
+    """收到太大的图片时，是否自动压缩或丢弃。"""
 
     max_image_size_mb: float = Field(
         default=30.0,
@@ -354,7 +354,7 @@ class VisualConfig(ConfigBase):
             },
         },
     )
-    """接收图片超过该大小时视为过大图片；设为 0 时不限制图片大小。"""
+    """超过这个大小的图片会按过大图片处理方法处理；0 表示不限。"""
 
     oversized_image_handle_method: Literal["compress", "discard"] = Field(
         default="compress",
@@ -371,10 +371,10 @@ class VisualConfig(ConfigBase):
             },
         },
     )
-    """接收图片超过最大图片大小时的处理方法：compress 为压缩，discard 为丢弃。"""
+    """大图的处理方式：压缩后继续用，或直接丢弃。"""
 
     image_cache_cleanup: ImageCacheCleanupConfig = Field(default_factory=ImageCacheCleanupConfig)
-    """图片缓存自动清理配置。"""
+    """定期清理旧图片缓存，减少磁盘占用。"""
 
 
 class TalkRulesItem(ConfigBase):
@@ -388,7 +388,7 @@ class TalkRulesItem(ConfigBase):
             },
         },
     )
-    """平台，与 ID 一起留空表示全局；单独填写时表示该平台下所有聊天流的默认值，"*" 表示平台通配覆盖。"""
+    """规则作用的平台；留空表示不限定平台，* 表示任意平台。"""
 
     item_id: str = Field(
         default="",
@@ -400,7 +400,7 @@ class TalkRulesItem(ConfigBase):
             },
         },
     )
-    """聊天流 ID，与平台一起留空表示全局；单独填写时表示该聊天流 ID 在所有平台下的默认值，"*" 表示聊天流通配覆盖。"""
+    """规则作用的群号或用户 ID；留空表示不限定聊天，* 表示任意聊天。"""
 
     rule_type: Literal["group", "private"] = Field(
         default="group",
@@ -414,7 +414,7 @@ class TalkRulesItem(ConfigBase):
             "x-option-descriptions": RULE_TYPE_OPTION_DESCRIPTIONS,
         },
     )
-    """聊天流类型，group（群聊）或private（私聊）"""
+    """规则作用于群聊还是私聊。"""
 
     time: str = Field(
         default="",
@@ -427,7 +427,7 @@ class TalkRulesItem(ConfigBase):
             "x-widget": "talk-time",
         },
     )
-    """留空表示兜底，"HH:MM-HH:MM" 表示指定时间段，"*" 表示强制全天覆盖。支持跨夜区间。"""
+    """规则生效时间；留空为兜底，* 为全天，也可填 23:00-02:00。"""
 
     value: float = Field(
         default=0.5,
@@ -439,7 +439,7 @@ class TalkRulesItem(ConfigBase):
             },
         },
     )
-    """聊天频率值，范围0-1"""
+    """该规则下的发言频率；0 更安静，1 按正常频率。"""
 
 
 class ChatConfig(ConfigBase):
@@ -463,7 +463,7 @@ class ChatConfig(ConfigBase):
             "step": 0.001,
         },
     )
-    """聊天频率，越小越沉默，范围0-1"""
+    """群聊里麦麦主动说话的频率；越小越安静。"""
 
     private_talk_value: float = Field(
         default=1,
@@ -481,7 +481,7 @@ class ChatConfig(ConfigBase):
             "step": 0.001,
         },
     )
-    """私聊聊天频率，越小越沉默，范围0-1"""
+    """私聊里麦麦主动说话的频率；越小越安静。"""
 
     mentioned_bot_reply: bool = Field(
         default=False,
@@ -496,7 +496,7 @@ class ChatConfig(ConfigBase):
             "x-row": "reply-switches",
         },
     )
-    """是否启用提及必回复"""
+    """开启后，只要消息提到麦麦名字就更容易回复。"""
 
     inevitable_at_reply: bool = Field(
         default=True,
@@ -511,7 +511,7 @@ class ChatConfig(ConfigBase):
             "x-row": "reply-switches",
         },
     )
-    """是否启用at必回复"""
+    """开启后，被 @ 时会尽量回复。"""
 
     self_message_special_mark: bool = Field(
         default=True,
@@ -526,7 +526,7 @@ class ChatConfig(ConfigBase):
             "x-row": "reply-switches",
         },
     )
-    """在原有基础上进一步强调哪些消息是自己发送的，减少bot认错的情况，不是高级设置"""
+    """加强标记麦麦自己的消息，减少把自己当成别人的情况。"""
 
     max_context_size: int = Field(
         default=40,
@@ -543,7 +543,7 @@ class ChatConfig(ConfigBase):
             "x-row": "context-sizes",
         },
     )
-    """上下文长度"""
+    """群聊回复时参考的最近消息数量；越大越懂上下文，也更耗模型。"""
     
     max_private_context_size: int = Field(
         default=60,
@@ -560,7 +560,7 @@ class ChatConfig(ConfigBase):
             "x-row": "context-sizes",
         },
     )
-    """私聊上下文长度"""
+    """私聊回复时参考的最近消息数量。"""
 
     enable_context_optimization: bool = Field(
         default=True,
@@ -575,7 +575,7 @@ class ChatConfig(ConfigBase):
             "x-row": "context-sizes",
         },
     )
-    """优化50%左右的Planner上下文消耗，但是可能影响缓存，轻微影响性能表现"""
+    """压缩部分上下文，减少模型消耗；一般建议开启。"""
 
     mid_term_memory: bool = Field(
         default=True,
@@ -590,7 +590,7 @@ class ChatConfig(ConfigBase):
             "x-row": "context-sizes",
         },
     )
-    """上下文裁切时是否使用 utils 模型生成中期聊天摘要，并以可展开复杂消息保留在历史中"""
+    """长对话被截断时，自动把旧内容概括成摘要继续参考。"""
 
     mid_term_memory_lenth: int = Field(
         default=10,
@@ -608,7 +608,7 @@ class ChatConfig(ConfigBase):
             "x-row": "context-sizes",
         },
     )
-    """最多保留多少条中期聊天摘要消息，超出后移除最早的摘要"""
+    """最多保留多少条中期摘要；设为 0 表示不保留。"""
 
     enable_reply_quote: bool = Field(
         default=True,
@@ -623,7 +623,7 @@ class ChatConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """是否启用回复时附带引用回复"""
+    """回复时是否可以引用上一条或相关消息。"""
 
     typing_speed: float = Field(
         default=1.0,
@@ -642,7 +642,7 @@ class ChatConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """模拟打字时间倍乘，0 表示不等待，1 保持默认等待时间，2 表示等待时间变为默认的两倍"""
+    """模拟打字等待时间；0 最快，1 默认，2 更慢。"""
 
     planner_interrupt_max_consecutive_count: int = Field(
         default=0,
@@ -658,7 +658,7 @@ class ChatConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """planner如果遇到新消息，重新开始思考的次数"""
+    """思考时来了新消息，最多重新思考多少次。"""
 
     no_action_backoff_base_seconds: float = Field(
         default=15,
@@ -675,7 +675,7 @@ class ChatConfig(ConfigBase):
             "advanced": False,
         },
     )
-    """连续 no_action 后的退避基准秒数，0 表示不启用退避"""
+    """连续决定不回复后，下一次检查前先等多久。"""
 
     no_action_backoff_cap_seconds: float = Field(
         default=300,
@@ -692,7 +692,7 @@ class ChatConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """连续 no_action 退避秒数上限"""
+    """不回复退避等待的最长时间。"""
 
     no_action_backoff_start_count: int = Field(
         default=2,
@@ -709,7 +709,7 @@ class ChatConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """连续第几次 no_action 后开始退避"""
+    """连续几次不回复后开始放慢检查。"""
 
     no_action_backoff_bypass_pending_count: int = Field(
         default=6,
@@ -726,7 +726,7 @@ class ChatConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """退避期间待处理消息达到该数量时直接绕过退避，0 表示不按消息数绕过"""
+    """等待期间新消息达到多少条就立刻重新处理；0 表示不按条数打断等待。"""
 
     group_chat_prompt: str = Field(
         default=(
@@ -745,7 +745,7 @@ class ChatConfig(ConfigBase):
             "x-icon": "users",
         },
     )
-    """_wrap_群聊通用注意事项"""
+    """_wrap_群聊通用提示词，告诉麦麦群聊中该怎么说话。"""
 
     private_chat_prompts: str = Field(
         default=(
@@ -763,7 +763,7 @@ class ChatConfig(ConfigBase):
             "x-icon": "user",
         },
     )
-    """_wrap_私聊通用注意事项"""
+    """_wrap_私聊通用提示词，告诉麦麦私聊中该怎么说话。"""
 
     chat_prompts: list["ExtraPromptItem"] = Field(
         default_factory=lambda: [],
@@ -777,6 +777,7 @@ class ChatConfig(ConfigBase):
             "x-icon": "list",
         },
     )
+    """给指定群聊或私聊额外补充聊天要求；有特殊群规或语气要求时再加。"""
 
     enable_talk_value_rules: bool = Field(
         default=False,
@@ -790,7 +791,7 @@ class ChatConfig(ConfigBase):
             "x-icon": "settings",
         },
     )
-    """是否启用动态发言频率规则"""
+    """开启后，可以按聊天或时间段单独调整发言频率。"""
 
     talk_value_rules: list[TalkRulesItem] = Field(
         default_factory=lambda: [
@@ -808,7 +809,7 @@ class ChatConfig(ConfigBase):
         },
     )
     """
-    _wrap_思考频率规则列表，支持按聊天流/按日内时段配置。
+    _wrap_动态发言频率规则；可让麦麦在某些群、私聊或时段更活跃或更安静。
     """
 
 
@@ -830,7 +831,43 @@ class ExperimentalConfig(ConfigBase):
             "x-icon": "brain-circuit",
         },
     )
-    """是否启用行为学习；关闭后不再从裁切历史中抽取和写入行为经验。"""
+    """让麦麦从聊天中学习什么时候该怎么回应的经验。"""
+
+    behavior_learning_list: list["LearningItem"] = Field(
+        default_factory=lambda: [
+            LearningItem(
+                platform="",
+                item_id="",
+                type="group",
+                use=True,
+                learn=True,
+            )
+        ],
+        json_schema_extra={
+            "label": {
+                "zh_CN": "行为学习配置",
+                "en_US": "Behavior learning settings",
+                "ja_JP": "行動学習設定",
+            },
+            "x-widget": "custom",
+            "x-icon": "list",
+        },
+    )
+    """配置哪些聊天会学习和使用行为经验；默认规则不够时再单独添加。"""
+
+    behavior_groups: list["ChatStreamGroup"] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "行为互通组",
+                "en_US": "Behavior sharing groups",
+                "ja_JP": "行動共有グループ",
+            },
+            "x-widget": "custom",
+            "x-icon": "users",
+        },
+    )
+    """_wrap_让多个群聊或私聊共享学到的行为经验。"""
 
     enable_replyer_format_output: bool = Field(
         default=False,
@@ -846,8 +883,7 @@ class ExperimentalConfig(ConfigBase):
         },
     )
     """
-    是否允许 replyer 输出 <text>、<at>、<emoji>、<image> 等格式化片段，
-    并在发送前解析为真实消息组件，可能会影响回复表现
+    允许模型输出 @、表情、图片等结构化片段；不熟悉时建议关闭。
     """
 
     focus_mode: bool = Field(
@@ -863,7 +899,7 @@ class ExperimentalConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """开启后仍正常创建聊天流，但同一时间只有一个 Maisaka 处于活跃关注状态，且忽略聊天频率控制"""
+    """让麦麦同一时间只专注一个聊天流，适合直播或高强度聊天场景。"""
 
     focus_on_private: bool = Field(
         default=False,
@@ -878,7 +914,7 @@ class ExperimentalConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """关闭时，Focus 模式只作用于群聊；开启后，群聊和私聊都会进入 Focus。"""
+    """Focus 模式是否也作用于私聊。"""
 
     focus_groups: list["ChatStreamGroup"] = Field(
         default_factory=list,
@@ -893,7 +929,7 @@ class ExperimentalConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """_wrap_Focus 互通组；不配置时所有启用 Focus 的聊天共享一个 Focus；配置后只有同组聊天互通，不同组可同时 Focus。"""
+    """_wrap_把聊天流分组后，同组共享 Focus，不同组互不抢占。"""
 
     focus_cool_time: int = Field(
         default=120,
@@ -912,7 +948,7 @@ class ExperimentalConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """Focus 模式下关注聊天超过该秒数没有进入循环时，会被其他聊天的新消息唤醒一次"""
+    """当前关注的聊天多久没继续处理后，允许被其他聊天唤醒。"""
 
 
 class MessageReceiveConfig(ConfigBase):
@@ -930,8 +966,7 @@ class MessageReceiveConfig(ConfigBase):
         },
     )
     """
-    当消息中图片数量不超过此阈值时，启用图片解析功能，将图片内容解析为文本后再进行处理。
-    当消息中图片数量超过此阈值时，为了避免过度解析导致的性能问题，将跳过图片解析，直接进行处理。
+    单条消息图片数不超过这个值时才识图，避免图片太多拖慢处理。
     """
 
     ban_words: set[str] = Field(
@@ -941,7 +976,7 @@ class MessageReceiveConfig(ConfigBase):
             "x-icon": "ban",
         },
     )
-    """过滤词列表"""
+    """包含这些词的消息会被过滤，不进入麦麦处理。"""
 
     ban_msgs_regex: set[str] = Field(
         default_factory=lambda: set(),
@@ -950,7 +985,7 @@ class MessageReceiveConfig(ConfigBase):
             "x-icon": "regex",
         },
     )
-    """过滤正则表达式列表"""
+    """用正则过滤消息；适合更复杂的过滤规则。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         for pattern in self.ban_msgs_regex:
@@ -974,7 +1009,7 @@ class TargetItem(ConfigBase):
             "x-icon": "wifi",
         },
     )
-    """平台，与ID一起留空表示全局"""
+    """要单独配置的平台；和聊天流 ID 都留空表示默认规则。"""
 
     item_id: str = Field(
         default="",
@@ -3013,7 +3048,7 @@ class LearningItem(ConfigBase):
             "x-icon": "hash",
         },
     )
-    """用户ID，与平台一起留空表示全局"""
+    """要单独配置的群号或用户 ID；留空表示默认规则。"""
 
     type: Literal["group", "private"] = Field(
         default="group",
@@ -3028,7 +3063,7 @@ class LearningItem(ConfigBase):
             "x-option-descriptions": RULE_TYPE_OPTION_DESCRIPTIONS,
         },
     )
-    """聊天流类型，group（群聊）或private（私聊）"""
+    """这条规则作用于群聊还是私聊。"""
 
     use: bool = Field(
         default=True,
@@ -3042,7 +3077,7 @@ class LearningItem(ConfigBase):
             "x-icon": "message-square",
         },
     )
-    """是否使用"""
+    """是否在这个聊天里使用已学到的内容。"""
 
     learn: bool = Field(
         default=True,
@@ -3056,7 +3091,7 @@ class LearningItem(ConfigBase):
             "x-icon": "graduation-cap",
         },
     )
-    """是否学习"""
+    """是否从这个聊天里继续学习新内容。"""
 
 
 class ChatStreamGroup(ConfigBase):
@@ -3074,7 +3109,7 @@ class ChatStreamGroup(ConfigBase):
             "x-icon": "users",
         },
     )
-    """_wrap_互通聊天流"""
+    """_wrap_这个组里的聊天流会共享对应的学习内容。"""
 
 
 ExperimentalConfig.model_rebuild()
@@ -3097,7 +3132,7 @@ class ExpressionConfig(ConfigBase):
             "x-icon": "check",
         },
     )
-    """是否仅选择已由用户人工检查的表达方式"""
+    """只使用人工确认过的表达方式，更稳但学习效果会慢一些。"""
 
     expression_self_reflect: bool = Field(
         default=True,
@@ -3111,7 +3146,7 @@ class ExpressionConfig(ConfigBase):
             "x-icon": "sparkles",
         },
     )
-    """是否在表达学习写入前进行 AI 审核；开启后只有审核通过的表达方式会被写入。"""
+    """写入表达方式前先让 AI 检查，减少学到奇怪内容。"""
 
     enable_precise_expression_selection: bool = Field(
         default=False,
@@ -3126,7 +3161,7 @@ class ExpressionConfig(ConfigBase):
             "advanced": False,
         },
     )
-    """是否启用精细表达选择；开启后 replyer 会使用子代理从候选表达中挑选更贴合当前语境的表达方式。"""
+    """回复前更精细地挑选表达方式，可能更贴切但会增加模型调用。"""
 
     max_expression_learner: int = Field(
         default=3,
@@ -3141,7 +3176,7 @@ class ExpressionConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """所有聊天流合计允许同时运行的表达学习批次数；同一聊天流始终只允许一个批次。"""
+    """同时运行的表达学习任务数量；太高可能占用更多资源。"""
 
     learning_list: list[LearningItem] = Field(
         default_factory=lambda: [
@@ -3163,6 +3198,7 @@ class ExpressionConfig(ConfigBase):
             "x-icon": "list",
         },
     )
+    """配置哪些聊天会学习和使用表达方式；默认规则不够时再单独添加。"""
 
     expression_groups: list[ChatStreamGroup] = Field(
         default_factory=list,
@@ -3176,7 +3212,7 @@ class ExpressionConfig(ConfigBase):
             "x-icon": "users",
         },
     )
-    """_wrap_表达学习互通组"""
+    """_wrap_让多个群聊或私聊共享学到的表达方式。"""
 
 
 class JargonConfig(ConfigBase):
@@ -3205,7 +3241,7 @@ class JargonConfig(ConfigBase):
             "x-icon": "list",
         },
     )
-    """_wrap_黑话学习配置列表，支持按聊天流配置，platform 或 item_id 可使用 * 通配"""
+    """_wrap_配置哪些聊天会学习和使用黑话；默认规则不够时再单独添加。"""
 
     jargon_groups: list[ChatStreamGroup] = Field(
         default_factory=list,
@@ -3219,7 +3255,7 @@ class JargonConfig(ConfigBase):
             "x-icon": "users",
         },
     )
-    """_wrap_黑话学习互通组，默认不互通；platform 或 item_id 可使用 * 通配"""
+    """_wrap_让多个群聊或私聊共享学到的黑话。"""
 
 
 class VoiceConfig(ConfigBase):
@@ -3235,7 +3271,7 @@ class VoiceConfig(ConfigBase):
             "x-icon": "mic",
         },
     )
-    """是否启用语音识别，启用后麦麦可以识别语音消息"""
+    """开启后麦麦可以把语音消息识别成文字再处理。"""
 
 
 class EmojiConfig(ConfigBase):
@@ -3259,7 +3295,7 @@ class EmojiConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """一次从多少个表情包中选择发送，最大为 64"""
+    """每次从多少个候选表情里挑一个发送；不是一次发送这么多。"""
 
     max_reg_num: int = Field(
         default=64,
@@ -3273,7 +3309,7 @@ class EmojiConfig(ConfigBase):
             "x-icon": "hash",
         },
     )
-    """表情包最大注册数量"""
+    """最多保存多少个可用表情。"""
 
     do_replace: bool = Field(
         default=True,
@@ -3288,7 +3324,7 @@ class EmojiConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """达到最大注册数量时替换旧表情包，关闭则达到最大数量时不会继续收集表情包"""
+    """表情满了以后是否用新表情替换旧表情。"""
 
     check_interval: int = Field(
         default=10,
@@ -3302,7 +3338,7 @@ class EmojiConfig(ConfigBase):
             "x-icon": "clock",
         },
     )
-    """表情包检查间隔（分钟）"""
+    """每隔多少分钟检查一次表情库状态。"""
 
     steal_emoji: bool = Field(
         default=True,
@@ -3316,7 +3352,7 @@ class EmojiConfig(ConfigBase):
             "x-icon": "copy",
         },
     )
-    """是否偷取表情包，让麦麦可以将一些表情包据为己有"""
+    """是否从聊天中自动收集别人发的表情。"""
 
     max_emoji_size_mb: float = Field(
         default=5.0,
@@ -3332,7 +3368,7 @@ class EmojiConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """偷取/收集聊天表情包时允许保存的最大文件大小，0 表示不限制"""
+    """收集表情时允许的最大文件大小；0 表示不限。"""
 
     content_filtration: bool = Field(
         default=False,
@@ -3347,7 +3383,7 @@ class EmojiConfig(ConfigBase):
             "x-icon": "filter",
         },
     )
-    """是否启用表情包过滤，只有符合该要求的表情包才会被保存"""
+    """开启后只保存内容合适的表情。"""
 
 
 class KeywordRuleConfig(ConfigBase):
@@ -3360,7 +3396,7 @@ class KeywordRuleConfig(ConfigBase):
             "x-icon": "tag",
         },
     )
-    """关键词列表"""
+    """要匹配的关键词；命中任意一个即可触发。"""
 
     regex: list[str] = Field(
         default_factory=lambda: [],
@@ -3369,7 +3405,7 @@ class KeywordRuleConfig(ConfigBase):
             "x-icon": "regex",
         },
     )
-    """正则表达式列表"""
+    """要匹配的正则表达式；适合复杂文本规则。"""
 
     reaction: str = Field(
         default="",
@@ -3378,7 +3414,7 @@ class KeywordRuleConfig(ConfigBase):
             "x-icon": "message-circle",
         },
     )
-    """关键词触发的反应"""
+    """命中后给麦麦看的提示内容，不会直接当作消息发送。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证配置"""
@@ -3408,7 +3444,7 @@ class KeywordReactionConfig(ConfigBase):
             "x-icon": "list",
         },
     )
-    """关键词规则列表"""
+    """命中关键词后，给麦麦追加一段固定反应提示。"""
 
     regex_rules: list[KeywordRuleConfig] = Field(
         default_factory=lambda: [],
@@ -3417,7 +3453,7 @@ class KeywordReactionConfig(ConfigBase):
             "x-icon": "list",
         },
     )
-    """正则表达式规则列表"""
+    """命中正则规则后，给麦麦追加一段固定反应提示。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证配置"""
@@ -3436,11 +3472,16 @@ class ResponsePostProcessConfig(ConfigBase):
     enable_response_post_process: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用回复后处理",
+                "en_US": "Enable response post-process",
+                "ja_JP": "返信後処理を有効化",
+            },
             "x-widget": "switch",
             "x-icon": "settings",
         },
     )
-    """是否启用回复后处理，包括错别字生成器，回复分割器"""
+    """开启后会对回复做错别字、分段等后处理。"""
 
 
 class ChineseTypoConfig(ConfigBase):
@@ -3451,60 +3492,85 @@ class ChineseTypoConfig(ConfigBase):
     enable: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用错别字",
+                "en_US": "Enable typos",
+                "ja_JP": "誤字生成を有効化",
+            },
             "x-widget": "switch",
             "x-icon": "type",
         },
     )
-    """是否启用中文错别字生成器"""
+    """让麦麦偶尔打错字，更像真人聊天。"""
 
     error_rate: float = Field(
         default=0.01,
         ge=0,
         le=1,
         json_schema_extra={
+            "label": {
+                "zh_CN": "单字错字概率",
+                "en_US": "Single-character typo chance",
+                "ja_JP": "単字誤字確率",
+            },
             "x-widget": "slider",
             "x-icon": "percent",
             "step": 0.01,
             "advanced": True,
         },
     )
-    """单字替换概率"""
+    """单个字被替换成错字的概率。"""
 
     min_freq: int = Field(
         default=9,
         json_schema_extra={
+            "label": {
+                "zh_CN": "最小字频",
+                "en_US": "Minimum character frequency",
+                "ja_JP": "最小文字頻度",
+            },
             "x-widget": "input",
             "x-icon": "hash",
             "advanced": True,
         },
     )
-    """最小字频阈值"""
+    """只对常见程度达到该值的字尝试制造错字。"""
 
     tone_error_rate: float = Field(
         default=0.1,
         ge=0,
         le=1,
         json_schema_extra={
+            "label": {
+                "zh_CN": "声调错字概率",
+                "en_US": "Tone typo chance",
+                "ja_JP": "声調誤字確率",
+            },
             "x-widget": "slider",
             "x-icon": "percent",
             "step": 0.1,
             "advanced": True,
         },
     )
-    """声调错误概率"""
+    """按相近声调制造错字的概率。"""
 
     word_replace_rate: float = Field(
         default=0.006,
         ge=0,
         le=1,
         json_schema_extra={
+            "label": {
+                "zh_CN": "整词替换概率",
+                "en_US": "Word replacement chance",
+                "ja_JP": "単語置換確率",
+            },
             "x-widget": "slider",
             "x-icon": "percent",
             "step": 0.001,
             "advanced": True,
         },
     )
-    """整词替换概率"""
+    """整词被替换成错词的概率。"""
 
 
 class ResponseSplitterConfig(ConfigBase):
@@ -3515,59 +3581,89 @@ class ResponseSplitterConfig(ConfigBase):
     enable: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用回复分割",
+                "en_US": "Enable response splitting",
+                "ja_JP": "返信分割を有効化",
+            },
             "x-widget": "switch",
             "x-icon": "scissors",
         },
     )
-    """是否启用回复分割器"""
+    """把过长回复拆成多条发送。"""
 
     max_length: int = Field(
         default=512,
         json_schema_extra={
+            "label": {
+                "zh_CN": "单条最大长度",
+                "en_US": "Max message length",
+                "ja_JP": "1通の最大長",
+            },
             "x-widget": "input",
             "x-icon": "ruler",
         },
     )
-    """回复允许的最大长度"""
+    """单条回复允许的最大长度。"""
 
     max_sentence_num: int = Field(
         default=8,
         json_schema_extra={
+            "label": {
+                "zh_CN": "单条最大句数",
+                "en_US": "Max sentences per message",
+                "ja_JP": "1通の最大文数",
+            },
             "x-widget": "input",
             "x-icon": "hash",
         },
     )
-    """回复允许的最大句子数"""
+    """单条回复最多包含多少个句子。"""
 
     max_split_num: int = Field(
         default=3,
         ge=1,
         json_schema_extra={
+            "label": {
+                "zh_CN": "最多分割条数",
+                "en_US": "Max split messages",
+                "ja_JP": "最大分割数",
+            },
             "x-widget": "input",
             "x-icon": "list",
         },
     )
-    """回复最多分割条数"""
+    """一次回复最多拆成几条消息。"""
 
     enable_kaomoji_protection: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "保护颜文字",
+                "en_US": "Protect kaomoji",
+                "ja_JP": "顔文字を保護",
+            },
             "x-widget": "switch",
             "x-icon": "smile",
             "advanced": True,
         },
     )
-    """是否启用颜文字保护"""
+    """尽量避免把颜文字从中间拆开。"""
 
     enable_overflow_return_all: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "超限保留全文",
+                "en_US": "Keep full text on overflow",
+                "ja_JP": "超過時に全文保持",
+            },
             "x-widget": "switch",
             "x-icon": "maximize",
             "advanced": True,
         },
     )
-    """是否在句子数量超出回复允许的最大句子数时一次性返回全部内容"""
+    """句子太多时是否直接保留完整回复，不再强行截断。"""
 
 
 class LogConfig(ConfigBase):
@@ -3579,110 +3675,170 @@ class LogConfig(ConfigBase):
     date_style: str = Field(
         default="m-d H:i:s",
         json_schema_extra={
+            "label": {
+                "zh_CN": "日期格式",
+                "en_US": "Date format",
+                "ja_JP": "日付形式",
+            },
             "x-widget": "input",
             "x-icon": "clock",
         },
     )
-    """日期格式"""
+    """日志时间的显示格式。"""
 
     log_level_style: Literal["lite", "compact", "full"] = Field(
         default="lite",
         json_schema_extra={
+            "label": {
+                "zh_CN": "日志等级样式",
+                "en_US": "Log level style",
+                "ja_JP": "ログレベル表示",
+            },
             "x-widget": "select",
             "x-icon": "list",
         },
     )
-    """日志等级显示样式"""
+    """日志等级的显示样式，只影响日志外观。"""
 
     color_text: Literal["none", "title", "full"] = Field(
         default="full",
         json_schema_extra={
+            "label": {
+                "zh_CN": "控制台颜色",
+                "en_US": "Console color",
+                "ja_JP": "コンソール色",
+            },
             "x-widget": "select",
             "x-icon": "palette",
         },
     )
-    """控制台日志颜色模式"""
+    """控制台日志颜色范围。"""
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
         json_schema_extra={
+            "label": {
+                "zh_CN": "全局日志级别",
+                "en_US": "Global log level",
+                "ja_JP": "全体ログレベル",
+            },
             "x-widget": "select",
             "x-icon": "list-filter",
         },
     )
-    """全局日志级别"""
+    """全局最低日志等级；DEBUG 最详细，ERROR 最安静。"""
 
     console_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
         json_schema_extra={
+            "label": {
+                "zh_CN": "控制台日志级别",
+                "en_US": "Console log level",
+                "ja_JP": "コンソールログレベル",
+            },
             "x-widget": "select",
             "x-icon": "terminal",
         },
     )
-    """控制台日志级别"""
+    """控制台输出的最低日志等级。"""
 
     file_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="DEBUG",
         json_schema_extra={
+            "label": {
+                "zh_CN": "文件日志级别",
+                "en_US": "File log level",
+                "ja_JP": "ファイルログレベル",
+            },
             "x-widget": "select",
             "x-icon": "file-json",
         },
     )
-    """文件日志级别"""
+    """写入日志文件的最低日志等级。"""
 
     log_file_max_bytes: int = Field(
         default=5 * 1024 * 1024,
         json_schema_extra={
+            "label": {
+                "zh_CN": "单个日志大小",
+                "en_US": "Single log file size",
+                "ja_JP": "単一ログサイズ",
+            },
             "x-widget": "input",
             "x-icon": "hard-drive",
         },
     )
-    """单个日志文件最大字节数"""
+    """单个日志文件超过这个大小后会轮转。"""
 
     max_log_files: int = Field(
         default=30,
         json_schema_extra={
+            "label": {
+                "zh_CN": "日志文件保留数",
+                "en_US": "Retained log files",
+                "ja_JP": "保持ログ数",
+            },
             "x-widget": "input",
             "x-icon": "files",
         },
     )
-    """最多保留的主日志文件数量"""
+    """最多保留多少个主日志文件。"""
 
     log_cleanup_days: int = Field(
         default=30,
         json_schema_extra={
+            "label": {
+                "zh_CN": "日志保留天数",
+                "en_US": "Log retention days",
+                "ja_JP": "ログ保持日数",
+            },
             "x-widget": "input",
             "x-icon": "calendar-days",
         },
     )
-    """主日志文件保留天数"""
+    """主日志文件超过多少天后清理。"""
 
     llm_request_snapshot_limit: int = Field(
         default=128,
         json_schema_extra={
+            "label": {
+                "zh_CN": "请求快照保留数",
+                "en_US": "Request snapshot limit",
+                "ja_JP": "リクエストスナップショット数",
+            },
             "x-widget": "input",
             "x-icon": "archive",
         },
     )
-    """失败请求快照最多保留数量"""
+    """失败模型请求快照最多保留多少份。"""
 
     maisaka_prompt_preview_limit: int = Field(
         default=256,
         json_schema_extra={
+            "label": {
+                "zh_CN": "Prompt 预览保留数",
+                "en_US": "Prompt preview limit",
+                "ja_JP": "Prompt プレビュー保持数",
+            },
             "x-widget": "input",
             "x-icon": "panel-top",
         },
     )
-    """每个会话最多保留的 Maisaka Prompt 预览组数"""
+    """每个聊天最多保留多少组 Prompt 预览。"""
 
     maisaka_reply_effect_limit: int = Field(
         default=256,
         json_schema_extra={
+            "label": {
+                "zh_CN": "回复效果记录数",
+                "en_US": "Reply effect record limit",
+                "ja_JP": "返信効果記録数",
+            },
             "x-widget": "input",
             "x-icon": "clipboard-check",
         },
     )
-    """每个会话最多保留的 Maisaka 回复效果记录数"""
+    """每个聊天最多保留多少条回复效果记录。"""
 
     suppress_libraries: list[str] = Field(
         default_factory=lambda: [
@@ -3699,22 +3855,32 @@ class LogConfig(ConfigBase):
             "jieba",
         ],
         json_schema_extra={
+            "label": {
+                "zh_CN": "屏蔽库日志",
+                "en_US": "Suppressed library logs",
+                "ja_JP": "抑制ライブラリログ",
+            },
             "x-widget": "custom",
             "x-icon": "volume-x",
             "advanced": True,
         },
     )
-    """完全屏蔽日志的第三方库列表"""
+    """完全不显示日志的第三方库名称列表。"""
 
     library_log_levels: dict[str, str] = Field(
         default_factory=lambda: {"aiohttp": "WARNING", "PIL": "WARNING"},
         json_schema_extra={
+            "label": {
+                "zh_CN": "库日志级别",
+                "en_US": "Library log levels",
+                "ja_JP": "ライブラリログレベル",
+            },
             "x-widget": "custom",
             "x-icon": "sliders-horizontal",
             "advanced": True,
         },
     )
-    """特定第三方库的日志级别"""
+    """单独设置某些第三方库的日志等级。"""
 
 
 class TelemetryConfig(ConfigBase):
@@ -3725,11 +3891,16 @@ class TelemetryConfig(ConfigBase):
     enable: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用遥测",
+                "en_US": "Enable telemetry",
+                "ja_JP": "テレメトリを有効化",
+            },
             "x-widget": "switch",
             "x-icon": "activity",
         },
     )
-    """是否启用遥测"""
+    """是否发送匿名运行统计；关闭不影响正常使用。"""
 
 
 class DebugConfig(ConfigBase):
@@ -3741,83 +3912,128 @@ class DebugConfig(ConfigBase):
     show_maisaka_thinking: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "显示思考过程",
+                "en_US": "Show thinking process",
+                "ja_JP": "思考過程を表示",
+            },
             "x-widget": "switch",
             "x-icon": "brain",
         },
     )
-    """是否显示回复器推理"""
+    """在日志或界面中显示麦麦的思考过程。"""
 
     show_jargon_prompt: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "显示黑话 Prompt",
+                "en_US": "Show jargon prompt",
+                "ja_JP": "隠語 Prompt を表示",
+            },
             "x-widget": "switch",
             "x-icon": "book",
         },
     )
-    """是否显示jargon相关提示词"""
+    """调试黑话学习时显示相关 Prompt。"""
 
     show_memory_prompt: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "显示记忆 Prompt",
+                "en_US": "Show memory prompt",
+                "ja_JP": "記憶 Prompt を表示",
+            },
             "x-widget": "switch",
             "x-icon": "database",
         },
     )
-    """是否显示记忆检索相关prompt"""
+    """调试记忆检索时显示相关 Prompt。"""
 
     enable_reply_effect_tracking: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "记录回复效果",
+                "en_US": "Track reply effects",
+                "ja_JP": "返信効果を記録",
+            },
             "x-widget": "switch",
             "x-icon": "activity",
         },
     )
-    """是否开启回复效果评分追踪，默认关闭，需要手动打开"""
+    """记录回复效果评分，方便观察回复质量。"""
 
     record_reply_request: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "记录 Replyer 请求",
+                "en_US": "Record Replyer request",
+                "ja_JP": "Replyer リクエスト記録",
+            },
             "x-widget": "switch",
             "x-icon": "file-json",
         },
     )
-    """是否记录 Replyer 请求体，默认关闭"""
+    """保存 Replyer 的请求内容，方便排查回复问题。"""
 
     record_planner_request: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "记录 Planner 请求",
+                "en_US": "Record Planner request",
+                "ja_JP": "Planner リクエスト記録",
+            },
             "x-widget": "switch",
             "x-icon": "file-json",
         },
     )
-    """是否记录 Planner 完整请求体和完整回复体，默认关闭"""
+    """保存 Planner 的完整请求和回复，日志体积会变大。"""
 
     keep_prompt_preview_json_base64: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "保留预览图片数据",
+                "en_US": "Keep preview image data",
+                "ja_JP": "プレビュー画像データを保持",
+            },
             "x-widget": "switch",
             "x-icon": "image",
         },
     )
-    """是否在 Prompt 预览 JSON 中保留内联 base64 图片，默认关闭以减少日志体积"""
+    """Prompt 预览里保留图片 base64，便于复现但会占空间。"""
 
     record_tool_structured_content: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "记录工具结构化内容",
+                "en_US": "Record tool structured content",
+                "ja_JP": "ツール構造化内容を記録",
+            },
             "x-widget": "switch",
             "x-icon": "braces",
         },
     )
-    """是否在工具调用记录中保存 structured_content，默认关闭以减少数据库体积"""
+    """保存工具返回的结构化内容，便于调试但会增加数据库体积。"""
 
     enable_llm_cache_stats: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "记录模型缓存统计",
+                "en_US": "Record model cache stats",
+                "ja_JP": "モデルキャッシュ統計を記録",
+            },
             "x-widget": "switch",
             "x-icon": "chart-no-axes-column",
         },
     )
-    """是否记录 LLM prompt cache 调试统计，默认关闭"""
+    """记录模型 prompt cache 统计，用于性能调试。"""
 
 
 class ExtraPromptItem(ConfigBase):
@@ -3828,7 +4044,7 @@ class ExtraPromptItem(ConfigBase):
             "x-icon": "wifi",
         },
     )
-    """平台，留空无效"""
+    """额外提示作用的平台，和聊天流 ID、提示内容需要一起填写。"""
 
     item_id: str = Field(
         default="",
@@ -3837,7 +4053,7 @@ class ExtraPromptItem(ConfigBase):
             "x-icon": "hash",
         },
     )
-    """用户ID，留空无效"""
+    """额外提示作用的群号或用户 ID。"""
 
     rule_type: Literal["group", "private"] = Field(
         default="group",
@@ -3847,7 +4063,7 @@ class ExtraPromptItem(ConfigBase):
             "x-option-descriptions": RULE_TYPE_OPTION_DESCRIPTIONS,
         },
     )
-    """聊天流类型，group（群聊）或private（私聊）"""
+    """额外提示作用于群聊还是私聊。"""
 
     prompt: str = Field(
         default="",
@@ -3856,7 +4072,7 @@ class ExtraPromptItem(ConfigBase):
             "x-icon": "file-text",
         },
     )
-    """额外的prompt内容"""
+    """给这个聊天额外补充的要求。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         if not self.platform and not self.item_id and not self.prompt:
@@ -3874,92 +4090,142 @@ class MaimMessageConfig(ConfigBase):
     ws_server_host: str = Field(
         default="127.0.0.1",
         json_schema_extra={
+            "label": {
+                "zh_CN": "旧版 WS 主机",
+                "en_US": "Legacy WS host",
+                "ja_JP": "旧 WS ホスト",
+            },
             "x-widget": "input",
             "x-icon": "server",
         },
     )
-    """旧版基于WS的服务器主机地址"""
+    """旧版 WebSocket 服务监听地址；不清楚就保持默认。"""
 
     ws_server_port: int = Field(
         default=8000,
         json_schema_extra={
+            "label": {
+                "zh_CN": "旧版 WS 端口",
+                "en_US": "Legacy WS port",
+                "ja_JP": "旧 WS ポート",
+            },
             "x-widget": "input",
             "x-icon": "hash",
         },
     )
-    """旧版基于WS的服务器端口号"""
+    """旧版 WebSocket 服务端口。"""
 
     auth_token: list[str] = Field(
         default_factory=lambda: [],
         json_schema_extra={
+            "label": {
+                "zh_CN": "旧版认证令牌",
+                "en_US": "Legacy auth tokens",
+                "ja_JP": "旧認証トークン",
+            },
             "x-widget": "custom",
             "x-icon": "key",
         },
     )
-    """认证令牌，用于旧版API验证，为空则不启用验证"""
+    """旧版 API 的认证令牌；为空表示不验证。"""
 
     enable_api_server: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用新版 API",
+                "en_US": "Enable new API",
+                "ja_JP": "新 API を有効化",
+            },
             "x-widget": "switch",
             "x-icon": "server",
         },
     )
-    """是否启用额外的新版API Server"""
+    """是否开启新版 API Server，供外部程序调用麦麦。"""
 
     api_server_host: str = Field(
         default="0.0.0.0",
         json_schema_extra={
+            "label": {
+                "zh_CN": "新版 API 主机",
+                "en_US": "New API host",
+                "ja_JP": "新 API ホスト",
+            },
             "x-widget": "input",
             "x-icon": "globe",
         },
     )
-    """新版API Server主机地址"""
+    """新版 API Server 监听地址；0.0.0.0 表示允许外部访问。"""
 
     api_server_port: int = Field(
         default=8090,
         json_schema_extra={
+            "label": {
+                "zh_CN": "新版 API 端口",
+                "en_US": "New API port",
+                "ja_JP": "新 API ポート",
+            },
             "x-widget": "input",
             "x-icon": "hash",
         },
     )
-    """新版API Server端口号"""
+    """新版 API Server 监听端口。"""
 
     api_server_use_wss: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "新版 API 使用 WSS",
+                "en_US": "Use WSS for new API",
+                "ja_JP": "新 API で WSS を使用",
+            },
             "x-widget": "switch",
             "x-icon": "lock",
         },
     )
-    """新版API Server是否启用WSS"""
+    """新版 API Server 是否使用加密 WebSocket。"""
 
     api_server_cert_file: str = Field(
         default="",
         json_schema_extra={
+            "label": {
+                "zh_CN": "WSS 证书文件",
+                "en_US": "WSS certificate file",
+                "ja_JP": "WSS 証明書ファイル",
+            },
             "x-widget": "input",
             "x-icon": "file",
         },
     )
-    """新版API Server SSL证书文件路径"""
+    """WSS 使用的证书文件路径。"""
 
     api_server_key_file: str = Field(
         default="",
         json_schema_extra={
+            "label": {
+                "zh_CN": "WSS 私钥文件",
+                "en_US": "WSS key file",
+                "ja_JP": "WSS 秘密鍵ファイル",
+            },
             "x-widget": "input",
             "x-icon": "key",
         },
     )
-    """新版API Server SSL密钥文件路径"""
+    """WSS 使用的私钥文件路径。"""
 
     api_server_allowed_api_keys: list[str] = Field(
         default_factory=lambda: [],
         json_schema_extra={
+            "label": {
+                "zh_CN": "新版 API Key 白名单",
+                "en_US": "New API key allowlist",
+                "ja_JP": "新 API Key 許可リスト",
+            },
             "x-widget": "custom",
             "x-icon": "shield",
         },
     )
-    """新版API Server允许的API Key列表，为空则允许所有连接"""
+    """允许访问新版 API 的 Key 列表；为空表示不限制。"""
 
 
 class LPMMKnowledgeConfig(ConfigBase):
@@ -3992,7 +4258,7 @@ class LPMMKnowledgeConfig(ConfigBase):
             "x-icon": "hash",
         },
     )
-    """同义检索TopK"""
+    """同义词检索时最多取多少个候选。"""
 
     rag_synonym_threshold: float = Field(
         default=0.8,
@@ -4022,7 +4288,7 @@ class LPMMKnowledgeConfig(ConfigBase):
             "x-icon": "hash",
         },
     )
-    """关系检索TopK"""
+    """问答检索关系时最多取多少个候选。"""
 
     qa_relation_threshold: float = Field(
         default=0.75,
@@ -4062,7 +4328,7 @@ class LPMMKnowledgeConfig(ConfigBase):
             "x-icon": "hash",
         },
     )
-    """实体过滤TopK"""
+    """实体过滤时最多保留多少个候选。"""
 
     qa_ppr_damping: float = Field(
         default=0.8,
@@ -4074,7 +4340,7 @@ class LPMMKnowledgeConfig(ConfigBase):
             "step": 0.1,
         },
     )
-    """PPR阻尼系数"""
+    """PPR 图搜索的扩散强度；不熟悉就保持默认。"""
 
     qa_res_top_k: int = Field(
         default=10,
@@ -4110,7 +4376,7 @@ class LPMMKnowledgeConfig(ConfigBase):
             "x-icon": "hash",
         },
     )
-    """每批嵌入的条数"""
+    """每次向嵌入模型提交多少条文本。"""
 
     max_synonym_entities: int = Field(
         default=2000,
@@ -4140,96 +4406,146 @@ class WebUIConfig(ConfigBase):
     enabled: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用 WebUI",
+                "en_US": "Enable WebUI",
+                "ja_JP": "WebUI を有効化",
+            },
             "x-widget": "switch",
             "x-icon": "monitor",
         },
     )
-    """是否启用WebUI"""
+    """是否启动 WebUI 管理界面。"""
 
     host: str = Field(
         default="127.0.0.1",
         json_schema_extra={
+            "label": {
+                "zh_CN": "WebUI 主机",
+                "en_US": "WebUI host",
+                "ja_JP": "WebUI ホスト",
+            },
             "x-widget": "input",
             "x-icon": "globe",
         },
     )
-    """WebUI 绑定主机地址"""
+    """WebUI 监听地址；本机使用通常填 127.0.0.1。"""
 
     port: int = Field(
         default=8001,
         json_schema_extra={
+            "label": {
+                "zh_CN": "WebUI 端口",
+                "en_US": "WebUI port",
+                "ja_JP": "WebUI ポート",
+            },
             "x-widget": "input",
             "x-icon": "hash",
         },
     )
-    """WebUI 绑定端口"""
+    """WebUI 访问端口。"""
 
     mode: Literal["development", "production"] = Field(
         default="production",
         json_schema_extra={
+            "label": {
+                "zh_CN": "运行模式",
+                "en_US": "Run mode",
+                "ja_JP": "実行モード",
+            },
             "x-widget": "select",
             "x-icon": "settings",
         },
     )
-    """运行模式：development(开发) 或 production(生产)"""
+    """WebUI 运行模式；普通使用保持 production。"""
 
     webui_style: int = Field(
         default=1,
         ge=0,
         le=1,
         json_schema_extra={
+            "label": {
+                "zh_CN": "界面风格",
+                "en_US": "Interface style",
+                "ja_JP": "画面スタイル",
+            },
             "x-widget": "number",
             "x-icon": "palette",
             "x-layout": "inline-right",
             "x-input-width": "8rem",
         },
     )
-    """WebUI界面风格：0为当前风格，1为未来复古"""
+    """界面风格编号；0 为旧风格，1 为未来复古风格。"""
 
     anti_crawler_mode: Literal["false", "strict", "loose", "basic"] = Field(
         default="basic",
         json_schema_extra={
+            "label": {
+                "zh_CN": "防爬虫模式",
+                "en_US": "Anti-crawler mode",
+                "ja_JP": "クローラー対策モード",
+            },
             "x-widget": "select",
             "x-icon": "shield",
         },
     )
-    """防爬虫模式：false(禁用) / strict(严格) / loose(宽松) / basic(基础-只记录不阻止)"""
+    """防爬虫策略；basic 只记录，strict/loose 会拦截更多请求。"""
 
     allowed_ips: str = Field(
         default="127.0.0.1",
         json_schema_extra={
+            "label": {
+                "zh_CN": "允许访问 IP",
+                "en_US": "Allowed IPs",
+                "ja_JP": "許可 IP",
+            },
             "x-widget": "input",
             "x-icon": "network",
         },
     )
-    """IP白名单（逗号分隔，支持精确IP、CIDR格式和通配符）"""
+    """允许访问 WebUI 的 IP，多个用逗号分隔。"""
 
     trusted_proxies: str = Field(
         default="",
         json_schema_extra={
+            "label": {
+                "zh_CN": "可信代理 IP",
+                "en_US": "Trusted proxy IPs",
+                "ja_JP": "信頼プロキシ IP",
+            },
             "x-widget": "input",
             "x-icon": "server",
         },
     )
-    """信任的代理IP列表（逗号分隔），只有来自这些IP的X-Forwarded-For才被信任"""
+    """可信反向代理 IP；只有这些代理传来的真实 IP 会被信任。"""
 
     trust_xff: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "信任 XFF",
+                "en_US": "Trust XFF",
+                "ja_JP": "XFF を信頼",
+            },
             "x-widget": "switch",
             "x-icon": "shield-check",
         },
     )
-    """是否启用X-Forwarded-For代理解析（默认false）"""
+    """是否信任 X-Forwarded-For 里的真实访客 IP。"""
 
     secure_cookie: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "安全 Cookie",
+                "en_US": "Secure cookie",
+                "ja_JP": "セキュア Cookie",
+            },
             "x-widget": "switch",
             "x-icon": "cookie",
         },
     )
-    """是否启用安全Cookie（仅通过HTTPS传输，默认false）"""
+    """只在 HTTPS 下发送登录 Cookie；没有 HTTPS 时不要开启。"""
 
     enforce_public_outbound_url: bool = Field(
         default=True,
@@ -4244,16 +4560,21 @@ class WebUIConfig(ConfigBase):
             "advanced": False,
         },
     )
-    """是否要求 WebUI 出站 URL 解析到公网地址；关闭后允许内网、本机或 TUN 代理地址，用于内网 LLM、反向代理等场景。"""
+    """限制 WebUI 访问外部 URL，降低访问内网地址的风险。"""
 
     enable_paragraph_content: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "加载段落全文",
+                "en_US": "Load full paragraph content",
+                "ja_JP": "段落全文を読み込む",
+            },
             "x-widget": "switch",
             "x-icon": "file-text",
         },
     )
-    """是否在知识图谱中加载段落完整内容（需要加载embedding store，会占用额外内存）"""
+    """知识图谱里是否加载段落全文；更完整但更占内存。"""
 
 
 class DatabaseConfig(ConfigBase):
@@ -4264,16 +4585,18 @@ class DatabaseConfig(ConfigBase):
     save_binary_data: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "保存二进制原文件",
+                "en_US": "Save binary source files",
+                "ja_JP": "バイナリ原本を保存",
+            },
             "x-widget": "switch",
             "x-icon": "save",
             "advanced": True,
         },
     )
     """
-    是否将消息中的二进制数据保存为独立文件
-    若启用，消息中的语音等二进制数据将会保存为独立文件，并在消息中以特殊标记替代。启用会导致数据文件夹体积增大，但可以实现二次识别等功能。
-    若禁用，则消息中的二进制将会在识别后删除，并在消息中使用识别结果替代，无法二次识别
-    该配置项仅影响新存储的消息，已有消息不会受到影响
+    是否保存语音等二进制原文件；更占空间，但方便以后重新识别。
     """
 
 
@@ -4287,7 +4610,7 @@ class MCPAuthorizationConfig(ConfigBase):
             "x-icon": "shield",
         },
     )
-    """认证模式，当前支持无认证和静态 Bearer Token"""
+    """MCP HTTP 认证方式；none 表示不认证。"""
 
     bearer_token: str = Field(
         default="",
@@ -4296,7 +4619,7 @@ class MCPAuthorizationConfig(ConfigBase):
             "x-icon": "key",
         },
     )
-    """静态 Bearer Token，仅在 `mode=\"bearer\"` 时使用"""
+    """Bearer 认证令牌，只在 mode 为 bearer 时使用。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证 MCP 认证配置。
@@ -4323,7 +4646,7 @@ class MCPRootItemConfig(ConfigBase):
             "x-icon": "power",
         },
     )
-    """是否启用当前 Root"""
+    """是否启用这个 Root。"""
 
     uri: str = Field(
         default="",
@@ -4332,7 +4655,7 @@ class MCPRootItemConfig(ConfigBase):
             "x-icon": "folder",
         },
     )
-    """Root URI，通常为 `file://` 路径 URI"""
+    """Root 的 URI，文件夹一般写 file:/// 开头的路径。"""
 
     name: str = Field(
         default="",
@@ -4341,7 +4664,7 @@ class MCPRootItemConfig(ConfigBase):
             "x-icon": "tag",
         },
     )
-    """Root 的显示名称"""
+    """这个 Root 在 MCP 里的显示名称。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证单个 Root 配置。
@@ -4368,7 +4691,7 @@ class MCPRootsConfig(ConfigBase):
             "x-icon": "folder-tree",
         },
     )
-    """是否向 MCP 服务器暴露 Roots 能力"""
+    """是否向 MCP 服务器暴露 Roots 能力。"""
 
     items: list[MCPRootItemConfig] = Field(
         default_factory=lambda: [],
@@ -4377,7 +4700,7 @@ class MCPRootsConfig(ConfigBase):
             "x-icon": "folder",
         },
     )
-    """Roots 列表"""
+    """允许 MCP 服务器看到的目录或资源列表。"""
 
 
 class MCPSamplingConfig(ConfigBase):
@@ -4390,7 +4713,7 @@ class MCPSamplingConfig(ConfigBase):
             "x-icon": "brain",
         },
     )
-    """是否启用 Sampling 能力声明"""
+    """是否声明支持 MCP Sampling。"""
 
     task_name: str = Field(
         default="planner",
@@ -4399,7 +4722,7 @@ class MCPSamplingConfig(ConfigBase):
             "x-icon": "sparkles",
         },
     )
-    """执行 Sampling 请求时使用的主程序模型任务名"""
+    """MCP Sampling 调用模型时使用的任务名。"""
 
     include_context_support: bool = Field(
         default=False,
@@ -4408,7 +4731,7 @@ class MCPSamplingConfig(ConfigBase):
             "x-icon": "layers",
         },
     )
-    """是否声明支持 `includeContext` 非 `none` 语义"""
+    """是否允许 Sampling 请求带上下文。"""
 
     tool_support: bool = Field(
         default=False,
@@ -4417,7 +4740,7 @@ class MCPSamplingConfig(ConfigBase):
             "x-icon": "wrench",
         },
     )
-    """是否声明支持在 Sampling 中继续使用工具"""
+    """Sampling 过程中是否允许继续使用工具。"""
 
 
 class MCPElicitationConfig(ConfigBase):
@@ -4430,7 +4753,7 @@ class MCPElicitationConfig(ConfigBase):
             "x-icon": "message-circle-question",
         },
     )
-    """是否启用 Elicitation 能力声明"""
+    """是否声明支持 MCP Elicitation。"""
 
     allow_form: bool = Field(
         default=True,
@@ -4439,7 +4762,7 @@ class MCPElicitationConfig(ConfigBase):
             "x-icon": "form-input",
         },
     )
-    """是否允许表单模式 Elicitation"""
+    """是否允许 MCP 服务器请求填写表单。"""
 
     allow_url: bool = Field(
         default=False,
@@ -4448,7 +4771,7 @@ class MCPElicitationConfig(ConfigBase):
             "x-icon": "link",
         },
     )
-    """是否允许 URL 模式 Elicitation"""
+    """是否允许 MCP 服务器请求打开 URL。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证 Elicitation 配置。
@@ -4475,7 +4798,7 @@ class MCPClientConfig(ConfigBase):
             "x-icon": "bot",
         },
     )
-    """MCP 客户端实现名称"""
+    """对 MCP 服务器展示的客户端名称。"""
 
     client_version: str = Field(
         default="1.0.0",
@@ -4484,16 +4807,16 @@ class MCPClientConfig(ConfigBase):
             "x-icon": "info",
         },
     )
-    """MCP 客户端实现版本"""
+    """对 MCP 服务器展示的客户端版本。"""
 
     roots: MCPRootsConfig = Field(default_factory=MCPRootsConfig)
-    """Roots 能力配置"""
+    """是否向 MCP 服务器提供可访问的文件根目录。"""
 
     sampling: MCPSamplingConfig = Field(default_factory=MCPSamplingConfig)
-    """Sampling 能力配置"""
+    """是否允许 MCP 服务器请求麦麦调用模型。"""
 
     elicitation: MCPElicitationConfig = Field(default_factory=MCPElicitationConfig)
-    """Elicitation 能力配置"""
+    """是否允许 MCP 服务器向麦麦请求补充信息。"""
 
 
 class MCPServerItemConfig(ConfigBase):
@@ -4506,7 +4829,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "tag",
         },
     )
-    """服务器名称，必须唯一"""
+    """MCP 服务器名称，必须唯一。"""
 
     enabled: bool = Field(
         default=True,
@@ -4515,7 +4838,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "power",
         },
     )
-    """是否启用当前 MCP 服务器"""
+    """是否启用这个 MCP 服务器。"""
 
     transport: Literal["stdio", "streamable_http", "sse"] = Field(
         default="stdio",
@@ -4524,7 +4847,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "shuffle",
         },
     )
-    """传输方式，可选 `stdio`、`streamable_http` 或 `sse`"""
+    """连接方式；本地命令通常用 stdio，远程服务用 HTTP/SSE。"""
 
     command: str = Field(
         default="",
@@ -4533,7 +4856,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "terminal",
         },
     )
-    """stdio 模式下启动服务器的命令"""
+    """stdio 模式下启动服务器的命令。"""
 
     args: list[str] = Field(
         default_factory=lambda: [],
@@ -4542,7 +4865,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "list",
         },
     )
-    """stdio 模式下的命令参数列表"""
+    """stdio 模式下传给命令的参数。"""
 
     env: dict[str, str] = Field(
         default_factory=lambda: {},
@@ -4551,7 +4874,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "variable",
         },
     )
-    """stdio 模式下附加的环境变量"""
+    """stdio 模式下额外传入的环境变量。"""
 
     url: str = Field(
         default="",
@@ -4560,7 +4883,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "link",
         },
     )
-    """`streamable_http` 模式下的 MCP 端点地址"""
+    """HTTP 或 SSE 模式下的服务器地址。"""
 
     headers: dict[str, str] = Field(
         default_factory=lambda: {},
@@ -4569,7 +4892,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "file-json",
         },
     )
-    """HTTP 模式下附加的请求头"""
+    """HTTP/SSE 请求时附加的请求头。"""
 
     http_timeout_seconds: float = Field(
         default=30.0,
@@ -4579,7 +4902,7 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "clock-3",
         },
     )
-    """HTTP 请求超时时间，单位秒"""
+    """HTTP 请求多久没响应就算超时。"""
 
     read_timeout_seconds: float = Field(
         default=300.0,
@@ -4589,10 +4912,10 @@ class MCPServerItemConfig(ConfigBase):
             "x-icon": "timer",
         },
     )
-    """会话读取超时时间，单位秒"""
+    """连接建立后，等服务器消息的最长时间。"""
 
     authorization: MCPAuthorizationConfig = Field(default_factory=MCPAuthorizationConfig)
-    """HTTP 认证配置"""
+    """HTTP/SSE 连接的认证设置。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证 MCP 服务器配置。
@@ -4631,10 +4954,10 @@ class MCPConfig(ConfigBase):
             "x-icon": "zap",
         },
     )
-    """是否启用 MCP（Model Context Protocol）"""
+    """是否启用 MCP 工具接入能力。"""
 
     client: MCPClientConfig = Field(default_factory=MCPClientConfig)
-    """MCP 客户端宿主能力配置"""
+    """麦麦作为 MCP 客户端时声明的能力。"""
 
     servers: list[MCPServerItemConfig] = Field(
         default_factory=lambda: [],
@@ -4643,7 +4966,7 @@ class MCPConfig(ConfigBase):
             "x-icon": "server",
         },
     )
-    """_wrap_MCP 服务器配置列表"""
+    """_wrap_要连接的 MCP 服务器列表。"""
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证 MCP 总配置。
@@ -4679,7 +5002,7 @@ class PluginConfig(ConfigBase):
             "x-icon": "shield-check",
         },
     )
-    """允许使用内置插件管理命令的用户 ID 列表，格式为 platform:id，例如 qq:123456789"""
+    """允许用聊天命令管理插件的用户，格式如 qq:123456789。"""
 
 
 class PluginRuntimeRenderConfig(ConfigBase):
@@ -4688,47 +5011,72 @@ class PluginRuntimeRenderConfig(ConfigBase):
     enabled: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用浏览器渲染",
+                "en_US": "Enable browser rendering",
+                "ja_JP": "ブラウザ描画を有効化",
+            },
             "x-widget": "switch",
             "x-icon": "image",
         },
     )
-    """是否启用插件运行时浏览器渲染能力"""
+    """是否允许插件使用浏览器渲染能力。"""
 
     browser_ws_endpoint: str = Field(
         default="",
         json_schema_extra={
+            "label": {
+                "zh_CN": "浏览器调试地址",
+                "en_US": "Browser debug endpoint",
+                "ja_JP": "ブラウザデバッグアドレス",
+            },
             "x-widget": "input",
             "x-icon": "link",
         },
     )
-    """优先复用的现有 Chromium CDP 地址，可填写 ws/http 端点"""
+    """已有 Chrome/Chromium 的调试地址；留空则自动启动。"""
 
     executable_path: str = Field(
         default="",
         json_schema_extra={
+            "label": {
+                "zh_CN": "浏览器程序路径",
+                "en_US": "Browser executable path",
+                "ja_JP": "ブラウザ実行ファイルパス",
+            },
             "x-widget": "input",
             "x-icon": "folder",
         },
     )
-    """浏览器可执行文件路径，留空时自动探测本机 Chrome/Chromium"""
+    """浏览器程序路径；留空自动查找。"""
 
     browser_install_root: str = Field(
         default="data/playwright-browsers",
         json_schema_extra={
+            "label": {
+                "zh_CN": "浏览器安装目录",
+                "en_US": "Browser install directory",
+                "ja_JP": "ブラウザインストール先",
+            },
             "x-widget": "input",
             "x-icon": "hard-drive",
         },
     )
-    """Playwright 托管浏览器目录，自动下载 Chromium 时会复用该目录"""
+    """自动下载浏览器时保存的位置。"""
 
     headless: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "无界面运行",
+                "en_US": "Run headless",
+                "ja_JP": "画面なしで実行",
+            },
             "x-widget": "switch",
             "x-icon": "monitor",
         },
     )
-    """是否以无头模式启动浏览器"""
+    """是否隐藏浏览器窗口运行。"""
 
     launch_args: list[str] = Field(
         default_factory=lambda: [
@@ -4739,70 +5087,105 @@ class PluginRuntimeRenderConfig(ConfigBase):
             "--no-zygote",
         ],
         json_schema_extra={
+            "label": {
+                "zh_CN": "启动参数",
+                "en_US": "Launch arguments",
+                "ja_JP": "起動引数",
+            },
             "x-widget": "custom",
             "x-icon": "terminal",
         },
     )
-    """浏览器启动参数列表"""
+    """启动浏览器时附加的命令参数。"""
 
     concurrency_limit: int = Field(
         default=2,
         ge=1,
         json_schema_extra={
+            "label": {
+                "zh_CN": "并发渲染数",
+                "en_US": "Concurrent renders",
+                "ja_JP": "同時描画数",
+            },
             "x-widget": "number",
             "x-icon": "layers",
         },
     )
-    """同时允许进行的最大渲染任务数"""
+    """同时最多运行多少个渲染任务。"""
 
     startup_timeout_sec: float = Field(
         default=20.0,
         gt=0,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启动超时秒数",
+                "en_US": "Startup timeout seconds",
+                "ja_JP": "起動タイムアウト秒数",
+            },
             "x-widget": "number",
             "x-icon": "clock",
         },
     )
-    """浏览器连接或启动超时时间（秒）"""
+    """浏览器启动或连接的最长等待时间。"""
 
     render_timeout_sec: float = Field(
         default=15.0,
         gt=0,
         json_schema_extra={
+            "label": {
+                "zh_CN": "渲染超时秒数",
+                "en_US": "Render timeout seconds",
+                "ja_JP": "描画タイムアウト秒数",
+            },
             "x-widget": "number",
             "x-icon": "timer",
         },
     )
-    """单次渲染默认超时时间（秒）"""
+    """单次渲染任务的最长等待时间。"""
 
     auto_download_chromium: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "自动下载 Chromium",
+                "en_US": "Auto download Chromium",
+                "ja_JP": "Chromium を自動ダウンロード",
+            },
             "x-widget": "switch",
             "x-icon": "download",
         },
     )
-    """未检测到可用浏览器时，是否自动下载 Playwright Chromium"""
+    """找不到浏览器时是否自动下载 Chromium。"""
 
     download_connection_timeout_sec: float = Field(
         default=120.0,
         gt=0,
         json_schema_extra={
+            "label": {
+                "zh_CN": "下载连接超时秒数",
+                "en_US": "Download connection timeout seconds",
+                "ja_JP": "ダウンロード接続タイムアウト秒数",
+            },
             "x-widget": "number",
             "x-icon": "cloud-lightning",
         },
     )
-    """自动下载 Chromium 时的连接超时时间（秒）"""
+    """下载 Chromium 时的连接超时时间。"""
 
     restart_after_render_count: int = Field(
         default=200,
         ge=0,
         json_schema_extra={
+            "label": {
+                "zh_CN": "渲染后重启次数",
+                "en_US": "Restart after render count",
+                "ja_JP": "描画後の再起動回数",
+            },
             "x-widget": "number",
             "x-icon": "refresh-cw",
         },
     )
-    """累计渲染指定次数后自动重建本地浏览器，0 表示关闭该策略"""
+    """渲染多少次后重启浏览器；0 表示不自动重启。"""
 
 
 class PluginRuntimeConfig(ConfigBase):
@@ -4814,59 +5197,97 @@ class PluginRuntimeConfig(ConfigBase):
     enabled: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用插件运行时",
+                "en_US": "Enable plugin runtime",
+                "ja_JP": "プラグインランタイムを有効化",
+            },
             "x-widget": "switch",
             "x-icon": "power",
         },
     )
-    """启用插件系统"""
+    """是否启用新版插件运行时。"""
 
     health_check_interval_sec: float = Field(
         default=30.0,
         json_schema_extra={
+            "label": {
+                "zh_CN": "健康检查间隔秒数",
+                "en_US": "Health check interval seconds",
+                "ja_JP": "ヘルスチェック間隔秒数",
+            },
             "x-widget": "number",
             "x-icon": "activity",
         },
     )
-    """健康检查间隔（秒）"""
+    """每隔多少秒检查一次插件运行状态。"""
 
     max_restart_attempts: int = Field(
         default=3,
         json_schema_extra={
+            "label": {
+                "zh_CN": "最大重启次数",
+                "en_US": "Maximum restart attempts",
+                "ja_JP": "最大再起動回数",
+            },
             "x-widget": "number",
             "x-icon": "refresh-cw",
         },
     )
-    """Runner 崩溃后最大自动重启次数"""
+    """插件 Runner 崩溃后最多自动重启几次。"""
 
     runner_spawn_timeout_sec: float = Field(
         default=30.0,
         json_schema_extra={
+            "label": {
+                "zh_CN": "Runner 启动超时秒数",
+                "en_US": "Runner startup timeout seconds",
+                "ja_JP": "Runner 起動タイムアウト秒数",
+            },
             "x-widget": "number",
             "x-icon": "clock",
         },
     )
-    """等待 Runner 子进程启动并注册的超时时间（秒）"""
+    """等待插件 Runner 启动完成的最长时间。"""
 
     hook_blocking_timeout_sec: float = Field(
         default=60,
         json_schema_extra={
+            "label": {
+                "zh_CN": "阻塞 Hook 超时秒数",
+                "en_US": "Blocking hook timeout seconds",
+                "ja_JP": "ブロッキング Hook タイムアウト秒数",
+            },
             "x-widget": "number",
             "x-icon": "timer",
         },
     )
-    """Hook 阻塞步骤的全局超时上限（秒）"""
+    """单个阻塞 Hook 最多允许运行多久。"""
 
     ipc_socket_path: str = Field(
         default="",
         json_schema_extra={
+            "label": {
+                "zh_CN": "通信 Socket 路径",
+                "en_US": "IPC socket path",
+                "ja_JP": "IPC ソケットパス",
+            },
             "x-widget": "input",
             "x-icon": "link",
         },
     )
     """
-    自定义 IPC Socket 路径（仅 Linux/macOS 生效）
-    留空则自动生成临时路径
+    自定义插件通信 Socket 路径；留空自动生成。
     """
 
-    render: PluginRuntimeRenderConfig = Field(default_factory=PluginRuntimeRenderConfig)
-    """浏览器渲染能力配置"""
+    render: PluginRuntimeRenderConfig = Field(
+        default_factory=PluginRuntimeRenderConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "浏览器渲染",
+                "en_US": "Browser rendering",
+                "ja_JP": "ブラウザ描画",
+            },
+        },
+    )
+    """插件需要网页截图或渲染时使用的浏览器配置。"""
