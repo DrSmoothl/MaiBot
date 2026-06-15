@@ -7,6 +7,17 @@ from json import dumps, loads
 from pathlib import Path
 from typing import Any
 
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    ProgressColumn,
+    Task,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+from rich.text import Text
 from sqlalchemy import text
 
 import asyncio
@@ -24,8 +35,16 @@ _STATUS_PENDING = "pending"
 _STATUS_RUNNING = "running"
 _STATUS_DONE = "done"
 _BATCH_SIZE = 100
-_BATCH_SLEEP_SECONDS = 0.2
 _PROGRESS_LOG_INTERVAL = 1000
+
+
+class ImagePathMaintenanceSpeedColumn(ProgressColumn):
+    """渲染图片路径规整速度。"""
+
+    def render(self, task: Task) -> Text:
+        if task.speed is None or task.speed <= 0:
+            return Text("-- 条/s")
+        return Text(f"{task.speed:.2f} 条/s")
 
 
 @dataclass(frozen=True)
@@ -192,6 +211,21 @@ def _fetch_image_path_rows(session: Any, cursor_id: int) -> list[tuple[int, str]
     return [(int(row[0]), str(row[1] or "")) for row in rows]
 
 
+def _count_remaining_image_path_rows(session: Any, cursor_id: int) -> int:
+    row = session.exec(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM images
+            WHERE id > :cursor_id
+              AND full_path IS NOT NULL
+            """
+        ),
+        params={"cursor_id": cursor_id},
+    ).first()
+    return int(row[0] or 0) if row is not None else 0
+
+
 def _normalize_stored_image_path(raw_path: str) -> str | None:
     path = Path(raw_path)
     resolved_path = path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
@@ -325,6 +359,19 @@ def get_image_path_maintenance_state() -> ImagePathMaintenanceState:
         return state
 
 
+def count_remaining_image_path_maintenance_records() -> int:
+    """统计当前图片路径规整任务剩余待检查记录数。"""
+
+    with get_db_session(auto_commit=False) as session:
+        state = _get_state(session)
+        if state.phase != _PHASE_NORMALIZE or not _images_table_exists(session):
+            session.commit()
+            return 0
+        remaining_records = _count_remaining_image_path_rows(session, state.cursor_id)
+        session.commit()
+        return remaining_records
+
+
 def should_schedule_image_path_maintenance_background() -> bool:
     """判断是否需要调度图片路径规整后台任务。"""
 
@@ -338,48 +385,70 @@ async def run_image_path_maintenance_background() -> None:
     """后台执行可中断的图片路径规整。"""
 
     initial_state = await asyncio.to_thread(get_image_path_maintenance_state)
+    remaining_records = await asyncio.to_thread(count_remaining_image_path_maintenance_records)
     logger.info(
         "图片路径规整一次性维护开始："
         f"从 images.id > {initial_state.cursor_id} 继续，"
         f"已检查 {initial_state.scanned_records} 条，转换 {initial_state.converted_records} 条，"
-        f"丢弃 {initial_state.discarded_records} 条，批量大小 {_BATCH_SIZE}"
+        f"丢弃 {initial_state.discarded_records} 条，剩余约 {remaining_records} 条，批量大小 {_BATCH_SIZE}"
     )
-    while True:
-        try:
-            result = await asyncio.to_thread(run_image_path_maintenance_batch)
-        except asyncio.CancelledError:
-            logger.info("图片路径规整一次性维护已中断，下次启动后继续")
-            raise
-        except Exception as exc:
-            logger.warning(f"图片路径规整批次失败，将在下次启动后继续: {exc}")
-            return
+    console = Console()
+    progress_disabled = not console.is_terminal
+    with Progress(
+        "{task.description}",
+        BarColumn(),
+        MofNCompleteColumn(),
+        ImagePathMaintenanceSpeedColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False,
+        disable=progress_disabled,
+        expand=True,
+    ) as progress:
+        task_id = progress.add_task("图片路径规整进度", total=max(remaining_records, 1))
+        while True:
+            try:
+                result = await asyncio.to_thread(run_image_path_maintenance_batch)
+            except asyncio.CancelledError:
+                logger.info("图片路径规整一次性维护已中断，下次启动后继续")
+                raise
+            except Exception as exc:
+                logger.warning(f"图片路径规整批次失败，将在下次启动后继续: {exc}")
+                return
 
-        if result.completed:
-            total_skipped = (
-                result.total_scanned_records
-                - result.total_converted_records
-                - result.total_discarded_records
-            )
-            logger.info(
-                "图片路径规整一次性维护完成："
-                f"累计检查 {result.total_scanned_records} 条，"
-                f"转换 {result.total_converted_records} 条，丢弃 {result.total_discarded_records} 条，"
-                f"跳过 {total_skipped} 条，最后处理 id={result.last_processed_id}"
-            )
-            return
+            if result.completed:
+                if remaining_records == 0:
+                    progress.update(task_id, completed=1)
+                total_skipped = (
+                    result.total_scanned_records
+                    - result.total_converted_records
+                    - result.total_discarded_records
+                )
+                logger.info(
+                    "图片路径规整一次性维护完成："
+                    f"累计检查 {result.total_scanned_records} 条，"
+                    f"转换 {result.total_converted_records} 条，丢弃 {result.total_discarded_records} 条，"
+                    f"跳过 {total_skipped} 条，最后处理 id={result.last_processed_id}"
+                )
+                return
 
-        if result.total_scanned_records % _PROGRESS_LOG_INTERVAL < result.scanned_records:
-            total_skipped = (
-                result.total_scanned_records
-                - result.total_converted_records
-                - result.total_discarded_records
-            )
-            logger.info(
-                "图片路径规整进行中："
-                f"累计检查 {result.total_scanned_records} 条，"
-                f"转换 {result.total_converted_records} 条，丢弃 {result.total_discarded_records} 条，"
-                f"跳过 {total_skipped} 条；本批检查 {result.scanned_records} 条，"
-                f"转换 {result.converted_records} 条，丢弃 {result.discarded_records} 条，"
-                f"跳过 {result.skipped_records} 条，进度 id={result.last_processed_id}"
-            )
-        await asyncio.sleep(_BATCH_SLEEP_SECONDS)
+            progress_task = progress.tasks[task_id]
+            progressed_records = int(progress_task.completed) + result.scanned_records
+            if progress_task.total is not None and progressed_records > progress_task.total:
+                progress.update(task_id, total=progressed_records)
+            progress.update(task_id, advance=result.scanned_records)
+            if result.total_scanned_records % _PROGRESS_LOG_INTERVAL < result.scanned_records:
+                total_skipped = (
+                    result.total_scanned_records
+                    - result.total_converted_records
+                    - result.total_discarded_records
+                )
+                logger.info(
+                    "图片路径规整进行中："
+                    f"累计检查 {result.total_scanned_records} 条，"
+                    f"转换 {result.total_converted_records} 条，丢弃 {result.total_discarded_records} 条，"
+                    f"跳过 {total_skipped} 条；本批检查 {result.scanned_records} 条，"
+                    f"转换 {result.converted_records} 条，丢弃 {result.discarded_records} 条，"
+                    f"跳过 {result.skipped_records} 条，进度 id={result.last_processed_id}"
+                )
