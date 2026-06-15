@@ -112,6 +112,7 @@ active_window_hours = 72
 max_refresh_per_cycle = 50
 top_k_evidence = 12
 evidence_classification_max_tokens = 1200
+evidence_classification_temperature = 0.1
 
 [memory]
 enabled = true

@@ -87,6 +87,7 @@ active_window_hours = 72
 max_refresh_per_cycle = 50
 top_k_evidence = 12
 evidence_classification_max_tokens = 1200
+evidence_classification_temperature = 0.1
 
 [memory]
 enabled = true
@@ -360,6 +361,7 @@ rule_type = "group"
 - `person_profile.max_refresh_per_cycle` (默认 `50`)
 - `person_profile.top_k_evidence` (默认 `12`)
 - `person_profile.evidence_classification_max_tokens` (默认 `1200`)
+- `person_profile.evidence_classification_temperature` (默认 `0.1`)
 
 ## 7. 记忆演化与回收
 
