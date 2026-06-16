@@ -2,8 +2,11 @@
  * 模型列表 - 移动端卡片视图
  */
 import React from 'react'
-import { Button } from '@/components/ui/button'
 import { Pencil, Trash2 } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { StreamlineIcon } from '@/components/ui/streamline-icon'
+
 import type { ModelInfo } from '../types'
 
 interface ModelCardListProps {
@@ -31,21 +34,21 @@ export const ModelCardList = React.memo(function ModelCardList({
 }: ModelCardListProps) {
   if (paginatedModels.length === 0) {
     return (
-      <div className="md:hidden text-center text-muted-foreground py-8 rounded-lg border bg-card">
+      <div className="text-muted-foreground bg-card rounded-lg border py-8 text-center md:hidden">
         {searchQuery ? '未找到匹配的模型' : '暂无模型配置'}
       </div>
     )
   }
 
   return (
-    <div className="md:hidden space-y-2.5">
+    <div className="space-y-2.5 md:hidden">
       {paginatedModels.map((model, displayIndex) => {
-        const actualIndex = allModels.findIndex(m => m === model)
+        const actualIndex = allModels.findIndex((m) => m === model)
         const used = isModelUsed(model.name)
         return (
-          <div key={displayIndex} className="space-y-2 rounded-lg border bg-card p-3">
+          <div key={displayIndex} className="bg-card space-y-2 rounded-lg border p-3">
             <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center gap-2">
                   <h3 className="truncate text-sm font-semibold">{model.name}</h3>
                   <span
@@ -58,27 +61,32 @@ export const ModelCardList = React.memo(function ModelCardList({
                     aria-label={used ? '已使用' : '未使用'}
                   />
                 </div>
-                <p className="break-all text-[11px] leading-snug text-muted-foreground" title={model.model_identifier}>
+                <p
+                  className="text-muted-foreground text-[11px] leading-snug break-all"
+                  title={model.model_identifier}
+                >
                   {model.model_identifier}
                 </p>
               </div>
               <div className="flex shrink-0 gap-1">
                 <Button
                   variant="default"
-                  size="sm"
-                  className="h-8 px-2 text-xs"
+                  size="icon"
+                  className="h-8 w-8"
                   onClick={() => onEdit(model, actualIndex)}
+                  title="编辑"
+                  aria-label={`编辑模型 ${model.name}`}
                 >
-                  <Pencil className="mr-1 h-3.5 w-3.5" strokeWidth={2} fill="none" />
-                  编辑
+                  <StreamlineIcon name="edit-pdf-solid" fallback={Pencil} className="h-3.5 w-3.5" />
                 </Button>
                 <Button
-                  size="sm"
+                  size="icon"
                   onClick={() => onDelete(actualIndex)}
-                  className="h-8 bg-red-600 px-2 text-xs text-white hover:bg-red-700"
+                  className="h-8 w-8 bg-red-600 text-white hover:bg-red-700"
+                  title="删除"
+                  aria-label={`删除模型 ${model.name}`}
                 >
-                  <Trash2 className="mr-1 h-3.5 w-3.5" strokeWidth={2} fill="none" />
-                  删除
+                  <StreamlineIcon name="delete-2-solid" fallback={Trash2} className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>

@@ -62,6 +62,7 @@ import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StreamlineIcon } from '@/components/ui/streamline-icon'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import { ZoomableChart } from '@/components/ui/zoomable-chart'
@@ -493,7 +494,7 @@ function IndexPageContent() {
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
             <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
-              <Power className="h-4 w-4" />
+              <StreamlineIcon name="button-power-circle-1-remix" fallback={Power} className="h-4 w-4" />
               {t('home.botStatus.title')}
             </CardTitle>
           </CardHeader>
@@ -620,7 +621,7 @@ function IndexPageContent() {
         <Card>
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
             <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
-              <Zap className="h-4 w-4" />
+              <StreamlineIcon name="one-finger-short-tap-remix" fallback={Zap} className="h-4 w-4" />
               {t('home.quickActions.title')}
             </CardTitle>
             <Button
@@ -730,9 +731,9 @@ function IndexPageContent() {
               </TabsList>
             </Tabs>
           </CardHeader>
-          <CardContent className="flex flex-col justify-center gap-2 py-3 sm:py-3">
-            <div className="grid gap-y-1 lg:grid-cols-4 lg:divide-x">
-              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
+          <CardContent className="flex flex-col justify-center py-3 sm:py-3">
+            <div className="grid gap-y-1 lg:grid-cols-2 xl:grid-cols-3 [&>*:nth-child(even)]:lg:border-l [&>*:nth-child(odd)]:lg:border-l-0 [&>*:not(:nth-child(3n+1))]:xl:border-l [&>*:nth-child(3n+1)]:xl:border-l-0">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.totalRequests')}</span>
@@ -747,7 +748,7 @@ function IndexPageContent() {
                 </div>
               </div>
 
-              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <DollarSign className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.totalCost')}</span>
@@ -767,7 +768,7 @@ function IndexPageContent() {
                 </p>
               </div>
 
-              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.tokenUsage')}</span>
@@ -787,7 +788,7 @@ function IndexPageContent() {
                 </p>
               </div>
 
-              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <Zap className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.avgResponse')}</span>
@@ -797,10 +798,8 @@ function IndexPageContent() {
                 </div>
                 <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">{t('home.stats.avgResponseDesc')}</p>
               </div>
-            </div>
 
-            <div className="grid gap-y-1 lg:grid-cols-3 lg:divide-x">
-              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.onlineTime')}</span>
@@ -813,7 +812,7 @@ function IndexPageContent() {
                 </div>
               </div>
 
-              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.messageProcessing')}</span>
@@ -834,7 +833,7 @@ function IndexPageContent() {
                 </p>
               </div>
 
-              <div className="flex min-h-10 min-w-0 flex-col justify-center px-3 py-1">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
                   <TrendingUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.costEfficiency')}</span>

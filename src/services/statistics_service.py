@@ -15,7 +15,7 @@ logger = get_logger("statistics_service")
 
 DASHBOARD_STATISTICS_CACHE_KEY = "webui_dashboard_statistics_cache"
 DASHBOARD_STATISTICS_CACHE_VERSION = 2
-DEFAULT_DASHBOARD_CACHE_MAX_AGE_SECONDS = 600
+DEFAULT_DASHBOARD_CACHE_MAX_AGE_SECONDS = 20 * 60
 DEFAULT_DASHBOARD_CACHE_HOURS = (24, 168, 720)
 _SPARSE_TIME_SERIES_FIELDS = ("hourly_data", "daily_data")
 
@@ -27,7 +27,10 @@ async def get_dashboard_statistics(hours: int = 24, *, use_cache: bool = True) -
         if cached_data is not None:
             return cached_data
 
-    return build_empty_dashboard_statistics()
+    data = await compute_dashboard_statistics(hours=hours)
+    if use_cache:
+        update_dashboard_statistics_cache_entry(hours, data)
+    return data
 
 
 def build_empty_dashboard_statistics() -> DashboardData:

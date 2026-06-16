@@ -14,7 +14,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import { useToast } from '@/hooks/use-toast'
@@ -67,11 +73,9 @@ export function PromptManagementPage() {
     const normalizedQuery = query.trim().toLowerCase()
     if (!normalizedQuery) return visiblePromptFiles
     return visiblePromptFiles.filter((file) => {
-      const searchableText = [
-        file.name,
-        file.display_name,
-        file.description,
-      ].join(' ').toLowerCase()
+      const searchableText = [file.name, file.display_name, file.description]
+        .join(' ')
+        .toLowerCase()
       return searchableText.includes(normalizedQuery)
     })
   }, [visiblePromptFiles, query])
@@ -90,17 +94,20 @@ export function PromptManagementPage() {
       setLoadingCatalog(true)
       const result = await getPromptCatalog()
       setCatalog(result)
-      const nextLanguage = language && result.languages.includes(language)
-        ? language
-        : result.languages.includes('zh-CN')
-          ? 'zh-CN'
-        : result.languages[0] ?? ''
+      const nextLanguage =
+        language && result.languages.includes(language)
+          ? language
+          : result.languages.includes('zh-CN')
+            ? 'zh-CN'
+            : (result.languages[0] ?? '')
       setLanguage(nextLanguage)
 
-      const nextFiles = nextLanguage ? result.files[nextLanguage] ?? [] : []
+      const nextFiles = nextLanguage ? (result.files[nextLanguage] ?? []) : []
       const nextBasicFiles = nextFiles.filter((file) => !file.advanced)
       setFilename((current) =>
-        nextFiles.some((file) => file.name === current) ? current : nextBasicFiles[0]?.name ?? nextFiles[0]?.name ?? ''
+        nextFiles.some((file) => file.name === current)
+          ? current
+          : (nextBasicFiles[0]?.name ?? nextFiles[0]?.name ?? '')
       )
     } catch (error) {
       toast({
@@ -157,7 +164,9 @@ export function PromptManagementPage() {
     setLanguage(nextLanguage)
     setQuery('')
     const nextFiles = catalog?.files[nextLanguage] ?? []
-    const nextVisibleFiles = showAdvancedPrompts ? nextFiles : nextFiles.filter((file) => !file.advanced)
+    const nextVisibleFiles = showAdvancedPrompts
+      ? nextFiles
+      : nextFiles.filter((file) => !file.advanced)
     setFilename(nextVisibleFiles[0]?.name ?? '')
   }
 
@@ -227,7 +236,7 @@ export function PromptManagementPage() {
     <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center justify-between gap-2">
-          <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">Prompt 管理</h1>
+          <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">Prompt管理</h1>
         </div>
         <div className="flex min-w-0 items-center gap-1.5 sm:flex-wrap sm:gap-2">
           <Select value={language} onValueChange={handleLanguageChange} disabled={loadingCatalog}>
@@ -236,7 +245,9 @@ export function PromptManagementPage() {
             </SelectTrigger>
             <SelectContent>
               {(catalog?.languages ?? []).map((item) => (
-                <SelectItem key={item} value={item}>{item}</SelectItem>
+                <SelectItem key={item} value={item}>
+                  {item}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -258,7 +269,9 @@ export function PromptManagementPage() {
             className="h-8 shrink-0 px-2 text-xs sm:h-9 sm:px-3 sm:text-sm"
           >
             <SlidersHorizontal className="h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" />
-            <span className="hidden sm:inline">{showAdvancedPrompts ? '隐藏高级' : '显示高级'}</span>
+            <span className="hidden sm:inline">
+              {showAdvancedPrompts ? '隐藏高级' : '显示高级'}
+            </span>
           </Button>
           <Button
             size="sm"
@@ -267,7 +280,9 @@ export function PromptManagementPage() {
             disabled={!hasUnsavedChanges || saving || loadingFile || !filename}
           >
             <Save className="h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" />
-            <span className="ml-1 sm:ml-0">{saving ? '保存中' : hasUnsavedChanges ? '保存' : '已保存'}</span>
+            <span className="ml-1 sm:ml-0">
+              {saving ? '保存中' : hasUnsavedChanges ? '保存' : '已保存'}
+            </span>
           </Button>
         </div>
       </div>
@@ -276,11 +291,11 @@ export function PromptManagementPage() {
         <Card className="flex max-h-52 min-h-0 flex-col overflow-hidden sm:max-h-none">
           <CardHeader className="shrink-0 p-3 pb-2 sm:p-6 sm:pb-3">
             <div className="flex items-center gap-2">
-              <div className="flex h-10 shrink-0 items-center px-1 text-4xl font-bold leading-none text-foreground sm:h-9">
+              <div className="text-foreground flex h-10 shrink-0 items-center px-1 text-4xl leading-none font-bold sm:h-9">
                 {filteredFiles.length}
               </div>
               <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Search className="text-muted-foreground pointer-events-none absolute top-2.5 left-2 h-4 w-4" />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
@@ -294,7 +309,7 @@ export function PromptManagementPage() {
           <ScrollArea className="min-h-0 flex-1" scrollbars="vertical">
             <div className="space-y-1 p-2">
               {loadingCatalog ? (
-                <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+                <div className="text-muted-foreground flex items-center justify-center gap-2 p-6 text-sm">
                   <ThinkingIllustration size="sm" />
                 </div>
               ) : filteredFiles.length > 0 ? (
@@ -306,24 +321,38 @@ export function PromptManagementPage() {
                     className={cn(
                       'w-full rounded-md px-3 py-2 text-left text-sm transition-colors',
                       'hover:bg-accent hover:text-accent-foreground',
-                      filename === file.name ? 'bg-accent text-accent-foreground' : 'text-muted-foreground',
+                      filename === file.name
+                        ? 'bg-accent text-accent-foreground'
+                        : 'text-muted-foreground'
                     )}
                   >
                     <div className="flex items-center gap-2">
                       <div className="truncate font-medium" title={file.display_name || file.name}>
                         {file.display_name || file.name}
                       </div>
-                      {file.advanced && <Badge variant="outline" className="shrink-0 text-[10px]">高级</Badge>}
-                      {file.customized && <Badge variant="secondary" className="shrink-0 text-[10px]">自定义</Badge>}
+                      {file.advanced && (
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                          高级
+                        </Badge>
+                      )}
+                      {file.customized && (
+                        <Badge variant="secondary" className="shrink-0 text-[10px]">
+                          自定义
+                        </Badge>
+                      )}
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-muted-foreground">{file.name}</div>
+                    <div className="text-muted-foreground mt-0.5 truncate text-xs">{file.name}</div>
                     {file.description && (
-                      <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{file.description}</div>
+                      <div className="text-muted-foreground mt-1 line-clamp-2 text-xs">
+                        {file.description}
+                      </div>
                     )}
                   </button>
                 ))
               ) : (
-                <div className="p-6 text-center text-sm text-muted-foreground">没有可编辑的 Prompt 文件</div>
+                <div className="text-muted-foreground p-6 text-center text-sm">
+                  没有可编辑的 Prompt 文件
+                </div>
               )}
             </div>
           </ScrollArea>
@@ -333,17 +362,29 @@ export function PromptManagementPage() {
           <CardHeader className="flex flex-col gap-2 space-y-0 p-3 pb-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3 sm:p-6 sm:pb-3">
             <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 truncate text-sm">
-                <span className="truncate">{selectedFile?.display_name || filename || '未选择文件'}</span>
-                {selectedFile?.advanced && <Badge variant="outline" className="shrink-0">高级</Badge>}
-                {isCustomized && <Badge variant="secondary" className="shrink-0">自定义</Badge>}
+                <span className="truncate">
+                  {selectedFile?.display_name || filename || '未选择文件'}
+                </span>
+                {selectedFile?.advanced && (
+                  <Badge variant="outline" className="shrink-0">
+                    高级
+                  </Badge>
+                )}
+                {isCustomized && (
+                  <Badge variant="secondary" className="shrink-0">
+                    自定义
+                  </Badge>
+                )}
               </CardTitle>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="text-muted-foreground mt-1 text-xs">
                 {language}
                 {selectedFile ? ` · ${formatFileSize(selectedFile.size)}` : ''}
                 {hasUnsavedChanges ? ' · 有未保存修改' : ''}
               </p>
               {selectedFile?.description && (
-                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{selectedFile.description}</p>
+                <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">
+                  {selectedFile.description}
+                </p>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -354,7 +395,12 @@ export function PromptManagementPage() {
                 disabled={!isCustomized || resetting || loadingFile || !filename}
                 className="h-8 flex-1 px-2 text-xs sm:h-9 sm:flex-none sm:px-3 sm:text-sm"
               >
-                <RotateCcw className={cn('mr-1 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4', resetting && 'animate-spin')} />
+                <RotateCcw
+                  className={cn(
+                    'mr-1 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4',
+                    resetting && 'animate-spin'
+                  )}
+                />
                 恢复默认
               </Button>
               <Button
@@ -364,14 +410,19 @@ export function PromptManagementPage() {
                 disabled={loadingDefaultPrompt || loadingFile || !filename}
                 className="h-8 flex-1 px-2 text-xs sm:h-9 sm:flex-none sm:px-3 sm:text-sm"
               >
-                <Eye className={cn('mr-1 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4', loadingDefaultPrompt && 'animate-pulse')} />
+                <Eye
+                  className={cn(
+                    'mr-1 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4',
+                    loadingDefaultPrompt && 'animate-pulse'
+                  )}
+                />
                 查看默认
               </Button>
             </div>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 p-0">
             {loadingFile ? (
-              <div className="flex h-full min-h-[320px] items-center justify-center gap-2 text-sm text-muted-foreground">
+              <div className="text-muted-foreground flex h-full min-h-[320px] items-center justify-center gap-2 text-sm">
                 <ThinkingIllustration />
               </div>
             ) : (
@@ -398,7 +449,7 @@ export function PromptManagementPage() {
             </DialogDescription>
           </DialogHeader>
           {loadingDefaultPrompt ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+            <div className="text-muted-foreground flex min-h-0 flex-1 items-center justify-center gap-2 text-sm">
               <ThinkingIllustration />
             </div>
           ) : (

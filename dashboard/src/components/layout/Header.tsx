@@ -2,7 +2,8 @@ import { Link, useRouterState } from '@tanstack/react-router'
 import {
   BookOpen,
   Check,
-  ChevronLeft,
+  ChevronRight,
+  Database,
   FileText,
   Globe,
   LogOut,
@@ -11,13 +12,12 @@ import {
   Moon,
   MoreHorizontal,
   Search,
-  Server,
   Settings,
   SlidersHorizontal,
   Sun,
 } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
-import { useEffect, useState } from 'react'
+import { type ComponentType, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { BackgroundLayer } from '@/components/background-layer'
@@ -40,6 +40,7 @@ import { useBackground } from '@/hooks/use-background'
 import { logout } from '@/lib/auth'
 import { isElectron } from '@/lib/runtime'
 import { cn } from '@/lib/utils'
+
 import type { WorkspaceMode } from './types'
 
 const LANGUAGE_CODES = ['zh', 'en', 'ja', 'ko'] as const
@@ -49,6 +50,17 @@ const LANGUAGE_NAMES: Record<(typeof LANGUAGE_CODES)[number], string> = {
   ja: '日本語',
   ko: '한국어',
 }
+
+const WORKSPACE_TABS: Array<{
+  value: WorkspaceMode
+  to: '/' | '/chat' | '/logs'
+  icon: ComponentType<{ className?: string }>
+  labelKey: string
+}> = [
+  { value: 'settings', to: '/', icon: SlidersHorizontal, labelKey: 'workspace.settings' },
+  { value: 'chat', to: '/chat', icon: MessageSquare, labelKey: 'workspace.chat' },
+  { value: 'logs', to: '/logs', icon: FileText, labelKey: 'workspace.logs' },
+]
 
 interface HeaderProps {
   sidebarOpen: boolean
@@ -161,8 +173,8 @@ export function Header({
                 workspaceMode !== 'settings' && 'lg:hidden'
               )}
             >
-              <ChevronLeft
-                className={cn('h-5 w-5 transition-transform', !sidebarOpen && 'rotate-180')}
+              <ChevronRight
+                className={cn('h-5 w-5 rotate-180 transition-transform', !sidebarOpen && 'rotate-0')}
               />
             </button>
           </div>
@@ -175,63 +187,28 @@ export function Header({
                   data-dashboard-workspace-tabs="true"
                   className="relative h-9 gap-0.5 border bg-transparent p-1 shadow-sm"
                 >
-                  <TabsTrigger
-                    asChild
-                    value="settings"
-                    className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-                  >
-                    <Link to="/">
-                      {workspaceMode === 'settings' && (
-                        <motion.span
-                          layoutId="workspace-tab-pill"
-                          className="bg-primary absolute inset-0 -z-10 rounded-md shadow-sm"
-                          transition={{ type: 'spring', stiffness: 480, damping: 38, mass: 0.6 }}
-                        />
-                      )}
-                      <SlidersHorizontal className="h-3.5 w-3.5" />
-                      <span className="hidden font-sans text-base font-semibold tracking-wider uppercase sm:inline">
-                        {t('workspace.settings')}
-                      </span>
-                    </Link>
-                  </TabsTrigger>
-                  <TabsTrigger
-                    asChild
-                    value="chat"
-                    className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-                  >
-                    <Link to="/chat">
-                      {workspaceMode === 'chat' && (
-                        <motion.span
-                          layoutId="workspace-tab-pill"
-                          className="bg-primary absolute inset-0 -z-10 rounded-md shadow-sm"
-                          transition={{ type: 'spring', stiffness: 480, damping: 38, mass: 0.6 }}
-                        />
-                      )}
-                      <MessageSquare className="h-3.5 w-3.5" />
-                      <span className="hidden font-sans text-base font-semibold tracking-wider uppercase sm:inline">
-                        {t('workspace.chat')}
-                      </span>
-                    </Link>
-                  </TabsTrigger>
-                  <TabsTrigger
-                    asChild
-                    value="logs"
-                    className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-                  >
-                    <Link to="/logs">
-                      {workspaceMode === 'logs' && (
-                        <motion.span
-                          layoutId="workspace-tab-pill"
-                          className="bg-primary absolute inset-0 -z-10 rounded-md shadow-sm"
-                          transition={{ type: 'spring', stiffness: 480, damping: 38, mass: 0.6 }}
-                        />
-                      )}
-                      <FileText className="h-3.5 w-3.5" />
-                      <span className="hidden font-sans text-base font-semibold tracking-wider uppercase sm:inline">
-                        {t('workspace.logs')}
-                      </span>
-                    </Link>
-                  </TabsTrigger>
+                  {WORKSPACE_TABS.map(({ value, to, icon: Icon, labelKey }) => (
+                    <TabsTrigger
+                      key={value}
+                      asChild
+                      value={value}
+                      className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                    >
+                      <Link to={to}>
+                        {workspaceMode === value && (
+                          <motion.span
+                            layoutId="workspace-tab-pill"
+                            className="bg-primary absolute inset-0 -z-10 rounded-md shadow-sm"
+                            transition={{ type: 'spring', stiffness: 480, damping: 38, mass: 0.6 }}
+                          />
+                        )}
+                        <Icon className="h-3.5 w-3.5" />
+                        <span className="hidden font-sans text-base font-semibold tracking-wider uppercase sm:inline">
+                          {t(labelKey)}
+                        </span>
+                      </Link>
+                    </TabsTrigger>
+                  ))}
                 </TabsList>
               </Tabs>
             </LayoutGroup>
@@ -259,7 +236,7 @@ export function Header({
                   onClick={() => setBackendManagerOpen(true)}
                   title={t('header.toggleConnection')}
                 >
-                  <Server className="h-4 w-4" />
+                  <Database className="h-4 w-4" />
                   <span className="text-muted-foreground hidden max-w-25 truncate text-xs sm:inline">
                     {activeBackendName}
                   </span>
@@ -277,7 +254,7 @@ export function Header({
               title={t('header.searchPlaceholder')}
               className="hidden md:inline-flex"
             >
-              <Search className="h-4 w-4" aria-hidden="true" />
+              <Search className="h-4 w-4" />
             </Button>
 
             {/* 搜索对话框 */}
@@ -337,7 +314,11 @@ export function Header({
               }
               className="hover:bg-accent hidden rounded-lg p-2 sm:inline-flex"
             >
-              {actualTheme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              {actualTheme === 'dark' ? (
+                <Sun className="h-5 w-5" />
+              ) : (
+                <Moon className="h-5 w-5" />
+              )}
             </button>
 
             {/* 分隔线 */}

@@ -29,10 +29,13 @@ from src.webui.dependencies import require_auth
 
 logger = get_logger("webui.expression")
 EXCLUDE_IDS_QUERY = Query(None, description="需要排除的表达方式 ID")
+EXPRESSION_CHAT_IDS_QUERY = Query(None, description="multiple chat ids")
+LEGACY_EXPRESSION_IMPORT_FILE = File(...)
 
 # 创建路由器
 router = APIRouter(prefix="/expression", tags=["Expression"], dependencies=[Depends(require_auth)])
 LEGACY_IMPORT_UPLOAD_DIR = Path("data/webui_legacy_expression_imports")
+LOGGED_INVALID_EXPRESSION_SESSION_IDS: set[int] = set()
 
 
 def get_configured_platform_accounts() -> set[tuple[str, str]]:
@@ -82,10 +85,60 @@ def select_legacy_import_matched_sessions(
     return [session for session in sessions if not str(session.account_id or "").strip()]
 
 
+def decode_expression_session_id(expression_id: int, raw_session_id: Any) -> Optional[str]:
+    """严格解码表达方式归属聊天流 ID，定位数据库中的坏编码记录。"""
+
+    if raw_session_id is None:
+        return None
+    if isinstance(raw_session_id, memoryview):
+        raw_session_id = raw_session_id.tobytes()
+    if isinstance(raw_session_id, bytes):
+        try:
+            session_id = raw_session_id.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            if expression_id not in LOGGED_INVALID_EXPRESSION_SESSION_IDS:
+                LOGGED_INVALID_EXPRESSION_SESSION_IDS.add(expression_id)
+                logger.error(
+                    "表达方式记录 session_id 非 UTF-8，已从 WebUI 表达列表排除: "
+                    f"id={expression_id}, session_id_hex={raw_session_id.hex().upper()}, error={exc}"
+                )
+            return None
+    elif isinstance(raw_session_id, str):
+        session_id = raw_session_id
+    else:
+        raise TypeError(f"表达方式记录 session_id 类型异常: id={expression_id}, type={type(raw_session_id)!r}")
+
+    return session_id or None
+
+
+def get_expression_session_ids(db_session: Any) -> set[str]:
+    """读取表达方式中可安全展示的聊天流 ID。"""
+
+    rows = db_session.connection().exec_driver_sql(
+        "SELECT id, CAST(session_id AS BLOB) FROM expressions WHERE session_id IS NOT NULL"
+    )
+    chat_ids: set[str] = set()
+    for expression_id, raw_session_id in rows:
+        session_id = decode_expression_session_id(expression_id, raw_session_id)
+        if session_id:
+            chat_ids.add(session_id)
+    return chat_ids
+
+
+def apply_valid_expression_session_scope(statement: Any, valid_chat_ids: set[str]) -> Any:
+    """限制表达方式查询只返回全局记录或 session_id 可正常解码的记录。"""
+
+    if valid_chat_ids:
+        return statement.where(
+            (col(Expression.session_id).is_(None)) | (col(Expression.session_id).in_(valid_chat_ids))
+        )
+    return statement.where(col(Expression.session_id).is_(None))
+
+
 def get_visible_expression_chat_ids(db_session: Any, include_legacy: bool) -> set[str]:
     """返回表达方式页面默认可见的聊天流 ID。"""
 
-    chat_ids = {chat_id for chat_id in db_session.exec(select(Expression.session_id).distinct()).all() if chat_id}
+    chat_ids = get_expression_session_ids(db_session)
     if include_legacy:
         return chat_ids
 
@@ -995,7 +1048,7 @@ async def get_expression_list(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     chat_id: Optional[str] = Query(None, description="聊天ID筛选"),
-    chat_ids: Optional[List[str]] = Query(None, description="multiple chat ids"),
+    chat_ids: Optional[List[str]] = EXPRESSION_CHAT_IDS_QUERY,
     review_filter: str = Query("all", description="表达方式筛选: all/user_checked/unchecked"),
     sort_by: str = Query("time", description="表达方式排序: time"),
     include_legacy: bool = Query(False, description="是否显示旧格式/非当前账号的表达方式"),
@@ -1016,9 +1069,14 @@ async def get_expression_list(
         if sort_by != "time":
             raise HTTPException(status_code=400, detail=f"不支持的表达方式排序: {sort_by}")
 
-        if not include_legacy:
-            with get_db_session() as filter_session:
+        visible_chat_ids: set[str] = set()
+        valid_expression_chat_ids: set[str] = set()
+        with get_db_session() as filter_session:
+            if include_legacy:
+                valid_expression_chat_ids = get_expression_session_ids(filter_session)
+            else:
                 visible_chat_ids = get_visible_expression_chat_ids(filter_session, include_legacy=False)
+        if not include_legacy:
             if chat_id:
                 if chat_id not in visible_chat_ids:
                     return ExpressionListResponse(success=True, total=0, page=page, page_size=page_size, data=[])
@@ -1044,6 +1102,8 @@ async def get_expression_list(
             statement = statement.where(col(Expression.session_id).in_(chat_ids))
         elif not include_legacy:
             statement = statement.where(col(Expression.session_id).in_(visible_chat_ids))
+        else:
+            statement = apply_valid_expression_session_scope(statement, valid_expression_chat_ids)
 
         statement = apply_expression_list_review_filter(statement, review_filter)
 
@@ -1070,6 +1130,8 @@ async def get_expression_list(
                 count_statement = count_statement.where(col(Expression.session_id).in_(chat_ids))
             elif not include_legacy:
                 count_statement = count_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+            else:
+                count_statement = apply_valid_expression_session_scope(count_statement, valid_expression_chat_ids)
             count_statement = apply_expression_list_review_filter(count_statement, review_filter)
             total = count_expressions(session, count_statement)
             data = [expression_to_response(expr, session) for expr in expressions]
@@ -1230,7 +1292,7 @@ async def preview_legacy_expression_import(
 
 @router.post("/legacy-import/preview-file", response_model=LegacyExpressionImportPreviewResponse)
 async def preview_legacy_expression_import_file(
-    file: UploadFile = File(...),
+    file: UploadFile = LEGACY_EXPRESSION_IMPORT_FILE,
 ) -> LegacyExpressionImportPreviewResponse:
     """上传旧版数据库文件并预览表达方式导入分组。"""
 
@@ -1611,6 +1673,8 @@ async def get_expression_stats(
             total_statement = select(Expression.id)
             if not include_legacy:
                 total_statement = total_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+            else:
+                total_statement = apply_valid_expression_session_scope(total_statement, visible_chat_ids)
             total = count_expressions(session, total_statement)
 
             chat_stats_statement = (
@@ -1618,8 +1682,7 @@ async def get_expression_stats(
                 .where(col(Expression.session_id).is_not(None))
                 .group_by(col(Expression.session_id))
             )
-            if not include_legacy:
-                chat_stats_statement = chat_stats_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+            chat_stats_statement = chat_stats_statement.where(col(Expression.session_id).in_(visible_chat_ids))
             chat_stats = {chat_id: count for chat_id, count in session.exec(chat_stats_statement).all() if chat_id}
 
             seven_days_ago = datetime.now() - timedelta(days=7)
@@ -1630,6 +1693,8 @@ async def get_expression_stats(
             )
             if not include_legacy:
                 recent_statement = recent_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+            else:
+                recent_statement = apply_valid_expression_session_scope(recent_statement, visible_chat_ids)
             recent = session.exec(recent_statement).one()
 
         return {

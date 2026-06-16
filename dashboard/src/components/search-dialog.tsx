@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import { FileText, Search, SlidersHorizontal } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
+import { FileText, Search, SlidersHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ShortcutKbd } from '@/components/ui/kbd'
+import { StreamlineIcon } from '@/components/ui/streamline-icon'
+import { createStreamlineIcon } from '@/components/ui/streamline-menu-icon'
 import { useMenuSections } from '@/components/layout/use-menu-sections'
 import type { MenuIcon } from '@/components/layout/types'
 import { registeredRoutePaths } from '@/router'
@@ -19,6 +21,9 @@ import { getBotConfigSchema, getModelConfigSchema } from '@/lib/config-api'
 import { getAllLocalizedText, resolveFieldLabel } from '@/lib/config-label'
 import { cn } from '@/lib/utils'
 import type { ConfigSchema, FieldSchema } from '@/types/config-schema'
+
+const ConfigFileIcon = createStreamlineIcon('file-bookmark-solid', FileText)
+const ModelConfigIcon = createStreamlineIcon('horizontal-slider-2-solid', SlidersHorizontal)
 
 interface SearchDialogProps {
   open: boolean
@@ -58,7 +63,7 @@ function unwrapConfigSchema(payload: unknown): ConfigSchema | null {
   return null
 }
 
-function getModelConfigPath(_fieldPath: string) {
+function getModelConfigPath() {
   return '/config/model'
 }
 
@@ -106,7 +111,7 @@ function collectConfigFields(
 
       items.push({
         id: `config:${sourceLabel}:${fullPath}`,
-        icon: sourceLabel === '模型配置' ? SlidersHorizontal : FileText,
+        icon: sourceLabel === '模型配置' ? ModelConfigIcon : ConfigFileIcon,
         title: fieldTitle,
         description: `${sourceLabel} / ${nextTrail.join(' / ')} / ${fullPath} · ${description}`,
         path: route,
@@ -134,7 +139,11 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const menuSections = useMenuSections()
 
   useEffect(() => {
-    setConfigSearchItems([])
+    const frameId = window.requestAnimationFrame(() => {
+      setConfigSearchItems([])
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
   }, [i18n.language])
 
   useEffect(() => {
@@ -270,7 +279,11 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
         <DialogHeader className="px-4 pt-4 pb-0">
           <DialogTitle className="sr-only">{t('search.title')}</DialogTitle>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+            <StreamlineIcon
+              name="search-bar-solid"
+              fallback={Search}
+              className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground"
+            />
             <Input
               ref={inputRef}
               value={searchQuery}
@@ -319,7 +332,11 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Search className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <StreamlineIcon
+                  name="search-bar-solid"
+                  fallback={Search}
+                  className="mb-4 h-12 w-12 text-muted-foreground/50"
+                />
                 <p className="text-sm text-muted-foreground">
                   {searchQuery ? t('search.noResults') : t('search.startSearch')}
                 </p>

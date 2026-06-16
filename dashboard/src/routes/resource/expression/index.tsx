@@ -1,7 +1,5 @@
 import {
   Check,
-  ChevronLeft,
-  ChevronRight,
   Download,
   FileClock,
   MessageSquare,
@@ -16,6 +14,8 @@ import { useRef, useState } from 'react'
 
 import { useQuery } from '@tanstack/react-query'
 
+import { ChatScopeFilterPanel } from '@/components/chat-scope-filter-panel'
+import { AccentPanel } from '@/components/ui/accent-panel'
 import { Button } from '@/components/ui/button'
 import { DashboardTabBar, DashboardTabTrigger } from '@/components/ui/dashboard-tabs'
 import { ExpressionReviewer } from '@/components/expression-reviewer'
@@ -563,190 +563,126 @@ export function ExpressionManagementPage() {
                 : 'lg:grid-cols-[13.5rem_minmax(0,1fr)]'
             }`}
           >
-            <aside className="bg-card rounded-lg border lg:flex lg:h-full lg:self-stretch lg:flex-col lg:overflow-hidden">
-              <div className="border-b px-4 py-3 sm:px-3 sm:py-2">
-                <div className="grid w-full grid-cols-[2rem_minmax(0,1fr)] items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setBrowserPanelCollapsed((collapsed) => !collapsed)}
-                    className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-                    aria-label={browserPanelCollapsed ? '展开浏览列表' : '折叠浏览列表'}
-                    aria-expanded={!browserPanelCollapsed}
-                    title={browserPanelCollapsed ? '展开浏览列表' : '折叠浏览列表'}
-                  >
-                    {browserPanelCollapsed ? (
-                      <ChevronRight className="h-4 w-4" />
-                    ) : (
-                      <ChevronLeft className="h-4 w-4" />
-                    )}
-                  </button>
-                  <div className="bg-muted grid grid-cols-3 gap-1 rounded-md p-1.5 sm:p-1">
-                    <button
-                      type="button"
-                      onClick={() => handleBrowseModeChange('chat')}
-                      className={`rounded px-2 py-2 text-xs transition-colors sm:py-1 ${
-                        browseMode === 'chat'
-                          ? 'bg-background shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      按聊天
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBrowseModeChange('group')}
-                      className={`rounded px-2 py-2 text-xs transition-colors sm:py-1 ${
-                        browseMode === 'group'
-                          ? 'bg-background shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      按互通组
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBrowseModeChange('all')}
-                      className={`rounded px-2 py-2 text-xs transition-colors sm:py-1 ${
-                        browseMode === 'all'
-                          ? 'bg-background shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      全部
-                    </button>
-                  </div>
+            <ChatScopeFilterPanel
+              modes={[
+                { label: '聊天', value: 'chat' },
+                { label: '组', value: 'group' },
+                { label: '全部', value: 'all' },
+              ]}
+              activeMode={browseMode}
+              onModeChange={handleBrowseModeChange}
+              items={
+                browseMode === 'chat'
+                  ? chatList.map((chat) => ({
+                      id: chat.chat_id,
+                      label: chat.chat_name,
+                      title: `${chat.chat_name} (${chat.chat_id})`,
+                    }))
+                  : browseMode === 'group'
+                    ? groups.map((group) => {
+                        const memberNames = group.members.map((member) => member.chat_name).join('、')
+                        return {
+                          id: group.index,
+                          label: `${group.name}${group.is_global ? '（全局）' : ''}`,
+                          description: memberNames || '暂无已解析聊天',
+                          descriptionTitle: memberNames,
+                          title: memberNames,
+                        }
+                      })
+                    : []
+              }
+              selectedItemId={browseMode === 'chat' ? selectedChatId : selectedGroupIndex}
+              onItemSelect={(id) => {
+                if (browseMode === 'chat') {
+                  handleChatChange(String(id))
+                } else if (browseMode === 'group') {
+                  handleGroupChange(Number(id))
+                }
+              }}
+              emptyContent={
+                <div className="text-muted-foreground px-2 py-6 text-center text-sm">
+                  {browseMode === 'group'
+                    ? '暂无互通组'
+                    : '当前显示全部表达方式'}
                 </div>
-              </div>
-              <div className="max-h-72 w-full space-y-2 overflow-y-auto p-3 sm:max-h-56 sm:space-y-1 sm:p-2 lg:max-h-none lg:min-h-0 lg:flex-1">
-                {browseMode === 'chat' ? (
-                  <>
-                    {chatList.map((chat) => (
-                      <button
-                        key={chat.chat_id}
-                        type="button"
-                        onClick={() => handleChatChange(chat.chat_id)}
-                        className={`w-full rounded-md px-3 py-2.5 text-left text-sm transition-colors sm:px-2 sm:py-2 ${
-                          selectedChatId === chat.chat_id
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-foreground hover:bg-muted'
-                        }`}
-                        title={`${chat.chat_name} (${chat.chat_id})`}
-                      >
-                        <span className="block truncate">{chat.chat_name}</span>
-                      </button>
-                    ))}
-                  </>
-                ) : browseMode === 'group' ? (
-                  <>
-                    {groups.map((group) => (
-                      <button
-                        key={group.index}
-                        type="button"
-                        onClick={() => handleGroupChange(group.index)}
-                        className={`w-full rounded-md px-3 py-2.5 text-left text-sm transition-colors sm:px-2 sm:py-2 ${
-                          selectedGroupIndex === group.index
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-foreground hover:bg-muted'
-                        }`}
-                        title={group.members.map((member) => member.chat_name).join('、')}
-                      >
-                        <span className="block truncate">
-                          {group.name}
-                          {group.is_global ? '（全局）' : ''}
-                        </span>
-                        <span
-                          className={`block truncate text-xs ${
-                            selectedGroupIndex === group.index
-                              ? 'text-primary-foreground/75'
-                              : 'text-muted-foreground'
-                          }`}
-                        >
-                          {group.members.length > 0
-                            ? group.members.map((member) => member.chat_name).join('、')
-                            : '暂无已解析聊天'}
-                        </span>
-                      </button>
-                    ))}
-                    {groups.length === 0 && (
-                      <div className="text-muted-foreground px-2 py-6 text-center text-sm">
-                        暂无互通组
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-muted-foreground px-2 py-6 text-center text-sm">
-                    当前显示全部表达方式
-                  </div>
-                )}
-              </div>
-              <div
-                className="flex w-full items-center justify-between gap-3 border-t px-4 py-3 sm:px-3 sm:py-2"
-                title="显示旧格式的表达方式（这些项目会在运行中被转换为新格式）"
-              >
-                <Label htmlFor="show-legacy-expressions" className="cursor-pointer text-sm">
-                  显示旧格式
-                </Label>
-                <Switch
-                  id="show-legacy-expressions"
-                  checked={showLegacyExpressions}
-                  onCheckedChange={handleLegacyExpressionsChange}
-                />
-              </div>
-            </aside>
+              }
+              collapsed={browserPanelCollapsed}
+              onCollapsedChange={setBrowserPanelCollapsed}
+              collapseLabel="折叠浏览列表"
+              expandLabel="展开浏览列表"
+              footer={
+                <div
+                  className="flex w-full items-center justify-between gap-3"
+                  title="显示旧格式的表达方式（这些项目会在运行中被转换为新格式）"
+                >
+                  <Label htmlFor="show-legacy-expressions" className="cursor-pointer text-sm">
+                    显示旧格式
+                  </Label>
+                  <Switch
+                    id="show-legacy-expressions"
+                    checked={showLegacyExpressions}
+                    onCheckedChange={handleLegacyExpressionsChange}
+                  />
+                </div>
+              }
+              listClassName="max-h-72 w-full space-y-2 p-3 sm:max-h-56 sm:space-y-1 sm:p-2 lg:max-h-none"
+            />
 
             <div className="flex min-h-0 flex-col space-y-4 sm:space-y-3">
               {scopeStatus && (
-                <div className="bg-card flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 sm:gap-2 sm:px-3 sm:py-2">
-                  {renderStatusIndicator('开启学习', scopeStatus.enableLearning, false)}
-                  {renderStatusIndicator('开启使用', scopeStatus.useExpression)}
-                  {currentChat && (
-                    <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto sm:flex-wrap sm:items-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 justify-center gap-1 sm:h-8"
-                        onClick={() => exportExpressionsToFile(false)}
-                      >
-                        <Download className="h-4 w-4" />
-                        导出全部
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 justify-center gap-1 sm:h-8"
-                        onClick={() => exportExpressionsToFile(true)}
-                        disabled={list.selectedCount === 0}
-                      >
-                        <Download className="h-4 w-4" />
-                        导出所选
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 justify-center gap-1 sm:h-8"
-                        onClick={() => importInputRef.current?.click()}
-                      >
-                        <Upload className="h-4 w-4" />
-                        导入
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="h-9 justify-center sm:h-8"
-                        onClick={() => setIsClearConfirmOpen(true)}
-                      >
-                        清除
-                      </Button>
-                      <input
-                        ref={importInputRef}
-                        type="file"
-                        accept="application/json,.json"
-                        className="hidden"
-                        onChange={handleImportFileChange}
-                      />
-                    </div>
-                  )}
-                </div>
+                <AccentPanel>
+                  <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:gap-2 sm:px-3 sm:py-2">
+                    {renderStatusIndicator('开启学习', scopeStatus.enableLearning, false)}
+                    {renderStatusIndicator('开启使用', scopeStatus.useExpression)}
+                    {currentChat && (
+                      <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 justify-center gap-1 sm:h-8"
+                          onClick={() => exportExpressionsToFile(false)}
+                        >
+                          <Download className="h-4 w-4" />
+                          导出全部
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 justify-center gap-1 sm:h-8"
+                          onClick={() => exportExpressionsToFile(true)}
+                          disabled={list.selectedCount === 0}
+                        >
+                          <Download className="h-4 w-4" />
+                          导出所选
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 justify-center gap-1 sm:h-8"
+                          onClick={() => importInputRef.current?.click()}
+                        >
+                          <Upload className="h-4 w-4" />
+                          导入
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-9 justify-center sm:h-8"
+                          onClick={() => setIsClearConfirmOpen(true)}
+                        >
+                          清除
+                        </Button>
+                        <input
+                          ref={importInputRef}
+                          type="file"
+                          accept="application/json,.json"
+                          className="hidden"
+                          onChange={handleImportFileChange}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </AccentPanel>
               )}
 
               <ExpressionList
