@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -40,6 +41,7 @@ import { InstallDialog } from './InstallDialog'
 import { MarketplaceTab } from './MarketplaceTab'
 import type { GitStatus, MaimaiVersion, MarketplaceSortKey, PluginInfo, PluginLoadProgress } from './types'
 import { getPluginType, PLUGIN_TYPE_OPTIONS } from './types'
+import { PluginDetailPage } from '../plugin-detail'
 
 const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
 const PLUGIN_MARKET_VIEW_STATE_KEY = 'plugins-market-view-state'
@@ -171,6 +173,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   // 安装对话框状态
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
   const [installingPlugin, setInstallingPlugin] = useState<PluginInfo | null>(null)
+  const [detailPluginId, setDetailPluginId] = useState<string | null>(null)
   
   const { toast } = useToast()
   const isFetchingMarketplace = loadProgress?.stage === 'loading' && loadProgress.operation === 'fetch'
@@ -1065,7 +1068,6 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         ) : (
           <MarketplaceTab
             plugins={plugins}
-            embedded={embedded}
             searchQuery={searchQuery}
             pluginTypeFilter={pluginTypeFilter}
             showCompatibleOnly={showCompatibleOnly}
@@ -1080,6 +1082,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             onLike={handleLike}
             onUpdate={handleUpdate}
             onUninstall={handleUninstall}
+            onDetail={(plugin) => setDetailPluginId(plugin.id)}
             checkPluginCompatibility={checkPluginCompatibility}
             needsUpdate={needsUpdate}
             getStatusBadge={getStatusBadge}
@@ -1095,6 +1098,19 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
           onOpenChange={handleInstallDialogOpenChange}
           onInstall={handleInstall}
         />
+
+        <Dialog open={detailPluginId !== null} onOpenChange={(open) => !open && setDetailPluginId(null)}>
+          <DialogContent className="max-w-[calc(100vw-2rem)] p-0 [--dialog-width:88rem]" hideCloseButton>
+            {detailPluginId ? (
+              <PluginDetailPage
+                embedded={embedded}
+                mode="dialog"
+                onClose={() => setDetailPluginId(null)}
+                pluginId={detailPluginId}
+              />
+            ) : null}
+          </DialogContent>
+        </Dialog>
 
         {/* 重启遮罩层 */}
         <RestartOverlay />

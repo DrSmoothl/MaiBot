@@ -30,7 +30,6 @@ interface MarketplaceScoreBasis {
 
 interface MarketplaceTabProps {
   plugins: PluginInfo[]
-  embedded?: boolean
   searchQuery: string
   pluginTypeFilter: string
   showCompatibleOnly: boolean
@@ -45,6 +44,7 @@ interface MarketplaceTabProps {
   onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
   onUninstall: (plugin: PluginInfo) => void
+  onDetail: (plugin: PluginInfo) => void
   checkPluginCompatibility: (plugin: PluginInfo) => boolean
   needsUpdate: (plugin: PluginInfo) => boolean
   getStatusBadge: (plugin: PluginInfo) => React.JSX.Element | null
@@ -171,7 +171,6 @@ function selectSurprisePlugins(
 
 export function MarketplaceTab({
   plugins,
-  embedded = false,
   searchQuery,
   pluginTypeFilter,
   showCompatibleOnly,
@@ -186,6 +185,7 @@ export function MarketplaceTab({
   onLike,
   onUpdate,
   onUninstall,
+  onDetail,
   checkPluginCompatibility,
   needsUpdate,
   getStatusBadge,
@@ -322,7 +322,6 @@ export function MarketplaceTab({
     <PluginCard
       key={plugin.id}
       plugin={plugin}
-      embedded={embedded}
       gitStatus={gitStatus}
       maimaiVersion={maimaiVersion}
       pluginStats={pluginStats}
@@ -332,6 +331,7 @@ export function MarketplaceTab({
       onLike={onLike}
       onUpdate={onUpdate}
       onUninstall={onUninstall}
+      onDetail={onDetail}
       checkPluginCompatibility={checkPluginCompatibility}
       needsUpdate={needsUpdate}
       getStatusBadge={getStatusBadge}

@@ -225,23 +225,6 @@ const pluginsRoute = createRoute({
   ),
 })
 
-// 插件详情路由
-const pluginDetailRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: '/plugin-detail',
-  component: lazyRouteComponent(() => import('./routes/plugin-detail'), 'PluginDetailPage'),
-})
-
-// 外部程序嵌入用插件详情路由，不挂载 dashboard 顶栏和侧边栏
-const pluginDetailEmbedRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/plugin-detail/embed',
-  component: lazyRouteComponent(
-    () => import('./routes/plugin-detail-embed'),
-    'PluginDetailEmbedPage'
-  ),
-})
-
 // 模型分配预设市场路由
 const modelPresetsRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -345,7 +328,6 @@ const routeTree = rootRoute.addChildren([
   pluginsEmbedRoute,
   pluginConfigEmbedRoute,
   pluginMirrorsEmbedRoute,
-  pluginDetailEmbedRoute,
   protectedRoute.addChildren([
     indexRoute,
     botConfigRoute,
@@ -362,7 +344,6 @@ const routeTree = rootRoute.addChildren([
     knowledgeGraphRoute,
     knowledgeBaseRoute,
     pluginsRoute,
-    pluginDetailRoute,
     modelPresetsRoute,
     pluginConfigRoute,
     pluginMirrorsRoute,

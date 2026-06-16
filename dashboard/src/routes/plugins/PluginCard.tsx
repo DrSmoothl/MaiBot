@@ -1,4 +1,3 @@
-import { useNavigate } from '@tanstack/react-router'
 import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, ThumbsUp, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -12,7 +11,6 @@ import { getPluginProgressDetail, getPluginTypeLabel } from './types'
 
 interface PluginCardProps {
   plugin: PluginInfo
-  embedded?: boolean
   gitStatus: GitStatus | null
   maimaiVersion: MaimaiVersion | null
   pluginStats: Record<string, PluginStatsData>
@@ -22,6 +20,7 @@ interface PluginCardProps {
   onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
   onUninstall: (plugin: PluginInfo) => void
+  onDetail: (plugin: PluginInfo) => void
   checkPluginCompatibility: (plugin: PluginInfo) => boolean
   needsUpdate: (plugin: PluginInfo) => boolean
   getStatusBadge: (plugin: PluginInfo) => React.JSX.Element | null
@@ -30,7 +29,6 @@ interface PluginCardProps {
 
 export function PluginCard({
   plugin,
-  embedded = false,
   gitStatus,
   maimaiVersion,
   pluginStats,
@@ -40,15 +38,12 @@ export function PluginCard({
   onLike,
   onUpdate,
   onUninstall,
+  onDetail,
   checkPluginCompatibility,
   needsUpdate,
   getStatusBadge,
   getIncompatibleReason,
 }: PluginCardProps) {
-  const navigate = useNavigate()
-  const detailRoute: '/plugin-detail' | '/plugin-detail/embed' = embedded
-    ? '/plugin-detail/embed'
-    : '/plugin-detail'
   const stats = [plugin.manifest?.id]
     .map(id => id ? pluginStats[id] : undefined)
     .find(Boolean)
@@ -161,7 +156,7 @@ export function PluginCard({
             variant="outline"
             size="sm"
             className="w-full sm:w-auto"
-            onClick={() => navigate({ to: detailRoute, search: { pluginId: plugin.id } })}
+            onClick={() => onDetail(plugin)}
           >
             查看详情
           </Button>

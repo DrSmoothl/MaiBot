@@ -16,6 +16,7 @@ interface InstalledTabProps {
   onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
   onUninstall: (plugin: PluginInfo) => void
+  onDetail: (plugin: PluginInfo) => void
   checkPluginCompatibility: (plugin: PluginInfo) => boolean
   needsUpdate: (plugin: PluginInfo) => boolean
   getStatusBadge: (plugin: PluginInfo) => React.JSX.Element | null
@@ -36,6 +37,7 @@ export function InstalledTab({
   onLike,
   onUpdate,
   onUninstall,
+  onDetail,
   checkPluginCompatibility,
   needsUpdate,
   getStatusBadge,
@@ -85,6 +87,7 @@ export function InstalledTab({
           onLike={onLike}
           onUpdate={onUpdate}
           onUninstall={onUninstall}
+          onDetail={onDetail}
           checkPluginCompatibility={checkPluginCompatibility}
           needsUpdate={needsUpdate}
           getStatusBadge={getStatusBadge}

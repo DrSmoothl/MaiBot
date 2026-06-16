@@ -4,16 +4,52 @@ import { useNavigate } from '@tanstack/react-router'
 import { checkAuthStatus } from '@/lib/auth'
 import { authApi } from '@/lib/http'
 
+const AUTH_STATUS_CACHE_MS = 30_000
+let cachedAuthStatus: { authenticated: boolean; checkedAt: number } | null = null
+let authStatusPromise: Promise<boolean> | null = null
+
+function readCachedAuthStatus(): boolean | undefined {
+  if (!cachedAuthStatus) {
+    return undefined
+  }
+  if (Date.now() - cachedAuthStatus.checkedAt > AUTH_STATUS_CACHE_MS) {
+    cachedAuthStatus = null
+    return undefined
+  }
+  return cachedAuthStatus.authenticated
+}
+
+async function checkAuthStatusCached(): Promise<boolean> {
+  const cached = readCachedAuthStatus()
+  if (typeof cached === 'boolean') {
+    return cached
+  }
+  authStatusPromise ??= checkAuthStatus().then((authenticated) => {
+    cachedAuthStatus = { authenticated, checkedAt: Date.now() }
+    return authenticated
+  }).finally(() => {
+    authStatusPromise = null
+  })
+  return authStatusPromise
+}
+
 export function useAuthGuard() {
   const navigate = useNavigate()
-  const [checking, setChecking] = useState(true)
+  const [checking, setChecking] = useState(readCachedAuthStatus() !== true)
 
   useEffect(() => {
     let cancelled = false
+    const cached = readCachedAuthStatus()
+    if (cached === true) {
+      setChecking(false)
+      return () => {
+        cancelled = true
+      }
+    }
     
     const verifyAuth = async () => {
       try {
-        const isAuth = await checkAuthStatus()
+        const isAuth = await checkAuthStatusCached()
         if (!cancelled && !isAuth) {
           navigate({ to: '/auth' })
         }
