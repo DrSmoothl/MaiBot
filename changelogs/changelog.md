@@ -2,6 +2,12 @@
 
 测试版更新日志见 [changelog_dev.md](changelog_dev.md)。
 
+# [1.0.6] - 2026-6-16
+
+## WebUI
+
+- 优化旧提醒
+
 # [1.0.5] - 2026-6-16
 
 ## WebUI
