@@ -12,7 +12,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="continue",
-        description="允许当前会话继续进入下一轮思考和工具执行。",
+        description="进入下一轮思考和工具执行。",
         provider_name="maisaka_builtin",
         provider_type="builtin",
     )

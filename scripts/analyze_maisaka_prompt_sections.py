@@ -925,6 +925,11 @@ def parse_args() -> Namespace:
     parser.add_argument("--component-csv", type=Path, default=None, help="导出推荐口径的组件模型 CSV。")
     parser.add_argument("--benchmark-md", type=Path, default=None, help="导出推荐口径的 benchmark Markdown。")
     parser.add_argument("--report-label", default="", help="写入 benchmark 标题的统计窗口标签，例如 7d。")
+    parser.add_argument(
+        "--skip-invalid-json",
+        action="store_true",
+        help="跳过无法解析的 prompt JSON，并在输出中报告跳过数量；默认遇到坏日志直接失败。",
+    )
     return parser.parse_args()
 
 
@@ -955,6 +960,7 @@ def main() -> int:
     usage_records = load_usage_records(args.db, since, until)
     used_usage_ids: set[int] = set()
     records: list[PromptRecord] = []
+    invalid_json_paths: list[Path] = []
     for stage, path in prompt_files:
         timestamp = parse_file_timestamp(path)
         usage = find_matching_usage(
@@ -964,7 +970,24 @@ def main() -> int:
             timestamp=timestamp,
             max_seconds=float(args.usage_match_window),
         )
-        records.append(load_prompt_record(path, stage=stage, usage=usage))
+        try:
+            records.append(load_prompt_record(path, stage=stage, usage=usage))
+        except json.JSONDecodeError as exc:
+            if not args.skip_invalid_json:
+                print(f"无法解析 prompt JSON: {path} ({exc})", file=sys.stderr)
+                return 2
+            invalid_json_paths.append(path)
+
+    if invalid_json_paths:
+        print("已跳过无法解析的 prompt JSON:")
+        for path in invalid_json_paths:
+            print(f"- {path}")
+        print(f"- 合计跳过: {len(invalid_json_paths)}")
+        print()
+
+    if not records:
+        print("没有可统计的有效 prompt 日志。")
+        return 0
 
     print_section_table(records)
     print_tool_table(records, int(args.top_tools))

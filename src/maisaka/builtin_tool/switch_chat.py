@@ -2,8 +2,9 @@
 
 from typing import Optional
 
-from .context import BuiltinToolRuntimeContext
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
+
+from .context import BuiltinToolRuntimeContext
 
 
 def get_tool_spec() -> ToolSpec:
@@ -12,9 +13,8 @@ def get_tool_spec() -> ToolSpec:
     return ToolSpec(
         name="switch_chat",
         description=(
-            "切换到另一个运行中已创建且未关注的聊天。切换会把当前 Maisaka 上下文复制并覆盖到目标聊天，"
+            "切换到另一个运行中已创建且未关注的聊天。切换会把当前上下文复制并覆盖到目标聊天，"
             "并把目标聊天当前未读新消息按普通 user message 格式接入上下文；未读新消息超过 20 条时只接入最新 20 条，"
-            "少于 20 条时全部接入。"
         ),
         parameters_schema={
             "type": "object",

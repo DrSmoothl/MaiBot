@@ -4,13 +4,13 @@ from typing import Optional
 
 from src.common.logger import get_logger
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
-
 from src.maisaka.context.messages import (
     SessionBackedMessage,
     build_full_complex_message_content,
     build_full_complex_message_content_from_sequence,
     contains_complex_message,
 )
+
 from .context import BuiltinToolRuntimeContext
 
 logger = get_logger("maisaka_builtin_view_complex_message")
@@ -21,13 +21,13 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="view_complex_message",
-        description="根据 msg_id 查看复杂消息的完整内容，适用于 Prompt 中标记为 [消息类型]复杂消息 的消息，包括转发消息、文件消息和聊天记录摘要。（图片不是复杂消息，不需要展开）",
+        description="根据 msg_id 查看复杂消息的完整内容，适用于标记为 [消息类型]复杂消息 的消息，包括转发消息、文件消息和聊天记录摘要。（图片不是复杂消息，不需要展开）",
         parameters_schema={
             "type": "object",
             "properties": {
                 "msg_id": {
                     "type": "string",
-                    "description": "要查看完整内容的目标消息编号。",
+                    "description": "复杂消息的msg_id。",
                 },
             },
             "required": ["msg_id"],
@@ -87,9 +87,7 @@ async def handle_tool(
         )
 
     target_sequence = (
-        target_context_message.raw_message
-        if target_context_message is not None
-        else target_source_message.raw_message
+        target_context_message.raw_message if target_context_message is not None else target_source_message.raw_message
     )
     if not contains_complex_message(target_sequence):
         return tool_ctx.build_failure_result(
@@ -97,9 +95,7 @@ async def handle_tool(
             f"目标消息不是可展开查看的复杂消息，msg_id={target_message_id}",
         )
 
-    logger.info(
-        f"{tool_ctx.runtime.log_prefix} 触发复杂消息查看工具，目标消息编号={target_message_id}"
-    )
+    logger.info(f"{tool_ctx.runtime.log_prefix} 触发复杂消息查看工具，目标消息编号={target_message_id}")
     try:
         if target_context_message is not None:
             full_content = await _build_full_content_for_context_message(target_context_message)

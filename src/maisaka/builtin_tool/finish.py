@@ -12,7 +12,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="finish",
-        description="结束连续 Planner 和本轮思考，等待后续新的外部消息再重新开始判断。",
+        description="结束连续思考，不再使用工具，进入等待观望",
         provider_name="maisaka_builtin",
         provider_type="builtin",
     )

@@ -22,7 +22,7 @@ def get_tool_spec() -> ToolSpec:
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "最多返回多少个匹配工具。",
+                    "description": "最多返回多少个工具。",
                     "minimum": 1,
                 },
             },
