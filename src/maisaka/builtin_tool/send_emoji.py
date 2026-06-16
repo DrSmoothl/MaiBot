@@ -26,6 +26,7 @@ from src.maisaka.context.messages import (
     ReferenceMessageType,
     SessionBackedMessage,
 )
+from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.prompt.prompt_manager import prompt_manager
 
 from .context import BuiltinToolRuntimeContext
@@ -208,6 +209,7 @@ async def _build_emoji_candidate_message(emojis: list[MaiEmoji]) -> SessionBacke
 
 def _build_send_emoji_monitor_detail(
     *,
+    request_messages: Optional[list[Any]] = None,
     request_message_count: int = 0,
     reasoning_text: str = "",
     output_text: str = "",
@@ -217,8 +219,10 @@ def _build_send_emoji_monitor_detail(
     """构建 send_emoji 工具统一监控详情。"""
 
     detail: Dict[str, Any] = {}
+    if request_messages:
+        detail["request_messages"] = request_messages
     if request_message_count > 0:
-        detail["prompt_omitted"] = True
+        detail["request_messages_sanitized"] = bool(request_messages)
         detail["request_message_count"] = request_message_count
     if reasoning_text.strip():
         detail["reasoning_text"] = reasoning_text.strip()
@@ -403,6 +407,10 @@ async def _select_emoji_with_sub_agent(
         logger.warning(f"{tool_ctx.runtime.log_prefix} 表情包子代理结果解析失败，将回退到候选首项: {exc}")
         if selection_metadata is not None:
             selection_metadata["monitor_detail"] = _build_send_emoji_monitor_detail(
+                request_messages=PromptCLIVisualizer._build_structured_message_payload(
+                    request_messages,
+                    keep_base64=False,
+                ),
                 request_message_count=len(request_messages),
                 output_text=response.content or "",
                 metrics=selection_metrics,
@@ -417,6 +425,10 @@ async def _select_emoji_with_sub_agent(
     if selection_metadata is not None:
         selection_metadata["reason"] = selection.reason.strip()
         selection_metadata["monitor_detail"] = _build_send_emoji_monitor_detail(
+            request_messages=PromptCLIVisualizer._build_structured_message_payload(
+                request_messages,
+                keep_base64=False,
+            ),
             request_message_count=len(request_messages),
             reasoning_text=selection.reason,
             output_text=response.content or "",

@@ -354,22 +354,24 @@ class MaisakaRuntimeDisplayMixin:
             try:
                 normalized_messages = deserialize_prompt_messages(request_messages)
             except Exception as exc:
-                logger.warning(f"工具 {tool_name} 的 request_messages 无法反序列化，已回退为文本预览: {exc}")
-            else:
-                return Panel(
-                    PromptCLIVisualizer.build_prompt_access_panel(
-                        normalized_messages,
-                        category=labels["prompt_category"],
-                        chat_id=self.session_id,
-                        request_kind=labels["request_kind"],
-                        selection_reason=subtitle,
-                        output_content=output_content,
-                        metadata=metadata,
-                    ),
-                    title=labels["prompt_title"],
-                    border_style=border_style,
-                    padding=(0, 1),
+                logger.debug(
+                    f"工具 {tool_name} 的 request_messages 无法还原为模型消息，将使用瘦身结构预览: {exc}"
                 )
+                normalized_messages = request_messages
+            return Panel(
+                PromptCLIVisualizer.build_prompt_access_panel(
+                    normalized_messages,
+                    category=labels["prompt_category"],
+                    chat_id=self.session_id,
+                    request_kind=labels["request_kind"],
+                    selection_reason=subtitle,
+                    output_content=output_content,
+                    metadata=metadata,
+                ),
+                title=labels["prompt_title"],
+                border_style=border_style,
+                padding=(0, 1),
+            )
 
         return Panel(
             PromptCLIVisualizer.build_text_access_panel(
@@ -509,14 +511,13 @@ class MaisakaRuntimeDisplayMixin:
 
         output_text = str(detail.get("output_text") or "").strip()
         prompt_text = str(detail.get("prompt_text") or "").strip()
-        if prompt_text:
+        request_messages = detail.get("request_messages") if isinstance(detail.get("request_messages"), list) else None
+        if prompt_text or request_messages:
             parts.append(
                 self._build_tool_prompt_access_panel(
                     tool_name=tool_name,
                     prompt_text=prompt_text,
-                    request_messages=(
-                        detail.get("request_messages") if isinstance(detail.get("request_messages"), list) else None
-                    ),
+                    request_messages=request_messages,
                     tool_call_id=tool_call_id,
                     border_style=prompt_border_style,
                     output_content=output_text,

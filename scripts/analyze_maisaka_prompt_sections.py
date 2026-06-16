@@ -19,6 +19,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROMPT_ROOT = PROJECT_ROOT / "logs" / "maisaka_prompt"
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "MaiBot.db"
 DEFAULT_STAGES = ("timing_gate", "planner")
+REPORT_SECTIONS = (
+    "chat_message",
+    "system",
+    "tool_definitions",
+    "assistant_history",
+    "system_reminder",
+    "tool_result",
+    "other_context",
+    "time_context",
+)
 REQUEST_TYPE_BY_STAGE = {
     "timing_gate": "maisaka.timing_gate",
     "planner": "maisaka.planner",
@@ -59,6 +69,7 @@ class PromptRecord:
     tool_definition_estimated_tokens: dict[str, int]
     usage: Optional[UsageRecord]
     message_count: int
+    chat_message_count: int
     tool_count: int
     output_tool_names: list[str]
 
@@ -204,12 +215,15 @@ def load_prompt_record(
 
     raw_messages = data.get("messages")
     messages = raw_messages if isinstance(raw_messages, list) else []
+    chat_message_count = 0
     for raw_message in messages:
         if not isinstance(raw_message, dict):
             continue
         section = classify_message_section(raw_message)
         content = str(raw_message.get("content_text") or raw_message.get("content") or "")
         section_texts[section].append(content)
+        if section == "chat_message":
+            chat_message_count += 1
 
     raw_tool_definitions = data.get("tool_definitions")
     tool_definitions = raw_tool_definitions if isinstance(raw_tool_definitions, list) else []
@@ -250,6 +264,7 @@ def load_prompt_record(
         tool_definition_estimated_tokens=tool_definition_estimated_tokens,
         usage=usage,
         message_count=len(messages),
+        chat_message_count=chat_message_count,
         tool_count=len(tool_definitions),
         output_tool_names=extract_output_tool_names(data),
     )
@@ -683,6 +698,163 @@ def print_top_records(records: list[PromptRecord], top: int) -> None:
     print()
 
 
+def mean(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
+def describe_component(mean_value: float, stddev_value: float) -> str:
+    if mean_value <= 0:
+        return "0"
+    coefficient_of_variation = stddev_value / mean_value if mean_value else 0.0
+    if coefficient_of_variation < 0.2:
+        return format_int(mean_value)
+    return f"avg {format_int(mean_value)}, std {format_int(stddev_value)}"
+
+
+def build_component_model_rows(records: list[PromptRecord]) -> list[dict[str, Any]]:
+    section_rows = build_section_rows(records)
+    rows: list[dict[str, Any]] = []
+    for stage in DEFAULT_STAGES:
+        stage_records = [
+            record
+            for record in records
+            if record.stage == stage and record.usage is not None
+        ]
+        if not stage_records:
+            continue
+
+        section_by_name = {
+            str(row["section"]): row
+            for row in section_rows
+            if row["stage"] == stage
+        }
+        chat_history_values = [
+            calibrated_section_value(record, "chat_message") / record.chat_message_count
+            for record in stage_records
+            if record.chat_message_count > 0
+        ]
+        chat_history_mean = mean(chat_history_values)
+        chat_history_stddev = standard_deviation(variance(chat_history_values))
+
+        for section in REPORT_SECTIONS:
+            row = section_by_name.get(section)
+            if row is None:
+                row = {
+                    "calibrated_tokens": 0.0,
+                    "calibrated_percent": 0.0,
+                    "calibrated_mean": 0.0,
+                    "calibrated_stddev": 0.0,
+                }
+
+            component_mean = float(row["calibrated_mean"])
+            component_stddev = float(row["calibrated_stddev"])
+            coefficient_of_variation = component_stddev / component_mean if component_mean else 0.0
+            if section == "chat_message":
+                description = f"{chat_history_mean:.1f} token / chat_history"
+                mean_per_chat_history: float | None = chat_history_mean
+                stddev_per_chat_history: float | None = chat_history_stddev
+            else:
+                description = describe_component(component_mean, component_stddev)
+                mean_per_chat_history = None
+                stddev_per_chat_history = None
+
+            rows.append(
+                {
+                    "stage": stage,
+                    "component": section,
+                    "request_count": len(stage_records),
+                    "total_tokens": float(row["calibrated_tokens"]),
+                    "share": float(row["calibrated_percent"]),
+                    "mean_per_request": component_mean,
+                    "stddev_per_request": component_stddev,
+                    "cv": coefficient_of_variation,
+                    "mean_per_chat_history": mean_per_chat_history,
+                    "stddev_per_chat_history": stddev_per_chat_history,
+                    "description": description,
+                }
+            )
+    return rows
+
+
+def write_component_model_csv(records: list[PromptRecord], output_path: Path) -> None:
+    write_csv(build_component_model_rows(records), output_path)
+
+
+def write_benchmark_markdown(records: list[PromptRecord], output_path: Path, report_label: str = "") -> None:
+    rows = build_component_model_rows(records)
+    rows_by_stage: DefaultDict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        rows_by_stage[str(row["stage"])].append(row)
+
+    title_suffix = f" {report_label.strip()}" if report_label.strip() else ""
+    lines = [
+        f"# Maisaka Prompt Cost Benchmark{title_suffix}",
+        "",
+        "口径：使用能匹配真实 `prompt_tokens` 的 prompt 日志；组件 token 为按估算比例分摊后的 calibrated tokens。",
+        "",
+        "`chat_message` 展示平均每条 chat history 的消耗，不使用聊天长度线性回归公式。",
+        "",
+    ]
+
+    for stage in DEFAULT_STAGES:
+        stage_records = [
+            record
+            for record in records
+            if record.stage == stage and record.usage is not None
+        ]
+        if not stage_records:
+            continue
+
+        prompt_mean = sum(record.actual_prompt_tokens for record in stage_records) / len(stage_records)
+        chat_history_mean = sum(record.chat_message_count for record in stage_records) / len(stage_records)
+        chat_row = next(
+            (row for row in rows_by_stage[stage] if row["component"] == "chat_message"),
+            None,
+        )
+        chat_mean = float(chat_row["mean_per_chat_history"]) if chat_row is not None else 0.0
+        chat_stddev = float(chat_row["stddev_per_chat_history"]) if chat_row is not None else 0.0
+
+        lines.extend(
+            [
+                f"## {stage}",
+                "",
+                f"- 请求数：{len(stage_records)}",
+                f"- prompt token / 请求均值：{format_int(prompt_mean)}",
+                f"- chat history / 请求均值：{chat_history_mean:.1f} 条",
+                f"- chat_message / chat history：{chat_mean:.1f} ± {chat_stddev:.1f} token",
+                "",
+                "| 组件 | 推荐描述 | 每请求均值 | 每请求标准差 | 占比 |",
+                "|---|---:|---:|---:|---:|",
+            ]
+        )
+
+        for row in rows_by_stage[stage]:
+            lines.append(
+                "| "
+                f"{row['component']} | "
+                f"{row['description']} | "
+                f"{format_int(row['mean_per_request'])} | "
+                f"{format_int(row['stddev_per_request'])} | "
+                f"{format_percent(row['share'])} |"
+            )
+        lines.append("")
+
+    lines.extend(
+        [
+            "## 解释",
+            "",
+            "- `chat_history` 指 prompt 中 `<message ...>` 形式的真实聊天历史消息。",
+            "- `chat_message / chat history` 是每条聊天历史消息平均进入 prompt 的 calibrated token。",
+            "- 其他组件用每请求均值/标准差描述。",
+        ]
+    )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def write_csv(rows: list[dict[str, Any]], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8-sig", newline="") as file:
@@ -703,6 +875,7 @@ def write_json(records: list[PromptRecord], output_path: Path) -> None:
                 "actual_prompt_tokens": record.actual_prompt_tokens,
                 "estimated_prompt_tokens": record.estimated_prompt_tokens,
                 "message_count": record.message_count,
+                "chat_message_count": record.chat_message_count,
                 "tool_count": record.tool_count,
                 "output_tool_names": record.output_tool_names,
                 "sections": {
@@ -749,6 +922,9 @@ def parse_args() -> Namespace:
     parser.add_argument("--top-tools", type=int, default=20, help="每个阶段输出 schema 最大的前 N 个工具。")
     parser.add_argument("--csv", type=Path, default=None, help="导出 section 汇总 CSV。")
     parser.add_argument("--json", type=Path, default=None, help="导出明细 JSON。")
+    parser.add_argument("--component-csv", type=Path, default=None, help="导出推荐口径的组件模型 CSV。")
+    parser.add_argument("--benchmark-md", type=Path, default=None, help="导出推荐口径的 benchmark Markdown。")
+    parser.add_argument("--report-label", default="", help="写入 benchmark 标题的统计窗口标签，例如 7d。")
     return parser.parse_args()
 
 
@@ -801,6 +977,12 @@ def main() -> int:
     if args.json is not None:
         write_json(records, args.json)
         print(f"JSON 已导出: {args.json}")
+    if args.component_csv is not None:
+        write_component_model_csv(records, args.component_csv)
+        print(f"组件模型 CSV 已导出: {args.component_csv}")
+    if args.benchmark_md is not None:
+        write_benchmark_markdown(records, args.benchmark_md, str(args.report_label or ""))
+        print(f"Benchmark Markdown 已导出: {args.benchmark_md}")
     return 0
 
 
