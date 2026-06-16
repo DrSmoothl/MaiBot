@@ -157,10 +157,10 @@ export function Layout({ children }: LayoutProps) {
             {isSettingsWorkspace && (
               <motion.div
                 key="settings-sidebar"
-                className="relative z-40 hidden shrink-0 lg:block"
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: sidebarOpen ? 208 : 64, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
+                className="relative z-40 hidden shrink-0 overflow-hidden transition-[width] duration-300 lg:block"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 transition={{
                   type: 'spring',
                   stiffness: 320,
@@ -168,7 +168,11 @@ export function Layout({ children }: LayoutProps) {
                   mass: 0.7,
                   opacity: { duration: 0.2 },
                 }}
-                style={{ overflow: 'hidden' }}
+                style={{
+                  width: sidebarOpen
+                    ? 'var(--layout-sidebar-width)'
+                    : 'var(--layout-sidebar-collapsed-width)',
+                }}
               >
                 <Sidebar
                   sidebarOpen={sidebarOpen}

@@ -8,7 +8,6 @@ import type { DashboardStyle, UserThemeConfig } from '@/lib/theme/tokens'
 import {
   THEME_STORAGE_KEYS,
   loadThemeConfig,
-  migrateOldKeys,
   resetThemeToDefault,
   saveThemePartial,
 } from '@/lib/theme/storage'
@@ -51,10 +50,6 @@ export function ThemeProvider({
     if (themeMode !== 'system') return themeMode
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   }, [themeMode, systemThemeTick])
-
-  useEffect(() => {
-    migrateOldKeys()
-  }, [])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')

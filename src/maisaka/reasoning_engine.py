@@ -24,7 +24,8 @@ from src.learners.behavior_selector import behavior_pattern_selector
 from src.llm_models.exceptions import ReqAbortException, RespNotOkException
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.services import database_service as database_api
-from src.services.memory_service import memory_service
+from src.maisaka.utils.tool_post_execution import handle_tool_post_execution_effects
+from src.maisaka.utils.tool_record_payload import build_tool_record_payload, normalize_tool_record_value
 
 from src.maisaka.builtin_tool import (
     build_builtin_tool_handlers as build_split_builtin_tool_handlers,
@@ -535,7 +536,14 @@ class MaisakaReasoningEngine:
                 error_message="统一工具注册表尚未初始化。",
             )
             if store_record:
-                await self._store_tool_execution_record(invocation, result, None)
+                saved_record = await self._store_tool_execution_record(invocation, result, None)
+                await handle_tool_post_execution_effects(
+                    invocation=invocation,
+                    result=result,
+                    saved_record=saved_record,
+                    chat_stream=self._runtime.chat_stream,
+                    log_prefix=self._runtime.log_prefix,
+                )
             if append_history:
                 self._append_tool_execution_result(tool_call, result)
             return invocation, result, None
@@ -545,7 +553,14 @@ class MaisakaReasoningEngine:
         tool_spec = await self._runtime._tool_registry.get_tool_spec(invocation.tool_name, availability_context)
         result = await self._runtime._tool_registry.invoke(invocation, execution_context)
         if store_record:
-            await self._store_tool_execution_record(invocation, result, tool_spec)
+            saved_record = await self._store_tool_execution_record(invocation, result, tool_spec)
+            await handle_tool_post_execution_effects(
+                invocation=invocation,
+                result=result,
+                saved_record=saved_record,
+                chat_stream=self._runtime.chat_stream,
+                log_prefix=self._runtime.log_prefix,
+            )
         if append_history:
             self._append_tool_execution_result(tool_call, result)
         return invocation, result, tool_spec
@@ -1759,42 +1774,6 @@ class MaisakaReasoningEngine:
         )
 
     @staticmethod
-    def _normalize_tool_record_value(value: Any) -> Any:
-        """将工具记录中的任意值规范化为可序列化结构。
-
-        Args:
-            value: 原始值。
-
-        Returns:
-            Any: 适合写入 JSON 的规范化结果。
-        """
-
-        if value is None or isinstance(value, (str, int, float, bool)):
-            return value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            normalized_dict: dict[str, Any] = {}
-            for key, item in value.items():
-                normalized_dict[str(key)] = MaisakaReasoningEngine._normalize_tool_record_value(item)
-            return normalized_dict
-        if isinstance(value, (list, tuple, set)):
-            return [MaisakaReasoningEngine._normalize_tool_record_value(item) for item in value]
-        if isinstance(value, bytes):
-            return f"<bytes:{len(value)}>"
-        if hasattr(value, "model_dump"):
-            try:
-                return MaisakaReasoningEngine._normalize_tool_record_value(value.model_dump())
-            except Exception:
-                return str(value)
-        if hasattr(value, "__dict__"):
-            try:
-                return MaisakaReasoningEngine._normalize_tool_record_value(dict(value.__dict__))
-            except Exception:
-                return str(value)
-        return str(value)
-
-    @staticmethod
     def _truncate_tool_record_text(text: str, max_length: int = 180) -> str:
         """截断工具记录中的展示文本。
 
@@ -1811,13 +1790,13 @@ class MaisakaReasoningEngine:
             return normalized_text
         return f"{normalized_text[: max_length - 1]}…"
 
-    def _build_tool_record_payload(
+    async def _store_tool_execution_record(
         self,
         invocation: ToolInvocation,
         result: ToolExecutionResult,
         tool_spec: Optional[ToolSpec],
-    ) -> dict[str, Any]:
-        """构造统一工具落库数据。
+    ) -> Optional[dict[str, Any]]:
+        """将工具执行结果落库到统一工具记录表。
 
         Args:
             invocation: 工具调用对象。
@@ -1825,40 +1804,7 @@ class MaisakaReasoningEngine:
             tool_spec: 对应的工具声明。
 
         Returns:
-            dict[str, Any]: 可直接写入数据库的工具记录数据。
-        """
-
-        payload: dict[str, Any] = {
-            "call_id": invocation.call_id,
-            "session_id": invocation.session_id,
-            "stream_id": invocation.stream_id,
-            "arguments": self._normalize_tool_record_value(invocation.arguments),
-            "success": result.success,
-            "content": result.content,
-            "error_message": result.error_message,
-            "history_content": result.get_history_content(),
-            "structured_content": self._normalize_tool_record_value(result.structured_content),
-            "metadata": self._normalize_tool_record_value(result.metadata),
-        }
-        if tool_spec is not None:
-            payload["provider_name"] = tool_spec.provider_name
-            payload["provider_type"] = tool_spec.provider_type
-            payload["description"] = tool_spec.description
-            payload["title"] = tool_spec.title
-        return payload
-
-    async def _store_tool_execution_record(
-        self,
-        invocation: ToolInvocation,
-        result: ToolExecutionResult,
-        tool_spec: Optional[ToolSpec],
-    ) -> None:
-        """将工具执行结果落库到统一工具记录表。
-
-        Args:
-            invocation: 工具调用对象。
-            result: 工具执行结果。
-            tool_spec: 对应的工具声明。
+            数据库保存后的工具记录；保存失败时返回 None。
         """
 
         if self._runtime.chat_stream is None:
@@ -1866,10 +1812,10 @@ class MaisakaReasoningEngine:
                 f"{self._runtime.log_prefix} 当前没有 chat_stream，跳过工具记录存储: "
                 f"工具={invocation.tool_name}"
             )
-            return
+            return None
 
         try:
-            tool_record_payload = self._build_tool_record_payload(invocation, result, tool_spec)
+            tool_record_payload = build_tool_record_payload(invocation, result, tool_spec)
             saved_record = await database_api.store_tool_info(
                 chat_stream=self._runtime.chat_stream,
                 tool_id=invocation.call_id,
@@ -1881,28 +1827,9 @@ class MaisakaReasoningEngine:
             logger.exception(
                 f"{self._runtime.log_prefix} 写入工具记录失败: 工具={invocation.tool_name} 调用编号={invocation.call_id}"
             )
-            return
+            return None
 
-        if invocation.tool_name == "query_memory" and isinstance(saved_record, dict):
-            try:
-                enqueue_payload = await memory_service.enqueue_feedback_task(
-                    query_tool_id=str(saved_record.get("tool_id") or invocation.call_id or "").strip(),
-                    session_id=str(saved_record.get("session_id") or self._runtime.chat_stream.session_id or "").strip(),
-                    query_timestamp=saved_record.get("timestamp"),
-                    structured_content=tool_record_payload.get("structured_content")
-                    if isinstance(tool_record_payload.get("structured_content"), dict)
-                    else {},
-                )
-            except Exception:
-                logger.exception(
-                    f"{self._runtime.log_prefix} 反馈纠错任务入队失败: tool_call_id={invocation.call_id}"
-                )
-            else:
-                if not bool(enqueue_payload.get("success")):
-                    logger.debug(
-                        f"{self._runtime.log_prefix} 反馈纠错任务未入队: "
-                        f"tool_call_id={invocation.call_id} reason={enqueue_payload.get('reason', '')}"
-                    )
+        return saved_record if isinstance(saved_record, dict) else None
 
     def _append_tool_execution_result(
         self,
@@ -1933,7 +1860,7 @@ class MaisakaReasoningEngine:
         if not history_content:
             history_content = "工具执行成功。" if result.success else f"工具 {tool_call.func_name} 执行失败。"
 
-        normalized_metadata = self._normalize_tool_record_value(result.metadata)
+        normalized_metadata = normalize_tool_record_value(result.metadata)
         if not isinstance(normalized_metadata, dict):
             normalized_metadata = {}
 
@@ -2285,23 +2212,23 @@ class MaisakaReasoningEngine:
         monitor_detail = result.metadata.get("monitor_detail")
         normalized_detail = None
         if monitor_detail is not None:
-            normalized_detail = self._normalize_tool_record_value(monitor_detail)
+            normalized_detail = normalize_tool_record_value(monitor_detail)
 
         monitor_card = result.metadata.get("monitor_card")
         normalized_card = None
         if monitor_card is not None:
-            normalized_card = self._normalize_tool_record_value(monitor_card)
+            normalized_card = normalize_tool_record_value(monitor_card)
 
         monitor_sub_cards = result.metadata.get("monitor_sub_cards")
         normalized_sub_cards = None
         if monitor_sub_cards is not None:
-            normalized_sub_cards = self._normalize_tool_record_value(monitor_sub_cards)
+            normalized_sub_cards = normalize_tool_record_value(monitor_sub_cards)
 
         return {
             "tool_call_id": tool_call.call_id,
             "tool_name": tool_call.func_name,
             "tool_title": tool_spec.title.strip() if tool_spec is not None and tool_spec.title.strip() else "",
-            "tool_args": self._normalize_tool_record_value(
+            "tool_args": normalize_tool_record_value(
                 invocation.arguments if isinstance(invocation.arguments, dict) else {}
             ),
             "success": result.success,
@@ -2342,7 +2269,14 @@ class MaisakaReasoningEngine:
                     success=False,
                     error_message="统一工具注册表尚未初始化。",
                 )
-                await self._store_tool_execution_record(invocation, result, None)
+                saved_record = await self._store_tool_execution_record(invocation, result, None)
+                await handle_tool_post_execution_effects(
+                    invocation=invocation,
+                    result=result,
+                    saved_record=saved_record,
+                    chat_stream=self._runtime.chat_stream,
+                    log_prefix=self._runtime.log_prefix,
+                )
                 self._append_tool_execution_result(tool_call, result)
                 tool_result_summaries.append(self._build_tool_result_summary(tool_call, result))
                 tool_monitor_results.append(
@@ -2369,10 +2303,17 @@ class MaisakaReasoningEngine:
             if is_unexpanded_tool and not result.success:
                 result = self._append_deferred_tool_parameter_hint(result)
             tool_duration_ms = (time.time() - tool_started_at) * 1000
-            await self._store_tool_execution_record(
+            saved_record = await self._store_tool_execution_record(
                 invocation,
                 result,
                 tool_spec_map.get(invocation.tool_name),
+            )
+            await handle_tool_post_execution_effects(
+                invocation=invocation,
+                result=result,
+                saved_record=saved_record,
+                chat_stream=self._runtime.chat_stream,
+                log_prefix=self._runtime.log_prefix,
             )
             self._append_tool_execution_result(tool_call, result, append_post_history=False)
             deferred_post_history_messages.extend(

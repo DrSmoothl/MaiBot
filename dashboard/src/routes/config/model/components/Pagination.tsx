@@ -2,6 +2,8 @@
  * 模型列表分页组件
  */
 import React from 'react'
+import { ChevronRight } from 'lucide-react'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,7 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { StreamlineIcon } from '@/components/ui/streamline-icon'
+
 import { PAGE_SIZE_OPTIONS } from '../constants'
 
 interface PaginationProps {
@@ -86,7 +89,10 @@ export const Pagination = React.memo(function Pagination({
           disabled={page === 1}
           className="hidden sm:flex"
         >
-          <ChevronsLeft className="h-4 w-4" />
+          <span className="flex -space-x-2">
+            <StreamlineIcon name="line-arrow-right-1-remix" fallback={ChevronRight} className="h-4 w-4 rotate-180" />
+            <StreamlineIcon name="line-arrow-right-1-remix" fallback={ChevronRight} className="h-4 w-4 rotate-180" />
+          </span>
         </Button>
         <Button
           variant="outline"
@@ -94,7 +100,7 @@ export const Pagination = React.memo(function Pagination({
           onClick={() => onPageChange(Math.max(1, page - 1))}
           disabled={page === 1}
         >
-          <ChevronLeft className="h-4 w-4 sm:mr-1" />
+          <StreamlineIcon name="line-arrow-right-1-remix" fallback={ChevronRight} className="h-4 w-4 rotate-180 sm:mr-1" />
           <span className="hidden sm:inline">上一页</span>
         </Button>
         <div className="flex items-center gap-2">
@@ -125,7 +131,7 @@ export const Pagination = React.memo(function Pagination({
           disabled={page >= totalPages}
         >
           <span className="hidden sm:inline">下一页</span>
-          <ChevronRight className="h-4 w-4 sm:ml-1" />
+          <StreamlineIcon name="line-arrow-right-1-remix" fallback={ChevronRight} className="h-4 w-4 sm:ml-1" />
         </Button>
         <Button
           variant="outline"
@@ -134,7 +140,10 @@ export const Pagination = React.memo(function Pagination({
           disabled={page >= totalPages}
           className="hidden sm:flex"
         >
-          <ChevronsRight className="h-4 w-4" />
+          <span className="flex -space-x-2">
+            <StreamlineIcon name="line-arrow-right-1-remix" fallback={ChevronRight} className="h-4 w-4" />
+            <StreamlineIcon name="line-arrow-right-1-remix" fallback={ChevronRight} className="h-4 w-4" />
+          </span>
         </Button>
       </div>
     </div>

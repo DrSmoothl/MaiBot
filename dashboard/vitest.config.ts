@@ -3,8 +3,11 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+import { dashboardVersionDefine } from './app-version'
+
 export default defineConfig({
   plugins: [react()],
+  define: dashboardVersionDefine,
   test: {
     globals: true,
     environment: 'jsdom',

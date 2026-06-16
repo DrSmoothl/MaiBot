@@ -74,16 +74,16 @@ export function ProviderCard({
   }
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-3">
+    <div className="bg-card space-y-3 rounded-lg border p-4">
       <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold text-base truncate">{provider.name}</h3>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-base font-semibold">{provider.name}</h3>
             {renderTestStatus()}
           </div>
-          <p className="text-xs text-muted-foreground mt-1 break-all">{provider.base_url}</p>
+          <p className="text-muted-foreground mt-1 text-xs break-all">{provider.base_url}</p>
         </div>
-        <div className="flex gap-1 flex-shrink-0">
+        <div className="flex flex-shrink-0 gap-1">
           <Button
             variant="outline"
             size="sm"
@@ -101,13 +101,17 @@ export function ProviderCard({
             variant="default"
             size="sm"
             onClick={() => onEdit(provider, actualIndex)}
+            title="编辑"
+            aria-label={`编辑厂商 ${provider.name}`}
           >
             <Pencil className="h-4 w-4" strokeWidth={2} fill="none" />
           </Button>
           <Button
             size="sm"
             onClick={() => onDelete(actualIndex)}
-            className="bg-red-600 hover:bg-red-700 text-white"
+            className="bg-red-600 text-white hover:bg-red-700"
+            title="删除"
+            aria-label={`删除厂商 ${provider.name}`}
           >
             <Trash2 className="h-4 w-4" strokeWidth={2} fill="none" />
           </Button>

@@ -1,6 +1,16 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, Download, Monitor, RotateCcw, ScanLine, Trash2, Upload } from 'lucide-react'
+import {
+  AlertTriangle,
+  Download,
+  Monitor,
+  Moon,
+  RotateCcw,
+  ScanLine,
+  Sun,
+  Trash2,
+  Upload,
+} from 'lucide-react'
 
 import { useAnimation } from '@/hooks/use-animation'
 import { useTheme } from '@/components/use-theme'
@@ -58,8 +68,9 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-import { ThemeOption } from './ThemeOption'
 import { hslToHex } from './types'
+
+type ThemeMode = 'light' | 'dark' | 'system'
 
 const dashboardStyleOptions: Array<{
   value: DashboardStyle
@@ -81,8 +92,34 @@ const dashboardStyleOptions: Array<{
   },
 ]
 
+const themeModeOptions: Array<{
+  value: ThemeMode
+  labelKey: string
+  descriptionKey: string
+  icon: typeof Monitor
+}> = [
+  {
+    value: 'light',
+    labelKey: 'settings.appearance.light',
+    descriptionKey: 'settings.appearance.lightDesc',
+    icon: Sun,
+  },
+  {
+    value: 'dark',
+    labelKey: 'settings.appearance.dark',
+    descriptionKey: 'settings.appearance.darkDesc',
+    icon: Moon,
+  },
+  {
+    value: 'system',
+    labelKey: 'settings.appearance.system',
+    descriptionKey: 'settings.appearance.systemDesc',
+    icon: Monitor,
+  },
+]
+
 /**
- * 安全访问 tokenOverrides 中的子属性值
+ * 安全访问当前风格 token 覆盖中的子属性值
  * @param overrides - Partial<ThemeTokens>
  * @param section - 如 'typography', 'visual', 'layout', 'animation'
  * @param key - token 键名，如 'font-family-base'
@@ -101,12 +138,17 @@ function getTokenValue<T>(
 }
 export function AppearanceTab() {
   const { theme, setTheme, themeConfig, updateThemeConfig, resolvedTheme, resetTheme } = useTheme()
-  const { enableAnimations, setEnableAnimations, enableWavesBackground, setEnableWavesBackground } =
-    useAnimation()
+  const { enableAnimations, setEnableAnimations } = useAnimation()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const dashboardStyle = themeConfig.dashboardStyle
+  const activeCustomCSS = themeConfig.styleCustomCSS?.[dashboardStyle] ?? ''
+  const activeBackgroundConfig = useMemo(
+    () => themeConfig.styleBackgroundConfig?.[dashboardStyle] ?? {},
+    [dashboardStyle, themeConfig.styleBackgroundConfig]
+  )
 
-  const [localCSS, setLocalCSS] = useState(themeConfig.customCSS || '')
+  const [localCSS, setLocalCSS] = useState(activeCustomCSS)
   const [accentInputValue, setAccentInputValue] = useState(() => {
     if (themeConfig.accentColor) {
       return hslToHex(themeConfig.accentColor)
@@ -121,9 +163,7 @@ export function AppearanceTab() {
 
     return DEFAULT_ACCENT_COLOR_HEX
   })
-  const [bgDraftConfig, setBgDraftConfig] = useState<BackgroundConfigMap>(
-    themeConfig.backgroundConfig ?? {}
-  )
+  const [bgDraftConfig, setBgDraftConfig] = useState<BackgroundConfigMap>(activeBackgroundConfig)
   const [cssWarnings, setCssWarnings] = useState<string[]>([])
   const accentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cssDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -137,6 +177,8 @@ export function AppearanceTab() {
     }),
     [themeConfig.styleConfig?.futureRetro]
   )
+  const defaultSidebarWidthRem = themeConfig.dashboardStyle === 'future-retro' ? 11 : 13
+  const activeTokenOverrides = themeConfig.styleTokenOverrides?.[themeConfig.dashboardStyle] ?? {}
 
   const updateFutureRetroConfig = useCallback(
     (partial: Partial<FutureRetroStyleConfig>) => {
@@ -169,27 +211,46 @@ export function AppearanceTab() {
 
   const updateTokenSection = useCallback(
     <K extends keyof ThemeTokens>(section: K, partial: Partial<ThemeTokens[K]>) => {
+      const nextStyleOverrides = {
+        ...activeTokenOverrides,
+        [section]: {
+          ...activeTokenOverrides[section],
+          ...partial,
+        } as ThemeTokens[K],
+      }
+
       updateThemeConfig({
-        tokenOverrides: {
-          ...themeConfig.tokenOverrides,
-          [section]: {
-            ...defaultLightTokens[section],
-            ...themeConfig.tokenOverrides?.[section],
-            ...partial,
-          } as ThemeTokens[K],
+        styleTokenOverrides: {
+          ...themeConfig.styleTokenOverrides,
+          [themeConfig.dashboardStyle]: nextStyleOverrides,
         },
       })
     },
-    [themeConfig.tokenOverrides, updateThemeConfig]
+    [
+      activeTokenOverrides,
+      themeConfig.dashboardStyle,
+      themeConfig.styleTokenOverrides,
+      updateThemeConfig,
+    ]
   )
 
   const resetTokenSection = useCallback(
     (section: keyof ThemeTokens) => {
-      const newOverrides: Partial<ThemeTokens> = { ...themeConfig.tokenOverrides }
+      const newOverrides: Partial<ThemeTokens> = { ...activeTokenOverrides }
       delete newOverrides[section]
-      updateThemeConfig({ tokenOverrides: newOverrides })
+      updateThemeConfig({
+        styleTokenOverrides: {
+          ...themeConfig.styleTokenOverrides,
+          [themeConfig.dashboardStyle]: newOverrides,
+        },
+      })
     },
-    [themeConfig.tokenOverrides, updateThemeConfig]
+    [
+      activeTokenOverrides,
+      themeConfig.dashboardStyle,
+      themeConfig.styleTokenOverrides,
+      updateThemeConfig,
+    ]
   )
 
   const handleCSSChange = useCallback(
@@ -200,10 +261,15 @@ export function AppearanceTab() {
 
       if (cssDebounceRef.current) clearTimeout(cssDebounceRef.current)
       cssDebounceRef.current = setTimeout(() => {
-        updateThemeConfig({ customCSS: val })
+        updateThemeConfig({
+          styleCustomCSS: {
+            ...themeConfig.styleCustomCSS,
+            [dashboardStyle]: val,
+          },
+        })
       }, 500)
     },
-    [updateThemeConfig]
+    [dashboardStyle, themeConfig.styleCustomCSS, updateThemeConfig]
   )
 
   const previewAccentHSL = useMemo(() => {
@@ -231,8 +297,13 @@ export function AppearanceTab() {
   }, [themeConfig.accentColor])
 
   useEffect(() => {
-    setBgDraftConfig(themeConfig.backgroundConfig ?? {})
-  }, [themeConfig.backgroundConfig])
+    setBgDraftConfig(activeBackgroundConfig)
+  }, [activeBackgroundConfig])
+
+  useEffect(() => {
+    setLocalCSS(activeCustomCSS)
+    setCssWarnings(sanitizeCSS(activeCustomCSS).warnings)
+  }, [activeCustomCSS])
 
   useEffect(() => {
     applyThemePipeline(previewThemeConfig, resolvedTheme === 'dark')
@@ -321,9 +392,11 @@ export function AppearanceTab() {
     })
   }
 
-  const previewTokens = useMemo(() => {
-    return getComputedTokens(previewThemeConfig, resolvedTheme === 'dark').color
+  const computedTokens = useMemo(() => {
+    return getComputedTokens(previewThemeConfig, resolvedTheme === 'dark')
   }, [previewThemeConfig, resolvedTheme])
+
+  const previewTokens = computedTokens.color
 
   const bgConfig: BackgroundConfigMap = bgDraftConfig
 
@@ -331,10 +404,15 @@ export function AppearanceTab() {
     (nextConfig: BackgroundConfigMap) => {
       if (bgDebounceRef.current) clearTimeout(bgDebounceRef.current)
       bgDebounceRef.current = setTimeout(() => {
-        updateThemeConfig({ backgroundConfig: nextConfig })
+        updateThemeConfig({
+          styleBackgroundConfig: {
+            ...themeConfig.styleBackgroundConfig,
+            [dashboardStyle]: nextConfig,
+          },
+        })
       }, 180)
     },
-    [updateThemeConfig]
+    [dashboardStyle, themeConfig.styleBackgroundConfig, updateThemeConfig]
   )
 
   const handleBgAssetChange = (layerId: keyof BackgroundConfigMap, assetId: string | undefined) => {
@@ -378,28 +456,46 @@ export function AppearanceTab() {
         <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">
           {t('settings.appearance.themeMode')}
         </h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
-          <ThemeOption
-            value="light"
-            current={theme}
-            onChange={setTheme}
-            label={t('settings.appearance.light')}
-            description={t('settings.appearance.lightDesc')}
-          />
-          <ThemeOption
-            value="dark"
-            current={theme}
-            onChange={setTheme}
-            label={t('settings.appearance.dark')}
-            description={t('settings.appearance.darkDesc')}
-          />
-          <ThemeOption
-            value="system"
-            current={theme}
-            onChange={setTheme}
-            label={t('settings.appearance.system')}
-            description={t('settings.appearance.systemDesc')}
-          />
+        <div
+          role="tablist"
+          aria-label={t('settings.appearance.themeMode')}
+          className="bg-muted/60 text-muted-foreground grid w-full max-w-2xl grid-cols-1 gap-1 rounded-lg border p-1 sm:grid-cols-3"
+        >
+          {themeModeOptions.map((option) => {
+            const selected = theme === option.value
+            const Icon = option.icon
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setTheme(option.value)}
+                className={cn(
+                  'group flex min-h-16 flex-col justify-center rounded-md px-3 py-2 text-left transition-all',
+                  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
+                  selected
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'hover:bg-background/60 hover:text-foreground'
+                )}
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold">
+                  <Icon
+                    className={cn(
+                      'h-4 w-4 transition-colors',
+                      selected ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'
+                    )}
+                    strokeWidth={2}
+                  />
+                  <span>{t(option.labelKey)}</span>
+                </span>
+                <span className="text-muted-foreground mt-1 block max-w-full truncate text-xs">
+                  {t(option.descriptionKey)}
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -562,7 +658,7 @@ export function AppearanceTab() {
                         variant="ghost"
                         size="sm"
                         onClick={() => resetTokenSection('typography')}
-                        disabled={!themeConfig.tokenOverrides?.typography}
+                        disabled={!activeTokenOverrides?.typography}
                         className="h-8 text-xs"
                       >
                         <RotateCcw className="mr-2 h-3.5 w-3.5" />
@@ -575,10 +671,10 @@ export function AppearanceTab() {
                       <Select
                         value={(() => {
                           const fontFamily = getTokenValue(
-                            themeConfig.tokenOverrides,
+                            activeTokenOverrides,
                             'typography',
                             'font-family-base',
-                            ''
+                            computedTokens.typography['font-family-base']
                           )
                           if (fontFamily.includes('ui-serif')) return 'serif'
                           if (fontFamily.includes('ui-monospace')) return 'mono'
@@ -629,10 +725,10 @@ export function AppearanceTab() {
                         <span className="text-muted-foreground text-sm">
                           {parseFloat(
                             getTokenValue(
-                              themeConfig.tokenOverrides,
+                              activeTokenOverrides,
                               'typography',
                               'font-size-base',
-                              '1'
+                              computedTokens.typography['font-size-base']
                             )
                           ) * 16}
                           px
@@ -643,10 +739,10 @@ export function AppearanceTab() {
                         value={[
                           parseFloat(
                             getTokenValue(
-                              themeConfig.tokenOverrides,
+                              activeTokenOverrides,
                               'typography',
                               'font-size-base',
-                              '1'
+                              computedTokens.typography['font-size-base']
                             )
                           ) * 16,
                         ]}
@@ -666,10 +762,10 @@ export function AppearanceTab() {
                       <Select
                         value={String(
                           getTokenValue(
-                            themeConfig.tokenOverrides,
+                            activeTokenOverrides,
                             'typography',
                             'line-height-normal',
-                            1.5
+                            computedTokens.typography['line-height-normal']
                           )
                         )}
                         onValueChange={(val) => {
@@ -710,7 +806,7 @@ export function AppearanceTab() {
                         variant="ghost"
                         size="sm"
                         onClick={() => resetTokenSection('visual')}
-                        disabled={!themeConfig.tokenOverrides?.visual}
+                        disabled={!activeTokenOverrides?.visual}
                         className="h-8 text-xs"
                       >
                         <RotateCcw className="mr-2 h-3.5 w-3.5" />
@@ -725,10 +821,10 @@ export function AppearanceTab() {
                           {Math.round(
                             parseFloat(
                               getTokenValue(
-                                themeConfig.tokenOverrides,
+                                activeTokenOverrides,
                                 'visual',
                                 'radius-md',
-                                '0.375'
+                                computedTokens.visual['radius-md']
                               )
                             ) * 16
                           )}
@@ -741,10 +837,10 @@ export function AppearanceTab() {
                           Math.round(
                             parseFloat(
                               getTokenValue(
-                                themeConfig.tokenOverrides,
+                                activeTokenOverrides,
                                 'visual',
                                 'radius-md',
-                                '0.375'
+                                computedTokens.visual['radius-md']
                               )
                             ) * 16
                           ),
@@ -765,7 +861,12 @@ export function AppearanceTab() {
                       <Select
                         value={(() => {
                           const shadowMd = String(
-                            getTokenValue(themeConfig.tokenOverrides, 'visual', 'shadow-md', '')
+                            getTokenValue(
+                              activeTokenOverrides,
+                              'visual',
+                              'shadow-md',
+                              computedTokens.visual['shadow-md']
+                            )
                           )
                           if (shadowMd === 'none') return 'none'
                           if (shadowMd === defaultLightTokens.visual['shadow-sm']) return 'sm'
@@ -805,8 +906,12 @@ export function AppearanceTab() {
                       <Switch
                         id="blur-switch"
                         checked={
-                          getTokenValue(themeConfig.tokenOverrides, 'visual', 'blur-md', '0px') !==
-                          '0px'
+                          getTokenValue(
+                            activeTokenOverrides,
+                            'visual',
+                            'blur-md',
+                            computedTokens.visual['blur-md']
+                          ) !== '0px'
                         }
                         onCheckedChange={(checked) => {
                           updateTokenSection('visual', {
@@ -829,7 +934,7 @@ export function AppearanceTab() {
                         variant="ghost"
                         size="sm"
                         onClick={() => resetTokenSection('layout')}
-                        disabled={!themeConfig.tokenOverrides?.layout}
+                        disabled={!activeTokenOverrides?.layout}
                         className="h-8 text-xs"
                       >
                         <RotateCcw className="mr-2 h-3.5 w-3.5" />
@@ -842,101 +947,31 @@ export function AppearanceTab() {
                         <Label>{t('settings.appearance.sidebarWidthLabel')}</Label>
                         <span className="text-muted-foreground text-sm">
                           {getTokenValue(
-                            themeConfig.tokenOverrides,
+                            activeTokenOverrides,
                             'layout',
                             'sidebar-width',
-                            '13rem'
+                            computedTokens.layout['sidebar-width']
                           )}
                         </span>
                       </div>
                       <Slider
-                        defaultValue={[16]}
+                        defaultValue={[defaultSidebarWidthRem]}
                         value={[
                           parseFloat(
                             getTokenValue(
-                              themeConfig.tokenOverrides,
+                              activeTokenOverrides,
                               'layout',
                               'sidebar-width',
-                              '13'
+                              computedTokens.layout['sidebar-width']
                             )
                           ),
                         ]}
-                        min={12}
+                        min={8}
                         max={24}
                         step={0.5}
                         onValueChange={(vals) => {
                           updateTokenSection('layout', {
                             'sidebar-width': `${vals[0]}rem`,
-                          })
-                        }}
-                      />
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="flex justify-between">
-                        <Label>{t('settings.appearance.maxContentWidth')}</Label>
-                        <span className="text-muted-foreground text-sm">
-                          {getTokenValue(
-                            themeConfig.tokenOverrides,
-                            'layout',
-                            'max-content-width',
-                            '1280px'
-                          )}
-                        </span>
-                      </div>
-                      <Slider
-                        defaultValue={[1280]}
-                        value={[
-                          parseFloat(
-                            getTokenValue(
-                              themeConfig.tokenOverrides,
-                              'layout',
-                              'max-content-width',
-                              '1280'
-                            ).replace('px', '')
-                          ),
-                        ]}
-                        min={960}
-                        max={1600}
-                        step={10}
-                        onValueChange={(vals) => {
-                          updateTokenSection('layout', {
-                            'max-content-width': `${vals[0]}px`,
-                          })
-                        }}
-                      />
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="flex justify-between">
-                        <Label>{t('settings.appearance.spacingUnit')}</Label>
-                        <span className="text-muted-foreground text-sm">
-                          {getTokenValue(
-                            themeConfig.tokenOverrides,
-                            'layout',
-                            'space-unit',
-                            '0.25rem'
-                          )}
-                        </span>
-                      </div>
-                      <Slider
-                        defaultValue={[0.25]}
-                        value={[
-                          parseFloat(
-                            getTokenValue(
-                              themeConfig.tokenOverrides,
-                              'layout',
-                              'space-unit',
-                              '0.25'
-                            ).replace('rem', '')
-                          ),
-                        ]}
-                        min={0.2}
-                        max={0.4}
-                        step={0.01}
-                        onValueChange={(vals) => {
-                          updateTokenSection('layout', {
-                            'space-unit': `${vals[0]}rem`,
                           })
                         }}
                       />
@@ -955,7 +990,7 @@ export function AppearanceTab() {
                         variant="ghost"
                         size="sm"
                         onClick={() => resetTokenSection('animation')}
-                        disabled={!themeConfig.tokenOverrides?.animation}
+                        disabled={!activeTokenOverrides?.animation}
                         className="h-8 text-xs"
                       >
                         <RotateCcw className="mr-2 h-3.5 w-3.5" />
@@ -969,10 +1004,10 @@ export function AppearanceTab() {
                         value={(() => {
                           const duration = String(
                             getTokenValue(
-                              themeConfig.tokenOverrides,
+                              activeTokenOverrides,
                               'animation',
                               'anim-duration-normal',
-                              '300ms'
+                              computedTokens.animation['anim-duration-normal']
                             )
                           )
                           if (duration === '100ms') return 'fast'
@@ -1102,7 +1137,7 @@ export function AppearanceTab() {
       {themeConfig.dashboardStyle === 'future-retro' && (
         <div>
           <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">未来复古配置</h3>
-          <div className="space-y-2 sm:space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
             <div className="bg-card rounded-lg border p-3 sm:p-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 space-y-0.5">
@@ -1112,9 +1147,7 @@ export function AppearanceTab() {
                   >
                     纸面颗粒
                   </Label>
-                  <p className="text-muted-foreground text-sm">
-                    启用与一键包外壳一致的纸面噪点和复古印刷质感。
-                  </p>
+                  <p className="text-muted-foreground text-sm">启用纸面噪点。</p>
                 </div>
                 <Switch
                   id="future-retro-paper-texture"
@@ -1163,10 +1196,15 @@ export function AppearanceTab() {
             size="sm"
             onClick={() => {
               setLocalCSS('')
-              updateThemeConfig({ customCSS: '' })
+              updateThemeConfig({
+                styleCustomCSS: {
+                  ...themeConfig.styleCustomCSS,
+                  [dashboardStyle]: '',
+                },
+              })
               setCssWarnings([])
             }}
-            disabled={!themeConfig.customCSS}
+            disabled={!activeCustomCSS}
           >
             <Trash2 className="mr-1 h-4 w-4" />
             {t('settings.appearance.clearCss')}
@@ -1219,25 +1257,6 @@ export function AppearanceTab() {
                 id="animations"
                 checked={enableAnimations}
                 onCheckedChange={setEnableAnimations}
-              />
-            </div>
-          </div>
-
-          {/* 波浪背景开关 */}
-          <div className="bg-card rounded-lg border p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1 space-y-0.5">
-                <Label htmlFor="waves-background" className="cursor-pointer text-base font-medium">
-                  {t('settings.appearance.loginWavesBackground')}
-                </Label>
-                <p className="text-muted-foreground text-sm">
-                  {t('settings.appearance.loginWavesBackgroundDesc')}
-                </p>
-              </div>
-              <Switch
-                id="waves-background"
-                checked={enableWavesBackground}
-                onCheckedChange={setEnableWavesBackground}
               />
             </div>
           </div>

@@ -2,7 +2,6 @@
 
 from sqlalchemy.engine import Connection
 
-from src.common.database.tool_record_payload_cleanup import clean_tool_record_payload
 from src.common.logger import get_logger
 
 from .models import MigrationExecutionContext
@@ -10,7 +9,6 @@ from .schema import SQLiteSchemaInspector
 
 logger = get_logger("database_migration")
 
-_TOOL_RECORD_COPY_BATCH_SIZE = 1000
 _TOOL_RECORD_CLEANUP_TASK_NAME = "tool_record_prompt_payload_cleanup_v1"
 _PHASE_AWAITING_VACUUM = "awaiting_vacuum"
 _PHASE_DONE = "done"
@@ -32,17 +30,16 @@ def migrate_v27_to_v28(context: MigrationExecutionContext) -> None:
 
     _create_one_time_maintenance_tasks_table(context.connection)
     context.advance_progress(records=0, completed_tables=1, item_name="one_time_maintenance_tasks")
-    scanned_records, changed_records, last_processed_id = _rebuild_tool_records_without_prompt_columns(context)
-    if scanned_records > 0:
-        _save_tool_record_cleanup_state(
-            context.connection,
-            scanned_records=scanned_records,
-            changed_records=changed_records,
-            last_processed_id=last_processed_id,
-        )
+    deleted_records, last_deleted_id = _replace_tool_records_with_empty_v28_table(context)
+    _save_tool_record_cleanup_state(
+        context.connection,
+        scanned_records=deleted_records,
+        changed_records=deleted_records,
+        last_processed_id=last_deleted_id,
+    )
     context.advance_progress(records=0, completed_tables=1, item_name="tool_records")
 
-    logger.info("v27 -> v28 数据库迁移完成：维护任务表已就绪，tool_records prompt 冗余列已移除")
+    logger.info("v27 -> v28 数据库迁移完成：维护任务表已就绪，tool_records 已按 v28 空表结构重建")
 
 
 def _count_tool_records_for_rebuild(connection: Connection) -> int:
@@ -135,16 +132,33 @@ def _save_tool_record_cleanup_state(
     )
 
 
-def _rebuild_tool_records_without_prompt_columns(context: MigrationExecutionContext) -> tuple[int, int, int]:
+def _replace_tool_records_with_empty_v28_table(context: MigrationExecutionContext) -> tuple[int, int]:
     connection = context.connection
     if not _should_rebuild_tool_records(connection):
-        return 0, 0, 0
+        return 0, 0
 
-    logger.info("v27 -> v28 开始优化数据库 tool_records：移除冗余 prompt 列，并同步清理 tool_data 历史大字段")
-    connection.exec_driver_sql("DROP TABLE IF EXISTS tool_records_v28")
+    deleted_records = _count_tool_records_for_rebuild(connection)
+    max_id_row = connection.exec_driver_sql("SELECT MAX(id) FROM tool_records").fetchone()
+    last_deleted_id = int(max_id_row[0] or 0) if max_id_row is not None else 0
+    logger.info(
+        "v27 -> v28 开始重建 tool_records 空表："
+        f"将删除历史工具记录 {deleted_records} 条，并移除冗余 prompt 列"
+    )
+    connection.exec_driver_sql("DROP TABLE IF EXISTS tool_records")
+    _create_empty_tool_records_table(connection)
+    _create_tool_records_indexes(connection)
+    context.advance_progress(records=deleted_records, completed_tables=0, item_name="tool_records")
+    logger.info(
+        "v27 -> v28 tool_records 空表重建完成："
+        f"已删除历史工具记录 {deleted_records} 条，索引与 v28 结构已创建"
+    )
+    return deleted_records, last_deleted_id
+
+
+def _create_empty_tool_records_table(connection: Connection) -> None:
     connection.exec_driver_sql(
         """
-        CREATE TABLE tool_records_v28 (
+        CREATE TABLE tool_records (
             id INTEGER NOT NULL,
             tool_id VARCHAR(255) NOT NULL,
             timestamp DATETIME NOT NULL,
@@ -156,79 +170,9 @@ def _rebuild_tool_records_without_prompt_columns(context: MigrationExecutionCont
         )
         """
     )
-    last_copied_id = 0
-    scanned_records = 0
-    changed_records = 0
-    while True:
-        rows = connection.exec_driver_sql(
-            """
-            SELECT
-                id,
-                tool_id,
-                timestamp,
-                session_id,
-                tool_name,
-                tool_reasoning,
-                tool_data
-            FROM tool_records
-            WHERE id > ?
-            ORDER BY id ASC
-            LIMIT ?
-            """,
-            (last_copied_id, _TOOL_RECORD_COPY_BATCH_SIZE),
-        ).fetchall()
-        if not rows:
-            break
 
-        batch_last_id = int(rows[-1][0])
-        insert_rows = []
-        batch_changed_records = 0
-        for row in rows:
-            raw_tool_data = str(row[6] or "")
-            cleanup_result = clean_tool_record_payload(raw_tool_data) if raw_tool_data else None
-            if cleanup_result is not None and cleanup_result.changed:
-                tool_data = cleanup_result.tool_data
-                batch_changed_records += 1
-            else:
-                tool_data = row[6]
-            insert_rows.append(
-                (
-                    row[0],
-                    row[1],
-                    row[2],
-                    row[3],
-                    row[4],
-                    row[5],
-                    tool_data,
-                )
-            )
-        connection.exec_driver_sql(
-            """
-            INSERT INTO tool_records_v28 (
-                id,
-                tool_id,
-                timestamp,
-                session_id,
-                tool_name,
-                tool_reasoning,
-                tool_data
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            insert_rows,
-        )
-        copied_count = len(rows)
-        scanned_records += copied_count
-        changed_records += batch_changed_records
-        context.advance_progress(records=copied_count, completed_tables=0, item_name="tool_records")
-        last_copied_id = batch_last_id
 
-    logger.info(
-        "v27 -> v28 tool_records 数据复制与粗筛清理完成："
-        f"复制 {scanned_records} 条，清理 tool_data {changed_records} 条，开始替换旧表并重建索引"
-    )
-    connection.exec_driver_sql("DROP TABLE tool_records")
-    connection.exec_driver_sql("ALTER TABLE tool_records_v28 RENAME TO tool_records")
+def _create_tool_records_indexes(connection: Connection) -> None:
     connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_tool_records_session_id ON tool_records (session_id)")
     connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_tool_records_timestamp ON tool_records (timestamp)")
     connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_tool_records_tool_id ON tool_records (tool_id)")
@@ -239,5 +183,3 @@ def _rebuild_tool_records_without_prompt_columns(context: MigrationExecutionCont
         ON tool_records(timestamp, tool_name)
         """
     )
-    logger.info("v27 -> v28 tool_records 重建完成")
-    return scanned_records, changed_records, last_copied_id

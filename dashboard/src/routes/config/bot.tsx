@@ -2,17 +2,6 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { parse as parseToml } from 'smol-toml'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { DashboardTabBar, DashboardTabTrigger } from '@/components/ui/dashboard-tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -34,7 +23,7 @@ import { fieldHooks } from '@/lib/field-hooks'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { cn } from '@/lib/utils'
 
-import { ChevronLeft, ChevronRight, Code2, Info, Layout, Power, RefreshCw, Save } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Code2, Info, Layout, RefreshCw, Save } from 'lucide-react'
 
 import type { ConfigSchema } from '@/types/config-schema'
 import {
@@ -42,7 +31,9 @@ import {
   AMemorixSharedMemoryGroupsHook,
   AMemorixRetrievalChatsHook,
   AMemorixRetrievalFilterMirrorHook,
+  BehaviorGroupsHook,
   BehaviorFocusGroupsHook,
+  BehaviorLearningListHook,
   BotPlatformAccountsHook,
   ChatPromptsHook,
   ChatTalkValueRulesHook,
@@ -299,7 +290,6 @@ function BotConfigPageContent() {
 
   /**
    * 构建完整的配置对象用于保存
-   * 抽取自 saveConfig 和 handleSaveAndRestart 中的重复逻辑
    */
   const buildFullConfig = useCallback(() => {
     return {
@@ -430,6 +420,8 @@ function BotConfigPageContent() {
       ['chat.chat_prompts', ChatPromptsHook],
       ['chat.talk_value_rules', ChatTalkValueRulesHook],
       ['experimental.focus_groups', BehaviorFocusGroupsHook],
+      ['experimental.behavior_groups', BehaviorGroupsHook],
+      ['experimental.behavior_learning_list', BehaviorLearningListHook],
       ['expression.expression_groups', ExpressionGroupsHook],
       ['expression.learning_list', ExpressionLearningListHook],
       ['jargon.jargon_groups', JargonGroupsHook],
@@ -605,11 +597,6 @@ function BotConfigPageContent() {
     }
   }
 
-  // 重启麦麦
-  const handleRestart = async () => {
-    await triggerRestart()
-  }
-
   const handleReloadFromFile = async () => {
     cancelPendingAutoSave()
     await loadConfig()
@@ -621,6 +608,11 @@ function BotConfigPageContent() {
       title: '已刷新',
       description: '已从 bot_config.toml 重新读取配置',
     })
+  }
+
+  // 重启麦麦
+  const handleRestart = async () => {
+    await triggerRestart()
   }
 
   // 保存并重启
@@ -650,6 +642,8 @@ function BotConfigPageContent() {
       setSaving(false)
     }
   }
+  // 保留给后续恢复重启入口或快捷操作复用；当前页面不渲染重启按钮。
+  void handleSaveAndRestart
 
   // 根据 schema 构建 tab 分组
   const tabGroups = useMemo(() => {
@@ -805,41 +799,6 @@ function BotConfigPageContent() {
                   {saving ? '保存中' : autoSaving ? '自动' : hasUnsavedChanges ? '保存' : '已保存'}
                 </span>
               </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    disabled={saving || autoSaving || isRestarting}
-                    size="sm"
-                    className="h-9 min-w-0 flex-1 sm:w-28 sm:flex-none"
-                  >
-                    <Power className="h-4 w-4 flex-shrink-0" />
-                    <span className="ml-1 truncate text-xs sm:text-sm">
-                      {isRestarting ? '重启中' : hasUnsavedChanges ? '保存重启' : '重启'}
-                    </span>
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>确认重启麦麦？</AlertDialogTitle>
-                  <AlertDialogDescription asChild>
-                    <div>
-                      <p>
-                        {hasUnsavedChanges 
-                          ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启麦麦使新配置生效。重启过程中麦麦将暂时离线。'
-                          : '即将重启麦麦主程序。重启过程中麦麦将暂时离线,配置将在重启后生效。'
-                        }
-                      </p>
-                    </div>
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}>
-                    {hasUnsavedChanges ? '保存并重启' : '确认重启'}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
             </div>
           </div>
         </div>

@@ -567,7 +567,7 @@ export function MemoryProfileManager({ initialPersonId = '' }: MemoryProfileMana
             </div>
           </div>
 
-          <ScrollArea className="h-[520px] rounded-lg border">
+          <ScrollArea className="h-[520px]">
             <Table>
               <TableHeader className="sticky top-0 bg-background">
                 <TableRow>

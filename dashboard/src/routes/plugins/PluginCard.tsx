@@ -1,4 +1,3 @@
-import { useNavigate } from '@tanstack/react-router'
 import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, ThumbsUp, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +20,7 @@ interface PluginCardProps {
   onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
   onUninstall: (plugin: PluginInfo) => void
+  onDetail: (plugin: PluginInfo) => void
   checkPluginCompatibility: (plugin: PluginInfo) => boolean
   needsUpdate: (plugin: PluginInfo) => boolean
   getStatusBadge: (plugin: PluginInfo) => React.JSX.Element | null
@@ -38,12 +38,12 @@ export function PluginCard({
   onLike,
   onUpdate,
   onUninstall,
+  onDetail,
   checkPluginCompatibility,
   needsUpdate,
   getStatusBadge,
   getIncompatibleReason,
 }: PluginCardProps) {
-  const navigate = useNavigate()
   const stats = [plugin.manifest?.id]
     .map(id => id ? pluginStats[id] : undefined)
     .find(Boolean)
@@ -156,7 +156,7 @@ export function PluginCard({
             variant="outline"
             size="sm"
             className="w-full sm:w-auto"
-            onClick={() => navigate({ to: '/plugin-detail', search: { pluginId: plugin.id } })}
+            onClick={() => onDetail(plugin)}
           >
             查看详情
           </Button>

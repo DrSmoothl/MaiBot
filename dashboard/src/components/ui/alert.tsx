@@ -26,6 +26,7 @@ const Alert = React.forwardRef<
   <div
     ref={ref}
     role="alert"
+    data-dashboard-alert="true"
     className={cn(alertVariants({ variant }), className)}
     {...props}
   />
@@ -39,6 +40,7 @@ const AlertTitle = React.forwardRef<
   // eslint-disable-next-line jsx-a11y/heading-has-content -- content passed via spread props
   <h5
     ref={ref}
+    data-dashboard-alert-title="true"
     className={cn("mb-1 font-medium leading-none tracking-tight", className)}
     {...props}
   />
@@ -51,6 +53,7 @@ const AlertDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
+    data-dashboard-alert-description="true"
     className={cn("text-sm [&_p]:leading-relaxed", className)}
     {...props}
   />

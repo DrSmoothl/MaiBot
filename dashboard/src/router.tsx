@@ -205,6 +205,16 @@ const chatEmbedRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/chat/embed'), 'ChatEmbedPage'),
 })
 
+// 外部程序嵌入用插件市场路由，不挂载 dashboard 顶栏和侧边栏
+const pluginsEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/plugins/embed',
+  component: lazyRouteComponent(
+    () => import('./routes/plugins/embed'),
+    'PluginMarketplaceEmbedPage'
+  ),
+})
+
 // 插件市场路由
 const pluginsRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -213,13 +223,6 @@ const pluginsRoute = createRoute({
     () => import('./routes/plugins/PluginMarketplacePage'),
     'PluginMarketplacePage'
   ),
-})
-
-// 插件详情路由
-const pluginDetailRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: '/plugin-detail',
-  component: lazyRouteComponent(() => import('./routes/plugin-detail'), 'PluginDetailPage'),
 })
 
 // 模型分配预设市场路由
@@ -234,6 +237,26 @@ const pluginConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/plugin-config',
   component: lazyRouteComponent(() => import('./routes/plugin-config'), 'PluginConfigPage'),
+})
+
+// 外部程序嵌入用插件配置路由，不挂载 dashboard 顶栏和侧边栏
+const pluginConfigEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/plugin-config/embed',
+  component: lazyRouteComponent(
+    () => import('./routes/plugin-config-embed'),
+    'PluginConfigEmbedPage'
+  ),
+})
+
+// 外部程序嵌入用插件镜像源配置路由，不挂载 dashboard 顶栏和侧边栏
+const pluginMirrorsEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/plugin-mirrors/embed',
+  component: lazyRouteComponent(
+    () => import('./routes/plugin-mirrors-embed'),
+    'PluginMirrorsEmbedPage'
+  ),
 })
 
 // 插件镜像源配置路由
@@ -302,6 +325,9 @@ const routeTree = rootRoute.addChildren([
   authRoute,
   setupRoute,
   chatEmbedRoute,
+  pluginsEmbedRoute,
+  pluginConfigEmbedRoute,
+  pluginMirrorsEmbedRoute,
   protectedRoute.addChildren([
     indexRoute,
     botConfigRoute,
@@ -318,7 +344,6 @@ const routeTree = rootRoute.addChildren([
     knowledgeGraphRoute,
     knowledgeBaseRoute,
     pluginsRoute,
-    pluginDetailRoute,
     modelPresetsRoute,
     pluginConfigRoute,
     pluginMirrorsRoute,

@@ -160,6 +160,9 @@ export function AboutTab() {
                 <LibraryItem name="Radix UI" description={t('settings.about.lib.radix')} license="MIT" />
                 <LibraryItem name="Tailwind CSS" description={t('settings.about.lib.tailwind')} license="MIT" />
                 <LibraryItem name="Lucide React" description={t('settings.about.lib.lucide')} license="ISC" />
+                <LibraryItem name="Iconify React" description={t('settings.about.lib.iconifyReact')} license="MIT" />
+                <LibraryItem name="Streamline Sharp" description={t('settings.about.lib.streamlineSharp')} license="CC BY 4.0" />
+                <LibraryItem name="Streamline Block" description={t('settings.about.lib.streamlineBlock')} license="CC BY 4.0" />
               </div>
             </div>
 

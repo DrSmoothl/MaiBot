@@ -332,7 +332,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           <TooltipContent
             side={side}
             align="start"
-            className="max-w-80 whitespace-pre-line bg-background text-foreground border shadow-lg"
+            className="max-w-80 whitespace-pre-line bg-popover text-popover-foreground"
           >
             {fieldDescription}
           </TooltipContent>
@@ -725,7 +725,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
                     <TooltipContent
                       side="right"
                       align="center"
-                      className="max-w-72 bg-background text-foreground border shadow-lg"
+                      className="max-w-72 bg-popover text-popover-foreground"
                     >
                       {description}
                     </TooltipContent>

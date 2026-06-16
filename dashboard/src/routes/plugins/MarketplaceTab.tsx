@@ -1,6 +1,13 @@
-import { useMemo } from 'react'
+import { useState } from 'react'
 
-import type { GitStatus, MaimaiVersion, MarketplaceSortKey, PluginInfo, PluginLoadProgress, PluginStatsData } from './types'
+import type {
+  GitStatus,
+  MaimaiVersion,
+  MarketplaceSortKey,
+  PluginInfo,
+  PluginLoadProgress,
+  PluginStatsData,
+} from './types'
 import { getPluginType } from './types'
 import { PluginCard } from './PluginCard'
 
@@ -37,6 +44,7 @@ interface MarketplaceTabProps {
   onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
   onUninstall: (plugin: PluginInfo) => void
+  onDetail: (plugin: PluginInfo) => void
   checkPluginCompatibility: (plugin: PluginInfo) => boolean
   needsUpdate: (plugin: PluginInfo) => boolean
   getStatusBadge: (plugin: PluginInfo) => React.JSX.Element | null
@@ -108,7 +116,8 @@ function getLaunchBoost(plugin: PluginInfo, now: number): number {
     return 0
   }
 
-  const decayProgress = (ageHours - LAUNCH_BOOST_FULL_HOURS) / (LAUNCH_BOOST_DECAY_HOURS - LAUNCH_BOOST_FULL_HOURS)
+  const decayProgress =
+    (ageHours - LAUNCH_BOOST_FULL_HOURS) / (LAUNCH_BOOST_DECAY_HOURS - LAUNCH_BOOST_FULL_HOURS)
   return (1 - decayProgress) * LAUNCH_BOOST_WEIGHT
 }
 
@@ -176,24 +185,27 @@ export function MarketplaceTab({
   onLike,
   onUpdate,
   onUninstall,
+  onDetail,
   checkPluginCompatibility,
   needsUpdate,
   getStatusBadge,
   getIncompatibleReason,
 }: MarketplaceTabProps) {
-  const surpriseSeed = useMemo(() => Math.random().toString(36).slice(2), [])
+  const [surpriseSeed] = useState(() => Math.random().toString(36).slice(2))
+  const [renderTime] = useState(() => Date.now())
 
   // 过滤插件
   const getPluginStats = (plugin: PluginInfo): PluginStatsData | undefined => {
-    const statsIds = [
-      plugin.manifest?.id,
-      plugin.id,
-    ].filter((id): id is string => Boolean(id))
+    const statsIds = [plugin.manifest?.id, plugin.id].filter((id): id is string => Boolean(id))
 
     return statsIds.map((id) => pluginStats[id]).find(Boolean)
   }
 
-  const getSortValue = (plugin: PluginInfo, scoreBasis: MarketplaceScoreBasis, now: number): number => {
+  const getSortValue = (
+    plugin: PluginInfo,
+    scoreBasis: MarketplaceScoreBasis,
+    now: number
+  ): number => {
     const stats = getPluginStats(plugin)
 
     if (sortBy === 'default') {
@@ -205,11 +217,13 @@ export function MarketplaceTab({
       const likeScore = Math.log10(likes + 1)
       const ratingScore = rating * Math.log10(ratingCount + 2)
 
-      return normalizeScore(downloadScore, scoreBasis.maxDownloadScore, 4)
-        + normalizeScore(likeScore, scoreBasis.maxLikeScore, 3)
-        + normalizeScore(ratingScore, scoreBasis.maxRatingScore, 2)
-        + getLaunchBoost(plugin, now)
-        + getFreshnessBoost(plugin, scoreBasis.maxMarketplaceOrder, now)
+      return (
+        normalizeScore(downloadScore, scoreBasis.maxDownloadScore, 4) +
+        normalizeScore(likeScore, scoreBasis.maxLikeScore, 3) +
+        normalizeScore(ratingScore, scoreBasis.maxRatingScore, 2) +
+        getLaunchBoost(plugin, now) +
+        getFreshnessBoost(plugin, scoreBasis.maxMarketplaceOrder, now)
+      )
     }
     if (sortBy === 'latest') {
       return getPluginFreshness(plugin)
@@ -227,7 +241,7 @@ export function MarketplaceTab({
     return 0
   }
 
-  const matchedPlugins = plugins.filter(plugin => {
+  const matchedPlugins = plugins.filter((plugin) => {
     // 跳过没有 manifest 的插件
     if (!plugin.manifest) {
       console.warn('[过滤] 跳过无 manifest 的插件:', plugin.id)
@@ -242,21 +256,22 @@ export function MarketplaceTab({
     if (hideInstalledPlugins && plugin.installed) {
       return false
     }
-    
+
     // 搜索过滤
-    const matchesSearch = searchQuery === '' ||
+    const matchesSearch =
+      searchQuery === '' ||
       plugin.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       plugin.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (plugin.manifest.keywords && plugin.manifest.keywords.some(k => k.toLowerCase().includes(searchQuery.toLowerCase())))
-    
+      (plugin.manifest.keywords &&
+        plugin.manifest.keywords.some((k) => k.toLowerCase().includes(searchQuery.toLowerCase())))
+
     // 类型过滤
     const matchesType = pluginTypeFilter === 'all' || getPluginType(plugin) === pluginTypeFilter
-    
+
     // 兼容性过滤
-    const matchesCompatibility = !showCompatibleOnly || 
-      !maimaiVersion || 
-      checkPluginCompatibility(plugin)
-    
+    const matchesCompatibility =
+      !showCompatibleOnly || !maimaiVersion || checkPluginCompatibility(plugin)
+
     return matchesSearch && matchesType && matchesCompatibility
   })
   const scoreBasis = matchedPlugins.reduce<MarketplaceScoreBasis>(
@@ -281,7 +296,7 @@ export function MarketplaceTab({
       maxMarketplaceOrder: 0,
     }
   )
-  const now = Date.now()
+  const now = renderTime
   const filteredPlugins = matchedPlugins.sort((left, right) => {
     const valueDiff = getSortValue(right, scoreBasis, now) - getSortValue(left, scoreBasis, now)
     if (valueDiff !== 0) {
@@ -298,7 +313,10 @@ export function MarketplaceTab({
 
   const surprisePlugins = selectSurprisePlugins(filteredPlugins, sortBy, surpriseSeed)
   const surprisePluginIds = new Set(surprisePlugins.map(getPluginIdentity))
-  const mainPlugins = filteredPlugins.filter(plugin => !surprisePluginIds.has(getPluginIdentity(plugin)))
+  const mainPlugins = filteredPlugins.filter(
+    (plugin) => !surprisePluginIds.has(getPluginIdentity(plugin))
+  )
+  const displayPlugins = [...surprisePlugins, ...mainPlugins]
 
   const renderPluginCard = (plugin: PluginInfo) => (
     <PluginCard
@@ -313,6 +331,7 @@ export function MarketplaceTab({
       onLike={onLike}
       onUpdate={onUpdate}
       onUninstall={onUninstall}
+      onDetail={onDetail}
       checkPluginCompatibility={checkPluginCompatibility}
       needsUpdate={needsUpdate}
       getStatusBadge={getStatusBadge}
@@ -321,18 +340,8 @@ export function MarketplaceTab({
   )
 
   return (
-    <div className="space-y-6">
-      {surprisePlugins.length > 0 && (
-        <section className="space-y-3">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {surprisePlugins.map(renderPluginCard)}
-          </div>
-        </section>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-        {mainPlugins.map(renderPluginCard)}
-      </div>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 2xl:grid-cols-4">
+      {displayPlugins.map(renderPluginCard)}
     </div>
   )
 }

@@ -21,9 +21,10 @@ const initialState: ThemeProviderState = {
   themeConfig: {
     selectedPreset: 'light',
     accentColor: '',
-    tokenOverrides: {},
-    customCSS: '',
+    styleTokenOverrides: {},
+    styleCustomCSS: {},
     dashboardStyle: DEFAULT_DASHBOARD_STYLE,
+    styleBackgroundConfig: {},
     styleConfig: DEFAULT_DASHBOARD_STYLE_CONFIG,
   },
   updateThemeConfig: () => null,

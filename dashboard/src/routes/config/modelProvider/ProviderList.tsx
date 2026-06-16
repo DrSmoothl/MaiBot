@@ -1,14 +1,40 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import type { TestConnectionResult } from '@/lib/config-api'
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Pencil, Search, Trash2, XCircle, Zap } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Loader2,
+  Pencil,
+  Search,
+  Trash2,
+  XCircle,
+  Zap,
+} from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 import { ProviderCard } from './ProviderCard'
 import type { APIProvider } from './types'
@@ -51,19 +77,17 @@ export function ProviderList({
   const filteredProviders = useMemo(() => {
     if (!searchQuery) return providers
     const query = searchQuery.toLowerCase()
-    return providers.filter((provider) => (
-      provider.name.toLowerCase().includes(query) ||
-      provider.base_url.toLowerCase().includes(query) ||
-      provider.client_type.toLowerCase().includes(query)
-    ))
+    return providers.filter(
+      (provider) =>
+        provider.name.toLowerCase().includes(query) ||
+        provider.base_url.toLowerCase().includes(query) ||
+        provider.client_type.toLowerCase().includes(query)
+    )
   }, [providers, searchQuery])
 
   const { totalPages, paginatedProviders } = useMemo(() => {
     const total = Math.ceil(filteredProviders.length / pageSize)
-    const paginated = filteredProviders.slice(
-      (page - 1) * pageSize,
-      page * pageSize
-    )
+    const paginated = filteredProviders.slice((page - 1) * pageSize, page * pageSize)
     return { totalPages: total, paginatedProviders: paginated }
   }, [filteredProviders, page, pageSize])
 
@@ -134,8 +158,8 @@ export function ProviderList({
       {/* 搜索框 */}
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative w-full sm:flex-1 sm:max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <div className="relative w-full sm:max-w-sm sm:flex-1">
+            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
             <Input
               placeholder="搜索提供商名称、URL 或类型..."
               value={searchQuery}
@@ -144,7 +168,7 @@ export function ProviderList({
             />
           </div>
           {searchQuery && (
-            <p className="text-sm text-muted-foreground whitespace-nowrap">
+            <p className="text-muted-foreground text-sm whitespace-nowrap">
               找到 {filteredProviders.length} 个结果
             </p>
           )}
@@ -157,14 +181,14 @@ export function ProviderList({
       </div>
 
       {/* 移动端卡片视图 */}
-      <div className="md:hidden space-y-3">
+      <div className="space-y-3 md:hidden">
         {filteredProviders.length === 0 ? (
-          <div className="text-center text-muted-foreground py-8 rounded-lg border bg-card">
+          <div className="text-muted-foreground bg-card rounded-lg border py-8 text-center">
             {searchQuery ? '未找到匹配的提供商' : '暂无提供商配置，点击"添加提供商"开始配置'}
           </div>
         ) : (
           paginatedProviders.map((provider, displayIndex) => {
-            const actualIndex = providers.findIndex(p => p === provider)
+            const actualIndex = providers.findIndex((p) => p === provider)
             return (
               <ProviderCard
                 key={displayIndex}
@@ -182,7 +206,7 @@ export function ProviderList({
       </div>
 
       {/* 桌面端表格视图 */}
-      <div className="hidden md:block overflow-hidden border bg-card">
+      <div className="bg-card hidden overflow-hidden border md:block">
         <div className="overflow-x-auto">
           <Table aria-label="AI 模型提供商列表" className="min-w-[960px]">
             <TableHeader className="bg-muted/30">
@@ -190,7 +214,10 @@ export function ProviderList({
                 <TableHead className={`${providerTableHeadClass} w-[5.5rem]`}>
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      checked={selectedProviders.size === filteredProviders.length && filteredProviders.length > 0}
+                      checked={
+                        selectedProviders.size === filteredProviders.length &&
+                        filteredProviders.length > 0
+                      }
                       onCheckedChange={onToggleSelectAll}
                       aria-label="选择全部厂商用于批量删除"
                       title="选择全部厂商用于批量删除"
@@ -205,21 +232,26 @@ export function ProviderList({
                 <TableHead className={providerNumericHeadClass}>最大重试</TableHead>
                 <TableHead className={providerNumericHeadClass}>超时(秒)</TableHead>
                 <TableHead className={providerNumericHeadClass}>间隔(秒)</TableHead>
-                <TableHead className={`${providerTableHeadClass} w-48 text-right`}>操作</TableHead>
+                <TableHead className={`${providerTableHeadClass} w-36 text-right`}>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedProviders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
-                    {searchQuery ? '未找到匹配的提供商' : '暂无提供商配置，点击"添加提供商"开始配置'}
+                  <TableCell colSpan={9} className="text-muted-foreground py-8 text-center">
+                    {searchQuery
+                      ? '未找到匹配的提供商'
+                      : '暂无提供商配置，点击"添加提供商"开始配置'}
                   </TableCell>
                 </TableRow>
               ) : (
                 paginatedProviders.map((provider, displayIndex) => {
-                  const actualIndex = providers.findIndex(p => p === provider)
+                  const actualIndex = providers.findIndex((p) => p === provider)
                   return (
-                    <TableRow key={displayIndex} data-state={selectedProviders.has(actualIndex) ? 'selected' : undefined}>
+                    <TableRow
+                      key={displayIndex}
+                      data-state={selectedProviders.has(actualIndex) ? 'selected' : undefined}
+                    >
                       <TableCell className={providerTableCellClass}>
                         <Checkbox
                           checked={selectedProviders.has(actualIndex)}
@@ -231,14 +263,27 @@ export function ProviderList({
                       <TableCell className={providerTableCellClass}>
                         {renderTestStatus(provider.name)}
                       </TableCell>
-                      <TableCell className={`${providerTableCellClass} font-medium whitespace-nowrap`}>{provider.name}</TableCell>
-                      <TableCell className={`${providerTableCellClass} max-w-[22rem] truncate font-mono text-xs`} title={provider.base_url}>
+                      <TableCell
+                        className={`${providerTableCellClass} font-medium whitespace-nowrap`}
+                      >
+                        {provider.name}
+                      </TableCell>
+                      <TableCell
+                        className={`${providerTableCellClass} max-w-[22rem] truncate font-mono text-xs`}
+                        title={provider.base_url}
+                      >
                         {provider.base_url}
                       </TableCell>
-                      <TableCell className={`${providerTableCellClass} whitespace-nowrap`}>{provider.client_type}</TableCell>
-                      <TableCell className={providerNumericCellClass}>{provider.max_retry}</TableCell>
+                      <TableCell className={`${providerTableCellClass} whitespace-nowrap`}>
+                        {provider.client_type}
+                      </TableCell>
+                      <TableCell className={providerNumericCellClass}>
+                        {provider.max_retry}
+                      </TableCell>
                       <TableCell className={providerNumericCellClass}>{provider.timeout}</TableCell>
-                      <TableCell className={providerNumericCellClass}>{provider.retry_interval}</TableCell>
+                      <TableCell className={providerNumericCellClass}>
+                        {provider.retry_interval}
+                      </TableCell>
                       <TableCell className={`${providerTableCellClass} text-right`}>
                         <div className="flex justify-end gap-2">
                           <Button
@@ -256,19 +301,21 @@ export function ProviderList({
                           </Button>
                           <Button
                             variant="default"
-                            size="sm"
+                            size="icon"
                             onClick={() => onEdit(provider, actualIndex)}
+                            title="编辑"
+                            aria-label={`编辑厂商 ${provider.name}`}
                           >
-                            <Pencil className="h-4 w-4 mr-1" strokeWidth={2} fill="none" />
-                            编辑
+                            <Pencil className="h-4 w-4" strokeWidth={2} fill="none" />
                           </Button>
                           <Button
-                            size="sm"
+                            size="icon"
                             onClick={() => onDelete(actualIndex)}
-                            className="bg-red-600 hover:bg-red-700 text-white"
+                            className="bg-red-600 text-white hover:bg-red-700"
+                            title="删除"
+                            aria-label={`删除厂商 ${provider.name}`}
                           >
-                            <Trash2 className="h-4 w-4 mr-1" strokeWidth={2} fill="none" />
-                            删除
+                            <Trash2 className="h-4 w-4" strokeWidth={2} fill="none" />
                           </Button>
                         </div>
                       </TableCell>
@@ -283,9 +330,11 @@ export function ProviderList({
 
       {/* 分页 */}
       {filteredProviders.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
+        <div className="mt-4 flex flex-col items-center justify-between gap-4 sm:flex-row">
           <div className="flex items-center gap-2">
-            <Label htmlFor="page-size-provider" className="text-sm whitespace-nowrap">每页显示</Label>
+            <Label htmlFor="page-size-provider" className="text-sm whitespace-nowrap">
+              每页显示
+            </Label>
             <Select
               value={pageSize.toString()}
               onValueChange={(value) => {
@@ -303,9 +352,10 @@ export function ProviderList({
                 <SelectItem value="100">100</SelectItem>
               </SelectContent>
             </Select>
-            <span className="text-sm text-muted-foreground">
+            <span className="text-muted-foreground text-sm">
               显示 {(page - 1) * pageSize + 1} 到{' '}
-              {Math.min(page * pageSize, filteredProviders.length)} 条，共 {filteredProviders.length} 条
+              {Math.min(page * pageSize, filteredProviders.length)} 条，共{' '}
+              {filteredProviders.length} 条
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -334,7 +384,7 @@ export function ProviderList({
                 onChange={(e) => setJumpToPage(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
                 placeholder={page.toString()}
-                className="w-16 h-8 text-center"
+                className="h-8 w-16 text-center"
                 min={1}
                 max={totalPages}
               />

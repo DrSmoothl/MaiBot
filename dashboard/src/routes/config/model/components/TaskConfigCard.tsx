@@ -3,10 +3,12 @@
  */
 import React from 'react'
 import { Info } from 'lucide-react'
+
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { MultiSelect } from '@/components/ui/multi-select'
+import { StreamlineIcon } from '@/components/ui/streamline-icon'
 import {
   Select,
   SelectContent,
@@ -21,6 +23,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+
 import type { TaskConfig } from '../types'
 
 interface TaskConfigCardProps {
@@ -169,7 +172,11 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
               <TooltipProvider delayDuration={150}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Info className="h-3.5 w-3.5 cursor-help text-muted-foreground" />
+                    <StreamlineIcon
+                      name="information-circle-solid"
+                      fallback={Info}
+                      className="h-3.5 w-3.5 cursor-help text-muted-foreground"
+                    />
                   </TooltipTrigger>
                   <TooltipContent side="top" align="start" className="max-w-64">
                     模型响应时间超过此时间将输出警告日志

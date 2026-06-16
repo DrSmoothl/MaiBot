@@ -13,7 +13,9 @@ export type {
 export {
   AliasNamesHook,
   AMemorixSharedMemoryGroupsHook,
+  BehaviorGroupsHook,
   BehaviorFocusGroupsHook,
+  BehaviorLearningListHook,
   BotPlatformsHook,
   BotPlatformAccountsHook,
   ChatPromptsHook,

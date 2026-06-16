@@ -8,14 +8,6 @@ type HSL = {
 
 export const DEFAULT_ACCENT_COLOR_HSL = '112.7 40.2% 47.8%'
 export const DEFAULT_ACCENT_COLOR_HEX = '#55AB49'
-const LEGACY_DUMB_GREEN_ACCENT_HSL = '112.9 63% 37.1%'
-const LEGACY_DUMB_GREEN_ACCENT_HEX = '#319a23'
-const LEGACY_LIGHT_GREEN_ACCENT_HSL = '113.5 55.2% 64.1%'
-const LEGACY_LIGHT_GREEN_ACCENT_HEX = '#7cd671'
-const LEGACY_GREEN_ACCENT_HSL = '158 45% 42%'
-const LEGACY_GREEN_ACCENT_HEX = '#3b9b75'
-const LEGACY_DEFAULT_ACCENT_HSL = '35 100% 45.1%'
-const LEGACY_DEFAULT_ACCENT_HEX = '#e68600'
 
 const clamp = (value: number, min: number, max: number): number => {
   if (value < min) return min
@@ -61,30 +53,14 @@ export const isValidHSLString = (value: string): boolean => {
   return /^-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?%\s+-?\d+(?:\.\d+)?%$/i.test(cleaned)
 }
 
-const isLegacyYellowAccent = (hsl: string): boolean => {
-  const { h, s, l } = parseHSL(hsl)
-  return h >= 30 && h <= 40 && s >= 70 && l >= 40 && l <= 55
-}
-
 export const isDefaultAccentColor = (hsl: string): boolean => {
   const current = parseHSL(hsl)
   const defaults = parseHSL(DEFAULT_ACCENT_COLOR_HSL)
-  const legacyDumbGreen = parseHSL(LEGACY_DUMB_GREEN_ACCENT_HSL)
-  const legacyLightGreen = parseHSL(LEGACY_LIGHT_GREEN_ACCENT_HSL)
-  const legacyGreen = parseHSL(LEGACY_GREEN_ACCENT_HSL)
-  const matchesCurrentDefault = Math.abs(current.h - defaults.h) <= 0.5
-    && Math.abs(current.s - defaults.s) <= 0.5
-    && Math.abs(current.l - defaults.l) <= 0.5
-  const matchesLegacyDumbGreen = Math.abs(current.h - legacyDumbGreen.h) <= 0.5
-    && Math.abs(current.s - legacyDumbGreen.s) <= 0.5
-    && Math.abs(current.l - legacyDumbGreen.l) <= 0.5
-  const matchesLegacyLightGreen = Math.abs(current.h - legacyLightGreen.h) <= 0.5
-    && Math.abs(current.s - legacyLightGreen.s) <= 0.5
-    && Math.abs(current.l - legacyLightGreen.l) <= 0.5
-  const matchesLegacyGreen = Math.abs(current.h - legacyGreen.h) <= 0.5
-    && Math.abs(current.s - legacyGreen.s) <= 0.5
-    && Math.abs(current.l - legacyGreen.l) <= 0.5
-  return matchesCurrentDefault || matchesLegacyDumbGreen || matchesLegacyLightGreen || matchesLegacyGreen
+  return (
+    Math.abs(current.h - defaults.h) <= 0.5 &&
+    Math.abs(current.s - defaults.s) <= 0.5 &&
+    Math.abs(current.l - defaults.l) <= 0.5
+  )
 }
 
 export const hexToHSL = (hex: string): string => {
@@ -140,31 +116,15 @@ export const normalizeAccentColor = (accentColor?: string | null): string => {
     return DEFAULT_ACCENT_COLOR_HSL
   }
 
-  if (trimmed.toLowerCase() === LEGACY_DEFAULT_ACCENT_HEX) {
-    return DEFAULT_ACCENT_COLOR_HSL
-  }
-
-  if (
-    trimmed.toLowerCase() === LEGACY_DUMB_GREEN_ACCENT_HEX
-    || trimmed.toLowerCase() === LEGACY_LIGHT_GREEN_ACCENT_HEX
-    || trimmed.toLowerCase() === LEGACY_GREEN_ACCENT_HEX
-  ) {
-    return DEFAULT_ACCENT_COLOR_HSL
-  }
-
   if (trimmed.startsWith('#')) {
     const normalized = hexToHSL(trimmed)
-    return isLegacyYellowAccent(normalized) || isDefaultAccentColor(normalized)
-      ? DEFAULT_ACCENT_COLOR_HSL
-      : normalized
+    return isDefaultAccentColor(normalized) ? DEFAULT_ACCENT_COLOR_HSL : normalized
   }
 
   if (isValidHSLString(trimmed)) {
     const { h, s, l } = parseHSL(trimmed)
     const normalized = formatHSL(h, s, l)
-    return normalized === LEGACY_DEFAULT_ACCENT_HSL || isLegacyYellowAccent(normalized) || isDefaultAccentColor(normalized)
-      ? DEFAULT_ACCENT_COLOR_HSL
-      : normalized
+    return isDefaultAccentColor(normalized) ? DEFAULT_ACCENT_COLOR_HSL : normalized
   }
 
   return DEFAULT_ACCENT_COLOR_HSL

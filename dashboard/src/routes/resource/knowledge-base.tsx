@@ -17,9 +17,10 @@ import {
 import { MemoryDeleteDialog } from '@/components/memory/MemoryDeleteDialog'
 import { MemoryEpisodeManager } from '@/components/memory/MemoryEpisodeManager'
 import { MemoryMaintenanceManager } from '@/components/memory/MemoryMaintenanceManager'
-import { MemoryMiniTabs } from '@/components/memory/MemoryMiniTabs'
 import { MemoryProfileManager } from '@/components/memory/MemoryProfileManager'
 import { MemoryTimelineManager } from '@/components/memory/MemoryTimelineManager'
+import { RoutePendingFallback } from '@/components/route-pending-fallback'
+import { AccentPanel } from '@/components/ui/accent-panel'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -30,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { DashboardTabBar, DashboardTabTrigger } from '@/components/ui/dashboard-tabs'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
@@ -55,8 +57,20 @@ import { TuningTab } from './knowledge-base/tabs/TuningTab'
 import { KnowledgeGraphPage } from './knowledge-graph'
 
 const MEMORY_QUICK_START_DISMISSED_KEY = 'memory-quick-start-dismissed'
-type MemoryConsoleTab = 'graph' | 'timeline' | 'import' | 'tuning' | 'episodes' | 'profiles' | 'maintenance' | 'delete' | 'feedback'
-type LoadableMemoryTab = Extract<MemoryConsoleTab, 'timeline' | 'import' | 'tuning' | 'delete' | 'feedback'>
+type MemoryConsoleTab =
+  | 'graph'
+  | 'timeline'
+  | 'import'
+  | 'tuning'
+  | 'episodes'
+  | 'profiles'
+  | 'maintenance'
+  | 'delete'
+  | 'feedback'
+type LoadableMemoryTab = Extract<
+  MemoryConsoleTab,
+  'timeline' | 'import' | 'tuning' | 'delete' | 'feedback'
+>
 
 const MEMORY_CONSOLE_TABS: MemoryConsoleTab[] = [
   'graph',
@@ -113,7 +127,10 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
   }
 }
 
-function updateKnowledgeBaseDeepLink(tab: MemoryConsoleTab, updates: Record<string, string | number | undefined>) {
+function updateKnowledgeBaseDeepLink(
+  tab: MemoryConsoleTab,
+  updates: Record<string, string | number | undefined>
+) {
   if (typeof window === 'undefined') {
     return
   }
@@ -151,7 +168,9 @@ export function KnowledgeBasePage() {
     }
     return window.localStorage.getItem(MEMORY_QUICK_START_DISMISSED_KEY) !== 'true'
   })
-  const [visitedMemoryTabs, setVisitedMemoryTabs] = useState<Set<MemoryConsoleTab>>(() => new Set(['graph', deepLinkRef.current.tab]))
+  const [visitedMemoryTabs, setVisitedMemoryTabs] = useState<Set<MemoryConsoleTab>>(
+    () => new Set(['graph', deepLinkRef.current.tab])
+  )
   const [tabLoading, setTabLoading] = useState<Partial<Record<LoadableMemoryTab, boolean>>>({})
   const loadedPanelDataRef = useRef<Set<LoadableMemoryTab>>(new Set())
   const [timelineInitialChatId] = useState(deepLinkRef.current.chatId ?? '')
@@ -163,8 +182,12 @@ export function KnowledgeBasePage() {
     timeStart: deepLinkRef.current.timeStart,
     timeEnd: deepLinkRef.current.timeEnd,
   })
-  const [profileInitialPersonId, setProfileInitialPersonId] = useState(deepLinkRef.current.personId ?? '')
-  const [maintenanceInitialTarget, setMaintenanceInitialTarget] = useState(deepLinkRef.current.maintenanceTarget ?? '')
+  const [profileInitialPersonId, setProfileInitialPersonId] = useState(
+    deepLinkRef.current.personId ?? ''
+  )
+  const [maintenanceInitialTarget, setMaintenanceInitialTarget] = useState(
+    deepLinkRef.current.maintenanceTarget ?? ''
+  )
 
   // 聊天流列表供审计时间线面板使用（导入面板的聊天流由 useImportForm 自管）
   const [importChatTargets, setImportChatTargets] = useState<MemoryImportChatTargetPayload[]>([])
@@ -215,108 +238,125 @@ export function KnowledgeBasePage() {
     return chatTargetsResult.data ?? []
   }, [])
 
-  const loadTimelinePanel = useCallback(async (force = false) => {
-    if (!force && loadedPanelDataRef.current.has('timeline')) {
-      return
-    }
-    try {
-      setPanelLoading('timeline', true)
-      await loadChatTargets()
-      loadedPanelDataRef.current.add('timeline')
-    } catch (error) {
-      toast({
-        title: '加载审计聊天流失败',
-        description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive',
-      })
-    } finally {
-      setPanelLoading('timeline', false)
-    }
-  }, [loadChatTargets, setPanelLoading, toast])
+  const loadTimelinePanel = useCallback(
+    async (force = false) => {
+      if (!force && loadedPanelDataRef.current.has('timeline')) {
+        return
+      }
+      try {
+        setPanelLoading('timeline', true)
+        await loadChatTargets()
+        loadedPanelDataRef.current.add('timeline')
+      } catch (error) {
+        toast({
+          title: '加载审计聊天流失败',
+          description: error instanceof Error ? error.message : '未知错误',
+          variant: 'destructive',
+        })
+      } finally {
+        setPanelLoading('timeline', false)
+      }
+    },
+    [loadChatTargets, setPanelLoading, toast]
+  )
 
   // tuning/delete/feedback 数据已下沉到各领域 hook（useQuery enabled:active 懒加载），
   // 此处仅保留 timeline 面板的命令式加载（聊天流列表）
-  const loadActiveTabData = useCallback(async (tab: MemoryConsoleTab, force = false) => {
-    switch (tab) {
-      case 'timeline':
-        await loadTimelinePanel(force)
-        break
-      default:
-        break
-    }
-  }, [loadTimelinePanel])
-
-  const switchMemoryTab = useCallback((tab: MemoryConsoleTab, query: Record<string, string | number | undefined> = {}) => {
-    setActiveTab(tab)
-    updateKnowledgeBaseDeepLink(tab, query)
-  }, [])
-
-  const handleTimelineJump = useCallback((target: MemoryTimelineJumpTargetPayload) => {
-    const tab = target.tab as MemoryConsoleTab
-    if (!MEMORY_CONSOLE_TABS.includes(tab)) {
-      return
-    }
-
-    if (tab === 'episodes') {
-      const episodeId = readJumpParam(target, 'episode_id')
-      const source = readJumpParam(target, 'source')
-      const timeStart = readJumpNumber(target, 'time_start')
-      const timeEnd = readJumpNumber(target, 'time_end')
-      setEpisodeInitialTarget({
-        episodeId,
-        source,
-        timeStart,
-        timeEnd,
-      })
-      switchMemoryTab('episodes', { episode_id: episodeId, source, time_start: timeStart, time_end: timeEnd })
-      return
-    }
-
-    if (tab === 'profiles') {
-      const personId = readJumpParam(target, 'person_id')
-      setProfileInitialPersonId(personId)
-      switchMemoryTab('profiles', { person_id: personId })
-      return
-    }
-
-    if (tab === 'feedback') {
-      const taskId = Math.floor(readJumpNumber(target, 'task_id') ?? 0)
-      if (taskId > 0) {
-        memoryFeedback.setSelectedFeedbackTaskId(taskId)
-        memoryFeedback.setFeedbackSearch(String(taskId))
-        memoryFeedback.setFeedbackActionLogPage(1)
+  const loadActiveTabData = useCallback(
+    async (tab: MemoryConsoleTab, force = false) => {
+      switch (tab) {
+        case 'timeline':
+          await loadTimelinePanel(force)
+          break
+        default:
+          break
       }
-      switchMemoryTab('feedback', { task_id: taskId > 0 ? taskId : undefined })
-      // 纠错数据由 useMemoryFeedback 自管加载（enabled:active），切到该 tab 即触发拉取
-      return
-    }
+    },
+    [loadTimelinePanel]
+  )
 
-    if (tab === 'delete') {
-      const operationId = readJumpParam(target, 'operation_id')
-      const source = readJumpParam(target, 'source')
-      const paragraphHash = readJumpParam(target, 'paragraph_hash')
-      if (operationId) {
-        memoryDelete.setSelectedOperationId(operationId)
-        memoryDelete.setOperationSearch(operationId)
-        switchMemoryTab('delete', { operation_id: operationId })
-      } else {
-        memoryDelete.setSourceSearch(source || paragraphHash)
-        memoryDelete.setOperationSearch(source || paragraphHash)
-        switchMemoryTab('delete', { source: source || undefined })
+  const switchMemoryTab = useCallback(
+    (tab: MemoryConsoleTab, query: Record<string, string | number | undefined> = {}) => {
+      setActiveTab(tab)
+      updateKnowledgeBaseDeepLink(tab, query)
+    },
+    []
+  )
+
+  const handleTimelineJump = useCallback(
+    (target: MemoryTimelineJumpTargetPayload) => {
+      const tab = target.tab as MemoryConsoleTab
+      if (!MEMORY_CONSOLE_TABS.includes(tab)) {
+        return
       }
-      // 删除数据由 useMemoryDelete 自管加载（enabled:active），切到该 tab 即触发拉取
-      return
-    }
 
-    if (tab === 'maintenance') {
-      const targetText = readJumpParam(target, 'target')
-      setMaintenanceInitialTarget(targetText)
-      switchMemoryTab('maintenance', { target: targetText })
-      return
-    }
+      if (tab === 'episodes') {
+        const episodeId = readJumpParam(target, 'episode_id')
+        const source = readJumpParam(target, 'source')
+        const timeStart = readJumpNumber(target, 'time_start')
+        const timeEnd = readJumpNumber(target, 'time_end')
+        setEpisodeInitialTarget({
+          episodeId,
+          source,
+          timeStart,
+          timeEnd,
+        })
+        switchMemoryTab('episodes', {
+          episode_id: episodeId,
+          source,
+          time_start: timeStart,
+          time_end: timeEnd,
+        })
+        return
+      }
 
-    switchMemoryTab(tab)
-  }, [memoryDelete, memoryFeedback, switchMemoryTab])
+      if (tab === 'profiles') {
+        const personId = readJumpParam(target, 'person_id')
+        setProfileInitialPersonId(personId)
+        switchMemoryTab('profiles', { person_id: personId })
+        return
+      }
+
+      if (tab === 'feedback') {
+        const taskId = Math.floor(readJumpNumber(target, 'task_id') ?? 0)
+        if (taskId > 0) {
+          memoryFeedback.setSelectedFeedbackTaskId(taskId)
+          memoryFeedback.setFeedbackSearch(String(taskId))
+          memoryFeedback.setFeedbackActionLogPage(1)
+        }
+        switchMemoryTab('feedback', { task_id: taskId > 0 ? taskId : undefined })
+        // 纠错数据由 useMemoryFeedback 自管加载（enabled:active），切到该 tab 即触发拉取
+        return
+      }
+
+      if (tab === 'delete') {
+        const operationId = readJumpParam(target, 'operation_id')
+        const source = readJumpParam(target, 'source')
+        const paragraphHash = readJumpParam(target, 'paragraph_hash')
+        if (operationId) {
+          memoryDelete.setSelectedOperationId(operationId)
+          memoryDelete.setOperationSearch(operationId)
+          switchMemoryTab('delete', { operation_id: operationId })
+        } else {
+          memoryDelete.setSourceSearch(source || paragraphHash)
+          memoryDelete.setOperationSearch(source || paragraphHash)
+          switchMemoryTab('delete', { source: source || undefined })
+        }
+        // 删除数据由 useMemoryDelete 自管加载（enabled:active），切到该 tab 即触发拉取
+        return
+      }
+
+      if (tab === 'maintenance') {
+        const targetText = readJumpParam(target, 'target')
+        setMaintenanceInitialTarget(targetText)
+        switchMemoryTab('maintenance', { target: targetText })
+        return
+      }
+
+      switchMemoryTab(tab)
+    },
+    [memoryDelete, memoryFeedback, switchMemoryTab]
+  )
 
   const loadPage = useCallback(async () => {
     try {
@@ -353,7 +393,7 @@ export function KnowledgeBasePage() {
         value: runtimeConfig.runtime_ready ? '就绪' : '未就绪',
         description: runtimeConfig.embedding_degraded ? 'Embedding 降级运行' : '运行时检查通过',
         icon: runtimeConfig.runtime_ready ? CheckCircle2 : CircleAlert,
-        className: runtimeConfig.runtime_ready ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/20 bg-amber-500/5',
+        className: runtimeConfig.runtime_ready ? 'border-emerald-500/25' : 'border-amber-500/25',
         iconClassName: runtimeConfig.runtime_ready ? 'text-emerald-500' : 'text-amber-500',
       },
       {
@@ -361,7 +401,7 @@ export function KnowledgeBasePage() {
         value: String(runtimeConfig.embedding_dimension),
         description: runtimeConfig.relation_vectors_enabled ? '关系向量已启用' : '关系向量未启用',
         icon: HardDrive,
-        className: 'border-sky-500/20 bg-sky-500/5',
+        className: 'border-sky-500/25',
         iconClassName: 'text-sky-500',
       },
       {
@@ -369,7 +409,7 @@ export function KnowledgeBasePage() {
         value: runtimeConfig.data_dir,
         description: '长期记忆存储位置',
         icon: FolderOpen,
-        className: 'border-violet-500/20 bg-violet-500/5',
+        className: 'border-violet-500/25',
         iconClassName: 'text-violet-500',
       },
     ]
@@ -380,28 +420,25 @@ export function KnowledgeBasePage() {
     setQuickStartVisible(false)
   }, [])
 
-  const shouldRenderMemoryTab = (tab: MemoryConsoleTab) => activeTab === tab || visitedMemoryTabs.has(tab)
+  const shouldRenderMemoryTab = (tab: MemoryConsoleTab) =>
+    activeTab === tab || visitedMemoryTabs.has(tab)
   const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
   const renderPanelFallback = (tab: LoadableMemoryTab) => (
     <TabsContent value={tab} className="space-y-4">
-      <div className="flex min-h-[240px] items-center justify-center rounded-xl border bg-background/70 text-sm text-muted-foreground">
-        <ThinkingIllustration size={tabLoading[tab] ? 'md' : 'sm'} />
-      </div>
+      <AccentPanel showRetroStripes={false} className="bg-background/70 rounded-xl border">
+        <div className="text-muted-foreground flex min-h-[240px] items-center justify-center text-sm">
+          <ThinkingIllustration size={tabLoading[tab] ? 'md' : 'sm'} />
+        </div>
+      </AccentPanel>
     </TabsContent>
   )
 
   if (memoryRuntime.runtimeLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="rounded-xl border bg-background px-6 py-4 shadow-sm">
-          <ThinkingIllustration size="lg" />
-        </div>
-      </div>
-    )
+    return <RoutePendingFallback />
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="bg-background flex h-full flex-col">
       <div className="flex-1 overflow-auto">
         <div className="memory-console-density mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 py-4 xl:px-5">
           <div className="hidden">
@@ -412,7 +449,12 @@ export function KnowledgeBasePage() {
           </div>
           {/* 运行时状态条 —— 紧凑、常驻、一眼看完 */}
           {runtimeBadges.length > 0 ? (
-            <div className="rounded-xl border border-border/60 bg-card/60 p-3 shadow-sm backdrop-blur">
+            <AccentPanel
+              showRetroStripes={false}
+              data-memory-runtime-status="true"
+              className="border-border/60 border bg-transparent"
+              contentClassName="p-3"
+            >
               <div className="mb-2 flex items-center justify-end gap-2">
                 {runtimeConfig?.vector_rebuild_required ? (
                   <Button
@@ -422,7 +464,12 @@ export function KnowledgeBasePage() {
                     onClick={() => void memoryRuntime.openVectorRebuildDialog()}
                     disabled={memoryRuntime.vectorRebuilding}
                   >
-                    <RotateCcw className={cn('mr-1 h-3 w-3', memoryRuntime.vectorRebuilding && 'animate-spin')} />
+                    <RotateCcw
+                      className={cn(
+                        'mr-1 h-3 w-3',
+                        memoryRuntime.vectorRebuilding && 'animate-spin'
+                      )}
+                    />
                     重建向量
                   </Button>
                 ) : null}
@@ -442,7 +489,9 @@ export function KnowledgeBasePage() {
                   onClick={() => void memoryRuntime.refreshSelfCheck()}
                   disabled={memoryRuntime.refreshingCheck}
                 >
-                  <RefreshCw className={cn('mr-1 h-3 w-3', memoryRuntime.refreshingCheck && 'animate-spin')} />
+                  <RefreshCw
+                    className={cn('mr-1 h-3 w-3', memoryRuntime.refreshingCheck && 'animate-spin')}
+                  />
                   自检
                 </Button>
               </div>
@@ -451,61 +500,81 @@ export function KnowledgeBasePage() {
                   <div
                     key={item.label}
                     className={cn(
-                      'min-w-0 overflow-hidden rounded-lg border px-2 py-1.5 transition-colors sm:flex sm:items-center sm:gap-2 sm:px-2.5',
-                      item.className,
+                      'min-w-0 overflow-hidden border bg-transparent px-2 py-1.5 transition-colors sm:flex sm:items-center sm:gap-2 sm:px-2.5',
+                      item.className
                     )}
                   >
-                    <div className="mb-1 w-fit flex-none rounded-md border bg-background/70 p-1 shadow-sm sm:mb-0">
+                    <div className="mb-1 w-fit flex-none border bg-transparent p-1 sm:mb-0">
                       <item.icon className={cn('h-3.5 w-3.5', item.iconClassName)} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[10px] font-medium leading-tight text-muted-foreground">
+                      <div className="text-muted-foreground truncate text-[10px] leading-tight font-medium">
                         {item.label}
                       </div>
-                      <div className="truncate text-xs font-semibold leading-tight" title={item.value}>
+                      <div
+                        className="truncate text-xs leading-tight font-semibold"
+                        title={item.value}
+                      >
                         {item.value}
                       </div>
-                      <div className="mt-0.5 hidden truncate text-[10px] text-muted-foreground xl:block">
+                      <div className="text-muted-foreground mt-0.5 hidden truncate text-[10px] xl:block">
                         {item.description}
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
+            </AccentPanel>
           ) : null}
 
-          <Dialog open={memoryRuntime.vectorRebuildDialogOpen} onOpenChange={memoryRuntime.setVectorRebuildDialogOpen}>
+          <Dialog
+            open={memoryRuntime.vectorRebuildDialogOpen}
+            onOpenChange={memoryRuntime.setVectorRebuildDialogOpen}
+          >
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>重建全部向量</DialogTitle>
                 <DialogDescription>
-                  将使用当前 embedding 配置重新生成段落、实体和已启用的关系向量，期间检索会临时降级（会对嵌入模型造成大量请求！）
+                  将使用当前 embedding
+                  配置重新生成段落、实体和已启用的关系向量，期间检索会临时降级（会对嵌入模型造成大量请求！）
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-3 text-sm">
                 <Alert variant={runtimeConfig?.vector_rebuild_required ? 'destructive' : 'default'}>
                   <AlertDescription>
-                    {runtimeConfig?.vector_rebuild_message || '这个操作会替换现有向量库，适合更换 embedding 模型或维度后执行。'}
+                    {runtimeConfig?.vector_rebuild_message ||
+                      '这个操作会替换现有向量库，适合更换 embedding 模型或维度后执行。'}
                   </AlertDescription>
                 </Alert>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {(['paragraphs', 'entities', 'relations'] as const).map((key) => (
-                    <div key={key} className="rounded-lg border bg-muted/30 p-3">
-                      <div className="text-xs text-muted-foreground">
+                    <div key={key} className="bg-muted/30 rounded-lg border p-3">
+                      <div className="text-muted-foreground text-xs">
                         {key === 'paragraphs' ? '段落' : key === 'entities' ? '实体' : '关系'}
                       </div>
-                      <div className="mt-1 text-xl font-semibold">{memoryRuntime.vectorRebuildPreview?.[key] ?? '-'}</div>
+                      <div className="mt-1 text-xl font-semibold">
+                        {memoryRuntime.vectorRebuildPreview?.[key] ?? '-'}
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => memoryRuntime.setVectorRebuildDialogOpen(false)} disabled={memoryRuntime.vectorRebuilding}>
+                <Button
+                  variant="outline"
+                  onClick={() => memoryRuntime.setVectorRebuildDialogOpen(false)}
+                  disabled={memoryRuntime.vectorRebuilding}
+                >
                   取消
                 </Button>
-                <Button variant="destructive" onClick={() => void memoryRuntime.confirmVectorRebuild()} disabled={memoryRuntime.vectorRebuilding}>
-                  <RotateCcw className={cn('mr-2 h-4 w-4', memoryRuntime.vectorRebuilding && 'animate-spin')} />
+                <Button
+                  variant="destructive"
+                  onClick={() => void memoryRuntime.confirmVectorRebuild()}
+                  disabled={memoryRuntime.vectorRebuilding}
+                >
+                  <RotateCcw
+                    className={cn('mr-2 h-4 w-4', memoryRuntime.vectorRebuilding && 'animate-spin')}
+                  />
                   确认重建
                 </Button>
               </DialogFooter>
@@ -514,12 +583,16 @@ export function KnowledgeBasePage() {
 
           {/* 快速开始 Hero —— 给新用户明确的"先做什么" */}
           {quickStartVisible && (
-            <div className="relative overflow-hidden rounded-xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-4 pr-11 shadow-sm">
+            <AccentPanel
+              showRetroStripes={false}
+              className="border-primary/20 from-primary/10 via-primary/5 relative overflow-hidden rounded-xl border bg-gradient-to-br to-transparent shadow-sm"
+              contentClassName="p-4 pr-11"
+            >
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute right-3 top-3 h-7 w-7 text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground absolute top-3 right-3 h-7 w-7"
                 onClick={dismissQuickStart}
                 aria-label="关闭快速开始"
                 title="关闭快速开始"
@@ -527,64 +600,64 @@ export function KnowledgeBasePage() {
                 <X className="h-4 w-4" />
               </Button>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="space-y-1.5 lg:max-w-sm">
-                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary">
-                  快速开始
+                <div className="space-y-1.5 lg:max-w-sm">
+                  <div className="text-primary text-[11px] font-medium tracking-[0.18em] uppercase">
+                    快速开始
+                  </div>
+                  <h2 className="text-lg leading-tight font-semibold">先从这三件事入手</h2>
+                  <p className="text-muted-foreground text-sm">
+                    不知道该做什么？挑一个最常用的入口，下面的标签页里有更详细的设置。
+                  </p>
                 </div>
-                <h2 className="text-lg font-semibold leading-tight">先从这三件事入手</h2>
-                <p className="text-sm text-muted-foreground">
-                  不知道该做什么？挑一个最常用的入口，下面的标签页里有更详细的设置。
-                </p>
-              </div>
-              <div className="grid w-full gap-2 sm:grid-cols-3 lg:max-w-3xl">
-                <button
-                  type="button"
-                  onClick={() => switchMemoryTab('import')}
-                  className="group flex items-start gap-2 rounded-lg border border-border/70 bg-background/80 p-3 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
-                >
-                  <div className="flex-none rounded-lg bg-primary/10 p-2 text-primary transition-transform group-hover:scale-105">
-                    <Upload className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold">导入资料</div>
-                    <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                      把文件、聊天记录写进记忆库
+                <div className="grid w-full gap-2 sm:grid-cols-3 lg:max-w-3xl">
+                  <button
+                    type="button"
+                    onClick={() => switchMemoryTab('import')}
+                    className="group border-border/70 bg-background/80 hover:border-primary/50 hover:bg-background flex items-start gap-2 rounded-lg border p-3 text-left transition hover:shadow-md"
+                  >
+                    <div className="bg-primary/10 text-primary flex-none rounded-lg p-2 transition-transform group-hover:scale-105">
+                      <Upload className="h-4 w-4" />
                     </div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => switchMemoryTab('tuning')}
-                  className="group flex items-start gap-2 rounded-lg border border-border/70 bg-background/80 p-3 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
-                >
-                  <div className="flex-none rounded-lg bg-amber-500/10 p-2 text-amber-500 transition-transform group-hover:scale-105">
-                    <SlidersHorizontal className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold">检索调优</div>
-                    <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                      让回忆变得更准、更聪明
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold">导入资料</div>
+                      <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                        把文件、聊天记录写进记忆库
+                      </div>
                     </div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => switchMemoryTab('graph')}
-                  className="group flex items-start gap-2 rounded-lg border border-border/70 bg-background/80 p-3 text-left transition hover:border-primary/50 hover:bg-background hover:shadow-md"
-                >
-                  <div className="flex-none rounded-lg bg-violet-500/10 p-2 text-violet-500 transition-transform group-hover:scale-105">
-                    <Database className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold">打开图谱</div>
-                    <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                      可视化已存的实体和关系
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchMemoryTab('tuning')}
+                    className="group border-border/70 bg-background/80 hover:border-primary/50 hover:bg-background flex items-start gap-2 rounded-lg border p-3 text-left transition hover:shadow-md"
+                  >
+                    <div className="flex-none rounded-lg bg-amber-500/10 p-2 text-amber-500 transition-transform group-hover:scale-105">
+                      <SlidersHorizontal className="h-4 w-4" />
                     </div>
-                  </div>
-                </button>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold">检索调优</div>
+                      <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                        让回忆变得更准、更聪明
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchMemoryTab('graph')}
+                    className="group border-border/70 bg-background/80 hover:border-primary/50 hover:bg-background flex items-start gap-2 rounded-lg border p-3 text-left transition hover:shadow-md"
+                  >
+                    <div className="flex-none rounded-lg bg-violet-500/10 p-2 text-violet-500 transition-transform group-hover:scale-105">
+                      <Database className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold">打开图谱</div>
+                      <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                        可视化已存的实体和关系
+                      </div>
+                    </div>
+                  </button>
+                </div>
               </div>
-              </div>
-            </div>
+            </AccentPanel>
           )}
 
           <Tabs
@@ -592,58 +665,80 @@ export function KnowledgeBasePage() {
             onValueChange={(value) => switchMemoryTab(value as MemoryConsoleTab)}
             className="space-y-3"
           >
-            <div className="-mx-4 border-b border-border/40 px-4 pb-1.5 pt-0 xl:-mx-5 xl:px-5">
+            <div className="border-border/40 -mx-4 border-b px-4 pt-0 pb-1.5 xl:-mx-5 xl:px-5">
               <div className="flex flex-wrap items-center gap-2">
-                <MemoryMiniTabs
-                  items={[
+                <DashboardTabBar
+                  variant="grid"
+                  className="h-[30px] w-fit max-w-full auto-cols-max grid-flow-col"
+                >
+                  {[
                     { value: 'graph', label: '图谱', description: '实体关系图与证据视图' },
                     { value: 'timeline', label: '审计时间线', description: '核对聊天流记忆变动' },
                     { value: 'tuning', label: '调优', description: '检索策略调优' },
                     { value: 'episodes', label: '情景记忆', description: '查看和重建情景记忆' },
                     { value: 'profiles', label: '人物画像', description: '查询和维护人物画像' },
-                  ]}
-                  className="h-[30px] w-fit max-w-full"
-                  triggerClassName="px-3"
-                />
-                <MemoryMiniTabs
-                  items={[
+                  ].map((item) => (
+                    <DashboardTabTrigger
+                      key={item.value}
+                      value={item.value}
+                      title={item.description}
+                      className="px-3 text-xs"
+                    >
+                      {item.label}
+                    </DashboardTabTrigger>
+                  ))}
+                </DashboardTabBar>
+                <DashboardTabBar
+                  variant="grid"
+                  className="h-[30px] w-fit max-w-full auto-cols-max grid-flow-col"
+                >
+                  {[
                     { value: 'import', label: '导入', description: '创建并管理导入任务' },
                     { value: 'maintenance', label: '维护', description: '回收站与记忆状态维护' },
                     { value: 'delete', label: '删除', description: '批量删除与历史回溯' },
                     { value: 'feedback', label: '纠错历史', description: '查看反馈与回滚' },
-                  ]}
-                  className="h-[30px] w-fit max-w-full"
-                  triggerClassName="px-3"
-                />
+                  ].map((item) => (
+                    <DashboardTabTrigger
+                      key={item.value}
+                      value={item.value}
+                      title={item.description}
+                      className="px-3 text-xs"
+                    >
+                      {item.label}
+                    </DashboardTabTrigger>
+                  ))}
+                </DashboardTabBar>
               </div>
             </div>
 
-            <TabsContent value="graph" className="h-[calc(100vh-132px)] min-h-[820px] overflow-hidden rounded-2xl border border-border/60 bg-background shadow-sm">
+            <TabsContent
+              value="graph"
+              className="border-border/60 bg-background h-[calc(100vh-132px)] min-h-[820px] overflow-hidden rounded-2xl border shadow-sm"
+            >
               <KnowledgeGraphPage embedded onOpenConsole={() => switchMemoryTab('import')} />
             </TabsContent>
 
-            {shouldRenderMemoryTab('timeline') && (shouldShowPanelFallback('timeline') ? renderPanelFallback('timeline') : (
-            <TabsContent value="timeline" className="space-y-4">
-              <MemoryTimelineManager
-                chatTargets={importChatTargets}
-                initialChatId={timelineInitialChatId}
-                initialTimeStart={timelineInitialTimeStart}
-                initialTimeEnd={timelineInitialTimeEnd}
-                onJump={handleTimelineJump}
-              />
-            </TabsContent>
-            ))}
+            {shouldRenderMemoryTab('timeline') &&
+              (shouldShowPanelFallback('timeline') ? (
+                renderPanelFallback('timeline')
+              ) : (
+                <TabsContent value="timeline" className="space-y-4">
+                  <MemoryTimelineManager
+                    chatTargets={importChatTargets}
+                    initialChatId={timelineInitialChatId}
+                    initialTimeStart={timelineInitialTimeStart}
+                    initialTimeEnd={timelineInitialTimeEnd}
+                    onJump={handleTimelineJump}
+                  />
+                </TabsContent>
+              ))}
 
             {/* 导入面板的数据由 useImportQueue/useImportForm 自管加载（useQuery enabled:active），
                 不再走 loadedPanelDataRef 懒加载门控；表单即时可交互，任务列表异步填充 */}
-            {shouldRenderMemoryTab('import') && (
-            <ImportTab queue={importQueue} form={importForm} />
-            )}
+            {shouldRenderMemoryTab('import') && <ImportTab queue={importQueue} form={importForm} />}
 
             {/* 调优面板数据由 useMemoryTuning 自管加载（enabled:active），不再走懒加载占位门控 */}
-            {shouldRenderMemoryTab('tuning') && (
-            <TuningTab tuning={memoryTuning} />
-            )}
+            {shouldRenderMemoryTab('tuning') && <TuningTab tuning={memoryTuning} />}
 
             <TabsContent value="episodes" className="space-y-4">
               {shouldRenderMemoryTab('episodes') ? (
@@ -657,22 +752,22 @@ export function KnowledgeBasePage() {
             </TabsContent>
 
             <TabsContent value="profiles" className="space-y-4">
-              {shouldRenderMemoryTab('profiles') ? <MemoryProfileManager initialPersonId={profileInitialPersonId} /> : null}
+              {shouldRenderMemoryTab('profiles') ? (
+                <MemoryProfileManager initialPersonId={profileInitialPersonId} />
+              ) : null}
             </TabsContent>
 
             <TabsContent value="maintenance" className="space-y-4">
-              {shouldRenderMemoryTab('maintenance') ? <MemoryMaintenanceManager initialTarget={maintenanceInitialTarget} /> : null}
+              {shouldRenderMemoryTab('maintenance') ? (
+                <MemoryMaintenanceManager initialTarget={maintenanceInitialTarget} />
+              ) : null}
             </TabsContent>
 
             {/* 删除面板数据由 useMemoryDelete 自管加载（enabled:active），不再走懒加载占位门控 */}
-            {shouldRenderMemoryTab('delete') && (
-            <DeleteTab delete={memoryDelete} />
-            )}
+            {shouldRenderMemoryTab('delete') && <DeleteTab delete={memoryDelete} />}
 
             {/* 纠错面板数据由 useMemoryFeedback 自管加载（enabled:active），不再走懒加载占位门控 */}
-            {shouldRenderMemoryTab('feedback') && (
-            <FeedbackTab feedback={memoryFeedback} />
-            )}
+            {shouldRenderMemoryTab('feedback') && <FeedbackTab feedback={memoryFeedback} />}
           </Tabs>
         </div>
       </div>
@@ -689,10 +784,17 @@ export function KnowledgeBasePage() {
         restoring={memoryDelete.deleteRestoring}
         error={memoryDelete.deletePreviewError}
         onExecute={() => void memoryDelete.executePendingDelete()}
-        onRestore={() => void (memoryDelete.deleteResult?.operation_id ? memoryDelete.restoreDeleteOperation(memoryDelete.deleteResult.operation_id) : Promise.resolve())}
+        onRestore={() =>
+          void (memoryDelete.deleteResult?.operation_id
+            ? memoryDelete.restoreDeleteOperation(memoryDelete.deleteResult.operation_id)
+            : Promise.resolve())
+        }
       />
 
-      <Dialog open={memoryFeedback.feedbackRollbackDialogOpen} onOpenChange={memoryFeedback.setFeedbackRollbackDialogOpen}>
+      <Dialog
+        open={memoryFeedback.feedbackRollbackDialogOpen}
+        onOpenChange={memoryFeedback.setFeedbackRollbackDialogOpen}
+      >
         <DialogContent className="max-w-lg" confirmOnEnter>
           <DialogHeader>
             <DialogTitle>回退本次纠错</DialogTitle>
@@ -701,9 +803,11 @@ export function KnowledgeBasePage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="rounded-lg border bg-muted/20 p-3 text-sm">
-              <div className="font-medium break-words">{memoryFeedback.selectedFeedbackResolved?.query_text || '无查询文本'}</div>
-              <div className="mt-1 font-mono text-[11px] break-all text-muted-foreground">
+            <div className="bg-muted/20 rounded-lg border p-3 text-sm">
+              <div className="font-medium break-words">
+                {memoryFeedback.selectedFeedbackResolved?.query_text || '无查询文本'}
+              </div>
+              <div className="text-muted-foreground mt-1 font-mono text-[11px] break-all">
                 {memoryFeedback.selectedFeedbackResolved?.query_tool_id}
               </div>
             </div>
@@ -718,10 +822,17 @@ export function KnowledgeBasePage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => memoryFeedback.setFeedbackRollbackDialogOpen(false)} disabled={memoryFeedback.feedbackRollingBack}>
+            <Button
+              variant="outline"
+              onClick={() => memoryFeedback.setFeedbackRollbackDialogOpen(false)}
+              disabled={memoryFeedback.feedbackRollingBack}
+            >
               取消
             </Button>
-            <Button onClick={() => void memoryFeedback.executeFeedbackRollback()} disabled={memoryFeedback.feedbackRollingBack}>
+            <Button
+              onClick={() => void memoryFeedback.executeFeedbackRollback()}
+              disabled={memoryFeedback.feedbackRollingBack}
+            >
               {memoryFeedback.feedbackRollingBack ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

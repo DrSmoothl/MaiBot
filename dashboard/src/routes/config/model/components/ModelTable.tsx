@@ -2,6 +2,8 @@
  * 模型列表 - 桌面端表格视图
  */
 import React from 'react'
+import { Pencil, Trash2 } from 'lucide-react'
+
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -12,7 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Pencil, Trash2 } from 'lucide-react'
+import { StreamlineIcon } from '@/components/ui/streamline-icon'
+
 import type { ModelInfo } from '../types'
 
 interface ModelTableProps {
@@ -51,14 +54,16 @@ export const ModelTable = React.memo(function ModelTable({
   searchQuery,
 }: ModelTableProps) {
   return (
-    <div className="hidden md:block rounded-lg border bg-card overflow-hidden">
+    <div className="bg-card hidden overflow-hidden rounded-lg border md:block">
       <div className="overflow-x-auto">
         <Table aria-label="模型列表">
           <TableHeader>
             <TableRow>
               <TableHead className="w-12">
                 <Checkbox
-                  checked={selectedModels.size === filteredModels.length && filteredModels.length > 0}
+                  checked={
+                    selectedModels.size === filteredModels.length && filteredModels.length > 0
+                  }
                   onCheckedChange={onToggleSelectAll}
                 />
               </TableHead>
@@ -76,13 +81,13 @@ export const ModelTable = React.memo(function ModelTable({
           <TableBody>
             {paginatedModels.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-muted-foreground py-8 text-center">
                   {searchQuery ? '未找到匹配的模型' : '暂无模型配置'}
                 </TableCell>
               </TableRow>
             ) : (
               paginatedModels.map((model, displayIndex) => {
-                const actualIndex = allModels.findIndex(m => m === model)
+                const actualIndex = allModels.findIndex((m) => m === model)
                 const used = isModelUsed(model.name)
                 return (
                   <TableRow key={displayIndex}>
@@ -120,7 +125,11 @@ export const ModelTable = React.memo(function ModelTable({
                       />
                     </TableCell>
                     <TableCell className="text-center">
-                      {model.temperature != null ? model.temperature : <span className="text-muted-foreground">-</span>}
+                      {model.temperature != null ? (
+                        model.temperature
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">¥{model.price_in}/M</TableCell>
                     <TableCell className="text-right">¥{model.price_out}/M</TableCell>
@@ -128,19 +137,29 @@ export const ModelTable = React.memo(function ModelTable({
                       <div className="flex justify-end gap-2">
                         <Button
                           variant="default"
-                          size="sm"
+                          size="icon"
                           onClick={() => onEdit(model, actualIndex)}
+                          title="编辑"
+                          aria-label={`编辑模型 ${model.name}`}
                         >
-                          <Pencil className="h-4 w-4 mr-1" strokeWidth={2} fill="none" />
-                          编辑
+                          <StreamlineIcon
+                            name="edit-pdf-solid"
+                            fallback={Pencil}
+                            className="h-4 w-4"
+                          />
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon"
                           onClick={() => onDelete(actualIndex)}
-                          className="bg-red-600 hover:bg-red-700 text-white"
+                          className="bg-red-600 text-white hover:bg-red-700"
+                          title="删除"
+                          aria-label={`删除模型 ${model.name}`}
                         >
-                          <Trash2 className="h-4 w-4 mr-1" strokeWidth={2} fill="none" />
-                          删除
+                          <StreamlineIcon
+                            name="delete-2-solid"
+                            fallback={Trash2}
+                            className="h-4 w-4"
+                          />
                         </Button>
                       </div>
                     </TableCell>

@@ -116,12 +116,40 @@ async function loadPluginReadme(
   return '该插件暂无 README 文档'
 }
 
-export function PluginDetailPage() {
+interface PluginDetailPageProps {
+  embedded?: boolean
+  mode?: 'page' | 'dialog'
+  onClose?: () => void
+  pluginId?: string
+}
+
+export function PluginDetailPage({
+  embedded = false,
+  mode = 'page',
+  onClose,
+  pluginId: pluginIdProp,
+}: PluginDetailPageProps) {
   const navigate = useNavigate()
+  const pluginsRoute: '/plugins' | '/plugins/embed' = embedded ? '/plugins/embed' : '/plugins'
   const search = useSearch({ strict: false }) as { pluginId?: string }
   const { toast } = useToast()
   const queryClient = useQueryClient()
-  const pluginId = search.pluginId
+  const pluginId = pluginIdProp ?? search.pluginId
+  const isDialog = mode === 'dialog'
+  const containerClassName = isDialog
+    ? 'space-y-4 sm:space-y-5 p-4 sm:p-5'
+    : 'space-y-4 sm:space-y-6 p-4 sm:p-6'
+  const detailScrollClassName = isDialog
+    ? 'h-[min(68vh,720px)]'
+    : 'h-[calc(100vh-200px)] sm:h-[calc(100vh-220px)]'
+  const readmeScrollClassName = isDialog ? 'h-[min(48vh,540px)] pr-4' : 'h-[600px] pr-4'
+  const handleBack = () => {
+    if (onClose) {
+      onClose()
+      return
+    }
+    navigate({ to: pluginsRoute })
+  }
 
   // 插件详情：从市场列表中筛出当前 pluginId；失败由 query 的 error 状态局部呈现
   const pluginQuery = useQuery({
@@ -288,18 +316,20 @@ export function PluginDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+      <div className={containerClassName}>
         <div className="flex items-center gap-3">
           <Button 
             variant="ghost" 
             size="icon"
-            onClick={() => navigate({ to: '/plugins' })}
+            onClick={handleBack}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">插件详情</h1>
-          </div>
+          {!isDialog && (
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold">插件详情</h1>
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-center py-12">
           <ThinkingIllustration size="lg" />
@@ -310,25 +340,27 @@ export function PluginDetailPage() {
 
   if (error || !plugin) {
     return (
-      <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+      <div className={containerClassName}>
         <div className="flex items-center gap-3">
           <Button 
             variant="ghost" 
             size="icon"
-            onClick={() => navigate({ to: '/plugins' })}
+            onClick={handleBack}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">插件详情</h1>
-          </div>
+          {!isDialog && (
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold">插件详情</h1>
+            </div>
+          )}
         </div>
         <Card className="p-6">
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <AlertCircle className="h-12 w-12 text-destructive mb-4" />
             <h3 className="text-lg font-semibold mb-2">加载失败</h3>
             <p className="text-sm text-muted-foreground mb-4">{error}</p>
-            <Button onClick={() => navigate({ to: '/plugins' })}>返回插件列表</Button>
+            <Button onClick={handleBack}>返回插件列表</Button>
           </div>
         </Card>
       </div>
@@ -336,104 +368,110 @@ export function PluginDetailPage() {
   }
 
   const isCompatible = checkCompatibility()
+  const detailActionButtonClassName = 'h-auto min-h-16 px-5 text-base'
+  const detailActionButtons = (
+    <div className="flex min-w-32 shrink-0 flex-col gap-2 sm:min-w-36 sm:flex-row">
+      {isInstalled ? (
+        <>
+          {needsUpdate() ? (
+            <Button
+              className={detailActionButtonClassName}
+              disabled={!gitStatus?.installed || operating}
+              onClick={handleUpdate}
+              title={!gitStatus?.installed ? 'Git 未安装' : undefined}
+            >
+              {operating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  更新中...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  更新
+                </>
+              )}
+            </Button>
+          ) : null}
+          <Button
+            className={detailActionButtonClassName}
+            variant="destructive"
+            disabled={!gitStatus?.installed || operating}
+            onClick={handleUninstall}
+            title={!gitStatus?.installed ? 'Git 未安装' : undefined}
+          >
+            {operating ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                卸载中...
+              </>
+            ) : (
+              <>
+                <Trash2 className="h-4 w-4 mr-2" />
+                卸载
+              </>
+            )}
+          </Button>
+        </>
+      ) : (
+        <Button
+          className={detailActionButtonClassName}
+          disabled={!gitStatus?.installed || !isCompatible || operating}
+          onClick={handleInstall}
+          title={
+            !gitStatus?.installed
+              ? 'Git 未安装'
+              : !isCompatible
+                ? `不兼容当前版本 (需要 ${plugin.manifest.host_application.min_version}${plugin.manifest.host_application.max_version ? ` - ${plugin.manifest.host_application.max_version}` : '+'}，当前 ${maimaiVersion?.version})`
+                : undefined
+          }
+        >
+          {operating ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              安装中...
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4 mr-2" />
+              安装
+            </>
+          )}
+        </Button>
+      )}
+    </div>
+  )
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+    <div className={containerClassName}>
       {/* 页面标题和返回按钮 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Button 
             variant="ghost" 
             size="icon"
-            onClick={() => navigate({ to: '/plugins' })}
+            onClick={handleBack}
             className="shrink-0"
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">插件详情</h1>
-            <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">
-              {plugin.manifest.name}
-            </p>
-          </div>
-        </div>
-
-        {/* 操作按钮 */}
-        <div className="flex flex-wrap gap-2">
-          {isInstalled ? (
-            <>
-              {needsUpdate() ? (
-                <Button
-                  disabled={!gitStatus?.installed || operating}
-                  onClick={handleUpdate}
-                  title={!gitStatus?.installed ? 'Git 未安装' : undefined}
-                >
-                  {operating ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      更新中...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      更新
-                    </>
-                  )}
-                </Button>
-              ) : null}
-              <Button
-                variant="destructive"
-                disabled={!gitStatus?.installed || operating}
-                onClick={handleUninstall}
-                title={!gitStatus?.installed ? 'Git 未安装' : undefined}
-              >
-                {operating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    卸载中...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    卸载
-                  </>
-                )}
-              </Button>
-            </>
-          ) : (
-            <Button
-              disabled={!gitStatus?.installed || !isCompatible || operating}
-              onClick={handleInstall}
-              title={
-                !gitStatus?.installed
-                  ? 'Git 未安装'
-                  : !isCompatible
-                    ? `不兼容当前版本 (需要 ${plugin.manifest.host_application.min_version}${plugin.manifest.host_application.max_version ? ` - ${plugin.manifest.host_application.max_version}` : '+'}，当前 ${maimaiVersion?.version})`
-                    : undefined
-              }
-            >
-              {operating ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  安装中...
-                </>
-              ) : (
-                <>
-                  <Download className="h-4 w-4 mr-2" />
-                  安装
-                </>
-              )}
-            </Button>
+          {!isDialog && (
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold">插件详情</h1>
+              <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">
+                {plugin.manifest.name}
+              </p>
+            </div>
           )}
         </div>
       </div>
 
-      <ScrollArea className="h-[calc(100vh-200px)] sm:h-[calc(100vh-220px)]">
+      <ScrollArea className={detailScrollClassName}>
         <div className="space-y-6 pr-4">
           {/* 插件头部信息卡片 */}
           <Card>
             <CardHeader>
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-stretch">
                 <div className="flex-1 space-y-2">
                   <div className="flex items-start gap-4">
                     <PluginIcon
@@ -476,6 +514,7 @@ export function PluginDetailPage() {
                     </div>
                   </div>
                 </div>
+                {detailActionButtons}
               </div>
             </CardHeader>
           </Card>
@@ -611,7 +650,7 @@ export function PluginDetailPage() {
                 <CardTitle className="text-lg">插件说明</CardTitle>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[600px] pr-4">
+                <ScrollArea className={readmeScrollClassName}>
                   {readmeLoading ? (
                     <div className="flex items-center justify-center py-12">
                       <ThinkingIllustration />

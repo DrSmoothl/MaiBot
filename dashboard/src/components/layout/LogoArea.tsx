@@ -7,7 +7,10 @@ interface LogoAreaProps {
 
 export function LogoArea({ sidebarOpen }: LogoAreaProps) {
   return (
-    <div data-dashboard-logo-area="true" className="flex h-20 items-center border-b px-4">
+    <div
+      data-dashboard-logo-area="true"
+      className="flex h-[var(--layout-sidebar-logo-height)] items-center border-b px-[var(--layout-sidebar-logo-padding-x)]"
+    >
       <div
         className={cn(
           'relative flex items-center justify-center flex-1 transition-all overflow-hidden',

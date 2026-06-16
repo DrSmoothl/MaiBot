@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react'
 import { useState } from 'react'
+import { AccentPanel } from '@/components/ui/accent-panel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -132,7 +133,11 @@ export function ExpressionList({
   }
 
   return (
-    <div className={cn('bg-card flex min-h-0 flex-col rounded-lg border', className)}>
+    <AccentPanel
+      showRetroStripes={false}
+      className={cn('flex min-h-0 flex-col', className)}
+      contentClassName="flex min-h-0 flex-1 flex-col"
+    >
       {/* 桌面端表格视图 */}
       <div className="hidden min-h-0 flex-1 overflow-auto md:block">
         <Table aria-label="表达方式列表">
@@ -150,11 +155,11 @@ export function ExpressionList({
               <TableHead>
                 <div className="flex items-center gap-1.5">
                   <span>审核</span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex h-7 w-7 items-center justify-center transition-colors focus-visible:ring-1 focus-visible:outline-none"
                         title="筛选审核状态"
                         aria-label="筛选审核状态"
                       >
@@ -167,7 +172,9 @@ export function ExpressionList({
                         onValueChange={(value) => onReviewFilterChange(value as ReviewFilter)}
                       >
                         <DropdownMenuRadioItem value="all">全部</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="user_checked">仅人工通过</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="user_checked">
+                          仅人工通过
+                        </DropdownMenuRadioItem>
                         <DropdownMenuRadioItem value="unchecked">未人工检查</DropdownMenuRadioItem>
                       </DropdownMenuRadioGroup>
                     </DropdownMenuContent>
@@ -404,7 +411,7 @@ export function ExpressionList({
           onJumpToPage={handleJumpToPage}
         />
       )}
-    </div>
+    </AccentPanel>
   )
 }
 
