@@ -67,27 +67,6 @@ export const TASK_CONFIGS = [
 ] as const
 
 /**
- * LPMM 任务配置信息
- */
-export const LPMM_TASK_CONFIGS = [
-  {
-    key: 'lpmm_entity_extract' as const,
-    title: '实体提取模型 (lpmm_entity_extract)',
-    description: '从文本中提取实体',
-  },
-  {
-    key: 'lpmm_rdf_build' as const,
-    title: 'RDF 构建模型 (lpmm_rdf_build)',
-    description: '构建知识图谱',
-  },
-  {
-    key: 'lpmm_qa' as const,
-    title: '问答模型 (lpmm_qa)',
-    description: '知识库问答',
-  },
-] as const
-
-/**
  * 默认模型信息
  */
 export const DEFAULT_MODEL_INFO = {

@@ -15,14 +15,12 @@ def get_api_router() -> APIRouter:
 def get_all_routers() -> List[APIRouter]:
     """获取所有需要独立注册的路由器列表"""
     from src.webui.routers.chat import router as chat_router
-    from src.webui.routers.knowledge import router as knowledge_router
     from src.webui.routers.memory import compat_router as memory_compat_router
     from src.webui.routes import router as main_router
 
     return [
         main_router,
         memory_compat_router,
-        knowledge_router,
         chat_router,
     ]
 
