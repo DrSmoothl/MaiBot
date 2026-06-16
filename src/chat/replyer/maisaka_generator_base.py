@@ -53,6 +53,7 @@ logger = get_logger("replyer")
 
 DEBUG_REPLY_CACHE_DIR = Path("logs/debug_reply_cache")
 REPLYER_MAX_HOOK_RETRIES = 3
+TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 
 
 @dataclass
@@ -489,7 +490,7 @@ class BaseMaisakaReplyGenerator:
         messages: List[Message] = []
 
         for message in chat_history:
-            if isinstance(message, (ReferenceMessage, ToolResultMessage)):
+            if self._is_replyer_filtered_history_message(message):
                 continue
 
             if isinstance(message, SessionBackedMessage):
@@ -748,12 +749,20 @@ class BaseMaisakaReplyGenerator:
         )
 
     @staticmethod
-    def _should_keep_replyer_history_message(message: LLMContextMessage) -> bool:
-        """replyer 只接收真实聊天上下文，不接收参考、工具结果和中期摘要。"""
+    def _is_replyer_filtered_history_message(message: LLMContextMessage) -> bool:
+        """判断 replyer 侧需要过滤掉的非真实聊天上下文。"""
 
         if isinstance(message, (ReferenceMessage, ToolResultMessage)):
-            return False
-        return not is_mid_term_memory_message(message)
+            return True
+        if isinstance(message, SessionBackedMessage) and message.source_kind == TOOL_RESULT_MEDIA_SOURCE_KIND:
+            return True
+        return is_mid_term_memory_message(message)
+
+    @classmethod
+    def _should_keep_replyer_history_message(cls, message: LLMContextMessage) -> bool:
+        """replyer 只接收真实聊天上下文，不接收参考、工具结果、工具媒体和中期摘要。"""
+
+        return not cls._is_replyer_filtered_history_message(message)
 
     async def generate_reply_with_context(
         self,
