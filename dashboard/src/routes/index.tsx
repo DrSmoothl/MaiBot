@@ -426,7 +426,7 @@ function IndexPageContent() {
               themeConfig.dashboardStyle === 'future-retro'
                 ? {
                     fontFamily:
-                      '"Cormorant Garamond", "EB Garamond", "Libre Baskerville", "Baskerville", "Palatino Linotype", "Book Antiqua", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif',
+                      '"MaiRetroQuote", "Noto Serif SC", "SimSun", serif',
                     textShadow: '0 0.035em 0 hsl(var(--background))',
                   }
                 : undefined

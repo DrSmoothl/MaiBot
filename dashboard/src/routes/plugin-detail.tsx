@@ -116,8 +116,13 @@ async function loadPluginReadme(
   return '该插件暂无 README 文档'
 }
 
-export function PluginDetailPage() {
+interface PluginDetailPageProps {
+  embedded?: boolean
+}
+
+export function PluginDetailPage({ embedded = false }: PluginDetailPageProps) {
   const navigate = useNavigate()
+  const pluginsRoute: '/plugins' | '/plugins/embed' = embedded ? '/plugins/embed' : '/plugins'
   const search = useSearch({ strict: false }) as { pluginId?: string }
   const { toast } = useToast()
   const queryClient = useQueryClient()
@@ -293,7 +298,7 @@ export function PluginDetailPage() {
           <Button 
             variant="ghost" 
             size="icon"
-            onClick={() => navigate({ to: '/plugins' })}
+            onClick={() => navigate({ to: pluginsRoute })}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
@@ -315,7 +320,7 @@ export function PluginDetailPage() {
           <Button 
             variant="ghost" 
             size="icon"
-            onClick={() => navigate({ to: '/plugins' })}
+            onClick={() => navigate({ to: pluginsRoute })}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
@@ -328,7 +333,7 @@ export function PluginDetailPage() {
             <AlertCircle className="h-12 w-12 text-destructive mb-4" />
             <h3 className="text-lg font-semibold mb-2">加载失败</h3>
             <p className="text-sm text-muted-foreground mb-4">{error}</p>
-            <Button onClick={() => navigate({ to: '/plugins' })}>返回插件列表</Button>
+            <Button onClick={() => navigate({ to: pluginsRoute })}>返回插件列表</Button>
           </div>
         </Card>
       </div>
@@ -345,7 +350,7 @@ export function PluginDetailPage() {
           <Button 
             variant="ghost" 
             size="icon"
-            onClick={() => navigate({ to: '/plugins' })}
+            onClick={() => navigate({ to: pluginsRoute })}
             className="shrink-0"
           >
             <ArrowLeft className="h-5 w-5" />

@@ -406,8 +406,7 @@ export const defaultDarkTokens: ThemeTokens = {
 // ============================================================================
 
 const futureRetroBaseTypography = {
-  'font-family-base':
-    '"Bahnschrift Condensed", "Agency FB", "Arial Narrow", "Microsoft YaHei UI", system-ui, sans-serif',
+  'font-family-base': '"MaiRetroText", "Microsoft YaHei UI", system-ui, sans-serif',
   'font-family-code': '"Agency FB", "Cascadia Mono", "JetBrains Mono", Consolas, monospace',
   'font-weight-normal': 700,
   'font-weight-medium': 700,

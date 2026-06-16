@@ -839,9 +839,7 @@
       "title": "麦麦版本",
       "mainVersion": "主程序版本",
       "webuiVersion": "WebUI 版本",
-      "latestVersion": "最新版本",
-      "stableLatest": "正式版最新",
-      "testLatest": "测试版最新",
+      "stableLatest": "最新版本",
       "githubReleases": "GitHub Releases",
       "unknown": "未知"
     },

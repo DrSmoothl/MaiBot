@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useState } from 'react'
 
 import type {
   GitStatus,
@@ -30,6 +30,7 @@ interface MarketplaceScoreBasis {
 
 interface MarketplaceTabProps {
   plugins: PluginInfo[]
+  embedded?: boolean
   searchQuery: string
   pluginTypeFilter: string
   showCompatibleOnly: boolean
@@ -170,6 +171,7 @@ function selectSurprisePlugins(
 
 export function MarketplaceTab({
   plugins,
+  embedded = false,
   searchQuery,
   pluginTypeFilter,
   showCompatibleOnly,
@@ -189,7 +191,8 @@ export function MarketplaceTab({
   getStatusBadge,
   getIncompatibleReason,
 }: MarketplaceTabProps) {
-  const surpriseSeed = useMemo(() => Math.random().toString(36).slice(2), [])
+  const [surpriseSeed] = useState(() => Math.random().toString(36).slice(2))
+  const [renderTime] = useState(() => Date.now())
 
   // 过滤插件
   const getPluginStats = (plugin: PluginInfo): PluginStatsData | undefined => {
@@ -293,7 +296,7 @@ export function MarketplaceTab({
       maxMarketplaceOrder: 0,
     }
   )
-  const now = Date.now()
+  const now = renderTime
   const filteredPlugins = matchedPlugins.sort((left, right) => {
     const valueDiff = getSortValue(right, scoreBasis, now) - getSortValue(left, scoreBasis, now)
     if (valueDiff !== 0) {
@@ -319,6 +322,7 @@ export function MarketplaceTab({
     <PluginCard
       key={plugin.id}
       plugin={plugin}
+      embedded={embedded}
       gitStatus={gitStatus}
       maimaiVersion={maimaiVersion}
       pluginStats={pluginStats}

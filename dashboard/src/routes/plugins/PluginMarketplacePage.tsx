@@ -1065,6 +1065,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         ) : (
           <MarketplaceTab
             plugins={plugins}
+            embedded={embedded}
             searchQuery={searchQuery}
             pluginTypeFilter={pluginTypeFilter}
             showCompatibleOnly={showCompatibleOnly}

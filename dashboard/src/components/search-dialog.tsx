@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { FileText, Search, SlidersHorizontal } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import type { LucideProps } from 'lucide-react'
 
 import {
   Dialog,
@@ -14,6 +13,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { ShortcutKbd } from '@/components/ui/kbd'
 import { useMenuSections } from '@/components/layout/use-menu-sections'
+import type { MenuIcon } from '@/components/layout/types'
 import { registeredRoutePaths } from '@/router'
 import { getBotConfigSchema, getModelConfigSchema } from '@/lib/config-api'
 import { getAllLocalizedText, resolveFieldLabel } from '@/lib/config-label'
@@ -27,7 +27,7 @@ interface SearchDialogProps {
 
 interface SearchItem {
   id: string
-  icon: React.ComponentType<LucideProps>
+  icon: MenuIcon
   title: string
   description: string
   path: string

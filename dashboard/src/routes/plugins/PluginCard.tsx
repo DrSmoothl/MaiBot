@@ -12,6 +12,7 @@ import { getPluginProgressDetail, getPluginTypeLabel } from './types'
 
 interface PluginCardProps {
   plugin: PluginInfo
+  embedded?: boolean
   gitStatus: GitStatus | null
   maimaiVersion: MaimaiVersion | null
   pluginStats: Record<string, PluginStatsData>
@@ -29,6 +30,7 @@ interface PluginCardProps {
 
 export function PluginCard({
   plugin,
+  embedded = false,
   gitStatus,
   maimaiVersion,
   pluginStats,
@@ -44,6 +46,9 @@ export function PluginCard({
   getIncompatibleReason,
 }: PluginCardProps) {
   const navigate = useNavigate()
+  const detailRoute: '/plugin-detail' | '/plugin-detail/embed' = embedded
+    ? '/plugin-detail/embed'
+    : '/plugin-detail'
   const stats = [plugin.manifest?.id]
     .map(id => id ? pluginStats[id] : undefined)
     .find(Boolean)
@@ -156,7 +161,7 @@ export function PluginCard({
             variant="outline"
             size="sm"
             className="w-full sm:w-auto"
-            onClick={() => navigate({ to: '/plugin-detail', search: { pluginId: plugin.id } })}
+            onClick={() => navigate({ to: detailRoute, search: { pluginId: plugin.id } })}
           >
             查看详情
           </Button>

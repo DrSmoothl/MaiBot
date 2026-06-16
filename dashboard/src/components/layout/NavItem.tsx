@@ -28,11 +28,12 @@ export function NavItem({ item, sidebarOpen, tooltipsEnabled, onMobileMenuClose 
         )}
       >
         <Icon
+          data-dashboard-nav-icon="true"
           className={cn('h-5 w-5 flex-shrink-0', isActive && 'text-primary')}
-          strokeWidth={2}
-          fill="none"
+          size={20}
         />
         <span
+          data-dashboard-nav-label="true"
           className={cn(
             'text-base font-medium whitespace-nowrap transition-all duration-300',
             sidebarOpen

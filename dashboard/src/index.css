@@ -139,6 +139,64 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: 'MaiRetroText';
+  src:
+    local('Bahnschrift Condensed'),
+    local('Bahnschrift'),
+    local('Agency FB'),
+    local('Arial Narrow');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-024F, U+2000-206F;
+}
+
+@font-face {
+  font-family: 'MaiRetroText';
+  src:
+    local('Noto Sans SC Bold'),
+    local('NotoSansSC-Bold'),
+    local('Noto Sans SC'),
+    local('Microsoft YaHei UI'),
+    local('Microsoft YaHei');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2E80-2EFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF, U+4E00-9FFF,
+    U+F900-FAFF, U+FF00-FFEF;
+}
+
+@font-face {
+  font-family: 'MaiRetroQuote';
+  src:
+    local('Cormorant Garamond'),
+    local('EB Garamond'),
+    local('Libre Baskerville'),
+    local('Baskerville'),
+    local('Palatino Linotype'),
+    local('Book Antiqua');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-024F, U+2000-206F;
+}
+
+@font-face {
+  font-family: 'MaiRetroQuote';
+  src:
+    local('Noto Serif SC'),
+    local('Source Han Serif SC'),
+    local('Songti SC'),
+    local('STSong'),
+    local('SimSun');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2E80-2EFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF, U+4E00-9FFF,
+    U+F900-FAFF, U+FF00-FFEF;
+}
+
 @layer base {
   :root {
     /* Color Tokens */
@@ -393,6 +451,9 @@
   --retro-recessed: rgb(73 48 22 / 0.055);
   --retro-recessed-strong: rgb(73 48 22 / 0.085);
   --retro-shadow: rgb(73 48 22 / 0.14);
+  --retro-font-display: 'MaiRetroText', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --retro-font-heading: 'MaiRetroText', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --retro-font-body: 'MaiRetroText', 'Microsoft YaHei UI', system-ui, sans-serif;
   --retro-paper-brightness-overlay: linear-gradient(
     rgb(255 252 242 / 0.24),
     rgb(255 252 242 / 0.24)
@@ -464,7 +525,7 @@
     auto,
     180px 180px;
   color: var(--retro-ink);
-  font-family: var(--typography-font-family-base);
+  font-family: var(--retro-font-body);
 }
 
 :root[data-dashboard-style='future-retro'] body {
@@ -560,33 +621,32 @@
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-shell='true']::after {
+  --retro-corner-lines-right: 0px;
+  --retro-corner-lines-bottom: 2px;
+  --retro-corner-lines-width: 1024px;
+  --retro-corner-lines-height: 12px;
+
   content: '';
   position: absolute;
-  right: 0;
-  bottom: 0;
+  inset: auto var(--retro-corner-lines-right) var(--retro-corner-lines-bottom) auto;
   z-index: 0;
-  width: 270px;
-  height: 118px;
+  width: var(--retro-corner-lines-width);
+  height: var(--retro-corner-lines-height);
   pointer-events: none;
   background: linear-gradient(
-    135deg,
-    transparent 0 26%,
-    var(--retro-ink) 26% 42%,
-    transparent 42% 47%,
-    var(--retro-gold) 47% 58%,
-    transparent 58% 63%,
-    var(--retro-rust) 63% 76%,
-    transparent 76%
+    to bottom,
+    var(--retro-ink) 0 calc(100% / 3),
+    var(--retro-gold) calc(100% / 3) calc(100% * 2 / 3),
+    var(--retro-rust) calc(100% * 2 / 3) 100%
   );
   opacity: 0.92;
 }
 
 @media (max-width: 640px) {
   :root[data-dashboard-style='future-retro'] [data-dashboard-shell='true']::after {
-    right: -26px;
-    bottom: -12px;
-    width: 190px;
-    height: 82px;
+    --retro-corner-lines-width: 160px;
+    --retro-corner-lines-height: 9px;
+
     opacity: 0.82;
   }
 }
@@ -657,6 +717,7 @@
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-logo-title='true'] {
+  font-family: var(--retro-font-display);
   font-size: 1.28rem;
   font-weight: 900;
   line-height: 1.05;
@@ -665,9 +726,17 @@
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-main='true'] h1 {
+  font-family: var(--retro-font-display);
   font-size: clamp(3.35rem, 3vw, 4.15rem);
   line-height: 0.98;
   font-weight: 800;
+}
+
+:root[data-dashboard-style='future-retro'] :is(h2, h3, h4, h5, h6),
+:root[data-dashboard-style='future-retro'] [data-dashboard-card-title='true'],
+:root[data-dashboard-style='future-retro'] [data-dashboard-nav-item='true'],
+:root[data-dashboard-style='future-retro'] [data-dashboard-tabs-trigger='true'] {
+  font-family: var(--retro-font-heading);
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-main='true'] [data-plugin-config-title] {
@@ -1369,6 +1438,19 @@
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-nav-item='true'] svg {
   color: currentColor !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-nav-icon='true'] {
+  display: block;
+  transform: none;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-nav-label='true'] {
+  display: inline-flex;
+  min-height: 1.5em;
+  align-items: center;
+  line-height: 1.35;
+  transform: translateY(0.06em);
 }
 
 :root[data-dashboard-style='future-retro'] svg {
