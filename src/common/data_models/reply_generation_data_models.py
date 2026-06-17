@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from . import BaseDataModel
+from .llm_service_data_models import PromptMessage
 
 if TYPE_CHECKING:
     from src.common.data_models.message_component_data_model import MessageSequence
@@ -129,6 +130,10 @@ class ReplyGenerationResult(BaseDataModel):
         default=0,
         metadata={"description": "本次 replyer 实际发送给模型的消息数量。"},
     )
+    request_messages: List[PromptMessage] = field(
+        default_factory=list,
+        metadata={"description": "本次 replyer 的预览用瘦身请求消息列表。"},
+    )
 
 
 def _format_selected_expression_line(expression: Dict[str, Any], fallback_id: Optional[int] = None) -> str:
@@ -198,11 +203,13 @@ def build_reply_monitor_detail(result: ReplyGenerationResult) -> Dict[str, Any]:
     reasoning_text = result.completion.reasoning_text.strip()
     output_text = result.completion.response_text.strip()
 
-    if result.request_message_count > 0:
-        detail["prompt_omitted"] = True
-        detail["request_message_count"] = result.request_message_count
+    if result.request_messages:
+        detail["request_messages"] = result.request_messages
     elif prompt_text:
-        detail["prompt_omitted"] = True
+        detail["prompt_text"] = prompt_text
+    if result.request_message_count > 0:
+        detail["request_messages_sanitized"] = bool(result.request_messages)
+        detail["request_message_count"] = result.request_message_count
     if reasoning_text:
         detail["reasoning_text"] = reasoning_text
     if output_text:

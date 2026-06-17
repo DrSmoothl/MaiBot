@@ -88,7 +88,6 @@ const TASK_TYPE_NAMES: Record<string, string> = {
   embedding: '向量嵌入',
   lpmm_entity_extract: '实体提取',
   lpmm_rdf_build: 'RDF构建',
-  lpmm_qa: '问答模型',
 }
 
 export default function PackDetailPage() {

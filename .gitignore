@@ -284,6 +284,7 @@ OtherRes.txt
 logs
 
 .ruff_cache
+.codex-runtime/
 
 .vscode
 
@@ -371,3 +372,4 @@ packages/
 /.venv312
 /src/A_memorix/algorithm_redesign
 agentlite/
+/qwen_mai/

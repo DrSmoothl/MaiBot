@@ -5,7 +5,6 @@
 export { BotInfoSection } from './BotInfoSection'
 export { PersonalitySection } from './PersonalitySection'
 export { DreamSection } from './DreamSection'
-export { LPMMSection } from './LPMMSection'
 export { LogSection } from './LogSection'
 export { DebugSection } from './DebugSection'
 export { MaimMessageSection } from './MaimMessageSection'

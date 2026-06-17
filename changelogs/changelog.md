@@ -2,6 +2,19 @@
 
 测试版更新日志见 [changelog_dev.md](changelog_dev.md)。
 
+# [1.0.6] - 2026-6-16
+
+## Maisak
+
+- 修复部分api不支持tool_choice参数的问题
+- 优化5%的planner调用,2%的tg调用
+- 修复replyer log 不记录的问题
+- 修复replyer 意外获取tool返回的图片问题
+
+## WebUI
+
+- 优化旧提醒
+
 # [1.0.5] - 2026-6-16
 
 ## WebUI

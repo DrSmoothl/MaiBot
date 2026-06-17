@@ -7,14 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
-from rich.console import Group, RenderableType
-from rich.panel import Panel
-from rich.text import Text
-
 from src.chat.message_receive.chat_manager import BotChatSession
 from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import get_chat_type_and_target_info
-from src.cli.console import console
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
 from src.common.data_models.message_component_data_model import (
     AtComponent,
@@ -58,6 +53,7 @@ logger = get_logger("replyer")
 
 DEBUG_REPLY_CACHE_DIR = Path("logs/debug_reply_cache")
 REPLYER_MAX_HOOK_RETRIES = 3
+TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 
 
 @dataclass
@@ -494,7 +490,7 @@ class BaseMaisakaReplyGenerator:
         messages: List[Message] = []
 
         for message in chat_history:
-            if isinstance(message, (ReferenceMessage, ToolResultMessage)):
+            if self._is_replyer_filtered_history_message(message):
                 continue
 
             if isinstance(message, SessionBackedMessage):
@@ -753,12 +749,20 @@ class BaseMaisakaReplyGenerator:
         )
 
     @staticmethod
-    def _should_keep_replyer_history_message(message: LLMContextMessage) -> bool:
-        """replyer 只接收真实聊天上下文，不接收参考、工具结果和中期摘要。"""
+    def _is_replyer_filtered_history_message(message: LLMContextMessage) -> bool:
+        """判断 replyer 侧需要过滤掉的非真实聊天上下文。"""
 
         if isinstance(message, (ReferenceMessage, ToolResultMessage)):
-            return False
-        return not is_mid_term_memory_message(message)
+            return True
+        if isinstance(message, SessionBackedMessage) and message.source_kind == TOOL_RESULT_MEDIA_SOURCE_KIND:
+            return True
+        return is_mid_term_memory_message(message)
+
+    @classmethod
+    def _should_keep_replyer_history_message(cls, message: LLMContextMessage) -> bool:
+        """replyer 只接收真实聊天上下文，不接收参考、工具结果、工具媒体和中期摘要。"""
+
+        return not cls._is_replyer_filtered_history_message(message)
 
     async def generate_reply_with_context(
         self,
@@ -846,10 +850,7 @@ class BaseMaisakaReplyGenerator:
         #     f"回复上下文完成 流={stream_id} 已选表达={result.selected_expression_ids!r}"
         # )
 
-        show_replyer_prompt = bool(getattr(global_config.debug, "show_replyer_prompt", False))
-        show_replyer_reasoning = bool(getattr(global_config.debug, "show_replyer_reasoning", False))
         preview_chat_id = self._resolve_session_id(stream_id)
-        replyer_prompt_section: RenderableType | None = None
         retry_constraints: List[str] = []
         retry_reasons: List[str] = []
         retry_events: List[Dict[str, Any]] = []
@@ -979,6 +980,10 @@ class BaseMaisakaReplyGenerator:
 
             result.completion.request_prompt = prompt_preview
             result.request_message_count = len(request_messages)
+            result.request_messages = PromptCLIVisualizer._build_structured_message_payload(
+                request_messages,
+                keep_base64=False,
+            )
             self._save_debug_reply_request_body(
                 stream_id=preview_chat_id,
                 model_name=generation_result.model_name or "",
@@ -1101,24 +1106,6 @@ class BaseMaisakaReplyGenerator:
                 )
             break
 
-        if show_replyer_prompt:
-            replyer_prompt_section = Panel(
-                PromptCLIVisualizer.build_prompt_access_panel(
-                    request_messages,
-                    category="replyer",
-                    chat_id=preview_chat_id,
-                    request_kind="replyer",
-                    selection_reason=f"ID: {preview_chat_id}",
-                    output_content=response_text,
-                    metadata={
-                        "model_name": generation_result.model_name or "",
-                        "duration_ms": llm_ms,
-                    },
-                ),
-                title="Reply Prompt",
-                border_style="bright_yellow",
-                padding=(0, 1),
-            )
         result.success = bool(response_text)
         result.completion = LLMCompletionResult(
             request_prompt=prompt_preview,
@@ -1173,9 +1160,6 @@ class BaseMaisakaReplyGenerator:
             f"prompt_tokens={generation_result.prompt_tokens}"
         )
 
-        if show_replyer_reasoning and result.completion.reasoning_text:
-            logger.info(f"Maisaka 回复器思考内容:\n{result.completion.reasoning_text}")
-
         if not result.success:
             result.error_message = "回复器返回了空内容"
             logger.warning("Maisaka 回复器返回了空内容")
@@ -1191,42 +1175,6 @@ class BaseMaisakaReplyGenerator:
                 "Maisaka 回复器重生成完成: "
                 f"session={preview_chat_id} attempts={retry_count + 1} "
                 f"retry_count={retry_count} final={self._normalize_content(response_text, limit=300)!r}"
-            )
-        if show_replyer_prompt or show_replyer_reasoning:
-            summary_lines = [
-                f"流ID: {preview_chat_id or 'unknown'}",
-                f"耗时: {result.metrics.overall_ms} ms",
-            ]
-            if result.selected_expression_ids:
-                summary_lines.append(f"表达编号: {result.selected_expression_ids!r}")
-
-            renderables: List[RenderableType] = [Text("\n".join(summary_lines))]
-            if replyer_prompt_section is not None:
-                renderables.append(replyer_prompt_section)
-            if show_replyer_reasoning and result.completion.reasoning_text:
-                renderables.append(
-                    Panel(
-                        Text(result.completion.reasoning_text),
-                        title="思考内容",
-                        border_style="magenta",
-                        padding=(0, 1),
-                    )
-                )
-            renderables.append(
-                Panel(
-                    Text(response_text),
-                    title="回复结果",
-                    border_style="green",
-                    padding=(0, 1),
-                )
-            )
-            console.print(
-                Panel(
-                    Group(*renderables),
-                    title="MaiSaka 回复器",
-                    border_style="bright_yellow",
-                    padding=(0, 1),
-                )
             )
         result.text_fragments = [response_text]
         return finalize(True)

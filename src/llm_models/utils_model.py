@@ -536,18 +536,6 @@ class LLMOrchestrator:
             return model_info.extra_params["max_tokens"]
         return self.model_for_task.max_tokens
 
-    def _build_response_extra_params(
-        self,
-        model_info: ModelInfo,
-        tool_options: List[ToolOption] | None,
-    ) -> Dict[str, Any]:
-        """构建响应请求的额外模型参数。"""
-
-        extra_params = dict(model_info.extra_params)
-        if self.request_type == "maisaka.timing_gate" and tool_options:
-            extra_params.setdefault("tool_choice", "required")
-        return extra_params
-
     def _build_response_request(
         self,
         model_info: ModelInfo,
@@ -586,7 +574,7 @@ class LLMOrchestrator:
             stream_response_handler=stream_response_handler,
             async_response_parser=async_response_parser,
             interrupt_flag=interrupt_flag,
-            extra_params=self._build_response_extra_params(model_info, tool_options),
+            extra_params=dict(model_info.extra_params),
         )
 
     @staticmethod

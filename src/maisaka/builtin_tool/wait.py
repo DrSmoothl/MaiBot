@@ -12,13 +12,13 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="wait",
-        description="暂停当前对话并固定等待一段时间，期间不因新消息提前恢复。",
+        description="暂停当前对话并固定等待一段时间。",
         parameters_schema={
             "type": "object",
             "properties": {
                 "seconds": {
                     "type": "integer",
-                    "description": "等待的秒数。",
+                    "description": "等待秒数。",
                 },
             },
             "required": ["seconds"],

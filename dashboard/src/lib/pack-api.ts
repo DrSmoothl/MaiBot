@@ -62,7 +62,6 @@ export interface PackTaskConfigs {
   embedding?: PackTaskConfig
   lpmm_entity_extract?: PackTaskConfig
   lpmm_rdf_build?: PackTaskConfig
-  lpmm_qa?: PackTaskConfig
 }
 
 /**

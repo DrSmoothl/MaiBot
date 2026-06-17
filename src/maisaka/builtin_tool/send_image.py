@@ -21,14 +21,14 @@ def get_tool_spec() -> ToolSpec:
         name="send_image",
         description=(
             "将图片发送给用户，变为用户可见的图片消息。当你需要通过图片进行说明解释时使用。当用户需要你发图片时使用。"
-            "按 msg_id 和 index 发送指定消息里的图片；也可以把工具返回媒体索引 tool_result:<call_id>:<item_index> 填入 msg_id 或 media_index。"
+            "按 msg_id + index 或 工具返回媒体索引 tool_result:<call_id>:<item_index> 发送指定图片"
         ),
         parameters_schema={
             "type": "object",
             "properties": {
                 "msg_id": {
                     "type": "string",
-                    "description": "包含图片的上下文消息编号，也可以是工具返回媒体索引 tool_result:<call_id>:<item_index>。",
+                    "description": "图片所在的消息编号，也可以是工具返回媒体索引 tool_result:<call_id>:<item_index>。",
                     "default": "",
                 },
                 "media_index": {
@@ -94,7 +94,9 @@ async def _load_readable_images(
     return readable_images, None
 
 
-async def _collect_message_images(tool_ctx: BuiltinToolRuntimeContext, msg_id: str) -> tuple[list[ImageComponent], str | None]:
+async def _collect_message_images(
+    tool_ctx: BuiltinToolRuntimeContext, msg_id: str
+) -> tuple[list[ImageComponent], str | None]:
     """从 Maisaka 历史消息或工具返回媒体消息里读取图片组件。"""
 
     target_message_id = str(msg_id or "").strip()
@@ -133,10 +135,7 @@ async def handle_tool(
 
     del context
     arguments = dict(invocation.arguments or {})
-    target_message_id = (
-        str(arguments.get("media_index") or "").strip()
-        or str(arguments.get("msg_id") or "").strip()
-    )
+    target_message_id = str(arguments.get("media_index") or "").strip() or str(arguments.get("msg_id") or "").strip()
     image_index = _normalize_image_index(arguments)
     structured_content: dict[str, Any] = {
         "success": False,

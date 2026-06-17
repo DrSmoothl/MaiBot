@@ -1,8 +1,7 @@
 """query_jargon 内置工具。"""
 
-from typing import Any, Dict, List, Optional
-
 import json
+from typing import Any, Dict, List, Optional
 
 from src.common.utils.utils_config import JargonConfigUtils
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
@@ -16,7 +15,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="query_jargon",
-        description="查询当前聊天上下文中的黑话或词条含义。用法：当你认为某些词的含义不明确，或用户询问某些词的含义，需要进行查询",
+        description="查询当前聊天上下文中的特殊的词条含义。当你认为某些词可能具有特殊含义，需要进行查询",
         parameters_schema={
             "type": "object",
             "properties": {
