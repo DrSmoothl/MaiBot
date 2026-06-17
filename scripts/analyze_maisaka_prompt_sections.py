@@ -170,7 +170,7 @@ def classify_message_section(message: dict[str, Any]) -> str:
         return "system_reminder"
     if stripped.startswith("当前时间：") or stripped.startswith("Current time:"):
         return "time_context"
-    if stripped.startswith("<message "):
+    if stripped.startswith("<message ") or stripped.startswith("<msg "):
         return "chat_message"
     if stripped.startswith("{") and '"success"' in stripped:
         return "tool_result"
@@ -845,7 +845,7 @@ def write_benchmark_markdown(records: list[PromptRecord], output_path: Path, rep
         [
             "## 解释",
             "",
-            "- `chat_history` 指 prompt 中 `<message ...>` 形式的真实聊天历史消息。",
+            "- `chat_history` 指 prompt 中 `<message ...>` 或 `<msg ...>` 形式的真实聊天历史消息。",
             "- `chat_message / chat history` 是每条聊天历史消息平均进入 prompt 的 calibrated token。",
             "- 其他组件用每请求均值/标准差描述。",
         ]
