@@ -240,7 +240,7 @@ export function EmojiManagementPage() {
               value={list.filters.status === 'all' ? 'adopted' : list.filters.status}
               onValueChange={(value) => list.setFilter('status', value as EmojiStatus)}
             >
-              <DashboardTabBar variant="grid" className="h-10 grid-cols-2 sm:grid-cols-4">
+              <DashboardTabBar variant="grid" className="grid-cols-2 sm:grid-cols-4">
                 {[
                   { value: 'known' as const, label: '认识', count: stats.known, className: 'text-sky-600' },
                   { value: 'unknown' as const, label: '不认识', count: stats.unknown, className: 'text-gray-600' },
@@ -260,7 +260,7 @@ export function EmojiManagementPage() {
 
           {/* 筛选和排序 */}
           <Card>
-            <CardContent className="space-y-4 pt-6">
+            <CardHeader className="space-y-4 ">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="emoji-search">搜索 tag</Label>
@@ -451,7 +451,7 @@ export function EmojiManagementPage() {
                   </Select>
                 </div>
               </div>
-            </CardContent>
+            </CardHeader>
           </Card>
 
           {/* 表情包卡片列表 */}

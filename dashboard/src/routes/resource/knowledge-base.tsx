@@ -669,7 +669,7 @@ export function KnowledgeBasePage() {
               <div className="flex flex-wrap items-center gap-2">
                 <DashboardTabBar
                   variant="grid"
-                  className="h-[30px] w-fit max-w-full auto-cols-max grid-flow-col"
+                  className="w-fit max-w-full auto-cols-max grid-flow-col"
                 >
                   {[
                     { value: 'graph', label: '图谱', description: '实体关系图与证据视图' },
@@ -690,7 +690,7 @@ export function KnowledgeBasePage() {
                 </DashboardTabBar>
                 <DashboardTabBar
                   variant="grid"
-                  className="h-[30px] w-fit max-w-full auto-cols-max grid-flow-col"
+                  className="w-fit max-w-full auto-cols-max grid-flow-col"
                 >
                   {[
                     { value: 'import', label: '导入', description: '创建并管理导入任务' },

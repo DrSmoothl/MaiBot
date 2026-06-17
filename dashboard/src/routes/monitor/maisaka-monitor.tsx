@@ -12,6 +12,7 @@ import {
   Brain,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDot,
   Clock,
@@ -831,7 +832,7 @@ export function MaisakaMonitor() {
               onClick={() => setSidebarCollapsed((value) => !value)}
               title={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
             >
-              {sidebarCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {sidebarCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
             </Button>
           </CardTitle>
         </CardHeader>
