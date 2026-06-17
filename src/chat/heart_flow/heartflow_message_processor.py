@@ -35,11 +35,6 @@ class HeartFCMessageReceiver:
             message: SessionMessage对象，包含原始消息数据和相关信息
         """
         try:
-            # 通知消息不处理
-            if message.is_notify:
-                logger.debug("通知消息，跳过处理")
-                return
-
             # 1. 消息解析与初始化
             userinfo = message.message_info.user_info
             group_info = message.message_info.group_info
