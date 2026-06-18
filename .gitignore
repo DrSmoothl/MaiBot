@@ -285,6 +285,7 @@ logs
 
 .ruff_cache
 .codex-runtime/
+unsloth_compiled_cache/
 
 .vscode
 

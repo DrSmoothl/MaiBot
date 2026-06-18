@@ -3966,6 +3966,21 @@ class DebugConfig(ConfigBase):
     )
     """记录回复效果评分，方便观察回复质量。"""
 
+    enable_local_mai_replyer: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用本地麦麦 Replyer",
+                "en_US": "Enable local Mai replyer",
+                "ja_JP": "ローカル Mai Replyer を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "route",
+            "advanced": True,
+        },
+    )
+    """如果你不知道这是什么，请勿打开"""
+
     record_reply_request: bool = Field(
         default=False,
         json_schema_extra={

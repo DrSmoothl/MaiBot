@@ -46,6 +46,10 @@ def get_tool_spec() -> ToolSpec:
                     "description": "以引用回复的方式发送这条回复，不用每句都引用。",
                     "default": True,
                 },
+                "reply_guide": {
+                    "type": "string",
+                    "description": "回复需要注意的事项和回复指引",
+                },
             },
             "required": ["msg_id"],
         },
