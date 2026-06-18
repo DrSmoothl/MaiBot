@@ -1,9 +1,9 @@
 import type { TestConnectionResult } from '@/lib/config-api'
-import { AlertCircle, CheckCircle2, Loader2, Pencil, Trash2, XCircle, Zap } from 'lucide-react'
+import { Loader2, Pencil, Trash2, Zap } from 'lucide-react'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
+import { renderProviderTestStatus } from './providerStatus'
 import type { APIProvider } from './types'
 
 interface ProviderCardProps {
@@ -28,49 +28,7 @@ export function ProviderCard({
   const renderTestStatus = () => {
     const isTesting = testingProviders.has(provider.name)
     const result = testResults.get(provider.name)
-
-    if (isTesting) {
-      return (
-        <Badge variant="secondary" className="gap-1">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          测试中
-        </Badge>
-      )
-    }
-
-    if (!result) return null
-
-    if (result.network_ok) {
-      if (result.api_key_valid === true) {
-        return (
-          <Badge className="gap-1 bg-green-600 hover:bg-green-700">
-            <CheckCircle2 className="h-3 w-3" />
-            正常
-          </Badge>
-        )
-      } else if (result.api_key_valid === false) {
-        return (
-          <Badge variant="destructive" className="gap-1">
-            <AlertCircle className="h-3 w-3" />
-            Key无效
-          </Badge>
-        )
-      } else {
-        return (
-          <Badge className="gap-1 bg-blue-600 hover:bg-blue-700">
-            <CheckCircle2 className="h-3 w-3" />
-            可访问
-          </Badge>
-        )
-      }
-    } else {
-      return (
-        <Badge variant="destructive" className="gap-1">
-          <XCircle className="h-3 w-3" />
-          离线
-        </Badge>
-      )
-    }
+    return renderProviderTestStatus(result, isTesting)
   }
 
   return (
@@ -123,16 +81,14 @@ export function ProviderCard({
           <p className="font-medium">{provider.client_type}</p>
         </div>
         <div>
-          <span className="text-muted-foreground text-xs">最大重试</span>
-          <p className="font-medium">{provider.max_retry}</p>
+          <span className="text-muted-foreground text-xs">重试</span>
+          <p className="font-medium">
+            {provider.max_retry} 次 / {provider.retry_interval} 秒
+          </p>
         </div>
         <div>
           <span className="text-muted-foreground text-xs">超时(秒)</span>
           <p className="font-medium">{provider.timeout}</p>
-        </div>
-        <div>
-          <span className="text-muted-foreground text-xs">重试间隔(秒)</span>
-          <p className="font-medium">{provider.retry_interval}</p>
         </div>
       </div>
     </div>
