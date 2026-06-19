@@ -17,6 +17,8 @@ export interface ChatStream {
   group_id: string | null
   group_name: string | null
   message_count: number
+  expression_count: number
+  jargon_count: number
   created_at: number | null
   last_active_at: number | null
   latest_message: string

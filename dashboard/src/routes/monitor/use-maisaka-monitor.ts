@@ -328,10 +328,22 @@ function shouldKeepMonitorActive() {
 }
 
 function appendTimelineEntry(entry: TimelineEntry) {
-  const next = [...cachedTimeline, entry]
+  const next = [...cachedTimeline, entry].sort(compareTimelineEntries)
   cachedTimeline = next.length > MAX_TIMELINE_ENTRIES
     ? next.slice(next.length - MAX_TIMELINE_ENTRIES)
     : next
+}
+
+function getTimelineEntrySequence(entry: TimelineEntry) {
+  const match = /^evt_(\d+)_/.exec(entry.id)
+  return match ? Number(match[1]) : 0
+}
+
+function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry) {
+  if (a.timestamp !== b.timestamp) {
+    return a.timestamp - b.timestamp
+  }
+  return getTimelineEntrySequence(a) - getTimelineEntrySequence(b)
 }
 
 function updateSessionInfo(event: MaisakaMonitorEvent, sessionId: string, timestamp: number) {

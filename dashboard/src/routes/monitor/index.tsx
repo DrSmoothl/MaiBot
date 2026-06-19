@@ -7,7 +7,7 @@ import { MaisakaMonitor } from './maisaka-monitor'
 
 export function PlannerMonitorPage() {
   return (
-    <div className="min-w-0 max-w-full space-y-4 overflow-x-hidden p-4 sm:space-y-6 sm:p-6">
+    <div className="min-w-0 max-w-full space-y-4 overflow-x-hidden px-4 pb-4 pt-2 sm:space-y-6 sm:px-6 sm:pb-6 sm:pt-3">
       {/* 主体 */}
       <MaisakaMonitor />
     </div>

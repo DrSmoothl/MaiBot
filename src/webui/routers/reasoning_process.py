@@ -1382,6 +1382,7 @@ async def list_reasoning_prompt_files(
     session: str = Query("auto"),
     action: str = Query(""),
     search: str = Query(""),
+    target_stem: str = Query(""),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=10, le=200),
 ):
@@ -1394,6 +1395,7 @@ async def list_reasoning_prompt_files(
     selected_session = _resolve_session_name(session, sessions)
     normalized_action = action.strip().casefold()
     normalized_search = search.strip().casefold()
+    normalized_target_stem = target_stem.strip()
     # 下拉菜单需要展示全部会话的真实名称，不能只解析当前选中项。
     session_infos = _list_session_infos(selected_stage, sessions)
     session_info_map = {item.name: item for item in session_infos}
@@ -1406,11 +1408,26 @@ async def list_reasoning_prompt_files(
         if normalized_search:
             items = [item for item in items if _matches_prompt_file_search(item, normalized_search)]
         total = len(items)
+        if normalized_target_stem:
+            target_index = next((index for index, item in enumerate(items) if item.stem == normalized_target_stem), -1)
+            if target_index >= 0:
+                page = target_index // page_size + 1
         start = (page - 1) * page_size
         end = start + page_size
         items = items[start:end]
     else:
         total = len(records)
+        if normalized_target_stem:
+            target_index = next(
+                (
+                    index
+                    for index, record in enumerate(records)
+                    if str(record.get("stem") or "") == normalized_target_stem
+                ),
+                -1,
+            )
+            if target_index >= 0:
+                page = target_index // page_size + 1
         start = (page - 1) * page_size
         end = start + page_size
         items = _hydrate_prompt_file_records(

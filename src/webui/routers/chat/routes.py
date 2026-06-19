@@ -188,10 +188,54 @@ def _get_message_counts_by_session(session_ids: List[str]) -> Dict[str, int]:
         }
 
 
+def _get_expression_counts_by_session(session_ids: List[str]) -> Dict[str, int]:
+    """批量统计每个聊天流的表达数量。"""
+
+    if not session_ids:
+        return {}
+
+    with get_db_session() as session:
+        statement = (
+            select(Expression.session_id, func.count(Expression.id))
+            .where(col(Expression.session_id).in_(session_ids))
+            .group_by(Expression.session_id)
+        )
+        return {
+            str(session_id): int(count)
+            for session_id, count in session.exec(statement).all()
+            if session_id
+        }
+
+
+def _get_jargon_counts_by_session(session_ids: List[str]) -> Dict[str, int]:
+    """批量统计每个聊天流关联的黑话数量。"""
+
+    if not session_ids:
+        return {}
+
+    session_id_set = set(session_ids)
+    counts = {session_id: 0 for session_id in session_ids}
+    with get_db_session() as session:
+        statement = select(Jargon.session_id_dict).where(col(Jargon.session_id_dict).is_not(None))
+        for raw_session_id_dict in session.exec(statement).all():
+            try:
+                session_counts = json.loads(raw_session_id_dict or "{}")
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(session_counts, dict):
+                continue
+            for session_id in session_counts:
+                if session_id in session_id_set:
+                    counts[session_id] += 1
+    return counts
+
+
 def _chat_session_to_response(
     chat_session: ChatSession,
     latest_message: Optional[Any],
     message_count: int,
+    expression_count: int,
+    jargon_count: int,
 ) -> Dict[str, Any]:
     """将 ChatSession 转换为 WebUI 列表项。"""
 
@@ -211,6 +255,8 @@ def _chat_session_to_response(
         "group_id": chat_session.group_id,
         "group_name": chat_session.group_name,
         "message_count": message_count,
+        "expression_count": expression_count,
+        "jargon_count": jargon_count,
         "created_at": _datetime_to_timestamp(chat_session.created_timestamp),
         "last_active_at": _datetime_to_timestamp(chat_session.last_active_timestamp),
         "latest_message": "",
@@ -704,11 +750,15 @@ async def get_chat_sessions(
     ]
     latest_messages = _get_latest_messages_by_session(display_fallback_session_ids)
     message_counts = _get_message_counts_by_session(session_ids)
+    expression_counts = _get_expression_counts_by_session(session_ids)
+    jargon_counts = _get_jargon_counts_by_session(session_ids)
     items = [
         _chat_session_to_response(
             chat_session=chat_session,
             latest_message=latest_messages.get(chat_session.session_id),
             message_count=message_counts.get(chat_session.session_id, 0),
+            expression_count=expression_counts.get(chat_session.session_id, 0),
+            jargon_count=jargon_counts.get(chat_session.session_id, 0),
         )
         for chat_session in chat_sessions
     ]

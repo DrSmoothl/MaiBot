@@ -114,6 +114,7 @@ export type ReasoningPromptListParams = {
   session?: string
   action?: string
   search?: string
+  targetStem?: string
   page?: number
   pageSize?: number
 }
@@ -127,6 +128,7 @@ export async function listReasoningPromptFiles(
       session: params.session ?? 'auto',
       action: params.action ?? '',
       search: params.search ?? '',
+      target_stem: params.targetStem ?? '',
       page: params.page ?? 1,
       page_size: params.pageSize ?? 50,
     },

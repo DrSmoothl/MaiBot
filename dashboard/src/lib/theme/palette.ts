@@ -163,12 +163,30 @@ export const getReadableForeground = (hsl: string): string => {
     : formatHSL(h, neutralSaturation, 96)
 }
 
+const deriveSurfaceColor = (
+  accent: HSL,
+  saturationRatio: number,
+  lightness: number,
+  minSaturation: number,
+  maxSaturation: number,
+): string => {
+  return formatHSL(
+    accent.h,
+    clamp(accent.s * saturationRatio, minSaturation, maxSaturation),
+    lightness,
+  )
+}
+
 export const generatePalette = (accentHSL: string, isDark: boolean): ColorTokens => {
   const accent = parseHSL(accentHSL)
   const primary = formatHSL(accent.h, accent.s, accent.l)
 
-  const background = isDark ? '222.2 84% 4.9%' : '0 0% 100%'
-  const foreground = isDark ? '210 40% 98%' : '222.2 84% 4.9%'
+  const background = isDark
+    ? deriveSurfaceColor(accent, 0.2, 5.2, 8, 22)
+    : deriveSurfaceColor(accent, 0.12, 98.2, 4, 14)
+  const foreground = isDark
+    ? deriveSurfaceColor(accent, 0.14, 97.2, 5, 18)
+    : deriveSurfaceColor(accent, 0.28, 9.5, 8, 28)
 
   const secondary = formatHSL(
     accent.h,
@@ -209,13 +227,12 @@ export const generatePalette = (accentHSL: string, isDark: boolean): ColorTokens
   const chartSteps = [0, 72, 144, 216, 288]
   const charts = chartSteps.map((step) => rotateHue(chartBase, step))
 
-  const surfaceSaturation = clamp(accent.s * (isDark ? 0.18 : 0.14), isDark ? 10 : 6, isDark ? 24 : 16)
-  const card = formatHSL(accent.h, surfaceSaturation, isDark ? 8.8 : 98.6)
-  const popover = formatHSL(
-    accent.h,
-    clamp(surfaceSaturation + (isDark ? 3 : 2), 0, 100),
-    isDark ? 10.5 : 99.3,
-  )
+  const card = isDark
+    ? deriveSurfaceColor(accent, 0.18, 8.8, 10, 24)
+    : deriveSurfaceColor(accent, 0.14, 98.6, 6, 16)
+  const popover = isDark
+    ? deriveSurfaceColor(accent, 0.21, 10.5, 12, 28)
+    : deriveSurfaceColor(accent, 0.16, 99.3, 7, 18)
 
   return {
     primary,

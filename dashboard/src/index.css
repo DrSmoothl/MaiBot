@@ -486,10 +486,7 @@
   --retro-recessed: rgb(210 192 169 / 0.04);
   --retro-recessed-strong: rgb(210 192 169 / 0.065);
   --retro-shadow: rgb(0 0 0 / 0.18);
-  --retro-paper-brightness-overlay: linear-gradient(
-    rgb(255 232 194 / 0.055),
-    rgb(255 232 194 / 0.055)
-  );
+  --retro-paper-brightness-overlay: none;
   --retro-paper-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.05' numOctaves='4' seed='11'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 .66 0 0 0 0 .52 0 0 0 0 .36 0 0 0 .1 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23noise)'/%3E%3C/svg%3E");
   --color-primary: 19.2 44.7% 42.5%;
   --color-primary-foreground: 34 40% 86%;

@@ -4,6 +4,7 @@
  * 通过 WebSocket 实时接收 MaiSaka 推理引擎事件，
  * 以时间线形式展示聊天流的推理过程。
  */
+import { useNavigate } from '@tanstack/react-router'
 import {
   Activity,
   AlertCircle,
@@ -17,7 +18,7 @@ import {
   CircleDot,
   Clock,
   Eraser,
-  ExternalLink,
+  FileCode2,
   Gauge,
   MessageSquare,
   PauseCircle,
@@ -251,18 +252,133 @@ function SessionSidebar({
 
 // ─── 单条时间线事件渲染 ──────────────────────────────────────
 
-function StageStatusPanel({ status }: { status?: StageStatusInfo }) {
+interface MonitorStats {
+  messages: number
+  cycles: number
+  toolCalls: number
+}
+
+interface StageStatusPanelProps {
+  autoScroll: boolean
+  backgroundCollection: boolean
+  onClearTimeline: () => void
+  onToggleAutoScroll: () => void
+  onToggleBackgroundCollection: () => void
+  onToggleCycleMarkers: () => void
+  showCycleMarkers: boolean
+  stats: MonitorStats
+  status?: StageStatusInfo
+}
+
+function MonitorStatusActions({
+  autoScroll,
+  backgroundCollection,
+  onClearTimeline,
+  onToggleAutoScroll,
+  onToggleBackgroundCollection,
+  onToggleCycleMarkers,
+  showCycleMarkers,
+  stats,
+}: Omit<StageStatusPanelProps, 'status'>) {
+  return (
+    <>
+      <div className="flex shrink-0 items-center gap-4 text-xs">
+        <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+          <MessageSquare className="h-3.5 w-3.5" />
+          <span>{stats.messages} 消息</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+          <Brain className="h-3.5 w-3.5" />
+          <span>{stats.cycles} 循环</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+          <Wrench className="h-3.5 w-3.5" />
+          <span>{stats.toolCalls} 工具调用</span>
+        </div>
+      </div>
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <Button
+          variant={backgroundCollection ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-7 shrink-0 text-xs"
+          onClick={onToggleBackgroundCollection}
+          title={backgroundCollection ? '关闭离开页面后的持续获取' : '开启离开页面后的持续获取'}
+        >
+          <Radio className={cn('h-3.5 w-3.5 mr-1', backgroundCollection && 'text-primary')} />
+          持续获取
+        </Button>
+        <Button
+          variant={showCycleMarkers ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-7 shrink-0 text-xs"
+          onClick={onToggleCycleMarkers}
+          title={showCycleMarkers ? '隐藏推理循环标记' : '显示推理循环标记'}
+        >
+          <CircleDot className={cn('h-3.5 w-3.5 mr-1', showCycleMarkers && 'text-primary')} />
+          循环标记
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 shrink-0 text-xs"
+          onClick={onToggleAutoScroll}
+        >
+          <Gauge className={cn('h-3.5 w-3.5 mr-1', autoScroll && 'text-primary')} />
+          {autoScroll ? '跟踪中' : '已暂停'}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 shrink-0 text-xs"
+          onClick={onClearTimeline}
+        >
+          <Eraser className="h-3.5 w-3.5 mr-1" />
+          清空
+        </Button>
+      </div>
+    </>
+  )
+}
+
+function StageStatusPanel({
+  autoScroll,
+  backgroundCollection,
+  onClearTimeline,
+  onToggleAutoScroll,
+  onToggleBackgroundCollection,
+  onToggleCycleMarkers,
+  showCycleMarkers,
+  stats,
+  status,
+}: StageStatusPanelProps) {
+  const actions = (
+    <MonitorStatusActions
+      autoScroll={autoScroll}
+      backgroundCollection={backgroundCollection}
+      onClearTimeline={onClearTimeline}
+      onToggleAutoScroll={onToggleAutoScroll}
+      onToggleBackgroundCollection={onToggleBackgroundCollection}
+      onToggleCycleMarkers={onToggleCycleMarkers}
+      showCycleMarkers={showCycleMarkers}
+      stats={stats}
+    />
+  )
+
   if (!status) {
     return (
-      <div className="mb-3 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-        当前聊天流暂无阶段状态
+      <div className="mb-2 flex min-w-0 items-center gap-3 overflow-x-auto rounded-md border bg-muted/30 px-3 py-1.5">
+        {actions}
+        <div className="shrink-0 whitespace-nowrap text-sm text-muted-foreground">
+          当前聊天流暂无阶段状态
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="mb-3 rounded-md border bg-background px-3 py-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="mb-2 flex min-w-0 items-center gap-3 overflow-x-auto rounded-md border bg-background px-3 py-1.5">
+      {actions}
+      <div className="flex shrink-0 items-center gap-2">
         <Badge variant="default" className="gap-1">
           <Activity className="h-3 w-3" />
           {status.stage || '未知阶段'}
@@ -282,7 +398,7 @@ function StageStatusPanel({ status }: { status?: StageStatusInfo }) {
         </span>
       </div>
       {status.detail && (
-        <p className="mt-1 text-sm text-muted-foreground">{status.detail}</p>
+        <p className="shrink-0 whitespace-nowrap text-sm text-muted-foreground">{status.detail}</p>
       )}
     </div>
   )
@@ -391,10 +507,38 @@ function ToolCallBadges({ toolCalls }: { toolCalls: MaisakaToolCall[] }) {
   )
 }
 
-function openPromptHtml(uri: string) {
+interface ReasoningRecordTarget {
+  session: string
+  stage: string
+  stem: string
+}
+
+function parsePromptHtmlReasoningTarget(uri: string): ReasoningRecordTarget | null {
   const normalized = uri.trim()
-  if (!normalized) return
-  window.open(normalized, '_blank', 'noopener,noreferrer')
+  if (!normalized || typeof window === 'undefined') return null
+
+  let url: URL
+  try {
+    url = new URL(normalized, window.location.origin)
+  } catch {
+    return null
+  }
+
+  if (url.origin !== window.location.origin || url.pathname !== '/api/webui/config/maisaka-prompt-preview') {
+    return null
+  }
+
+  const previewPath = url.searchParams.get('path')?.trim() ?? ''
+  const parts = previewPath.split('/').filter(Boolean)
+  if (parts.length < 3) return null
+
+  const [stage, session, filename] = parts
+  if (!filename.endsWith('.html')) return null
+
+  const stem = filename.slice(0, -'.html'.length)
+  if (!stage || !session || !stem) return null
+
+  return { stage, session, stem }
 }
 
 function isPlannerInterrupted(data: PlannerFinalizedEvent) {
@@ -452,9 +596,16 @@ function PlannerResponseCard({ data }: { data: PlannerResponseEvent }) {
   )
 }
 
-function PlannerFinalizedCard({ data }: { data: PlannerFinalizedEvent }) {
+function PlannerFinalizedCard({
+  data,
+  onOpenReasoning,
+}: {
+  data: PlannerFinalizedEvent
+  onOpenReasoning: (promptHtmlUri: string) => void
+}) {
   const planner = data.planner
   const promptHtmlUri = planner?.prompt_html_uri?.trim() ?? ''
+  const canOpenReasoning = Boolean(promptHtmlUri && parsePromptHtmlReasoningTarget(promptHtmlUri))
 
   return (
     <Card className="border-l-4 border-l-emerald-500/60">
@@ -462,16 +613,16 @@ function PlannerFinalizedCard({ data }: { data: PlannerFinalizedEvent }) {
         <div className="flex items-center gap-2 flex-wrap">
           <Brain className="h-4 w-4 text-emerald-500" />
           <CardTitle className="text-sm font-medium">主循环 planner</CardTitle>
-          {promptHtmlUri && (
+          {canOpenReasoning && (
             <Button
               variant="ghost"
               size="sm"
               className="h-6 px-2 text-[10px]"
-              onClick={() => openPromptHtml(promptHtmlUri)}
-              title="打开 planner HTML 记录"
+              onClick={() => onOpenReasoning(promptHtmlUri)}
+              title="在推理过程页查看对应记录"
             >
-              <ExternalLink className="mr-1 h-3 w-3" />
-              HTML
+              <FileCode2 className="mr-1 h-3 w-3" />
+              推理
             </Button>
           )}
           <Badge variant="outline" className="text-xs font-normal ml-auto">
@@ -780,9 +931,11 @@ function ReplierResponseCard({ data }: { data: ReplierResponseEvent }) {
 
 function TimelineEventRenderer({
   entry,
+  onOpenReasoning,
   showCycleMarkers,
 }: {
   entry: TimelineEntry
+  onOpenReasoning: (promptHtmlUri: string) => void
   showCycleMarkers: boolean
 }) {
   switch (entry.type) {
@@ -806,7 +959,7 @@ function TimelineEventRenderer({
       }
       return (
         <div className="space-y-2">
-          <PlannerFinalizedCard data={entry.data as PlannerFinalizedEvent} />
+          <PlannerFinalizedCard data={entry.data as PlannerFinalizedEvent} onOpenReasoning={onOpenReasoning} />
           <PlannerToolCallsBlock data={entry.data as PlannerFinalizedEvent} />
         </div>
       )
@@ -825,6 +978,7 @@ function TimelineEventRenderer({
 // ─── 主组件 ─────────────────────────────────────────────────
 
 export function MaisakaMonitor() {
+  const navigate = useNavigate()
   const {
     timeline,
     sessions,
@@ -847,6 +1001,19 @@ export function MaisakaMonitor() {
     const saved = localStorage.getItem('maisaka-monitor-show-cycle-markers')
     return saved === 'true'
   })
+
+  const handleOpenReasoning = useCallback((promptHtmlUri: string) => {
+    const target = parsePromptHtmlReasoningTarget(promptHtmlUri)
+    if (!target) return
+
+    const params = new URLSearchParams({
+      stage: target.stage,
+      session: target.session,
+      stem: target.stem,
+      returnTo: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    })
+    navigate({ to: `/reasoning-process?${params.toString()}` })
+  }, [navigate])
 
   useEffect(() => {
     localStorage.setItem('maisaka-monitor-sidebar-collapsed', String(sidebarCollapsed))
@@ -890,13 +1057,13 @@ export function MaisakaMonitor() {
   const selectedStageStatus = selectedSession ? stageStatuses.get(selectedSession) : undefined
 
   return (
-    <div className="flex min-w-0 flex-col gap-4 lg:h-[calc(100vh-180px)] lg:flex-row">
+    <div className="flex min-w-0 flex-col gap-4 lg:h-[calc(100vh-116px)] lg:flex-row">
       {/* 会话侧边栏 */}
       <aside className={cn(
         'flex min-w-0 shrink-0 flex-col overflow-hidden border border-border bg-background/45 transition-[width] duration-200',
         sidebarCollapsed ? 'w-full lg:w-16' : 'w-full lg:w-52',
       )}>
-        <div className={cn('py-3', sidebarCollapsed ? 'px-2' : 'px-3')}>
+        <div className={cn('py-2', sidebarCollapsed ? 'px-2' : 'px-3')}>
           <h2 className={cn(
             'text-sm font-medium flex items-center gap-2',
             sidebarCollapsed && 'justify-center text-[0px]',
@@ -931,66 +1098,18 @@ export function MaisakaMonitor() {
 
       {/* 主时间线区域 */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* 顶部统计栏 */}
-        <div className="mb-3 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <MessageSquare className="h-3.5 w-3.5" />
-              <span>{stats.messages} 消息</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Brain className="h-3.5 w-3.5" />
-              <span>{stats.cycles} 循环</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Wrench className="h-3.5 w-3.5" />
-              <span>{stats.toolCalls} 工具调用</span>
-            </div>
-          </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2 sm:ml-auto">
-            <Button
-              variant={backgroundCollection ? 'secondary' : 'ghost'}
-              size="sm"
-              className="h-7 max-w-full text-xs"
-              onClick={() => setBackgroundCollectionEnabled(!backgroundCollection)}
-              title={backgroundCollection ? '关闭离开页面后的持续获取' : '开启离开页面后的持续获取'}
-            >
-              <Radio className={cn('h-3.5 w-3.5 mr-1', backgroundCollection && 'text-primary')} />
-              持续获取
-            </Button>
-            <Button
-              variant={showCycleMarkers ? 'secondary' : 'ghost'}
-              size="sm"
-              className="h-7 max-w-full text-xs"
-              onClick={() => setShowCycleMarkers((value) => !value)}
-              title={showCycleMarkers ? '隐藏推理循环标记' : '显示推理循环标记'}
-            >
-              <CircleDot className={cn('h-3.5 w-3.5 mr-1', showCycleMarkers && 'text-primary')} />
-              循环标记
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 max-w-full text-xs"
-              onClick={() => setAutoScroll(!autoScroll)}
-            >
-              <Gauge className={cn('h-3.5 w-3.5 mr-1', autoScroll && 'text-primary')} />
-              {autoScroll ? '跟踪中' : '已暂停'}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 max-w-full text-xs"
-              onClick={clearTimeline}
-            >
-              <Eraser className="h-3.5 w-3.5 mr-1" />
-              清空
-            </Button>
-          </div>
-        </div>
-
         {/* 时间线 */}
-        <StageStatusPanel status={selectedStageStatus} />
+        <StageStatusPanel
+          autoScroll={autoScroll}
+          backgroundCollection={backgroundCollection}
+          onClearTimeline={clearTimeline}
+          onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
+          onToggleBackgroundCollection={() => setBackgroundCollectionEnabled(!backgroundCollection)}
+          onToggleCycleMarkers={() => setShowCycleMarkers((value) => !value)}
+          showCycleMarkers={showCycleMarkers}
+          stats={stats}
+          status={selectedStageStatus}
+        />
 
         <Card className="min-h-[420px] min-w-0 flex-1 overflow-hidden lg:min-h-0">
           <ScrollArea
@@ -1023,7 +1142,13 @@ export function MaisakaMonitor() {
                       const data = entry.data as PlannerResponseEvent | PlannerFinalizedEvent
                       const cycleKey = buildCycleKey(data.session_id, data.cycle_id)
                       if (entry.type === 'planner.finalized' && isPlannerInterrupted(data as PlannerFinalizedEvent)) {
-                        const rendered = <TimelineEventRenderer entry={entry} showCycleMarkers={showCycleMarkers} />
+                        const rendered = (
+                          <TimelineEventRenderer
+                            entry={entry}
+                            onOpenReasoning={handleOpenReasoning}
+                            showCycleMarkers={showCycleMarkers}
+                          />
+                        )
                         if (!rendered) return null
                         return (
                           <div
@@ -1039,7 +1164,13 @@ export function MaisakaMonitor() {
                       }
                     }
 
-                    const rendered = <TimelineEventRenderer entry={entry} showCycleMarkers={showCycleMarkers} />
+                    const rendered = (
+                      <TimelineEventRenderer
+                        entry={entry}
+                        onOpenReasoning={handleOpenReasoning}
+                        showCycleMarkers={showCycleMarkers}
+                      />
+                    )
                     if (!rendered) return null
                     return (
                       <div

@@ -1,3 +1,4 @@
+import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -97,6 +98,26 @@ type StructuredPromptPayload = {
   } | null
   tool_definitions?: unknown[]
   text_dump?: string
+}
+
+function getInitialSearchParams(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams()
+  return new URLSearchParams(window.location.search)
+}
+
+function getSafeInternalReturnTo(value: string | null): string {
+  const normalized = value?.trim() ?? ''
+  if (!normalized || !normalized.startsWith('/') || normalized.startsWith('//') || typeof window === 'undefined') {
+    return ''
+  }
+
+  try {
+    const url = new URL(normalized, window.location.origin)
+    if (url.origin !== window.location.origin) return ''
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return ''
+  }
 }
 
 type ParsedMessageTagBlock = {
@@ -985,16 +1006,26 @@ export function ReasoningProcessPage({
   toolbarVisible = true,
 }: ReasoningProcessPageProps) {
   const { toast } = useToast()
+  const navigate = useNavigate()
+  const initialSearchParams = useMemo(getInitialSearchParams, [])
+  const initialStage = initialSearchParams.get('stage')?.trim() || 'planner'
+  const initialSession = initialSearchParams.get('session')?.trim() || AUTO_SESSION
+  const initialTargetStem = initialSearchParams.get('stem')?.trim() || ''
+  const returnTo = useMemo(
+    () => getSafeInternalReturnTo(initialSearchParams.get('returnTo')),
+    [initialSearchParams]
+  )
   const [items, setItems] = useState<ReasoningPromptFile[]>([])
   const [stages, setStages] = useState<string[]>([])
   const [stageInfos, setStageInfos] = useState<ReasoningPromptStageInfo[]>([])
   const [sessions, setSessions] = useState<string[]>([])
   const [sessionInfos, setSessionInfos] = useState<ReasoningPromptSessionInfo[]>([])
-  const [stage, setStage] = useState('planner')
-  const [session, setSession] = useState(AUTO_SESSION)
+  const [stage, setStage] = useState(initialStage)
+  const [session, setSession] = useState(initialSession)
   const [actionFilter, setActionFilter] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [targetStem, setTargetStem] = useState(initialTargetStem)
   const [refreshKey, setRefreshKey] = useState(0)
   const [total, setTotal] = useState(0)
   const [selected, setSelected] = useState<ReasoningPromptFile | null>(null)
@@ -1006,7 +1037,9 @@ export function ReasoningProcessPage({
   const [loading, setLoading] = useState(false)
   const [contentLoading, setContentLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [browsingStage, setBrowsingStage] = useState(false)
+  const [browsingStage, setBrowsingStage] = useState(
+    () => Boolean(initialSearchParams.get('stage') || initialSearchParams.get('session') || initialTargetStem)
+  )
   const [toolbarRoot, setToolbarRoot] = useState<HTMLElement | null>(null)
   const [replayPanelOpen, setReplayPanelOpen] = useState(false)
 
@@ -1081,10 +1114,15 @@ export function ReasoningProcessPage({
           session,
           action: actionFilter,
           search,
+          targetStem,
           page,
           pageSize: PAGE_SIZE,
         })
         if (ignore) return
+        const targetItem = targetStem
+          ? data.items.find((item) => item.stage === stage && item.session_id === data.selected_session && item.stem === targetStem)
+            ?? data.items.find((item) => item.stem === targetStem)
+          : undefined
         setItems(data.items)
         setStages(data.stages)
         setStageInfos(data.stage_infos ?? [])
@@ -1093,8 +1131,14 @@ export function ReasoningProcessPage({
         if (data.selected_session && data.selected_session !== session) {
           setSession(data.selected_session)
         }
+        if (data.page !== page) {
+          setPage(data.page)
+        }
         setTotal(data.total)
         setSelected((current) => {
+          if (targetItem) {
+            return targetItem
+          }
           if (
             current &&
             data.items.some(
@@ -1108,6 +1152,9 @@ export function ReasoningProcessPage({
           }
           return null
         })
+        if (targetItem) {
+          setTargetStem('')
+        }
       } catch (err) {
         if (!ignore) setError(err instanceof Error ? err.message : '加载推理过程失败')
       } finally {
@@ -1119,7 +1166,7 @@ export function ReasoningProcessPage({
     return () => {
       ignore = true
     }
-  }, [actionFilter, browsingStage, page, refreshKey, search, session, stage])
+  }, [actionFilter, browsingStage, page, refreshKey, search, session, stage, targetStem])
 
   useEffect(() => {
     let ignore = false
@@ -1204,6 +1251,7 @@ export function ReasoningProcessPage({
 
   function resetToFirstPage(nextAction: () => void) {
     nextAction()
+    setTargetStem('')
     setPage(1)
   }
 
@@ -1251,6 +1299,7 @@ export function ReasoningProcessPage({
   const selectedSessionInfo = selected ? sessionInfoByName.get(selected.session_id) : undefined
   const selectedTitle = selected ? getReasoningRecordTitle(selected, selectedSessionInfo) : '未选择记录'
   const botSelfNames = useMemo(() => extractBotSelfNames(structuredPrompt), [structuredPrompt])
+  const previewTabMode = selected?.json_path ? 'structured' : selected?.text_path ? 'text' : selected?.html_path ? 'html' : null
   const renderRefreshButton = () => (
     <Button
       variant="outline"
@@ -1264,6 +1313,18 @@ export function ReasoningProcessPage({
       <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
     </Button>
   )
+  const renderReturnButton = () => returnTo ? (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-9 shrink-0 gap-1.5 sm:h-10"
+      onClick={() => navigate({ to: returnTo })}
+      title="返回麦麦观察"
+    >
+      <ArrowLeft className="h-4 w-4" />
+      返回观察
+    </Button>
+  ) : null
   const renderBrowsingControls = (inToolbar = false) => (
     <>
       <Button
@@ -1334,6 +1395,7 @@ export function ReasoningProcessPage({
   )
   const toolbarContent = (
     <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
+      {renderReturnButton()}
       {browsingStage && renderBrowsingControls(true)}
       {renderRefreshButton()}
     </div>
@@ -1381,7 +1443,10 @@ export function ReasoningProcessPage({
             <h1 className="text-foreground text-xl font-semibold tracking-normal">推理过程</h1>
             <p className="text-muted-foreground text-sm">浏览 logs/maisaka_prompt 下的 prompt 记录</p>
           </div>
-          {renderRefreshButton()}
+          <div className="flex shrink-0 items-center gap-2">
+            {renderReturnButton()}
+            {renderRefreshButton()}
+          </div>
         </div>
       )}
 
@@ -1575,30 +1640,24 @@ export function ReasoningProcessPage({
                       {selected && (
                         <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-2 text-xs">
                           <TabsList className="h-8 rounded-md">
-                            <TabsTrigger
-                              value="structured"
-                              disabled={!selected?.json_path}
-                              className="h-6 gap-1 px-2 text-xs"
-                            >
-                              <FileJson className="h-3.5 w-3.5" />
-                              结构化
-                            </TabsTrigger>
-                            <TabsTrigger
-                              value="text"
-                              disabled={!selected?.text_path}
-                              className="h-6 gap-1 px-2 text-xs"
-                            >
-                              <FileText className="h-3.5 w-3.5" />
-                              文本
-                            </TabsTrigger>
-                            <TabsTrigger
-                              value="html"
-                              disabled={!selected?.html_path}
-                              className="h-6 gap-1 px-2 text-xs"
-                            >
-                              <Code2 className="h-3.5 w-3.5" />
-                              HTML
-                            </TabsTrigger>
+                            {previewTabMode === 'structured' && (
+                              <TabsTrigger value="structured" className="h-6 gap-1 px-2 text-xs">
+                                <FileJson className="h-3.5 w-3.5" />
+                                结构化
+                              </TabsTrigger>
+                            )}
+                            {previewTabMode === 'text' && (
+                              <TabsTrigger value="text" className="h-6 gap-1 px-2 text-xs">
+                                <FileText className="h-3.5 w-3.5" />
+                                文本
+                              </TabsTrigger>
+                            )}
+                            {selected.html_path && (
+                              <TabsTrigger value="html" className="h-6 gap-1 px-2 text-xs">
+                                <Code2 className="h-3.5 w-3.5" />
+                                HTML
+                              </TabsTrigger>
+                            )}
                           </TabsList>
                           <Button
                             variant="outline"

@@ -97,21 +97,56 @@ function HoverScrollText({
   value: string | null | undefined
 }) {
   const text = value || '-'
-  const shouldScroll = text.length > maxChars
+  const containerRef = useRef<HTMLSpanElement>(null)
+  const textRef = useRef<HTMLSpanElement>(null)
+  const [shouldScroll, setShouldScroll] = useState(false)
+  const [scrollDurationMs, setScrollDurationMs] = useState(900)
+
+  useEffect(() => {
+    const containerElement = containerRef.current
+    const textElement = textRef.current
+    if (!containerElement || !textElement) return
+
+    const updateOverflowState = () => {
+      const overflowWidth = textElement.scrollWidth - containerElement.clientWidth
+      const nextShouldScroll = overflowWidth > 1
+      setShouldScroll((current) => (current === nextShouldScroll ? current : nextShouldScroll))
+      setScrollDurationMs(Math.max(900, Math.min(2800, overflowWidth * 36)))
+    }
+
+    updateOverflowState()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateOverflowState)
+      return () => window.removeEventListener('resize', updateOverflowState)
+    }
+
+    const resizeObserver = new ResizeObserver(updateOverflowState)
+    resizeObserver.observe(containerElement)
+    resizeObserver.observe(textElement)
+    return () => resizeObserver.disconnect()
+  }, [maxChars, text])
 
   return (
     <span
+      ref={containerRef}
       className={cn('group inline-block overflow-hidden align-bottom', className)}
       style={{ width: `${maxChars}ch` }}
       title={text}
     >
       <span
+        ref={textRef}
         className={cn(
           'block max-w-full overflow-hidden text-ellipsis whitespace-nowrap',
           shouldScroll &&
-            'group-hover:w-max group-hover:max-w-none group-hover:animate-[chat-management-text-scroll_2.8s_linear_infinite_alternate] group-hover:overflow-visible'
+            'group-hover:w-max group-hover:max-w-none group-hover:animate-[chat-management-text-scroll_1s_linear_infinite_alternate] group-hover:overflow-visible'
         )}
-        style={{ '--scroll-container-width': `${maxChars}ch` } as CSSProperties}
+        style={
+          {
+            '--scroll-container-width': `${maxChars}ch`,
+            animationDuration: `${scrollDurationMs}ms`,
+          } as CSSProperties
+        }
       >
         {text}
       </span>
@@ -201,7 +236,7 @@ function ConfigStatusRow({ title, status }: { title: string; status: ChatLearnin
   )
 }
 
-type TalkFrequencyEditMode = 'input' | 'slider' | 'timeline'
+type TalkFrequencyEditMode = 'input' | 'timeline'
 type TimelineEdge = 'end' | 'start'
 
 interface TimelineRange {
@@ -371,11 +406,9 @@ function TalkFrequencyRuleStackItem({ rule }: { rule: ChatTalkFrequencyRule }) {
 
 function TalkFrequencyRuleEditor({
   detail,
-  mode,
   rule,
 }: {
   detail: ChatStreamDetail
-  mode: TalkFrequencyEditMode
   rule?: ChatTalkFrequencyRule
 }) {
   const queryClient = useQueryClient()
@@ -455,29 +488,14 @@ function TalkFrequencyRuleEditor({
       </div>
       <div className="space-y-2">
         <Label className="text-xs">发言频率</Label>
-        {mode === 'slider' ? (
-          <div className="flex items-center gap-3">
-            <Slider
-              value={[value]}
-              min={0}
-              max={1}
-              step={0.01}
-              onValueChange={(values) => setValue(clampTalkFrequencyValue(values[0] ?? 0))}
-              data-dashboard-slider="config"
-              data-dashboard-slider-value-format="fixed-2"
-            />
-            <span className="w-12 text-right font-mono text-sm tabular-nums">{value.toFixed(2)}</span>
-          </div>
-        ) : (
-          <Input
-            type="number"
-            min={0}
-            max={1}
-            step={0.01}
-            value={value}
-            onChange={(event) => setValue(clampTalkFrequencyValue(Number(event.target.value)))}
-          />
-        )}
+        <Input
+          type="number"
+          min={0}
+          max={1}
+          step={0.01}
+          value={value}
+          onChange={(event) => setValue(clampTalkFrequencyValue(Number(event.target.value)))}
+        />
       </div>
       <div className="flex items-center justify-end gap-2">
         <Button
@@ -524,6 +542,10 @@ function TalkFrequencyTimelineRule({
   const range = parseTalkTimeRange(time)
   const draggableRange = range && time.trim() !== '' && time.trim() !== '*'
   const segments = range ? getTimelineSegments(range) : []
+  const startLabelLeft = range ? (range.start / DAY_MINUTES) * 100 : 0
+  const endLabelLeft = range ? ((range.end + 1) / DAY_MINUTES) * 100 : 100
+  const startLabelTransform = startLabelLeft < 4 ? 'translateX(0)' : 'translateX(-50%)'
+  const endLabelTransform = endLabelLeft > 96 ? 'translateX(-100%)' : 'translateX(-50%)'
 
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
@@ -604,14 +626,7 @@ function TalkFrequencyTimelineRule({
   }
 
   return (
-    <div className="grid gap-3 rounded-md border bg-muted/25 p-3 lg:grid-cols-[7rem_minmax(18rem,1fr)_8rem_8rem] lg:items-center">
-      <div className="min-w-0">
-        <Input
-          value={time}
-          placeholder="HH:MM-HH:MM"
-          onChange={(event) => setTime(event.target.value)}
-        />
-      </div>
+    <div className="grid min-w-0 gap-3 rounded-md border bg-muted/25 p-3 xl:grid-cols-[minmax(12rem,1fr)_8rem_8rem] xl:items-center">
       <div className="min-w-0">
         <div className="relative mb-1 h-4 px-1 text-[10px] text-muted-foreground">
           {TIMELINE_TICKS.map((hour) => (
@@ -680,8 +695,28 @@ function TalkFrequencyTimelineRule({
             </>
           )}
         </div>
+        <div className="relative mt-1 h-4 text-[11px] text-muted-foreground">
+          {range ? (
+            <>
+              <span
+                className="absolute top-0 font-mono tabular-nums"
+                style={{ left: `${startLabelLeft}%`, transform: startLabelTransform }}
+              >
+                {formatTimelineMinute(range.start)}
+              </span>
+              <span
+                className="absolute top-0 font-mono tabular-nums"
+                style={{ left: `${endLabelLeft}%`, transform: endLabelTransform }}
+              >
+                {formatTimelineMinute(range.end)}
+              </span>
+            </>
+          ) : (
+            <span className="font-mono tabular-nums">{time || '-'}</span>
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <Slider
           value={[value]}
           min={0}
@@ -729,8 +764,7 @@ function TalkFrequencyTimelineEditor({
 }) {
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-[7rem_minmax(18rem,1fr)_8rem_8rem] gap-3 px-3 text-[11px] text-muted-foreground">
-        <div>时间段</div>
+      <div className="hidden grid-cols-[minmax(12rem,1fr)_8rem_8rem] gap-3 px-3 text-[11px] text-muted-foreground xl:grid">
         <div>时间轴</div>
         <div>频率</div>
         <div className="text-right">操作</div>
@@ -787,15 +821,6 @@ function TalkFrequencyEditor({ detail }: { detail: ChatStreamDetail }) {
           <Button
             type="button"
             size="sm"
-            variant={mode === 'slider' ? 'secondary' : 'ghost'}
-            className="h-7"
-            onClick={() => setMode('slider')}
-          >
-            滑块
-          </Button>
-          <Button
-            type="button"
-            size="sm"
             variant={mode === 'input' ? 'secondary' : 'ghost'}
             className="h-7"
             onClick={() => setMode('input')}
@@ -819,7 +844,6 @@ function TalkFrequencyEditor({ detail }: { detail: ChatStreamDetail }) {
                 <TalkFrequencyRuleEditor
                   key={`${rule.time}:${index}`}
                   detail={detail}
-                  mode={mode}
                   rule={rule}
                 />
               ))}
@@ -830,7 +854,7 @@ function TalkFrequencyEditor({ detail }: { detail: ChatStreamDetail }) {
               <Plus className="h-4 w-4" />
               新增规则
             </div>
-            <TalkFrequencyRuleEditor detail={detail} mode={mode} />
+            <TalkFrequencyRuleEditor detail={detail} />
           </div>
         </div>
       )}
@@ -1227,31 +1251,33 @@ export function ChatManagementPage() {
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[15rem] px-3">聊天流</TableHead>
-                <TableHead className="w-[4.5rem] px-2">平台</TableHead>
-                <TableHead className="w-[8.5rem] px-2">ID</TableHead>
-                <TableHead className="w-[5rem] px-2">Type</TableHead>
-                <TableHead className="w-[5.5rem] px-2 text-right">消息数</TableHead>
-                <TableHead className="w-[7.5rem] px-2">最后活跃</TableHead>
+                <TableHead className="w-[7rem] px-3">聊天流</TableHead>
+                <TableHead className="w-[2rem] px-2">平台</TableHead>
+                <TableHead className="w-[5rem] px-2">ID</TableHead>
+                <TableHead className="w-[2.5rem] px-2">Type</TableHead>
+                <TableHead className="w-[3rem] px-2 text-right">消息数</TableHead>
+                <TableHead className="w-[3rem] px-2 text-right">表达数</TableHead>
+                <TableHead className="w-[3rem] px-2 text-right">黑话数</TableHead>
+                <TableHead className="w-[3rem] px-2">最后活跃</TableHead>
                 <TableHead className="w-[4rem] px-2 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-28 text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="h-28 text-center text-muted-foreground">
                     正在加载聊天流...
                   </TableCell>
                 </TableRow>
               ) : error ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-28 text-center text-destructive">
+                  <TableCell colSpan={9} className="h-28 text-center text-destructive">
                     加载聊天流失败
                   </TableCell>
                 </TableRow>
               ) : filteredChats.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-28 text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="h-28 text-center text-muted-foreground">
                     暂无匹配的聊天流
                   </TableCell>
                 </TableRow>
@@ -1276,6 +1302,8 @@ export function ChatManagementPage() {
                       <Badge variant="outline">{getChatTypeLabel(chat)}</Badge>
                     </TableCell>
                     <TableCell className="px-2 text-right tabular-nums">{chat.message_count}</TableCell>
+                    <TableCell className="px-2 text-right tabular-nums">{chat.expression_count}</TableCell>
+                    <TableCell className="px-2 text-right tabular-nums">{chat.jargon_count}</TableCell>
                     <TableCell className="px-2 text-muted-foreground">
                       {formatTimestamp(chat.last_active_at)}
                     </TableCell>
