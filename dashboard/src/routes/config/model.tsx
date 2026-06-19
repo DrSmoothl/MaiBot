@@ -324,7 +324,10 @@ function ModelConfigPageContent() {
 
         {/* 标签页 */}
         <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="w-full">
-          <div className="flex w-full items-stretch gap-2">
+          <div
+            data-model-config-tabs-bar="true"
+            className="sticky top-0 z-40 -mx-4 flex w-[calc(100%+2rem)] items-stretch gap-2 border-b bg-background px-4 py-2 sm:-mx-6 sm:w-[calc(100%+3rem)] sm:px-6"
+          >
             <TabsList className="grid h-9 min-w-0 flex-1 grid-cols-3">
               <TabsTrigger value="providers" className="w-full" data-tour="providers-tab-trigger">模型厂商设置</TabsTrigger>
               <TabsTrigger value="models" className="w-full" data-tour="models-tab-trigger">模型列表</TabsTrigger>
@@ -809,7 +812,7 @@ function ModelConfigPageContent() {
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="p-0" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
+                    <PopoverContent className="z-[60] p-0" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
                       <Command>
                         <CommandInput placeholder="搜索模型..." />
                         <CommandList className="max-h-[300px]">
@@ -1086,10 +1089,10 @@ function ModelConfigPageContent() {
                       step={0.01}
                       min={0}
                       max={2}
-                      className="w-20 h-8 text-sm text-right tabular-nums"
+                      className="h-8 w-24 text-right text-sm tabular-nums sm:w-20"
                     />
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="hidden items-center gap-3 sm:flex">
                     <span className="text-xs text-muted-foreground tabular-nums">0</span>
                     <Slider
                       value={[editingModel.temperature]}

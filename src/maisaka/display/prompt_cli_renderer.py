@@ -29,6 +29,7 @@ from .prompt_preview_logger import PromptPreviewLogger
 DATA_IMAGE_DIR = REPO_ROOT / "data" / "images"
 DATA_EMOJI_DIR = REPO_ROOT / "data" / "emoji"
 DATA_HTML_IMAGE_DIR = REPO_ROOT / "data" / "html_imgs"
+SUPPORTED_STRUCTURED_IMAGE_FORMATS = {"jpg", "jpeg", "png", "webp", "gif"}
 
 
 def _build_prompt_preview_web_uri(file_path: Path) -> str:
@@ -247,8 +248,17 @@ class PromptCLIVisualizer:
 
         if isinstance(item, (tuple, list)) and len(item) == 2:
             image_format, image_base64 = item
-            if isinstance(image_format, str) and isinstance(image_base64, str):
-                return image_format, image_base64
+            if not isinstance(image_format, str) or not isinstance(image_base64, str):
+                return None
+            normalized_format = PromptCLIVisualizer._normalize_image_format(image_format)
+            if normalized_format not in SUPPORTED_STRUCTURED_IMAGE_FORMATS:
+                return None
+            try:
+                if not b64decode(image_base64, validate=True):
+                    return None
+            except Exception:
+                return None
+            return normalized_format, image_base64
         return None
 
     @staticmethod
@@ -509,14 +519,16 @@ class PromptCLIVisualizer:
             if key not in {"base64", "image_base64", "image_url"}
         }
         image_reference = cls._build_structured_image_reference(image_format, image_base64)
-        image_uri = image_reference.get("image_uri")
-        if isinstance(image_uri, str) and image_uri:
-            sanitized_item["image_url"] = {"url": image_uri}
+        embedded_image_reference = {
+            key: value
+            for key, value in image_reference.items()
+            if key not in {"type", "image_format"}
+        }
 
         sanitized_item.update(
             {
                 "image_format": image_reference["image_format"],
-                "image_reference": image_reference,
+                "image_reference": embedded_image_reference,
             }
         )
         return sanitized_item

@@ -36,6 +36,7 @@ import type {
   DashboardStyle,
   FutureRetroStyleConfig,
   ThemeTokens,
+  TypographyTokens,
 } from '@/lib/theme/tokens'
 import {
   Accordion,
@@ -136,6 +137,27 @@ function getTokenValue<T>(
   if (!sectionTokens || !(key in sectionTokens)) return defaultValue
   return (sectionTokens[key] ?? defaultValue) as T
 }
+
+function buildFontSizeTokens(basePx: number): Pick<
+  TypographyTokens,
+  | 'font-size-xs'
+  | 'font-size-sm'
+  | 'font-size-base'
+  | 'font-size-lg'
+  | 'font-size-xl'
+  | 'font-size-2xl'
+> {
+  const toRem = (px: number) => `${Number((px / 16).toFixed(4))}rem`
+
+  return {
+    'font-size-xs': toRem(basePx * 0.75),
+    'font-size-sm': toRem(basePx * 0.875),
+    'font-size-base': toRem(basePx),
+    'font-size-lg': toRem(basePx * 1.125),
+    'font-size-xl': toRem(basePx * 1.25),
+    'font-size-2xl': toRem(basePx * 1.5),
+  }
+}
 export function AppearanceTab() {
   const { theme, setTheme, themeConfig, updateThemeConfig, resolvedTheme, resetTheme } = useTheme()
   const { enableAnimations, setEnableAnimations } = useAnimation()
@@ -178,7 +200,10 @@ export function AppearanceTab() {
     [themeConfig.styleConfig?.futureRetro]
   )
   const defaultSidebarWidthRem = themeConfig.dashboardStyle === 'future-retro' ? 11 : 13
-  const activeTokenOverrides = themeConfig.styleTokenOverrides?.[themeConfig.dashboardStyle] ?? {}
+  const activeTokenOverrides = useMemo(
+    () => themeConfig.styleTokenOverrides?.[themeConfig.dashboardStyle] ?? {},
+    [themeConfig.dashboardStyle, themeConfig.styleTokenOverrides]
+  )
 
   const updateFutureRetroConfig = useCallback(
     (partial: Partial<FutureRetroStyleConfig>) => {
@@ -395,6 +420,15 @@ export function AppearanceTab() {
   const computedTokens = useMemo(() => {
     return getComputedTokens(previewThemeConfig, resolvedTheme === 'dark')
   }, [previewThemeConfig, resolvedTheme])
+  const baseFontSizePx =
+    parseFloat(
+      getTokenValue(
+        activeTokenOverrides,
+        'typography',
+        'font-size-base',
+        computedTokens.typography['font-size-base']
+      )
+    ) * 16
 
   const previewTokens = computedTokens.color
 
@@ -723,35 +757,18 @@ export function AppearanceTab() {
                       <div className="flex justify-between">
                         <Label>{t('settings.appearance.baseFontSize')}</Label>
                         <span className="text-muted-foreground text-sm">
-                          {parseFloat(
-                            getTokenValue(
-                              activeTokenOverrides,
-                              'typography',
-                              'font-size-base',
-                              computedTokens.typography['font-size-base']
-                            )
-                          ) * 16}
-                          px
+                          {baseFontSizePx}px
                         </span>
                       </div>
                       <Slider
                         defaultValue={[16]}
-                        value={[
-                          parseFloat(
-                            getTokenValue(
-                              activeTokenOverrides,
-                              'typography',
-                              'font-size-base',
-                              computedTokens.typography['font-size-base']
-                            )
-                          ) * 16,
-                        ]}
+                        value={[baseFontSizePx]}
                         min={12}
                         max={20}
                         step={1}
                         onValueChange={(vals) => {
                           updateTokenSection('typography', {
-                            'font-size-base': `${vals[0] / 16}rem`,
+                            ...buildFontSizeTokens(vals[0]),
                           })
                         }}
                       />
@@ -1136,7 +1153,37 @@ export function AppearanceTab() {
 
       {themeConfig.dashboardStyle === 'future-retro' && (
         <div>
-          <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">未来复古配置</h3>
+          <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
+            <h3 className="text-base font-semibold sm:text-lg">未来复古配置</h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => resetTokenSection('typography')}
+              disabled={!activeTokenOverrides?.typography}
+              className="h-8"
+            >
+              <RotateCcw className="mr-2 h-3.5 w-3.5" />
+              {t('settings.appearance.resetDefault')}
+            </Button>
+          </div>
+          <div className="mb-3 rounded-lg border bg-card p-3 sm:mb-4 sm:p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <Label>{t('settings.appearance.baseFontSize')}</Label>
+              <span className="text-muted-foreground text-sm">{baseFontSizePx}px</span>
+            </div>
+            <Slider
+              defaultValue={[16]}
+              value={[baseFontSizePx]}
+              min={12}
+              max={20}
+              step={1}
+              onValueChange={(vals) => {
+                updateTokenSection('typography', {
+                  ...buildFontSizeTokens(vals[0]),
+                })
+              }}
+            />
+          </div>
           <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
             <div className="bg-card rounded-lg border p-3 sm:p-4">
               <div className="flex items-center justify-between gap-4">

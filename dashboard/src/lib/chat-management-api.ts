@@ -88,6 +88,25 @@ interface ChatStreamDetailResponse {
   detail?: ChatStreamDetail
 }
 
+export interface ChatStreamDeleteItem {
+  key: string
+  label: string
+  count: number
+  unlinked?: number
+}
+
+export interface ChatStreamDeleteResult {
+  success: boolean
+  session_id: string
+  deleted_total: number
+  jargons?: {
+    deleted: number
+    unlinked: number
+    removed_refs: number
+  }
+  items: ChatStreamDeleteItem[]
+}
+
 interface UpdateTalkFrequencyPayload {
   previous_time?: string | null
   time: string
@@ -143,4 +162,13 @@ export async function deleteChatStreamTalkFrequency(
     throw new Error('聊天流详情为空')
   }
   return result.detail
+}
+
+export async function deleteChatStream(sessionId: string): Promise<ChatStreamDeleteResult> {
+  return backendApi.delete<ChatStreamDeleteResult>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      errorMessage: '删除聊天流失败',
+    }
+  )
 }

@@ -51,8 +51,12 @@ export function BackToTop() {
 
   useEffect(() => {
     scrollerRef.current = null
-    setProgress(0)
-    setVisible(false)
+    const frameId = window.requestAnimationFrame(() => {
+      setProgress(0)
+      setVisible(false)
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
   }, [locationKey])
 
   const scrollToTop = () => {
@@ -71,7 +75,7 @@ export function BackToTop() {
   return (
     <div 
       className={cn(
-        "fixed bottom-24 right-8 z-50 transition-all duration-500 ease-in-out transform",
+        "fixed right-6 bottom-24 z-50 transform transition-all duration-500 ease-in-out",
         visible ? "translate-x-0 opacity-100" : "translate-x-32 opacity-0 pointer-events-none"
       )}
     >
@@ -80,9 +84,9 @@ export function BackToTop() {
         size="icon"
         data-dashboard-back-to-top="true"
         className={cn(
-          "relative h-12 w-12 rounded-full shadow-xl",
+          "relative h-10 w-10 rounded-full shadow-xl",
           "bg-background/80 backdrop-blur-md border-border/50",
-          "hover:bg-accent hover:scale-110 hover:shadow-2xl hover:border-primary/50",
+          "hover:bg-accent hover:scale-105 hover:shadow-2xl hover:border-primary/50",
           "transition-all duration-300",
           "group"
         )}
@@ -127,7 +131,7 @@ export function BackToTop() {
         
         {/* 图标 */}
         <ArrowUp 
-          className="h-5 w-5 text-primary transition-transform duration-300 group-hover:-translate-y-1 group-hover:scale-110" 
+          className="h-4 w-4 text-primary transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:scale-110" 
           strokeWidth={2.5}
         />
         

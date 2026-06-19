@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Eye,
+  Info,
   Plus,
   RefreshCw,
   Search,
@@ -22,11 +23,14 @@ import {
   Dialog,
   DialogBody,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
 import { Slider } from '@/components/ui/slider'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -39,6 +43,7 @@ import {
 } from '@/components/ui/table'
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
 import {
+  deleteChatStream,
   deleteChatStreamTalkFrequency,
   getChatStreamDetail,
   getChatStreams,
@@ -46,6 +51,7 @@ import {
   type ChatConfigRule,
   type ChatLearningStatus,
   type ChatStream,
+  type ChatStreamDeleteResult,
   type ChatTalkFrequencyRule,
   type ChatStreamDetail,
   type ChatStreamType,
@@ -381,8 +387,12 @@ function TalkFrequencyRuleEditor({
   )
 
   useEffect(() => {
-    setTime(rule?.time ?? '*')
-    setValue(clampTalkFrequencyValue(rule?.value ?? detail.talk_frequency.effective_value))
+    const frameId = window.requestAnimationFrame(() => {
+      setTime(rule?.time ?? '*')
+      setValue(clampTalkFrequencyValue(rule?.value ?? detail.talk_frequency.effective_value))
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
   }, [detail.session_id, detail.talk_frequency.effective_value, rule])
 
   const updateDetailCache = (updatedDetail: ChatStreamDetail) => {
@@ -516,8 +526,12 @@ function TalkFrequencyTimelineRule({
   const segments = range ? getTimelineSegments(range) : []
 
   useEffect(() => {
-    setTime(rule?.time || '00:00-23:59')
-    setValue(clampTalkFrequencyValue(rule?.value ?? detail.talk_frequency.effective_value))
+    const frameId = window.requestAnimationFrame(() => {
+      setTime(rule?.time || '00:00-23:59')
+      setValue(clampTalkFrequencyValue(rule?.value ?? detail.talk_frequency.effective_value))
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
   }, [detail.session_id, detail.talk_frequency.effective_value, rule])
 
   const updateDetailCache = (updatedDetail: ChatStreamDetail) => {
@@ -929,11 +943,175 @@ function ChatDetailContent({
   )
 }
 
+function formatDeleteSummary(result: ChatStreamDeleteResult): string {
+  const visibleItems = result.items.filter((item) => item.count > 0 || (item.unlinked ?? 0) > 0)
+  if (visibleItems.length === 0) {
+    return '未发现可清理的数据。'
+  }
+
+  return visibleItems
+    .map((item) => {
+      if (item.key === 'jargons') {
+        return `${item.label} 删除 ${item.count} 条，解除关联 ${item.unlinked ?? 0} 条`
+      }
+      return `${item.label} ${item.count} 条`
+    })
+    .join('；')
+}
+
+function DeleteChatStreamDialog({
+  chat,
+  onDeleted,
+  onOpenChange,
+}: {
+  chat: ChatStream | null
+  onDeleted: (sessionId: string) => void
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [confirmText, setConfirmText] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [stage, setStage] = useState('等待确认')
+  const [deleteResult, setDeleteResult] = useState<ChatStreamDeleteResult | null>(null)
+  const deleteMutation = useMutation({
+    mutationFn: (sessionId: string) => deleteChatStream(sessionId),
+  })
+  const isDeleting = deleteMutation.isPending
+  const canDelete =
+    Boolean(chat?.session_id) && confirmText.trim() === chat?.session_id && !isDeleting && !deleteResult
+
+  useEffect(() => {
+    if (!chat) {
+      const frameId = window.requestAnimationFrame(() => {
+        setConfirmText('')
+        setProgress(0)
+        setStage('等待确认')
+        setDeleteResult(null)
+      })
+
+      return () => window.cancelAnimationFrame(frameId)
+    }
+  }, [chat])
+
+  const handleDelete = async () => {
+    if (!chat || !canDelete) {
+      return
+    }
+
+    setDeleteResult(null)
+    setProgress(12)
+    setStage('提交删除请求')
+    try {
+      setProgress(35)
+      setStage('清理聊天流关联数据')
+      const result = await deleteMutation.mutateAsync(chat.session_id)
+      setProgress(82)
+      setStage('刷新聊天流列表')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['chat-streams'] }),
+        queryClient.removeQueries({ queryKey: ['chat-stream-detail', chat.session_id] }),
+      ])
+      setProgress(100)
+      setStage('删除完成')
+      setDeleteResult(result)
+      onDeleted(chat.session_id)
+      toast({
+        title: '聊天流已删除',
+        description: formatDeleteSummary(result),
+      })
+    } catch (error) {
+      setProgress(0)
+      setStage('删除失败')
+      toast({
+        title: '删除聊天流失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  return (
+    <Dialog open={chat !== null} onOpenChange={(open) => !isDeleting && onOpenChange(open)}>
+      <DialogContent style={{ '--dialog-width': '38rem' } as CSSProperties}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-5 w-5" />
+            严肃确认：删除聊天流
+          </DialogTitle>
+          <DialogDescription>
+            此操作不可撤销。删除后会清理所有与该 session_id 直接相关的数据。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="space-y-4">
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+              <div className="font-medium text-destructive">将被清理的数据包括：</div>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                <li>聊天流记录和该 session_id 下的所有消息。</li>
+                <li>表达学习、黑话关联、工具调用记录、行为学习记录。</li>
+                <li>消息统计、高频词等以该聊天流为归属的数据。</li>
+              </ul>
+            </div>
+
+            <div className="grid gap-2 text-sm">
+              <div className="grid gap-1 rounded-md border bg-muted/30 p-3">
+                <span className="text-muted-foreground">聊天流</span>
+                <span className="font-medium">{chat?.display_name || '-'}</span>
+                <span className="break-all font-mono text-xs text-muted-foreground">
+                  {chat?.session_id || '-'}
+                </span>
+              </div>
+              <Label htmlFor="delete-chat-session-confirm">
+                请输入完整 session_id 以确认删除
+              </Label>
+              <Input
+                id="delete-chat-session-confirm"
+                value={confirmText}
+                disabled={isDeleting}
+                onChange={(event) => setConfirmText(event.target.value)}
+                placeholder={chat?.session_id}
+                className="font-mono text-xs"
+              />
+            </div>
+
+            {(isDeleting || progress > 0 || deleteResult) && (
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="font-medium">{stage}</span>
+                  <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                    {progress}%
+                  </span>
+                </div>
+                <Progress value={progress} className="h-2" />
+                {deleteResult && (
+                  <p className="text-xs text-muted-foreground">
+                    {formatDeleteSummary(deleteResult)}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" disabled={isDeleting} onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button variant="destructive" disabled={!canDelete} onClick={() => void handleDelete()}>
+            {isDeleting ? '删除中...' : '永久删除'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function ChatManagementPage() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<ChatTypeFilter>('all')
   const [page, setPage] = useState(1)
   const [selectedChat, setSelectedChat] = useState<ChatStream | null>(null)
+  const [deletingChat, setDeletingChat] = useState<ChatStream | null>(null)
   const {
     data: chats = [],
     error,
@@ -966,14 +1144,22 @@ export function ChatManagementPage() {
   const privateCount = chats.length - groupCount
 
   useEffect(() => {
-    setPage(1)
+    const frameId = window.requestAnimationFrame(() => setPage(1))
+    return () => window.cancelAnimationFrame(frameId)
   }, [search, typeFilter])
 
   useEffect(() => {
     if (page > pageCount) {
-      setPage(pageCount)
+      const frameId = window.requestAnimationFrame(() => setPage(pageCount))
+      return () => window.cancelAnimationFrame(frameId)
     }
   }, [page, pageCount])
+
+  const handleChatDeleted = (sessionId: string) => {
+    if (selectedChat?.session_id === sessionId) {
+      setSelectedChat(null)
+    }
+  }
 
   return (
     <main className="flex h-full min-h-0 flex-col gap-5 overflow-hidden p-4 md:p-6">
@@ -1047,7 +1233,7 @@ export function ChatManagementPage() {
                 <TableHead className="w-[5rem] px-2">Type</TableHead>
                 <TableHead className="w-[5.5rem] px-2 text-right">消息数</TableHead>
                 <TableHead className="w-[7.5rem] px-2">最后活跃</TableHead>
-                <TableHead className="w-[4.5rem] px-2 text-right">详情</TableHead>
+                <TableHead className="w-[4rem] px-2 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1094,15 +1280,17 @@ export function ChatManagementPage() {
                       {formatTimestamp(chat.last_active_at)}
                     </TableCell>
                     <TableCell className="px-2 text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`查看 ${chat.display_name} 详情`}
-                        onClick={() => setSelectedChat(chat)}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`查看 ${chat.display_name} 详情`}
+                          onClick={() => setSelectedChat(chat)}
+                        >
+                          <Info className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -1178,8 +1366,28 @@ export function ChatManagementPage() {
               error={detailQuery.error}
             />
           </DialogBody>
+          <DialogFooter className="border-t pt-4">
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!selectedChat}
+              onClick={() => {
+                if (selectedChat) {
+                  setDeletingChat(selectedChat)
+                }
+              }}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              删除聊天流
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+      <DeleteChatStreamDialog
+        chat={deletingChat}
+        onDeleted={handleChatDeleted}
+        onOpenChange={(open) => !open && setDeletingChat(null)}
+      />
     </main>
   )
 }

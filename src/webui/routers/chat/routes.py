@@ -6,13 +6,28 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, func
+from sqlalchemy import and_, case, delete, func
 from sqlmodel import col, select
+import json
 import tomlkit
 
+from src.chat.heart_flow.heartflow_manager import heartflow_manager
 from src.chat.message_receive.chat_manager import chat_manager as core_chat_manager
 from src.common.database.database import get_db_session
-from src.common.database.database_model import ChatSession, Messages, PersonInfo
+from src.common.database.database_model import (
+    BehaviorAction,
+    BehaviorExperiencePath,
+    BehaviorOutcome,
+    BehaviorSceneCluster,
+    ChatSession,
+    Expression,
+    HighFrequencyTerm,
+    Jargon,
+    Messages,
+    PersonInfo,
+    StatisticsMessageHourly,
+    ToolRecord,
+)
 from src.common.logger import get_logger
 from src.common.utils.utils_config import (
     BehaviorConfigUtils,
@@ -477,6 +492,114 @@ def _chat_session_detail_to_response(chat_session: ChatSession) -> Dict[str, Any
     }
 
 
+SESSION_DELETE_TABLES = [
+    ("messages", "消息", Messages, "session_id"),
+    ("expressions", "表达", Expression, "session_id"),
+    ("tool_records", "工具调用记录", ToolRecord, "session_id"),
+    ("behavior_experience_paths", "行为经验路径", BehaviorExperiencePath, "session_id"),
+    ("behavior_scene_clusters", "行为场景簇", BehaviorSceneCluster, "session_id"),
+    ("behavior_actions", "行为动作", BehaviorAction, "session_id"),
+    ("behavior_outcomes", "行为结果", BehaviorOutcome, "session_id"),
+    ("statistics_message_hourly", "消息统计", StatisticsMessageHourly, "chat_id"),
+    ("high_frequency_terms", "高频词", HighFrequencyTerm, "chat_id"),
+    ("chat_sessions", "聊天流记录", ChatSession, "session_id"),
+]
+
+
+def _delete_rows_by_text_field(session: Any, model: Any, field_name: str, session_id: str) -> int:
+    """删除指定模型中归属于当前聊天流的记录。"""
+
+    field = getattr(model, field_name)
+    result = session.exec(delete(model).where(col(field) == session_id))
+    return int(result.rowcount or 0)
+
+
+def _delete_or_unlink_jargons(session: Any, session_id: str) -> Dict[str, int]:
+    """清理黑话中的聊天流关联；仅剩当前聊天流时删除整条黑话。"""
+
+    deleted = 0
+    unlinked = 0
+    removed_refs = 0
+    candidate_statement = select(Jargon).where(func.instr(col(Jargon.session_id_dict), f'"{session_id}"') > 0)
+    candidates = session.exec(candidate_statement).all()
+    for jargon in candidates:
+        try:
+            session_counts = json.loads(jargon.session_id_dict or "{}")
+        except json.JSONDecodeError:
+            logger.warning(f"跳过无法解析 session_id_dict 的黑话记录: jargon_id={jargon.id}")
+            continue
+        if not isinstance(session_counts, dict) or session_id not in session_counts:
+            continue
+
+        removed_count = int(session_counts.pop(session_id, 0) or 0)
+        removed_refs += 1
+        if not session_counts and not jargon.is_global:
+            session.delete(jargon)
+            deleted += 1
+            continue
+
+        jargon.session_id_dict = json.dumps(session_counts, ensure_ascii=False)
+        if removed_count > 0:
+            jargon.count = max(0, int(jargon.count or 0) - removed_count)
+        session.add(jargon)
+        unlinked += 1
+
+    return {
+        "deleted": deleted,
+        "unlinked": unlinked,
+        "removed_refs": removed_refs,
+    }
+
+
+def _release_deleted_chat_runtime(session_id: str) -> None:
+    """移除运行期缓存，避免定时保存把已删除聊天流重新写回数据库。"""
+
+    core_chat_manager.sessions.pop(session_id, None)
+    heartflow_manager.heartflow_chat_list.pop(session_id, None)
+
+
+def _delete_chat_session_scope(session_id: str) -> Dict[str, Any]:
+    """删除聊天流及所有直接归属该 session_id 的数据库记录。"""
+
+    with get_db_session() as session:
+        chat_session = session.exec(select(ChatSession).where(col(ChatSession.session_id) == session_id)).first()
+        if chat_session is None:
+            raise HTTPException(status_code=404, detail=f"聊天流不存在: {session_id}")
+
+        items: List[Dict[str, Any]] = []
+        total_deleted = 0
+
+        jargon_result = _delete_or_unlink_jargons(session, session_id)
+        if jargon_result["deleted"] or jargon_result["unlinked"]:
+            items.append(
+                {
+                    "key": "jargons",
+                    "label": "黑话",
+                    "count": jargon_result["deleted"],
+                    "unlinked": jargon_result["unlinked"],
+                }
+            )
+        total_deleted += jargon_result["deleted"]
+
+        for key, label, model, field_name in SESSION_DELETE_TABLES:
+            deleted_count = _delete_rows_by_text_field(session, model, field_name, session_id)
+            total_deleted += deleted_count
+            items.append({"key": key, "label": label, "count": deleted_count})
+
+    _release_deleted_chat_runtime(session_id)
+    logger.warning(
+        "已删除聊天流及关联数据: "
+        f"session_id={session_id} total_deleted={total_deleted} items={items}"
+    )
+    return {
+        "success": True,
+        "session_id": session_id,
+        "deleted_total": total_deleted,
+        "jargons": jargon_result,
+        "items": items,
+    }
+
+
 @router.get("/history")
 async def get_chat_history(
     limit: int = Query(default=50, ge=1, le=200),
@@ -609,6 +732,17 @@ async def get_chat_session_detail(session_id: str) -> Dict[str, object]:
         raise HTTPException(status_code=404, detail=f"聊天流不存在: {normalized_session_id}")
 
     return {"success": True, "detail": _chat_session_detail_to_response(chat_session)}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_chat_session(session_id: str) -> Dict[str, object]:
+    """删除聊天流及所有与该 session_id 直接关联的数据。"""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise HTTPException(status_code=400, detail="缺少聊天流 session_id")
+
+    return _delete_chat_session_scope(normalized_session_id)
 
 
 @router.put("/sessions/{session_id}/talk-frequency")

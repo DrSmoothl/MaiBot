@@ -21,7 +21,7 @@ export function NavItem({ item, sidebarOpen, onMobileMenuClose }: NavItemProps) 
     <>
       <div
         className={cn(
-          'flex min-w-0 items-center transition-all duration-300',
+          'flex min-w-0 items-center',
           sidebarOpen ? 'gap-3' : 'gap-3 lg:gap-0'
         )}
       >
@@ -33,7 +33,7 @@ export function NavItem({ item, sidebarOpen, onMobileMenuClose }: NavItemProps) 
         <span
           data-dashboard-nav-label="true"
           className={cn(
-            'text-base font-medium whitespace-nowrap transition-all duration-300',
+            'text-base font-medium whitespace-nowrap transition-opacity duration-150',
             sidebarOpen
               ? 'max-w-[160px] min-w-0 overflow-hidden text-ellipsis opacity-100'
               : 'max-w-[200px] opacity-100 lg:max-w-0 lg:overflow-hidden lg:opacity-0'
@@ -58,7 +58,7 @@ export function NavItem({ item, sidebarOpen, onMobileMenuClose }: NavItemProps) 
           minHeight: 'var(--layout-sidebar-nav-item-height)',
         }}
         className={cn(
-          'relative flex h-[var(--layout-sidebar-nav-item-height)] items-center rounded-lg px-[var(--layout-sidebar-nav-item-padding-x)] py-0 transition-all duration-300',
+          'relative flex h-[var(--layout-sidebar-nav-item-height)] items-center rounded-lg px-[var(--layout-sidebar-nav-item-padding-x)] py-0 transition-colors duration-150',
           'hover:bg-accent hover:text-accent-foreground',
           isActive ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
           !sidebarOpen &&

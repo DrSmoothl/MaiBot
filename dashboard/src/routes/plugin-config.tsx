@@ -43,7 +43,6 @@ import {
   ChevronDown,
   Save,
   RotateCcw,
-  Power,
   Loader2,
   Search,
   ArrowLeft,
@@ -329,6 +328,14 @@ interface SectionRendererProps {
   onChange: (sectionName: string, fieldName: string, value: unknown) => void
 }
 
+function getFieldGridClassName(field: ConfigFieldSchema): string {
+  if (field.ui_type === 'textarea' || field.ui_type === 'list' || field.ui_type === 'slider') {
+    return 'lg:col-span-2'
+  }
+
+  return 'min-w-0'
+}
+
 function SectionRenderer({ sectionName, section, config, onChange }: SectionRendererProps) {
   const [isOpen, setIsOpen] = useState(!section.collapsed)
   const { i18n } = useTranslation()
@@ -371,15 +378,16 @@ function SectionRenderer({ sectionName, section, config, onChange }: SectionRend
           </CardHeader>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent className="space-y-4 pt-0">
+          <CardContent className="grid grid-cols-1 gap-4 pt-0 lg:grid-cols-2">
             {sortedFields.map(([fieldName, field]) => (
-              <FieldRenderer
-                key={fieldName}
-                field={field}
-                value={sectionConfig?.[fieldName]}
-                onChange={(value) => onChange(resolvedSectionName, fieldName, value)}
-                sectionName={resolvedSectionName}
-              />
+              <div key={fieldName} className={getFieldGridClassName(field)}>
+                <FieldRenderer
+                  field={field}
+                  value={sectionConfig?.[fieldName]}
+                  onChange={(value) => onChange(resolvedSectionName, fieldName, value)}
+                  sectionName={resolvedSectionName}
+                />
+              </div>
             ))}
           </CardContent>
         </CollapsibleContent>
@@ -396,7 +404,6 @@ interface PluginConfigEditorProps {
 }
 
 function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorProps) {
-  const { triggerRestart, isRestarting } = useRestart()
   const { i18n } = useTranslation()
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
 
@@ -494,29 +501,31 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* 头部 */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <Button variant="ghost" size="icon" onClick={handleBack}>
-            <ArrowLeft className="h-5 w-5" />
+      <div
+        className="sticky top-0 z-40 -mx-5 flex items-center justify-between gap-3 overflow-x-auto border-b px-5 py-2.5 shadow-sm backdrop-blur sm:-mx-7 sm:px-7 lg:-mx-8 lg:px-8"
+        style={{ backgroundColor: 'hsl(var(--background) / 0.96)' }}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={handleBack}>
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div>
-            <h1 className="text-xl font-bold sm:text-2xl" data-plugin-config-title>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="min-w-0 truncate text-lg font-semibold sm:text-xl" data-plugin-config-title>
               {pluginName}
             </h1>
-            <div className="mt-1 flex items-center gap-2">
-              <Badge variant={isEnabled ? 'default' : 'secondary'}>
-                {isEnabled ? '已启用' : '已禁用'}
-              </Badge>
-              <span className="text-muted-foreground text-sm">
-                v{schema.plugin_info.version || plugin.manifest.version}
-              </span>
-            </div>
+            <Badge variant={isEnabled ? 'default' : 'secondary'} className="shrink-0">
+              {isEnabled ? '已启用' : '已禁用'}
+            </Badge>
+            <span className="text-muted-foreground shrink-0 text-sm">
+              v{schema.plugin_info.version || plugin.manifest.version}
+            </span>
           </div>
         </div>
-        <div className="ml-10 flex flex-wrap gap-3 sm:ml-0">
+        <div className="flex shrink-0 items-center gap-2 whitespace-nowrap sm:gap-3">
           <Button
             variant="outline"
             size="sm"
+            className="h-8"
             onClick={() => setEditMode(editMode === 'visual' ? 'source' : 'visual')}
           >
             {editMode === 'visual' ? (
@@ -531,24 +540,27 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
               </>
             )}
           </Button>
+          <div
+            data-dashboard-input="true"
+            className="border-input flex h-8 items-center gap-2 rounded-md border bg-transparent px-2 text-sm font-medium shadow-sm"
+          >
+            <Switch
+              checked={isEnabled}
+              onCheckedChange={() => void handleToggle()}
+              aria-label={isEnabled ? '禁用插件' : '启用插件'}
+            />
+            <span className="text-xs">启用</span>
+          </div>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => triggerRestart()}
-            disabled={isRestarting}
+            className="h-8"
+            onClick={() => setResetDialogOpen(true)}
           >
-            <RotateCw className={`mr-2 h-4 w-4 ${isRestarting ? 'animate-spin' : ''}`} />
-            重启麦麦
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleToggle}>
-            <Power className="mr-2 h-4 w-4" />
-            {isEnabled ? '禁用' : '启用'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setResetDialogOpen(true)}>
             <RotateCcw className="mr-2 h-4 w-4" />
             重置
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={!hasChanges || saving}>
+          <Button size="sm" className="h-8" onClick={handleSave} disabled={!hasChanges || saving}>
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -783,6 +795,7 @@ export function PluginConfigPage() {
 // 内部组件：实际内容
 function PluginConfigPageContent() {
   const { themeConfig } = useTheme()
+  const { triggerRestart, isRestarting } = useRestart()
 
   const {
     plugins,
@@ -852,7 +865,7 @@ function PluginConfigPageContent() {
     return (
       <>
         <ScrollArea className="h-full">
-          <div className="p-4 sm:p-6">
+          <div className="px-5 pt-0 pb-4 sm:px-7 sm:pb-6 lg:px-8">
             <PluginConfigEditor
               plugin={selectedPlugin}
               initialTab={selectedPluginTab}
@@ -866,7 +879,8 @@ function PluginConfigPageContent() {
   }
 
   return (
-    <ScrollArea className="h-full">
+    <>
+      <ScrollArea className="h-full">
       <div className="space-y-4 p-4 sm:space-y-6 sm:p-6">
         <div className="flex flex-nowrap items-center gap-2 sm:gap-3">
           <div className="relative min-w-0 flex-1 basis-0 sm:basis-72">
@@ -901,6 +915,17 @@ function PluginConfigPageContent() {
             title="刷新"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 shrink-0 px-2 sm:px-3"
+            onClick={() => triggerRestart()}
+            disabled={isRestarting}
+            title="重启麦麦"
+          >
+            <RotateCw className={`h-4 w-4 ${isRestarting ? 'animate-spin' : ''} sm:mr-2`} />
+            <span className="hidden sm:inline">重启麦麦</span>
           </Button>
         </div>
 
@@ -1398,6 +1423,8 @@ function PluginConfigPageContent() {
           </DialogContent>
         </Dialog>
       </div>
-    </ScrollArea>
+      </ScrollArea>
+      <RestartOverlay />
+    </>
   )
 }

@@ -142,7 +142,7 @@ export function Layout({ children }: LayoutProps) {
             {isSettingsWorkspace && (
               <motion.div
                 key="settings-sidebar"
-                className="relative z-40 hidden shrink-0 overflow-hidden transition-[width] duration-300 lg:block"
+                className="relative z-40 hidden shrink-0 overflow-hidden transition-[width] duration-150 ease-out motion-reduce:transition-none lg:block"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}

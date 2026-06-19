@@ -28,6 +28,21 @@
   --radius-xl: var(--visual-radius-xl);
   --font-sans: var(--typography-font-family-base);
   --font-mono: var(--typography-font-family-code);
+  --text-xs: var(--typography-font-size-xs);
+  --text-sm: var(--typography-font-size-sm);
+  --text-base: var(--typography-font-size-base);
+  --text-lg: var(--typography-font-size-lg);
+  --text-xl: var(--typography-font-size-xl);
+  --text-2xl: var(--typography-font-size-2xl);
+  --text-xs--line-height: var(--typography-line-height-normal);
+  --text-sm--line-height: var(--typography-line-height-normal);
+  --text-base--line-height: var(--typography-line-height-normal);
+  --text-lg--line-height: var(--typography-line-height-normal);
+  --text-xl--line-height: var(--typography-line-height-normal);
+  --text-2xl--line-height: var(--typography-line-height-tight);
+  --leading-tight: var(--typography-line-height-tight);
+  --leading-normal: var(--typography-line-height-normal);
+  --leading-relaxed: var(--typography-line-height-relaxed);
   --shadow-sm: var(--visual-shadow-sm);
   --shadow-md: var(--visual-shadow-md);
   --shadow-lg: var(--visual-shadow-lg);
@@ -382,6 +397,8 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: var(--typography-font-size-base);
+    line-height: var(--typography-line-height-normal);
   }
 
   html,
@@ -667,6 +684,17 @@
     auto,
     180px 180px !important;
   border-color: var(--retro-line) !important;
+  backdrop-filter: none !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-model-config-tabs-bar='true'] {
+  background-color: var(--retro-paper) !important;
+  background-image: var(--retro-paper-brightness-overlay), var(--retro-paper-texture) !important;
+  background-size:
+    auto,
+    180px 180px !important;
+  border-color: var(--retro-line) !important;
+  color: var(--retro-ink) !important;
   backdrop-filter: none !important;
 }
 
