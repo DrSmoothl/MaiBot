@@ -219,8 +219,26 @@ def _deep_copy_plugin_config_mapping(value: Mapping[str, Any]) -> Dict[str, Any]
     return {str(key): _deep_copy_plugin_config_value(item) for key, item in value.items()}
 
 
+def _is_plugin_config_value_type_compatible(target_value: Any, source_value: Any) -> bool:
+    """判断旧配置值是否可回填到新默认配置字段。"""
+
+    if target_value is None:
+        return True
+    if isinstance(target_value, bool):
+        return isinstance(source_value, bool)
+    if isinstance(target_value, str):
+        return isinstance(source_value, str)
+    if isinstance(target_value, list):
+        return isinstance(source_value, list)
+    if isinstance(target_value, int):
+        return isinstance(source_value, int) and not isinstance(source_value, bool)
+    if isinstance(target_value, float):
+        return isinstance(source_value, (int, float)) and not isinstance(source_value, bool)
+    return isinstance(source_value, type(target_value))
+
+
 def _overlay_plugin_config_fields(target: Dict[str, Any], source: Mapping[str, Any]) -> None:
-    """将旧配置中的已有字段覆盖到新配置骨架中。
+    """将旧配置中类型匹配的已有字段覆盖到新配置骨架中。
 
     Args:
         target: 以最新默认配置构造出的目标配置字典。
@@ -236,6 +254,9 @@ def _overlay_plugin_config_fields(target: Dict[str, Any], source: Mapping[str, A
         target_value = target[key]
         if isinstance(target_value, dict) and isinstance(source_value, Mapping):
             _overlay_plugin_config_fields(target_value, source_value)
+            continue
+
+        if not _is_plugin_config_value_type_compatible(target_value, source_value):
             continue
 
         target[key] = _deep_copy_plugin_config_value(source_value)
@@ -276,7 +297,7 @@ def rebuild_plugin_config_data(
 ) -> Dict[str, Any]:
     """基于默认结构重建插件配置。
 
-    该方法用于版本升级场景：以最新默认配置为骨架，仅迁移仍然存在的旧字段值，
+    该方法用于版本升级场景：以最新默认配置为骨架，仅迁移仍然存在且类型匹配的旧字段值，
     从而达到“补齐新增字段、移除废弃字段、保留用户已有值”的效果。
 
     Args:
