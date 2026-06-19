@@ -578,7 +578,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
       {/* 未保存提示 */}
       {hasChanges && (
         <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-900">
-          <CardContent className="py-3">
+          <CardContent className="py-3!">
             <div className="flex items-center gap-2">
               <Info className="h-4 w-4 text-orange-600" />
               <p className="text-sm text-orange-800 dark:text-orange-200">
@@ -906,7 +906,7 @@ function PluginConfigPageContent() {
         {/* 统计信息 */}
         {isModernDashboardStyle ? (
           <Card>
-            <CardContent className="space-y-3 p-4">
+            <CardContent className="space-y-3 p-4!">
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
                 <span className="flex items-center gap-2">
                   <Package className="h-4 w-4 text-muted-foreground" />

@@ -79,10 +79,10 @@ export function SettingsPage() {
       >
         <div className="-mx-1 shrink-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:overflow-visible sm:p-0">
           <TabsList
-            data-dashboard-settings-tabs="true"
             className="inline-grid h-auto w-max min-w-full grid-cols-5 gap-1 p-1 sm:w-full"
           >
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="appearance"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -90,6 +90,7 @@ export function SettingsPage() {
               <span>{t('settings.tabs.appearance')}</span>
             </TabsTrigger>
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="security"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -97,6 +98,7 @@ export function SettingsPage() {
               <span>{t('settings.tabs.security')}</span>
             </TabsTrigger>
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="local-cache"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -104,6 +106,7 @@ export function SettingsPage() {
               <span>本地缓存</span>
             </TabsTrigger>
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="other"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -111,6 +114,7 @@ export function SettingsPage() {
               <span>{t('settings.tabs.other')}</span>
             </TabsTrigger>
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="about"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >

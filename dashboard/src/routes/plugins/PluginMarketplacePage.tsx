@@ -880,7 +880,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         {/* 安装提示 */}
         {restartNoticeVisible && (
           <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900">
-            <CardContent className="py-3">
+            <CardContent className="py-3!">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
                   <Info className="h-4 w-4 text-blue-600 flex-shrink-0" />
