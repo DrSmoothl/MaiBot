@@ -52,6 +52,7 @@ interface MultiSelectProps {
   emptyText?: string
   className?: string
   compact?: boolean
+  disabled?: boolean
 }
 
 // 可排序的标签组件
@@ -60,11 +61,13 @@ function SortableBadge({
   label,
   onRemove,
   compact = false,
+  disabled = false,
 }: {
   value: string
   label: string
   onRemove: (value: string) => void
   compact?: boolean
+  disabled?: boolean
 }) {
   const {
     attributes,
@@ -73,7 +76,7 @@ function SortableBadge({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: value })
+  } = useSortable({ id: value, disabled })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -85,6 +88,7 @@ function SortableBadge({
   const handleRemoveClick = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (disabled) return
     onRemove(value)
   }
 
@@ -105,14 +109,20 @@ function SortableBadge({
       <Badge
         variant="secondary"
         className={cn(
-          'flex cursor-move items-center gap-1 hover:bg-secondary/80',
+          'flex items-center gap-1 hover:bg-secondary/80',
+          !disabled && 'cursor-move',
+          disabled && 'opacity-60',
           compact && 'min-h-6 max-w-[calc(100vw-5rem)] px-1.5 py-0 text-[11px] leading-none sm:max-w-full'
         )}
       >
         <div
           {...attributes}
           {...listeners}
-          className="flex cursor-grab items-center active:cursor-grabbing"
+          className={cn(
+            'flex items-center',
+            !disabled && 'cursor-grab active:cursor-grabbing',
+            disabled && 'cursor-not-allowed'
+          )}
         >
           <GripVertical className="h-3 w-3 text-muted-foreground" />
         </div>
@@ -127,6 +137,7 @@ function SortableBadge({
           onClick={handleRemoveClick}
           onPointerDown={handleRemovePointerDown}
           onMouseDown={(e) => e.stopPropagation()}
+          aria-disabled={disabled}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
@@ -153,8 +164,15 @@ export function MultiSelect({
   emptyText = '未找到选项',
   className,
   compact = false,
+  disabled = false,
 }: MultiSelectProps) {
   const [open, setOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    if (disabled && open) {
+      setOpen(false)
+    }
+  }, [disabled, open])
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -168,6 +186,7 @@ export function MultiSelect({
   )
 
   const handleSelect = (value: string) => {
+    if (disabled) return
     if (selected.includes(value)) {
       // 取消选择
       onChange(selected.filter((item) => item !== value))
@@ -178,10 +197,12 @@ export function MultiSelect({
   }
 
   const handleRemove = (value: string) => {
+    if (disabled) return
     onChange(selected.filter((item) => item !== value))
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
+    if (disabled) return
     const { active, over } = event
 
     if (over && active.id !== over.id) {
@@ -193,12 +214,20 @@ export function MultiSelect({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={disabled ? false : open}
+      onOpenChange={(nextOpen) => {
+        if (!disabled) {
+          setOpen(nextOpen)
+        }
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          disabled={disabled}
           className={cn(
             'h-auto w-full justify-between',
             compact ? 'min-h-9 px-2 py-1.5' : 'min-h-10',
@@ -227,6 +256,7 @@ export function MultiSelect({
                         label={option?.label || value}
                         onRemove={handleRemove}
                         compact={compact}
+                        disabled={disabled}
                       />
                     )
                   })
@@ -249,6 +279,7 @@ export function MultiSelect({
                   <CommandItem
                     key={option.value}
                     value={option.value}
+                    disabled={disabled}
                     onSelect={() => handleSelect(option.value)}
                   >
                     <div
