@@ -60,7 +60,6 @@ from src.maisaka.memory.mid_term import build_mid_term_memory_message, insert_mi
 from src.maisaka.monitor.events import (
     emit_cycle_end,
     emit_cycle_start,
-    emit_message_ingested,
     emit_planner_finalized,
     emit_timing_gate_result,
 )
@@ -1426,17 +1425,6 @@ class MaisakaReasoningEngine:
                 continue
 
             self._insert_chat_history_message(history_message)
-
-            # 向监控前端广播新消息注入事件
-            user_info = message.message_info.user_info
-            speaker_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
-            await emit_message_ingested(
-                session_id=self._runtime.session_id,
-                speaker_name=speaker_name,
-                content=(message.processed_plain_text or "").strip(),
-                message_id=message.message_id,
-                timestamp=message.timestamp.timestamp(),
-            )
 
     async def _build_history_message(
         self,

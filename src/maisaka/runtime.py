@@ -42,7 +42,7 @@ from src.maisaka.context.messages import (
 from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
 from src.maisaka.display.stage_status_board import remove_stage_status, update_stage_status
 from src.maisaka.focus import MaisakaFocusRuntimeMixin, focus_mode_manager
-from src.maisaka.monitor.events import emit_message_sent, emit_session_start
+from src.maisaka.monitor.events import emit_message_ingested, emit_message_sent, emit_session_start
 from src.maisaka.reply_effect import ReplyEffectTracker
 from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
 from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids, message_id_from_context_message
@@ -575,10 +575,35 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                     message_id=message.message_id,
                     timestamp=message.timestamp.timestamp(),
                     source_kind=source_kind,
+                    platform=message.platform,
+                    user_id=message.message_info.user_info.user_id,
+                    group_id=message.message_info.group_info.group_id if message.message_info.group_info else "",
                 )
             )
         except RuntimeError as exc:
             logger.debug(f"{self.log_prefix} 广播已发送消息到监控面板失败: {exc}")
+
+    def _emit_monitor_message_ingested(self, message: SessionMessage) -> None:
+        """异步广播收到的新消息，供 WebUI 实时展示。"""
+
+        try:
+            user_info = message.message_info.user_info
+            group_info = message.message_info.group_info
+            speaker_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
+            asyncio.create_task(
+                emit_message_ingested(
+                    session_id=self.session_id,
+                    speaker_name=speaker_name,
+                    content=(message.processed_plain_text or "").strip(),
+                    message_id=message.message_id,
+                    timestamp=message.timestamp.timestamp(),
+                    platform=message.platform,
+                    user_id=user_info.user_id,
+                    group_id=group_info.group_id if group_info else "",
+                )
+            )
+        except RuntimeError as exc:
+            logger.debug(f"{self.log_prefix} 广播收到消息到监控面板失败: {exc}")
 
     async def register_message(self, message: SessionMessage) -> None:
         """缓存一条新消息并唤醒主循环。"""
@@ -589,6 +614,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._record_external_message_interval(message, received_at)
         self._update_message_trigger_state(message)
         self.message_cache.append(message)
+        self._emit_monitor_message_ingested(message)
         self._prune_processed_message_cache()
         if self._is_reply_effect_tracking_enabled():
             asyncio.create_task(self._reply_effect_tracker.observe_user_message(message))

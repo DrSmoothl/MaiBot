@@ -23,7 +23,17 @@ import { fieldHooks } from '@/lib/field-hooks'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { cn } from '@/lib/utils'
 
-import { ChevronLeft, ChevronRight, Code2, Info, Layout, RefreshCw, Save } from 'lucide-react'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Code2,
+  Info,
+  Layout,
+  RefreshCw,
+  Save,
+  X,
+} from 'lucide-react'
 
 import type { ConfigSchema } from '@/types/config-schema'
 import {
@@ -55,6 +65,7 @@ type ConfigSectionData = Record<string, unknown>
 // ==================== 常量定义 ====================
 /** Toast 显示前的延迟时间 (毫秒) */
 const TOAST_DISPLAY_DELAY = 500
+const FILE_MODE_NOTICE_DISMISSED_KEY = 'bot-config-file-mode-notice-dismissed'
 
 /** Tab 标签页的首选排列顺序 (host field name) */
 const TAB_ORDER = [
@@ -159,6 +170,9 @@ function BotConfigPageContent() {
   const [sourceCode, setSourceCode] = useState<string>('')
   const [hasTomlError, setHasTomlError] = useState(false)
   const [tomlErrorMessage, setTomlErrorMessage] = useState<string>('')
+  const [showFileModeNotice, setShowFileModeNotice] = useState(
+    () => localStorage.getItem(FILE_MODE_NOTICE_DISMISSED_KEY) !== 'true'
+  )
   const { toast } = useToast()
   const { triggerRestart, isRestarting } = useRestart()
 
@@ -174,9 +188,12 @@ function BotConfigPageContent() {
   const [voiceConfig, setVoiceConfig] = useState<ConfigSectionData | null>(null)
   const [messageReceiveConfig, setMessageReceiveConfig] = useState<ConfigSectionData | null>(null)
   const [keywordReactionConfig, setKeywordReactionConfig] = useState<ConfigSectionData | null>(null)
-  const [responsePostProcessConfig, setResponsePostProcessConfig] = useState<ConfigSectionData | null>(null)
+  const [responsePostProcessConfig, setResponsePostProcessConfig] =
+    useState<ConfigSectionData | null>(null)
   const [chineseTypoConfig, setChineseTypoConfig] = useState<ConfigSectionData | null>(null)
-  const [responseSplitterConfig, setResponseSplitterConfig] = useState<ConfigSectionData | null>(null)
+  const [responseSplitterConfig, setResponseSplitterConfig] = useState<ConfigSectionData | null>(
+    null
+  )
   const [logConfig, setLogConfig] = useState<ConfigSectionData | null>(null)
   const [debugConfig, setDebugConfig] = useState<ConfigSectionData | null>(null)
   const [maimMessageConfig, setMaimMessageConfig] = useState<ConfigSectionData | null>(null)
@@ -196,37 +213,46 @@ function BotConfigPageContent() {
   const configRef = useRef<Record<string, unknown>>({})
 
   // ==================== 辅助函数 ====================
-  
+
   /**
    * 翻译 TOML 错误信息为中文
    */
   const translateTomlError = (errorMessage: string): string => {
     // 分行处理，保留多行格式
     const lines = errorMessage.split('\n')
-    
+
     // 翻译第一行（主要错误信息）
     let firstLine = lines[0]
-    
+
     // 移除 "Error: " 前缀（如果有）
     firstLine = firstLine.replace(/^Error:\s*/, '')
-    
+
     // 常见 TOML 错误模式匹配和翻译
     const translations: Array<[RegExp, string | ((match: RegExpMatchArray) => string)]> = [
       // Invalid TOML document 系列
-      [/Invalid TOML document: unrecognized escape sequence/, 'TOML 文档错误：无法识别的转义序列（提示：在双引号字符串中使用 \\\\ 转义反斜杠，或使用单引号字符串）'],
-      [/Invalid TOML document: only letter, numbers, dashes and underscores are allowed in keys/, 'TOML 文档错误：键名只能包含字母、数字、短横线和下划线'],
+      [
+        /Invalid TOML document: unrecognized escape sequence/,
+        'TOML 文档错误：无法识别的转义序列（提示：在双引号字符串中使用 \\\\ 转义反斜杠，或使用单引号字符串）',
+      ],
+      [
+        /Invalid TOML document: only letter, numbers, dashes and underscores are allowed in keys/,
+        'TOML 文档错误：键名只能包含字母、数字、短横线和下划线',
+      ],
       [/Invalid TOML document: (.+)/, 'TOML 文档错误：$1'],
-      
+
       // 位置错误系列
       [/Unexpected character.*at line (\d+), column (\d+)/, '第 $1 行第 $2 列：意外的字符'],
       [/Expected.*at line (\d+), column (\d+)/, '第 $1 行第 $2 列：缺少必要的字符'],
       [/Invalid.*at line (\d+), column (\d+)/, '第 $1 行第 $2 列：无效的语法'],
       [/Unterminated string at line (\d+)/, '第 $1 行：字符串未正常结束（缺少引号）'],
       [/Duplicate key.*at line (\d+)/, '第 $1 行：重复的键名'],
-      [/Invalid escape sequence at line (\d+)/, '第 $1 行：无效的转义序列（提示：在双引号字符串中使用 \\\\ 转义反斜杠）'],
+      [
+        /Invalid escape sequence at line (\d+)/,
+        '第 $1 行：无效的转义序列（提示：在双引号字符串中使用 \\\\ 转义反斜杠）',
+      ],
       [/Expected.*but got.*at line (\d+)/, '第 $1 行：类型不匹配'],
       [/line (\d+), column (\d+)/, '第 $1 行第 $2 列'],
-      
+
       // 通用错误系列
       [/Unexpected end of input/, '意外的文件结束（可能缺少闭合符号）'],
       [/Unexpected token/, '意外的标记'],
@@ -253,7 +279,7 @@ function BotConfigPageContent() {
 
     return firstLine
   }
-  
+
   /**
    * 解析并设置所有配置状态
    * 抽取自 loadConfig 和 handleModeChange 中的重复逻辑
@@ -355,10 +381,10 @@ function BotConfigPageContent() {
       // 使用正则表达式只处理双引号字符串内的转义序列，不影响单引号字符串
       const unescaped = raw.replace(/"([^"]*)"/g, (_match, content) => {
         const decoded = content
-          .replace(/\\n/g, '\n')  // 换行符
-          .replace(/\\t/g, '\t')  // 制表符
-          .replace(/\\r/g, '\r')  // 回车符
-          .replace(/\\"/g, '"')   // 双引号
+          .replace(/\\n/g, '\n') // 换行符
+          .replace(/\\t/g, '\t') // 制表符
+          .replace(/\\r/g, '\r') // 回车符
+          .replace(/\\"/g, '"') // 双引号
           .replace(/\\\\/g, '\\') // 反斜杠（必须放在最后）
         return `"${decoded}"`
       })
@@ -378,7 +404,10 @@ function BotConfigPageContent() {
     try {
       setLoading(true)
       // 用 allSettled：主配置为必需，schema 为可选，二者失败互不影响
-      const [result, schemaResult] = await Promise.allSettled([getBotConfigCached(), getBotConfigSchema()])
+      const [result, schemaResult] = await Promise.allSettled([
+        getBotConfigCached(),
+        getBotConfigSchema(),
+      ])
       if (result.status !== 'fulfilled') {
         toast({
           title: '加载失败',
@@ -390,7 +419,9 @@ function BotConfigPageContent() {
       }
       parseAndSetConfig(result.value)
       if (schemaResult.status === 'fulfilled' && schemaResult.value) {
-        setConfigSchema((schemaResult.value as unknown as Record<string, unknown>).schema as ConfigSchema)
+        setConfigSchema(
+          (schemaResult.value as unknown as Record<string, unknown>).schema as ConfigSchema
+        )
       }
       setHasUnsavedChanges(false)
       initialLoadRef.current = false
@@ -469,11 +500,31 @@ function BotConfigPageContent() {
   useConfigAutoSave(emojiConfig, 'emoji', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(visualConfig, 'visual', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(voiceConfig, 'voice', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(messageReceiveConfig, 'message_receive', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(keywordReactionConfig, 'keyword_reaction', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(responsePostProcessConfig, 'response_post_process', initialLoadRef.current, triggerAutoSave)
+  useConfigAutoSave(
+    messageReceiveConfig,
+    'message_receive',
+    initialLoadRef.current,
+    triggerAutoSave
+  )
+  useConfigAutoSave(
+    keywordReactionConfig,
+    'keyword_reaction',
+    initialLoadRef.current,
+    triggerAutoSave
+  )
+  useConfigAutoSave(
+    responsePostProcessConfig,
+    'response_post_process',
+    initialLoadRef.current,
+    triggerAutoSave
+  )
   useConfigAutoSave(chineseTypoConfig, 'chinese_typo', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(responseSplitterConfig, 'response_splitter', initialLoadRef.current, triggerAutoSave)
+  useConfigAutoSave(
+    responseSplitterConfig,
+    'response_splitter',
+    initialLoadRef.current,
+    triggerAutoSave
+  )
   useConfigAutoSave(logConfig, 'log', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(debugConfig, 'debug', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(maimMessageConfig, 'maim_message', initialLoadRef.current, triggerAutoSave)
@@ -484,6 +535,11 @@ function BotConfigPageContent() {
   useConfigAutoSave(pluginConfig, 'plugin', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(pluginRuntimeConfig, 'plugin_runtime', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(aMemorixConfig, 'a_memorix', initialLoadRef.current, triggerAutoSave)
+
+  const dismissFileModeNotice = useCallback(() => {
+    localStorage.setItem(FILE_MODE_NOTICE_DISMISSED_KEY, 'true')
+    setShowFileModeNotice(false)
+  }, [])
 
   // 保存源代码
   const saveSourceCode = async () => {
@@ -499,7 +555,7 @@ function BotConfigPageContent() {
           .replace(/\r/g, '\\r')
         return `"${encoded}"`
       })
-      
+
       // 前端验证 TOML 格式
       try {
         parseToml(escapedSourceCode)
@@ -516,7 +572,7 @@ function BotConfigPageContent() {
         setSaving(false)
         return
       }
-      
+
       await updateBotConfigRaw(escapedSourceCode)
       setHasUnsavedChanges(false)
       setHasTomlError(false)
@@ -578,7 +634,7 @@ function BotConfigPageContent() {
       setSaving(true)
       // 取消待处理的自动保存
       cancelPendingAutoSave()
-      
+
       await updateBotConfig(buildFullConfig())
       setHasUnsavedChanges(false)
       toast({
@@ -621,7 +677,7 @@ function BotConfigPageContent() {
       setSaving(true)
       // 取消待处理的自动保存
       cancelPendingAutoSave()
-      
+
       await updateBotConfig(buildFullConfig())
       setHasUnsavedChanges(false)
       toast({
@@ -629,7 +685,7 @@ function BotConfigPageContent() {
         description: '配置已保存，即将重启麦麦...',
       })
       // 等待一下让用户看到保存成功的提示
-      await new Promise(resolve => setTimeout(resolve, TOAST_DISPLAY_DELAY))
+      await new Promise((resolve) => setTimeout(resolve, TOAST_DISPLAY_DELAY))
       await handleRestart()
     } catch (error) {
       console.error('保存失败:', error)
@@ -740,8 +796,8 @@ function BotConfigPageContent() {
   if (loading) {
     return (
       <ScrollArea className="h-full">
-        <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-          <div className="flex items-center justify-center h-64">
+        <div className="space-y-4 p-4 sm:space-y-6 sm:p-6">
+          <div className="flex h-64 items-center justify-center">
             <ThinkingIllustration size="lg" />
           </div>
         </div>
@@ -754,9 +810,9 @@ function BotConfigPageContent() {
       <div className="max-w-full space-y-4 overflow-x-hidden p-4 sm:space-y-6 sm:p-6">
         {/* 页面标题 */}
         <div className="flex flex-col gap-3 sm:gap-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">麦麦设置</h1>
+              <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">麦麦设置</h1>
             </div>
             {/* 按钮组 - 桌面端靠右 */}
             <div className="flex w-full min-w-0 flex-wrap gap-2 sm:w-auto sm:flex-shrink-0 sm:justify-end">
@@ -772,7 +828,7 @@ function BotConfigPageContent() {
                   </TabsTrigger>
                   <TabsTrigger value="source" className="px-2 text-sm">
                     <Code2 className="mr-1 h-4 w-4" />
-                    源代码
+                    文件
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -792,11 +848,34 @@ function BotConfigPageContent() {
                 disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting}
                 size="sm"
                 variant="outline"
-                className="h-9 min-w-0 flex-1 sm:w-24 sm:flex-none"
+                className="h-9 w-9 flex-none px-0"
+                aria-label={
+                  saving
+                    ? '保存中'
+                    : autoSaving
+                      ? '自动保存中'
+                      : hasUnsavedChanges
+                        ? '保存'
+                        : '已保存'
+                }
+                title={
+                  saving
+                    ? '保存中'
+                    : autoSaving
+                      ? '自动保存中'
+                      : hasUnsavedChanges
+                        ? '保存'
+                        : '已保存'
+                }
               >
-                <Save className="h-4 w-4 flex-shrink-0" strokeWidth={2} fill="none" />
-                <span className="ml-1 truncate text-xs sm:text-sm">
-                  {saving ? '保存中' : autoSaving ? '自动' : hasUnsavedChanges ? '保存' : '已保存'}
+                <span className="relative inline-flex h-4 w-4 items-center justify-center">
+                  <Save className="h-4 w-4" strokeWidth={2} fill="none" />
+                  {!saving && !autoSaving && !hasUnsavedChanges && (
+                    <Check
+                      className="pointer-events-none absolute -right-2 -bottom-2 !h-3 !w-3"
+                      strokeWidth={3.4}
+                    />
+                  )}
                 </span>
               </Button>
             </div>
@@ -806,21 +885,41 @@ function BotConfigPageContent() {
         {/* 源代码模式 */}
         {editMode === 'source' && (
           <div className="space-y-4">
-            <Alert>
-              <Info className="h-4 w-4" />
-              <AlertDescription>
-                <strong>源代码模式（高级功能）：</strong>直接编辑 TOML 配置文件。此功能仅适用于熟悉 TOML 语法的高级用户。保存时会在前端验证格式，只有格式完全正确才能保存。
-                {hasTomlError && tomlErrorMessage && (
-                  <div className="text-destructive font-semibold mt-3 p-3 bg-destructive/10 rounded-md">
-                    <div className="font-bold mb-2">⚠️ TOML 格式错误：</div>
-                    <pre className="text-sm font-mono whitespace-pre-wrap break-words">
-                      {tomlErrorMessage}
-                    </pre>
-                  </div>
+            {(showFileModeNotice || (hasTomlError && tomlErrorMessage)) && (
+              <Alert className={showFileModeNotice ? 'pr-10' : undefined}>
+                <Info className="h-4 w-4" />
+                {showFileModeNotice && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute top-2 right-2 h-6 w-6 px-0"
+                    aria-label="关闭文件模式提示"
+                    title="关闭文件模式提示"
+                    onClick={dismissFileModeNotice}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
                 )}
-              </AlertDescription>
-            </Alert>
-            
+                <AlertDescription>
+                  {showFileModeNotice && (
+                    <>
+                      <strong>文件模式：</strong>直接编辑原始配置文件。此功能仅适用于熟悉 TOML
+                      语法的用户。只有格式完全正确才能保存。
+                    </>
+                  )}
+                  {hasTomlError && tomlErrorMessage && (
+                    <div className="text-destructive bg-destructive/10 mt-3 rounded-md p-3 font-semibold">
+                      <div className="mb-2 font-bold">⚠️ TOML 格式错误：</div>
+                      <pre className="font-mono text-sm break-words whitespace-pre-wrap">
+                        {tomlErrorMessage}
+                      </pre>
+                    </div>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
             <CodeEditor
               value={sourceCode}
               onChange={(value) => {
@@ -881,7 +980,11 @@ function updateNestedValue(
 
   return {
     ...currentTarget,
-    [currentPath]: updateNestedValue(currentTarget[currentPath] as ConfigSectionData | undefined, restPath, value),
+    [currentPath]: updateNestedValue(
+      currentTarget[currentPath] as ConfigSectionData | undefined,
+      restPath,
+      value
+    ),
   }
 }
 
@@ -987,14 +1090,14 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
           return (
             <Fragment key={tab.id}>
               {tab.id === firstExpandedTabId && (
-                <span className="mx-1 hidden h-7 w-[2px] bg-border/90 transition-opacity duration-200 sm:block" />
+                <span className="bg-border/90 mx-1 hidden h-7 w-[2px] transition-opacity duration-200 sm:block" />
               )}
               <DashboardTabTrigger
                 value={tab.id}
                 data-config-bot-extra-tab={isExpandedOnlyTab ? 'true' : undefined}
                 className={cn(
                   isExpandedOnlyTab &&
-                    "text-muted-foreground/80 underline decoration-dashed underline-offset-4 decoration-border/80 motion-safe:animate-[config-tab-enter_180ms_ease-out_both] hover:bg-background/70 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+                    'text-muted-foreground/80 decoration-border/80 hover:bg-background/70 data-[state=active]:bg-primary/10 data-[state=active]:text-primary underline decoration-dashed underline-offset-4 data-[state=active]:shadow-none motion-safe:animate-[config-tab-enter_180ms_ease-out_both]'
                 )}
               >
                 {tab.label}
@@ -1007,7 +1110,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             type="button"
             variant="ghost"
             size="sm"
-            className="group h-7 shrink-0 self-center gap-1 px-1.5 text-xs leading-none transition-all duration-200 ease-out sm:px-2"
+            className="group h-7 shrink-0 gap-1 self-center px-1.5 text-xs leading-none transition-all duration-200 ease-out sm:px-2"
             onClick={toggleExpanded}
           >
             {expanded ? (
@@ -1029,17 +1132,25 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
         </Button>
       </DashboardTabBar>
       {tabGuideVisible && (
-        <div className="mt-2 flex flex-col gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <span>
-            点击“更多”展开隐藏配置栏目；点击“高级设置”显示高级配置项。
-          </span>
-          <Button type="button" variant="ghost" size="sm" className="h-6 self-start px-2 text-xs sm:self-center" onClick={dismissTabGuide}>
+        <div className="bg-muted/20 text-muted-foreground mt-2 flex flex-col gap-2 rounded-md border px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+          <span>点击“更多”展开隐藏配置栏目；点击“高级设置”显示高级配置项。</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 self-start px-2 text-xs sm:self-center"
+            onClick={dismissTabGuide}
+          >
             我知道了
           </Button>
         </div>
       )}
       {tabGroups.map((tab) => (
-        <TabsContent key={tab.id} value={tab.id} className="space-y-4 motion-safe:animate-[config-tab-content-enter_180ms_ease-out_both]">
+        <TabsContent
+          key={tab.id}
+          value={tab.id}
+          className="space-y-4 motion-safe:animate-[config-tab-content-enter_180ms_ease-out_both]"
+        >
           {renderTabContent(tab)}
         </TabsContent>
       ))}

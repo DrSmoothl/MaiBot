@@ -230,12 +230,14 @@ export function JargonList({
                         <Eye className="h-4 w-4" />
                       </Button>
                       <Button
-                        size="sm"
+                        variant="outline"
+                        size="icon"
                         onClick={() => onDelete(jargon)}
-                        className="bg-red-600 text-white hover:bg-red-700"
+                        className="text-destructive hover:text-destructive h-8 w-8"
+                        title="删除"
+                        aria-label="删除黑话"
                       >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        删除
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
@@ -303,12 +305,13 @@ export function JargonList({
                 </Button>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={() => onDelete(jargon)}
-                  className="text-destructive hover:text-destructive h-auto px-2 py-1 text-xs"
+                  className="text-destructive hover:text-destructive h-8 w-8"
+                  title="删除"
+                  aria-label="删除黑话"
                 >
-                  <Trash2 className="mr-1 h-3 w-3" />
-                  删除
+                  <Trash2 className="h-3 w-3" />
                 </Button>
               </div>
             </div>

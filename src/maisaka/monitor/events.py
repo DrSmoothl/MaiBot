@@ -399,6 +399,10 @@ async def emit_message_ingested(
     content: str,
     message_id: str,
     timestamp: float,
+    *,
+    platform: str = "",
+    user_id: str = "",
+    group_id: str = "",
 ) -> None:
     """广播新消息注入事件。"""
 
@@ -407,6 +411,9 @@ async def emit_message_ingested(
         "speaker_name": speaker_name,
         "content": content,
         "message_id": message_id,
+        "platform": platform,
+        "user_id": user_id,
+        "group_id": group_id,
         "timestamp": timestamp,
     })
 
@@ -418,6 +425,10 @@ async def emit_message_sent(
     message_id: str,
     timestamp: float,
     source_kind: str = "",
+    *,
+    platform: str = "",
+    user_id: str = "",
+    group_id: str = "",
 ) -> None:
     """广播 MaiSaka 自己发送的消息事件。"""
 
@@ -427,6 +438,9 @@ async def emit_message_sent(
         "content": content,
         "message_id": message_id,
         "source_kind": source_kind,
+        "platform": platform,
+        "user_id": user_id,
+        "group_id": group_id,
         "timestamp": timestamp,
     })
 

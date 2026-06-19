@@ -787,7 +787,7 @@ export function BehaviorLearningPage() {
         </DashboardTabBar>
 
         <TabsContent value="paths" className="mt-4 min-h-0 space-y-4">
-          <AccentPanel className="bg-background rounded-lg border">
+          <AccentPanel className="bg-background rounded-lg border" showRetroStripeDivider={false}>
             <div className="grid min-w-0 gap-2 p-3 md:grid-cols-[minmax(9rem,1fr)_repeat(4,minmax(6.75rem,8rem))_auto] md:items-center">
               <div className="relative min-w-0">
                 <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />

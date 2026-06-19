@@ -48,6 +48,7 @@
       "logViewer": "日志查看器",
       "reasoningProcess": "推理过程",
       "maisakaMonitor": "麦麦观察",
+      "chatManagement": "聊天管理",
       "localChat": "本地聊天室",
       "settings": "系统设置"
     }
@@ -165,7 +166,7 @@
     }
   },
   "layout": {
-    "verifyingLogin": "正在验证登录状态...",
+    "verifyingLogin": "麦麦正在啃食服务器...",
     "logoTitle": "MaiBot WebUI",
     "logoTitleShort": "M"
   },

@@ -1,6 +1,7 @@
 """WebUI 通用头像缓存接口。"""
 
 from pathlib import Path
+from typing import Literal
 from urllib.request import Request, urlopen
 import mimetypes
 import re
@@ -16,9 +17,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AVATAR_CACHE_ROOT = (PROJECT_ROOT / "data" / "avatar").resolve()
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 QQ_AVATAR_URL_TEMPLATE = "https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640"
+QQ_GROUP_AVATAR_URL_TEMPLATE = "https://p.qlogo.cn/gh/{group_id}/{group_id}/640"
 SUPPORTED_AVATAR_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 AVATAR_USER_AGENT = "MaiBot-WebUI-Avatar/1.0"
 QQ_COMPATIBLE_PLATFORMS = {"qq", "qqguild", "napcat"}
+AvatarTargetType = Literal["user", "group"]
 
 
 def build_webui_avatar_url(platform: str, user_id: str) -> str | None:
@@ -35,23 +38,60 @@ def build_webui_avatar_url(platform: str, user_id: str) -> str | None:
     return f"/api/webui/avatar?platform={normalized_platform}&user_id={normalized_user_id}"
 
 
-def _avatar_cache_path(platform: str, user_id: str, suffix: str = ".jpg") -> Path:
+def build_webui_group_avatar_url(platform: str, group_id: str) -> str | None:
+    """构造 WebUI 内部群头像 URL。"""
+
+    normalized_platform = platform.strip().lower()
+    normalized_group_id = group_id.strip()
+    if not normalized_platform or not normalized_group_id:
+        return None
+    if normalized_platform not in QQ_COMPATIBLE_PLATFORMS:
+        return None
+    if not normalized_group_id.isdigit():
+        return None
+    return f"/api/webui/avatar?platform={normalized_platform}&group_id={normalized_group_id}"
+
+
+def _avatar_cache_key(target_id: str, target_type: AvatarTargetType) -> str:
+    if target_type == "group":
+        return f"group_{target_id.strip()}"
+    return target_id.strip()
+
+
+def _avatar_cache_path(
+    platform: str,
+    target_id: str,
+    suffix: str = ".jpg",
+    target_type: AvatarTargetType = "user",
+) -> Path:
     normalized_platform = re.sub(r"[^A-Za-z0-9_-]+", "_", platform.strip().lower()).strip("_")
-    normalized_user_id = re.sub(r"[^A-Za-z0-9_-]+", "_", user_id.strip()).strip("_")
-    if not normalized_platform or not normalized_user_id:
+    normalized_target_id = re.sub(
+        r"[^A-Za-z0-9_-]+",
+        "_",
+        _avatar_cache_key(target_id, target_type),
+    ).strip("_")
+    if not normalized_platform or not normalized_target_id:
         raise HTTPException(status_code=400, detail="头像参数不合法")
     if suffix.lower() not in SUPPORTED_AVATAR_SUFFIXES:
         suffix = ".jpg"
-    return (AVATAR_CACHE_ROOT / normalized_platform / f"{normalized_user_id}{suffix}").resolve()
+    return (AVATAR_CACHE_ROOT / normalized_platform / f"{normalized_target_id}{suffix}").resolve()
 
 
-def _iter_cached_avatar_paths(platform: str, user_id: str) -> list[Path]:
-    base_path = _avatar_cache_path(platform, user_id, ".jpg")
+def _iter_cached_avatar_paths(
+    platform: str,
+    target_id: str,
+    target_type: AvatarTargetType,
+) -> list[Path]:
+    base_path = _avatar_cache_path(platform, target_id, ".jpg", target_type)
     return [base_path.with_suffix(suffix) for suffix in sorted(SUPPORTED_AVATAR_SUFFIXES)]
 
 
-def _find_cached_avatar_path(platform: str, user_id: str) -> Path | None:
-    for cache_path in _iter_cached_avatar_paths(platform, user_id):
+def _find_cached_avatar_path(
+    platform: str,
+    target_id: str,
+    target_type: AvatarTargetType,
+) -> Path | None:
+    for cache_path in _iter_cached_avatar_paths(platform, target_id, target_type):
         try:
             cache_path.relative_to(AVATAR_CACHE_ROOT)
         except ValueError:
@@ -85,13 +125,18 @@ def _guess_avatar_suffix(content_type: str, image_bytes: bytes) -> str:
     return ".jpg"
 
 
-def _download_qq_avatar_to_cache(platform: str, user_id: str) -> Path:
-    normalized_user_id = user_id.strip()
-    if not normalized_user_id.isdigit():
-        raise HTTPException(status_code=404, detail="当前平台用户没有可用头像")
+def _download_qq_avatar_to_cache(platform: str, target_id: str, target_type: AvatarTargetType) -> Path:
+    normalized_target_id = target_id.strip()
+    if not normalized_target_id.isdigit():
+        raise HTTPException(status_code=404, detail="当前平台没有可用头像")
+    avatar_url = (
+        QQ_GROUP_AVATAR_URL_TEMPLATE.format(group_id=normalized_target_id)
+        if target_type == "group"
+        else QQ_AVATAR_URL_TEMPLATE.format(user_id=normalized_target_id)
+    )
 
     request = Request(
-        QQ_AVATAR_URL_TEMPLATE.format(user_id=normalized_user_id),
+        avatar_url,
         headers={"User-Agent": AVATAR_USER_AGENT},
     )
     try:
@@ -109,7 +154,7 @@ def _download_qq_avatar_to_cache(platform: str, user_id: str) -> Path:
         raise HTTPException(status_code=502, detail="头像下载失败：图片为空或超过大小限制")
 
     suffix = _guess_avatar_suffix(content_type, image_bytes)
-    cache_path = _avatar_cache_path(platform, normalized_user_id, suffix)
+    cache_path = _avatar_cache_path(platform, normalized_target_id, suffix, target_type)
     try:
         cache_path.relative_to(AVATAR_CACHE_ROOT)
     except ValueError as exc:
@@ -120,25 +165,35 @@ def _download_qq_avatar_to_cache(platform: str, user_id: str) -> Path:
     return cache_path
 
 
-def resolve_avatar_cache_file(platform: str, user_id: str) -> Path:
+def resolve_avatar_cache_file(platform: str, target_id: str, target_type: AvatarTargetType = "user") -> Path:
     """读取头像缓存；不存在时按平台规则下载。"""
 
     normalized_platform = platform.strip().lower()
-    cached_path = _find_cached_avatar_path(normalized_platform, user_id)
+    cached_path = _find_cached_avatar_path(normalized_platform, target_id, target_type)
     if cached_path is not None:
         return cached_path
 
     if normalized_platform in QQ_COMPATIBLE_PLATFORMS:
-        return _download_qq_avatar_to_cache(normalized_platform, user_id)
+        return _download_qq_avatar_to_cache(normalized_platform, target_id, target_type)
 
-    raise HTTPException(status_code=404, detail="当前平台用户没有可用头像")
+    raise HTTPException(status_code=404, detail="当前平台没有可用头像")
 
 
 @router.get("")
-async def get_webui_avatar(platform: str = Query(...), user_id: str = Query(...)):
+async def get_webui_avatar(
+    platform: str = Query(...),
+    user_id: str | None = Query(default=None),
+    group_id: str | None = Query(default=None),
+):
     """读取或下载并缓存 WebUI 展示用头像。"""
 
-    cache_path = resolve_avatar_cache_file(platform, user_id)
+    if group_id:
+        cache_path = resolve_avatar_cache_file(platform, group_id, "group")
+    elif user_id:
+        cache_path = resolve_avatar_cache_file(platform, user_id, "user")
+    else:
+        raise HTTPException(status_code=400, detail="缺少头像目标 ID")
+
     media_type = mimetypes.guess_type(str(cache_path))[0] or "image/jpeg"
     return FileResponse(
         cache_path,

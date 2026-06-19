@@ -91,10 +91,8 @@ function normalizeStyleCustomCSS(value: unknown): StyleCustomCSS {
   }
 
   const nextCustomCSS: StyleCustomCSS = {}
-  for (const style of ['modern', 'future-retro'] as const) {
-    if (typeof value[style] === 'string') {
-      nextCustomCSS[style] = value[style]
-    }
+  if (typeof value.modern === 'string') {
+    nextCustomCSS.modern = value.modern
   }
 
   return nextCustomCSS
@@ -121,14 +119,14 @@ function normalizeStyleConfig(value: unknown): DashboardStyleConfig {
 
   return {
     futureRetro: {
+      focusHighlight:
+        typeof futureRetro.focusHighlight === 'boolean'
+          ? futureRetro.focusHighlight
+          : DEFAULT_FUTURE_RETRO_STYLE_CONFIG.focusHighlight,
       paperTexture:
         typeof futureRetro.paperTexture === 'boolean'
           ? futureRetro.paperTexture
           : DEFAULT_FUTURE_RETRO_STYLE_CONFIG.paperTexture,
-      strongBorders:
-        typeof futureRetro.strongBorders === 'boolean'
-          ? futureRetro.strongBorders
-          : DEFAULT_FUTURE_RETRO_STYLE_CONFIG.strongBorders,
     },
   }
 }

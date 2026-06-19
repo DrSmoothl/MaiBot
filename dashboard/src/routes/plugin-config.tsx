@@ -97,7 +97,7 @@ function resolveLocalizedText(
   language: string,
   fallback = '',
   i18n?: Record<string, Record<string, string>>,
-  key?: string,
+  key?: string
 ): string {
   const candidates = getLocaleCandidates(language)
 
@@ -129,7 +129,7 @@ function resolveLocalizedText(
 
 function localizeItemFields(
   itemFields: Record<string, ItemFieldDefinition> | undefined,
-  language: string,
+  language: string
 ): Record<string, ItemFieldDefinition> | undefined {
   if (!itemFields) return undefined
 
@@ -139,7 +139,9 @@ function localizeItemFields(
       {
         ...field,
         label: resolveLocalizedText(field.label, language, fieldName, field.i18n, 'label'),
-        placeholder: resolveLocalizedText(field.placeholder, language, '', field.i18n, 'placeholder') || undefined,
+        placeholder:
+          resolveLocalizedText(field.placeholder, language, '', field.i18n, 'placeholder') ||
+          undefined,
       },
     ])
   )
@@ -151,7 +153,13 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
   const label = resolveLocalizedText(field.label, language, field.name, field.i18n, 'label')
   const hint = resolveLocalizedText(field.hint, language, '', field.i18n, 'hint')
-  const placeholder = resolveLocalizedText(field.placeholder, language, '', field.i18n, 'placeholder')
+  const placeholder = resolveLocalizedText(
+    field.placeholder,
+    language,
+    '',
+    field.i18n,
+    'placeholder'
+  )
   const localizedItemFields = localizeItemFields(field.item_fields, language)
 
   // 根据 ui_type 渲染不同的控件
@@ -161,9 +169,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <Label>{label}</Label>
-            {hint && (
-              <p className="text-xs text-muted-foreground">{hint}</p>
-            )}
+            {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
           </div>
           <Switch
             checked={Boolean(value ?? field.default)}
@@ -187,9 +193,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
             placeholder={placeholder}
             disabled={field.disabled}
           />
-          {hint && (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          )}
+          {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
         </div>
       )
 
@@ -198,21 +202,19 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label>{label}</Label>
-            <span className="text-sm text-muted-foreground">
-              {value as number ?? field.default}
+            <span className="text-muted-foreground text-sm">
+              {(value as number) ?? field.default}
             </span>
           </div>
           <Slider
-            value={[value as number ?? field.default as number]}
+            value={[(value as number) ?? (field.default as number)]}
             onValueChange={(v) => onChange(v[0])}
             min={field.min ?? 0}
             max={field.max ?? 100}
             step={field.step ?? 1}
             disabled={field.disabled}
           />
-          {hint && (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          )}
+          {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
         </div>
       )
 
@@ -236,9 +238,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
               ))}
             </SelectContent>
           </Select>
-          {hint && (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          )}
+          {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
         </div>
       )
 
@@ -247,15 +247,13 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
         <div className="space-y-2">
           <Label>{label}</Label>
           <Textarea
-            value={value as string ?? field.default}
+            value={(value as string) ?? field.default}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
             rows={field.rows ?? 3}
             disabled={field.disabled}
           />
-          {hint && (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          )}
+          {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
         </div>
       )
 
@@ -266,7 +264,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
           <div className="relative">
             <Input
               type={showPassword ? 'text' : 'password'}
-              value={value as string ?? ''}
+              value={(value as string) ?? ''}
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
               disabled={field.disabled}
@@ -276,19 +274,13 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
               type="button"
               variant="ghost"
               size="icon"
-              className="absolute right-0 top-0 h-full px-3"
+              className="absolute top-0 right-0 h-full px-3"
               onClick={() => setShowPassword(!showPassword)}
             >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </Button>
           </div>
-          {hint && (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          )}
+          {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
         </div>
       )
 
@@ -297,7 +289,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
         <div className="space-y-2">
           <Label>{label}</Label>
           <ListFieldEditor
-            value={Array.isArray(value) ? value : (Array.isArray(field.default) ? field.default : [])}
+            value={Array.isArray(value) ? value : Array.isArray(field.default) ? field.default : []}
             onChange={(newValue) => onChange(newValue)}
             itemType={field.item_type ?? 'string'}
             itemFields={localizedItemFields}
@@ -306,9 +298,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
             disabled={field.disabled}
             placeholder={placeholder}
           />
-          {hint && (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          )}
+          {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
         </div>
       )
 
@@ -319,15 +309,13 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
           <Label>{label}</Label>
           <Input
             type="text"
-            value={value as string ?? field.default ?? ''}
+            value={(value as string) ?? field.default ?? ''}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
             maxLength={field.max_length}
             disabled={field.disabled}
           />
-          {hint && (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          )}
+          {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
         </div>
       )
   }
@@ -348,7 +336,13 @@ function SectionRenderer({ sectionName, section, config, onChange }: SectionRend
   const resolvedSectionName = section.name || sectionName
   const sectionConfig = getNestedRecord(config, resolvedSectionName)
   const title = resolveLocalizedText(section.title, language, sectionName, section.i18n, 'title')
-  const description = resolveLocalizedText(section.description, language, '', section.i18n, 'description')
+  const description = resolveLocalizedText(
+    section.description,
+    language,
+    '',
+    section.i18n,
+    'description'
+  )
 
   // 按 order 排序字段
   const sortedFields = Object.entries(section.fields)
@@ -359,13 +353,13 @@ function SectionRenderer({ sectionName, section, config, onChange }: SectionRend
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <Card>
         <CollapsibleTrigger asChild>
-          <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+          <CardHeader className="hover:bg-muted/50 cursor-pointer transition-colors">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {isOpen ? (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  <ChevronDown className="text-muted-foreground h-4 w-4" />
                 ) : (
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  <ChevronRight className="text-muted-foreground h-4 w-4" />
                 )}
                 <CardTitle className="text-lg">{title}</CardTitle>
               </div>
@@ -373,11 +367,7 @@ function SectionRenderer({ sectionName, section, config, onChange }: SectionRend
                 {sortedFields.length} 项
               </Badge>
             </div>
-            {description && (
-              <CardDescription className="ml-6">
-                {description}
-              </CardDescription>
-            )}
+            {description && <CardDescription className="ml-6">{description}</CardDescription>}
           </CardHeader>
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -441,19 +431,19 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="text-muted-foreground h-8 w-8 animate-spin" />
       </div>
     )
   }
 
   if (!schema) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 space-y-4">
-        <AlertCircle className="h-12 w-12 text-muted-foreground" />
+      <div className="flex h-64 flex-col items-center justify-center space-y-4">
+        <AlertCircle className="text-muted-foreground h-12 w-12" />
         <p className="text-muted-foreground">无法加载配置</p>
         <Button onClick={onBack} variant="outline">
-          <ArrowLeft className="h-4 w-4 mr-2" />
+          <ArrowLeft className="mr-2 h-4 w-4" />
           返回
         </Button>
       </div>
@@ -461,8 +451,9 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
   }
 
   // 按 order 排序 sections
-  const sortedSections = Object.entries(schema.sections)
-    .sort(([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0))
+  const sortedSections = Object.entries(schema.sections).sort(
+    ([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0)
+  )
   const schemaTabs = schema.layout.type === 'tabs' ? schema.layout.tabs : []
   const selectedConfigTab = schemaTabs.some((tab) => tab.id === activeConfigTab)
     ? activeConfigTab
@@ -475,14 +466,16 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
     language,
     plugin.manifest.name,
     schema.plugin_info.i18n,
-    'name',
+    'name'
   )
-  const manifestUrls = plugin.manifest.urls as {
-    repository?: string
-    homepage?: string
-    documentation?: string
-    issues?: string
-  } | undefined
+  const manifestUrls = plugin.manifest.urls as
+    | {
+        repository?: string
+        homepage?: string
+        documentation?: string
+        issues?: string
+      }
+    | undefined
   const pluginHomepageUrl = plugin.manifest.homepage_url || manifestUrls?.homepage
   const pluginRepositoryUrl = plugin.manifest.repository_url || manifestUrls?.repository
   const pluginDetailItems = [
@@ -493,12 +486,15 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
     { label: '许可证', value: plugin.manifest.license },
     { label: '最低麦麦版本', value: plugin.manifest.host_application?.min_version },
     { label: '安装路径', value: plugin.path },
-  ].filter((item): item is { label: string; value: string } => typeof item.value === 'string' && item.value.trim().length > 0)
+  ].filter(
+    (item): item is { label: string; value: string } =>
+      typeof item.value === 'string' && item.value.trim().length > 0
+  )
 
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* 头部 */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <Button variant="ghost" size="icon" onClick={handleBack}>
             <ArrowLeft className="h-5 w-5" />
@@ -507,11 +503,11 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
             <h1 className="text-xl font-bold sm:text-2xl" data-plugin-config-title>
               {pluginName}
             </h1>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="mt-1 flex items-center gap-2">
               <Badge variant={isEnabled ? 'default' : 'secondary'}>
                 {isEnabled ? '已启用' : '已禁用'}
               </Badge>
-              <span className="text-sm text-muted-foreground">
+              <span className="text-muted-foreground text-sm">
                 v{schema.plugin_info.version || plugin.manifest.version}
               </span>
             </div>
@@ -525,12 +521,12 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
           >
             {editMode === 'visual' ? (
               <>
-                <Code2 className="h-4 w-4 mr-2" />
+                <Code2 className="mr-2 h-4 w-4" />
                 源代码
               </>
             ) : (
               <>
-                <Layout className="h-4 w-4 mr-2" />
+                <Layout className="mr-2 h-4 w-4" />
                 可视化
               </>
             )}
@@ -541,34 +537,22 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
             onClick={() => triggerRestart()}
             disabled={isRestarting}
           >
-            <RotateCw className={`h-4 w-4 mr-2 ${isRestarting ? 'animate-spin' : ''}`} />
+            <RotateCw className={`mr-2 h-4 w-4 ${isRestarting ? 'animate-spin' : ''}`} />
             重启麦麦
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleToggle}
-          >
-            <Power className="h-4 w-4 mr-2" />
+          <Button variant="outline" size="sm" onClick={handleToggle}>
+            <Power className="mr-2 h-4 w-4" />
             {isEnabled ? '禁用' : '启用'}
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setResetDialogOpen(true)}
-          >
-            <RotateCcw className="h-4 w-4 mr-2" />
+          <Button variant="outline" size="sm" onClick={() => setResetDialogOpen(true)}>
+            <RotateCcw className="mr-2 h-4 w-4" />
             重置
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!hasChanges || saving}
-          >
+          <Button size="sm" onClick={handleSave} disabled={!hasChanges || saving}>
             {saving ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
-              <Save className="h-4 w-4 mr-2" />
+              <Save className="mr-2 h-4 w-4" />
             )}
             保存
           </Button>
@@ -577,19 +561,20 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
 
       {/* 未保存提示 */}
       {hasChanges && (
-        <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-900">
+        <Card className="border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/20">
           <CardContent className="py-3!">
             <div className="flex items-center gap-2">
               <Info className="h-4 w-4 text-orange-600" />
-              <p className="text-sm text-orange-800 dark:text-orange-200">
-                有未保存的更改
-              </p>
+              <p className="text-sm text-orange-800 dark:text-orange-200">有未保存的更改</p>
             </div>
           </CardContent>
         </Card>
       )}
 
-      <Tabs value={pluginPageTab} onValueChange={(value) => setPluginPageTab(value as 'settings' | 'details')}>
+      <Tabs
+        value={pluginPageTab}
+        onValueChange={(value) => setPluginPageTab(value as 'settings' | 'details')}
+      >
         <TabsList>
           <TabsTrigger value="settings">设置</TabsTrigger>
           <TabsTrigger value="details">详情</TabsTrigger>
@@ -601,9 +586,12 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  <strong>源代码模式（高级功能）：</strong>直接编辑 TOML 配置文件。保存时会验证格式，只有格式正确才能保存。
+                  <strong>文件模式：</strong>直接编辑原始配置文件。此功能仅适用于熟悉
+                  TOML语法的用户。只有格式完全正确才能保存。
                   {hasTomlError && (
-                    <span className="text-destructive font-semibold ml-2">⚠️ 上次保存失败，请检查 TOML 格式</span>
+                    <span className="text-destructive ml-2 font-semibold">
+                      ⚠️ 上次保存失败，请检查 TOML 格式
+                    </span>
                   )}
                 </AlertDescription>
               </Alert>
@@ -621,56 +609,56 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
 
           {/* 可视化模式 */}
           {editMode === 'visual' && (
-          <>
-          {/* 配置区域 */}
-          {schema.layout.type === 'tabs' && schemaTabs.length > 0 ? (
-            // 标签页布局
-            <Tabs value={selectedConfigTab} onValueChange={handleConfigTabChange}>
-              <TabsList>
-                {schemaTabs.map(tab => (
-                  <TabsTrigger key={tab.id} value={tab.id}>
-                    {resolveLocalizedText(tab.title, language, tab.id, tab.i18n, 'title')}
-                    {tab.badge && (
-                      <Badge variant="secondary" className="ml-2 text-xs">
-                        {tab.badge}
-                      </Badge>
-                    )}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              {schemaTabs.map(tab => (
-                <TabsContent key={tab.id} value={tab.id} className="space-y-4 mt-4">
-                  {tab.sections.map(sectionName => {
-                    const section = schema.sections[sectionName]
-                    if (!section) return null
-                    return (
-                      <SectionRenderer
-                        key={sectionName}
-                        sectionName={sectionName}
-                        section={section}
-                        config={config}
-                        onChange={handleFieldChange}
-                      />
-                    )
-                  })}
-                </TabsContent>
-              ))}
-            </Tabs>
-          ) : (
-            // 自动布局
-            <div className="space-y-4">
-              {sortedSections.map(([sectionName, section]) => (
-                <SectionRenderer
-                  key={sectionName}
-                  sectionName={sectionName}
-                  section={section}
-                  config={config}
-                  onChange={handleFieldChange}
-                />
-              ))}
-            </div>
-          )}
-          </>
+            <>
+              {/* 配置区域 */}
+              {schema.layout.type === 'tabs' && schemaTabs.length > 0 ? (
+                // 标签页布局
+                <Tabs value={selectedConfigTab} onValueChange={handleConfigTabChange}>
+                  <TabsList>
+                    {schemaTabs.map((tab) => (
+                      <TabsTrigger key={tab.id} value={tab.id}>
+                        {resolveLocalizedText(tab.title, language, tab.id, tab.i18n, 'title')}
+                        {tab.badge && (
+                          <Badge variant="secondary" className="ml-2 text-xs">
+                            {tab.badge}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  {schemaTabs.map((tab) => (
+                    <TabsContent key={tab.id} value={tab.id} className="mt-4 space-y-4">
+                      {tab.sections.map((sectionName) => {
+                        const section = schema.sections[sectionName]
+                        if (!section) return null
+                        return (
+                          <SectionRenderer
+                            key={sectionName}
+                            sectionName={sectionName}
+                            section={section}
+                            config={config}
+                            onChange={handleFieldChange}
+                          />
+                        )
+                      })}
+                    </TabsContent>
+                  ))}
+                </Tabs>
+              ) : (
+                // 自动布局
+                <div className="space-y-4">
+                  {sortedSections.map(([sectionName, section]) => (
+                    <SectionRenderer
+                      key={sectionName}
+                      sectionName={sectionName}
+                      section={section}
+                      config={config}
+                      onChange={handleFieldChange}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </TabsContent>
         <TabsContent value="details" className="mt-4">
@@ -682,32 +670,43 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
             <CardContent className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 {pluginDetailItems.map((item) => (
-                  <div key={item.label} className="min-w-0 rounded-md border bg-muted/20 px-3 py-2">
-                    <div className="text-xs font-medium text-muted-foreground">{item.label}</div>
-                    <div className="mt-1 break-words text-sm">{item.value}</div>
+                  <div key={item.label} className="bg-muted/20 min-w-0 rounded-md border px-3 py-2">
+                    <div className="text-muted-foreground text-xs font-medium">{item.label}</div>
+                    <div className="mt-1 text-sm break-words">{item.value}</div>
                   </div>
                 ))}
               </div>
-              {(pluginHomepageUrl || pluginRepositoryUrl || manifestUrls?.documentation || manifestUrls?.issues) && (
+              {(pluginHomepageUrl ||
+                pluginRepositoryUrl ||
+                manifestUrls?.documentation ||
+                manifestUrls?.issues) && (
                 <div className="flex flex-wrap gap-2">
                   {pluginHomepageUrl && (
                     <Button variant="outline" size="sm" asChild>
-                      <a href={pluginHomepageUrl} target="_blank" rel="noreferrer">主页</a>
+                      <a href={pluginHomepageUrl} target="_blank" rel="noreferrer">
+                        主页
+                      </a>
                     </Button>
                   )}
                   {pluginRepositoryUrl && (
                     <Button variant="outline" size="sm" asChild>
-                      <a href={pluginRepositoryUrl} target="_blank" rel="noreferrer">仓库</a>
+                      <a href={pluginRepositoryUrl} target="_blank" rel="noreferrer">
+                        仓库
+                      </a>
                     </Button>
                   )}
                   {manifestUrls?.documentation && (
                     <Button variant="outline" size="sm" asChild>
-                      <a href={manifestUrls.documentation} target="_blank" rel="noreferrer">文档</a>
+                      <a href={manifestUrls.documentation} target="_blank" rel="noreferrer">
+                        文档
+                      </a>
                     </Button>
                   )}
                   {manifestUrls?.issues && (
                     <Button variant="outline" size="sm" asChild>
-                      <a href={manifestUrls.issues} target="_blank" rel="noreferrer">问题反馈</a>
+                      <a href={manifestUrls.issues} target="_blank" rel="noreferrer">
+                        问题反馈
+                      </a>
                     </Button>
                   )}
                 </div>
@@ -728,9 +727,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
         <DialogContent>
           <DialogHeader>
             <DialogTitle>有未保存的更改</DialogTitle>
-            <DialogDescription>
-              当前插件配置文件有修改，离开页面前是否保存？
-            </DialogDescription>
+            <DialogDescription>当前插件配置文件有修改，离开页面前是否保存？</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={closeLeavePrompt} disabled={saving}>
@@ -740,7 +737,11 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
               不保存
             </Button>
             <Button onClick={saveAndLeave} disabled={saving}>
-              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+              {saving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
               保存并离开
             </Button>
           </DialogFooter>
@@ -866,10 +867,10 @@ function PluginConfigPageContent() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+      <div className="space-y-4 p-4 sm:space-y-6 sm:p-6">
         <div className="flex flex-nowrap items-center gap-2 sm:gap-3">
           <div className="relative min-w-0 flex-1 basis-0 sm:basis-72">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
             <Input
               placeholder="搜索插件..."
               value={searchQuery}
@@ -879,7 +880,7 @@ function PluginConfigPageContent() {
           </div>
           <div
             data-dashboard-input="true"
-            className="border-input flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border bg-transparent px-2 py-1 text-sm font-medium shadow-sm transition-colors sm:gap-2 sm:px-3"
+            className="border-input flex h-9 shrink-0 items-center gap-1.5 rounded-md border bg-transparent px-2 py-1 text-sm font-medium whitespace-nowrap shadow-sm transition-colors sm:gap-2 sm:px-3"
           >
             <Label htmlFor="show-update-only" className="cursor-pointer text-sm font-medium">
               有更新
@@ -909,25 +910,34 @@ function PluginConfigPageContent() {
             <CardContent className="space-y-3 p-4!">
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
                 <span className="flex items-center gap-2">
-                  <Package className="h-4 w-4 text-muted-foreground" />
+                  <Package className="text-muted-foreground h-4 w-4" />
                   已安装 <strong>{installedCount}</strong> 个插件
                 </span>
-                <span>已启用 <strong className="text-emerald-600">{enabledCount}</strong> 个</span>
-                <span>已禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个</span>
-                <span>加载中 <strong className="text-sky-600">{loadingCount}</strong> 个</span>
+                <span>
+                  已启用 <strong className="text-emerald-600">{enabledCount}</strong> 个
+                </span>
+                <span>
+                  已禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个
+                </span>
+                <span>
+                  加载中 <strong className="text-sky-600">{loadingCount}</strong> 个
+                </span>
                 {showsCircuitSummary && (
-                  <span>熔断中 <strong className="text-orange-600">{circuitOpenCount}</strong> 个</span>
+                  <span>
+                    熔断中 <strong className="text-orange-600">{circuitOpenCount}</strong> 个
+                  </span>
                 )}
               </div>
               <div
                 className="flex items-center gap-3 border-t pt-3 text-sm"
                 aria-label={modernLoadSummaryLabel}
               >
-                <span className="sr-only">
-                  {modernLoadSummaryLabel}
-                </span>
+                <span className="sr-only">{modernLoadSummaryLabel}</span>
                 <strong className="w-8 text-right text-emerald-600">{loadSuccessCount}</strong>
-                <div className="flex h-3 min-w-28 flex-1 overflow-hidden bg-muted" aria-hidden="true">
+                <div
+                  className="bg-muted flex h-3 min-w-28 flex-1 overflow-hidden"
+                  aria-hidden="true"
+                >
                   <div className="bg-emerald-500" style={{ width: `${loadSuccessPercent}%` }} />
                   <div className="bg-sky-500" style={{ width: `${loadingPercent}%` }} />
                   <div className="bg-orange-500" style={{ width: `${circuitPercent}%` }} />
@@ -939,29 +949,24 @@ function PluginConfigPageContent() {
           </Card>
         ) : (
           <div className="space-y-3">
-            <div
-              className="space-y-2"
-              aria-label={futureRetroPluginSummaryLabel}
-            >
-              <span className="sr-only">
-                {futureRetroPluginSummaryLabel}
-              </span>
-              <div className="flex h-3 w-full overflow-hidden bg-muted" aria-hidden="true">
+            <div className="space-y-2" aria-label={futureRetroPluginSummaryLabel}>
+              <span className="sr-only">{futureRetroPluginSummaryLabel}</span>
+              <div className="bg-muted flex h-3 w-full overflow-hidden" aria-hidden="true">
                 {plugins.length > 0 ? (
                   plugins.map((plugin, index) => (
                     <div
                       key={`${plugin.id}-${index}`}
                       className={`min-w-0 flex-1 ${getPluginStatusBarClassName(plugin)} ${
-                        index < plugins.length - 1 ? 'border-r border-background' : ''
+                        index < plugins.length - 1 ? 'border-background border-r' : ''
                       }`}
                       title={`${plugin.manifest.name}：${getPluginStatusLabel(plugin)}`}
                     />
                   ))
                 ) : (
-                  <div className="h-full flex-1 bg-muted-foreground/20" />
+                  <div className="bg-muted-foreground/20 h-full flex-1" />
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <span className="flex items-center gap-1.5">
                   插件 <strong className="text-foreground">{installedCount}</strong>个
                 </span>
@@ -970,7 +975,7 @@ function PluginConfigPageContent() {
                   启用 <strong className="text-emerald-600">{enabledCount}</strong> 个
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground/45" />
+                  <span className="bg-muted-foreground/45 h-2 w-2 rounded-full" />
                   禁用 <strong className="text-muted-foreground">{disabledCount}</strong> 个
                 </span>
                 <span className="flex items-center gap-1.5">
@@ -995,157 +1000,183 @@ function PluginConfigPageContent() {
         {/* 插件列表 */}
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <Loader2 className="text-muted-foreground h-8 w-8 animate-spin" />
           </div>
         ) : visiblePlugins.length === 0 ? (
           <div className="flex flex-col items-center justify-center space-y-4 py-12">
-            <Package className="h-16 w-16 text-muted-foreground/50" />
+            <Package className="text-muted-foreground/50 h-16 w-16" />
             <div className="space-y-2 text-center">
-              <p className="text-lg font-medium text-muted-foreground">
-                {showUpdateOnly ? '暂无可更新插件' : searchQuery ? '没有找到匹配的插件' : '暂无已安装的插件'}
+              <p className="text-muted-foreground text-lg font-medium">
+                {showUpdateOnly
+                  ? '暂无可更新插件'
+                  : searchQuery
+                    ? '没有找到匹配的插件'
+                    : '暂无已安装的插件'}
               </p>
-              <p className="text-sm text-muted-foreground">
-                {showUpdateOnly ? '当前已安装插件没有发现新版本' : searchQuery ? '尝试其他搜索关键词' : '前往插件市场安装插件'}
+              <p className="text-muted-foreground text-sm">
+                {showUpdateOnly
+                  ? '当前已安装插件没有发现新版本'
+                  : searchQuery
+                    ? '尝试其他搜索关键词'
+                    : '前往插件市场安装插件'}
               </p>
             </div>
           </div>
         ) : (
-          <div className="divide-y divide-border/80">
-            {visiblePlugins.map(plugin => {
+          <div className="divide-border/80 divide-y">
+            {visiblePlugins.map((plugin) => {
               const statusMeta = getPluginStatusMeta(plugin)
               const pluginActing = actingPluginId === plugin.id
               const pluginDisabled = isPluginDisabled(plugin)
               const updateState = getPluginUpdateState(plugin)
               return (
-              <div
-                key={plugin.id}
-                data-plugin-list-item="true"
-                className={`relative flex cursor-pointer flex-col justify-between gap-2 py-2.5 transition-all duration-150 ease-out hover:-translate-y-0.5 hover:bg-muted/55 hover:shadow-md focus-visible:-translate-y-0.5 focus-visible:bg-muted/55 focus-visible:outline-none focus-visible:shadow-md sm:min-h-0 sm:flex-row sm:items-center sm:gap-3 sm:px-2 sm:py-3 ${
-                  isPluginDisabled(plugin) ? 'opacity-70' : ''
-                }`}
-                role="button"
-                tabIndex={0}
-                onClick={() => openPluginConfig(plugin)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPluginConfig(plugin) } }}
-              >
-                <div className="flex min-w-0 items-start gap-3 sm:items-center">
-                  <span
-                    className={`mt-4 flex-shrink-0 sm:mt-0 ${
-                      isFutureRetroDashboardStyle ? 'h-12 w-2' : 'h-2.5 w-2.5 rounded-full'
-                    } ${statusMeta.dotClassName}`}
-                    title={statusMeta.label}
-                    aria-label={statusMeta.label}
-                  />
-                  <div className="flex w-12 flex-shrink-0 flex-col items-center gap-1 sm:w-10">
-                    <PluginIcon pluginId={plugin.id} manifest={plugin.manifest} installed className="h-12 w-12 sm:h-10 sm:w-10" />
-                    <span className="text-muted-foreground text-[0.65rem] leading-none">
-                      v{plugin.manifest.version}
-                    </span>
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-2 sm:space-y-1">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <h3 className="min-w-0 break-words text-sm font-medium leading-snug sm:truncate sm:text-base">
-                        {plugin.manifest.name}
-                      </h3>
-                      <Badge variant="outline" className="text-xs flex-shrink-0">
-                        {getPluginTypeLabel(plugin)}
-                      </Badge>
-                      {statusMeta.showsBadge !== false && (
-                        <Badge
-                          variant="outline"
-                          className={`text-xs flex-shrink-0 gap-1 ${statusMeta.badgeClassName ?? ''}`}
-                        >
-                          {statusMeta.icon === 'loading' && <Loader2 className="h-3 w-3 animate-spin" />}
-                          {statusMeta.icon === 'warning' && <AlertCircle className="h-3 w-3" />}
-                          {statusMeta.icon === 'circuit' && <AlertTriangle className="h-3 w-3" />}
-                          {statusMeta.label}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:truncate sm:leading-normal">
-                      {plugin.manifest.description || '暂无描述'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-end gap-2 border-t pt-2 sm:flex-shrink-0 sm:border-t-0 sm:pt-0">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 w-9 p-0"
-                    title="配置"
-                    aria-label="配置"
-                    onClick={() => openPluginConfig(plugin)}
-                  >
-                    <Settings className="h-4 w-4" />
-                  </Button>
-                  <div
-                    className="flex h-9 w-9 items-center justify-center"
-                    title={pluginDisabled ? '启动插件' : '关闭插件'}
-                  >
-                    {pluginActing && <Loader2 className="h-4 w-4 animate-spin" />}
-                    <Switch
-                      data-plugin-list-switch="true"
-                      checked={!pluginDisabled}
-                      disabled={pluginActing}
-                      aria-label={pluginDisabled ? '启动插件' : '关闭插件'}
-                      onClick={(event) => event.stopPropagation()}
-                      onCheckedChange={() => void performTogglePlugin(plugin)}
+                <div
+                  key={plugin.id}
+                  data-plugin-list-item="true"
+                  className={`hover:bg-muted/55 focus-visible:bg-muted/55 relative flex cursor-pointer flex-col justify-between gap-2 py-2.5 transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md focus-visible:-translate-y-0.5 focus-visible:shadow-md focus-visible:outline-none sm:min-h-0 sm:flex-row sm:items-center sm:gap-3 sm:px-2 sm:py-3 ${
+                    isPluginDisabled(plugin) ? 'opacity-70' : ''
+                  }`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openPluginConfig(plugin)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      openPluginConfig(plugin)
+                    }
+                  }}
+                >
+                  <div className="flex min-w-0 items-start gap-3 sm:items-center">
+                    <span
+                      className={`mt-4 flex-shrink-0 sm:mt-0 ${
+                        isFutureRetroDashboardStyle ? 'h-12 w-2' : 'h-2.5 w-2.5 rounded-full'
+                      } ${statusMeta.dotClassName}`}
+                      title={statusMeta.label}
+                      aria-label={statusMeta.label}
                     />
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="relative h-9 w-9 p-0"
-                    disabled={pluginActing || !updateState.canUpdate}
-                    title={updateState.title}
-                    aria-label={updateState.title || '更新/升级'}
-                    onClick={(event) => openUpdatePluginDialog(plugin, event)}
-                  >
-                    {updateState.hasUpdate && (
-                      <span
-                        className="absolute -right-1 -top-1 h-3 w-3 rounded-sm bg-yellow-400 ring-2 ring-background"
-                        aria-hidden="true"
+                    <div className="flex w-12 flex-shrink-0 flex-col items-center gap-1 sm:w-10">
+                      <PluginIcon
+                        pluginId={plugin.id}
+                        manifest={plugin.manifest}
+                        installed
+                        className="h-12 w-12 sm:h-10 sm:w-10"
                       />
-                    )}
-                    {pluginActing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : checkingUpdates ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ArrowUp className="h-4 w-4" />
-                    )}
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="h-9 w-9 p-0"
-                    disabled={pluginActing}
-                    title="删除"
-                    aria-label="删除"
-                    onClick={(event) => openDeletePluginDialog(plugin, event)}
-                  >
-                    {pluginActing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-muted-foreground text-[0.65rem] leading-none">
+                        v{plugin.manifest.version}
+                      </span>
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-2 sm:space-y-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <h3 className="min-w-0 text-sm leading-snug font-medium break-words sm:truncate sm:text-base">
+                          {plugin.manifest.name}
+                        </h3>
+                        <Badge variant="outline" className="flex-shrink-0 text-xs">
+                          {getPluginTypeLabel(plugin)}
+                        </Badge>
+                        {statusMeta.showsBadge !== false && (
+                          <Badge
+                            variant="outline"
+                            className={`flex-shrink-0 gap-1 text-xs ${statusMeta.badgeClassName ?? ''}`}
+                          >
+                            {statusMeta.icon === 'loading' && (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            )}
+                            {statusMeta.icon === 'warning' && <AlertCircle className="h-3 w-3" />}
+                            {statusMeta.icon === 'circuit' && <AlertTriangle className="h-3 w-3" />}
+                            {statusMeta.label}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-muted-foreground line-clamp-2 text-sm leading-relaxed sm:truncate sm:leading-normal">
+                        {plugin.manifest.description || '暂无描述'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 border-t pt-2 sm:flex-shrink-0 sm:border-t-0 sm:pt-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-9 w-9 p-0"
+                      title="配置"
+                      aria-label="配置"
+                      onClick={() => openPluginConfig(plugin)}
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                    <div
+                      className="flex h-9 w-9 items-center justify-center"
+                      title={pluginDisabled ? '启动插件' : '关闭插件'}
+                    >
+                      {pluginActing && <Loader2 className="h-4 w-4 animate-spin" />}
+                      <Switch
+                        data-plugin-list-switch="true"
+                        checked={!pluginDisabled}
+                        disabled={pluginActing}
+                        aria-label={pluginDisabled ? '启动插件' : '关闭插件'}
+                        onClick={(event) => event.stopPropagation()}
+                        onCheckedChange={() => void performTogglePlugin(plugin)}
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="relative h-9 w-9 p-0"
+                      disabled={pluginActing || !updateState.canUpdate}
+                      title={updateState.title}
+                      aria-label={updateState.title || '更新/升级'}
+                      onClick={(event) => openUpdatePluginDialog(plugin, event)}
+                    >
+                      {updateState.hasUpdate && (
+                        <span
+                          className="ring-background absolute -top-1 -right-1 h-3 w-3 rounded-sm bg-yellow-400 ring-2"
+                          aria-hidden="true"
+                        />
+                      )}
+                      {pluginActing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : checkingUpdates ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ArrowUp className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-9 w-9 p-0"
+                      disabled={pluginActing}
+                      title="删除"
+                      aria-label="删除"
+                      onClick={(event) => openDeletePluginDialog(plugin, event)}
+                    >
+                      {pluginActing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <ChevronRight className="text-muted-foreground h-4 w-4" />
+                  </div>
                 </div>
-              </div>
               )
             })}
           </div>
         )}
 
-        <Dialog open={updateDialogOpen} onOpenChange={(open) => {
-          if (!open) {
-            closeUpdatePluginDialog()
-            return
-          }
-          setUpdateDialogOpen(true)
-        }}>
-          <DialogContent preventOutsideClose={updateProgress?.stage === 'loading'} hideCloseButton={updateProgress?.stage === 'loading'}>
+        <Dialog
+          open={updateDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeUpdatePluginDialog()
+              return
+            }
+            setUpdateDialogOpen(true)
+          }}
+        >
+          <DialogContent
+            preventOutsideClose={updateProgress?.stage === 'loading'}
+            hideCloseButton={updateProgress?.stage === 'loading'}
+          >
             <DialogHeader>
               <DialogTitle>确认更新插件</DialogTitle>
               <DialogDescription>
@@ -1156,13 +1187,15 @@ function PluginConfigPageContent() {
             </DialogHeader>
 
             {updateProgress && (
-              <div className={`space-y-3 border p-3 ${
-                updateProgress.stage === 'success'
-                  ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20'
-                  : updateProgress.stage === 'error'
-                    ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
-                    : 'bg-muted/50'
-              }`}>
+              <div
+                className={`space-y-3 border p-3 ${
+                  updateProgress.stage === 'success'
+                    ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20'
+                    : updateProgress.stage === 'error'
+                      ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
+                      : 'bg-muted/50'
+                }`}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
                     {updateProgress.stage === 'loading' ? (
@@ -1172,22 +1205,28 @@ function PluginConfigPageContent() {
                     ) : (
                       <Info className="h-4 w-4 shrink-0 text-red-600" />
                     )}
-                    <span className={`text-sm font-medium ${
-                      updateProgress.stage === 'success'
-                        ? 'text-green-700 dark:text-green-300'
-                        : updateProgress.stage === 'error'
-                          ? 'text-red-700 dark:text-red-300'
-                          : ''
-                    }`}>
+                    <span
+                      className={`text-sm font-medium ${
+                        updateProgress.stage === 'success'
+                          ? 'text-green-700 dark:text-green-300'
+                          : updateProgress.stage === 'error'
+                            ? 'text-red-700 dark:text-red-300'
+                            : ''
+                      }`}
+                    >
                       {updateProgress.stage === 'loading' && '正在更新'}
                       {updateProgress.stage === 'success' && '更新完成'}
                       {updateProgress.stage === 'error' && '更新失败'}
                     </span>
                   </div>
                   {updateProgress.stage !== 'error' && (
-                    <span className={`shrink-0 text-sm font-medium ${
-                      updateProgress.stage === 'success' ? 'text-green-700 dark:text-green-300' : ''
-                    }`}>
+                    <span
+                      className={`shrink-0 text-sm font-medium ${
+                        updateProgress.stage === 'success'
+                          ? 'text-green-700 dark:text-green-300'
+                          : ''
+                      }`}
+                    >
                       {updateProgress.progress}%
                     </span>
                   )}
@@ -1198,15 +1237,17 @@ function PluginConfigPageContent() {
                     className={`h-2 ${updateProgress.stage === 'success' ? '[&>div]:bg-green-500' : ''}`}
                   />
                 )}
-                <p className={`break-words text-sm ${
-                  updateProgress.stage === 'success'
-                    ? 'text-green-600 dark:text-green-400'
-                    : updateProgress.stage === 'error'
-                      ? 'text-red-600 dark:text-red-400'
-                      : 'text-muted-foreground'
-                }`}>
+                <p
+                  className={`text-sm break-words ${
+                    updateProgress.stage === 'success'
+                      ? 'text-green-600 dark:text-green-400'
+                      : updateProgress.stage === 'error'
+                        ? 'text-red-600 dark:text-red-400'
+                        : 'text-muted-foreground'
+                  }`}
+                >
                   {updateProgress.stage === 'error'
-                    ? (updateProgress.error || updateProgress.message || '更新失败')
+                    ? updateProgress.error || updateProgress.message || '更新失败'
                     : updateProgress.message}
                 </p>
               </div>
@@ -1218,7 +1259,9 @@ function PluginConfigPageContent() {
                 onClick={closeUpdatePluginDialog}
                 disabled={updateProgress?.stage === 'loading'}
               >
-                {updateProgress?.stage === 'success' || updateProgress?.stage === 'error' ? '关闭' : '取消'}
+                {updateProgress?.stage === 'success' || updateProgress?.stage === 'error'
+                  ? '关闭'
+                  : '取消'}
               </Button>
               {updateProgress?.stage !== 'success' && updateProgress?.stage !== 'error' && (
                 <Button
@@ -1237,14 +1280,20 @@ function PluginConfigPageContent() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
-          if (!open) {
-            closeDeletePluginDialog()
-            return
-          }
-          setDeleteDialogOpen(true)
-        }}>
-          <DialogContent preventOutsideClose={deleteProgress?.stage === 'loading'} hideCloseButton={deleteProgress?.stage === 'loading'}>
+        <Dialog
+          open={deleteDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeDeletePluginDialog()
+              return
+            }
+            setDeleteDialogOpen(true)
+          }}
+        >
+          <DialogContent
+            preventOutsideClose={deleteProgress?.stage === 'loading'}
+            hideCloseButton={deleteProgress?.stage === 'loading'}
+          >
             <DialogHeader>
               <DialogTitle>确认删除插件</DialogTitle>
               <DialogDescription>
@@ -1255,13 +1304,15 @@ function PluginConfigPageContent() {
             </DialogHeader>
 
             {deleteProgress && (
-              <div className={`space-y-3 border p-3 ${
-                deleteProgress.stage === 'success'
-                  ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20'
-                  : deleteProgress.stage === 'error'
-                    ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
-                    : 'bg-muted/50'
-              }`}>
+              <div
+                className={`space-y-3 border p-3 ${
+                  deleteProgress.stage === 'success'
+                    ? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20'
+                    : deleteProgress.stage === 'error'
+                      ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
+                      : 'bg-muted/50'
+                }`}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
                     {deleteProgress.stage === 'loading' ? (
@@ -1271,22 +1322,28 @@ function PluginConfigPageContent() {
                     ) : (
                       <Info className="h-4 w-4 shrink-0 text-red-600" />
                     )}
-                    <span className={`text-sm font-medium ${
-                      deleteProgress.stage === 'success'
-                        ? 'text-green-700 dark:text-green-300'
-                        : deleteProgress.stage === 'error'
-                          ? 'text-red-700 dark:text-red-300'
-                          : ''
-                    }`}>
+                    <span
+                      className={`text-sm font-medium ${
+                        deleteProgress.stage === 'success'
+                          ? 'text-green-700 dark:text-green-300'
+                          : deleteProgress.stage === 'error'
+                            ? 'text-red-700 dark:text-red-300'
+                            : ''
+                      }`}
+                    >
                       {deleteProgress.stage === 'loading' && '正在删除'}
                       {deleteProgress.stage === 'success' && '删除完成'}
                       {deleteProgress.stage === 'error' && '删除失败'}
                     </span>
                   </div>
                   {deleteProgress.stage !== 'error' && (
-                    <span className={`shrink-0 text-sm font-medium ${
-                      deleteProgress.stage === 'success' ? 'text-green-700 dark:text-green-300' : ''
-                    }`}>
+                    <span
+                      className={`shrink-0 text-sm font-medium ${
+                        deleteProgress.stage === 'success'
+                          ? 'text-green-700 dark:text-green-300'
+                          : ''
+                      }`}
+                    >
                       {deleteProgress.progress}%
                     </span>
                   )}
@@ -1297,15 +1354,17 @@ function PluginConfigPageContent() {
                     className={`h-2 ${deleteProgress.stage === 'success' ? '[&>div]:bg-green-500' : ''}`}
                   />
                 )}
-                <p className={`break-words text-sm ${
-                  deleteProgress.stage === 'success'
-                    ? 'text-green-600 dark:text-green-400'
-                    : deleteProgress.stage === 'error'
-                      ? 'text-red-600 dark:text-red-400'
-                      : 'text-muted-foreground'
-                }`}>
+                <p
+                  className={`text-sm break-words ${
+                    deleteProgress.stage === 'success'
+                      ? 'text-green-600 dark:text-green-400'
+                      : deleteProgress.stage === 'error'
+                        ? 'text-red-600 dark:text-red-400'
+                        : 'text-muted-foreground'
+                  }`}
+                >
                   {deleteProgress.stage === 'error'
-                    ? (deleteProgress.error || deleteProgress.message || '删除失败')
+                    ? deleteProgress.error || deleteProgress.message || '删除失败'
                     : deleteProgress.message}
                 </p>
               </div>
@@ -1317,7 +1376,9 @@ function PluginConfigPageContent() {
                 onClick={closeDeletePluginDialog}
                 disabled={deleteProgress?.stage === 'loading'}
               >
-                {deleteProgress?.stage === 'success' || deleteProgress?.stage === 'error' ? '关闭' : '取消'}
+                {deleteProgress?.stage === 'success' || deleteProgress?.stage === 'error'
+                  ? '关闭'
+                  : '取消'}
               </Button>
               {deleteProgress?.stage !== 'success' && deleteProgress?.stage !== 'error' && (
                 <Button

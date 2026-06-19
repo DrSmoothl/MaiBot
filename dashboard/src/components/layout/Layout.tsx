@@ -29,7 +29,7 @@ export function Layout({ children }: LayoutProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const announce = useAnnounce()
   const isLogsPath = pathname === '/logs' || pathname.startsWith('/reasoning-process')
-  const workspaceMode = pathname.startsWith('/chat') ? 'chat' : isLogsPath ? 'logs' : 'settings'
+  const workspaceMode = pathname === '/chat' ? 'chat' : isLogsPath ? 'logs' : 'settings'
   const isSettingsWorkspace = workspaceMode === 'settings'
   const isChatWorkspace = workspaceMode === 'chat'
   const showBackToTop = isSettingsWorkspace
@@ -38,7 +38,6 @@ export function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [topbarCollapsed, setTopbarCollapsed] = useState(false)
-  const [tooltipsEnabled, setTooltipsEnabled] = useState(false) // 控制 tooltip 启用状态
   const [visibleWorkspaceMode, setVisibleWorkspaceMode] = useState<WorkspaceMode>(workspaceMode)
   const [visibleChildren, setVisibleChildren] = useState<LayoutProps['children']>(children)
   const [pendingWorkspace, setPendingWorkspace] = useState<{
@@ -47,20 +46,6 @@ export function Layout({ children }: LayoutProps) {
   } | null>(null)
   const { theme, setTheme } = useTheme()
   const menuSections = useMenuSections()
-
-  // 侧边栏状态变化时，延迟启用/禁用 tooltip
-  useEffect(() => {
-    if (sidebarOpen) {
-      // 侧边栏展开时，立即禁用 tooltip
-      setTooltipsEnabled(false)
-    } else {
-      // 侧边栏收起时，等待动画完成后再启用 tooltip
-      const timer = setTimeout(() => {
-        setTooltipsEnabled(true)
-      }, 350) // 稍大于 CSS transition duration (300ms)
-      return () => clearTimeout(timer)
-    }
-  }, [sidebarOpen])
 
   // 搜索快捷键监听（Cmd/Ctrl + K）
   useEffect(() => {
@@ -177,7 +162,6 @@ export function Layout({ children }: LayoutProps) {
                 <Sidebar
                   sidebarOpen={sidebarOpen}
                   mobileMenuOpen={mobileMenuOpen}
-                  tooltipsEnabled={tooltipsEnabled}
                   onMobileMenuClose={() => setMobileMenuOpen(false)}
                 />
               </motion.div>
@@ -190,7 +174,6 @@ export function Layout({ children }: LayoutProps) {
               <Sidebar
                 sidebarOpen={sidebarOpen}
                 mobileMenuOpen={mobileMenuOpen}
-                tooltipsEnabled={tooltipsEnabled}
                 onMobileMenuClose={() => setMobileMenuOpen(false)}
               />
             </div>

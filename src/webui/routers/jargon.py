@@ -1,11 +1,11 @@
 """黑话（俚语）管理路由"""
 
 from datetime import datetime
-from typing import Annotated, Any, Dict, List, Optional, Set
+from typing import Annotated, Any, Dict, List, Literal, Mapping, Optional, Set
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_
+from sqlalchemy import String as SQLString, cast, func, or_
 from sqlmodel import Session, col, delete, select
 
 import json
@@ -169,8 +169,8 @@ class JargonResponse(BaseModel):
     is_complete: bool = False
     is_global: bool = False
     created_by: JargonCreatedBy = JargonCreatedBy.AI
-    created_timestamp: datetime
-    updated_timestamp: datetime
+    created_timestamp: Any
+    updated_timestamp: Any
 
 
 class JargonListResponse(BaseModel):
@@ -382,7 +382,9 @@ def apply_jargon_list_filters(
     *,
     search: Optional[str],
     session_id: Optional[str],
+    jargon_status: Optional[Literal["confirmed_jargon", "confirmed_not_jargon", "pending"]],
     is_jargon: Optional[bool],
+    is_complete: Optional[bool],
     is_global: Optional[bool],
 ) -> Any:
     """向黑话列表查询追加筛选条件。"""
@@ -398,8 +400,17 @@ def apply_jargon_list_filters(
         if session_id_filter is not None:
             statement = statement.where(session_id_filter)
 
-    if is_jargon is not None:
+    if jargon_status == "confirmed_jargon":
+        statement = statement.where(col(Jargon.is_jargon) == True)  # noqa: E712
+    elif jargon_status == "confirmed_not_jargon":
+        statement = statement.where(col(Jargon.is_jargon) == False)  # noqa: E712
+    elif jargon_status == "pending":
+        statement = statement.where(col(Jargon.is_jargon).is_(None))
+    elif is_jargon is not None:
         statement = statement.where(col(Jargon.is_jargon) == is_jargon)
+
+    if is_complete is not None:
+        statement = statement.where(col(Jargon.is_complete) == is_complete)
 
     if is_global is not None:
         statement = statement.where(col(Jargon.is_global) == is_global)
@@ -467,6 +478,18 @@ def scopes_overlap(jargon: Jargon, target_session_ids: Set[str], target_is_globa
     return bool(target_session_ids.intersection(parse_session_id_dict(jargon.session_id_dict)))
 
 
+def normalize_jargon_created_by(created_by: Any, jargon_id: Optional[int]) -> JargonCreatedBy:
+    """兼容历史空值或异常值，并保持 WebUI 响应只输出合法创建来源。"""
+
+    if created_by in (JargonCreatedBy.MANUAL, JargonCreatedBy.MANUAL.value):
+        return JargonCreatedBy.MANUAL
+    if created_by in (JargonCreatedBy.AI, JargonCreatedBy.AI.value, None, ""):
+        return JargonCreatedBy.AI
+
+    logger.warning(f"黑话记录存在未知创建来源，已按 AI 展示: id={jargon_id}, created_by={created_by!r}")
+    return JargonCreatedBy.AI
+
+
 def jargon_to_dict(
     jargon: Jargon,
     session: Session,
@@ -505,10 +528,66 @@ def jargon_to_dict(
         "is_jargon": jargon.is_jargon,
         "is_complete": jargon.is_complete,
         "is_global": jargon.is_global,
-        "created_by": jargon.created_by,
+        "created_by": normalize_jargon_created_by(jargon.created_by, jargon.id),
         "created_timestamp": jargon.created_timestamp,
         "updated_timestamp": jargon.updated_timestamp,
     }
+
+
+def jargon_list_row_to_dict(
+    row: Mapping[str, Any],
+    session: Session,
+    chat_name_cache: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """将列表查询的原始列映射转换为 WebUI 可序列化字典。"""
+
+    session_ids = get_session_ids(str(row["session_id_dict"] or "{}"))
+    session_id = session_ids[0] if session_ids else ""
+
+    def resolve_chat_name(current_session_id: str) -> str:
+        if chat_name_cache is not None and current_session_id in chat_name_cache:
+            return chat_name_cache[current_session_id]
+        return get_display_name_for_session_id(current_session_id, session)
+
+    chat_names = [resolve_chat_name(current_session_id) for current_session_id in session_ids]
+    chat_name = chat_names[0] if chat_names else None
+
+    return {
+        "id": row["id"],
+        "content": row["content"],
+        "raw_content": row["raw_content"],
+        "meaning": row["meaning"],
+        "session_id": session_id,
+        "session_ids": session_ids,
+        "chat_name": chat_name,
+        "chat_names": chat_names,
+        "count": row["count"],
+        "is_jargon": row["is_jargon"],
+        "is_complete": row["is_complete"],
+        "is_global": row["is_global"],
+        "created_by": normalize_jargon_created_by(row["created_by"], row["id"]),
+        "created_timestamp": row["created_timestamp"] or "",
+        "updated_timestamp": row["updated_timestamp"] or "",
+    }
+
+
+def build_jargon_compatible_select() -> Any:
+    """构建黑话兼容读取列，避免历史异常值触发 ORM 类型转换错误。"""
+
+    return select(
+        col(Jargon.id).label("id"),
+        col(Jargon.content).label("content"),
+        col(Jargon.raw_content).label("raw_content"),
+        col(Jargon.meaning).label("meaning"),
+        col(Jargon.session_id_dict).label("session_id_dict"),
+        col(Jargon.count).label("count"),
+        col(Jargon.is_jargon).label("is_jargon"),
+        col(Jargon.is_complete).label("is_complete"),
+        col(Jargon.is_global).label("is_global"),
+        col(Jargon.created_by).label("created_by"),
+        cast(col(Jargon.created_timestamp), SQLString).label("created_timestamp"),
+        cast(col(Jargon.updated_timestamp), SQLString).label("updated_timestamp"),
+    )
 
 
 # ==================== API 端点 ====================
@@ -520,7 +599,12 @@ async def get_jargon_list(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     session_id: Optional[str] = Query(None, description="按聊天流ID筛选"),
+    jargon_status: Optional[Literal["confirmed_jargon", "confirmed_not_jargon", "pending"]] = Query(
+        None,
+        description="按黑话判定状态筛选",
+    ),
     is_jargon: Optional[bool] = Query(None, description="按是否是黑话筛选"),
+    is_complete: Optional[bool] = Query(None, description="按是否推断完成筛选"),
     is_global: Optional[bool] = Query(None, description="按是否全局筛选"),
 ) -> JargonListResponse:
     """获取黑话列表。
@@ -530,7 +614,9 @@ async def get_jargon_list(
         page_size: 每页数量，范围为 1-100。
         search: 搜索关键词。
         session_id: 聊天流 ID 筛选条件。
+        jargon_status: 黑话判定状态筛选条件。
         is_jargon: 是否为黑话的筛选条件。
+        is_complete: 是否推断完成的筛选条件。
         is_global: 是否为全局黑话的筛选条件。
 
     Returns:
@@ -538,10 +624,12 @@ async def get_jargon_list(
     """
     try:
         statement = apply_jargon_list_filters(
-            select(Jargon),
+            build_jargon_compatible_select(),
             search=search,
             session_id=session_id,
+            jargon_status=jargon_status,
             is_jargon=is_jargon,
+            is_complete=is_complete,
             is_global=is_global,
         ).order_by(col(Jargon.count).desc(), col(Jargon.id).desc())
 
@@ -549,19 +637,21 @@ async def get_jargon_list(
             select(Jargon.id),
             search=search,
             session_id=session_id,
+            jargon_status=jargon_status,
             is_jargon=is_jargon,
+            is_complete=is_complete,
             is_global=is_global,
         )
 
         with get_db_session() as session:
             total = count_jargon_query(session, count_statement)
             offset = (page - 1) * page_size
-            page_jargons = session.exec(statement.offset(offset).limit(page_size)).all()
+            page_rows = session.execute(statement.offset(offset).limit(page_size)).mappings().all()
             page_session_ids: List[str] = []
-            for jargon in page_jargons:
-                page_session_ids.extend(get_session_ids(jargon.session_id_dict))
+            for row in page_rows:
+                page_session_ids.extend(get_session_ids(str(row["session_id_dict"] or "{}")))
             chat_name_cache = build_session_display_name_cache(page_session_ids, session, include_message_fallback=True)
-            data = [jargon_to_dict(jargon, session, chat_name_cache) for jargon in page_jargons]
+            data = [jargon_list_row_to_dict(row, session, chat_name_cache) for row in page_rows]
 
         return JargonListResponse(
             success=True,
@@ -704,9 +794,12 @@ async def get_jargon_detail(jargon_id: int) -> JargonDetailResponse:
     """
     try:
         with get_db_session() as session:
-            if not (jargon := session.exec(select(Jargon).where(col(Jargon.id) == jargon_id)).first()):
+            row = session.execute(
+                build_jargon_compatible_select().where(col(Jargon.id) == jargon_id)
+            ).mappings().first()
+            if row is None:
                 raise HTTPException(status_code=404, detail="黑话不存在")
-            data = JargonResponse(**jargon_to_dict(jargon, session))
+            data = JargonResponse(**jargon_list_row_to_dict(row, session))
 
         return JargonDetailResponse(success=True, data=data)
 
@@ -741,7 +834,7 @@ async def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
                 (
                     jargon
                     for jargon in same_content_jargons
-                    if jargon.created_by == JargonCreatedBy.MANUAL
+                    if normalize_jargon_created_by(jargon.created_by, jargon.id) == JargonCreatedBy.MANUAL
                     and scopes_overlap(jargon, target_session_ids, request.is_global)
                 ),
                 None,
@@ -751,7 +844,7 @@ async def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
 
             replaced_ai_count = 0
             for existing_jargon in same_content_jargons:
-                if existing_jargon.created_by != JargonCreatedBy.AI:
+                if normalize_jargon_created_by(existing_jargon.created_by, existing_jargon.id) != JargonCreatedBy.AI:
                     continue
                 if not scopes_overlap(existing_jargon, target_session_ids, request.is_global):
                     continue

@@ -12,14 +12,12 @@ import { useMenuSections } from './use-menu-sections'
 interface SidebarProps {
   sidebarOpen: boolean
   mobileMenuOpen: boolean
-  tooltipsEnabled: boolean
   onMobileMenuClose: () => void
 }
 
 export function Sidebar({
   sidebarOpen,
   mobileMenuOpen,
-  tooltipsEnabled,
   onMobileMenuClose,
 }: SidebarProps) {
   const { t } = useTranslation()
@@ -98,7 +96,6 @@ export function Sidebar({
                       key={item.path}
                       item={item}
                       sidebarOpen={sidebarOpen}
-                      tooltipsEnabled={tooltipsEnabled}
                       onMobileMenuClose={onMobileMenuClose}
                     />
                   ))}

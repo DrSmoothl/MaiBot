@@ -171,14 +171,14 @@ export function EmojiList({
 
               {/* 操作按钮 - 悬停时显示 */}
               <div
-                className={`mt-1 flex gap-1 justify-center opacity-0 group-hover:opacity-100 transition-opacity ${
-                  cardSize === 'small' ? 'flex-wrap' : ''
+                className={`mt-1 flex justify-center opacity-0 transition-opacity group-hover:opacity-100 ${
+                  cardSize === 'small' ? 'flex-nowrap gap-0.5' : 'gap-1'
                 }`}
               >
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6"
+                  className={cardSize === 'small' ? 'h-5 w-5 flex-none' : 'h-6 w-6'}
                   onClick={(e) => {
                     e.stopPropagation()
                     onEdit(emoji)
@@ -190,7 +190,7 @@ export function EmojiList({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6"
+                  className={cardSize === 'small' ? 'h-5 w-5 flex-none' : 'h-6 w-6'}
                   onClick={(e) => {
                     e.stopPropagation()
                     onViewDetail(emoji)
@@ -203,7 +203,11 @@ export function EmojiList({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-green-600 hover:text-green-700"
+                    className={
+                      cardSize === 'small'
+                        ? 'h-5 w-5 flex-none text-green-600 hover:text-green-700'
+                        : 'h-6 w-6 text-green-600 hover:text-green-700'
+                    }
                     onClick={(e) => {
                       e.stopPropagation()
                       onRegister(emoji)
@@ -217,7 +221,11 @@ export function EmojiList({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-orange-600 hover:text-orange-700"
+                    className={
+                      cardSize === 'small'
+                        ? 'h-5 w-5 flex-none text-orange-600 hover:text-orange-700'
+                        : 'h-6 w-6 text-orange-600 hover:text-orange-700'
+                    }
                     onClick={(e) => {
                       e.stopPropagation()
                       onBan(emoji)
@@ -230,7 +238,11 @@ export function EmojiList({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6 text-red-600 hover:text-red-700"
+                  className={
+                    cardSize === 'small'
+                      ? 'h-5 w-5 flex-none text-red-600 hover:text-red-700'
+                      : 'h-6 w-6 text-red-600 hover:text-red-700'
+                  }
                   onClick={(e) => {
                     e.stopPropagation()
                     onDelete(emoji)

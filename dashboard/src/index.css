@@ -504,10 +504,6 @@
   --retro-paper-texture: none;
 }
 
-:root[data-dashboard-style='future-retro'][data-retro-strong-borders='false'] {
-  --retro-stroke: 1px;
-}
-
 :root[data-dashboard-style='future-retro'],
 :root[data-dashboard-style='future-retro'] body {
   background-color: var(--retro-paper);
@@ -718,8 +714,8 @@
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-main='true'] h1 {
   font-family: var(--retro-font-display);
-  font-size: clamp(3.35rem, 3vw, 4.15rem);
-  line-height: 0.98;
+  font-size: clamp(2.75rem, 2.55vw, 3.5rem);
+  line-height: 1.12;
   font-weight: 800;
 }
 
@@ -1035,6 +1031,11 @@
     165px 165px;
   box-shadow: none !important;
   color: var(--retro-ink) !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-dashboard-dialog-content='true'] {
+  border: 0 !important;
+  border-radius: 0 !important;
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-select-item='true'] {
@@ -1670,6 +1671,12 @@
 }
 
 :root[data-dashboard-style='future-retro']
+  [data-dashboard-accent-panel='true'][data-retro-stripes='true'][data-retro-stripe-divider='false']
+  > [data-dashboard-accent-panel-stripes='true'] {
+  border-right-width: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro']
   [data-dashboard-accent-panel='true'][data-retro-stripes='true']
   > [data-dashboard-accent-panel-content='true'] {
   padding-left: 0.75rem;
@@ -1784,10 +1791,23 @@
   border-color: var(--retro-ink) !important;
 }
 
+:root[data-dashboard-style='future-retro'] *:focus {
+  outline: none !important;
+  outline-offset: 0;
+  --tw-ring-color: transparent !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  box-shadow: none !important;
+}
+
 :root[data-dashboard-style='future-retro'] *:focus-visible {
   outline: none !important;
   outline-offset: 0;
-  box-shadow: none !important;
+}
+
+:root[data-dashboard-style='future-retro'][data-retro-focus-highlight='true'] *:focus-visible {
+  outline: 2px solid var(--retro-rust) !important;
+  outline-offset: 2px;
 }
 
 :root[data-dashboard-style='future-retro'] ::selection {
@@ -2254,6 +2274,15 @@
   /* 鼠标设备：保留原有 hover 效果，无需额外处理 */
   .touch-device-only {
     display: none;
+  }
+}
+
+@keyframes chat-management-text-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(var(--scroll-container-width) - 100%));
   }
 }
 /* ============================================================

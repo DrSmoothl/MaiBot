@@ -1156,24 +1156,21 @@ export function AppearanceTab() {
                 />
               </div>
             </div>
-
             <div className="bg-card rounded-lg border p-3 sm:p-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 space-y-0.5">
                   <Label
-                    htmlFor="future-retro-strong-borders"
+                    htmlFor="future-retro-focus-highlight"
                     className="cursor-pointer text-base font-medium"
                   >
-                    硬朗描边
+                    焦点高亮
                   </Label>
-                  <p className="text-muted-foreground text-sm">
-                    使用更强的描边、切角和机械面板边界。
-                  </p>
+                  <p className="text-muted-foreground text-sm">显示键盘焦点的橙色高亮。</p>
                 </div>
                 <Switch
-                  id="future-retro-strong-borders"
-                  checked={futureRetroConfig.strongBorders}
-                  onCheckedChange={(strongBorders) => updateFutureRetroConfig({ strongBorders })}
+                  id="future-retro-focus-highlight"
+                  checked={futureRetroConfig.focusHighlight}
+                  onCheckedChange={(focusHighlight) => updateFutureRetroConfig({ focusHighlight })}
                 />
               </div>
             </div>
@@ -1181,60 +1178,62 @@ export function AppearanceTab() {
         </div>
       )}
 
-      <div>
-        <div className="mb-3 flex items-center justify-between sm:mb-4">
-          <div>
-            <h3 className="text-base font-semibold sm:text-lg">
-              {t('settings.appearance.customCss')}
-            </h3>
-            <p className="text-muted-foreground mt-1 text-sm">
-              {t('settings.appearance.cssDescription')}
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setLocalCSS('')
-              updateThemeConfig({
-                styleCustomCSS: {
-                  ...themeConfig.styleCustomCSS,
-                  [dashboardStyle]: '',
-                },
-              })
-              setCssWarnings([])
-            }}
-            disabled={!activeCustomCSS}
-          >
-            <Trash2 className="mr-1 h-4 w-4" />
-            {t('settings.appearance.clearCss')}
-          </Button>
-        </div>
-
-        <div className="bg-card space-y-3 rounded-lg border p-3 sm:p-4">
-          <CodeEditor
-            value={localCSS}
-            language="css"
-            height="250px"
-            placeholder={t('settings.appearance.cssPlaceholder')}
-            onChange={handleCSSChange}
-          />
-
-          {cssWarnings.length > 0 && (
-            <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950/30">
-              <div className="mb-1 flex items-center gap-2 text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                <AlertTriangle className="h-4 w-4" />
-                {t('settings.appearance.cssWarningTitle')}
-              </div>
-              <ul className="ml-6 list-disc space-y-0.5 text-xs text-yellow-700 dark:text-yellow-300">
-                {cssWarnings.map((w, i) => (
-                  <li key={i}>{w}</li>
-                ))}
-              </ul>
+      {dashboardStyle !== 'future-retro' && (
+        <div>
+          <div className="mb-3 flex items-center justify-between sm:mb-4">
+            <div>
+              <h3 className="text-base font-semibold sm:text-lg">
+                {t('settings.appearance.customCss')}
+              </h3>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t('settings.appearance.cssDescription')}
+              </p>
             </div>
-          )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setLocalCSS('')
+                updateThemeConfig({
+                  styleCustomCSS: {
+                    ...themeConfig.styleCustomCSS,
+                    [dashboardStyle]: '',
+                  },
+                })
+                setCssWarnings([])
+              }}
+              disabled={!activeCustomCSS}
+            >
+              <Trash2 className="mr-1 h-4 w-4" />
+              {t('settings.appearance.clearCss')}
+            </Button>
+          </div>
+
+          <div className="bg-card space-y-3 rounded-lg border p-3 sm:p-4">
+            <CodeEditor
+              value={localCSS}
+              language="css"
+              height="250px"
+              placeholder={t('settings.appearance.cssPlaceholder')}
+              onChange={handleCSSChange}
+            />
+
+            {cssWarnings.length > 0 && (
+              <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950/30">
+                <div className="mb-1 flex items-center gap-2 text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                  <AlertTriangle className="h-4 w-4" />
+                  {t('settings.appearance.cssWarningTitle')}
+                </div>
+                <ul className="ml-6 list-disc space-y-0.5 text-xs text-yellow-700 dark:text-yellow-300">
+                  {cssWarnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 动效设置 */}
       <div>
@@ -1264,65 +1263,71 @@ export function AppearanceTab() {
       </div>
 
       {/* 主题导入/导出 */}
-      <div>
-        <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">
-          {t('settings.appearance.importExportTheme')}
-        </h3>
-        <div className="bg-card space-y-3 rounded-lg border p-3 sm:p-4">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {/* 导出按钮 */}
-            <Button onClick={handleExport} variant="outline" className="gap-2">
-              <Download className="h-4 w-4" />
-              {t('settings.appearance.exportTheme')}
-            </Button>
+      {dashboardStyle !== 'future-retro' && (
+        <div>
+          <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">
+            {t('settings.appearance.importExportTheme')}
+          </h3>
+          <div className="bg-card space-y-3 rounded-lg border p-3 sm:p-4">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {/* 导出按钮 */}
+              <Button onClick={handleExport} variant="outline" className="gap-2">
+                <Download className="h-4 w-4" />
+                {t('settings.appearance.exportTheme')}
+              </Button>
 
-            {/* 导入按钮 */}
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              variant="outline"
-              className="gap-2"
-            >
-              <Upload className="h-4 w-4" />
-              {t('settings.appearance.importTheme')}
-            </Button>
+              {/* 导入按钮 */}
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                variant="outline"
+                className="gap-2"
+              >
+                <Upload className="h-4 w-4" />
+                {t('settings.appearance.importTheme')}
+              </Button>
 
-            {/* 重置按钮 */}
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" className="gap-2">
-                  <RotateCcw className="h-4 w-4" />
-                  {t('settings.appearance.resetTheme')}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{t('settings.appearance.confirmResetTheme')}</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {t('settings.appearance.confirmResetThemeDesc')}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleResetTheme}>
-                    {t('settings.appearance.confirmResetAction')}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+              {/* 重置按钮 */}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <RotateCcw className="h-4 w-4" />
+                    {t('settings.appearance.resetTheme')}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      {t('settings.appearance.confirmResetTheme')}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t('settings.appearance.confirmResetThemeDesc')}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleResetTheme}>
+                      {t('settings.appearance.confirmResetAction')}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+
+            {/* 隐藏的文件输入 */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleImport}
+              className="hidden"
+            />
+
+            <p className="text-muted-foreground text-xs">
+              {t('settings.appearance.exportDesc')}
+            </p>
           </div>
-
-          {/* 隐藏的文件输入 */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleImport}
-            className="hidden"
-          />
-
-          <p className="text-muted-foreground text-xs">{t('settings.appearance.exportDesc')}</p>
         </div>
-      </div>
+      )}
     </div>
   )
 }

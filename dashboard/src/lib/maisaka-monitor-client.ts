@@ -61,6 +61,9 @@ export interface MessageIngestedEvent {
   speaker_name: string
   content: string
   message_id: string
+  platform?: string
+  user_id?: string
+  group_id?: string
   timestamp: number
 }
 
@@ -70,6 +73,9 @@ export interface MessageSentEvent {
   content: string
   message_id: string
   source_kind?: string
+  platform?: string
+  user_id?: string
+  group_id?: string
   timestamp: number
 }
 
