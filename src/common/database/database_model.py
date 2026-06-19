@@ -242,15 +242,15 @@ class HighFrequencyTerm(SQLModel, table=True):
 
     __tablename__ = "high_frequency_terms"  # type: ignore
     __table_args__ = (
-        UniqueConstraint("normalized_term", name="uq_high_frequency_terms_normalized_term"),
-        Index("ix_high_frequency_terms_rank", "rank"),
+        UniqueConstraint("chat_id", "term", name="uq_high_frequency_terms_chat_term"),
+        Index("ix_high_frequency_terms_chat_id", "chat_id"),
+        Index("ix_high_frequency_terms_chat_rank", "chat_id", "rank"),
         Index("ix_high_frequency_terms_updated_at", "updated_at"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    chat_id: str = Field(max_length=255)
     term: str = Field(sa_column=Column(Text, nullable=False))
-    normalized_term: str = Field(sa_column=Column(Text, nullable=False))
-    term_type: str = Field(default="word", max_length=20)
     rank: int = Field(default=0)
     occurrence_count: int = Field(default=0)
     message_count: int = Field(default=0)

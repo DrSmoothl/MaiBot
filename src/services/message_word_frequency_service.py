@@ -1,7 +1,7 @@
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Sequence
 
 from sqlmodel import select
 
@@ -29,6 +29,7 @@ _CN_STOP_WORDS = {
     "一些",
     "一样",
     "一定",
+    "一直",
     "一条",
     "一种",
     "一起",
@@ -126,16 +127,22 @@ _CN_STOP_WORDS = {
     "不了",
     "之前",
     "出来",
+    "只能",
+    "多少",
+    "今天",
     "图片",
     "喜欢",
     "好像",
     "好看",
     "哈哈",
     "哈哈哈",
+    "开始",
     "小时",
+    "分钟",
     "应该",
     "我要",
     "时候",
+    "时间",
     "消息",
     "确实",
     "聊天",
@@ -144,11 +151,16 @@ _CN_STOP_WORDS = {
     "需要",
     "感觉",
     "看看",
+    "看到",
     "群友",
     "使用",
     "可能",
     "问题",
     "这种",
+    "里面",
+    "内容",
+    "用户",
+    "啊啊啊",
     "东西",
 }
 _EN_STOP_WORDS = {
@@ -224,7 +236,6 @@ class WordFrequencyItem:
     message_count: int
     frequency: float
     message_frequency: float
-    term_type: Literal["word", "phrase"] = "word"
 
 
 def update_high_frequency_terms_from_context_messages(
@@ -236,23 +247,29 @@ def update_high_frequency_terms_from_context_messages(
 ) -> int:
     """从 Maisaka 裁切上下文消息批次中提取格式化用户消息，并增量更新高频词词库。"""
 
-    texts = _extract_user_texts_from_context(context_messages)
-    if not texts:
+    texts_by_chat_id = _extract_user_texts_by_chat_id_from_context(context_messages)
+    if not texts_by_chat_id:
         return 0
 
-    terms = _build_message_word_frequency_terms(
-        texts,
-        limit=limit,
-        min_count=min_count,
-    )
-    if not terms:
-        return 0
+    updated_count = 0
+    generated_at = datetime.now()
+    for chat_id, texts in texts_by_chat_id.items():
+        terms = _build_message_word_frequency_terms(
+            texts,
+            limit=limit,
+            min_count=min_count,
+        )
+        if not terms:
+            continue
 
-    return _merge_high_frequency_terms(
-        terms,
-        generated_at=datetime.now(),
-        max_terms=max_terms,
-    )
+        updated_count += _merge_high_frequency_terms(
+            chat_id=chat_id,
+            terms=terms,
+            generated_at=generated_at,
+            max_terms=max_terms,
+        )
+
+    return updated_count
 
 
 def _build_message_word_frequency_terms(
@@ -302,40 +319,42 @@ def _build_message_word_frequency_terms(
 
 
 def _merge_high_frequency_terms(
+    chat_id: str,
     terms: Sequence[WordFrequencyItem],
     *,
     generated_at: datetime,
     max_terms: int = 1000,
 ) -> int:
-    """将一批统计结果合并进当前高频词词库，保持每个归一化词仅一行。"""
+    """将一批统计结果合并进当前聊天的高频词词库，保持同一聊天内每个词仅一行。"""
 
+    normalized_chat_id = str(chat_id).strip()
+    if not normalized_chat_id:
+        return 0
     max_term_count = max(1, int(max_terms))
     with get_db_session(auto_commit=False) as session:
-        records = list(session.exec(select(HighFrequencyTerm)).all())
-        records_by_term = {record.normalized_term: record for record in records if record.normalized_term}
+        records = list(session.exec(select(HighFrequencyTerm).where(HighFrequencyTerm.chat_id == normalized_chat_id)).all())
+        records_by_term = {_normalize_term_for_match(record.term): record for record in records if record.term}
         merged_count = 0
 
         for item in terms:
-            normalized_term = _normalize_term_for_match(item.term)
-            if not normalized_term:
+            term_key = _normalize_term_for_match(item.term)
+            if not term_key:
                 continue
 
-            existing_record = records_by_term.get(normalized_term)
+            existing_record = records_by_term.get(term_key)
             if existing_record is None:
                 existing_record = HighFrequencyTerm(
+                    chat_id=normalized_chat_id,
                     term=item.term,
-                    normalized_term=normalized_term,
-                    term_type=item.term_type,
                     occurrence_count=0,
                     message_count=0,
                     created_at=generated_at,
                     updated_at=generated_at,
                 )
                 records.append(existing_record)
-                records_by_term[normalized_term] = existing_record
+                records_by_term[term_key] = existing_record
 
             existing_record.term = item.term
-            existing_record.term_type = item.term_type
             existing_record.occurrence_count += item.count
             existing_record.message_count += item.message_count
             existing_record.updated_at = generated_at
@@ -351,9 +370,9 @@ def _merge_high_frequency_terms(
     return merged_count
 
 
-def _extract_user_texts_from_context(context_messages: Sequence[object]) -> list[str]:
-    texts: list[str] = []
-    seen_message_ids: set[str] = set()
+def _extract_user_texts_by_chat_id_from_context(context_messages: Sequence[object]) -> dict[str, list[str]]:
+    texts_by_chat_id: dict[str, list[str]] = {}
+    seen_message_keys: set[tuple[str, str]] = set()
 
     for context_message in context_messages:
         if not isinstance(context_message, SessionBackedMessage):
@@ -361,19 +380,30 @@ def _extract_user_texts_from_context(context_messages: Sequence[object]) -> list
         if context_message.source_kind != "user":
             continue
 
+        chat_id = _extract_chat_id_from_context_message(context_message)
+        if not chat_id:
+            continue
+
         message_id = str(context_message.message_id or "").strip()
         if message_id:
-            if message_id in seen_message_ids:
+            message_key = (chat_id, message_id)
+            if message_key in seen_message_keys:
                 continue
-            seen_message_ids.add(message_id)
+            seen_message_keys.add(message_key)
 
         text = _extract_text_from_maisaka_components(context_message.raw_message.components)
         if not text:
             continue
 
-        texts.append(text)
+        texts_by_chat_id.setdefault(chat_id, []).append(text)
 
-    return texts
+    return texts_by_chat_id
+
+
+def _extract_chat_id_from_context_message(context_message: SessionBackedMessage) -> str:
+    if context_message.original_message is None:
+        return ""
+    return str(context_message.original_message.session_id).strip()
 
 
 def _extract_text_from_maisaka_components(components: Sequence[object]) -> str:
@@ -413,14 +443,12 @@ def _rerank_high_frequency_records(
     return kept_records, removed_records
 
 
-def _high_frequency_record_sort_key(record: HighFrequencyTerm) -> tuple[int, int, int, int, str]:
-    phrase_priority = 0 if record.term_type == "phrase" else 1
+def _high_frequency_record_sort_key(record: HighFrequencyTerm) -> tuple[int, int, int, str]:
     return (
         -record.occurrence_count,
         -record.message_count,
-        phrase_priority,
         -len(record.term or ""),
-        record.normalized_term or "",
+        record.term or "",
     )
 
 
@@ -514,7 +542,6 @@ def _build_frequency_items(
         _counter_to_items(
             counter=word_counter,
             message_counter=word_message_counter,
-            term_type="word",
             message_count=message_count,
             total_term_count=total_term_count,
             min_count=min_count,
@@ -524,7 +551,6 @@ def _build_frequency_items(
         _counter_to_items(
             counter=phrase_counter,
             message_counter=phrase_message_counter,
-            term_type="phrase",
             message_count=message_count,
             total_term_count=total_term_count,
             min_count=min_count,
@@ -538,7 +564,6 @@ def _counter_to_items(
     *,
     counter: Counter[str],
     message_counter: Counter[str],
-    term_type: Literal["word", "phrase"],
     message_count: int,
     total_term_count: int,
     min_count: int,
@@ -555,15 +580,13 @@ def _counter_to_items(
                 message_count=term_message_count,
                 frequency=count / total_term_count if total_term_count > 0 else 0.0,
                 message_frequency=term_message_count / message_count if message_count > 0 else 0.0,
-                term_type=term_type,
             )
         )
     return items
 
 
-def _frequency_item_sort_key(item: WordFrequencyItem) -> tuple[int, int, int, int, str]:
-    phrase_priority = 0 if item.term_type == "phrase" else 1
-    return (-item.count, -item.message_count, phrase_priority, -len(item.term), item.term)
+def _frequency_item_sort_key(item: WordFrequencyItem) -> tuple[int, int, int, str]:
+    return (-item.count, -item.message_count, -len(item.term), item.term)
 
 
 def _contains_cjk(text: str) -> bool:
