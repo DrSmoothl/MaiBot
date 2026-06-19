@@ -96,6 +96,15 @@ export interface ItemFieldDefinition {
   label?: string
   placeholder?: string
   default?: unknown
+  multiple?: boolean
+  choices?: unknown[]
+  min?: number
+  max?: number
+  step?: number
+  item_type?: string
+  item_fields?: Record<string, ItemFieldDefinition>
+  min_items?: number
+  max_items?: number
   i18n?: Record<string, Record<string, string>>
 }
 
@@ -109,6 +118,7 @@ export interface ConfigFieldSchema {
   description: string
   example?: string
   required: boolean
+  multiple?: boolean
   choices?: unknown[]
   min?: number
   max?: number

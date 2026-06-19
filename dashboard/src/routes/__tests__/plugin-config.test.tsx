@@ -129,4 +129,94 @@ describe('PluginConfigPage 特征化', () => {
     await user.click(screen.getByRole('button', { name: /保存/ }))
     await waitFor(() => expect(pluginApi.updatePluginConfigRaw).toHaveBeenCalled())
   })
+
+  it('可视化模式下将 multiple=true 的 select 字段保存为字符串数组', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginApi.getPluginConfigSchema).mockResolvedValue({
+      plugin_info: { name: 'Emoji Plugin', version: '1.0.0', description: 'desc' },
+      sections: {
+        batch: {
+          name: 'batch',
+          title: '批量配置',
+          collapsed: false,
+          order: 0,
+          fields: {
+            push_format: {
+              name: 'push_format',
+              type: 'select',
+              default: [],
+              description: '推送格式',
+              required: false,
+              choices: ['image', 'text'],
+              multiple: true,
+              label: '推送格式',
+              hidden: false,
+              disabled: false,
+              order: 0,
+              ui_type: 'select',
+            },
+          },
+        },
+      },
+      layout: { type: 'auto', tabs: [] },
+    } as never)
+    vi.mocked(pluginApi.getPluginConfig).mockResolvedValue({
+      batch: { push_format: [] },
+    } as never)
+
+    render(<PluginConfigPage />)
+    await user.click(await screen.findByRole('button', { name: /Emoji Plugin/ }))
+
+    await screen.findByText('推送格式')
+    await user.click((await screen.findAllByRole('combobox'))[0])
+    await user.click(await screen.findByText('image'))
+    await user.click(await screen.findByText('text'))
+    await user.click(screen.getByRole('button', { name: /保存/ }))
+
+    await waitFor(() =>
+      expect(pluginApi.updatePluginConfig).toHaveBeenCalledWith('test.emoji', {
+        batch: { push_format: ['image', 'text'] },
+      })
+    )
+  })
+
+  it('可视化模式下将 disabled 的多选字段渲染为禁用态', async () => {
+    vi.mocked(pluginApi.getPluginConfigSchema).mockResolvedValue({
+      plugin_info: { name: 'Emoji Plugin', version: '1.0.0', description: 'desc' },
+      sections: {
+        batch: {
+          name: 'batch',
+          title: '批量配置',
+          collapsed: false,
+          order: 0,
+          fields: {
+            push_format: {
+              name: 'push_format',
+              type: 'select',
+              default: ['image'],
+              description: '推送格式',
+              required: false,
+              choices: ['image', 'text'],
+              multiple: true,
+              label: '推送格式',
+              hidden: false,
+              disabled: true,
+              order: 0,
+              ui_type: 'select',
+            },
+          },
+        },
+      },
+      layout: { type: 'auto', tabs: [] },
+    } as never)
+    vi.mocked(pluginApi.getPluginConfig).mockResolvedValue({
+      batch: { push_format: ['image'] },
+    } as never)
+
+    render(<PluginConfigPage />)
+    await userEvent.click(await screen.findByRole('button', { name: /Emoji Plugin/ }))
+
+    await screen.findByText('推送格式')
+    expect((await screen.findAllByRole('combobox'))[0]).toBeDisabled()
+  })
 })

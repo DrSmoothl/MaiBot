@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ListFieldEditor } from '@/components/ListFieldEditor'
+import { MultiSelect } from '@/components/ui/multi-select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { CodeEditor } from '@/components/CodeEditor'
 import { useTheme } from '@/components/use-theme'
@@ -218,6 +219,33 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
       )
 
     case 'select':
+      if (field.multiple) {
+        const selectedValues = Array.isArray(value)
+          ? value.map(v => String(v))
+          : Array.isArray(field.default)
+            ? field.default.map(v => String(v))
+            : []
+
+        return (
+          <div className="space-y-2">
+            <Label>{label}</Label>
+            <MultiSelect
+              options={(field.choices ?? []).map((choice) => ({
+                label: String(choice),
+                value: String(choice),
+              }))}
+              selected={selectedValues}
+              onChange={onChange}
+              placeholder={placeholder || '请选择'}
+              disabled={field.disabled}
+            />
+            {hint && (
+              <p className="text-xs text-muted-foreground">{hint}</p>
+            )}
+          </div>
+        )
+      }
+
       return (
         <div className="space-y-2">
           <Label>{label}</Label>
