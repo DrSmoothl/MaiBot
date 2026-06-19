@@ -1070,6 +1070,10 @@
   padding: 0.375rem 0.25rem !important;
 }
 
+:root[data-dashboard-style='future-retro'] [data-emoji-status-tabs='true'] {
+  height: 2.5rem !important;
+}
+
 :root[data-dashboard-style='future-retro']
   [data-config-bot-mode-tabs='true']
   [data-dashboard-tabs-trigger='true'] {
