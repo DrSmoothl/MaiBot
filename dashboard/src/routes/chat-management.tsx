@@ -12,8 +12,8 @@ import {
   UserRound,
   UsersRound,
 } from 'lucide-react'
-import type { CSSProperties, ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import type { CSSProperties, PointerEvent, ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -22,7 +22,6 @@ import {
   Dialog,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -196,13 +195,105 @@ function ConfigStatusRow({ title, status }: { title: string; status: ChatLearnin
   )
 }
 
-type TalkFrequencyEditMode = 'input' | 'slider'
+type TalkFrequencyEditMode = 'input' | 'slider' | 'timeline'
+type TimelineEdge = 'end' | 'start'
+
+interface TimelineRange {
+  end: number
+  start: number
+}
+
+const DAY_MINUTES = 24 * 60
+const TIMELINE_TICKS = [0, 3, 6, 9, 12, 15, 18, 21, 24]
+const TIMELINE_DRAG_STEP_MINUTES = 5
 
 function clampTalkFrequencyValue(value: number): number {
   if (!Number.isFinite(value)) {
     return 0
   }
   return Math.max(0, Math.min(1, value))
+}
+
+function parseTimelineMinute(value: string): number | null {
+  const match = /^(\d{1,2}):(\d{1,2})$/.exec(value.trim())
+  if (!match) {
+    return null
+  }
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+    return null
+  }
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null
+  }
+  return hour * 60 + minute
+}
+
+function formatTimelineMinute(minute: number): string {
+  const normalizedMinute = Math.max(0, Math.min(DAY_MINUTES - 1, Math.round(minute)))
+  const hour = Math.floor(normalizedMinute / 60)
+  const minuteInHour = normalizedMinute % 60
+  return `${hour.toString().padStart(2, '0')}:${minuteInHour.toString().padStart(2, '0')}`
+}
+
+function parseTalkTimeRange(time: string): TimelineRange | null {
+  const normalizedTime = time.trim()
+  if (!normalizedTime || normalizedTime === '*') {
+    return { start: 0, end: DAY_MINUTES - 1 }
+  }
+  const [startRaw, endRaw, extra] = normalizedTime.split('-')
+  if (extra !== undefined) {
+    return null
+  }
+  const start = startRaw ? parseTimelineMinute(startRaw) : null
+  const end = endRaw ? parseTimelineMinute(endRaw) : null
+  if (start === null || end === null) {
+    return null
+  }
+  return { start, end }
+}
+
+function formatTalkTimeRange(range: TimelineRange): string {
+  return `${formatTimelineMinute(range.start)}-${formatTimelineMinute(range.end)}`
+}
+
+function getTimelineSegments(range: TimelineRange): Array<{ left: number; width: number }> {
+  if (range.start <= range.end) {
+    return [
+      {
+        left: (range.start / DAY_MINUTES) * 100,
+        width: ((range.end - range.start + 1) / DAY_MINUTES) * 100,
+      },
+    ]
+  }
+  return [
+    {
+      left: (range.start / DAY_MINUTES) * 100,
+      width: ((DAY_MINUTES - range.start) / DAY_MINUTES) * 100,
+    },
+    {
+      left: 0,
+      width: ((range.end + 1) / DAY_MINUTES) * 100,
+    },
+  ]
+}
+
+function getTimelineMinuteFromClient(clientX: number, timelineElement: HTMLElement): number {
+  const rect = timelineElement.getBoundingClientRect()
+  const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0
+  const rawMinute = Math.max(0, Math.min(DAY_MINUTES - 1, ratio * DAY_MINUTES))
+  return Math.round(rawMinute / TIMELINE_DRAG_STEP_MINUTES) * TIMELINE_DRAG_STEP_MINUTES
+}
+
+function talkValueColor(value: number): string {
+  if (value >= 0.75) {
+    return 'bg-emerald-500'
+  }
+  if (value >= 0.45) {
+    return 'bg-amber-500'
+  }
+  return 'bg-sky-500'
 }
 
 function getExactTalkRules(detail: ChatStreamDetail): ChatTalkFrequencyRule[] {
@@ -405,9 +496,260 @@ function TalkFrequencyRuleEditor({
   )
 }
 
+function TalkFrequencyTimelineRule({
+  detail,
+  rule,
+}: {
+  detail: ChatStreamDetail
+  rule?: ChatTalkFrequencyRule
+}) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const isNewRule = !rule
+  const [time, setTime] = useState(rule?.time || '00:00-23:59')
+  const [value, setValue] = useState(() =>
+    clampTalkFrequencyValue(rule?.value ?? detail.talk_frequency.effective_value)
+  )
+  const draggingEdgeRef = useRef<TimelineEdge | null>(null)
+  const range = parseTalkTimeRange(time)
+  const draggableRange = range && time.trim() !== '' && time.trim() !== '*'
+  const segments = range ? getTimelineSegments(range) : []
+
+  useEffect(() => {
+    setTime(rule?.time || '00:00-23:59')
+    setValue(clampTalkFrequencyValue(rule?.value ?? detail.talk_frequency.effective_value))
+  }, [detail.session_id, detail.talk_frequency.effective_value, rule])
+
+  const updateDetailCache = (updatedDetail: ChatStreamDetail) => {
+    queryClient.setQueryData(['chat-stream-detail', detail.session_id], updatedDetail)
+    void queryClient.invalidateQueries({ queryKey: ['chat-streams'] })
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updateChatStreamTalkFrequency(detail.session_id, {
+        previous_time: rule?.time ?? null,
+        time: time.trim(),
+        value: clampTalkFrequencyValue(value),
+      }),
+    onSuccess: (updatedDetail) => {
+      updateDetailCache(updatedDetail)
+      toast({
+        title: isNewRule ? '发言频率规则已新增' : '发言频率规则已保存',
+        description: '已写入当前聊天流的精确动态频率规则。',
+      })
+    },
+    onError: (error) => {
+      toast({
+        title: '保存发言频率失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteChatStreamTalkFrequency(detail.session_id, rule?.time ?? ''),
+    onSuccess: (updatedDetail) => {
+      updateDetailCache(updatedDetail)
+      toast({
+        title: '发言频率规则已删除',
+        description: '已删除当前聊天流的这条精确规则。',
+      })
+    },
+    onError: (error) => {
+      toast({
+        title: '删除发言频率规则失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    },
+  })
+
+  const updateTimeFromPointer = (event: PointerEvent<HTMLElement>, edge: TimelineEdge) => {
+    if (!range) {
+      return
+    }
+    const timelineElement = event.currentTarget.closest('[data-chat-talk-timeline-track]')
+    if (!(timelineElement instanceof HTMLElement)) {
+      return
+    }
+    const nextMinute = getTimelineMinuteFromClient(event.clientX, timelineElement)
+    const nextRange =
+      edge === 'start'
+        ? { ...range, start: nextMinute }
+        : { ...range, end: nextMinute }
+    setTime(formatTalkTimeRange(nextRange))
+  }
+
+  const startDrag = (event: PointerEvent<HTMLElement>, edge: TimelineEdge) => {
+    event.preventDefault()
+    draggingEdgeRef.current = edge
+    event.currentTarget.setPointerCapture(event.pointerId)
+    updateTimeFromPointer(event, edge)
+  }
+
+  return (
+    <div className="grid gap-3 rounded-md border bg-muted/25 p-3 lg:grid-cols-[7rem_minmax(18rem,1fr)_8rem_8rem] lg:items-center">
+      <div className="min-w-0">
+        <Input
+          value={time}
+          placeholder="HH:MM-HH:MM"
+          onChange={(event) => setTime(event.target.value)}
+        />
+      </div>
+      <div className="min-w-0">
+        <div className="relative mb-1 h-4 px-1 text-[10px] text-muted-foreground">
+          {TIMELINE_TICKS.map((hour) => (
+            <span
+              key={hour}
+              className="absolute -translate-x-1/2"
+              style={{ left: `${(hour / 24) * 100}%` }}
+            >
+              {hour.toString().padStart(2, '0')}
+            </span>
+          ))}
+        </div>
+        <div className="relative h-8 rounded-md border bg-background" data-chat-talk-timeline-track>
+          {TIMELINE_TICKS.slice(1, -1).map((hour) => (
+            <span
+              key={hour}
+              className="absolute top-0 h-full border-l border-dashed border-muted-foreground/20"
+              style={{ left: `${(hour / 24) * 100}%` }}
+            />
+          ))}
+          {segments.map((segment, index) => (
+            <span
+              key={index}
+              className={cn(
+                'absolute top-1/2 h-4 -translate-y-1/2 rounded-sm opacity-85',
+                talkValueColor(value),
+                !range && 'opacity-35'
+              )}
+              style={{ left: `${segment.left}%`, width: `${segment.width}%` }}
+            />
+          ))}
+          {draggableRange && (
+            <>
+              <button
+                type="button"
+                className="absolute top-1/2 h-7 w-2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-background bg-foreground/80"
+                style={{ left: `${(range.start / DAY_MINUTES) * 100}%` }}
+                aria-label="调整开始时间"
+                onPointerDown={(event) => startDrag(event, 'start')}
+                onPointerMove={(event) => {
+                  if (draggingEdgeRef.current === 'start' && event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    updateTimeFromPointer(event, 'start')
+                  }
+                }}
+                onPointerUp={(event) => {
+                  draggingEdgeRef.current = null
+                  event.currentTarget.releasePointerCapture(event.pointerId)
+                }}
+              />
+              <button
+                type="button"
+                className="absolute top-1/2 h-7 w-2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-background bg-foreground/80"
+                style={{ left: `${((range.end + 1) / DAY_MINUTES) * 100}%` }}
+                aria-label="调整结束时间"
+                onPointerDown={(event) => startDrag(event, 'end')}
+                onPointerMove={(event) => {
+                  if (draggingEdgeRef.current === 'end' && event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    updateTimeFromPointer(event, 'end')
+                  }
+                }}
+                onPointerUp={(event) => {
+                  draggingEdgeRef.current = null
+                  event.currentTarget.releasePointerCapture(event.pointerId)
+                }}
+              />
+            </>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Slider
+          value={[value]}
+          min={0}
+          max={1}
+          step={0.01}
+          onValueChange={(values) => setValue(clampTalkFrequencyValue(values[0] ?? 0))}
+          data-dashboard-slider="config"
+          data-dashboard-slider-value-format="fixed-2"
+        />
+        <span className="w-10 text-right font-mono text-xs tabular-nums">{value.toFixed(2)}</span>
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={saveMutation.isPending}
+          onClick={() => saveMutation.mutate()}
+        >
+          {saveMutation.isPending ? '保存中...' : isNewRule ? '新增' : '保存'}
+        </Button>
+        {!isNewRule && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            disabled={deleteMutation.isPending}
+            aria-label={`删除时间段 ${rule.time || '默认'} 的发言频率规则`}
+            onClick={() => deleteMutation.mutate()}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TalkFrequencyTimelineEditor({
+  detail,
+  exactRules,
+}: {
+  detail: ChatStreamDetail
+  exactRules: ChatTalkFrequencyRule[]
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-[7rem_minmax(18rem,1fr)_8rem_8rem] gap-3 px-3 text-[11px] text-muted-foreground">
+        <div>时间段</div>
+        <div>时间轴</div>
+        <div>频率</div>
+        <div className="text-right">操作</div>
+      </div>
+      {exactRules.length === 0 ? (
+        <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          当前聊天流还没有专属发言频率规则。
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {exactRules.map((rule, index) => (
+            <TalkFrequencyTimelineRule
+              key={`${rule.time}:${index}`}
+              detail={detail}
+              rule={rule}
+            />
+          ))}
+        </div>
+      )}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Plus className="h-4 w-4" />
+          新增规则
+        </div>
+        <TalkFrequencyTimelineRule detail={detail} />
+      </div>
+    </div>
+  )
+}
+
 function TalkFrequencyEditor({ detail }: { detail: ChatStreamDetail }) {
   const exactRules = useMemo(() => getExactTalkRules(detail), [detail])
-  const [mode, setMode] = useState<TalkFrequencyEditMode>('slider')
+  const [mode, setMode] = useState<TalkFrequencyEditMode>('timeline')
 
   return (
     <div className="space-y-3 rounded-md border bg-muted/10 p-3">
@@ -419,6 +761,15 @@ function TalkFrequencyEditor({ detail }: { detail: ChatStreamDetail }) {
           </div>
         </div>
         <div className="inline-flex shrink-0 rounded-md border bg-background p-1">
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === 'timeline' ? 'secondary' : 'ghost'}
+            className="h-7"
+            onClick={() => setMode('timeline')}
+          >
+            时间轴
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -440,30 +791,35 @@ function TalkFrequencyEditor({ detail }: { detail: ChatStreamDetail }) {
         </div>
       </div>
 
-      {exactRules.length === 0 ? (
-        <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-          当前聊天流还没有专属发言频率规则。
-        </div>
+      {mode === 'timeline' ? (
+        <TalkFrequencyTimelineEditor detail={detail} exactRules={exactRules} />
       ) : (
-        <div className="space-y-2">
-          {exactRules.map((rule, index) => (
-            <TalkFrequencyRuleEditor
-              key={`${rule.time}:${index}`}
-              detail={detail}
-              mode={mode}
-              rule={rule}
-            />
-          ))}
+        <div className="space-y-3">
+          {exactRules.length === 0 ? (
+            <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+              当前聊天流还没有专属发言频率规则。
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {exactRules.map((rule, index) => (
+                <TalkFrequencyRuleEditor
+                  key={`${rule.time}:${index}`}
+                  detail={detail}
+                  mode={mode}
+                  rule={rule}
+                />
+              ))}
+            </div>
+          )}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Plus className="h-4 w-4" />
+              新增规则
+            </div>
+            <TalkFrequencyRuleEditor detail={detail} mode={mode} />
+          </div>
         </div>
       )}
-
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <Plus className="h-4 w-4" />
-          新增规则
-        </div>
-        <TalkFrequencyRuleEditor detail={detail} mode={mode} />
-      </div>
     </div>
   )
 }
@@ -518,15 +874,6 @@ function ConfigStatusRows({ detail }: { detail: ChatStreamDetail }) {
         ) : null
       )}
     </section>
-  )
-}
-
-function DetailRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr] sm:gap-3">
-      <div className="text-muted-foreground">{label}</div>
-      <div className="min-w-0 break-all">{value}</div>
-    </div>
   )
 }
 
