@@ -69,6 +69,7 @@ import { ZoomableChart } from '@/components/ui/zoomable-chart'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { ThemeProviderContext } from '@/lib/theme-context'
 import type { DashboardStyle } from '@/lib/theme/tokens'
+import { backendApi } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { APP_VERSION } from '@/lib/version'
 
@@ -115,6 +116,25 @@ const generatePieColors = (count: number, dashboardStyle: DashboardStyle): strin
     colors.push(`hsl(${hue}, 70%, 55%)`)
   }
   return colors
+}
+
+interface BotPlatformConfig {
+  platform?: string
+  qq_account?: string | number
+  platforms?: string[]
+}
+
+const UNCONFIGURED_ACCOUNT_VALUES = new Set(['', '0'])
+
+function hasConfiguredPlatformAccount(config: BotPlatformConfig | undefined): boolean {
+  if (!config) return false
+  const qqAccount = String(config.qq_account ?? '').trim()
+  if (!UNCONFIGURED_ACCOUNT_VALUES.has(qqAccount)) return true
+  return (config.platforms ?? []).some((entry) => {
+    const [, ...accountParts] = String(entry ?? '').split(':')
+    const account = accountParts.join(':').trim()
+    return !UNCONFIGURED_ACCOUNT_VALUES.has(account)
+  })
 }
 
 // 内部实现组件
@@ -211,12 +231,26 @@ function IndexPageContent() {
   const { hitokoto, hitokotoLoading, maibotStableRelease, fetchHitokoto } = useMaibotVersion()
 
   const [isReviewerOpen, setIsReviewerOpen] = useState(false)
+  const [platformAccountConfigured, setPlatformAccountConfigured] = useState<boolean | null>(null)
 
   const handleRestart = useCallback(async () => {
     await triggerRestart()
   }, [triggerRestart])
 
   const openReviewer = useCallback(() => setIsReviewerOpen(true), [])
+
+  const fetchPlatformAccountConfig = useCallback(async () => {
+    try {
+      const data = await backendApi.get<{ config: { bot?: BotPlatformConfig } }>(
+        '/api/webui/config/bot',
+        { errorMessage: '读取平台账号配置失败' }
+      )
+      setPlatformAccountConfigured(hasConfiguredPlatformAccount(data.config.bot))
+    } catch (error) {
+      console.error('读取平台账号配置失败:', error)
+      setPlatformAccountConfigured(null)
+    }
+  }, [])
 
   const {
     quickShortcutIds,
@@ -239,7 +273,8 @@ function IndexPageContent() {
     fetchFeatureStatus()
     fetchLocalCacheStats()
     fetchReviewStats()
-  }, [fetchDashboardData, fetchHitokoto, fetchBotStatus, fetchFeatureStatus, fetchLocalCacheStats, fetchReviewStats])
+    fetchPlatformAccountConfig()
+  }, [fetchDashboardData, fetchHitokoto, fetchBotStatus, fetchFeatureStatus, fetchLocalCacheStats, fetchReviewStats, fetchPlatformAccountConfig])
 
   if (loading || !dashboardData) {
     return (
@@ -705,6 +740,29 @@ function IndexPageContent() {
         </Card>
 
       </div>
+
+      {platformAccountConfigured === false && (
+        <Card className="border-2 border-orange-500 bg-orange-50/80 dark:border-orange-500 dark:bg-orange-950/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-2xl text-orange-700 dark:text-orange-300">
+              {t('home.platformGuide.title')}
+            </CardTitle>
+            <CardDescription>
+              {t('home.platformGuide.description')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {t('home.platformGuide.detail')}
+            </p>
+            <Button asChild className="shrink-0">
+              <Link to="/config/bot">
+                {t('home.platformGuide.action')}
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px]">
         {/* 统计概览 */}

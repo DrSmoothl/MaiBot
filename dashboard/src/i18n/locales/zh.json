@@ -505,6 +505,10 @@
   },
   "setupPage": {
     "steps": {
+      "botProfile": {
+        "title": "基础与人格",
+        "description": "配置昵称、人格和表达风格"
+      },
       "botBasic": {
         "title": "Bot基础",
         "description": "配置机器人的基本信息"
@@ -552,7 +556,7 @@
       "saveFailedTitle": "保存失败",
       "validationFailedTitle": "验证失败",
       "completeSuccessTitle": "配置完成",
-      "completeSuccessDescription": "{{appName}} 正在重启以应用新配置...",
+      "completeSuccessDescription": "{{appName}} 配置已保存并生效。",
       "completeFailedTitle": "配置失败",
       "skipFailedTitle": "跳过失败",
       "unknownError": "未知错误"
@@ -845,6 +849,12 @@
       "stableLatest": "最新版本",
       "githubReleases": "GitHub Releases",
       "unknown": "未知"
+    },
+    "platformGuide": {
+      "title": "添加平台账号",
+      "description": "还没有配置麦麦用于连接消息平台的账号。",
+      "detail": "配置平台和账号后，麦麦才能接入 QQ 等消息软件收发消息。",
+      "action": "去添加平台账号"
     },
     "quickActions": {
       "title": "快速操作",

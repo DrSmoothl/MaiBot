@@ -505,6 +505,10 @@
   },
   "setupPage": {
     "steps": {
+      "botProfile": {
+        "title": "Basics & Personality",
+        "description": "Configure nickname, personality, and reply style"
+      },
       "botBasic": {
         "title": "Bot Basics",
         "description": "Configure the bot's basic information"
@@ -552,7 +556,7 @@
       "saveFailedTitle": "Save failed",
       "validationFailedTitle": "Validation failed",
       "completeSuccessTitle": "Setup complete",
-      "completeSuccessDescription": "{{appName}} is restarting to apply the new configuration...",
+      "completeSuccessDescription": "{{appName}} configuration has been saved and applied.",
       "completeFailedTitle": "Setup failed",
       "skipFailedTitle": "Failed to skip the setup wizard",
       "unknownError": "Unknown error"
@@ -847,6 +851,12 @@
       "testLatest": "Latest test",
       "githubReleases": "GitHub Releases",
       "unknown": "Unknown"
+    },
+    "platformGuide": {
+      "title": "Add a Platform Account",
+      "description": "No account has been configured for connecting MaiBot to a messaging platform.",
+      "detail": "Add a platform and account so MaiBot can receive and send messages through QQ or another messaging app.",
+      "action": "Add Platform Account"
     },
     "quickActions": {
       "title": "Quick Actions",

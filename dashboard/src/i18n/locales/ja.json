@@ -505,6 +505,10 @@
   },
   "setupPage": {
     "steps": {
+      "botProfile": {
+        "title": "基本情報と人格",
+        "description": "ニックネーム、人格、返信スタイルを設定します"
+      },
       "botBasic": {
         "title": "Bot基本設定",
         "description": "ボットの基本情報を設定します"
@@ -552,7 +556,7 @@
       "saveFailedTitle": "保存に失敗しました",
       "validationFailedTitle": "入力内容を確認してください",
       "completeSuccessTitle": "設定が完了しました",
-      "completeSuccessDescription": "新しい設定を反映するために {{appName}} を再起動しています...",
+      "completeSuccessDescription": "{{appName}} の設定を保存して適用しました。",
       "completeFailedTitle": "設定の完了に失敗しました",
       "skipFailedTitle": "セットアップのスキップに失敗しました",
       "unknownError": "不明なエラー"
@@ -847,6 +851,12 @@
       "testLatest": "最新テスト版",
       "githubReleases": "GitHub Releases",
       "unknown": "不明"
+    },
+    "platformGuide": {
+      "title": "プラットフォームアカウントを追加",
+      "description": "MaiBot をメッセージプラットフォームに接続するアカウントがまだ設定されていません。",
+      "detail": "プラットフォームとアカウントを設定すると、MaiBot が QQ などのメッセージアプリで送受信できます。",
+      "action": "アカウントを追加"
     },
     "quickActions": {
       "title": "クイック操作",
