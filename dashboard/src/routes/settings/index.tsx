@@ -13,6 +13,8 @@ import { SecurityTab } from './SecurityTab'
 
 type SettingsTab = 'appearance' | 'security' | 'local-cache' | 'other' | 'about'
 const SETTINGS_TABS: SettingsTab[] = ['appearance', 'security', 'local-cache', 'other', 'about']
+const TITLE_COLLAPSE_SCROLL_TOP = 64
+const TITLE_EXPAND_SCROLL_TOP = 4
 
 function getInitialSettingsTab(): SettingsTab {
   const fallback: SettingsTab = 'appearance'
@@ -30,7 +32,9 @@ export function SettingsPage() {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<SettingsTab>(getInitialSettingsTab)
   const [isTitleCollapsed, setIsTitleCollapsed] = useState(false)
+  const titleCollapsedRef = useRef(false)
   const scrollViewportRef = useRef<HTMLDivElement | null>(null)
+  const scrollCorrectionFrameRef = useRef<number | null>(null)
 
   const handleTabChange = (value: string) => {
     const nextTab = SETTINGS_TABS.includes(value as SettingsTab) ? (value as SettingsTab) : 'appearance'
@@ -38,6 +42,7 @@ export function SettingsPage() {
     const nextUrl = nextTab === 'appearance' ? '/settings' : `/settings?tab=${nextTab}`
     window.history.replaceState(null, '', nextUrl)
     scrollViewportRef.current?.scrollTo({ top: 0 })
+    titleCollapsedRef.current = false
     setIsTitleCollapsed(false)
   }
 
@@ -48,13 +53,41 @@ export function SettingsPage() {
     }
 
     const handleScroll = () => {
-      setIsTitleCollapsed(viewport.scrollTop > 8)
+      const shouldCollapse = titleCollapsedRef.current
+        ? viewport.scrollTop > TITLE_EXPAND_SCROLL_TOP
+        : viewport.scrollTop > TITLE_COLLAPSE_SCROLL_TOP
+
+      if (shouldCollapse === titleCollapsedRef.current) {
+        return
+      }
+
+      const scrollTopBeforeLayout = viewport.scrollTop
+      const viewportHeightBeforeLayout = viewport.clientHeight
+      titleCollapsedRef.current = shouldCollapse
+      setIsTitleCollapsed(shouldCollapse)
+
+      if (scrollCorrectionFrameRef.current !== null) {
+        cancelAnimationFrame(scrollCorrectionFrameRef.current)
+      }
+
+      scrollCorrectionFrameRef.current = requestAnimationFrame(() => {
+        scrollCorrectionFrameRef.current = null
+        const viewportHeightDelta = viewport.clientHeight - viewportHeightBeforeLayout
+        if (viewportHeightDelta === 0) {
+          return
+        }
+
+        viewport.scrollTop = Math.max(0, scrollTopBeforeLayout + viewportHeightDelta)
+      })
     }
 
     handleScroll()
     viewport.addEventListener('scroll', handleScroll, { passive: true })
     return () => {
       viewport.removeEventListener('scroll', handleScroll)
+      if (scrollCorrectionFrameRef.current !== null) {
+        cancelAnimationFrame(scrollCorrectionFrameRef.current)
+      }
     }
   }, [])
 
@@ -62,8 +95,8 @@ export function SettingsPage() {
     <div className="flex h-full min-h-0 flex-col p-4 sm:p-6">
       {/* 页面标题 */}
       <div
-        className={`flex shrink-0 flex-col justify-between gap-4 overflow-hidden transition-all duration-200 sm:flex-row sm:items-center ${
-          isTitleCollapsed ? 'max-h-0 opacity-0' : 'max-h-12 opacity-100'
+        className={`flex shrink-0 flex-col justify-between gap-4 overflow-hidden pt-1 transition-[max-height,opacity] duration-200 sm:flex-row sm:items-center ${
+          isTitleCollapsed ? 'max-h-0 opacity-0' : 'max-h-24 opacity-100'
         }`}
       >
         <div>
@@ -75,14 +108,16 @@ export function SettingsPage() {
       <Tabs
         value={activeTab}
         onValueChange={handleTabChange}
-        className={`flex min-h-0 w-full flex-1 flex-col transition-[margin] duration-200 ${isTitleCollapsed ? 'mt-0' : 'mt-4 sm:mt-6'}`}
+        className={`flex min-h-0 w-full flex-1 flex-col transition-[margin] duration-200 ${
+          isTitleCollapsed ? 'mt-0' : 'mt-4 sm:mt-6'
+        }`}
       >
         <div className="-mx-1 shrink-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:overflow-visible sm:p-0">
           <TabsList
-            data-dashboard-settings-tabs="true"
             className="inline-grid h-auto w-max min-w-full grid-cols-5 gap-1 p-1 sm:w-full"
           >
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="appearance"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -90,6 +125,7 @@ export function SettingsPage() {
               <span>{t('settings.tabs.appearance')}</span>
             </TabsTrigger>
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="security"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -97,6 +133,7 @@ export function SettingsPage() {
               <span>{t('settings.tabs.security')}</span>
             </TabsTrigger>
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="local-cache"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -104,6 +141,7 @@ export function SettingsPage() {
               <span>本地缓存</span>
             </TabsTrigger>
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="other"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -111,6 +149,7 @@ export function SettingsPage() {
               <span>{t('settings.tabs.other')}</span>
             </TabsTrigger>
             <TabsTrigger
+              data-dashboard-settings-tabs="true"
               value="about"
               className="min-w-[5.5rem] gap-1 px-3 text-sm sm:min-w-0 sm:gap-2 sm:text-base"
             >
@@ -122,7 +161,7 @@ export function SettingsPage() {
 
         <ScrollArea
           viewportRef={scrollViewportRef}
-          contentClassName="pb-6"
+          contentClassName="pb-16 sm:pb-20"
           className="mt-4 min-h-0 flex-1 sm:mt-6"
         >
           <TabsContent value="appearance" className="mt-0">

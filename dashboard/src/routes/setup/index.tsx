@@ -8,7 +8,6 @@ import {
   Key,
   SkipForward,
   Sparkles,
-  User,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -60,8 +59,6 @@ import {
   saveModelSetupConfig,
   completeSetup,
 } from './api'
-import { RestartProvider, useRestart } from '@/lib/restart-context'
-import { RestartOverlay } from '@/components/restart-overlay'
 
 const LANGUAGE_CODES = ['zh', 'en', 'ja', 'ko'] as const
 const LANGUAGE_NAMES: Record<(typeof LANGUAGE_CODES)[number], string> = {
@@ -71,13 +68,8 @@ const LANGUAGE_NAMES: Record<(typeof LANGUAGE_CODES)[number], string> = {
   ko: '한국어',
 }
 
-// 主导出组件：包装 RestartProvider
 export function SetupPage() {
-  return (
-    <RestartProvider>
-      <SetupPageContent />
-    </RestartProvider>
-  )
+  return <SetupPageContent />
 }
 
 // 内部实现组件
@@ -85,7 +77,6 @@ function SetupPageContent() {
   const navigate = useNavigate()
   const { t, i18n: i18nInstance } = useTranslation()
   const { toast } = useToast()
-  const { triggerRestart } = useRestart()
   const currentLang = i18nInstance.resolvedLanguage || i18nInstance.language || 'zh'
   const createDefaultPersonalityConfig = (): PersonalityConfig => ({
     personality: t('setupPage.defaults.personality.personality'),
@@ -138,16 +129,10 @@ function SetupPageContent() {
 
   const steps: SetupStep[] = [
     {
-      id: 'bot-basic',
-      title: t('setupPage.steps.botBasic.title'),
-      description: t('setupPage.steps.botBasic.description'),
+      id: 'bot-profile',
+      title: t('setupPage.steps.botProfile.title'),
+      description: t('setupPage.steps.botProfile.description'),
       icon: Bot,
-    },
-    {
-      id: 'personality',
-      title: t('setupPage.steps.personality.title'),
-      description: t('setupPage.steps.personality.description'),
-      icon: User,
     },
     {
       id: 'api-provider',
@@ -203,16 +188,14 @@ function SetupPageContent() {
     setIsSaving(true)
     try {
       switch (currentStep) {
-        case 0: // Bot基础
+        case 0: // Bot基础与人格
           await saveBotBasicConfig(botBasic)
-          break
-        case 1: // 人格配置
           await savePersonalityConfig(personality)
           break
-        case 2: // API 提供商
+        case 1: // API 提供商
           await saveApiProviderSetupConfig(apiProviderSetup)
           break
-        case 3: // 基础模型
+        case 2: // 基础模型
           await saveModelSetupConfig(modelSetup, apiProviderSetup.provider_name)
           break
       }
@@ -239,18 +222,7 @@ function SetupPageContent() {
 
   // Step 1 验证
   function validateBotBasic(config: BotBasicConfig): string | null {
-    if (!config.platform) return t('setupPage.validation.selectPlatform')
     if (!config.nickname.trim()) return t('setupPage.validation.enterNickname')
-    if (config.platform === 'qq') {
-      if (!config.qq_account.trim()) {
-        return t('setupPage.validation.enterQqAccount')
-      }
-    } else {
-      const hasAccount = config.platforms.some(
-        (p) => p.startsWith(config.platform + ':') && p.split(':')[1]?.trim()
-      )
-      if (!hasAccount) return t('setupPage.validation.enterAccountId')
-    }
     return null
   }
 
@@ -285,7 +257,7 @@ function SetupPageContent() {
         return
       }
     }
-    if (currentStep === 2) {
+    if (currentStep === 1) {
       const error = validateApiProviderSetup(apiProviderSetup)
       if (error) {
         toast({
@@ -296,7 +268,7 @@ function SetupPageContent() {
         return
       }
     }
-    if (currentStep === 3) {
+    if (currentStep === 2) {
       const error = validateModelSetup(modelSetup)
       if (error) {
         toast({
@@ -356,8 +328,8 @@ function SetupPageContent() {
         }),
       })
 
-      // 3. 触发麦麦重启（使用新的重启组件）
-      await triggerRestart()
+      // 3. 配置文件会被 MaiBot 热加载；完成后直接回到首页。
+      navigate({ to: '/' })
     } catch (error) {
       toast({
         title: t('setupPage.toast.completeFailedTitle'),
@@ -386,12 +358,17 @@ function SetupPageContent() {
   const renderStepForm = () => {
     switch (currentStep) {
       case 0:
-        return <BotBasicForm config={botBasic} onChange={setBotBasic} />
+        return (
+          <div className="space-y-8">
+            <BotBasicForm config={botBasic} onChange={setBotBasic} />
+            <div className="border-t pt-6">
+              <PersonalityForm config={personality} onChange={setPersonality} />
+            </div>
+          </div>
+        )
       case 1:
-        return <PersonalityForm config={personality} onChange={setPersonality} />
-      case 2:
         return <ApiProviderSetupForm config={apiProviderSetup} onChange={setApiProviderSetup} />
-      case 3:
+      case 2:
         return <ModelSetupForm config={modelSetup} onChange={setModelSetup} />
       default:
         return null
@@ -400,9 +377,6 @@ function SetupPageContent() {
 
   return (
     <div className="from-primary/5 via-background to-secondary/5 relative flex h-full min-h-screen flex-col items-center justify-center overflow-y-auto overflow-x-hidden bg-gradient-to-br p-4 md:p-6">
-      {/* 重启遮罩层 */}
-      <RestartOverlay />
-
       {/* 语言切换 */}
       <div className="absolute top-4 right-4 z-20">
         <DropdownMenu>

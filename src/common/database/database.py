@@ -6,6 +6,7 @@ from typing import ContextManager, Generator, TYPE_CHECKING
 from rich.traceback import install
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel, Session, create_engine
 
@@ -55,16 +56,67 @@ engine = create_engine(
 )
 
 # 创建会话工厂（使用 sqlmodel.Session）
+# 说明: 设置 expire_on_commit=False，避免在 with get_db_session() 块自动 commit 时，
+# 已加载到内存中的 ORM 实例属性被标记为过期。否则会话关闭后实例进入 detached 状态，
+# 任何属性访问都会触发刷新而抛出
+# "Instance ... is not bound to a Session; attribute refresh operation cannot proceed".
+# 当前数据库模型不包含 SQLAlchemy Relationship，因此不会引入 lazy-load 副作用。
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=engine,
     class_=Session,
+    expire_on_commit=False,
 )
 _migration_bootstrapper = create_database_migration_bootstrapper(engine)
 
 _db_initialized = False
 _db_initialize_lock = threading.Lock()
+
+_RUNTIME_PERFORMANCE_INDEXES = (
+    (
+        "ix_jargons_status_count_id",
+        "CREATE INDEX IF NOT EXISTS ix_jargons_status_count_id "
+        "ON jargons (is_jargon, count DESC, id DESC)",
+    ),
+    (
+        "ix_jargons_global_count_id",
+        "CREATE INDEX IF NOT EXISTS ix_jargons_global_count_id "
+        "ON jargons (is_global, count DESC, id DESC)",
+    ),
+    (
+        "ix_jargons_complete_count_id",
+        "CREATE INDEX IF NOT EXISTS ix_jargons_complete_count_id "
+        "ON jargons (is_complete, count DESC, id DESC)",
+    ),
+)
+
+
+def ensure_runtime_performance_indexes() -> None:
+    """补齐不影响 schema 版本的运行期性能索引。"""
+
+    index_start_time = perf_counter()
+    created_or_checked_indexes = 0
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("PRAGMA busy_timeout=30000")
+            for index_name, statement in _RUNTIME_PERFORMANCE_INDEXES:
+                statement_start_time = perf_counter()
+                connection.exec_driver_sql(statement)
+                created_or_checked_indexes += 1
+                logger.debug(
+                    "数据库运行期性能索引已检查："
+                    f"{index_name}，耗时={int((perf_counter() - statement_start_time) * 1000)}ms"
+                )
+    except OperationalError as exc:
+        logger.warning(
+            "数据库运行期性能索引检查未完成，当前数据库被占用；"
+            f"已完成 {created_or_checked_indexes}/{len(_RUNTIME_PERFORMANCE_INDEXES)} 个，"
+            "下次启动或空闲初始化时会再次检查。"
+            f" 错误={exc}"
+        )
+        return
+    logger.info(f"数据库运行期性能索引检查完成，耗时={int((perf_counter() - index_start_time) * 1000)}ms")
 
 
 def initialize_database() -> None:
@@ -95,6 +147,7 @@ def initialize_database() -> None:
         create_all_start_time = perf_counter()
         SQLModel.metadata.create_all(engine)
         logger.info(f"数据库模型建表检查完成，耗时={int((perf_counter() - create_all_start_time) * 1000)}ms")
+        ensure_runtime_performance_indexes()
         finalize_start_time = perf_counter()
         _migration_bootstrapper.finalize_database(migration_state)
         logger.info(f"数据库 schema 版本收尾完成，耗时={int((perf_counter() - finalize_start_time) * 1000)}ms")

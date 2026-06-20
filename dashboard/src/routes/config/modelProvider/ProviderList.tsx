@@ -1,8 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import type { TestConnectionResult } from '@/lib/config-api'
 import {
-  AlertCircle,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -11,11 +8,10 @@ import {
   Pencil,
   Search,
   Trash2,
-  XCircle,
   Zap,
 } from 'lucide-react'
 
-import { Badge } from '@/components/ui/badge'
+import type { TestConnectionResult } from '@/lib/config-api'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -37,6 +33,7 @@ import {
 } from '@/components/ui/table'
 
 import { ProviderCard } from './ProviderCard'
+import { renderProviderTestStatus } from './providerStatus'
 import type { APIProvider } from './types'
 
 interface ProviderListProps {
@@ -102,55 +99,7 @@ export function ProviderList({
   const renderTestStatus = (providerName: string) => {
     const isTesting = testingProviders.has(providerName)
     const result = testResults.get(providerName)
-
-    if (isTesting) {
-      return (
-        <Badge variant="secondary" className="gap-1">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          测试中
-        </Badge>
-      )
-    }
-
-    if (!result) {
-      return (
-        <Badge variant="outline" className="text-muted-foreground">
-          未测试
-        </Badge>
-      )
-    }
-
-    if (result.network_ok) {
-      if (result.api_key_valid === true) {
-        return (
-          <Badge className="gap-1 bg-green-600 hover:bg-green-700">
-            <CheckCircle2 className="h-3 w-3" />
-            正常
-          </Badge>
-        )
-      } else if (result.api_key_valid === false) {
-        return (
-          <Badge variant="destructive" className="gap-1">
-            <AlertCircle className="h-3 w-3" />
-            Key无效
-          </Badge>
-        )
-      } else {
-        return (
-          <Badge className="gap-1 bg-blue-600 hover:bg-blue-700">
-            <CheckCircle2 className="h-3 w-3" />
-            可访问
-          </Badge>
-        )
-      }
-    } else {
-      return (
-        <Badge variant="destructive" className="gap-1">
-          <XCircle className="h-3 w-3" />
-          离线
-        </Badge>
-      )
-    }
+    return renderProviderTestStatus(result, isTesting)
   }
 
   return (
@@ -229,16 +178,15 @@ export function ProviderList({
                 <TableHead className={`${providerTableHeadClass} w-32`}>名称</TableHead>
                 <TableHead className={providerTableHeadClass}>基础URL</TableHead>
                 <TableHead className={`${providerTableHeadClass} w-24`}>客户端</TableHead>
-                <TableHead className={providerNumericHeadClass}>最大重试</TableHead>
+                <TableHead className={`${providerTableHeadClass} w-28 text-right`}>重试</TableHead>
                 <TableHead className={providerNumericHeadClass}>超时(秒)</TableHead>
-                <TableHead className={providerNumericHeadClass}>间隔(秒)</TableHead>
                 <TableHead className={`${providerTableHeadClass} w-36 text-right`}>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedProviders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-muted-foreground py-8 text-center">
+                  <TableCell colSpan={8} className="text-muted-foreground py-8 text-center">
                     {searchQuery
                       ? '未找到匹配的提供商'
                       : '暂无提供商配置，点击"添加提供商"开始配置'}
@@ -278,12 +226,9 @@ export function ProviderList({
                         {provider.client_type}
                       </TableCell>
                       <TableCell className={providerNumericCellClass}>
-                        {provider.max_retry}
+                        {provider.max_retry} 次 / {provider.retry_interval} 秒
                       </TableCell>
                       <TableCell className={providerNumericCellClass}>{provider.timeout}</TableCell>
-                      <TableCell className={providerNumericCellClass}>
-                        {provider.retry_interval}
-                      </TableCell>
                       <TableCell className={`${providerTableCellClass} text-right`}>
                         <div className="flex justify-end gap-2">
                           <Button

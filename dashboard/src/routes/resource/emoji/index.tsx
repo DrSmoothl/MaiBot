@@ -5,12 +5,7 @@ import { Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { DashboardTabBar, DashboardTabTrigger } from '@/components/ui/dashboard-tabs'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -53,11 +48,8 @@ import {
 } from '@/lib/emoji-api'
 import type { Emoji, EmojiStats, EmojiStatus } from '@/types/emoji'
 
-import {
-  EmojiDetailDialog,
-  EmojiEditDialog,
-  EmojiUploadDialog,
-} from './EmojiDialogs'
+import { EmojiCacheMaintenancePanel } from './EmojiCacheMaintenancePanel'
+import { EmojiDetailDialog, EmojiEditDialog, EmojiUploadDialog } from './EmojiDialogs'
 import { EmojiList } from './EmojiList'
 
 // 表情包筛选项：状态 / 格式 / 排序字段 / 排序方向
@@ -75,9 +67,7 @@ export function EmojiManagementPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false)
   const [jumpToPage, setJumpToPage] = useState('')
-  const [cardSize, setCardSize] = useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
+  const [cardSize, setCardSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
 
   const { toast } = useToast()
@@ -231,25 +221,45 @@ export function EmojiManagementPage() {
   const formatOptions = stats?.formats ? Object.keys(stats.formats) : []
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
+    <div className="flex h-[calc(100vh-4rem)] flex-col p-4 sm:p-6">
       <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 pr-4">
+        <div className="space-y-4 pr-4 sm:space-y-6">
           {/* 状态切换 */}
           {stats && (
             <Tabs
               value={list.filters.status === 'all' ? 'adopted' : list.filters.status}
               onValueChange={(value) => list.setFilter('status', value as EmojiStatus)}
             >
-              <DashboardTabBar variant="grid" className="h-10 grid-cols-2 sm:grid-cols-4">
+              <DashboardTabBar data-emoji-status-tabs="true" variant="grid" className="grid-cols-2 sm:grid-cols-4">
                 {[
-                  { value: 'known' as const, label: '认识', count: stats.known, className: 'text-sky-600' },
-                  { value: 'unknown' as const, label: '不认识', count: stats.unknown, className: 'text-gray-600' },
-                  { value: 'adopted' as const, label: '据为己用', count: stats.adopted, className: 'text-green-600' },
-                  { value: 'discarded' as const, label: '丢弃', count: stats.discarded, className: 'text-red-600' },
+                  {
+                    value: 'known' as const,
+                    label: '认识',
+                    count: stats.known,
+                    className: 'text-sky-600',
+                  },
+                  {
+                    value: 'unknown' as const,
+                    label: '不认识',
+                    count: stats.unknown,
+                    className: 'text-gray-600',
+                  },
+                  {
+                    value: 'adopted' as const,
+                    label: '据为己用',
+                    count: stats.adopted,
+                    className: 'text-green-600',
+                  },
+                  {
+                    value: 'discarded' as const,
+                    label: '丢弃',
+                    count: stats.discarded,
+                    className: 'text-red-600',
+                  },
                 ].map((item) => (
                   <DashboardTabTrigger key={item.value} value={item.value} className="h-10 gap-2">
                     <span>{item.label}</span>
-                    <span className={`font-semibold leading-none ${item.className}`}>
+                    <span className={`leading-none font-semibold ${item.className}`}>
                       {item.count}
                     </span>
                   </DashboardTabTrigger>
@@ -260,18 +270,16 @@ export function EmojiManagementPage() {
 
           {/* 筛选和排序 */}
           <Card>
-            <CardContent className="space-y-4 pt-6">
+            <CardHeader className="space-y-3">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="emoji-search">搜索 tag</Label>
                   <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
                     <Input
                       id="emoji-search"
                       value={list.searchInput}
-                      onChange={(event) =>
-                        list.setSearchInput(event.target.value)
-                      }
+                      onChange={(event) => list.setSearchInput(event.target.value)}
                       placeholder="搜索 tag、描述或哈希..."
                       className="pr-9 pl-8"
                     />
@@ -280,7 +288,7 @@ export function EmojiManagementPage() {
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="absolute right-1 top-1 h-7 w-7"
+                        className="absolute top-1 right-1 h-7 w-7"
                         onClick={() => list.setSearchInput('')}
                         aria-label="清空搜索"
                       >
@@ -304,30 +312,14 @@ export function EmojiManagementPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="usage_count-desc">
-                        使用次数 (多→少)
-                      </SelectItem>
-                      <SelectItem value="usage_count-asc">
-                        使用次数 (少→多)
-                      </SelectItem>
-                      <SelectItem value="register_time-desc">
-                        注册时间 (新→旧)
-                      </SelectItem>
-                      <SelectItem value="register_time-asc">
-                        注册时间 (旧→新)
-                      </SelectItem>
-                      <SelectItem value="record_time-desc">
-                        记录时间 (新→旧)
-                      </SelectItem>
-                      <SelectItem value="record_time-asc">
-                        记录时间 (旧→新)
-                      </SelectItem>
-                      <SelectItem value="last_used_time-desc">
-                        最后使用 (新→旧)
-                      </SelectItem>
-                      <SelectItem value="last_used_time-asc">
-                        最后使用 (旧→新)
-                      </SelectItem>
+                      <SelectItem value="usage_count-desc">使用次数 (多→少)</SelectItem>
+                      <SelectItem value="usage_count-asc">使用次数 (少→多)</SelectItem>
+                      <SelectItem value="register_time-desc">注册时间 (新→旧)</SelectItem>
+                      <SelectItem value="register_time-asc">注册时间 (旧→新)</SelectItem>
+                      <SelectItem value="record_time-desc">记录时间 (新→旧)</SelectItem>
+                      <SelectItem value="record_time-asc">记录时间 (旧→新)</SelectItem>
+                      <SelectItem value="last_used_time-desc">最后使用 (新→旧)</SelectItem>
+                      <SelectItem value="last_used_time-asc">最后使用 (旧→新)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -356,7 +348,7 @@ export function EmojiManagementPage() {
               <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-3">
                   {list.selectedCount > 0 && (
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-muted-foreground text-sm">
                       已选择 {list.selectedCount} 个表情包
                     </span>
                   )}
@@ -393,27 +385,17 @@ export function EmojiManagementPage() {
                     aria-label="刷新"
                     title="刷新"
                   >
-                    <RefreshCw
-                      className={`h-4 w-4 ${list.isFetching ? 'animate-spin' : ''}`}
-                    />
+                    <RefreshCw className={`h-4 w-4 ${list.isFetching ? 'animate-spin' : ''}`} />
                   </Button>
 
-                  <Button
-                    size="sm"
-                    onClick={() => setUploadDialogOpen(true)}
-                    className="gap-2"
-                  >
+                  <Button size="sm" onClick={() => setUploadDialogOpen(true)} className="gap-2">
                     <Plus className="h-4 w-4" />
                     新增
                   </Button>
 
                   {list.selectedCount > 0 && (
                     <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => list.clearSelection()}
-                      >
+                      <Button variant="outline" size="sm" onClick={() => list.clearSelection()}>
                         取消选择
                       </Button>
                       <Button
@@ -421,7 +403,7 @@ export function EmojiManagementPage() {
                         size="sm"
                         onClick={() => setBatchDeleteDialogOpen(true)}
                       >
-                        <Trash2 className="h-4 w-4 mr-1" />
+                        <Trash2 className="mr-1 h-4 w-4" />
                         批量删除
                       </Button>
                     </>
@@ -429,10 +411,7 @@ export function EmojiManagementPage() {
                 </div>
 
                 <div className="flex items-center gap-2 sm:ml-auto">
-                  <Label
-                    htmlFor="emoji-page-size"
-                    className="text-sm whitespace-nowrap"
-                  >
+                  <Label htmlFor="emoji-page-size" className="text-sm whitespace-nowrap">
                     每页显示
                   </Label>
                   <Select
@@ -451,8 +430,15 @@ export function EmojiManagementPage() {
                   </Select>
                 </div>
               </div>
-            </CardContent>
+            </CardHeader>
           </Card>
+
+          <EmojiCacheMaintenancePanel
+            onCacheChanged={() => {
+              list.invalidate()
+              void statsQuery.refetch()
+            }}
+          />
 
           {/* 表情包卡片列表 */}
           <Card>
@@ -465,8 +451,8 @@ export function EmojiManagementPage() {
             </CardHeader>
             <CardContent>
               {list.isError ? (
-                <div className="text-center py-12 space-y-2">
-                  <p className="text-sm text-destructive">{list.error?.message}</p>
+                <div className="space-y-2 py-12 text-center">
+                  <p className="text-destructive text-sm">{list.error?.message}</p>
                   <Button variant="outline" size="sm" onClick={() => list.refetch()}>
                     重试
                   </Button>
@@ -520,23 +506,17 @@ export function EmojiManagementPage() {
       </ScrollArea>
 
       {/* 批量删除确认对话框 */}
-      <AlertDialog
-        open={batchDeleteDialogOpen}
-        onOpenChange={setBatchDeleteDialogOpen}
-      >
+      <AlertDialog open={batchDeleteDialogOpen} onOpenChange={setBatchDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认批量删除</AlertDialogTitle>
             <AlertDialogDescription>
-              你确定要删除选中的 {list.selectedCount}{' '}
-              个表情包吗?此操作不可撤销。
+              你确定要删除选中的 {list.selectedCount} 个表情包吗?此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBatchDelete}>
-              确认删除
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleBatchDelete}>确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -546,15 +526,10 @@ export function EmojiManagementPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>确认删除</DialogTitle>
-            <DialogDescription>
-              确定要删除这个表情包吗?此操作无法撤销。
-            </DialogDescription>
+            <DialogDescription>确定要删除这个表情包吗?此操作无法撤销。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
               取消
             </Button>
             <Button variant="destructive" onClick={confirmDelete}>

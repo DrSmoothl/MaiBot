@@ -250,9 +250,9 @@ class ImageCacheCleanupConfig(ConfigBase):
             "x-widget": "input",
             "x-icon": "database",
             "label": {
-                "zh_CN": "无文件识别结果保留天数",
-                "en_US": "No-file recognition retention days",
-                "ja_JP": "ファイルなし認識結果保持日数",
+                "zh_CN": "图片理解保留天数",
+                "en_US": "image recognition retention days",
+                "ja_JP": "認識結果保持日数",
             },
         },
     )
@@ -273,9 +273,14 @@ class VisualConfig(ConfigBase):
             "x-input-width": "12rem",
             "x-option-descriptions": VISUAL_MODE_OPTION_DESCRIPTIONS,
             "x-row": "visual-modes",
+            "label": {
+                "zh_CN": "规划阶段视觉模式",
+                "en_US": "Planner vision mode",
+                "ja_JP": "プランナー視覚モード",
+            },
         },
     )
-    """规划阶段是否看图片；不确定就保持 auto。"""
+    """控制规划阶段是否把图片内容直接发送给 planner 模型。auto 会根据模型是否支持视觉自动选择；text 始终只使用文字和图片识别结果；multimodal 会强制使用多模态输入。"""
 
     replyer_mode: Literal["text", "multimodal", "auto"] = Field(
         default="auto",
@@ -286,9 +291,14 @@ class VisualConfig(ConfigBase):
             "x-input-width": "12rem",
             "x-option-descriptions": VISUAL_MODE_OPTION_DESCRIPTIONS,
             "x-row": "visual-modes",
+            "label": {
+                "zh_CN": "回复生成视觉模式",
+                "en_US": "Replyer vision mode",
+                "ja_JP": "返信生成視覚モード",
+            },
         },
     )
-    """回复生成阶段是否看图片；不确定就保持 auto。"""
+    """控制回复生成阶段是否把图片内容直接发送给 replyer 模型。auto 会根据模型是否支持视觉自动选择；text 始终只使用文字和图片识别结果；multimodal 会强制使用多模态输入。"""
 
     max_image_num: int = Field(
         default=128,
@@ -331,9 +341,9 @@ class VisualConfig(ConfigBase):
             "x-layout": "inline-right",
             "x-row": "visual-image-compression",
             "label": {
-                "zh_CN": "处理过大图片",
+                "zh_CN": "是否处理过大图片",
                 "en_US": "Handle oversized images",
-                "ja_JP": "過大画像を処理",
+                "ja_JP": "是否過大画像を処理",
             },
         },
     )
@@ -3965,6 +3975,21 @@ class DebugConfig(ConfigBase):
         },
     )
     """记录回复效果评分，方便观察回复质量。"""
+
+    enable_local_mai_replyer: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用本地麦麦 Replyer",
+                "en_US": "Enable local Mai replyer",
+                "ja_JP": "ローカル Mai Replyer を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "route",
+            "advanced": True,
+        },
+    )
+    """如果你不知道这是什么，请勿打开"""
 
     record_reply_request: bool = Field(
         default=False,

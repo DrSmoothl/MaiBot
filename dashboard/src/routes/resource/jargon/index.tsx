@@ -43,10 +43,13 @@ import type { Jargon, JargonChatInfo } from '@/types/jargon'
 import type { StatsData } from './types'
 
 interface JargonFilters {
+  summary: JargonSummaryTab
   scope: 'all' | 'global' | 'local'
   chatId: string
-  isJargon: string
 }
+
+type JargonStatusFilter = 'confirmed_jargon' | 'confirmed_not_jargon' | 'pending'
+type JargonSummaryTab = 'total' | JargonStatusFilter | 'global_count' | 'complete_count'
 
 /**
  * 黑话管理主页面
@@ -58,6 +61,7 @@ export function JargonManagementPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [deleteConfirmJargon, setDeleteConfirmJargon] = useState<Jargon | null>(null)
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
+  const [scopePanelCollapsed, setScopePanelCollapsed] = useState(false)
   const { toast } = useToast()
 
   // 黑话列表：分页/搜索/筛选/多选统一由 useDataList 承载，翻页/改参自动重置页码并清空选中
@@ -66,24 +70,32 @@ export function JargonManagementPage() {
   const list = useDataList<Jargon, JargonFilters, number>({
     domain: 'jargon',
     getId: (jargon) => jargon.id,
-    initialFilters: { scope: 'all', chatId: 'all', isJargon: 'all' },
+    initialFilters: { summary: 'total', scope: 'all', chatId: 'all' },
     searchDebounceMs: 300,
     queryFn: async ({ page, pageSize, search, filters }) => {
+      const summaryStatus: JargonStatusFilter | undefined = [
+        'confirmed_jargon',
+        'confirmed_not_jargon',
+        'pending',
+      ].includes(filters.summary)
+        ? (filters.summary as JargonStatusFilter)
+        : undefined
       const result = await getJargonList({
         page,
         page_size: pageSize,
         search: search || undefined,
         session_id:
-          filters.scope !== 'global' && filters.chatId !== 'all' ? filters.chatId : undefined,
-        is_jargon:
-          filters.isJargon === 'all'
-            ? undefined
-            : filters.isJargon === 'true'
-              ? true
-              : filters.isJargon === 'false'
-                ? false
-                : undefined,
-        is_global: filters.scope === 'all' ? undefined : filters.scope === 'global',
+          filters.summary !== 'global_count' && filters.scope !== 'global' && filters.chatId !== 'all'
+            ? filters.chatId
+            : undefined,
+        jargon_status: summaryStatus,
+        is_complete: filters.summary === 'complete_count' ? true : undefined,
+        is_global:
+          filters.summary === 'global_count'
+            ? true
+            : filters.scope === 'all'
+              ? undefined
+              : filters.scope === 'global',
       })
       return { items: result.data, total: result.total }
     },
@@ -93,9 +105,9 @@ export function JargonManagementPage() {
   const loading = list.isPending
   const page = list.page
   const pageSize = list.pageSize
+  const summaryFilter = list.filters.summary
   const scopeFilter = list.filters.scope
   const filterChatId = list.filters.chatId
-  const filterIsJargon = list.filters.isJargon
   const selectedIds = list.selectedIds
 
   // 统计数据：失败时保持占位数值，不打断页面
@@ -230,12 +242,27 @@ export function JargonManagementPage() {
   }
 
   const handleChatChange = (chatId: string) => {
+    if (summaryFilter === 'global_count') {
+      list.setFilter('summary', 'total')
+    }
     list.setFilter('chatId', chatId)
   }
 
   const handleScopeChange = (scope: 'all' | 'global' | 'local') => {
     list.setFilter('scope', scope)
+    if (summaryFilter === 'global_count' && scope !== 'global') {
+      list.setFilter('summary', 'total')
+    }
     if (scope === 'global') {
+      list.setFilter('chatId', 'all')
+    }
+  }
+
+  const handleSummaryChange = (value: string) => {
+    const summary = value as JargonSummaryTab
+    list.setFilter('summary', summary)
+    if (summary === 'global_count') {
+      list.setFilter('scope', 'global')
       list.setFilter('chatId', 'all')
     }
   }
@@ -246,10 +273,10 @@ export function JargonManagementPage() {
         <div className="space-y-4 pr-4 sm:space-y-6">
           {/* 统计标签 */}
           <AccentPanel showRetroStripes={false} className="bg-muted rounded-lg border">
-            <Tabs value="summary">
+            <Tabs value={summaryFilter} onValueChange={handleSummaryChange}>
               <DashboardTabBar
                 variant="grid"
-                className="h-10 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6"
+                className="grid-cols-2 sm:grid-cols-3 lg:grid-cols-6"
               >
                 {[
                   {
@@ -292,7 +319,7 @@ export function JargonManagementPage() {
                   <DashboardTabTrigger
                     key={item.value}
                     value={item.value}
-                    className="h-10 cursor-default gap-2"
+                    className="h-10 gap-2"
                     aria-label={`${item.label} ${item.count}`}
                   >
                     <span>{item.label}</span>
@@ -306,9 +333,9 @@ export function JargonManagementPage() {
           </AccentPanel>
 
           {/* 搜索和筛选 */}
-          <AccentPanel className="bg-card border">
+          <AccentPanel className="bg-card border" showRetroStripeDivider={false}>
             <div className="p-3">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
                 <div className="space-y-1">
                   <Label htmlFor="search">搜索</Label>
                   <div className="relative">
@@ -321,22 +348,6 @@ export function JargonManagementPage() {
                       className="h-8 pl-9"
                     />
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <Label>状态筛选</Label>
-                  <Select
-                    value={filterIsJargon}
-                    onValueChange={(value) => list.setFilter('isJargon', value)}
-                  >
-                    <SelectTrigger className="h-8">
-                      <SelectValue placeholder="全部状态" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部状态</SelectItem>
-                      <SelectItem value="true">是黑话</SelectItem>
-                      <SelectItem value="false">非黑话</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="page-size">每页显示</Label>
@@ -355,9 +366,13 @@ export function JargonManagementPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button onClick={() => setIsCreateDialogOpen(true)} className="h-8 gap-2">
+                <Button
+                  onClick={() => setIsCreateDialogOpen(true)}
+                  className="h-8 w-10 px-0"
+                  aria-label="新增黑话"
+                  title="新增黑话"
+                >
                   <Plus className="h-4 w-4" />
-                  新增
                 </Button>
               </div>
 
@@ -392,7 +407,13 @@ export function JargonManagementPage() {
           </AccentPanel>
 
           {/* 黑话列表 */}
-          <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-19rem)] lg:min-h-[30rem] lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-stretch">
+          <div
+            className={`grid grid-cols-1 gap-4 transition-[grid-template-columns] duration-200 lg:h-[calc(100vh-19rem)] lg:min-h-[30rem] lg:items-stretch ${
+              scopePanelCollapsed
+                ? 'lg:grid-cols-[3.25rem_minmax(0,1fr)]'
+                : 'lg:grid-cols-[12rem_minmax(0,1fr)]'
+            }`}
+          >
             <ChatScopeFilterPanel
               title="范围"
               modes={[
@@ -421,6 +442,10 @@ export function JargonManagementPage() {
                   全局黑话不按聊天划分
                 </div>
               }
+              collapsed={scopePanelCollapsed}
+              onCollapsedChange={setScopePanelCollapsed}
+              collapseLabel="折叠范围列表"
+              expandLabel="展开范围列表"
             />
 
             <div className="min-h-0 lg:h-full">

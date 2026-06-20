@@ -77,11 +77,44 @@ export type ReasoningPromptMessageAvatar = {
   avatar_url: string | null
 }
 
+export type ReasoningReplayMessage = {
+  role: string
+  content: unknown
+  tool_call_id?: string
+  tool_calls?: unknown[]
+}
+
+export type ReasoningReplayRequest = {
+  source_path?: string | null
+  stage?: string
+  model_name: string
+  messages: ReasoningReplayMessage[]
+  tool_definitions?: Record<string, unknown>[]
+  temperature?: number | null
+  max_tokens?: number | null
+}
+
+export type ReasoningReplayResponse = {
+  success: boolean
+  response: string
+  reasoning: string
+  model_name: string
+  tool_calls?: unknown[] | null
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  prompt_cache_hit_tokens: number
+  prompt_cache_miss_tokens: number
+  duration_ms: number
+  error?: string | null
+}
+
 export type ReasoningPromptListParams = {
   stage?: string
   session?: string
   action?: string
   search?: string
+  targetStem?: string
   page?: number
   pageSize?: number
 }
@@ -95,6 +128,7 @@ export async function listReasoningPromptFiles(
       session: params.session ?? 'auto',
       action: params.action ?? '',
       search: params.search ?? '',
+      target_stem: params.targetStem ?? '',
       page: params.page ?? 1,
       page_size: params.pageSize ?? 50,
     },
@@ -122,4 +156,13 @@ export async function getReasoningPromptFile(
 
 export async function getReasoningPromptHtmlUrl(path: string): Promise<string> {
   return resolveApiPath(`${API_BASE}/html?path=${encodeURIComponent(path)}`)
+}
+
+export async function replayReasoningPrompt(
+  request: ReasoningReplayRequest
+): Promise<ReasoningReplayResponse> {
+  return backendApi.post<ReasoningReplayResponse>(`${API_BASE}/replay`, {
+    body: request,
+    errorMessage: '重放推理请求失败',
+  })
 }

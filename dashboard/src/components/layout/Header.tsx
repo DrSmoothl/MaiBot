@@ -2,7 +2,6 @@ import { Link, useRouterState } from '@tanstack/react-router'
 import {
   BookOpen,
   Check,
-  ChevronRight,
   Database,
   FileText,
   Globe,
@@ -132,6 +131,28 @@ export function Header({
           {!inheritsPageBackground && <BackgroundLayer config={headerBg} layerId="header" />}
           <button
             type="button"
+            onClick={onSidebarToggle}
+            aria-label={sidebarOpen ? t('header.collapseSidebar') : t('header.expandSidebar')}
+            aria-expanded={sidebarOpen}
+            title={sidebarOpen ? t('header.collapseSidebar') : t('header.expandSidebar')}
+            className={cn(
+              'group absolute top-1/2 left-0 z-20 hidden h-4 w-3 -translate-y-1/2 focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none lg:block',
+              workspaceMode !== 'settings' && 'lg:hidden'
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'bg-muted-foreground/45 absolute top-1/2 -left-0.5 h-3 w-4 -translate-y-1/2 rounded-r transition-colors group-hover:bg-primary/65',
+                !sidebarOpen && 'bg-primary/70'
+              )}
+            />
+            <span className="sr-only">
+              {sidebarOpen ? t('header.collapseSidebar') : t('header.expandSidebar')}
+            </span>
+          </button>
+          <button
+            type="button"
             data-dashboard-topbar-toggle="true"
             onClick={onTopbarToggle}
             aria-label={t('header.expandTopbar')}
@@ -168,14 +189,22 @@ export function Header({
               onClick={onSidebarToggle}
               aria-label={sidebarOpen ? t('header.collapseSidebar') : t('header.expandSidebar')}
               aria-expanded={sidebarOpen}
+              title={sidebarOpen ? t('header.collapseSidebar') : t('header.expandSidebar')}
               className={cn(
-                'hover:bg-accent hidden rounded-lg p-2 lg:block',
+                'group absolute top-1/2 left-0 z-20 hidden h-14 w-4 -translate-y-1/2 focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none lg:block',
                 workspaceMode !== 'settings' && 'lg:hidden'
               )}
             >
-              <ChevronRight
-                className={cn('h-5 w-5 rotate-180 transition-transform', !sidebarOpen && 'rotate-0')}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'bg-muted-foreground/45 absolute top-1/2 -left-0.5 h-8 w-1 -translate-y-1/2 rounded-r transition-all group-hover:h-9 group-hover:bg-primary/65',
+                  !sidebarOpen && 'bg-primary/70'
+                )}
               />
+              <span className="sr-only">
+                {sidebarOpen ? t('header.collapseSidebar') : t('header.expandSidebar')}
+              </span>
             </button>
           </div>
 

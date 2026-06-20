@@ -37,7 +37,9 @@ export async function getJargonList(params: {
   page_size?: number
   search?: string
   session_id?: string
+  jargon_status?: 'confirmed_jargon' | 'confirmed_not_jargon' | 'pending'
   is_jargon?: boolean | null
+  is_complete?: boolean
   is_global?: boolean
 }): Promise<JargonListResponse> {
   return backendApi.get<JargonListResponse>(`${API_BASE}/list`, {
@@ -46,7 +48,9 @@ export async function getJargonList(params: {
       page_size: params.page_size || undefined,
       search: params.search || undefined,
       session_id: params.session_id || undefined,
+      jargon_status: params.jargon_status,
       is_jargon: params.is_jargon,
+      is_complete: params.is_complete,
       is_global: params.is_global,
     },
     errorMessage: '获取黑话列表失败',

@@ -21,7 +21,7 @@ export function ChatEmbedPage() {
   if (checking) {
     return (
       <div className="bg-background flex h-screen items-center justify-center">
-        <div className="text-muted-foreground">正在验证登录状态...</div>
+        <div className="text-muted-foreground">麦麦正在啃食服务器...</div>
       </div>
     )
   }

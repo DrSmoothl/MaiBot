@@ -12,14 +12,12 @@ import { useMenuSections } from './use-menu-sections'
 interface SidebarProps {
   sidebarOpen: boolean
   mobileMenuOpen: boolean
-  tooltipsEnabled: boolean
   onMobileMenuClose: () => void
 }
 
 export function Sidebar({
   sidebarOpen,
   mobileMenuOpen,
-  tooltipsEnabled,
   onMobileMenuClose,
 }: SidebarProps) {
   const { t } = useTranslation()
@@ -31,7 +29,7 @@ export function Sidebar({
     <aside
       data-dashboard-sidebar="true"
       className={cn(
-        'fixed inset-y-0 left-0 isolate z-50 flex flex-col border-r transition-all duration-300 lg:relative lg:z-0 lg:h-full',
+        'fixed inset-y-0 left-0 isolate z-50 flex flex-col border-r transition-transform duration-300 lg:relative lg:z-0 lg:h-full lg:transition-none',
         inheritsPageBackground ? 'bg-transparent' : 'bg-card',
         // 移动端始终显示完整宽度，桌面端根据 sidebarOpen 切换
         'w-[var(--layout-sidebar-width)] lg:w-full',
@@ -98,7 +96,6 @@ export function Sidebar({
                       key={item.path}
                       item={item}
                       sidebarOpen={sidebarOpen}
-                      tooltipsEnabled={tooltipsEnabled}
                       onMobileMenuClose={onMobileMenuClose}
                     />
                   ))}

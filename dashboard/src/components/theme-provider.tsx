@@ -75,8 +75,8 @@ export function ThemeProvider({
     }
 
     root.dataset.dashboardStyle = dashboardStyle
+    root.dataset.retroFocusHighlight = futureRetroConfig.focusHighlight ? 'true' : 'false'
     root.dataset.retroPaperTexture = futureRetroConfig.paperTexture ? 'true' : 'false'
-    root.dataset.retroStrongBorders = futureRetroConfig.strongBorders ? 'true' : 'false'
 
     applyThemePipeline(themeConfig, isDark)
   }, [resolvedTheme, themeConfig])

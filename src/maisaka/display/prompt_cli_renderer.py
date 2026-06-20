@@ -29,6 +29,7 @@ from .prompt_preview_logger import PromptPreviewLogger
 DATA_IMAGE_DIR = REPO_ROOT / "data" / "images"
 DATA_EMOJI_DIR = REPO_ROOT / "data" / "emoji"
 DATA_HTML_IMAGE_DIR = REPO_ROOT / "data" / "html_imgs"
+SUPPORTED_STRUCTURED_IMAGE_FORMATS = {"jpg", "jpeg", "png", "webp", "gif"}
 
 
 def _build_prompt_preview_web_uri(file_path: Path) -> str:
@@ -247,8 +248,17 @@ class PromptCLIVisualizer:
 
         if isinstance(item, (tuple, list)) and len(item) == 2:
             image_format, image_base64 = item
-            if isinstance(image_format, str) and isinstance(image_base64, str):
-                return image_format, image_base64
+            if not isinstance(image_format, str) or not isinstance(image_base64, str):
+                return None
+            normalized_format = PromptCLIVisualizer._normalize_image_format(image_format)
+            if normalized_format not in SUPPORTED_STRUCTURED_IMAGE_FORMATS:
+                return None
+            try:
+                if not b64decode(image_base64, validate=True):
+                    return None
+            except Exception:
+                return None
+            return normalized_format, image_base64
         return None
 
     @staticmethod
@@ -509,14 +519,16 @@ class PromptCLIVisualizer:
             if key not in {"base64", "image_base64", "image_url"}
         }
         image_reference = cls._build_structured_image_reference(image_format, image_base64)
-        image_uri = image_reference.get("image_uri")
-        if isinstance(image_uri, str) and image_uri:
-            sanitized_item["image_url"] = {"url": image_uri}
+        embedded_image_reference = {
+            key: value
+            for key, value in image_reference.items()
+            if key not in {"type", "image_format"}
+        }
 
         sanitized_item.update(
             {
                 "image_format": image_reference["image_format"],
-                "image_reference": image_reference,
+                "image_reference": embedded_image_reference,
             }
         )
         return sanitized_item
@@ -630,7 +642,6 @@ class PromptCLIVisualizer:
         output_title: str,
         output_tool_calls: list[Any] | None,
         metadata: Mapping[str, Any] | None,
-        text_dump: str,
         keep_base64: bool,
     ) -> dict[str, Any]:
         """构建 Prompt 预览 JSON，供 WebUI 稳定解析展示。"""
@@ -650,7 +661,6 @@ class PromptCLIVisualizer:
                 keep_base64,
             ),
             "tool_definitions": tool_definitions or [],
-            "text_dump": text_dump,
         }
 
     @classmethod
@@ -806,7 +816,6 @@ class PromptCLIVisualizer:
                 output_title=output_title,
                 output_tool_calls=output_tool_calls,
                 metadata=metadata,
-                text_dump=prompt_dump_text,
                 keep_base64=keep_json_base64,
             ),
             ensure_ascii=False,
@@ -1457,6 +1466,34 @@ class PromptCLIVisualizer:
     ) -> RenderableType:
         """构建文本型 Prompt 的折叠入口内容。"""
 
+        return cls.build_text_preview_access(
+            content,
+            category=category,
+            chat_id=chat_id,
+            request_kind=request_kind,
+            subtitle=subtitle,
+            output_content=output_content,
+            output_title=output_title,
+            output_tool_calls=output_tool_calls,
+            metadata=metadata,
+        ).body
+
+    @classmethod
+    def build_text_preview_access(
+        cls,
+        content: str,
+        *,
+        category: str,
+        chat_id: str,
+        request_kind: str,
+        subtitle: str,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
+        output_tool_calls: list[Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> PromptPreviewAccess:
+        """保存文本型 Prompt 预览文件，并返回对应访问入口。"""
+
         html_content = cls._build_text_preview_html(
             content,
             request_kind=request_kind,
@@ -1481,7 +1518,6 @@ class PromptCLIVisualizer:
                 output_title=output_title,
                 output_tool_calls=output_tool_calls,
                 metadata=metadata,
-                text_dump=text_content,
                 keep_base64=keep_json_base64,
             ),
             ensure_ascii=False,
@@ -1506,4 +1542,13 @@ class PromptCLIVisualizer:
             dump_path=structured_path,
             dump_link_text="点击打开 JSON 记录",
         )
-        return body
+        return PromptPreviewAccess(
+            body=body,
+            viewer_path=viewer_html_path,
+            viewer_uri=build_file_uri(viewer_html_path),
+            viewer_web_uri=_build_prompt_preview_web_uri(viewer_html_path),
+            dump_path=structured_path,
+            dump_uri=build_file_uri(structured_path),
+            structured_path=structured_path,
+            structured_uri=build_file_uri(structured_path),
+        )

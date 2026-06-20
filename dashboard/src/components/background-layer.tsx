@@ -8,6 +8,11 @@ type BackgroundLayerProps = {
   layerId: string
 }
 
+type ResolvedAssetUrl = {
+  assetId: string
+  url?: string
+}
+
 function getAutoOverlayOpacity(layerId: string): number {
   switch (layerId) {
     case 'page':
@@ -74,15 +79,23 @@ function getObjectFit(position: BackgroundConfig['effects']['position']): React.
 
 export function BackgroundLayer({ config, layerId }: BackgroundLayerProps) {
   const { getAssetUrl } = useAssetStore()
-  const [blobUrl, setBlobUrl] = useState<string | undefined>()
+  const [resolvedAssetUrl, setResolvedAssetUrl] = useState<ResolvedAssetUrl | undefined>()
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
-    if (!config.assetId) {
-      setBlobUrl(undefined)
-      return
+    const assetId = config.assetId
+    if (!assetId) return
+
+    let cancelled = false
+    getAssetUrl(assetId).then((url) => {
+      if (!cancelled) {
+        setResolvedAssetUrl({ assetId, url })
+      }
+    })
+
+    return () => {
+      cancelled = true
     }
-    getAssetUrl(config.assetId).then(setBlobUrl)
   }, [config.assetId, getAssetUrl])
 
   useEffect(() => {
@@ -107,14 +120,22 @@ export function BackgroundLayer({ config, layerId }: BackgroundLayerProps) {
     return null
   }
 
+  const blobUrl =
+    resolvedAssetUrl && resolvedAssetUrl.assetId === config.assetId ? resolvedAssetUrl.url : undefined
   const filterString = buildFilterString(config.effects)
   const { overlayColor, overlayOpacity, gradientOverlay } = config.effects
+  const hasMediaAsset = (config.type === 'image' || config.type === 'video') && Boolean(blobUrl)
   const hasExplicitOverlay = overlayOpacity > 0
-  const effectiveOverlayOpacity = hasExplicitOverlay ? overlayOpacity : getAutoOverlayOpacity(layerId)
+  const effectiveOverlayOpacity = hasExplicitOverlay
+    ? overlayOpacity
+    : hasMediaAsset
+      ? getAutoOverlayOpacity(layerId)
+      : 0
   const effectiveOverlayColor = hasExplicitOverlay
     ? `hsl(${overlayColor} / ${effectiveOverlayOpacity})`
     : `hsl(var(--background) / ${effectiveOverlayOpacity})`
-  const effectiveGradientOverlay = gradientOverlay || getAutoGradientOverlay(layerId)
+  const effectiveGradientOverlay =
+    gradientOverlay || (hasMediaAsset ? getAutoGradientOverlay(layerId) : undefined)
 
   return (
     <div

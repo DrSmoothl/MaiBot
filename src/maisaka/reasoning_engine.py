@@ -60,7 +60,6 @@ from src.maisaka.memory.mid_term import build_mid_term_memory_message, insert_mi
 from src.maisaka.monitor.events import (
     emit_cycle_end,
     emit_cycle_start,
-    emit_message_ingested,
     emit_planner_finalized,
     emit_timing_gate_result,
 )
@@ -1427,17 +1426,6 @@ class MaisakaReasoningEngine:
 
             self._insert_chat_history_message(history_message)
 
-            # 向监控前端广播新消息注入事件
-            user_info = message.message_info.user_info
-            speaker_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
-            await emit_message_ingested(
-                session_id=self._runtime.session_id,
-                speaker_name=speaker_name,
-                content=(message.processed_plain_text or "").strip(),
-                message_id=message.message_id,
-                timestamp=message.timestamp.timestamp(),
-            )
-
     async def _build_history_message(
         self,
         message: SessionMessage,
@@ -2224,7 +2212,7 @@ class MaisakaReasoningEngine:
         if monitor_sub_cards is not None:
             normalized_sub_cards = normalize_tool_record_value(monitor_sub_cards)
 
-        return {
+        tool_monitor_result = {
             "tool_call_id": tool_call.call_id,
             "tool_name": tool_call.func_name,
             "tool_title": tool_spec.title.strip() if tool_spec is not None and tool_spec.title.strip() else "",
@@ -2238,6 +2226,12 @@ class MaisakaReasoningEngine:
             "card": normalized_card,
             "sub_cards": normalized_sub_cards,
         }
+        prompt_html_uri = str(result.metadata.get("prompt_html_uri") or "").strip()
+        if not prompt_html_uri and isinstance(normalized_detail, dict):
+            prompt_html_uri = str(normalized_detail.get("prompt_html_uri") or "").strip()
+        if prompt_html_uri:
+            tool_monitor_result["prompt_html_uri"] = prompt_html_uri
+        return tool_monitor_result
 
     async def _handle_tool_calls(
         self,

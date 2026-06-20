@@ -5,14 +5,26 @@ import { cn } from '@/lib/utils'
 interface AccentPanelProps extends React.HTMLAttributes<HTMLDivElement> {
   contentClassName?: string
   showRetroStripes?: boolean
+  showRetroStripeDivider?: boolean
 }
 
 const AccentPanel = React.forwardRef<HTMLDivElement, AccentPanelProps>(
-  ({ className, contentClassName, showRetroStripes = true, children, ...props }, ref) => (
+  (
+    {
+      className,
+      contentClassName,
+      showRetroStripes = true,
+      showRetroStripeDivider = true,
+      children,
+      ...props
+    },
+    ref
+  ) => (
     <div
       ref={ref}
       data-dashboard-accent-panel="true"
       data-retro-stripes={showRetroStripes ? 'true' : 'false'}
+      data-retro-stripe-divider={showRetroStripeDivider ? 'true' : 'false'}
       className={cn(
         'bg-card border-border text-card-foreground relative overflow-hidden border-2',
         className

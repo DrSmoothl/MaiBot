@@ -158,8 +158,8 @@ export type StyleCustomCSS = Partial<Record<DashboardStyle, string>>
 export type StyleBackgroundConfigMap = Partial<Record<DashboardStyle, BackgroundConfigMap>>
 
 export type FutureRetroStyleConfig = {
+  focusHighlight: boolean
   paperTexture: boolean
-  strongBorders: boolean
 }
 
 export type DashboardStyleConfig = {
@@ -169,8 +169,8 @@ export type DashboardStyleConfig = {
 export const DEFAULT_DASHBOARD_STYLE: DashboardStyle = 'future-retro'
 
 export const DEFAULT_FUTURE_RETRO_STYLE_CONFIG: FutureRetroStyleConfig = {
+  focusHighlight: false,
   paperTexture: true,
-  strongBorders: true,
 }
 
 export const DEFAULT_DASHBOARD_STYLE_CONFIG: DashboardStyleConfig = {

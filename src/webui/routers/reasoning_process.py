@@ -3,17 +3,24 @@
 from html import unescape
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
+import base64
 import json
 import os
 import re
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, col, select
 
+from src.common.data_models.llm_service_data_models import LLMServiceRequest
 from src.common.database.database import get_db_session
 from src.common.database.database_model import ChatSession, Messages
+from src.config.config import config_manager
+from src.services.llm_service import generate as generate_llm_response
+from src.services.service_task_resolver import get_available_models
 from src.webui.dependencies import require_auth
 from src.webui.routers.avatar import build_webui_avatar_url
 
@@ -21,6 +28,11 @@ router = APIRouter(prefix="/reasoning-process", tags=["reasoning-process"], depe
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_LOG_ROOT = (PROJECT_ROOT / "logs" / "maisaka_prompt").resolve()
+REPLAY_IMAGE_ROOTS = (
+    (PROJECT_ROOT / "data" / "images").resolve(),
+    (PROJECT_ROOT / "data" / "emoji").resolve(),
+    (PROJECT_ROOT / "data" / "html_imgs").resolve(),
+)
 ALLOWED_SUFFIXES = {".txt", ".html", ".json"}
 SESSION_CHAT_TYPES = ("group", "private")
 ALL_GROUP_SESSIONS = "__all_group_chats__"
@@ -121,6 +133,44 @@ class ReasoningPromptContentResponse(BaseModel):
     model_name: str | None = None
     duration_ms: float | None = None
     message_avatars: dict[str, ReasoningPromptMessageAvatar] = Field(default_factory=dict)
+
+
+class ReasoningReplayMessage(BaseModel):
+    """重放调试使用的单条 LLM 消息。"""
+
+    role: str = Field(..., min_length=1)
+    content: Any
+    tool_call_id: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+
+
+class ReasoningReplayRequest(BaseModel):
+    """推理过程重放请求。"""
+
+    source_path: str | None = Field(default=None, description="原始 prompt JSON 相对路径")
+    stage: str = Field(default="", description="原始推理阶段")
+    model_name: str = Field(..., min_length=1, description="要用于重放的模型名称")
+    messages: list[ReasoningReplayMessage] = Field(default_factory=list)
+    tool_definitions: list[dict[str, Any]] = Field(default_factory=list)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=1)
+
+
+class ReasoningReplayResponse(BaseModel):
+    """推理过程重放响应。"""
+
+    success: bool
+    response: str = ""
+    reasoning: str = ""
+    model_name: str = ""
+    tool_calls: list[dict[str, Any]] | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    prompt_cache_hit_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
+    duration_ms: float = 0
+    error: str | None = None
 
 
 def _to_safe_relative_path(relative_path: str) -> Path:
@@ -660,6 +710,164 @@ def _extract_prompt_metadata_from_json_payload(payload: dict[str, Any]) -> dict[
     return _normalize_prompt_metadata(raw_metadata if isinstance(raw_metadata, dict) else {})
 
 
+def _ensure_replay_model_exists(model_name: str) -> str:
+    """确认重放模型存在并返回规范化模型名。"""
+
+    normalized_model_name = model_name.strip()
+    if not any(model.name == normalized_model_name for model in config_manager.get_model_config().models):
+        raise HTTPException(status_code=404, detail=f"未找到模型: {normalized_model_name}")
+    return normalized_model_name
+
+
+def _resolve_replay_task_name(stage: str, model_name: str) -> str:
+    """为重放调试选择一个已存在的任务配置名。"""
+
+    available_tasks = get_available_models()
+    normalized_stage = stage.strip()
+    if normalized_stage in available_tasks:
+        return normalized_stage
+
+    for task_name, task_config in available_tasks.items():
+        if model_name in list(task_config.model_list or []):
+            return task_name
+
+    if available_tasks:
+        return next(iter(available_tasks.keys()))
+    raise HTTPException(status_code=500, detail="没有可用的模型任务配置")
+
+
+def _is_path_in_roots(file_path: Path, roots: tuple[Path, ...]) -> bool:
+    resolved_path = file_path.resolve()
+    for root in roots:
+        try:
+            resolved_path.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _resolve_replay_image_path(raw_path: str) -> Path:
+    """解析结构化 prompt 中的图片引用路径，只允许读取预览图片缓存目录。"""
+
+    normalized_path = str(raw_path or "").strip()
+    if not normalized_path:
+        raise ValueError("图片引用缺少 image_path")
+
+    candidate = Path(normalized_path)
+    if not candidate.is_absolute():
+        candidate = PROJECT_ROOT / candidate
+    resolved_path = candidate.resolve()
+    if not _is_path_in_roots(resolved_path, REPLAY_IMAGE_ROOTS):
+        raise ValueError(f"图片引用路径不在允许目录内: {normalized_path}")
+    if not resolved_path.is_file():
+        raise ValueError(f"图片引用文件不存在: {normalized_path}")
+    return resolved_path
+
+
+def _resolve_replay_image_uri(raw_uri: str) -> Path | None:
+    """解析 file:// 图片引用；非 file URI 交给上游图片解析逻辑处理。"""
+
+    normalized_uri = str(raw_uri or "").strip()
+    if not normalized_uri.lower().startswith("file:"):
+        return None
+
+    parsed_uri = urlparse(normalized_uri)
+    uri_path = unquote(parsed_uri.path or "")
+    if os.name == "nt" and uri_path.startswith("/") and re.match(r"^/[A-Za-z]:/", uri_path):
+        uri_path = uri_path[1:]
+    return _resolve_replay_image_path(uri_path)
+
+
+def _infer_image_format(file_path: Path, fallback_format: Any = None) -> str:
+    raw_format = str(fallback_format or "").strip().lower().removeprefix(".")
+    if raw_format:
+        return "jpeg" if raw_format == "jpg" else raw_format
+
+    suffix_format = file_path.suffix.lower().removeprefix(".")
+    if suffix_format:
+        return "jpeg" if suffix_format == "jpg" else suffix_format
+    return "png"
+
+
+def _read_replay_image_base64(file_path: Path) -> str:
+    return base64.b64encode(file_path.read_bytes()).decode("utf-8")
+
+
+def _rehydrate_replay_image_part(content_item: dict[str, Any]) -> dict[str, Any] | None:
+    """把结构化 JSON 中省略 base64 的图片引用还原为 LLMService 可识别的图片片段。"""
+
+    part_type = str(content_item.get("type", "text")).strip().lower()
+    if part_type not in {"image", "image_url", "input_image"}:
+        return None
+
+    image_url = content_item.get("image_url")
+    if isinstance(image_url, dict):
+        image_url_value = image_url.get("url")
+    else:
+        image_url_value = image_url
+
+    if isinstance(content_item.get("image_base64"), str):
+        if isinstance(image_url_value, str) and not image_url_value.startswith("data:image/"):
+            return {key: value for key, value in content_item.items() if key != "image_url"}
+        return content_item
+
+    if isinstance(image_url_value, str) and image_url_value.startswith("data:image/"):
+        return content_item
+
+    image_reference = content_item.get("image_reference")
+    image_reference = image_reference if isinstance(image_reference, dict) else {}
+    image_path = content_item.get("image_path") or image_reference.get("image_path")
+    image_uri = image_url_value or content_item.get("image_uri") or image_reference.get("image_uri")
+
+    resolved_path: Path | None = None
+    if isinstance(image_path, str) and image_path.strip():
+        resolved_path = _resolve_replay_image_path(image_path)
+    elif isinstance(image_uri, str):
+        resolved_path = _resolve_replay_image_uri(image_uri)
+
+    if resolved_path is None:
+        raise ValueError("图片片段缺少可用于重放的 image_path 或 file:// image_uri")
+
+    return {
+        key: value
+        for key, value in content_item.items()
+        if key not in {"image_url", "image_uri", "image_reference"}
+    } | {
+        "type": part_type,
+        "image_format": _infer_image_format(
+            resolved_path,
+            content_item.get("image_format") or image_reference.get("image_format"),
+        ),
+        "image_base64": _read_replay_image_base64(resolved_path),
+    }
+
+
+def _rehydrate_replay_content(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_rehydrate_replay_content(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    image_part = _rehydrate_replay_image_part(value)
+    if image_part is not None:
+        return image_part
+
+    return {key: _rehydrate_replay_content(item) for key, item in value.items()}
+
+
+def _normalize_replay_message(message: ReasoningReplayMessage) -> dict[str, Any]:
+    normalized_message: dict[str, Any] = {
+        "role": message.role.strip().lower(),
+        "content": _rehydrate_replay_content(message.content),
+    }
+    if message.tool_call_id:
+        normalized_message["tool_call_id"] = message.tool_call_id
+    if message.tool_calls:
+        normalized_message["tool_calls"] = message.tool_calls
+    return normalized_message
+
+
 def _decode_json_string_match(value: str) -> str:
     try:
         decoded = json.loads(f'"{value}"')
@@ -769,6 +977,14 @@ def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | Non
 
     output_text = str(output.get("content_text") or "").strip()
     if output_text:
+        try:
+            parsed_output_text = json.loads(output_text)
+        except json.JSONDecodeError:
+            parsed_output_text = None
+        if isinstance(parsed_output_text, dict):
+            response_text = str(parsed_output_text.get("response") or "").strip()
+            if response_text:
+                return " ".join(line.strip() for line in response_text.splitlines() if line.strip()) or None
         return " ".join(line.strip() for line in output_text.splitlines() if line.strip())
 
     content = output.get("content")
@@ -776,6 +992,10 @@ def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | Non
         return None
     if isinstance(content, str):
         return " ".join(line.strip() for line in content.splitlines() if line.strip()) or None
+    if isinstance(content, dict):
+        response_text = str(content.get("response") or "").strip()
+        if response_text:
+            return " ".join(line.strip() for line in response_text.splitlines() if line.strip()) or None
     return json.dumps(content, ensure_ascii=False, default=str)
 
 
@@ -1157,6 +1377,58 @@ def _hydrate_prompt_file_records(
     ]
 
 
+def _deduplicate_replyer_prompt_records(items: list[ReasoningPromptFile]) -> list[ReasoningPromptFile]:
+    """隐藏同一次 replyer 输出的重复预览记录。"""
+
+    deduplicated_items: list[ReasoningPromptFile] = []
+    seen_indexes: dict[tuple[str, str], list[int]] = {}
+
+    for item in items:
+        if item.stage != "replyer" or not item.output_preview:
+            deduplicated_items.append(item)
+            continue
+
+        key = (item.session_id, item.output_preview.strip())
+        existing_index = next(
+            (
+                index
+                for index in seen_indexes.get(key, [])
+                if _is_duplicate_replyer_record_time_close(deduplicated_items[index], item)
+            ),
+            None,
+        )
+        if existing_index is None:
+            seen_indexes.setdefault(key, []).append(len(deduplicated_items))
+            deduplicated_items.append(item)
+            continue
+
+        existing_item = deduplicated_items[existing_index]
+        if _should_replace_duplicate_replyer_record(existing_item, item):
+            deduplicated_items[existing_index] = item
+
+    return deduplicated_items
+
+
+def _is_duplicate_replyer_record_time_close(left: ReasoningPromptFile, right: ReasoningPromptFile) -> bool:
+    left_time = left.timestamp
+    right_time = right.timestamp
+    if left_time is not None and right_time is not None:
+        return abs(left_time - right_time) <= 10_000
+    return abs(left.modified_at - right.modified_at) <= 10
+
+
+def _should_replace_duplicate_replyer_record(existing_item: ReasoningPromptFile, candidate_item: ReasoningPromptFile) -> bool:
+    if existing_item.model_name and not candidate_item.model_name:
+        return False
+    if candidate_item.model_name and not existing_item.model_name:
+        return True
+    if existing_item.duration_ms is not None and candidate_item.duration_ms is None:
+        return False
+    if candidate_item.duration_ms is not None and existing_item.duration_ms is None:
+        return True
+    return candidate_item.modified_at > existing_item.modified_at
+
+
 @router.get("/stages", response_model=ReasoningPromptStagesResponse)
 async def list_reasoning_prompt_stages():
     """只列出 logs/maisaka_prompt 下的推理过程类型概览。"""
@@ -1174,6 +1446,7 @@ async def list_reasoning_prompt_files(
     session: str = Query("auto"),
     action: str = Query(""),
     search: str = Query(""),
+    target_stem: str = Query(""),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=10, le=200),
 ):
@@ -1186,6 +1459,7 @@ async def list_reasoning_prompt_files(
     selected_session = _resolve_session_name(session, sessions)
     normalized_action = action.strip().casefold()
     normalized_search = search.strip().casefold()
+    normalized_target_stem = target_stem.strip()
     # 下拉菜单需要展示全部会话的真实名称，不能只解析当前选中项。
     session_infos = _list_session_infos(selected_stage, sessions)
     session_info_map = {item.name: item for item in session_infos}
@@ -1197,12 +1471,44 @@ async def list_reasoning_prompt_files(
             items = [item for item in items if _matches_prompt_file_action(item, normalized_action)]
         if normalized_search:
             items = [item for item in items if _matches_prompt_file_search(item, normalized_search)]
+        if selected_stage == "replyer":
+            items = _deduplicate_replyer_prompt_records(items)
         total = len(items)
+        if normalized_target_stem:
+            target_index = next((index for index, item in enumerate(items) if item.stem == normalized_target_stem), -1)
+            if target_index >= 0:
+                page = target_index // page_size + 1
+        start = (page - 1) * page_size
+        end = start + page_size
+        items = items[start:end]
+    elif selected_stage == "replyer":
+        items = _hydrate_prompt_file_records(
+            records,
+            include_previews=False,
+            include_output_preview=True,
+        )
+        items = _deduplicate_replyer_prompt_records(items)
+        total = len(items)
+        if normalized_target_stem:
+            target_index = next((index for index, item in enumerate(items) if item.stem == normalized_target_stem), -1)
+            if target_index >= 0:
+                page = target_index // page_size + 1
         start = (page - 1) * page_size
         end = start + page_size
         items = items[start:end]
     else:
         total = len(records)
+        if normalized_target_stem:
+            target_index = next(
+                (
+                    index
+                    for index, record in enumerate(records)
+                    if str(record.get("stem") or "") == normalized_target_stem
+                ),
+                -1,
+            )
+            if target_index >= 0:
+                page = target_index // page_size + 1
         start = (page - 1) * page_size
         end = start + page_size
         items = _hydrate_prompt_file_records(
@@ -1243,6 +1549,63 @@ async def get_reasoning_prompt_file(path: str = Query(...)):
         model_name=metadata.get("model_name") if isinstance(metadata.get("model_name"), str) else None,
         duration_ms=metadata.get("duration_ms") if isinstance(metadata.get("duration_ms"), (int, float)) else None,
         message_avatars=message_avatars,
+    )
+
+
+@router.post("/replay", response_model=ReasoningReplayResponse)
+async def replay_reasoning_prompt(request: ReasoningReplayRequest):
+    """使用可编辑消息重放一次推理过程请求。"""
+
+    model_name = _ensure_replay_model_exists(request.model_name)
+    if not request.messages:
+        raise HTTPException(status_code=400, detail="重放消息不能为空")
+
+    tool_definitions = request.tool_definitions
+    if not tool_definitions and request.source_path:
+        source_path = _resolve_prompt_log_path(request.source_path, {".json"})
+        source_payload = _load_prompt_json(source_path)
+        raw_tool_definitions = source_payload.get("tool_definitions")
+        if isinstance(raw_tool_definitions, list):
+            tool_definitions = [item for item in raw_tool_definitions if isinstance(item, dict)]
+
+    try:
+        replay_messages = [_normalize_replay_message(message) for message in request.messages]
+    except ValueError as exc:
+        return ReasoningReplayResponse(
+            success=False,
+            model_name=model_name,
+            error=str(exc),
+        )
+
+    task_name = _resolve_replay_task_name(request.stage, model_name)
+    started_at = time.perf_counter()
+    service_result = await generate_llm_response(
+        LLMServiceRequest(
+            task_name=task_name,
+            request_type=f"webui.reasoning_replay.{request.stage or 'unknown'}",
+            prompt=replay_messages,
+            model_name=model_name,
+            tool_options=tool_definitions,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+        )
+    )
+    duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    completion = service_result.completion
+
+    return ReasoningReplayResponse(
+        success=service_result.success,
+        response=completion.response,
+        reasoning=completion.reasoning,
+        model_name=completion.model_name or model_name,
+        tool_calls=service_result.to_capability_payload().get("tool_calls") if completion.tool_calls else None,
+        prompt_tokens=completion.prompt_tokens,
+        completion_tokens=completion.completion_tokens,
+        total_tokens=completion.total_tokens,
+        prompt_cache_hit_tokens=completion.prompt_cache_hit_tokens,
+        prompt_cache_miss_tokens=completion.prompt_cache_miss_tokens,
+        duration_ms=duration_ms,
+        error=service_result.error,
     )
 
 

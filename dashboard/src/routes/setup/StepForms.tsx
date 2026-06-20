@@ -1,5 +1,3 @@
-// 设置向导各步骤表单组件
-
 import { Eye, EyeOff } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -7,13 +5,6 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -24,64 +15,6 @@ import type {
   PersonalityConfig,
 } from './types'
 
-// ====== 步骤1：Bot基础配置 ======
-
-const KNOWN_PLATFORMS: Record<string, string> = {
-  qq: 'qq',
-  telegram: 'telegram',
-  tg: 'telegram',
-  discord: 'discord',
-  kook: 'kook',
-}
-
-const PLATFORM_OPTIONS = ['qq', 'telegram', 'discord', 'kook', 'custom'] as const
-
-function normalizePlatform(raw: string): string {
-  const key = raw.trim().toLowerCase()
-  return KNOWN_PLATFORMS[key] || key
-}
-
-function deriveSelectedPlatform(config: BotBasicConfig): { selected: string; customName: string } {
-  const platform = config.platform
-  // Legacy: no platform set but has QQ account
-  if (!platform && config.qq_account.trim()) {
-    return { selected: 'qq', customName: '' }
-  }
-  if (!platform) {
-    return { selected: '', customName: '' }
-  }
-  const known = PLATFORM_OPTIONS.find((value) => value === platform && value !== 'custom')
-  if (known) {
-    return { selected: platform, customName: '' }
-  }
-  return { selected: 'custom', customName: platform }
-}
-
-function upsertPlatformAccount(
-  platforms: string[],
-  platformName: string,
-  accountId: string
-): string[] {
-  const normalized = normalizePlatform(platformName)
-  const filtered = platforms.filter((platform) => {
-    const prefix = platform.split(':')[0]
-    return normalizePlatform(prefix) !== normalized
-  })
-  if (accountId.trim()) {
-    filtered.push(`${normalized}:${accountId.trim()}`)
-  }
-  return filtered
-}
-
-function getPrimaryAccount(platforms: string[], platformName: string): string {
-  const normalized = normalizePlatform(platformName)
-  const entry = platforms.find((platform) => {
-    const prefix = platform.split(':')[0]
-    return normalizePlatform(prefix) === normalized
-  })
-  return entry ? entry.split(':').slice(1).join(':') : ''
-}
-
 interface BotBasicFormProps {
   config: BotBasicConfig
   onChange: (config: BotBasicConfig) => void
@@ -89,138 +22,9 @@ interface BotBasicFormProps {
 
 export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
   const { t } = useTranslation()
-  const derived = deriveSelectedPlatform(config)
-  const [selectedPlatformOverride, setSelectedPlatformOverride] = useState<string | null>(null)
-  const [customPlatformNameOverride, setCustomPlatformNameOverride] = useState<string | null>(null)
-  const selectedPlatform = selectedPlatformOverride ?? derived.selected
-  const customPlatformName = customPlatformNameOverride ?? derived.customName
-  const primaryAccount =
-    selectedPlatform === 'qq'
-      ? config.qq_account.trim()
-      : config.platform
-        ? getPrimaryAccount(config.platforms, config.platform)
-        : ''
-
-  const platformOptions = [
-    { value: 'qq', label: 'QQ' },
-    { value: 'telegram', label: 'Telegram' },
-    { value: 'discord', label: 'Discord' },
-    { value: 'kook', label: 'Kook' },
-    { value: 'custom', label: t('setupPage.forms.botBasic.platform.options.custom') },
-  ]
-
-  const handlePlatformChange = (value: string) => {
-    setSelectedPlatformOverride(value)
-    const realPlatform = value === 'custom' ? customPlatformName : value
-    onChange({
-      ...config,
-      platform: normalizePlatform(realPlatform),
-      qq_account: value === 'qq' ? config.qq_account : config.qq_account,
-    })
-  }
-
-  const handleCustomNameChange = (name: string) => {
-    setCustomPlatformNameOverride(name)
-    const normalized = normalizePlatform(name)
-    const nextPlatforms = primaryAccount
-      ? upsertPlatformAccount(config.platforms, normalized, primaryAccount)
-      : config.platforms
-    onChange({
-      ...config,
-      platform: normalized,
-      platforms: nextPlatforms,
-    })
-  }
-
-  const handleAccountChange = (accountId: string) => {
-    const realPlatform = selectedPlatform === 'custom' ? customPlatformName : selectedPlatform
-    const normalized = normalizePlatform(realPlatform)
-
-    if (normalized === 'qq') {
-      onChange({
-        ...config,
-        qq_account: accountId.trim(),
-        platform: 'qq',
-      })
-    } else {
-      onChange({
-        ...config,
-        platform: normalized,
-        platforms: upsertPlatformAccount(config.platforms, normalized, accountId),
-      })
-    }
-  }
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <Label htmlFor="platform">{t('setupPage.forms.botBasic.platform.label')}</Label>
-        <Select value={selectedPlatform} onValueChange={handlePlatformChange}>
-          <SelectTrigger id="platform">
-            <SelectValue placeholder={t('setupPage.forms.botBasic.platform.placeholder')} />
-          </SelectTrigger>
-          <SelectContent>
-            {platformOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-muted-foreground text-xs">
-          {t('setupPage.forms.botBasic.platform.description')}
-        </p>
-      </div>
-
-      {selectedPlatform === 'custom' && (
-        <div className="space-y-3">
-          <Label htmlFor="custom_platform_name">
-            {t('setupPage.forms.botBasic.customPlatform.label')}
-          </Label>
-          <Input
-            id="custom_platform_name"
-            placeholder={t('setupPage.forms.botBasic.customPlatform.placeholder')}
-            value={customPlatformName}
-            onChange={(e) => handleCustomNameChange(e.target.value)}
-          />
-        </div>
-      )}
-
-      {selectedPlatform === 'qq' && (
-        <div className="space-y-3">
-          <Label htmlFor="qq_account">{t('setupPage.forms.botBasic.qqAccount.label')}</Label>
-          <Input
-            id="qq_account"
-            type="number"
-            placeholder={t('setupPage.forms.botBasic.qqAccount.placeholder')}
-            value={primaryAccount}
-            onChange={(e) => handleAccountChange(e.target.value)}
-          />
-          <p className="text-muted-foreground text-xs">
-            {t('setupPage.forms.botBasic.qqAccount.description')}
-          </p>
-        </div>
-      )}
-
-      {selectedPlatform &&
-        selectedPlatform !== 'qq' &&
-        (selectedPlatform !== 'custom' || customPlatformName) && (
-          <div className="space-y-3">
-            <Label htmlFor="primary_account">
-              {t('setupPage.forms.botBasic.primaryAccount.label')}
-            </Label>
-            <Input
-              id="primary_account"
-              placeholder={t('setupPage.forms.botBasic.primaryAccount.placeholder')}
-              value={primaryAccount}
-              onChange={(e) => handleAccountChange(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">
-              {t('setupPage.forms.botBasic.primaryAccount.description')}
-            </p>
-          </div>
-        )}
-
       <div className="space-y-3">
         <Label htmlFor="nickname">{t('setupPage.forms.botBasic.nickname.label')}</Label>
         <Input

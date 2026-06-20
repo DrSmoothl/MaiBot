@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo } from 'react'
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -9,6 +9,7 @@ import ReactFlow, {
   type Edge,
   type Node,
   type NodeTypes,
+  useNodesState,
 } from 'reactflow'
 
 import 'reactflow/dist/style.css'
@@ -23,7 +24,7 @@ const EntityNode = memo(({ data }: { data: FlowNodeData }) => {
     ? 'line-clamp-2 max-w-[11.5rem] whitespace-normal break-words text-xs font-semibold leading-snug text-white'
     : 'max-w-[9rem] truncate text-xs font-semibold leading-tight text-white'
   return (
-    <div className={`flex items-center justify-center border border-blue-300/70 bg-blue-500/90 text-center shadow-[0_0_22px_rgba(37,99,235,0.26)] backdrop-blur ${evidenceClassName}`}>
+    <div className={`flex cursor-grab items-center justify-center border border-blue-300/70 bg-blue-500/90 text-center shadow-[0_0_22px_rgba(37,99,235,0.26)] backdrop-blur active:cursor-grabbing ${evidenceClassName}`}>
       <Handle className="opacity-0" type="target" position={Position.Top} />
       <div className={textClassName} title={data.content}>
         {data.label}
@@ -43,7 +44,7 @@ const ParagraphNode = memo(({ data }: { data: FlowNodeData }) => {
     ? 'line-clamp-2 max-w-[11.5rem] whitespace-normal break-words text-xs font-medium leading-snug text-white'
     : 'max-w-[8rem] truncate text-[11px] font-medium leading-tight text-white'
   return (
-    <div className={`flex items-center justify-center border border-emerald-300/70 bg-emerald-500/90 text-center shadow-[0_0_18px_rgba(16,185,129,0.22)] backdrop-blur ${evidenceClassName}`}>
+    <div className={`flex cursor-grab items-center justify-center border border-emerald-300/70 bg-emerald-500/90 text-center shadow-[0_0_18px_rgba(16,185,129,0.22)] backdrop-blur active:cursor-grabbing ${evidenceClassName}`}>
       <Handle className="opacity-0" type="target" position={Position.Top} />
       <div className={textClassName} title={data.content}>
         {data.label}
@@ -63,7 +64,7 @@ const RelationNode = memo(({ data }: { data: FlowNodeData }) => {
     ? 'line-clamp-2 max-w-[11.5rem] whitespace-normal break-words text-xs font-medium leading-snug text-white'
     : 'max-w-[9rem] truncate text-[11px] font-medium leading-tight text-white'
   return (
-    <div className={`flex items-center justify-center border border-orange-300/70 bg-orange-500/90 text-center shadow-[0_0_18px_rgba(249,115,22,0.24)] backdrop-blur ${evidenceClassName}`}>
+    <div className={`flex cursor-grab items-center justify-center border border-orange-300/70 bg-orange-500/90 text-center shadow-[0_0_18px_rgba(249,115,22,0.24)] backdrop-blur active:cursor-grabbing ${evidenceClassName}`}>
       <Handle className="opacity-0" type="target" position={Position.Top} />
       <div className={textClassName} title={data.content}>
         {data.label}
@@ -220,7 +221,7 @@ function calculateEvidenceLayout(nodes: GraphNode[], edges: GraphEdge[]): { node
             ? '#60a5fa'
             : edge.kind === 'object'
               ? '#a78bfa'
-              : '#94a3b8'
+              : '#64748b'
     const isCrossLayer = sourceNode?.type !== targetNode?.type
     const flowEdge: FlowEdge = {
       id: `edge-${index}`,
@@ -230,14 +231,14 @@ function calculateEvidenceLayout(nodes: GraphNode[], edges: GraphEdge[]): { node
       animated: nodes.length <= 200,
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 14,
-        height: 14,
+        width: 16,
+        height: 16,
         color: strokeColor,
       },
       zIndex: 0,
       style: {
-        strokeWidth: Math.min(Math.max(edge.weight, isCrossLayer ? 2 : 1.5), 4),
-        opacity: isCrossLayer ? 0.72 : 0.42,
+        strokeWidth: Math.min(Math.max(edge.weight, isCrossLayer ? 2.5 : 2), 5),
+        opacity: isCrossLayer ? 0.88 : 0.68,
         stroke: strokeColor,
       },
       labelStyle: {
@@ -315,15 +316,17 @@ function calculateLayout(nodes: GraphNode[], edges: GraphEdge[]): { nodes: FlowN
             ? '#4f46e5'
             : edge.kind === 'object'
               ? '#7c3aed'
-              : '#64748b'
+              : '#475569'
     const flowEdge: FlowEdge = {
       id: `edge-${index}`,
       source: edge.source,
       target: edge.target,
       animated: nodes.length <= 200 && (isEvidenceEdge || edge.weight > 5),
       style: {
-        strokeWidth: isEvidenceEdge ? Math.min(Math.max(edge.weight, 1.5), 4) : Math.min(edge.weight / 2, 5),
-        opacity: isEvidenceEdge ? 0.9 : 0.6,
+        strokeWidth: isEvidenceEdge
+          ? Math.min(Math.max(edge.weight, 2), 5)
+          : Math.min(Math.max(edge.weight / 2, 1.75), 5.5),
+        opacity: isEvidenceEdge ? 0.95 : 0.78,
         stroke: strokeColor,
       },
       labelStyle: {
@@ -358,7 +361,12 @@ export function GraphVisualization({ graphData, onNodeClick, onEdgeClick, loadin
     () => calculateLayout(graphData.nodes, graphData.edges),
     [graphData.edges, graphData.nodes],
   )
-  const nodeCount = flowNodes.length
+  const [nodes, setNodes, onNodesChange] = useNodesState(flowNodes)
+  const nodeCount = nodes.length
+
+  useEffect(() => {
+    setNodes(flowNodes)
+  }, [flowNodes, setNodes])
 
   if (loading) {
     return null
@@ -375,8 +383,9 @@ export function GraphVisualization({ graphData, onNodeClick, onEdgeClick, loadin
         {`知识图谱包含 ${nodeCount} 个节点和 ${flowEdges.length} 条关系。`}
       </span>
       <ReactFlow
-        nodes={flowNodes}
+        nodes={nodes}
         edges={flowEdges}
+        onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
         nodeTypes={nodeTypes}

@@ -815,7 +815,7 @@ wheels = [
 
 [[package]]
 name = "maibot"
-version = "1.0.6"
+version = "1.0.7"
 source = { editable = "." }
 dependencies = [
     { name = "ahocorasick-rs" },
@@ -876,7 +876,7 @@ requires-dist = [
     { name = "httpx", extras = ["socks"] },
     { name = "jieba", specifier = ">=0.42.1" },
     { name = "json-repair", specifier = ">=0.47.6" },
-    { name = "maibot-dashboard", specifier = "==1.4.5" },
+    { name = "maibot-dashboard", specifier = ">=1.5.0.dev20260619253" },
     { name = "maibot-plugin-sdk", specifier = ">=2.5.4" },
     { name = "maim-message", specifier = "==0.6.8" },
     { name = "mcp" },
@@ -912,11 +912,11 @@ dev = [
 
 [[package]]
 name = "maibot-dashboard"
-version = "1.4.5"
+version = "1.5.0.dev20260619253"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/be/47/3699e64f8a2fbe6d039c233a8db3680a27df43547bab7c1cfa7f007bf75b/maibot_dashboard-1.4.5.tar.gz", hash = "sha256:29acb266d37acf978cf802d6068e51850d95143006cc6398e05fe912e120cb9b", size = 2741335, upload-time = "2026-06-16T08:37:41.097Z" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/94/4d/7640c25a62abc1fe86c9893787972a7c445e4cd9b32671c8bc5dc1f4460b/maibot_dashboard-1.5.0.dev20260619253.tar.gz", hash = "sha256:ee1c5e7080f28ab4a5fe6cebc7e20c76c2e0f3abd443fe3a2a461463bd2d707d", size = 2752368, upload-time = "2026-06-19T10:03:18.165Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/76/3d/f9b91b0711501f91c6c6dfa2a05a7f71047f7f3601b542d919956e12e028/maibot_dashboard-1.4.5-py3-none-any.whl", hash = "sha256:f70f1b598c2318a3bb0685ba9b58fa4d4e9b1b00e725717aff26d20175a9eb5d", size = 2812391, upload-time = "2026-06-16T08:37:39.477Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/4c/4e/17375a73b223e1240d4ec370bad7236e93434469c8997dc92936109a6227/maibot_dashboard-1.5.0.dev20260619253-py3-none-any.whl", hash = "sha256:9bbe5117014b3d588049eee367fc85d7fa6dba0b212d503853a2bf48ceca0af9", size = 2821891, upload-time = "2026-06-19T10:03:16.299Z" },
 ]
 
 [[package]]

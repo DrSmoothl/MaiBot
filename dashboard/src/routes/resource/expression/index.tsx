@@ -630,7 +630,7 @@ export function ExpressionManagementPage() {
 
             <div className="flex min-h-0 flex-col space-y-4 sm:space-y-3">
               {scopeStatus && (
-                <AccentPanel>
+                <AccentPanel showRetroStripeDivider={false}>
                   <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:gap-2 sm:px-3 sm:py-2">
                     {renderStatusIndicator('开启学习', scopeStatus.enableLearning, false)}
                     {renderStatusIndicator('开启使用', scopeStatus.useExpression)}
