@@ -48,6 +48,7 @@ import {
 } from '@/lib/emoji-api'
 import type { Emoji, EmojiStats, EmojiStatus } from '@/types/emoji'
 
+import { EmojiCacheMaintenancePanel } from './EmojiCacheMaintenancePanel'
 import { EmojiDetailDialog, EmojiEditDialog, EmojiUploadDialog } from './EmojiDialogs'
 import { EmojiList } from './EmojiList'
 
@@ -431,6 +432,13 @@ export function EmojiManagementPage() {
               </div>
             </CardHeader>
           </Card>
+
+          <EmojiCacheMaintenancePanel
+            onCacheChanged={() => {
+              list.invalidate()
+              void statsQuery.refetch()
+            }}
+          />
 
           {/* 表情包卡片列表 */}
           <Card>

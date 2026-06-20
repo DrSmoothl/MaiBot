@@ -20,6 +20,7 @@ BuildHistoryMessage = Callable[[SessionMessage, str], Awaitable[Optional[LLMCont
 BuildVisibleText = Callable[[SessionMessage, str], str]
 
 _PLANNER_PENDING_IMAGE_HASHES: set[str] = set()
+_MONITOR_PENDING_IMAGE_REFRESHERS: dict[str, list[Callable[[str], None]]] = {}
 
 
 async def refresh_chat_history_visual_placeholders(
@@ -123,11 +124,28 @@ def log_pending_image_recognition_before_text_planner(
 def log_tracked_image_recognition_completed(image_hash: str) -> None:
     """当 planner 已遇到的待识别图片完成识别时记录一次日志。"""
 
-    if not image_hash or image_hash not in _PLANNER_PENDING_IMAGE_HASHES:
+    if not image_hash:
         return
 
-    _PLANNER_PENDING_IMAGE_HASHES.remove(image_hash)
-    logger.info(f"非多模态 planner 等待中的图片已完成识别，image_hash={image_hash}")
+    if image_hash in _PLANNER_PENDING_IMAGE_HASHES:
+        _PLANNER_PENDING_IMAGE_HASHES.remove(image_hash)
+        logger.info(f"非多模态 planner 等待中的图片已完成识别，image_hash={image_hash}")
+
+    refreshers = _MONITOR_PENDING_IMAGE_REFRESHERS.pop(image_hash, [])
+    for refresher in refreshers:
+        try:
+            refresher(image_hash)
+        except Exception as exc:
+            logger.debug(f"通知 MaiSaka 监控图片占位刷新失败，image_hash={image_hash}: {exc}")
+
+
+def register_monitor_image_placeholder_refresh(image_hash: str, refresher: Callable[[str], None]) -> None:
+    """登记图片识别完成后的监控消息刷新回调。"""
+
+    if not image_hash:
+        return
+
+    _MONITOR_PENDING_IMAGE_REFRESHERS.setdefault(image_hash, []).append(refresher)
 
 
 def _is_vlm_task_configured() -> bool:

@@ -977,6 +977,14 @@ def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | Non
 
     output_text = str(output.get("content_text") or "").strip()
     if output_text:
+        try:
+            parsed_output_text = json.loads(output_text)
+        except json.JSONDecodeError:
+            parsed_output_text = None
+        if isinstance(parsed_output_text, dict):
+            response_text = str(parsed_output_text.get("response") or "").strip()
+            if response_text:
+                return " ".join(line.strip() for line in response_text.splitlines() if line.strip()) or None
         return " ".join(line.strip() for line in output_text.splitlines() if line.strip())
 
     content = output.get("content")
@@ -984,6 +992,10 @@ def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | Non
         return None
     if isinstance(content, str):
         return " ".join(line.strip() for line in content.splitlines() if line.strip()) or None
+    if isinstance(content, dict):
+        response_text = str(content.get("response") or "").strip()
+        if response_text:
+            return " ".join(line.strip() for line in response_text.splitlines() if line.strip()) or None
     return json.dumps(content, ensure_ascii=False, default=str)
 
 
@@ -1365,6 +1377,58 @@ def _hydrate_prompt_file_records(
     ]
 
 
+def _deduplicate_replyer_prompt_records(items: list[ReasoningPromptFile]) -> list[ReasoningPromptFile]:
+    """隐藏同一次 replyer 输出的重复预览记录。"""
+
+    deduplicated_items: list[ReasoningPromptFile] = []
+    seen_indexes: dict[tuple[str, str], list[int]] = {}
+
+    for item in items:
+        if item.stage != "replyer" or not item.output_preview:
+            deduplicated_items.append(item)
+            continue
+
+        key = (item.session_id, item.output_preview.strip())
+        existing_index = next(
+            (
+                index
+                for index in seen_indexes.get(key, [])
+                if _is_duplicate_replyer_record_time_close(deduplicated_items[index], item)
+            ),
+            None,
+        )
+        if existing_index is None:
+            seen_indexes.setdefault(key, []).append(len(deduplicated_items))
+            deduplicated_items.append(item)
+            continue
+
+        existing_item = deduplicated_items[existing_index]
+        if _should_replace_duplicate_replyer_record(existing_item, item):
+            deduplicated_items[existing_index] = item
+
+    return deduplicated_items
+
+
+def _is_duplicate_replyer_record_time_close(left: ReasoningPromptFile, right: ReasoningPromptFile) -> bool:
+    left_time = left.timestamp
+    right_time = right.timestamp
+    if left_time is not None and right_time is not None:
+        return abs(left_time - right_time) <= 10_000
+    return abs(left.modified_at - right.modified_at) <= 10
+
+
+def _should_replace_duplicate_replyer_record(existing_item: ReasoningPromptFile, candidate_item: ReasoningPromptFile) -> bool:
+    if existing_item.model_name and not candidate_item.model_name:
+        return False
+    if candidate_item.model_name and not existing_item.model_name:
+        return True
+    if existing_item.duration_ms is not None and candidate_item.duration_ms is None:
+        return False
+    if candidate_item.duration_ms is not None and existing_item.duration_ms is None:
+        return True
+    return candidate_item.modified_at > existing_item.modified_at
+
+
 @router.get("/stages", response_model=ReasoningPromptStagesResponse)
 async def list_reasoning_prompt_stages():
     """只列出 logs/maisaka_prompt 下的推理过程类型概览。"""
@@ -1407,6 +1471,23 @@ async def list_reasoning_prompt_files(
             items = [item for item in items if _matches_prompt_file_action(item, normalized_action)]
         if normalized_search:
             items = [item for item in items if _matches_prompt_file_search(item, normalized_search)]
+        if selected_stage == "replyer":
+            items = _deduplicate_replyer_prompt_records(items)
+        total = len(items)
+        if normalized_target_stem:
+            target_index = next((index for index, item in enumerate(items) if item.stem == normalized_target_stem), -1)
+            if target_index >= 0:
+                page = target_index // page_size + 1
+        start = (page - 1) * page_size
+        end = start + page_size
+        items = items[start:end]
+    elif selected_stage == "replyer":
+        items = _hydrate_prompt_file_records(
+            records,
+            include_previews=False,
+            include_output_preview=True,
+        )
+        items = _deduplicate_replyer_prompt_records(items)
         total = len(items)
         if normalized_target_stem:
             target_index = next((index for index, item in enumerate(items) if item.stem == normalized_target_stem), -1)

@@ -97,7 +97,6 @@ type StructuredPromptPayload = {
     tool_calls?: unknown[]
   } | null
   tool_definitions?: unknown[]
-  text_dump?: string
 }
 
 function getInitialSearchParams(): URLSearchParams {
@@ -259,6 +258,45 @@ function parseStructuredPrompt(content: string): StructuredPromptPayload | null 
     return null
   }
   return null
+}
+
+function buildStructuredPromptCopyText(payload: StructuredPromptPayload | null): string {
+  if (!payload) return ''
+
+  const sections: string[] = []
+  const metadataLines: string[] = []
+  if (payload.request?.kind) metadataLines.push(`请求类型：${payload.request.kind}`)
+  if (payload.request?.selection_reason) metadataLines.push(`选择原因：${payload.request.selection_reason}`)
+  if (payload.metadata?.model_name) metadataLines.push(`模型：${payload.metadata.model_name}`)
+  if (typeof payload.metadata?.duration_ms === 'number') metadataLines.push(`耗时：${payload.metadata.duration_ms} ms`)
+  if (metadataLines.length > 0) sections.push(`[元信息]\n${metadataLines.join('\n')}`)
+
+  if (payload.output) {
+    const outputText = payload.output.content_text || stringifyStructuredValue(payload.output.content)
+    const toolCallsText = payload.output.tool_calls?.length
+      ? `\n\n[工具调用]\n${stringifyStructuredValue(payload.output.tool_calls)}`
+      : ''
+    if (outputText || toolCallsText) {
+      sections.push(`[${payload.output.title || '输出结果'}]\n${outputText}${toolCallsText}`)
+    }
+  }
+
+  const messageSections = (payload.messages ?? []).map((message, index) => {
+    const role = message.role || 'unknown'
+    const content = message.content_text || stringifyStructuredValue(message.content)
+    const toolCallId = message.tool_call_id ? `\ntool_call_id: ${message.tool_call_id}` : ''
+    const toolCalls = message.tool_calls?.length
+      ? `\ntool_calls:\n${stringifyStructuredValue(message.tool_calls)}`
+      : ''
+    return `#${message.index ?? index + 1} ${role}${toolCallId}${toolCalls}\n${content}`
+  })
+  if (messageSections.length > 0) sections.push(`[Prompt 消息]\n${messageSections.join('\n\n')}`)
+
+  if (payload.tool_definitions?.length) {
+    sections.push(`[工具定义]\n${stringifyStructuredValue(payload.tool_definitions)}`)
+  }
+
+  return sections.join(`\n\n${'='.repeat(80)}\n\n`)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1271,7 +1309,7 @@ export function ReasoningProcessPage({
   }
 
   async function handleCopyPrompt() {
-    const copyContent = textContent || structuredPrompt?.text_dump || jsonContent
+    const copyContent = textContent || buildStructuredPromptCopyText(structuredPrompt) || jsonContent
     if (!copyContent || contentLoading) {
       toast({
         title: '暂无可复制内容',
@@ -1666,7 +1704,7 @@ export function ReasoningProcessPage({
                             onClick={handleCopyPrompt}
                             disabled={
                               contentLoading ||
-                              !(textContent || structuredPrompt?.text_dump || jsonContent)
+                              !(textContent || buildStructuredPromptCopyText(structuredPrompt) || jsonContent)
                             }
                             title="复制完整 Prompt"
                           >

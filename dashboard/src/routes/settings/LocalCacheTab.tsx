@@ -1,7 +1,7 @@
 import {
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
-  CalendarDays,
   Database,
   Eye,
   File,
@@ -850,10 +850,10 @@ function DatabaseManagementPanel({
               </AlertDialogHeader>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1.5">
-                  <span className="text-xs text-muted-foreground">清理模式</span>
+                <div className="space-y-1.5">
+                  <span id="database-cleanup-mode-label" className="text-xs text-muted-foreground">清理模式</span>
                   <Select value={cleanupMode} onValueChange={(value) => onModeChange(value as DatabaseCleanupMode)}>
-                    <SelectTrigger>
+                    <SelectTrigger aria-labelledby="database-cleanup-mode-label">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -861,15 +861,15 @@ function DatabaseManagementPanel({
                       <SelectItem value="all">清空所选表</SelectItem>
                     </SelectContent>
                   </Select>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-xs text-muted-foreground">保留最近</span>
+                </div>
+                <div className="space-y-1.5">
+                  <span id="database-keep-days-label" className="text-xs text-muted-foreground">保留最近</span>
                   <Select
                     value={String(keepDays)}
                     onValueChange={(value) => onKeepDaysChange(Number(value))}
                     disabled={cleanupMode !== 'older_than_days'}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger aria-labelledby="database-keep-days-label">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -878,21 +878,22 @@ function DatabaseManagementPanel({
                       ))}
                     </SelectContent>
                   </Select>
-                </label>
+                </div>
               </div>
 
-              <label className="flex cursor-pointer items-center gap-3 rounded-md border p-3">
+              <div className="flex cursor-pointer items-center gap-3 rounded-md border p-3">
                 <Checkbox
+                  id="database-vacuum-after-cleanup"
                   checked={vacuumAfterCleanup}
                   onCheckedChange={(value) => onVacuumAfterCleanupChange(value === true)}
                 />
-                <span className="text-sm">
+                <label htmlFor="database-vacuum-after-cleanup" className="cursor-pointer text-sm">
                   清理完成后执行 VACUUM
                   <span className="mt-1 block text-xs text-muted-foreground">
                     删除记录后会产生空闲页，VACUUM 才能尽量把主数据库文件缩小。
                   </span>
-                </span>
-              </label>
+                </label>
+              </div>
 
               <div className="space-y-3">
                 {cleanableTables.map((table) => {
@@ -1499,6 +1500,7 @@ export function LocalCacheTab() {
   const dataCleanupDisabled = cleanupTarget !== null || isLoading || loadingDataEntries || deletingDataPath !== null
   const databaseCleanupDisabled = cleanupTarget !== null || isLoading || loadingDatabaseStats || isVacuuming
   const browserTargetLabel = browserTarget === 'images' ? '图片缓存' : '表情包缓存'
+  const visibleCacheDirectories = (stats?.directories ?? []).filter((item) => item.key !== 'emoji')
 
   const handleRefreshAll = () => {
     void refreshStats()
@@ -1508,31 +1510,20 @@ export function LocalCacheTab() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h3 className="flex items-center gap-2 text-base font-semibold sm:text-lg">
-              <HardDrive className="h-5 w-5" />
-              本地缓存
-            </h3>
-            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-              浏览 data 目录中的图片、表情包、日志文件和数据库存储占用。
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            onClick={handleRefreshAll}
-            disabled={isLoading || loadingDatabaseStats || loadingDataEntries}
-            className="gap-2"
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            刷新
-          </Button>
-        </div>
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          onClick={handleRefreshAll}
+          disabled={isLoading || loadingDatabaseStats || loadingDataEntries}
+          className="gap-2"
+        >
+          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          刷新
+        </Button>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {(stats?.directories ?? []).map((item) => {
+        {visibleCacheDirectories.map((item) => {
           const imageTarget = getImageTarget(item.key)
           const isBrowserOpen = imageTarget !== null && browserTarget === imageTarget
           const cleanupDisabled = cleanupTarget !== null

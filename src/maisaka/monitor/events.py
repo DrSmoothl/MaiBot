@@ -207,6 +207,11 @@ def _serialize_tool_results(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "summary": str(tool.get("summary", "")),
         }
         detail = tool.get("detail")
+        prompt_html_uri = str(tool.get("prompt_html_uri") or "").strip()
+        if not prompt_html_uri and isinstance(detail, dict):
+            prompt_html_uri = str(detail.get("prompt_html_uri") or "").strip()
+        if prompt_html_uri:
+            serialized_tool["prompt_html_uri"] = prompt_html_uri
         if detail is not None:
             serialized_tool["detail"] = _normalize_payload_value(detail)
         serialized_tools.append(serialized_tool)
@@ -433,6 +438,33 @@ async def emit_message_sent(
     """广播 MaiSaka 自己发送的消息事件。"""
 
     await _broadcast("message.sent", {
+        "session_id": session_id,
+        "speaker_name": speaker_name,
+        "content": content,
+        "message_id": message_id,
+        "source_kind": source_kind,
+        "platform": platform,
+        "user_id": user_id,
+        "group_id": group_id,
+        "timestamp": timestamp,
+    })
+
+
+async def emit_message_updated(
+    session_id: str,
+    speaker_name: str,
+    content: str,
+    message_id: str,
+    timestamp: float,
+    source_kind: str = "",
+    *,
+    platform: str = "",
+    user_id: str = "",
+    group_id: str = "",
+) -> None:
+    """广播已有消息内容更新事件。"""
+
+    await _broadcast("message.updated", {
         "session_id": session_id,
         "speaker_name": speaker_name,
         "content": content,

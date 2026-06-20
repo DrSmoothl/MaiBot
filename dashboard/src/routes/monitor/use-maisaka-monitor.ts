@@ -103,6 +103,7 @@ let persistSnapshotTimer: ReturnType<typeof setTimeout> | null = null
 let monitorDbPromise: Promise<IDBPDatabase<MaisakaMonitorDb>> | null = null
 let persistedEntryCountSincePrune = 0
 let pendingPersistEntries: TimelineEntry[] = []
+let pendingPersistUpdatedEntryIds = new Set<string>()
 let pendingPersistSessionIds = new Set<string>()
 let pendingPersistMeta = false
 
@@ -246,13 +247,15 @@ async function flushMonitorSnapshot() {
     }
 
     const entries = pendingPersistEntries
+    const updatedEntryIds = Array.from(pendingPersistUpdatedEntryIds)
     const sessionIds = Array.from(pendingPersistSessionIds)
     const shouldPersistMeta = pendingPersistMeta
     pendingPersistEntries = []
+    pendingPersistUpdatedEntryIds = new Set()
     pendingPersistSessionIds = new Set()
     pendingPersistMeta = false
 
-    if (entries.length === 0 && sessionIds.length === 0 && !shouldPersistMeta) {
+    if (entries.length === 0 && updatedEntryIds.length === 0 && sessionIds.length === 0 && !shouldPersistMeta) {
       return
     }
 
@@ -261,6 +264,12 @@ async function flushMonitorSnapshot() {
     const persistedAt = Date.now()
     for (const entry of entries) {
       await tx.objectStore('timeline').put({ ...entry, persistedAt })
+    }
+    for (const entryId of updatedEntryIds) {
+      const entry = cachedTimeline.find((item) => item.id === entryId)
+      if (entry) {
+        await tx.objectStore('timeline').put({ ...entry, persistedAt })
+      }
     }
     for (const sessionId of sessionIds) {
       const session = cachedSessions.get(sessionId)
@@ -332,6 +341,24 @@ function appendTimelineEntry(entry: TimelineEntry) {
   cachedTimeline = next.length > MAX_TIMELINE_ENTRIES
     ? next.slice(next.length - MAX_TIMELINE_ENTRIES)
     : next
+}
+
+function schedulePersistUpdatedTimelineEntry(entryId: string, sessionId?: string) {
+  if (typeof window === 'undefined') {
+    return
+  }
+  pendingPersistUpdatedEntryIds.add(entryId)
+  if (sessionId) {
+    pendingPersistSessionIds.add(sessionId)
+  }
+  pendingPersistMeta = true
+  if (persistSnapshotTimer !== null) {
+    window.clearTimeout(persistSnapshotTimer)
+  }
+  persistSnapshotTimer = window.setTimeout(() => {
+    persistSnapshotTimer = null
+    void flushMonitorSnapshot()
+  }, 300)
 }
 
 function getTimelineEntrySequence(entry: TimelineEntry) {
@@ -451,6 +478,51 @@ function updateStageStatus(event: MaisakaMonitorEvent) {
   }
 }
 
+function updateTimelineMessageContent(event: MaisakaMonitorEvent, sessionId: string) {
+  if (event.type !== 'message.updated') {
+    return false
+  }
+
+  const dataRecord = event.data as unknown as Record<string, unknown>
+  const messageId = typeof dataRecord.message_id === 'string' ? dataRecord.message_id : ''
+  const content = typeof dataRecord.content === 'string' ? dataRecord.content : ''
+  if (!messageId || !content) {
+    return false
+  }
+
+  let updatedEntryId = ''
+  const nextTimeline = cachedTimeline.map((entry) => {
+    if (
+      entry.sessionId !== sessionId
+      || (entry.type !== 'message.ingested' && entry.type !== 'message.sent')
+    ) {
+      return entry
+    }
+
+    const entryData = entry.data as unknown as Record<string, unknown>
+    if (entryData.message_id !== messageId) {
+      return entry
+    }
+
+    updatedEntryId = entry.id
+    return {
+      ...entry,
+      data: {
+        ...entryData,
+        content,
+      } as TimelineEntry['data'],
+    }
+  })
+
+  if (!updatedEntryId) {
+    return false
+  }
+
+  cachedTimeline = nextTimeline
+  schedulePersistUpdatedTimelineEntry(updatedEntryId, sessionId)
+  return true
+}
+
 function handleMonitorEvent(event: MaisakaMonitorEvent) {
   const dataRecord = event.data as unknown as Record<string, unknown>
   const sessionId = dataRecord.session_id as string
@@ -471,6 +543,15 @@ function handleMonitorEvent(event: MaisakaMonitorEvent) {
     updateSessionInfo(event, sessionId, timestamp)
     schedulePersistMonitorSnapshot(undefined, sessionId)
     notifyStoreListeners()
+    return
+  }
+
+  if (event.type === 'message.updated') {
+    const updated = updateTimelineMessageContent(event, sessionId)
+    updateSessionInfo(event, sessionId, timestamp)
+    if (updated) {
+      notifyStoreListeners()
+    }
     return
   }
 

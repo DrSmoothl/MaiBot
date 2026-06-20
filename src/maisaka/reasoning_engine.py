@@ -2212,7 +2212,7 @@ class MaisakaReasoningEngine:
         if monitor_sub_cards is not None:
             normalized_sub_cards = normalize_tool_record_value(monitor_sub_cards)
 
-        return {
+        tool_monitor_result = {
             "tool_call_id": tool_call.call_id,
             "tool_name": tool_call.func_name,
             "tool_title": tool_spec.title.strip() if tool_spec is not None and tool_spec.title.strip() else "",
@@ -2226,6 +2226,12 @@ class MaisakaReasoningEngine:
             "card": normalized_card,
             "sub_cards": normalized_sub_cards,
         }
+        prompt_html_uri = str(result.metadata.get("prompt_html_uri") or "").strip()
+        if not prompt_html_uri and isinstance(normalized_detail, dict):
+            prompt_html_uri = str(normalized_detail.get("prompt_html_uri") or "").strip()
+        if prompt_html_uri:
+            tool_monitor_result["prompt_html_uri"] = prompt_html_uri
+        return tool_monitor_result
 
     async def _handle_tool_calls(
         self,

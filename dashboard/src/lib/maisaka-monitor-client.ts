@@ -79,6 +79,18 @@ export interface MessageSentEvent {
   timestamp: number
 }
 
+export interface MessageUpdatedEvent {
+  session_id: string
+  speaker_name: string
+  content: string
+  message_id: string
+  source_kind?: string
+  platform?: string
+  user_id?: string
+  group_id?: string
+  timestamp: number
+}
+
 export interface CycleStartEvent {
   session_id: string
   cycle_id: number
@@ -170,6 +182,7 @@ export interface MaisakaFinalizedToolResult {
   success: boolean
   duration_ms: number
   summary: string
+  prompt_html_uri?: string
   detail?: unknown
 }
 
@@ -229,6 +242,7 @@ export type MaisakaMonitorEvent =
   | { type: 'stage.snapshot'; data: StageSnapshotEvent }
   | { type: 'message.ingested'; data: MessageIngestedEvent }
   | { type: 'message.sent'; data: MessageSentEvent }
+  | { type: 'message.updated'; data: MessageUpdatedEvent }
   | { type: 'cycle.start'; data: CycleStartEvent }
   | { type: 'timing_gate.result'; data: TimingGateResultEvent }
   | { type: 'planner.request'; data: PlannerRequestEvent }

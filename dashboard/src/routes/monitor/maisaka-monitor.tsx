@@ -612,7 +612,7 @@ function PlannerFinalizedCard({
       <CardHeader className="py-3 px-4 space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
           <Brain className="h-4 w-4 text-emerald-500" />
-          <CardTitle className="text-sm font-medium">主循环 planner</CardTitle>
+          <CardTitle className="text-sm font-medium">Planner</CardTitle>
           {canOpenReasoning && (
             <Button
               variant="ghost"
@@ -651,7 +651,160 @@ function PlannerFinalizedCard({
   )
 }
 
-function PlannerToolCallsBlock({ data }: { data: PlannerFinalizedEvent }) {
+function getValueTypeLabel(value: unknown) {
+  if (Array.isArray(value)) return `array(${value.length})`
+  if (value === null) return 'null'
+  return typeof value
+}
+
+function formatToolValue(value: unknown) {
+  if (typeof value === 'string') return value
+  if (value === undefined) return 'undefined'
+  return JSON.stringify(value, null, 2)
+}
+
+function ToolArgumentBlock({
+  name,
+  value,
+}: {
+  name: string
+  value: unknown
+}) {
+  const formattedValue = formatToolValue(value)
+  const inlineValue = formattedValue.replace(/\s+/g, ' ')
+
+  return (
+    <div
+      className="flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-md border bg-background/60 px-2 text-xs"
+      title={`${name} (${getValueTypeLabel(value)}): ${formattedValue}`}
+    >
+      <span className="shrink-0 font-mono font-semibold text-foreground">{name}</span>
+      <span className="shrink-0 text-muted-foreground">=</span>
+      <span className="min-w-0 max-w-72 truncate font-mono text-[11px] text-muted-foreground">
+        {inlineValue}
+      </span>
+    </div>
+  )
+}
+
+function ToolFullJsonBlock({
+  tool,
+}: {
+  tool: {
+    duration_ms: number
+    prompt_html_uri?: string
+    success: boolean
+    summary: string
+    tool_args: Record<string, unknown>
+    tool_call_id: string
+    tool_name: string
+  }
+}) {
+  const payload = {
+    tool_call_id: tool.tool_call_id,
+    tool_name: tool.tool_name,
+    tool_args: tool.tool_args,
+    success: tool.success,
+    duration_ms: tool.duration_ms,
+    summary: tool.summary,
+    prompt_html_uri: tool.prompt_html_uri,
+  }
+
+  return (
+    <details className="group contents text-xs">
+      <summary
+        className="ml-auto flex h-7 cursor-pointer list-none items-center gap-1 rounded border border-dashed bg-background/40 px-1.5 text-[10px] text-muted-foreground hover:bg-muted/40"
+        title="完整调用 JSON"
+      >
+        <ChevronRight className="h-2.5 w-2.5 shrink-0 transition-transform group-open:rotate-90" />
+        <span>JSON</span>
+      </summary>
+      <pre className="basis-full rounded-md border bg-background/60 px-2.5 py-2 font-mono text-[11px] leading-5 whitespace-pre-wrap break-words text-muted-foreground">
+        {JSON.stringify(payload, null, 2)}
+      </pre>
+    </details>
+  )
+}
+
+function PlannerToolResultCard({
+  tool,
+  index,
+  onOpenReasoning,
+}: {
+  tool: {
+    duration_ms: number
+    prompt_html_uri?: string
+    success: boolean
+    summary: string
+    tool_args: Record<string, unknown>
+    tool_call_id: string
+    tool_name: string
+  }
+  index: number
+  onOpenReasoning: (promptHtmlUri: string) => void
+}) {
+  const argumentEntries = Object.entries(tool.tool_args ?? {})
+  const statusText = tool.success ? '执行成功' : '执行失败'
+  const promptHtmlUri = tool.prompt_html_uri?.trim() ?? ''
+  const canOpenReasoning = Boolean(promptHtmlUri && parsePromptHtmlReasoningTarget(promptHtmlUri))
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-sm font-semibold text-foreground">{tool.tool_name || 'unknown'}</span>
+        {tool.success
+          ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+          : <XCircle className="h-3.5 w-3.5 text-red-500" />
+        }
+        <Badge variant={tool.success ? 'secondary' : 'destructive'} className="h-5 px-1.5 text-[10px]">
+          {statusText}
+        </Badge>
+        {tool.duration_ms > 0 && (
+          <span className="text-xs font-medium text-muted-foreground">{formatMs(tool.duration_ms)}</span>
+        )}
+        {canOpenReasoning && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1.5 text-[10px]"
+            onClick={() => onOpenReasoning(promptHtmlUri)}
+            title="查看这个工具对应的推理"
+          >
+            <FileCode2 className="mr-1 h-3 w-3" />
+            推理
+          </Button>
+        )}
+        <span className="ml-auto text-[10px] text-muted-foreground">#{index + 1}</span>
+      </div>
+
+      <div className="space-y-2">
+        {argumentEntries.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {argumentEntries.map(([name, value]) => (
+              <ToolArgumentBlock key={name} name={name} value={value} />
+            ))}
+            <ToolFullJsonBlock tool={tool} />
+          </div>
+        )}
+
+        <div className="flex items-start gap-2 rounded-md border bg-muted/20 px-2.5 py-1.5">
+          <span className="shrink-0 text-[10px] font-medium leading-5 text-muted-foreground">执行结果</span>
+          <p className="min-w-0 flex-1 text-xs leading-5 whitespace-pre-wrap break-words text-foreground/80">
+            {tool.summary || '未返回结果摘要。'}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PlannerToolCallsBlock({
+  data,
+  onOpenReasoning,
+}: {
+  data: PlannerFinalizedEvent
+  onOpenReasoning: (promptHtmlUri: string) => void
+}) {
   const toolCalls = data.planner?.tool_calls ?? []
   const tools = data.tools ?? []
   const displayTools = tools.length > 0
@@ -689,7 +842,7 @@ function PlannerToolCallsBlock({ data }: { data: PlannerFinalizedEvent }) {
       <CardHeader className="py-3 px-4 space-y-2">
         <div className="flex items-center gap-2">
           <Wrench className="h-4 w-4 text-teal-500" />
-          <CardTitle className="text-sm font-medium">Planner 工具调用</CardTitle>
+          <CardTitle className="text-sm font-medium">使用工具</CardTitle>
           <Badge variant="secondary" className="ml-auto text-[10px]">
             {regularTools.length} 个
           </Badge>
@@ -701,30 +854,15 @@ function PlannerToolCallsBlock({ data }: { data: PlannerFinalizedEvent }) {
             <span className="text-muted-foreground">等待新的消息。</span>
           </div>
         )}
-        <div className="space-y-2">
+        <div className="space-y-3">
           {regularTools.map((tool, idx) => (
-            <div
-              key={`${tool.tool_call_id || tool.tool_name}-${idx}`}
-              className="rounded-md border bg-muted/40 px-2.5 py-2 text-xs"
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-mono font-medium">{tool.tool_name || 'unknown'}</span>
-                {tool.success
-                  ? <CheckCircle2 className="h-3.5 w-3.5 text-teal-500" />
-                  : <XCircle className="h-3.5 w-3.5 text-red-500" />
-                }
-                {tool.duration_ms > 0 && (
-                  <span className="text-muted-foreground">{formatMs(tool.duration_ms)}</span>
-                )}
-              </div>
-              {Object.keys(tool.tool_args ?? {}).length > 0 && (
-                <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-background/70 px-2 py-1 text-[11px] text-muted-foreground">
-                  {JSON.stringify(tool.tool_args, null, 2)}
-                </pre>
-              )}
-              {tool.summary && (
-                <p className="mt-1 text-muted-foreground whitespace-pre-wrap break-words">{tool.summary}</p>
-              )}
+            <div key={`${tool.tool_call_id || tool.tool_name}-${idx}`} className="space-y-3">
+              {idx > 0 && <Separator />}
+              <PlannerToolResultCard
+                tool={tool}
+                index={idx}
+                onOpenReasoning={onOpenReasoning}
+              />
             </div>
           ))}
         </div>
@@ -960,7 +1098,7 @@ function TimelineEventRenderer({
       return (
         <div className="space-y-2">
           <PlannerFinalizedCard data={entry.data as PlannerFinalizedEvent} onOpenReasoning={onOpenReasoning} />
-          <PlannerToolCallsBlock data={entry.data as PlannerFinalizedEvent} />
+          <PlannerToolCallsBlock data={entry.data as PlannerFinalizedEvent} onOpenReasoning={onOpenReasoning} />
         </div>
       )
     case 'tool.execution':

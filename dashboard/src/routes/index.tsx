@@ -924,18 +924,11 @@ function IndexPageContent() {
                       ? t('home.storage.reading')
                       : '-'}
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {hasLocalCacheStats
-                    ? t('home.storage.summary', {
-                        image: formatStorageBytes(imageCacheSize),
-                        emoji: formatStorageBytes(emojiCacheSize),
-                        logs: formatStorageBytes(logCacheSize),
-                        database: formatStorageBytes(databaseSize),
-                      })
-                    : isLocalCacheStatsLoading
-                      ? t('home.storage.readingDescription')
-                      : t('home.storage.unavailable')}
-                </p>
+                {!hasLocalCacheStats && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {isLocalCacheStatsLoading ? t('home.storage.readingDescription') : t('home.storage.unavailable')}
+                  </p>
+                )}
               </div>
               {hasLocalCacheStats && (
                 <div className="space-y-2.5">

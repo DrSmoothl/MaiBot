@@ -281,9 +281,13 @@ def _build_send_emoji_monitor_metadata(
     if extra_sections:
         detail["extra_sections"] = extra_sections
 
+    metadata: Dict[str, Any] = {}
     if detail:
-        return {"monitor_detail": detail}
-    return {}
+        metadata["monitor_detail"] = detail
+    prompt_html_uri = str(selection_metadata.get("prompt_html_uri") or "").strip()
+    if prompt_html_uri:
+        metadata["prompt_html_uri"] = prompt_html_uri
+    return metadata
 
 
 def _resolve_emoji_selector_model_task_name() -> str:
@@ -394,6 +398,8 @@ async def _select_emoji_with_sub_agent(
         "total_tokens": response.total_tokens,
         "overall_ms": selection_duration_ms,
     }
+    if response.prompt_html_uri and selection_metadata is not None:
+        selection_metadata["prompt_html_uri"] = response.prompt_html_uri
 
     try:
         selection = EmojiSelectionResult.model_validate_json(response.content or "")
