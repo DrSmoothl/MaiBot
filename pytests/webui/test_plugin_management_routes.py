@@ -273,6 +273,33 @@ def test_clone_repository_reports_plugin_and_mirror_progress(tmp_path, monkeypat
     assert any(event.get("attempt") == 1 and event.get("max_attempts") == 1 for event in events)
 
 
+def test_clone_repository_cleans_partial_directory_on_git_failure(tmp_path, monkeypatch):
+    target_path = tmp_path / "bad_plugin"
+
+    def fake_run(cmd, capture_output, text, timeout):
+        assert cmd[:2] == ["git", "clone"]
+        target_path.mkdir(parents=True, exist_ok=True)
+        (target_path / ".git").mkdir()
+        return SimpleNamespace(returncode=128, stdout="", stderr="network failed")
+
+    service = mirror_service_module.GitMirrorService(max_retries=1, timeout=1)
+    monkeypatch.setattr(mirror_service_module.subprocess, "run", fake_run)
+
+    result = asyncio.run(
+        service._clone_with_url(
+            url="https://github.com/test/bad.git",
+            target_path=target_path,
+            branch=None,
+            depth=1,
+            mirror_type="test",
+        )
+    )
+
+    assert result["success"] is False
+    assert "network failed" in result["error"]
+    assert not target_path.exists()
+
+
 def test_uninstall_plugin_releases_runtime_before_delete(client: TestClient, monkeypatch):
     from src.plugin_runtime import integration as integration_module
 

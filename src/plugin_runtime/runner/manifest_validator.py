@@ -788,6 +788,7 @@ class ManifestValidator:
         sdk_version: str = "",
         project_root: Optional[Path] = None,
         validate_python_package_dependencies: bool = True,
+        log_errors: bool = True,
         log_compat_warnings: bool = True,
     ) -> None:
         """初始化 Manifest 校验器。
@@ -797,13 +798,16 @@ class ManifestValidator:
             sdk_version: 当前 SDK 版本号；留空时自动从运行环境中探测。
             project_root: 项目根目录；留空时自动推断。
             validate_python_package_dependencies: 是否校验 Python 包依赖与当前环境的关系。
+            log_errors: 是否输出 Manifest 校验错误；预扫描场景可关闭，由加载边界统一记录。
             log_compat_warnings: 是否输出兼容模式提示；预扫描场景可关闭以避免重复日志。
         """
         self._project_root: Path = project_root or self._resolve_project_root()
         self._host_version: str = host_version or self._detect_default_host_version(self._project_root)
         self._sdk_version: str = sdk_version or self._detect_default_sdk_version(self._project_root)
         self._validate_python_package_dependencies: bool = validate_python_package_dependencies
+        self._log_errors_enabled: bool = log_errors
         self._log_compat_warnings: bool = log_compat_warnings
+        self._logged_error_keys: Set[Tuple[str, Tuple[str, ...]]] = set()
         self.errors: List[str] = []
         self.warnings: List[str] = []
 
@@ -1138,10 +1142,22 @@ class ManifestValidator:
 
     def _log_errors(self, source: Optional[str] = None) -> None:
         """输出当前累计的 Manifest 校验错误。"""
+        if not self._log_errors_enabled:
+            return
         if not self.errors:
             return
 
         error_summary = "；".join(self.errors)
+        source_key = source or ""
+        error_key = (source_key, tuple(self.errors))
+        if error_key in self._logged_error_keys:
+            if source:
+                logger.debug(f"Manifest 校验失败 [{source}] 重复出现，已抑制重复错误日志: {error_summary}")
+                return
+            logger.debug(f"Manifest 校验失败重复出现，已抑制重复错误日志: {error_summary}")
+            return
+
+        self._logged_error_keys.add(error_key)
         if source:
             logger.error(f"Manifest 校验失败 [{source}]: 共 {len(self.errors)} 项，{error_summary}")
             return

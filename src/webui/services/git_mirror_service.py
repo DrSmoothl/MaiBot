@@ -897,6 +897,11 @@ class GitMirrorService:
                 else:
                     last_error = f"Git 克隆失败: {process.stderr}"
                     logger.warning(f"克隆失败 (尝试 {attempt + 1}/{self.max_retries}): {last_error}")
+
+                    # git clone 失败时可能已经创建 .git 等半成品，立即清理避免下次安装误判为插件已存在。
+                    if target_path.exists():
+                        shutil.rmtree(target_path, ignore_errors=True)
+
                     if _update_progress and attempt + 1 < self.max_retries:
                         try:
                             mirror_progress_base = 20
