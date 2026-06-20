@@ -1,16 +1,17 @@
-"""fetch_histroy focus-mode builtin tool."""
+"""fetch_history focus-mode builtin tool."""
 
 from typing import Any, Optional
 
-from .context import BuiltinToolRuntimeContext
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
+
+from .context import BuiltinToolRuntimeContext
 
 
 def get_tool_spec() -> ToolSpec:
-    """Build the fetch_histroy tool spec."""
+    """Build the fetch_history tool spec."""
 
     return ToolSpec(
-        name="fetch_histroy",
+        name="fetch_history",
         description=(
             "获取当前聊天流中已经存在、但尚未进入 Maisaka 上下文的消息。"
             "按从新到旧最多返回 num 条；不能获取其他聊天的信息。"
@@ -43,11 +44,11 @@ async def handle_tool(
     invocation: ToolInvocation,
     context: Optional[ToolExecutionContext] = None,
 ) -> ToolExecutionResult:
-    """Execute fetch_histroy."""
+    """Execute fetch_history."""
 
     del context
     if not tool_ctx.runtime._is_focus_mode_active_for_current_chat():
-        return tool_ctx.build_failure_result(invocation.tool_name, "focus_mode 未启用，fetch_histroy 不可用。")
+        return tool_ctx.build_failure_result(invocation.tool_name, "focus_mode 未启用，fetch_history 不可用。")
 
     num = min(50, _coerce_positive_int(invocation.arguments.get("num"), 10))
     content, structured_content, post_history_messages = await tool_ctx.runtime.build_focus_fetch_history_result(

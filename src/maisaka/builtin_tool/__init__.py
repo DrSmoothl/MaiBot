@@ -14,8 +14,8 @@ from .continue_tool import get_tool_spec as get_continue_tool_spec
 from .continue_tool import handle_tool as handle_continue_tool
 from .finish import get_tool_spec as get_finish_tool_spec
 from .finish import handle_tool as handle_finish_tool
-from .fetch_histroy import get_tool_spec as get_fetch_histroy_tool_spec
-from .fetch_histroy import handle_tool as handle_fetch_histroy_tool
+from .fetch_history import get_tool_spec as get_fetch_history_tool_spec
+from .fetch_history import handle_tool as handle_fetch_history_tool
 from .no_action import get_tool_spec as get_no_action_tool_spec
 from .no_action import handle_tool as handle_no_action_tool
 from .query_jargon import get_tool_spec as get_query_jargon_tool_spec
@@ -107,9 +107,9 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("send_image", get_send_image_tool_spec, handle_send_image_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),
     BuiltinToolEntry(
-        "fetch_histroy",
-        get_fetch_histroy_tool_spec,
-        handle_fetch_histroy_tool,
+        "fetch_history",
+        get_fetch_history_tool_spec,
+        handle_fetch_history_tool,
         stage="action",
     ),
     BuiltinToolEntry("switch_chat", get_switch_chat_tool_spec, handle_switch_chat_tool, stage="action"),
@@ -141,7 +141,7 @@ def _is_builtin_tool_enabled_by_config(entry: BuiltinToolEntry) -> bool:
     if entry.name in {"send_emoji", "send_image"}:
         if bool(global_config.experimental.enable_replyer_format_output):
             return False
-    if entry.name in {"fetch_histroy", "switch_chat"}:
+    if entry.name in {"fetch_history", "switch_chat"}:
         return bool(global_config.experimental.focus_mode)
     return True
 
@@ -149,7 +149,7 @@ def _is_builtin_tool_enabled_by_config(entry: BuiltinToolEntry) -> bool:
 def _is_builtin_tool_available(entry: BuiltinToolEntry, context: ToolAvailabilityContext) -> bool:
     """判断内置工具是否适用于当前聊天。"""
 
-    if entry.name in {"fetch_histroy", "switch_chat"}:
+    if entry.name in {"fetch_history", "switch_chat"}:
         if context.is_group_chat is False and not bool(global_config.experimental.focus_on_private):
             return False
     if entry.chat_scope == "all":
