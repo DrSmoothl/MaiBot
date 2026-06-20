@@ -1,6 +1,5 @@
 """聊天消息入口与主链路调度。"""
 
-from contextlib import suppress
 from typing import Any, Dict, List, Optional
 
 import os
@@ -387,69 +386,28 @@ class ChatBot:
         return True
 
     async def handle_notice_message(self, message: SessionMessage) -> bool:
-        """处理通知类消息。
+        """处理通知类消息（戳一戳、撤回、禁言、入群退群等）。
+
+        适配器通过 ``is_notify`` 字段标识通知消息，同时通过
+        ``additional_config`` 中的 ``napcat_notice_type``、``napcat_notice_sub_type``
+        和 ``napcat_notice_payload`` 携带原始通知事件的详细信息。
 
         Args:
-            message: 当前通知消息。
+            message: 当前通知消息（已由适配器设置 ``is_notify=True``）。
 
         Returns:
-            bool: 当前消息是否为通知消息。
+            bool: 当前消息是通知消息时返回 ``True``，否则返回 ``False``。
         """
 
-        if message.message_id != "notice":
+        if not message.is_notify:
             return False
 
-        message.is_notify = True
-        logger.debug("notice消息")
-        try:
-            seg = getattr(message, "message_segment", None)  # SessionMessage 没有 message_segment
-            mi = message.message_info
-            sub_type = None
-            scene = None
-            msg_id = None
-            recalled: Dict[str, Any] = {}
-            recalled_id = None
+        additional_config = message.message_info.additional_config
+        if not isinstance(additional_config, dict):
+            return False
 
-            seg_data = getattr(seg, "data", None)
-            if getattr(seg, "type", None) == "notify" and isinstance(seg_data, dict):
-                sub_type = seg_data.get("sub_type")
-                scene = seg_data.get("scene")
-                msg_id = seg_data.get("message_id")
-                recalled = seg_data.get("recalled_user_info") or {}
-                if isinstance(recalled, dict):
-                    recalled_id = recalled.get("user_id")
-
-            op = mi.user_info
-            gid = mi.group_info.group_id if mi.group_info else None
-
-            # 撤回事件打印；无法获取被撤回者则省略
-            if sub_type == "recall":
-                op_name = (
-                    getattr(op, "user_cardname", None)
-                    or getattr(op, "user_nickname", None)
-                    or str(getattr(op, "user_id", None))
-                )
-                recalled_name = None
-                with suppress(Exception):
-                    if isinstance(recalled, dict):
-                        recalled_name = (
-                            recalled.get("user_cardname")
-                            or recalled.get("user_nickname")
-                            or str(recalled.get("user_id"))
-                        )
-
-                if recalled_name and str(recalled_id) != str(getattr(op, "user_id", None)):
-                    logger.info(f"{op_name} 撤回了 {recalled_name} 的消息")
-                else:
-                    logger.info(f"{op_name} 撤回了消息")
-            else:
-                logger.debug(
-                    f"[notice] sub_type={sub_type} scene={scene} op={getattr(op, 'user_nickname', None)}({getattr(op, 'user_id', None)}) "
-                    f"gid={gid} msg_id={msg_id} recalled={recalled_id}"
-                )
-        except Exception:
-            logger.info("[notice] (简略) 收到一条通知事件")
-
+        # 通知消息由适配器完整格式化（含 [事件-xxx] 前缀及详情），
+        # 此处仅做类型识别，具体文本由消息正常链路输出，避免重复日志。
         return True
 
     async def echo_message_process(self, raw_data: Dict[str, Any]) -> None:
@@ -570,18 +528,8 @@ class ChatBot:
             if isinstance(additional_config, dict):
                 account_id, scope = RouteKeyFactory.extract_components(additional_config)
 
-            # TODO: 修复事件预处理部分
-            # continue_flag, modified_message = await events_manager.handle_mai_events(
-            #     EventType.ON_MESSAGE_PRE_PROCESS, message
-            # )
-            # if not continue_flag:
-            #     return
-            # if modified_message and modified_message._modify_flags.modify_message_segments:
-            #     message.message_segment = Seg(type="seglist", data=modified_message.message_segments)
-
-            # TODO: notice消息处理
-            # if await self.handle_notice_message(message):
-            #     pass
+            # 通知消息（戳一戳、撤回、禁言等）由适配器标记 is_notify=True，
+            await self.handle_notice_message(message)
 
             # 处理消息内容，识别表情包等二进制数据并转化为文本描述。
             # 如果 Maisaka 需要直接消费图片，会在后续构建 prompt 时按需回填图片二进制数据，
