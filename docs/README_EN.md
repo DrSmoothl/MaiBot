@@ -1,12 +1,13 @@
 <div align="center">
 
   <!-- Language Switcher -->
-  <a href="README_CN.md">简体中文</a> | <a href="../README.md">English</a>
+  <a href="../README.md">Bilingual</a> | <a href="README_CN.md">简体中文</a> | <a href="README_EN.md">English</a>
 
   <br>
   <br>
 
   <h1>MaiBot <sub><small>MaiSaka</small></sub></h1>
+  <sub><sup>An interactive agent based on large language models.</sup></sub>
 
   <!-- Badges Row -->
   <p>
@@ -16,6 +17,7 @@
     <img src="https://img.shields.io/github/contributors/Mai-with-u/MaiBot.svg?style=flat&label=Contributors" alt="Contributors">
     <img src="https://img.shields.io/github/forks/Mai-with-u/MaiBot.svg?style=flat&label=Forks" alt="Forks">
     <img src="https://img.shields.io/github/stars/Mai-with-u/MaiBot?style=flat&label=Stars" alt="Stars">
+    <a href="https://trendshift.io/repositories/20445" target="_blank"><img src="https://trendshift.io/api/badge/repositories/20445" alt="Mai-with-u%2FMaiBot | Trendshift" width="250" height="55"></a>
     <a href="https://deepwiki.com/DrSmoothl/MaiBot"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   </p>
 </div>
@@ -64,7 +66,7 @@ MaiSaka is more than just a bot, and more than a "helpful assistant" that comple
 
 ## 🔥 Updates and Installation
 
-> **Latest Version: v1.0.0** ([📄 Changelog](../changelogs/changelog.md))
+> **Latest Version: v1.0.7** ([📄 Changelog](../changelogs/changelog.md))
 
 - **Download**: Visit the [Release](https://github.com/MaiM-with-u/MaiBot/releases/) page to get the latest version.
 - **Launcher**: [Mailauncher](https://github.com/MaiM-with-u/mailauncher/releases/) (MacOS only, still in early development).
@@ -75,7 +77,7 @@ MaiSaka is more than just a bot, and more than a "helpful assistant" that comple
 | `dev` | 🚧 Development testing branch with new features, may be unstable |
 
 ### 📚 Deployment Guide
-👉 **[🚀 Latest Deployment Guide](https://docs.mai-mai.org/manual/deployment/mmc_deploy_windows.html)**
+👉 **[🚀 Latest Deployment Guide](https://docs.mai-mai.org/manual/deployment/)**
 
 ---
 
@@ -85,11 +87,11 @@ We welcome everyone interested in MaiBot to join us.
 
 | Category | Group | Description |
 | :--- | :--- | :--- |
-| **Technical** | [MaiBrain EEG](https://qm.qq.com/q/RzmCiRtHEW) | Technical discussion / Q&A |
-| **Technical** | [MaiBrain MRI](https://qm.qq.com/q/VQ3XZrWgMs) | Technical discussion / Q&A |
+| **Technical** | MaiBrain EEG: 571780722 | Technical discussion / Q&A |
+| **Technical** | MaiBrain MRI: 766798517 | Technical discussion / Q&A |
 | **Technical** | [Mai Wants to Be a VTuber](https://qm.qq.com/q/wGePTl1UyY) | Technical discussion / Q&A |
 | **Casual Chat** | [Mai Casual Chat Group](https://qm.qq.com/q/JxvHZnxyec) | Casual chat only, no support |
-| **Plugin Development** | [Plugin Dev Group](https://qm.qq.com/q/1036092828) | Advanced development and testing |
+| **Plugin Development** | Plugin Dev Group: 1036092828 | Advanced development and testing |
 
 ---
 
@@ -130,6 +132,10 @@ Contributions are welcome. Please read the [Contribution Guide](CONTRIBUTE.md) f
   <img alt="contributors" src="https://contrib.rocks/image?repo=MaiM-with-u/MaiBot" />
 </a>
 
+### 🤝 Open Source Friends
+
+- **[AstrBot](https://github.com/AstrBotDevs/AstrBot)**: An excellent LLM Agent project.
+
 ### ❤️ Special Thanks
 
 - **[Sacabambaspis](https://en.wikipedia.org/wiki/Sacabambaspis)**: SengokuCola's favorite creature.
@@ -140,7 +146,7 @@ Contributions are welcome. Please read the [Contribution Guide](CONTRIBUTE.md) f
 
 ## 📊 Repository Status
 
-![Alt](https://repobeats.axiom.co/api/embed/9faca9fccfc467931b87dd357b60c6362b5cfae0.svg "MaiBot Repository Status")
+![Alt](../depends-data/repository-metrics.svg "MaiBot Repository Status")
 
 ### Star History
 [![Star History](https://starchart.cc/MaiM-with-u/MaiBot.svg?variant=adaptive)](https://starchart.cc/MaiM-with-u/MaiBot)
