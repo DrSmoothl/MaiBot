@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple
 import asyncio
 import difflib
 import json
-import re
 
 from sqlmodel import select
 
@@ -28,7 +27,6 @@ from .expression_utils import check_expression_suitability, parse_expression_res
 
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
-    from .jargon_miner import JargonMiner, JargonEntry
     from src.maisaka.context.messages import LLMContextMessage
 
 
@@ -147,7 +145,7 @@ def register_expression_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]
             ),
             HookSpec(
                 name="expression.learn.after_extract",
-                description="表达方式学习解析出表达/黑话候选后触发，可改写候选集或直接终止本轮学习。",
+                description="表达方式学习解析出表达候选后触发，可改写候选集或直接终止本轮学习。",
                 parameters_schema=build_object_schema(
                     {
                         "session_id": {"type": "string", "description": "当前会话 ID。"},
@@ -160,7 +158,7 @@ def register_expression_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]
                         "jargon_entries": {
                             "type": "array",
                             "items": {"type": "object"},
-                            "description": "解析出的黑话候选列表。",
+                            "description": "兼容字段。黑话学习已由独立 learner 处理，此处固定为空列表。",
                         },
                     },
                     required=["session_id", "message_count", "expressions", "jargon_entries"],
@@ -271,57 +269,9 @@ class ExpressionLearner:
             normalized_expressions.append((situation, style, source_id))
         return normalized_expressions
 
-    @staticmethod
-    def _serialize_jargon_entries(jargon_entries: List[Tuple[str, str]]) -> List[dict[str, str]]:
-        """将黑话候选序列化为 Hook 载荷。
-
-        Args:
-            jargon_entries: 原始黑话候选列表。
-
-        Returns:
-            List[dict[str, str]]: 序列化后的黑话候选列表。
-        """
-
-        return [
-            {
-                "content": str(content).strip(),
-                "source_id": str(source_id).strip(),
-            }
-            for content, source_id in jargon_entries
-            if str(content).strip()
-        ]
-
-    @staticmethod
-    def _deserialize_jargon_entries(raw_jargon_entries: Any) -> List[Tuple[str, str]]:
-        """从 Hook 载荷恢复黑话候选列表。
-
-        Args:
-            raw_jargon_entries: Hook 返回的黑话候选列表。
-
-        Returns:
-            List[Tuple[str, str]]: 恢复后的黑话候选列表。
-        """
-
-        if not isinstance(raw_jargon_entries, list):
-            return []
-
-        normalized_entries: List[Tuple[str, str]] = []
-        for raw_entry in raw_jargon_entries:
-            if not isinstance(raw_entry, dict):
-                continue
-            content = str(raw_entry.get("content") or "").strip()
-            source_id = str(raw_entry.get("source_id") or "").strip()
-            if not content:
-                continue
-            normalized_entries.append((content, source_id))
-        return normalized_entries
-
     async def learn_from_context_messages(
         self,
         context_messages: Sequence["LLMContextMessage"],
-        jargon_miner: Optional["JargonMiner"] = None,
-        *,
-        enable_expression_learning: bool = True,
     ) -> bool:
         """从 Maisaka 被裁切的上下文消息中学习表达方式。
 
@@ -341,8 +291,6 @@ class ExpressionLearner:
 
         return await self._learn_from_session_messages(
             source_messages,
-            jargon_miner=jargon_miner,
-            enable_expression_learning=enable_expression_learning,
         )
 
     @staticmethod
@@ -385,9 +333,6 @@ class ExpressionLearner:
     async def _learn_from_session_messages(
         self,
         pending_messages: List["SessionMessage"],
-        *,
-        jargon_miner: Optional["JargonMiner"] = None,
-        enable_expression_learning: bool = True,
     ) -> bool:
         """对一批真实会话消息执行表达学习。"""
 
@@ -424,8 +369,6 @@ class ExpressionLearner:
             return await self._run_learning_batch(
                 pending_messages,
                 learning_session_id=learning_session_id,
-                jargon_miner=jargon_miner,
-                enable_expression_learning=enable_expression_learning,
             )
         finally:
             await expression_learning_batch_gate.release(learning_session_id)
@@ -435,8 +378,6 @@ class ExpressionLearner:
         pending_messages: List["SessionMessage"],
         *,
         learning_session_id: str,
-        jargon_miner: Optional["JargonMiner"] = None,
-        enable_expression_learning: bool = True,
     ) -> bool:
         """执行已经获得并发闸门的表达学习批次。"""
 
@@ -465,18 +406,7 @@ class ExpressionLearner:
             return False
 
         expressions: List[Tuple[str, str, str]]
-        jargon_entries: List[Tuple[str, str]]
-        expressions, jargon_entries = parse_expression_response(response)
-
-        cached_jargon_entries = self._check_cached_jargons_in_messages(pending_messages, jargon_miner)
-        if cached_jargon_entries:
-            existing_contents = {content for content, _ in jargon_entries}
-            for content, source_id in cached_jargon_entries:
-                if content in existing_contents:
-                    continue
-                jargon_entries.append((content, source_id))
-                existing_contents.add(content)
-                logger.info(f"从缓存中找到黑话: {content}")
+        expressions, _ = parse_expression_response(response)
 
         if len(expressions) > 20:
             logger.info(f"表达方式数量超过20: {len(expressions)}")
@@ -487,7 +417,7 @@ class ExpressionLearner:
             session_id=learning_session_id,
             message_count=len(pending_messages),
             expressions=self._serialize_expressions(expressions),
-            jargon_entries=self._serialize_jargon_entries(jargon_entries),
+            jargon_entries=[],
         )
         if after_extract_result.aborted:
             logger.info(f"{self.session_id} 表达方式选择 Hook 中止")
@@ -497,36 +427,12 @@ class ExpressionLearner:
         raw_expressions = after_extract_kwargs.get("expressions")
         if raw_expressions is not None:
             expressions = self._deserialize_expressions(raw_expressions)
-        raw_jargon_entries = after_extract_kwargs.get("jargon_entries")
-        if raw_jargon_entries is not None:
-            jargon_entries = self._deserialize_jargon_entries(raw_jargon_entries)
-
-        processed_jargon = False
-        if jargon_entries:
-            original_jargon_session_id = getattr(jargon_miner, "session_id", None) if jargon_miner is not None else None
-            original_jargon_session_name = getattr(jargon_miner, "session_name", None) if jargon_miner is not None else None
-            if jargon_miner is not None and learning_session_id != original_jargon_session_id:
-                chat_name = self._get_session_display_name(learning_session_id)
-                jargon_miner.session_id = learning_session_id
-                jargon_miner.session_name = chat_name
-            try:
-                processed_jargon = await self._process_jargon_entries(jargon_entries, pending_messages, jargon_miner)
-            finally:
-                if jargon_miner is not None and original_jargon_session_id is not None:
-                    jargon_miner.session_id = original_jargon_session_id
-                    jargon_miner.session_name = original_jargon_session_name or original_jargon_session_id
-
-        if not enable_expression_learning:
-            if processed_jargon:
-                logger.info("表达学习未启用，本轮仅完成黑话学习")
-            return processed_jargon
 
         if not expressions:
             logger.info("没有可学习的表达方式")
             return False
 
         # logger.info(f"可学习的表达方式: {expressions}")
-        # logger.info(f"可学习的黑话: {jargon_entries}")
 
         learnt_expressions = self._filter_expressions(expressions, pending_messages)
         if not learnt_expressions:
@@ -696,144 +602,6 @@ class ExpressionLearner:
             f"HTML={preview_access.viewer_path} "
             f"TXT={preview_access.dump_path}"
         )
-
-    def _check_cached_jargons_in_messages(
-        self,
-        messages: List["SessionMessage"],
-        jargon_miner: Optional["JargonMiner"] = None,
-    ) -> List[Tuple[str, str]]:
-        """
-        检查缓存中的 jargon 是否出现在 messages 中
-
-        Args:
-            jargon_miner: JargonMiner 实例，用于获取缓存的黑话
-
-        Returns:
-            List[Tuple[str, str]]: 匹配到的黑话条目列表，每个元素是 (content, source_id)
-        """
-        if not jargon_miner:
-            return []
-
-        # 获取缓存的所有 jargon 实例
-        cached_jargons = jargon_miner.get_cached_jargons()
-        if not cached_jargons:
-            return []
-
-        matched_entries: List[Tuple[str, str]] = []
-
-        for i, msg in enumerate(messages):
-            # 跳过机器人自己的消息
-            if is_bot_self(msg.platform, msg.message_info.user_info.user_id):
-                continue
-
-            # 获取消息文本
-            msg_text = (msg.processed_plain_text or "").strip()
-
-            if not msg_text:
-                continue
-
-            # 检查每个缓存中的 jargon 是否出现在消息文本中
-            for jargon in cached_jargons:
-                if not jargon or not jargon.strip():
-                    continue
-
-                jargon_content = jargon.strip()
-
-                # 使用正则匹配，考虑单词边界（类似 jargon_explainer 中的逻辑）
-                pattern = re.escape(jargon_content)
-                # 对于中文，使用更宽松的匹配；对于英文/数字，使用单词边界
-                if re.search(r"[\u4e00-\u9fff]", jargon_content):
-                    # 包含中文，使用更宽松的匹配
-                    search_pattern = pattern
-                else:
-                    # 纯英文/数字，使用单词边界
-                    search_pattern = r"\b" + pattern + r"\b"
-
-                if re.search(search_pattern, msg_text, re.IGNORECASE):
-                    # 找到匹配，构建条目（source_id 与多 message 构造时的编号一致，从 1 开始）
-                    source_id = str(i + 1)
-                    matched_entries.append((jargon_content, source_id))
-
-        return matched_entries
-
-    async def _process_jargon_entries(
-        self,
-        jargon_entries: List[Tuple[str, str]],
-        messages: List["SessionMessage"],
-        jargon_miner: Optional["JargonMiner"] = None,
-    ) -> bool:
-        """
-        处理从 expression learner 提取的黑话条目，路由到 jargon_miner
-
-        Args:
-            jargon_entries: 黑话条目列表，每个元素是 (content, source_id)
-            jargon_miner: JargonMiner 实例
-        """
-        if not jargon_entries or not messages:
-            return False
-
-        if not jargon_miner:
-            logger.warning("缺少 JargonMiner 实例，无法处理黑话条目")
-            return False
-
-        # 构建黑话条目格式
-        entries: List["JargonEntry"] = []
-
-        for content, source_id in jargon_entries:
-            content = content.strip()
-            if not content:
-                continue
-
-            # 过滤掉包含 SELF 的黑话，不学习
-            if "SELF" in content:
-                logger.info(f"跳过包含 SELF 的黑话：{content}")
-                continue
-
-            # TODO: 多平台兼容
-            # 检查是否包含机器人名称
-            bot_nickname = global_config.bot.nickname
-            if bot_nickname and bot_nickname in content:
-                logger.info(f"跳过包含机器人昵称的黑话：{content}")
-                continue
-
-            # 解析 source_id
-            if not source_id.isdigit():
-                logger.warning(f"黑话条目 source_id 无效：content={content}, source_id={source_id}")
-                continue
-
-            # 多 message 构造时的 source_id 从 1 开始
-            line_index = int(source_id) - 1
-            if line_index < 0 or line_index >= len(messages):
-                logger.warning(f"黑话条目 source_id 超出范围：content={content}, source_id={source_id}")
-                continue
-
-            # 检查是否是机器人自己的消息
-            target_msg = messages[line_index]
-            if is_bot_self(target_msg.platform, target_msg.message_info.user_info.user_id):
-                logger.info(f"跳过引用机器人自身消息的黑话：content={content}, source_id={source_id}")
-                continue
-
-            # 构建上下文段落（取前后各 3 条消息）
-            start_idx = max(0, line_index - 3)
-            end_idx = min(len(messages), line_index + 4)
-            context_msgs = messages[start_idx:end_idx]
-
-            context_paragraph = "\n".join(
-                [f"[{i + 1}] {msg.processed_plain_text or ''}" for i, msg in enumerate(context_msgs)]
-            )
-
-            if not context_paragraph:
-                logger.warning(f"黑话条目上下文为空：content={content}, source_id={source_id}")
-                continue
-
-            entries.append({"content": content, "raw_content": {context_paragraph}})  # type: ignore
-
-        if not entries:
-            return False
-
-        saved, updated = await jargon_miner.process_extracted_entries(entries)
-        logger.info(f"成功处理 {len(entries)} 个黑话条目")
-        return saved + updated > 0
 
     # ====== 过滤方法 ======
     def _filter_expressions(

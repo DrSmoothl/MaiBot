@@ -260,6 +260,13 @@ def parse_expression_response(response: str) -> Tuple[List[Tuple[str, str, str]]
     return expressions, jargon_entries
 
 
+def parse_jargon_response(response: str) -> List[Tuple[str, str]]:
+    """解析独立黑话学习 LLM 响应，提取 (content, source_id) 列表。"""
+
+    _, jargon_entries = parse_expression_response(response)
+    return jargon_entries
+
+
 def is_single_char_jargon(content: str) -> bool:
     """判断是否是单字黑话（单个汉字、英文或数字）。"""
     if not content or len(content) != 1:
