@@ -1555,11 +1555,8 @@
 :root[data-dashboard-style='future-retro']
   [data-dashboard-slider]
   [data-dashboard-slider-thumb='true'] {
-  display: inline-flex !important;
   width: 1.125rem !important;
   height: 1.125rem !important;
-  align-items: center;
-  justify-content: center;
   border: 2px solid var(--retro-line) !important;
   border-radius: 0 !important;
   background: var(--retro-rust) !important;
@@ -2280,8 +2277,9 @@
   [role='menuitem'],
   [role='option'],
   [role='tab'] {
-    min-height: 44px;
-    min-width: 44px;
+    /* 会导致移动设备 原版dashboard 界面按钮过大问题 */
+    /* min-height: 44px;
+    min-width: 44px; */
   }
 }
 
@@ -2329,8 +2327,9 @@
     position: absolute;
     inset: 50% auto auto 50%;
     transform: translate(-50%, -50%);
-    min-width: 44px;
-    min-height: 44px;
+    /* 会导致tab组件的分割线巨大 */
+    /* min-width: 44px; */
+    /* min-height: 44px; */
   }
 
   /* Radix Switch: h-5 w-9 (20px) → 触控区拖展到 44px */
