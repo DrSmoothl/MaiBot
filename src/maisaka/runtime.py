@@ -761,13 +761,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
     def _get_pending_message_count(self) -> int:
         """统计当前尚未进入内部循环的新消息数量。"""
         pending_messages = self.message_cache[self._last_processed_index :]
-        if not pending_messages:
-            return 0
-
-        seen_message_ids: set[str] = set()
-        for message in pending_messages:
-            seen_message_ids.add(message.message_id)
-        return len(seen_message_ids)
+        return len(pending_messages)
 
     def _prune_recent_external_message_intervals(self, now: Optional[float] = None) -> None:
         """仅保留最近 30 分钟内的外部消息间隔记录。"""
@@ -837,18 +831,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return original_message
 
         return None
-
-    def _has_chat_history_message(self, message_id: str) -> bool:
-        """判断指定真实消息是否已经注入过 Maisaka 上下文。"""
-
-        normalized_message_id = str(message_id or "").strip()
-        if not normalized_message_id:
-            return False
-
-        return any(
-            str(getattr(history_message, "message_id", "") or "").strip() == normalized_message_id
-            for history_message in self._chat_history
-        )
 
     def _prune_processed_message_cache(self) -> None:
         """裁剪 runtime 已经消费过的旧消息。"""
@@ -1504,23 +1486,14 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         if not pending_messages:
             return []
 
-        unique_messages: list[SessionMessage] = []
-        seen_message_ids: set[str] = set()
-        for message in pending_messages:
-            message_id = message.message_id
-            if message_id in seen_message_ids:
-                continue
-            seen_message_ids.add(message_id)
-            unique_messages.append(message)
-
         self._last_processed_index = len(self.message_cache)
-        if unique_messages:
+        if pending_messages:
             focus_mode_manager.mark_read(self.session_id)
         # logger.info(
         # f"{self.log_prefix} 已从消息缓存区[{start_index}:{self._last_processed_index}] "
-        # f"收集 {len(unique_messages)} 条新消息"
+        # f"收集 {len(pending_messages)} 条新消息"
         # )
-        return unique_messages
+        return pending_messages
 
     async def _wait_for_message_quiet_period(self) -> None:
         """等待消息静默窗口结束后，再启动由打断触发的新一轮。"""
