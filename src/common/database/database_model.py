@@ -6,11 +6,6 @@ from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, Float, Index,
 from sqlmodel import Field, LargeBinary, SQLModel
 
 
-class ModelUser(str, Enum):
-    SYSTEM = "system"
-    PLUGIN = "plugin"
-
-
 class ImageType(str, Enum):
     EMOJI = "emoji"
     IMAGE = "image"
@@ -74,8 +69,7 @@ class ModelUsage(SQLModel, table=True):
     model_api_provider_name: str = Field(index=True, max_length=255)  # 模型API供应商名称
 
     # 请求相关信息
-    endpoint: Optional[str] = Field(default=None, max_length=255, nullable=True)  # 模型API的具体endpoint
-    user_type: ModelUser = Field(sa_column=Column(SQLEnum(ModelUser)), default=ModelUser.SYSTEM)  # 模型使用者类型
+    session_id: str = Field(default="", index=True, max_length=255)  # 对应真实聊天流；非聊天上下文为空字符串
     task_name: Optional[str] = Field(default=None, index=True, max_length=100, nullable=True)  # 模型任务配置名称
     request_type: str = Field(max_length=50)  # 内部请求类型，记录哪种模块使用了此模型
     time_cost: float = Field(sa_column=Column(Float))  # 本次请求耗时，单位秒

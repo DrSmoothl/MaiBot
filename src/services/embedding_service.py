@@ -23,16 +23,22 @@ _CoroutineReturnT = TypeVar("_CoroutineReturnT")
 class EmbeddingServiceClient:
     """面向上层模块的 Embedding 服务对象式门面。"""
 
-    def __init__(self, task_name: str = "embedding", request_type: str = "") -> None:
+    def __init__(self, task_name: str = "embedding", request_type: str = "", session_id: str = "") -> None:
         """初始化 Embedding 服务门面。
 
         Args:
             task_name: 任务配置名称，对应 `model_task_config` 下的字段名。
             request_type: 当前请求的业务类型标识。
+            session_id: 当前请求归属的真实聊天流 ID；非聊天上下文为空。
         """
         self.task_name = resolve_task_name(task_name)
         self.request_type = request_type
-        self._orchestrator = LLMOrchestrator(task_name=self.task_name, request_type=request_type)
+        self.session_id = str(session_id or "").strip()
+        self._orchestrator = LLMOrchestrator(
+            task_name=self.task_name,
+            request_type=request_type,
+            session_id=self.session_id,
+        )
 
     async def embed_text(self, embedding_input: str) -> EmbeddingResult:
         """生成单条文本的嵌入向量。

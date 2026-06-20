@@ -719,7 +719,7 @@ class MaisakaChatLoopService:
     def _get_chat_prompt_name(self) -> str:
         """选择当前聊天使用的 Planner 模板。"""
 
-        if focus_mode_manager.is_enabled_for_chat(is_group_chat=self._is_group_chat):
+        if focus_mode_manager.is_enabled_for_session(self._session_id, is_group_chat=self._is_group_chat):
             return "maisaka_chat_focus"
         return "maisaka_chat"
 
@@ -926,16 +926,20 @@ class MaisakaChatLoopService:
         if tool_definitions is not None:
             all_tools = list(tool_definitions)
         elif self._tool_registry is not None:
-            tool_specs = await self._tool_registry.list_tools(
-                ToolAvailabilityContext(
-                    session_id=self._session_id,
-                    stream_id=self._session_id,
-                    is_group_chat=self._is_group_chat,
-                )
+            availability_context = ToolAvailabilityContext(
+                session_id=self._session_id,
+                stream_id=self._session_id,
+                is_group_chat=self._is_group_chat,
             )
+            tool_specs = await self._tool_registry.list_tools(availability_context)
             all_tools = [tool_spec.to_llm_definition() for tool_spec in tool_specs]
         else:
-            all_tools = [*get_builtin_tools(), *self._extra_tools]
+            availability_context = ToolAvailabilityContext(
+                session_id=self._session_id,
+                stream_id=self._session_id,
+                is_group_chat=self._is_group_chat,
+            )
+            all_tools = [*get_builtin_tools(availability_context), *self._extra_tools]
 
         before_request_result = await self._get_runtime_manager().invoke_hook(
             "maisaka.planner.before_request",

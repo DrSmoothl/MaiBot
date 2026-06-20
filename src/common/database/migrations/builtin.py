@@ -34,6 +34,7 @@ from .v25_to_v26 import migrate_v25_to_v26
 from .v26_to_v27 import migrate_v26_to_v27
 from .v27_to_v28 import migrate_v27_to_v28
 from .v28_to_v29 import migrate_v28_to_v29
+from .v29_to_v30 import migrate_v29_to_v30
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -66,7 +67,8 @@ V26_SCHEMA_VERSION = 26
 V27_SCHEMA_VERSION = 27
 V28_SCHEMA_VERSION = 28
 V29_SCHEMA_VERSION = 29
-LATEST_SCHEMA_VERSION = 29
+V30_SCHEMA_VERSION = 30
+LATEST_SCHEMA_VERSION = 30
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -643,7 +645,40 @@ class LatestSchemaVersionDetector(BaseSchemaVersionDetector):
             return None
         if any(snapshot.has_table(table_name) for table_name in LEGACY_V1_CLEANUP_TABLES):
             return None
+        if not snapshot.has_column("llm_usage", "session_id"):
+            return None
+        if snapshot.has_column("llm_usage", "endpoint"):
+            return None
+        if snapshot.has_column("llm_usage", "user_type"):
+            return None
         return LATEST_SCHEMA_VERSION
+
+
+class V29SchemaVersionDetector(BaseSchemaVersionDetector):
+    """v29 schema 结构探测器。"""
+
+    @property
+    def name(self) -> str:
+        return "v29_schema_detector"
+
+    def detect_version(self, snapshot: DatabaseSchemaSnapshot) -> Optional[int]:
+        """检测数据库是否为 v29 结构。"""
+
+        if not _detect_v26_base_schema(snapshot, use_latest_high_frequency_terms=True):
+            return None
+        if snapshot.has_column("behavior_scene_clusters", "score"):
+            return None
+        if not snapshot.has_table("one_time_maintenance_tasks"):
+            return None
+        if snapshot.has_column("tool_records", "tool_builtin_prompt"):
+            return None
+        if snapshot.has_column("tool_records", "tool_display_prompt"):
+            return None
+        if any(snapshot.has_table(table_name) for table_name in LEGACY_V1_CLEANUP_TABLES):
+            return None
+        if snapshot.has_column("llm_usage", "session_id"):
+            return None
+        return V29_SCHEMA_VERSION
 
 
 class V28SchemaVersionDetector(BaseSchemaVersionDetector):
@@ -1427,6 +1462,7 @@ def build_default_schema_version_detectors() -> List[BaseSchemaVersionDetector]:
 
     return [
         LatestSchemaVersionDetector(),
+        V29SchemaVersionDetector(),
         V28SchemaVersionDetector(),
         V27SchemaVersionDetector(),
         V26SchemaVersionDetector(),
@@ -1674,6 +1710,13 @@ def build_default_migration_registry() -> MigrationRegistry:
                 name="v28_to_v29",
                 description="将高频词词库改为按 chat_id 分类，并移除归一化词与类型列。",
                 handler=migrate_v28_to_v29,
+            ),
+            MigrationStep(
+                version_from=V29_SCHEMA_VERSION,
+                version_to=V30_SCHEMA_VERSION,
+                name="v29_to_v30",
+                description="调整 LLM 使用记录字段：移除 endpoint/user_type，新增 session_id。",
+                handler=migrate_v29_to_v30,
             ),
         ]
     )

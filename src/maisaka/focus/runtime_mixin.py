@@ -40,7 +40,10 @@ class MaisakaFocusRuntimeMixin:
     def _is_focus_mode_active_for_current_chat(self) -> bool:
         """Return whether focus mode applies to this runtime's chat."""
 
-        return focus_mode_manager.is_enabled_for_chat(is_group_chat=self.chat_stream.is_group_session)
+        return focus_mode_manager.is_enabled_for_session(
+            self.session_id,
+            is_group_chat=self.chat_stream.is_group_session,
+        )
 
     def _get_pending_attention_flags(self) -> tuple[bool, bool]:
         """Return whether pending messages contain @ or mention signals."""
@@ -231,7 +234,10 @@ class MaisakaFocusRuntimeMixin:
         for runtime in running_runtimes:
             if not focus_mode_manager.is_in_focus_set(runtime.session_id):
                 continue
-            if not focus_mode_manager.is_enabled_for_chat(is_group_chat=runtime.chat_stream.is_group_session):
+            if not focus_mode_manager.is_enabled_for_session(
+                runtime.session_id,
+                is_group_chat=runtime.chat_stream.is_group_session,
+            ):
                 continue
             if trigger_session_id and not focus_mode_manager.is_same_focus_scope(runtime.session_id, trigger_session_id):
                 continue
@@ -267,7 +273,10 @@ class MaisakaFocusRuntimeMixin:
         for runtime in running_runtimes:
             if runtime.session_id == focus_session_id:
                 continue
-            if not focus_mode_manager.is_enabled_for_chat(is_group_chat=runtime.chat_stream.is_group_session):
+            if not focus_mode_manager.is_enabled_for_session(
+                runtime.session_id,
+                is_group_chat=runtime.chat_stream.is_group_session,
+            ):
                 continue
             if not focus_mode_manager.is_same_focus_scope(runtime.session_id, focus_session_id):
                 continue
@@ -396,7 +405,10 @@ class MaisakaFocusRuntimeMixin:
             )
 
         for chat_runtime in running_runtimes:
-            if not focus_mode_manager.is_enabled_for_chat(is_group_chat=chat_runtime.chat_stream.is_group_session):
+            if not focus_mode_manager.is_enabled_for_session(
+                chat_runtime.session_id,
+                is_group_chat=chat_runtime.chat_stream.is_group_session,
+            ):
                 continue
             if not focus_mode_manager.is_same_focus_scope(chat_runtime.session_id, self.session_id):
                 continue

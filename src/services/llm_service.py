@@ -60,7 +60,11 @@ class LLMServiceClient:
         self.task_name = _resolve_task_name(task_name)
         self.request_type = request_type
         self.session_id = str(session_id or "").strip()
-        self._orchestrator = LLMOrchestrator(task_name=self.task_name, request_type=request_type)
+        self._orchestrator = LLMOrchestrator(
+            task_name=self.task_name,
+            request_type=request_type,
+            session_id=self.session_id,
+        )
 
     @staticmethod
     def _normalize_generation_options(options: LLMGenerationOptions | None = None) -> LLMGenerationOptions:
@@ -321,6 +325,7 @@ class LLMServiceClient:
         embedding_client = EmbeddingServiceClient(
             task_name=self.task_name,
             request_type=self.request_type,
+            session_id=self.session_id,
         )
         return await embedding_client.embed_text(embedding_input)
 
@@ -625,7 +630,11 @@ async def generate(request: LLMServiceRequest) -> LLMServiceResult:
     Returns:
         LLMServiceResult: 统一响应对象；失败时 `success=False`。
     """
-    llm_client = LLMServiceClient(task_name=request.task_name, request_type=request.request_type)
+    llm_client = LLMServiceClient(
+        task_name=request.task_name,
+        request_type=request.request_type,
+        session_id=request.session_id,
+    )
     if request.message_factory is not None:
         active_message_factory = request.message_factory
     else:

@@ -924,6 +924,20 @@ class ExperimentalConfig(ConfigBase):
     )
     """Focus 模式是否也作用于私聊。"""
 
+    focus_chat_whitelist: list["TargetItem"] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "Focus 白名单",
+                "en_US": "Focus whitelist",
+                "ja_JP": "Focus ホワイトリスト",
+            },
+            "x-widget": "custom",
+            "x-icon": "list-checks",
+        },
+    )
+    """_wrap_Focus 白名单。配置后只有命中的群聊或私聊会进入 Focus；留空表示所有符合聊天类型开关的聊天都可进入 Focus。"""
+
     focus_groups: list["ChatStreamGroup"] = Field(
         default_factory=list,
         json_schema_extra={

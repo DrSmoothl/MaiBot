@@ -10,6 +10,7 @@ _REQUEST_PANEL_STYLE_MAP: dict[str, tuple[str, str]] = {
     "emotion": ("MaiSaka Emotion Tool Prompt", "bright_cyan"),
     "expression_selector": ("MaiSaka 表达选择子代理 Prompt", "bright_yellow"),
     "expression_learner": ("MaiSaka 表达学习上下文", "bright_green"),
+    "jargon_learner": ("MaiSaka 黑话学习上下文", "bright_cyan"),
     "reply_effect_judge": ("MaiSaka 回复效果评分器 Prompt", "bright_red"),
     "sub_agent": ("MaiSaka 大模型请求 - 子代理", "bright_blue"),
 }

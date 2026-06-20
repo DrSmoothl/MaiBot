@@ -26,6 +26,7 @@ from src.config.config import global_config
 from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.behavior_learner import BehaviorLearner
 from src.learners.expression_learner import ExpressionLearner
+from src.learners.jargon_learner import JargonLearner
 from src.learners.jargon_miner import JargonMiner
 from src.llm_models.payload_content.resp_format import RespFormat
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
@@ -141,6 +142,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._trimmed_history_learning_task: Optional[asyncio.Task[None]] = None
         self._behavior_learner = BehaviorLearner(session_id)
         self._expression_learner = ExpressionLearner(session_id)
+        self._jargon_learner = JargonLearner(session_id)
         self._jargon_miner = JargonMiner(session_id, session_name=session_name)
 
         self._reasoning_engine = MaisakaReasoningEngine(self)
@@ -704,7 +706,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._prune_processed_message_cache()
         if self._is_reply_effect_tracking_enabled():
             asyncio.create_task(self._reply_effect_tracker.observe_user_message(message))
-        if focus_mode_manager.is_enabled_for_chat(is_group_chat=self.chat_stream.is_group_session):
+        if self._is_focus_mode_active_for_current_chat():
             can_enter_focus = focus_mode_manager.try_enter_focus(
                 self.session_id,
                 is_group_chat=self.chat_stream.is_group_session,
@@ -753,7 +755,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
     def _get_effective_reply_frequency(self) -> float:
         """返回当前会话生效的回复频率。"""
-        if focus_mode_manager.is_enabled_for_chat(is_group_chat=self.chat_stream.is_group_session):
+        if self._is_focus_mode_active_for_current_chat():
             return 1.0
 
         base_talk_value = self._get_base_reply_frequency()
@@ -1163,7 +1165,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
     def _should_delay_for_no_action_backoff(self, pending_count: int) -> bool:
         """判断当前消息触发是否应被 no_action 退避延迟。"""
 
-        if focus_mode_manager.is_enabled_for_chat(is_group_chat=self.chat_stream.is_group_session):
+        if self._is_focus_mode_active_for_current_chat():
             self._reset_no_action_backoff()
             return False
 
@@ -1706,6 +1708,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             pending_count=pending_context_count,
             min_messages_for_extraction=min(
                 self._expression_learner.min_messages_for_extraction,
+                self._jargon_learner.min_messages_for_extraction,
                 self._behavior_learner.min_messages_for_extraction,
             ),
         ):
@@ -1741,18 +1744,23 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         enable_jargon_learning: bool,
         enable_high_frequency_learning: bool,
     ) -> None:
-        """在后台执行表达、行为、黑话与高频词学习。"""
+        """在后台并行执行表达、行为、黑话与高频词学习。"""
 
-        async def run_expression_and_jargon_learning() -> bool:
-            jargon_miner = self._jargon_miner if enable_jargon_learning else None
+        async def run_expression_learning() -> bool:
             try:
-                return await self._expression_learner.learn_from_context_messages(
+                return await self._expression_learner.learn_from_context_messages(context_messages)
+            except Exception:
+                logger.exception(f"{self.log_prefix} 裁切历史表达学习异常")
+                return False
+
+        async def run_jargon_learning() -> bool:
+            try:
+                return await self._jargon_learner.learn_from_context_messages(
                     context_messages,
-                    jargon_miner,
-                    enable_expression_learning=enable_expression_learning,
+                    self._jargon_miner,
                 )
             except Exception:
-                logger.exception(f"{self.log_prefix} 裁切历史表达/黑话学习异常")
+                logger.exception(f"{self.log_prefix} 裁切历史黑话学习异常")
                 return False
 
         async def run_behavior_learning() -> bool:
@@ -1775,8 +1783,10 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return True
 
         learner_tasks: list[asyncio.Task[bool]] = []
-        if enable_expression_learning or enable_jargon_learning:
-            learner_tasks.append(asyncio.create_task(run_expression_and_jargon_learning()))
+        if enable_expression_learning:
+            learner_tasks.append(asyncio.create_task(run_expression_learning()))
+        if enable_jargon_learning:
+            learner_tasks.append(asyncio.create_task(run_jargon_learning()))
         if enable_behavior_learning:
             learner_tasks.append(asyncio.create_task(run_behavior_learning()))
         if enable_high_frequency_learning:

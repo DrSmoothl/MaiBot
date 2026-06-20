@@ -135,6 +135,7 @@ def test_model_request_cache_rate_ignores_disabled_model_cache(monkeypatch: pyte
             "prompt_cache_miss_tokens": 6,
             "cost": 0.01,
             "time_cost": 1.0,
+            "session_id": "g_validation",
         },
         {
             "timestamp": now,
@@ -149,6 +150,7 @@ def test_model_request_cache_rate_ignores_disabled_model_cache(monkeypatch: pyte
             "prompt_cache_miss_tokens": 10,
             "cost": 0.01,
             "time_cost": 1.0,
+            "session_id": "",
         },
     ]
     monkeypatch.setattr(statistic, "fetch_model_usage_since", lambda query_start_time: records)
@@ -161,6 +163,9 @@ def test_model_request_cache_rate_ignores_disabled_model_cache(monkeypatch: pyte
     assert period_stats[statistic.CACHE_HIT_TOK] == 4
     assert period_stats[statistic.CACHE_MISS_TOK] == 6
     assert period_stats[statistic.CACHE_MISS_TOK_BY_MODEL]["cache-disabled"] == 0
+    assert period_stats[statistic.COST_BY_CHAT]["g_validation"] == 0.01
+    assert period_stats[statistic.COST_BY_CHAT][statistic.GLOBAL_COST_SESSION_KEY] == 0.01
+    assert "" not in period_stats[statistic.COST_BY_CHAT]
 
 
 def test_html_report_encodes_chat_names_in_tables_and_charts(tmp_path) -> None:
@@ -173,6 +178,8 @@ def test_html_report_encodes_chat_names_in_tables_and_charts(tmp_path) -> None:
     for period_key, _duration, _label in task.stat_period:
         period_data = task._build_stat_period_data()
         period_data[statistic.MSG_CNT_BY_CHAT]["g_validation"] = 1
+        period_data[statistic.COST_BY_CHAT]["g_validation"] = 0.12
+        period_data[statistic.COST_BY_CHAT][statistic.GLOBAL_COST_SESSION_KEY] = 0.34
         period_data[statistic.TOTAL_MSG_CNT] = 1
         stats[period_key] = period_data
     task.name_mapping["g_validation"] = (chat_name, now.timestamp())
@@ -183,3 +190,16 @@ def test_html_report_encodes_chat_names_in_tables_and_charts(tmp_path) -> None:
     assert chat_name not in generated_html
     assert "&lt;/script&gt;&lt;span data-case=&quot;report-rendering&quot;&gt;&amp;" in generated_html
     assert "\\u003c/script\\u003e\\u003cspan data-case=" in generated_html
+    assert 'class="pie-chart-grid"' in generated_html
+    assert 'class="pie-chart-canvas-wrap"' in generated_html
+    assert 'class="pie-chart-legend"' in generated_html
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in generated_html
+    assert "height: 450px;" in generated_html
+    assert "max-height: 128px;" in generated_html
+    assert "overflow-y: auto;" in generated_html
+    assert "maintainAspectRatio: false" in generated_html
+    assert "display: false" in generated_html
+    assert "聊天流花费分布" in generated_html
+    assert "全局" in generated_html
+    assert "chatCostPieChart" in generated_html
+    assert "chatCostPieLegend" in generated_html

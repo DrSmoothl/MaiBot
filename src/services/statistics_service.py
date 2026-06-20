@@ -441,6 +441,7 @@ def fetch_model_usage_since(query_start_time: datetime) -> list[dict[str, object
                 "model_api_provider_name": record.model_api_provider_name,
                 "model_assign_name": record.model_assign_name,
                 "model_name": record.model_name,
+                "session_id": record.session_id,
                 "prompt_tokens": record.prompt_tokens,
                 "completion_tokens": record.completion_tokens,
                 "prompt_cache_enabled": bool(getattr(record, "prompt_cache_enabled", False)),

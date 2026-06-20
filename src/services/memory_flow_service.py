@@ -38,7 +38,7 @@ class PersonFactWritebackService:
         if self._worker_task is not None and not self._worker_task.done():
             return
         self._stopping = False
-        self._worker_task = asyncio.create_task(self._worker_loop(), name="memory_person_fact_writeback")
+        self._worker_task = asyncio.create_task(self._worker_loop(), name="A_Memorix.person_fact_writeback")
 
     async def shutdown(self) -> None:
         self._stopping = True
@@ -363,7 +363,7 @@ class PersonFactWritebackService:
             if self._extractor is None:
                 from src.services.llm_service import LLMServiceClient
 
-                self._extractor = LLMServiceClient(task_name="utils", request_type="person_fact_writeback")
+                self._extractor = LLMServiceClient(task_name="utils", request_type="A_Memorix.person_fact_writeback")
             response_result = await self._extractor.generate_response(prompt)
         except Exception as exc:
             logger.debug(f"人物事实提取模型调用失败: {exc}")

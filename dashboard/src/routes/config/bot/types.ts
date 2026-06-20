@@ -43,6 +43,9 @@ export interface ExperimentalConfig {
   behavior_groups: ChatStreamGroup[]
   enable_replyer_format_output: boolean
   focus_mode: boolean
+  focus_on_private: boolean
+  focus_chat_whitelist: TargetItem[]
+  focus_groups: ChatStreamGroup[]
   focus_cool_time: number
 }
 

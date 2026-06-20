@@ -20,6 +20,7 @@ FOCUSED_TASK_NAMES = {"replyer", "planner"}
 EXCLUDED_REQUEST_TYPES = {
     "A_Memorix.ChatSummarization",
     "expression.learner",
+    "jargon.learner",
     "reply.effect_judge",
 }
 REPORT_INTERVAL_SECONDS = 300

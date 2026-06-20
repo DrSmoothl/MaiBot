@@ -86,15 +86,17 @@ class LLMExecutionResult:
 class LLMOrchestrator:
     """LLM 编排调度器。"""
 
-    def __init__(self, task_name: str, request_type: str = "") -> None:
+    def __init__(self, task_name: str, request_type: str = "", session_id: str = "") -> None:
         """初始化 LLM 请求调度器。
 
         Args:
             task_name: 任务配置名称，对应 `model_task_config` 下的字段名。
             request_type: 当前请求的业务类型标识。
+            session_id: 当前请求归属的真实聊天流 ID；非聊天上下文为空。
         """
         self.task_name = task_name.strip()
         self.request_type = request_type
+        self.session_id = str(session_id or "").strip()
         self.model_for_task = self._get_task_config_or_raise()
         self.model_usage: Dict[str, Tuple[int, int, int]] = {
             model: (0, 0, 0) for model in self.model_for_task.model_list
@@ -283,8 +285,8 @@ class LLMOrchestrator:
                 model_usage=usage,
                 user_id="system",
                 request_type=self.request_type,
-                endpoint="/chat/completions",
                 task_name=self.task_name,
+                session_id=self.session_id,
                 time_cost=time_cost,
             )
         return self._build_generation_result(
@@ -375,8 +377,8 @@ class LLMOrchestrator:
                 model_usage=usage,
                 user_id="system",
                 request_type=self.request_type,
-                endpoint="/chat/completions",
                 task_name=self.task_name,
+                session_id=self.session_id,
                 time_cost=time.time() - start_time,
             )
         return self._build_generation_result(
@@ -448,8 +450,8 @@ class LLMOrchestrator:
                 model_usage=usage,
                 user_id="system",
                 request_type=self.request_type,
-                endpoint="/chat/completions",
                 task_name=self.task_name,
+                session_id=self.session_id,
                 time_cost=time_cost,
             )
         return self._build_generation_result(
@@ -484,8 +486,8 @@ class LLMOrchestrator:
                 model_usage=usage,
                 user_id="system",
                 request_type=self.request_type,
-                endpoint="/embeddings",
                 task_name=self.task_name,
+                session_id=self.session_id,
                 time_cost=time.time() - start_time,
             )
         if not embedding:

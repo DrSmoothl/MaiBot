@@ -9,6 +9,8 @@ from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 
+from src.maisaka.focus import focus_mode_manager
+
 from .context import BuiltinToolRuntimeContext
 from .continue_tool import get_tool_spec as get_continue_tool_spec
 from .continue_tool import handle_tool as handle_continue_tool
@@ -150,7 +152,12 @@ def _is_builtin_tool_available(entry: BuiltinToolEntry, context: ToolAvailabilit
     """判断内置工具是否适用于当前聊天。"""
 
     if entry.name in {"fetch_history", "switch_chat"}:
-        if context.is_group_chat is False and not bool(global_config.experimental.focus_on_private):
+        if context.session_id:
+            return focus_mode_manager.is_enabled_for_session(
+                context.session_id,
+                is_group_chat=context.is_group_chat,
+            )
+        if not focus_mode_manager.is_enabled_for_chat(is_group_chat=context.is_group_chat):
             return False
     if entry.chat_scope == "all":
         return True
@@ -194,12 +201,12 @@ def get_timing_tools(context: Optional[ToolAvailabilityContext] = None) -> List[
     return [tool_spec.to_llm_definition() for tool_spec in tool_specs if tool_spec.enabled]
 
 
-def get_builtin_tools() -> List[ToolDefinitionInput]:
+def get_builtin_tools(context: Optional[ToolAvailabilityContext] = None) -> List[ToolDefinitionInput]:
     """获取默认暴露给模型层的内置工具定义。"""
 
     tool_specs = [
         entry.build_spec()
-        for entry in _get_builtin_tool_entries(stage="action", visibility="visible")
+        for entry in _get_builtin_tool_entries(stage="action", visibility="visible", context=context)
     ]
     return [tool_spec.to_llm_definition() for tool_spec in tool_specs if tool_spec.enabled]
 

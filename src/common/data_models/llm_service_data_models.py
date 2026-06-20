@@ -33,6 +33,7 @@ class LLMServiceRequest(BaseDataModel):
 
     task_name: str
     request_type: str
+    session_id: str = ""
     prompt: PromptInput | None = None
     message_factory: MessageFactory | None = None
     model_name: str | None = None
@@ -50,6 +51,7 @@ class LLMServiceRequest(BaseDataModel):
                 的组合非法时抛出。
         """
         self.task_name = self.task_name.strip()
+        self.session_id = str(self.session_id or "").strip()
         if not self.task_name:
             raise ValueError("`task_name` 不能为空")
         has_prompt = self.prompt is not None

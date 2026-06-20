@@ -22,6 +22,7 @@ export {
   ChatTalkValueRulesHook,
   ExpressionGroupsHook,
   ExpressionLearningListHook,
+  FocusWhitelistHook,
   JargonGroupsHook,
   JargonLearningListHook,
   KeywordRulesHook,

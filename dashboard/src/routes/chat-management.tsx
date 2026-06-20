@@ -12,6 +12,7 @@ import {
   Trash2,
   UserRound,
   UsersRound,
+  X,
 } from 'lucide-react'
 import type { CSSProperties, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -19,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogBody,
@@ -56,11 +58,27 @@ import {
   type ChatStreamDetail,
   type ChatStreamType,
 } from '@/lib/chat-management-api'
+import { getBotConfig, updateBotConfigSection } from '@/lib/config-api'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 10
 type ChatTypeFilter = 'all' | ChatStreamType
+type ChatManagementView = 'groups' | 'streams'
+type MutualGroupKind = 'expression' | 'jargon'
+
+interface TargetItem {
+  platform: string
+  item_id: string
+  rule_type?: ChatStreamType | string
+  type?: ChatStreamType | string
+}
+
+interface ChatStreamGroupConfig {
+  targets?: TargetItem[]
+  expression_groups?: TargetItem[]
+  jargon_groups?: TargetItem[]
+}
 
 function formatTimestamp(timestamp: number | null): string {
   if (!timestamp) {
@@ -85,6 +103,72 @@ function getChatTypeText(chatType: ChatStreamType): string {
 
 function getChatLogicalId(chat: ChatStream): string {
   return chat.target_id || (chat.chat_type === 'group' ? chat.group_id : chat.user_id) || '-'
+}
+
+function getTargetRuleType(target: TargetItem): ChatStreamType {
+  return target.rule_type === 'private' || target.type === 'private' ? 'private' : 'group'
+}
+
+function normalizeTarget(target: unknown): TargetItem | null {
+  if (!target || typeof target !== 'object') {
+    return null
+  }
+  const rawTarget = target as Record<string, unknown>
+  const platform = String(rawTarget.platform ?? '').trim()
+  const itemId = String(rawTarget.item_id ?? '').trim()
+  const rawRuleType = rawTarget.rule_type ?? rawTarget.type
+  const ruleType = rawRuleType === 'private' ? 'private' : 'group'
+  if (!platform || !itemId) {
+    return null
+  }
+  return { platform, item_id: itemId, rule_type: ruleType }
+}
+
+function normalizeMutualGroups(value: unknown): ChatStreamGroupConfig[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.map((group) => {
+    if (!group || typeof group !== 'object') {
+      return { targets: [] }
+    }
+    const rawGroup = group as ChatStreamGroupConfig
+    const rawTargets = rawGroup.targets ?? rawGroup.expression_groups ?? rawGroup.jargon_groups ?? []
+    const targets = Array.isArray(rawTargets)
+      ? rawTargets.map(normalizeTarget).filter((target): target is TargetItem => target !== null)
+      : []
+    return { targets }
+  })
+}
+
+function serializeMutualGroups(groups: ChatStreamGroupConfig[]): ChatStreamGroupConfig[] {
+  return groups.map((group) => ({
+    targets: (group.targets ?? []).map((target) => ({
+      platform: target.platform,
+      item_id: target.item_id,
+      rule_type: getTargetRuleType(target),
+    })),
+  }))
+}
+
+function targetKey(target: TargetItem): string {
+  return `${target.platform}:${target.item_id}:${getTargetRuleType(target)}`
+}
+
+function targetLabel(target: TargetItem): string {
+  return `${target.platform}:${target.item_id}:${getChatTypeText(getTargetRuleType(target))}`
+}
+
+function getTargetDisplayName(target: TargetItem, chatNameByTargetKey: Map<string, string>): string {
+  return chatNameByTargetKey.get(targetKey(target)) ?? '未找到聊天流'
+}
+
+function chatToTarget(chat: ChatStream): TargetItem {
+  return {
+    platform: chat.platform,
+    item_id: getChatLogicalId(chat),
+    rule_type: chat.chat_type,
+  }
 }
 
 function HoverScrollText({
@@ -893,6 +977,322 @@ function TalkFrequencySection({ detail }: { detail: ChatStreamDetail }) {
   )
 }
 
+function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [kind, setKind] = useState<MutualGroupKind>('expression')
+  const [addDialogGroupIndex, setAddDialogGroupIndex] = useState<number | null>(null)
+  const [addDialogSearch, setAddDialogSearch] = useState('')
+  const [selectedTargetKeys, setSelectedTargetKeys] = useState<string[]>([])
+  const configQuery = useQuery({
+    queryKey: ['chat-management-mutual-groups-config'],
+    queryFn: () => getBotConfig(),
+  })
+  const sectionName = kind === 'expression' ? 'expression' : 'jargon'
+  const groupFieldName = kind === 'expression' ? 'expression_groups' : 'jargon_groups'
+  const sectionData = (configQuery.data?.[sectionName] && typeof configQuery.data[sectionName] === 'object'
+    ? configQuery.data[sectionName]
+    : {}) as Record<string, unknown>
+  const groups = useMemo(
+    () => normalizeMutualGroups(sectionData[groupFieldName]),
+    [groupFieldName, sectionData]
+  )
+  const addDialogGroup = addDialogGroupIndex === null ? null : groups[addDialogGroupIndex] ?? null
+  const selectedTargetKeySet = useMemo(() => new Set(selectedTargetKeys), [selectedTargetKeys])
+  const addDialogExistingKeySet = useMemo(
+    () => new Set((addDialogGroup?.targets ?? []).map(targetKey)),
+    [addDialogGroup]
+  )
+  const chatNameByTargetKey = useMemo(
+    () => new Map(chats.map((chat) => [targetKey(chatToTarget(chat)), chat.display_name])),
+    [chats]
+  )
+  const addDialogChats = useMemo(() => {
+    const keyword = addDialogSearch.trim().toLowerCase()
+    return chats.filter((chat) => {
+      const target = chatToTarget(chat)
+      if (addDialogExistingKeySet.has(targetKey(target))) {
+        return false
+      }
+      if (!keyword) {
+        return true
+      }
+      return [
+        chat.display_name,
+        chat.platform,
+        getChatLogicalId(chat),
+        chat.user_id,
+        chat.group_id,
+        chat.session_id,
+        getChatTypeText(chat.chat_type),
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(keyword)
+    })
+  }, [addDialogExistingKeySet, addDialogSearch, chats])
+
+  const saveMutation = useMutation({
+    mutationFn: (nextSectionData: Record<string, unknown>) => updateBotConfigSection(sectionName, nextSectionData),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-management-mutual-groups-config'] })
+      toast({
+        title: '互通组已保存',
+        description: `${kind === 'expression' ? '表达' : '黑话'}互通组配置已更新。`,
+      })
+    },
+    onError: (error) => {
+      toast({
+        title: '保存互通组失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    },
+  })
+
+  const updateGroups = (nextGroups: ChatStreamGroupConfig[]) => {
+    saveMutation.mutate({
+      ...sectionData,
+      [groupFieldName]: serializeMutualGroups(nextGroups),
+    })
+  }
+
+  const createGroup = () => {
+    updateGroups([...groups, { targets: [] }])
+  }
+
+  const openAddDialog = (groupIndex: number) => {
+    setAddDialogGroupIndex(groupIndex)
+    setAddDialogSearch('')
+    setSelectedTargetKeys([])
+  }
+
+  const closeAddDialog = () => {
+    setAddDialogGroupIndex(null)
+    setAddDialogSearch('')
+    setSelectedTargetKeys([])
+  }
+
+  const toggleAddDialogChat = (target: TargetItem) => {
+    const key = targetKey(target)
+    setSelectedTargetKeys((currentKeys) =>
+      currentKeys.includes(key)
+        ? currentKeys.filter((currentKey) => currentKey !== key)
+        : [...currentKeys, key]
+    )
+  }
+
+  const applySelectedChatsToGroup = () => {
+    if (addDialogGroupIndex === null || selectedTargetKeys.length === 0) {
+      return
+    }
+    const selectedKeySet = new Set(selectedTargetKeys)
+    const selectedTargets = chats
+      .map(chatToTarget)
+      .filter((target) => selectedKeySet.has(targetKey(target)))
+    const nextGroups = groups.map((group, index) => {
+      if (index !== addDialogGroupIndex) {
+        return group
+      }
+      const targets = group.targets ?? []
+      const existingKeys = new Set(targets.map(targetKey))
+      const nextTargets = selectedTargets.filter((target) => !existingKeys.has(targetKey(target)))
+      return { targets: [...targets, ...nextTargets] }
+    })
+    updateGroups(nextGroups)
+    closeAddDialog()
+  }
+
+  const removeTarget = (groupIndex: number, targetIndex: number) => {
+    updateGroups(
+      groups.map((group, index) =>
+        index === groupIndex
+          ? { targets: (group.targets ?? []).filter((_, memberIndex) => memberIndex !== targetIndex) }
+          : group
+      )
+    )
+  }
+
+  const deleteGroup = (groupIndex: number) => {
+    updateGroups(groups.filter((_, index) => index !== groupIndex))
+  }
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
+      <div className="flex shrink-0 flex-col gap-3 border-b p-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold">互通组管理</h2>
+          <p className="text-sm text-muted-foreground">管理表达和黑话的聊天流互通组。</p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="inline-flex rounded-md border bg-background p-1">
+            {[
+              ['expression', '表达'],
+              ['jargon', '黑话'],
+            ].map(([value, label]) => (
+              <Button
+                key={value}
+                type="button"
+                variant={kind === value ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-8"
+                onClick={() => setKind(value as MutualGroupKind)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+          <Button type="button" disabled={saveMutation.isPending} onClick={createGroup}>
+            <Plus className="mr-2 h-4 w-4" />
+            新建互通组
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        {configQuery.isLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-20" />
+            <Skeleton className="h-20" />
+          </div>
+        ) : configQuery.error ? (
+          <div className="rounded-md border border-destructive/40 p-4 text-sm text-destructive">
+            加载互通组失败
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+            暂无{kind === 'expression' ? '表达' : '黑话'}互通组。
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {groups.map((group, groupIndex) => (
+              <div key={groupIndex} className="rounded-md border p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="font-medium">互通组 {groupIndex + 1}</div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={saveMutation.isPending}
+                      onClick={() => openAddDialog(groupIndex)}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      添加聊天
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:text-destructive"
+                      disabled={saveMutation.isPending}
+                      aria-label={`删除互通组 ${groupIndex + 1}`}
+                      onClick={() => deleteGroup(groupIndex)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(group.targets ?? []).length === 0 ? (
+                    <span className="text-sm text-muted-foreground">空互通组</span>
+                  ) : (
+                    (group.targets ?? []).map((target, targetIndex) => (
+                      <Badge
+                        key={`${targetKey(target)}:${targetIndex}`}
+                        variant="outline"
+                        className="gap-2"
+                        title={targetLabel(target)}
+                      >
+                        <span className="max-w-48 truncate text-xs">
+                          {getTargetDisplayName(target, chatNameByTargetKey)}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-destructive"
+                          disabled={saveMutation.isPending}
+                          aria-label={`移除 ${getTargetDisplayName(target, chatNameByTargetKey)}`}
+                          onClick={() => removeTarget(groupIndex, targetIndex)}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Dialog open={addDialogGroupIndex !== null} onOpenChange={(open) => !open && closeAddDialog()}>
+        <DialogContent style={{ '--dialog-width': '42rem' } as CSSProperties}>
+          <DialogHeader>
+            <DialogTitle>添加聊天</DialogTitle>
+            <DialogDescription>
+              选择要加入互通组 {addDialogGroupIndex === null ? '' : addDialogGroupIndex + 1} 的聊天流。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <div className="space-y-3">
+              <Input
+                value={addDialogSearch}
+                onChange={(event) => setAddDialogSearch(event.target.value)}
+                placeholder="搜索名称、平台、用户、群号或会话 ID"
+              />
+              <div className="max-h-[22rem] overflow-auto rounded-md border">
+                {addDialogChats.length === 0 ? (
+                  <div className="p-4 text-center text-sm text-muted-foreground">没有可加入的聊天流</div>
+                ) : (
+                  <div className="divide-y">
+                    {addDialogChats.map((chat) => {
+                      const target = chatToTarget(chat)
+                      const key = targetKey(target)
+                      const checked = selectedTargetKeySet.has(key)
+                      return (
+                        <label
+                          key={chat.session_id}
+                          className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-muted/60"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => toggleAddDialogChat(target)}
+                            aria-label={`选择 ${chat.display_name}`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">{chat.display_name}</div>
+                            <div className="truncate font-mono text-xs text-muted-foreground">
+                              {chat.platform}:{getChatLogicalId(chat)}
+                            </div>
+                          </div>
+                          <Badge variant="outline">{getChatTypeText(chat.chat_type)}</Badge>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeAddDialog}>
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={selectedTargetKeys.length === 0 || saveMutation.isPending}
+              onClick={applySelectedChatsToGroup}
+            >
+              加入 {selectedTargetKeys.length} 个聊天
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  )
+}
+
 function ConfigStatusRows({ detail }: { detail: ChatStreamDetail }) {
   const configRows = [
     { title: '表达', status: detail.expression, visible: true },
@@ -1131,6 +1531,7 @@ function DeleteChatStreamDialog({
 }
 
 export function ChatManagementPage() {
+  const [activeView, setActiveView] = useState<ChatManagementView>('streams')
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<ChatTypeFilter>('all')
   const [page, setPage] = useState(1)
@@ -1202,53 +1603,74 @@ export function ChatManagementPage() {
             <div className="mt-1 text-lg font-semibold">{privateCount}</div>
           </div>
         </div>
+        <div className="inline-flex rounded-md border bg-background p-1">
+          {[
+            ['streams', '聊天流'],
+            ['groups', '互通组'],
+          ].map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              variant={activeView === value ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-8"
+              onClick={() => setActiveView(value as ChatManagementView)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
       </header>
 
-      <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative w-full sm:max-w-sm">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜索名称、平台、用户、群号或会话 ID"
-            className="pl-9"
-          />
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="inline-flex rounded-md border bg-background p-1">
-            {[
-              ['all', '全部'],
-              ['group', '群聊'],
-              ['private', '私聊'],
-            ].map(([value, label]) => (
+      {activeView === 'groups' ? (
+        <MutualGroupsView chats={chats} />
+      ) : (
+        <>
+          <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="搜索名称、平台、用户、群号或会话 ID"
+                className="pl-9"
+              />
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex rounded-md border bg-background p-1">
+                {[
+                  ['all', '全部'],
+                  ['group', '群聊'],
+                  ['private', '私聊'],
+                ].map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    variant={typeFilter === value ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setTypeFilter(value as ChatTypeFilter)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
               <Button
-                key={value}
                 type="button"
-                variant={typeFilter === value ? 'secondary' : 'ghost'}
-                size="sm"
-                className="h-8"
-                onClick={() => setTypeFilter(value as ChatTypeFilter)}
+                variant="outline"
+                onClick={() => void refetch()}
+                disabled={isFetching}
+                className="shrink-0"
               >
-                {label}
+                <RefreshCw className={cn('mr-2 h-4 w-4', isFetching && 'animate-spin')} />
+                刷新
               </Button>
-            ))}
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void refetch()}
-            disabled={isFetching}
-            className="shrink-0"
-          >
-            <RefreshCw className={cn('mr-2 h-4 w-4', isFetching && 'animate-spin')} />
-            刷新
-          </Button>
-        </div>
-      </section>
+            </div>
+          </section>
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
-        <div className="min-h-0 flex-1 overflow-auto">
-          <Table className="table-fixed">
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
+            <div className="min-h-0 flex-1 overflow-auto">
+              <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[7rem] px-3">聊天流</TableHead>
@@ -1381,6 +1803,8 @@ export function ChatManagementPage() {
           </div>
         </div>
       </section>
+        </>
+      )}
 
       <Dialog open={selectedChat !== null} onOpenChange={(open) => !open && setSelectedChat(null)}>
         <DialogContent style={{ '--dialog-width': '44rem' } as CSSProperties}>

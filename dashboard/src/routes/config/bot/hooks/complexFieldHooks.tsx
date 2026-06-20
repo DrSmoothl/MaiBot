@@ -1450,6 +1450,17 @@ export const BehaviorLearningListHook = createListItemEditorHook({
   },
 })
 
+export const FocusWhitelistHook = createListItemEditorHook({
+  addLabel: '添加 Focus 白名单',
+  infoText: '配置后只有命中的聊天流会进入 Focus；留空表示所有符合聊天类型开关的聊天都可进入 Focus。',
+  emptyText: '尚未配置 Focus 白名单。',
+  fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
+  fieldRows: [['platform', 'item_id', 'type']],
+  itemTitle: (item) => {
+    return `${platformLabel(item)} · ${ruleTypeLabel(item.type)}`
+  },
+})
+
 export const BotPlatformsHook: FieldHookComponent = ({ onChange, value }) => {
   const platforms = normalizePlatformAccounts(value)
   const rows = platforms.map(parsePlatformAccount)
