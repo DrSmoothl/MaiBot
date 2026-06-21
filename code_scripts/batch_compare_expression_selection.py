@@ -1069,17 +1069,23 @@ def diversify_samples_by_session(
         return list(samples[:limit])
 
     selected_samples: List[PlannerReplySample] = []
-    skipped_samples: List[PlannerReplySample] = []
+    skipped_samples_by_session: dict[str, List[PlannerReplySample]] = {}
+    session_order: List[str] = []
     selected_counts: dict[str, int] = {}
     for sample in samples:
         target_message = load_target_message(connection, sample.target_message_id)
         session_id = str(target_message.get("session_id") or sample.target_session_id or "").strip()
         session_id = session_id or "unknown"
         if selected_counts.get(session_id, 0) >= max_per_session:
-            skipped_samples.append(sample)
+            if session_id not in skipped_samples_by_session:
+                skipped_samples_by_session[session_id] = []
+                session_order.append(session_id)
+            skipped_samples_by_session[session_id].append(sample)
             continue
         selected_samples.append(sample)
         selected_counts[session_id] = selected_counts.get(session_id, 0) + 1
+        if session_id not in session_order:
+            session_order.append(session_id)
         if len(selected_samples) >= limit:
             return selected_samples
 
@@ -1087,9 +1093,17 @@ def diversify_samples_by_session(
         return selected_samples
 
     # 会话数量不足时，用剩余样本补足 limit，避免一次实验样本数过少。
-    for sample in skipped_samples:
-        selected_samples.append(sample)
-        if len(selected_samples) >= limit:
+    while len(selected_samples) < limit:
+        added_count = 0
+        for session_id in session_order:
+            skipped_samples = skipped_samples_by_session.get(session_id) or []
+            if not skipped_samples:
+                continue
+            selected_samples.append(skipped_samples.pop(0))
+            added_count += 1
+            if len(selected_samples) >= limit:
+                break
+        if added_count == 0:
             break
     return selected_samples
 

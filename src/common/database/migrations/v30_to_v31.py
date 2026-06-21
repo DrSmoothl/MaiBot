@@ -2,10 +2,12 @@
 
 from collections import defaultdict
 from datetime import datetime
-from sqlalchemy.engine import Connection
 from typing import Any, Sequence
 
 import json
+import random
+
+from sqlalchemy.engine import Connection
 
 from src.common.logger import get_logger
 from src.learners.behavior_generic_tags import is_behavior_generic_tag
@@ -14,7 +16,11 @@ from .models import MigrationExecutionContext
 from .schema import SQLiteSchemaInspector
 
 logger = get_logger("database_migration")
-LOW_SIGNAL_SCENE_MAX_SOURCE_COUNT = 1
+LOW_DOMAIN_SCENE_DELETE_RATES = {
+    1: 1.0,
+    2: 0.75,
+    3: 0.5,
+}
 
 
 def migrate_v30_to_v31(context: MigrationExecutionContext) -> None:
@@ -172,10 +178,9 @@ def _build_behavior_cleanup_plan(connection: Connection) -> dict[str, list[dict[
         new_distribution = _normalize_distribution(kept_items)
         old_distribution = str(row["tag_distribution"] or "[]")
         normalized_items = [item for item in _load_json_list(new_distribution) if isinstance(item, dict)]
-        source_count = int(row["source_count"] or 0)
         if new_distribution == "[]" and scene_changed:
             scene_deletes.append({"scene_cluster_id": int(row["id"])})
-        elif _low_signal_scene_delete_reason(normalized_items, source_count):
+        elif _low_signal_scene_delete_reason(normalized_items):
             scene_deletes.append({"scene_cluster_id": int(row["id"])})
         elif scene_changed and new_distribution != old_distribution:
             scene_updates.append(
@@ -296,9 +301,8 @@ def _normalize_distribution(items: Sequence[dict[str, Any]]) -> str:
     return json.dumps(normalized_items, ensure_ascii=False, sort_keys=True)
 
 
-def _low_signal_scene_delete_reason(items: Sequence[dict[str, Any]], source_count: int) -> str:
+def _low_signal_scene_delete_reason(items: Sequence[dict[str, Any]]) -> str:
     domain_ref_count = 0
-    other_ref_count = 0
     for item in items:
         split_ref = _split_tag_ref(item.get("tag"))
         if split_ref is None:
@@ -306,17 +310,12 @@ def _low_signal_scene_delete_reason(items: Sequence[dict[str, Any]], source_coun
         tag_kind, _ = split_ref
         if tag_kind == "domain":
             domain_ref_count += 1
-        else:
-            other_ref_count += 1
 
     if domain_ref_count == 0:
         return "no_domain_tag"
-    if (
-        domain_ref_count == 1
-        and other_ref_count == 0
-        and source_count <= LOW_SIGNAL_SCENE_MAX_SOURCE_COUNT
-    ):
-        return "single_domain_single_source"
+    delete_rate = LOW_DOMAIN_SCENE_DELETE_RATES.get(domain_ref_count, 0.0)
+    if delete_rate >= 1.0 or random.random() < delete_rate:
+        return f"{domain_ref_count}_domain_random_delete"
     return ""
 
 

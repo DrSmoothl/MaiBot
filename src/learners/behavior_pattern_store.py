@@ -6,6 +6,7 @@ from typing import Any, Optional, Sequence
 from sqlmodel import Session, select
 
 import json
+import random
 
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
@@ -42,7 +43,11 @@ MAX_BEHAVIOR_SCORE = 8.0
 NEGATIVE_FEEDBACK_STATUSES = {"failed", "blocked", "abandoned"}
 POSITIVE_FEEDBACK_STATUSES = {"success", "succeeded", "completed"}
 PARTIAL_POSITIVE_FEEDBACK_STATUSES = {"partial_success"}
-LOW_SIGNAL_SCENE_MAX_SOURCE_COUNT = 1
+LOW_DOMAIN_SCENE_DELETE_RATES = {
+    1: 1.0,
+    2: 0.75,
+    3: 0.5,
+}
 
 
 @dataclass(frozen=True)
@@ -146,8 +151,6 @@ def _build_evidence_item(
 
 def _normalize_behavior_experience_item(
     item: BehaviorExperienceUpsertItem,
-    *,
-    profile_source_count: int | None = None,
 ) -> Optional[_NormalizedBehaviorExperienceItem]:
     normalized_action = _normalize_text(item.action, max_length=240)
     normalized_outcome = _normalize_text(item.outcome, max_length=240)
@@ -160,13 +163,9 @@ def _normalize_behavior_experience_item(
             f"action={normalized_action!r} outcome={normalized_outcome!r}"
         )
         return None
-    if _is_low_signal_scenario_profile(
-        item.scenario_profile,
-        source_count=profile_source_count if profile_source_count is not None else len(normalized_source_ids),
-    ):
+    if _should_skip_low_domain_scenario_profile(item.scenario_profile):
         logger.info(
             "跳过写入行为经验路径：场景画像信号过少 "
-            f"source_count={profile_source_count if profile_source_count is not None else len(normalized_source_ids)} "
             f"action={normalized_action!r}"
         )
         return None
@@ -186,33 +185,23 @@ def _normalize_profile_tag_kind(raw_value: object) -> str:
     return " ".join(str(raw_value or "").lower().split()).strip()
 
 
-def _is_low_signal_scenario_profile(
-    profile: BehaviorScenarioProfile,
-    *,
-    source_count: int,
-) -> bool:
-    """过滤后只有单个 domain 簇且证据不足时，不写入新行为经验。"""
+def _should_skip_low_domain_scenario_profile(profile: BehaviorScenarioProfile) -> bool:
+    """按 domain 簇数量随机过滤泛化能力不足的场景画像。"""
 
     if not profile.has_signal:
         return True
 
     domain_cluster_count = 0
-    other_signal_count = 0
     for cluster in profile.tag_clusters:
         if not cluster.all_values():
             continue
         if _normalize_profile_tag_kind(cluster.kind) == "domain":
             domain_cluster_count += 1
-        else:
-            other_signal_count += 1
 
     if domain_cluster_count == 0:
         return True
-    return (
-        domain_cluster_count == 1
-        and other_signal_count == 0
-        and source_count <= LOW_SIGNAL_SCENE_MAX_SOURCE_COUNT
-    )
+    delete_rate = LOW_DOMAIN_SCENE_DELETE_RATES.get(domain_cluster_count, 0.0)
+    return delete_rate >= 1.0 or random.random() < delete_rate
 
 
 def _merge_profile_tag_distribution_from_evidence(evidence_list: Any) -> list[dict[str, float | str]]:
@@ -361,14 +350,7 @@ def upsert_behavior_experiences(
 ) -> list[Optional[BehaviorExperiencePath]]:
     """批量写入行为经验路径，复用同一批次中相同场景画像的场景簇引用。"""
 
-    source_ids_by_profile = _collect_source_ids_by_profile(items)
-    normalized_items = [
-        _normalize_behavior_experience_item(
-            item,
-            profile_source_count=len(source_ids_by_profile.get(id(item.scenario_profile), [])),
-        )
-        for item in items
-    ]
+    normalized_items = [_normalize_behavior_experience_item(item) for item in items]
     results: list[Optional[BehaviorExperiencePath]] = [None for _ in normalized_items]
     if not any(item is not None for item in normalized_items):
         return results

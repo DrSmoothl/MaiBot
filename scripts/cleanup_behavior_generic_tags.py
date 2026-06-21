@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import json
+import random
 import sqlite3
 import sys
 
@@ -19,7 +20,11 @@ DEFAULT_DB_PATH = "data/MaiBot.db"
 DEFAULT_JSON_OUTPUT = "data/analysis/behavior_generic_tag_cleanup_report.json"
 DEFAULT_MD_OUTPUT = "data/analysis/behavior_generic_tag_cleanup_report.md"
 BATCH_SIZE = 500
-LOW_SIGNAL_SCENE_MAX_SOURCE_COUNT = 1
+LOW_DOMAIN_SCENE_DELETE_RATES = {
+    1: 1.0,
+    2: 0.75,
+    3: 0.5,
+}
 
 
 def _load_json_list(raw_value: Any) -> list[Any]:
@@ -79,9 +84,8 @@ def _distribution_refs(items: Sequence[dict[str, Any]]) -> list[str]:
     return refs
 
 
-def _low_signal_scene_delete_reason(items: Sequence[dict[str, Any]], source_count: int) -> str:
+def _low_signal_scene_delete_reason(items: Sequence[dict[str, Any]]) -> str:
     domain_ref_count = 0
-    other_ref_count = 0
     for item in items:
         split_ref = _split_tag_ref(item.get("tag"))
         if split_ref is None:
@@ -89,17 +93,12 @@ def _low_signal_scene_delete_reason(items: Sequence[dict[str, Any]], source_coun
         tag_kind, _ = split_ref
         if tag_kind == "domain":
             domain_ref_count += 1
-        else:
-            other_ref_count += 1
 
     if domain_ref_count == 0:
         return "no_domain_tag"
-    if (
-        domain_ref_count == 1
-        and other_ref_count == 0
-        and source_count <= LOW_SIGNAL_SCENE_MAX_SOURCE_COUNT
-    ):
-        return "single_domain_single_source"
+    delete_rate = LOW_DOMAIN_SCENE_DELETE_RATES.get(domain_ref_count, 0.0)
+    if delete_rate >= 1.0 or random.random() < delete_rate:
+        return f"{domain_ref_count}_domain_random_delete"
     return ""
 
 
@@ -278,7 +277,6 @@ def build_cleanup_plan(connection: sqlite3.Connection) -> dict[str, Any]:
         new_distribution = _normalize_distribution(kept_items)
         old_distribution = str(row["tag_distribution"] or "[]")
         normalized_items = [item for item in _load_json_list(new_distribution) if isinstance(item, dict)]
-        source_count = int(row["source_count"] or 0)
         if new_distribution == "[]" and scene_changed:
             delete_reason = "empty_after_ref_cleanup" if removed_refs else "empty_distribution"
             scene_delete_reason_counts[delete_reason] += 1
@@ -290,7 +288,7 @@ def build_cleanup_plan(connection: sqlite3.Connection) -> dict[str, Any]:
                     remaining_refs=[],
                 )
             )
-        elif delete_reason := _low_signal_scene_delete_reason(normalized_items, source_count):
+        elif delete_reason := _low_signal_scene_delete_reason(normalized_items):
             scene_delete_reason_counts[delete_reason] += 1
             scene_deletes.append(
                 _build_scene_delete_plan(
@@ -315,7 +313,8 @@ def build_cleanup_plan(connection: sqlite3.Connection) -> dict[str, Any]:
     low_signal_deleted_scene_ids = [
         plan["scene_cluster_id"]
         for plan in scene_deletes
-        if plan["delete_reason"] in {"empty_distribution", "no_domain_tag", "single_domain_single_source"}
+        if plan["delete_reason"]
+        in {"empty_distribution", "no_domain_tag", "1_domain_random_delete", "2_domain_random_delete", "3_domain_random_delete"}
     ]
     low_signal_deleted_scene_id_set = set(low_signal_deleted_scene_ids)
     low_signal_deleted_path_count = 0

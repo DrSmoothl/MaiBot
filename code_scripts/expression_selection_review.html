@@ -595,7 +595,11 @@
 
     function isComplete(sample) {
       const rating = getRating(sample);
-      return rating.special === "tie" || rating.special === "none" || rating.ranking.length === methods.length;
+      return rating.special === "tie" || rating.special === "none" || rating.ranking.length > 0;
+    }
+
+    function unrankedMethods(rating) {
+      return methods.filter((method) => !rating.ranking.includes(method));
     }
 
     function saveRatingsToStorage() {
@@ -800,9 +804,7 @@
       } else if (rating.ranking.length < methods.length) {
         rating.ranking.push(selectedValue);
       }
-      if (rating.ranking.length === methods.length) {
-        rating.winner = rating.ranking[0];
-      }
+      rating.winner = rating.ranking[0] || "";
       return rating;
     }
 
@@ -843,6 +845,16 @@
     }
 
     function currentRatingExport() {
+      const normalizedRatings = {};
+      for (const sample of dataset?.samples || []) {
+        const key = sampleKey(sample);
+        const rating = getRating(sample);
+        normalizedRatings[key] = {
+          ...rating,
+          unranked_methods: rating.special ? [] : unrankedMethods(rating),
+          unranked_treatment: rating.special ? "" : "完全不符"
+        };
+      }
       return {
         exported_at: new Date().toISOString(),
         dataset: {
@@ -850,7 +862,7 @@
           analysis_json: dataset?.analysis_json || "",
           sample_count: dataset?.samples?.length || 0
         },
-        ratings
+        ratings: normalizedRatings
       };
     }
 

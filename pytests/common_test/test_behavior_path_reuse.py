@@ -36,12 +36,38 @@ def _profile() -> BehaviorScenarioProfile:
     return BehaviorScenarioProfile(
         summary="群友通过越界请求与麦麦玩梗",
         tag_clusters=[
-            BehaviorScenarioTagCluster(kind="domain", tags=["机器人玩梗互动", "越界请求"]),
+            BehaviorScenarioTagCluster(kind="domain", tags=["机器人玩梗互动"]),
+            BehaviorScenarioTagCluster(kind="domain", tags=["越界请求"]),
+            BehaviorScenarioTagCluster(kind="domain", tags=["群聊角色互动"]),
+            BehaviorScenarioTagCluster(kind="domain", tags=["拒绝式回应"]),
             BehaviorScenarioTagCluster(kind="need", tags=["轻松角色互动", "拒绝式调侃"]),
             BehaviorScenarioTagCluster(kind="attitude", tags=["群友玩梗活跃", "氛围轻松"]),
         ],
         confidence=0.9,
     )
+
+
+def _domain_profile(domain_count: int) -> BehaviorScenarioProfile:
+    return BehaviorScenarioProfile(
+        summary=f"{domain_count} 个 domain 的测试画像",
+        tag_clusters=[
+            BehaviorScenarioTagCluster(kind="domain", tags=[f"测试场景{i}"])
+            for i in range(domain_count)
+        ],
+        confidence=0.9,
+    )
+
+
+def test_low_domain_profile_filter_uses_random_rates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pattern_store.random, "random", lambda: 0.99)
+    assert pattern_store._should_skip_low_domain_scenario_profile(_domain_profile(1))
+    assert not pattern_store._should_skip_low_domain_scenario_profile(_domain_profile(2))
+    assert not pattern_store._should_skip_low_domain_scenario_profile(_domain_profile(3))
+    assert not pattern_store._should_skip_low_domain_scenario_profile(_domain_profile(4))
+
+    monkeypatch.setattr(pattern_store.random, "random", lambda: 0.49)
+    assert pattern_store._should_skip_low_domain_scenario_profile(_domain_profile(2))
+    assert pattern_store._should_skip_low_domain_scenario_profile(_domain_profile(3))
 
 
 def test_upsert_behavior_experience_does_not_reuse_similar_surface_text(
