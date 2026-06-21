@@ -10,6 +10,8 @@ from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
 from src.config.config import global_config
 
+from .behavior_generic_tags import filter_behavior_tag_values
+
 logger = get_logger("behavior_scenario")
 
 ScenarioAgentRunner = Callable[[str], Awaitable[str]]
@@ -251,12 +253,25 @@ def _profile_from_mapping(parsed_response: dict[str, Any]) -> BehaviorScenarioPr
     need_cluster = _coerce_need_tag_cluster(parsed_response.get("need"))
     if need_cluster is not None:
         tag_clusters.append(need_cluster)
+    tag_clusters = _filter_generic_tag_clusters(tag_clusters)
 
     return BehaviorScenarioProfile(
         summary=" ".join(str(parsed_response.get("summary") or "").split()).strip(),
         tag_clusters=tag_clusters,
         confidence=_coerce_float(parsed_response.get("confidence")),
     )
+
+
+def _filter_generic_tag_clusters(
+    tag_clusters: list[BehaviorScenarioTagCluster],
+) -> list[BehaviorScenarioTagCluster]:
+    filtered_clusters: list[BehaviorScenarioTagCluster] = []
+    for cluster in tag_clusters:
+        tags = filter_behavior_tag_values(cluster.kind, cluster.tags)
+        if not tags:
+            continue
+        filtered_clusters.append(BehaviorScenarioTagCluster(kind=cluster.kind, tags=tags))
+    return filtered_clusters
 
 
 def parse_behavior_scenario_response(response: str) -> BehaviorScenarioProfile:

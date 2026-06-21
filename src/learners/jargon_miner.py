@@ -318,7 +318,7 @@ class JargonMiner:
         prompt1 = await prompt_manager.render_prompt(prompt1_template)
 
         generation_result_1 = await llm_inference.generate_response(
-            prompt1, options=LLMGenerationOptions(temperature=0.3)
+            prompt1, options=LLMGenerationOptions(temperature=0.3), session_id=self.session_id
         )
         llm_response_1 = generation_result_1.response
         if not llm_response_1:
@@ -350,7 +350,7 @@ class JargonMiner:
         prompt2 = await prompt_manager.render_prompt(prompt2_template)
 
         generation_result_2 = await llm_inference.generate_response(
-            prompt2, options=LLMGenerationOptions(temperature=0.3)
+            prompt2, options=LLMGenerationOptions(temperature=0.3), session_id=self.session_id
         )
         llm_response_2 = generation_result_2.response
         if not llm_response_2:
@@ -377,7 +377,7 @@ class JargonMiner:
             logger.info(f"jargon {content} 比较提示词: {prompt3}")
 
         generation_result_3 = await llm_inference.generate_response(
-            prompt3, options=LLMGenerationOptions(temperature=0.3)
+            prompt3, options=LLMGenerationOptions(temperature=0.3), session_id=self.session_id
         )
         llm_response_3 = generation_result_3.response
         if not llm_response_3:

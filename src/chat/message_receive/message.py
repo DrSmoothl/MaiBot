@@ -336,6 +336,7 @@ class SessionMessage(MaiMessage):
         try:
             tuple_content = await emoji_manager.get_emoji_description(
                 emoji_bytes=component.binary_data,
+                session_id=self.session_id,
                 wait_for_build=enable_heavy_media_analysis,
             )
         except Exception:

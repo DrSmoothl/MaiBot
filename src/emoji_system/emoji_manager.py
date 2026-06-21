@@ -258,11 +258,8 @@ def _is_collected_emoji_size_allowed(size_bytes: int) -> bool:
     return max_size_bytes <= 0 or size_bytes <= max_size_bytes
 
 
-# TODO: 修改这个vlm为获取的vlm client，暂时使用这个VLM方法
 emoji_manager_vlm = LLMServiceClient(task_name="vlm", request_type="emoji.see")
-emoji_manager_emotion_judge_llm = LLMServiceClient(
-    task_name="utils", request_type="emoji"
-)
+emoji_manager_emotion_judge_llm = LLMServiceClient(task_name="utils", request_type="emoji")
 
 
 class EmojiManager:
@@ -305,6 +302,7 @@ class EmojiManager:
         *,
         emoji_bytes: Optional[bytes] = None,
         emoji_hash: Optional[str] = None,
+        session_id: str = "",
         wait_for_build: bool = True,
     ) -> Optional[tuple[str, list[str]]]:
         """
@@ -366,11 +364,11 @@ class EmojiManager:
             return None
         if not wait_for_build:
             await self.ensure_emoji_saved(emoji_bytes, emoji_hash=emoji_hash)
-            self._schedule_description_build(emoji_hash, emoji_bytes)
+            self._schedule_description_build(emoji_hash, emoji_bytes, session_id=session_id)
             return None
 
         # 找不到尝试构建
-        return await self._build_and_cache_emoji_description(emoji_hash, emoji_bytes)
+        return await self._build_and_cache_emoji_description(emoji_hash, emoji_bytes, session_id=session_id)
 
     async def ensure_emoji_saved(
         self,
@@ -430,7 +428,7 @@ class EmojiManager:
 
         return emoji
 
-    def _schedule_description_build(self, emoji_hash: str, emoji_bytes: bytes) -> None:
+    def _schedule_description_build(self, emoji_hash: str, emoji_bytes: bytes, *, session_id: str = "") -> None:
         """调度表情包描述后台构建任务。
 
         Args:
@@ -444,11 +442,17 @@ class EmojiManager:
         if emoji_hash in self._pending_description_tasks:
             return
 
-        task = asyncio.create_task(self._build_description_in_background(emoji_hash, emoji_bytes))
+        task = asyncio.create_task(self._build_description_in_background(emoji_hash, emoji_bytes, session_id=session_id))
         self._pending_description_tasks[emoji_hash] = task
         task.add_done_callback(lambda finished_task: self._finalize_description_build(emoji_hash, finished_task))
 
-    async def _build_description_in_background(self, emoji_hash: str, emoji_bytes: bytes) -> None:
+    async def _build_description_in_background(
+        self,
+        emoji_hash: str,
+        emoji_bytes: bytes,
+        *,
+        session_id: str = "",
+    ) -> None:
         """在后台构建并缓存表情包描述。
 
         Args:
@@ -457,7 +461,7 @@ class EmojiManager:
         """
         try:
             logger.info(f"表情包描述后台构建已开始，哈希值: {emoji_hash}")
-            await self._build_and_cache_emoji_description(emoji_hash, emoji_bytes)
+            await self._build_and_cache_emoji_description(emoji_hash, emoji_bytes, session_id=session_id)
             logger.info(f"表情包描述后台构建完成，哈希值: {emoji_hash}")
         except Exception as exc:
             logger.warning(f"表情包描述后台构建失败，哈希值: {emoji_hash}，错误: {exc}")
@@ -479,12 +483,14 @@ class EmojiManager:
         self,
         emoji_hash: str,
         emoji_bytes: bytes,
+        *,
+        session_id: str = "",
     ) -> Optional[tuple[str, list[str]]]:
         """构建并缓存表情包描述（返回标签化结果，不再走额外识别流程）。"""
         logger.info(f"Start building cached emoji description, hash={emoji_hash}")
         new_emoji = await self.ensure_emoji_saved(emoji_bytes, emoji_hash=emoji_hash)
 
-        success_desc, new_emoji = await self.build_emoji_description(new_emoji)
+        success_desc, new_emoji = await self.build_emoji_description(new_emoji, session_id=session_id)
         if not success_desc:
             logger.error("Build emoji description failed")
             return None
@@ -861,7 +867,7 @@ class EmojiManager:
         )
         return selected_emoji
 
-    async def replace_an_emoji_by_llm(self, new_emoji: MaiEmoji) -> bool:
+    async def replace_an_emoji_by_llm(self, new_emoji: MaiEmoji, *, session_id: str = "") -> bool:
         """
         使用 LLM 决策替换一个表情包
 
@@ -893,7 +899,10 @@ class EmojiManager:
         emoji_replace_prompt_template.add_context("description", new_emoji.description or "无描述")
         emoji_replace_prompt = await prompt_manager.render_prompt(emoji_replace_prompt_template)
 
-        decision_result = await emoji_manager_emotion_judge_llm.generate_response(emoji_replace_prompt)
+        decision_result = await emoji_manager_emotion_judge_llm.generate_response(
+            emoji_replace_prompt,
+            session_id=session_id,
+        )
         decision = decision_result.response
         logger.info(f"[决策] 结果: {decision}")
 
@@ -937,7 +946,7 @@ class EmojiManager:
             logger.error("[决策] 未能解析取消注册编号")
         return False
 
-    async def review_emoji_for_registration(self, target_emoji: MaiEmoji) -> bool:
+    async def review_emoji_for_registration(self, target_emoji: MaiEmoji, *, session_id: str = "") -> bool:
         """注册前审核表情包内容，审核关闭时直接通过。"""
         if not global_config.emoji.content_filtration:
             return True
@@ -957,6 +966,7 @@ class EmojiManager:
                 review_prompt,
                 image_base64,
                 image_format,
+                session_id=session_id,
             )
             llm_response = filtration_result.response
         except Exception as e:
@@ -968,7 +978,7 @@ class EmojiManager:
             return False
         return True
 
-    async def build_emoji_description(self, target_emoji: MaiEmoji) -> tuple[bool, MaiEmoji]:
+    async def build_emoji_description(self, target_emoji: MaiEmoji, *, session_id: str = "") -> tuple[bool, MaiEmoji]:
         """
         构建表情包描述
 
@@ -1010,6 +1020,7 @@ class EmojiManager:
                     prompt,
                     image_base64,
                     "jpg",
+                    session_id=session_id,
                 )
                 description = description_result.response
             else:
@@ -1021,6 +1032,7 @@ class EmojiManager:
                     prompt,
                     image_base64,
                     image_format,
+                    session_id=session_id,
                 )
                 description = description_result.response
         except Exception as e:

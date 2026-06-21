@@ -211,6 +211,7 @@ class JargonLearner:
             generation_result = await jargon_learn_model.generate_response_with_messages(
                 lambda _client: learning_messages,
                 options=LLMGenerationOptions(temperature=0.3),
+                session_id=learning_session_id,
             )
             self._log_learning_context_preview(
                 learning_messages,

@@ -83,6 +83,11 @@ display_name = "表达风格学习"
 advanced = true
 description = "用于从聊天内容中学习表达风格的模板。"
 
+[learn_jargon]
+display_name = "黑话学习"
+advanced = true
+description = "用于从真实聊天内容中抽取群内黑话候选，并交给黑话矿工更新含义和共现分布。"
+
 [learn_behavior]
 display_name = "行为表现学习"
 advanced = true

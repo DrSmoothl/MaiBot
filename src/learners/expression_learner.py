@@ -392,6 +392,7 @@ class ExpressionLearner:
             generation_result = await express_learn_model.generate_response_with_messages(
                 lambda _client: learning_messages,
                 options=LLMGenerationOptions(temperature=0.3),
+                session_id=learning_session_id,
             )
             self._log_learning_context_preview(
                 learning_messages,
@@ -700,6 +701,7 @@ class ExpressionLearner:
                 expr,
                 situation,
                 use_llm_summary=use_llm_summary,
+                session_id=session_id,
                 checked=checked,
                 modified_by=modified_by,
             )
@@ -755,6 +757,8 @@ class ExpressionLearner:
         self,
         expr: "MaiExpression",
         situation: str,
+        *,
+        session_id: str,
         use_llm_summary: bool = True,
         checked: bool = False,
         modified_by: Optional[ModifiedBy] = None,
@@ -767,7 +771,7 @@ class ExpressionLearner:
 
         if use_llm_summary:
             # 相似匹配时，使用 LLM 重新组合 situation
-            new_situation = await self._compose_situation_text(expr.content)
+            new_situation = await self._compose_situation_text(expr.content, session_id=session_id)
             if new_situation:
                 expr.situation = new_situation
 
@@ -800,8 +804,12 @@ class ExpressionLearner:
     ) -> bool:
         """在表达方式写入数据库前执行 AI 审核，只有通过时才允许写入。"""
 
-        suitable, reason, error = await check_expression_suitability(situation, style)
         review_session_id = session_id or self.session_id
+        suitable, reason, error = await check_expression_suitability(
+            situation,
+            style,
+            session_id=review_session_id,
+        )
         if error:
             append_ai_review_log(
                 session_id=review_session_id,
@@ -834,7 +842,7 @@ class ExpressionLearner:
         return suitable
 
     # ====== 概括方法 ======
-    async def _compose_situation_text(self, content_list: List[str]) -> Optional[str]:
+    async def _compose_situation_text(self, content_list: List[str], *, session_id: str) -> Optional[str]:
         texts = [c.strip() for c in content_list if c.strip()]
         if not texts:
             return None
@@ -846,7 +854,7 @@ class ExpressionLearner:
         )
         try:
             summary_result = await summary_model.generate_response(
-                prompt, options=LLMGenerationOptions(temperature=0.2)
+                prompt, options=LLMGenerationOptions(temperature=0.2), session_id=session_id
             )
             summary = summary_result.response
             if summary := summary.strip():

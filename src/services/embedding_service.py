@@ -40,7 +40,12 @@ class EmbeddingServiceClient:
             session_id=self.session_id,
         )
 
-    async def embed_text(self, embedding_input: str) -> EmbeddingResult:
+    def _resolve_effective_session_id(self, session_id: str = "") -> str:
+        """解析本次请求用于统计归属的聊天流 ID。"""
+
+        return str(session_id or self.session_id or "").strip()
+
+    async def embed_text(self, embedding_input: str, *, session_id: str = "") -> EmbeddingResult:
         """生成单条文本的嵌入向量。
 
         Args:
@@ -49,7 +54,10 @@ class EmbeddingServiceClient:
         Returns:
             EmbeddingResult: 统一嵌入结果对象。
         """
-        raw_result = await self._orchestrator.get_embedding(embedding_input)
+        raw_result = await self._orchestrator.get_embedding(
+            embedding_input,
+            session_id=self._resolve_effective_session_id(session_id),
+        )
         return EmbeddingResult(
             embedding=list(raw_result.embedding),
             model_name=raw_result.model_name,
@@ -59,6 +67,8 @@ class EmbeddingServiceClient:
         self,
         embedding_inputs: List[str],
         max_concurrent: int | None = None,
+        *,
+        session_id: str = "",
     ) -> List[EmbeddingResult]:
         """批量生成文本嵌入向量。
 
@@ -76,7 +86,7 @@ class EmbeddingServiceClient:
         if safe_max_concurrent == 1:
             results: List[EmbeddingResult] = []
             for embedding_input in embedding_inputs:
-                results.append(await self.embed_text(embedding_input))
+                results.append(await self.embed_text(embedding_input, session_id=session_id))
             return results
 
         semaphore = asyncio.Semaphore(safe_max_concurrent)
@@ -92,7 +102,7 @@ class EmbeddingServiceClient:
                 tuple[int, EmbeddingResult]: 输入索引与对应嵌入结果。
             """
             async with semaphore:
-                result = await self.embed_text(embedding_input)
+                result = await self.embed_text(embedding_input, session_id=session_id)
                 return index, result
 
         ordered_results = await asyncio.gather(
@@ -101,7 +111,7 @@ class EmbeddingServiceClient:
         ordered_results.sort(key=lambda item: item[0])
         return [result for _, result in ordered_results]
 
-    def embed_text_sync(self, embedding_input: str) -> EmbeddingResult:
+    def embed_text_sync(self, embedding_input: str, *, session_id: str = "") -> EmbeddingResult:
         """以同步方式生成单条文本的嵌入向量。
 
         Args:
@@ -110,12 +120,14 @@ class EmbeddingServiceClient:
         Returns:
             EmbeddingResult: 统一嵌入结果对象。
         """
-        return self._run_coroutine_sync(self.embed_text(embedding_input))
+        return self._run_coroutine_sync(self.embed_text(embedding_input, session_id=session_id))
 
     def embed_texts_sync(
         self,
         embedding_inputs: List[str],
         max_concurrent: int | None = None,
+        *,
+        session_id: str = "",
     ) -> List[EmbeddingResult]:
         """以同步方式批量生成文本嵌入向量。
 
@@ -130,6 +142,7 @@ class EmbeddingServiceClient:
             self.embed_texts(
                 embedding_inputs,
                 max_concurrent=max_concurrent,
+                session_id=session_id,
             )
         )
 

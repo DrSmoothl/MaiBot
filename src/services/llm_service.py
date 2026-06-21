@@ -66,6 +66,11 @@ class LLMServiceClient:
             session_id=self.session_id,
         )
 
+    def _resolve_effective_session_id(self, session_id: str = "") -> str:
+        """解析本次请求用于统计归属的聊天流 ID。"""
+
+        return str(session_id or self.session_id or "").strip()
+
     @staticmethod
     def _normalize_generation_options(options: LLMGenerationOptions | None = None) -> LLMGenerationOptions:
         """规范化文本生成选项。
@@ -144,14 +149,20 @@ class LLMServiceClient:
         }
         return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
 
-    def _record_cache_stats(self, result: LLMResponseResult, prompt_text: str | None = None) -> None:
+    def _record_cache_stats(
+        self,
+        result: LLMResponseResult,
+        prompt_text: str | None = None,
+        *,
+        session_id: str = "",
+    ) -> None:
         """记录当前调用的 prompt cache 统计。"""
 
         record_llm_cache_usage(
             task_name=self.task_name,
             request_type=self.request_type,
             model_name=result.model_name,
-            session_id=self.session_id,
+            session_id=self._resolve_effective_session_id(session_id),
             prompt_tokens=result.prompt_tokens,
             prompt_cache_hit_tokens=result.prompt_cache_hit_tokens,
             prompt_cache_miss_tokens=result.prompt_cache_miss_tokens,
@@ -162,6 +173,8 @@ class LLMServiceClient:
         self,
         prompt: str,
         options: LLMGenerationOptions | None = None,
+        *,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """生成单轮文本响应。
 
@@ -187,14 +200,17 @@ class LLMServiceClient:
             response_format=active_options.response_format,
             raise_when_empty=active_options.raise_when_empty,
             interrupt_flag=active_options.interrupt_flag,
+            session_id=self._resolve_effective_session_id(session_id),
         )
-        self._record_cache_stats(result, prompt_text=prompt_text)
+        self._record_cache_stats(result, prompt_text=prompt_text, session_id=session_id)
         return result
 
     async def generate_response_with_messages(
         self,
         message_factory: MessageFactory,
         options: LLMGenerationOptions | None = None,
+        *,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """基于消息工厂生成响应。
 
@@ -233,8 +249,9 @@ class LLMServiceClient:
             response_format=active_options.response_format,
             raise_when_empty=active_options.raise_when_empty,
             interrupt_flag=active_options.interrupt_flag,
+            session_id=self._resolve_effective_session_id(session_id),
         )
-        self._record_cache_stats(result, prompt_text=prompt_text_holder.get("prompt_text"))
+        self._record_cache_stats(result, prompt_text=prompt_text_holder.get("prompt_text"), session_id=session_id)
         return result
 
     async def generate_response_for_image(
@@ -243,6 +260,8 @@ class LLMServiceClient:
         image_base64: str,
         image_format: str,
         options: LLMImageOptions | None = None,
+        *,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """为图像内容生成响应。
 
@@ -298,11 +317,12 @@ class LLMServiceClient:
             temperature=active_options.temperature,
             max_tokens=active_options.max_tokens,
             interrupt_flag=active_options.interrupt_flag,
+            session_id=self._resolve_effective_session_id(session_id),
         )
-        self._record_cache_stats(result, prompt_text=prompt_text)
+        self._record_cache_stats(result, prompt_text=prompt_text, session_id=session_id)
         return result
 
-    async def transcribe_audio(self, voice_base64: str) -> LLMAudioTranscriptionResult:
+    async def transcribe_audio(self, voice_base64: str, *, session_id: str = "") -> LLMAudioTranscriptionResult:
         """执行音频转写请求。
 
         Args:
@@ -311,9 +331,10 @@ class LLMServiceClient:
         Returns:
             LLMAudioTranscriptionResult: 音频转写结果对象。
         """
+        del session_id
         return await self._orchestrator.generate_response_for_voice(voice_base64)
 
-    async def embed_text(self, embedding_input: str) -> EmbeddingResult:
+    async def embed_text(self, embedding_input: str, *, session_id: str = "") -> EmbeddingResult:
         """兼容旧调用的文本嵌入入口。
 
         Args:
@@ -325,9 +346,9 @@ class LLMServiceClient:
         embedding_client = EmbeddingServiceClient(
             task_name=self.task_name,
             request_type=self.request_type,
-            session_id=self.session_id,
+            session_id=self._resolve_effective_session_id(session_id),
         )
-        return await embedding_client.embed_text(embedding_input)
+        return await embedding_client.embed_text(embedding_input, session_id=session_id)
 
 
 def get_available_models() -> Dict[str, Any]:

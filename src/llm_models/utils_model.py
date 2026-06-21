@@ -103,6 +103,11 @@ class LLMOrchestrator:
         }
         """模型使用量记录，用于进行负载均衡，对应为(total_tokens, penalty, usage_penalty)，惩罚值是为了能在某个模型请求不给力或正在被使用的时候进行调整"""
 
+    def _resolve_effective_session_id(self, session_id: str = "") -> str:
+        """解析本次请求用于统计归属的聊天流 ID。"""
+
+        return str(session_id or self.session_id or "").strip()
+
     def _get_task_config_or_raise(self) -> TaskConfig:
         """获取当前任务名对应的最新任务配置。
 
@@ -237,6 +242,7 @@ class LLMOrchestrator:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         interrupt_flag: asyncio.Event | None = None,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """为图像生成响应。
 
@@ -286,7 +292,7 @@ class LLMOrchestrator:
                 user_id="system",
                 request_type=self.request_type,
                 task_name=self.task_name,
-                session_id=self.session_id,
+                session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time_cost,
             )
         return self._build_generation_result(
@@ -323,6 +329,7 @@ class LLMOrchestrator:
         response_format: RespFormat | None = None,
         raise_when_empty: bool = True,
         interrupt_flag: asyncio.Event | None = None,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """异步生成文本响应。
 
@@ -378,7 +385,7 @@ class LLMOrchestrator:
                 user_id="system",
                 request_type=self.request_type,
                 task_name=self.task_name,
-                session_id=self.session_id,
+                session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time.time() - start_time,
             )
         return self._build_generation_result(
@@ -399,6 +406,7 @@ class LLMOrchestrator:
         response_format: RespFormat | None = None,
         raise_when_empty: bool = True,
         interrupt_flag: asyncio.Event | None = None,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """基于外部消息工厂异步生成响应。
 
@@ -451,7 +459,7 @@ class LLMOrchestrator:
                 user_id="system",
                 request_type=self.request_type,
                 task_name=self.task_name,
-                session_id=self.session_id,
+                session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time_cost,
             )
         return self._build_generation_result(
@@ -462,7 +470,7 @@ class LLMOrchestrator:
             response.usage,
         )
 
-    async def get_embedding(self, embedding_input: str) -> LLMEmbeddingResult:
+    async def get_embedding(self, embedding_input: str, *, session_id: str = "") -> LLMEmbeddingResult:
         """获取嵌入向量。
 
         Args:
@@ -487,7 +495,7 @@ class LLMOrchestrator:
                 user_id="system",
                 request_type=self.request_type,
                 task_name=self.task_name,
-                session_id=self.session_id,
+                session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time.time() - start_time,
             )
         if not embedding:

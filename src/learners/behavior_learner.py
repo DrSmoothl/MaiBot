@@ -22,12 +22,13 @@ from .behavior_pattern_store import (
     ACTOR_GROUP_COLLECTIVE,
     ACTOR_MAIBOT_SELF,
     ACTOR_OTHER_USER,
+    BehaviorExperienceUpsertItem,
     LEARNING_OBSERVED,
     LEARNING_SELF_REFLECTION,
     apply_behavior_feedback,
     behavior_pattern_to_dict,
     get_behavior_pattern,
-    upsert_behavior_pattern,
+    upsert_behavior_patterns,
 )
 from .behavior_scenario import BehaviorScenarioProfile, BehaviorScenarioSegment, behavior_scenario_analyzer
 
@@ -711,6 +712,7 @@ class BehaviorLearner:
             generation_result = await behavior_feedback_model.generate_response_with_messages(
                 lambda _client: feedback_messages,
                 options=LLMGenerationOptions(temperature=0.15),
+                session_id=self.session_id,
             )
             response = generation_result.response or ""
             self._log_behavior_feedback_preview(
@@ -872,6 +874,7 @@ class BehaviorLearner:
             generation_result = await behavior_learn_model.generate_response_with_messages(
                 lambda _client: learning_messages,
                 options=LLMGenerationOptions(temperature=0.25),
+                session_id=learning_session_id,
             )
             response = generation_result.response or ""
             self._log_learning_context_preview(
@@ -912,6 +915,7 @@ class BehaviorLearner:
         wrote_pattern = False
         write_success_count = 0
         write_failed_count = 0
+        write_plans: list[tuple[BehaviorCandidate, BehaviorScenarioSegment, str]] = []
         for candidate in behavior_candidates[:12]:
             matched_segment = self._select_segment_for_candidate(candidate, scene_segments)
             candidate_scene_start = scene_start_by_segment_id.get(matched_segment.segment_id, scene_start)
@@ -921,16 +925,24 @@ class BehaviorLearner:
                 f"outcome={candidate.outcome} actor_type={candidate.actor_type} "
                 f"learning_type={candidate.learning_type} source_ids={candidate.source_ids}"
             )
-            path = upsert_behavior_pattern(
-                action=candidate.action,
-                outcome=candidate.outcome,
-                source_ids=candidate.source_ids,
-                session_id=learning_session_id,
-                scenario_profile=matched_segment.profile,
-                scene_start=candidate_scene_start,
-                actor_type=candidate.actor_type,
-                learning_type=candidate.learning_type,
-            )
+            write_plans.append((candidate, matched_segment, candidate_scene_start))
+
+        written_paths = upsert_behavior_patterns(
+            session_id=learning_session_id,
+            items=[
+                BehaviorExperienceUpsertItem(
+                    action=candidate.action,
+                    outcome=candidate.outcome,
+                    source_ids=candidate.source_ids,
+                    scenario_profile=matched_segment.profile,
+                    scene_start=candidate_scene_start,
+                    actor_type=candidate.actor_type,
+                    learning_type=candidate.learning_type,
+                )
+                for candidate, matched_segment, candidate_scene_start in write_plans
+            ],
+        )
+        for (candidate, matched_segment, candidate_scene_start), path in zip(write_plans, written_paths):
             if path is None:
                 write_failed_count += 1
                 logger.warning(
@@ -949,6 +961,16 @@ class BehaviorLearner:
                 f"行为={candidate.action} 结果={candidate.outcome}"
             )
 
+        if len(written_paths) < len(write_plans):
+            for candidate, matched_segment, _candidate_scene_start in write_plans[len(written_paths) :]:
+                write_failed_count += 1
+                logger.warning(
+                    f"{learning_session_id} 行为经验路径写入未返回结果: "
+                    f"segment_id={matched_segment.segment_id} action={candidate.action} "
+                    f"outcome={candidate.outcome} actor_type={candidate.actor_type} "
+                    f"learning_type={candidate.learning_type} source_ids={candidate.source_ids}"
+                )
+
         logger.info(
             f"{learning_session_id} 行为学习写入概览: "
             f"有效候选={len(behavior_candidates)} "
@@ -960,7 +982,6 @@ class BehaviorLearner:
         if wrote_pattern:
             maintenance_result = behavior_pattern_maintenance.maybe_maintain_session(
                 session_id=learning_session_id,
-                force=True,
             )
             if maintenance_result.changed:
                 logger.info(
@@ -1057,6 +1078,7 @@ class BehaviorLearner:
             generation_result = await behavior_scene_model.generate_response_with_messages(
                 lambda _client: scene_messages,
                 options=LLMGenerationOptions(temperature=0.2),
+                session_id=learning_session_id,
             )
             response = generation_result.response or ""
             self._log_learning_scene_preview(
@@ -1090,6 +1112,7 @@ class BehaviorLearner:
             generation_result = await behavior_scene_model.generate_response_with_messages(
                 lambda _client: scene_messages,
                 options=LLMGenerationOptions(temperature=0.2),
+                session_id=learning_session_id,
             )
             response = generation_result.response or ""
             self._log_learning_scene_preview(
