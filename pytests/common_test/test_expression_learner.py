@@ -72,13 +72,78 @@ def test_find_similar_expression_uses_read_only_session_and_history_content(
     monkeypatch.setattr(expression_learner_module, "get_db_session", fake_get_db_session)
 
     learner = ExpressionLearner(session_id="session-a")
-    result = learner._find_similar_expression("表达情绪高涨或生理反应", session_id="session-a")
+    result = learner._find_similar_expression("表达情绪高涨或生理反应", "发送💦表情符号", session_id="session-a")
 
     assert result is not None
     expression, similarity = result
     assert expression.item_id is not None
     assert expression.style == "发送💦表情符号"
     assert similarity == pytest.approx(1.0)
+
+    different_style_result = learner._find_similar_expression(
+        "表达情绪高涨或生理反应",
+        "用文字冷静解释情绪",
+        session_id="session-a",
+    )
+    assert different_style_result is None
+
+
+@pytest.mark.asyncio
+async def test_upsert_expression_creates_new_record_when_style_is_different(
+    monkeypatch: pytest.MonkeyPatch,
+    expression_learner_engine,
+) -> None:
+    """情景相似但表达风格不相似时，应保留为新的表达方式。"""
+
+    import src.learners.expression_learner as expression_learner_module
+
+    with Session(expression_learner_engine) as session:
+        session.add(
+            Expression(
+                situation="被朋友开玩笑时",
+                style="撒娇地怼回去",
+                content_list='["对方调侃你"]',
+                count=1,
+                session_id="session-a",
+                checked=False,
+            )
+        )
+        session.commit()
+
+    @contextmanager
+    def fake_get_db_session(auto_commit: bool = True) -> Generator[Session, None, None]:
+        """构造带自动提交语义的测试会话工厂。"""
+
+        session = Session(expression_learner_engine)
+        try:
+            yield session
+            if auto_commit:
+                session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    monkeypatch.setattr(expression_learner_module, "get_db_session", fake_get_db_session)
+
+    learner = ExpressionLearner(session_id="session-a")
+    expression = await learner._upsert_expression_to_db(
+        "对方调侃你",
+        "用冷静短句转移话题",
+        session_id="session-a",
+    )
+
+    assert expression is not None
+    with Session(expression_learner_engine) as session:
+        expressions = session.exec(select(Expression).order_by(Expression.id)).all()
+
+    assert len(expressions) == 2
+    assert expressions[0].style == "撒娇地怼回去"
+    assert expressions[0].count == 1
+    assert expressions[1].situation == "对方调侃你"
+    assert expressions[1].style == "用冷静短句转移话题"
+    assert expressions[1].count == 1
 
 
 def test_get_session_display_name_uses_chat_manager(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,8 +203,8 @@ async def test_ai_self_reflect_expression_stays_unchecked(
             return "prompt"
 
     class FakeLearnModel:
-        async def generate_response_with_messages(self, builder, options):
-            del builder, options
+        async def generate_response_with_messages(self, builder, options, session_id: str):
+            del builder, options, session_id
             return SimpleNamespace(response="response")
 
     class FakeRuntimeManager:
