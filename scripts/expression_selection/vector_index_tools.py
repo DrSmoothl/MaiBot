@@ -1,8 +1,9 @@
-"""构建 replyer 表达方式向量召回索引。
+"""表达选择向量索引辅助工具。
 
 示例：
-    uv run python code_scripts/build_expression_vector_index.py
-    uv run python code_scripts/build_expression_vector_index.py --checked-only --clusters 80
+    uv run python scripts/expression_selection/vector_index_tools.py build-index
+    uv run python scripts/expression_selection/vector_index_tools.py build-index --checked-only --clusters 80
+    uv run python scripts/expression_selection/vector_index_tools.py refresh-profile --limit 200
 """
 
 from __future__ import annotations
@@ -22,13 +23,13 @@ import sys
 
 import numpy as np
 
-ROOT_PATH = Path(__file__).resolve().parents[1]
+ROOT_PATH = Path(__file__).resolve().parents[2]
 if str(ROOT_PATH) not in sys_path:
     sys_path.insert(0, str(ROOT_PATH))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(errors="replace")
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 DEFAULT_OUTPUT_JSON = "data/expression_selection/expression_vector_index.json"
 
 
@@ -45,13 +46,16 @@ class ExpressionIndexSample:
     modified_by: str
 
 
-def build_argument_parser() -> ArgumentParser:
-    """构建命令行参数解析器。"""
+def add_build_index_arguments(parser: ArgumentParser) -> None:
+    """添加构建索引参数。"""
 
-    parser = ArgumentParser(description="构建 replyer 表达方式向量召回索引。")
     parser.add_argument("--output-json", default=DEFAULT_OUTPUT_JSON, help="输出索引 JSON 路径。")
     parser.add_argument("--source-analysis-json", default="", help="复用已有表达分析 JSON 样本。")
-    parser.add_argument("--embedding-cache", default="", help="复用候选 embedding npz；需要包含 ids/embeddings/model_name。")
+    parser.add_argument(
+        "--embedding-cache",
+        default="",
+        help="复用候选 embedding npz；需要包含 ids/embeddings/model_name/embedding_profile_marker。",
+    )
     parser.add_argument("--limit", type=int, default=0, help="最多纳入多少条表达；0 表示全部。")
     parser.add_argument("--clusters", type=int, default=80, help="聚类数量；0 表示按样本量自动选择。")
     parser.add_argument("--seed", type=int, default=20260621, help="聚类初始化随机种子。")
@@ -63,13 +67,39 @@ def build_argument_parser() -> ArgumentParser:
         help="与 --checked-only 配合，只纳入用户人工修改/确认的表达。",
     )
     parser.add_argument("--max-concurrent", type=int, default=3, help="embedding 最大并发数。")
+
+
+def add_refresh_profile_arguments(parser: ArgumentParser) -> None:
+    """添加刷新 profile 参数。"""
+
+    parser.add_argument("--index-json", default=DEFAULT_OUTPUT_JSON, help="表达向量索引 JSON 路径。")
+    parser.add_argument("--limit", type=int, default=200, help="本次最多刷新多少条表达。")
+    parser.add_argument("--all", action="store_true", help="刷新全部不匹配表达，忽略 --limit。")
+
+
+def build_argument_parser() -> ArgumentParser:
+    """构建命令行参数解析器。"""
+
+    parser = ArgumentParser(description="表达选择向量索引辅助工具。")
+    subparsers = parser.add_subparsers(dest="command")
+
+    build_parser = subparsers.add_parser("build-index", help="重建表达向量索引。")
+    add_build_index_arguments(build_parser)
+
+    refresh_parser = subparsers.add_parser("refresh-profile", help="刷新与当前 embedding profile 不一致的表达。")
+    add_refresh_profile_arguments(refresh_parser)
     return parser
 
 
 def parse_args() -> Namespace:
     """解析命令行参数。"""
 
-    return build_argument_parser().parse_args()
+    raw_args = list(sys.argv[1:])
+    if not raw_args:
+        raw_args = ["build-index"]
+    elif raw_args[0] not in {"build-index", "refresh-profile", "-h", "--help"}:
+        raw_args = ["build-index", *raw_args]
+    return build_argument_parser().parse_args(raw_args)
 
 
 def normalize_text(value: Any) -> str:
@@ -210,7 +240,11 @@ def load_expression_samples(args: Namespace) -> List[ExpressionIndexSample]:
     return samples
 
 
-async def embed_expressions(samples: Sequence[ExpressionIndexSample], *, max_concurrent: int) -> tuple[np.ndarray, str]:
+async def embed_expressions(
+    samples: Sequence[ExpressionIndexSample],
+    *,
+    max_concurrent: int,
+) -> tuple[np.ndarray, str]:
     """批量生成表达方式向量。"""
 
     from src.services.embedding_service import EmbeddingServiceClient
@@ -227,7 +261,7 @@ async def embed_expressions(samples: Sequence[ExpressionIndexSample], *, max_con
     return embeddings, model_name
 
 
-def load_cached_embeddings(samples: Sequence[ExpressionIndexSample], raw_cache_path: str) -> tuple[np.ndarray, str]:
+def load_cached_embeddings(samples: Sequence[ExpressionIndexSample], raw_cache_path: str) -> tuple[np.ndarray, str, str]:
     """从候选 embedding 缓存读取并按 samples 顺序重排。"""
 
     cache_path = resolve_input_path(raw_cache_path)
@@ -237,6 +271,7 @@ def load_cached_embeddings(samples: Sequence[ExpressionIndexSample], raw_cache_p
         ids = np.array(payload["ids"], dtype=np.int64)
         embeddings = np.array(payload["embeddings"], dtype=np.float32)
         raw_model_name = payload["model_name"] if "model_name" in payload else ""
+        raw_profile_marker = payload["embedding_profile_marker"] if "embedding_profile_marker" in payload else ""
     if embeddings.ndim != 2 or embeddings.shape[0] != ids.shape[0]:
         raise ValueError(f"embedding cache 维度异常: ids={ids.shape}, embeddings={embeddings.shape}")
 
@@ -253,7 +288,12 @@ def load_cached_embeddings(samples: Sequence[ExpressionIndexSample], raw_cache_p
         raise ValueError(f"embedding cache 缺少表达 ID: {missing_ids[:10]}，缺失数={len(missing_ids)}")
 
     model_name = str(raw_model_name.item()) if hasattr(raw_model_name, "item") else str(raw_model_name or "")
-    return np.vstack(ordered_embeddings).astype(np.float32), model_name
+    profile_marker = (
+        str(raw_profile_marker.item())
+        if hasattr(raw_profile_marker, "item")
+        else str(raw_profile_marker or "")
+    )
+    return np.vstack(ordered_embeddings).astype(np.float32), model_name, profile_marker
 
 
 def l2_normalize(matrix: np.ndarray) -> np.ndarray:
@@ -288,6 +328,7 @@ def run_kmeans(normalized_vectors: np.ndarray, *, cluster_count: int, seed: int,
         selected = normalized_vectors[centroid_indices]
         similarity = normalized_vectors @ selected.T
         distance = 1.0 - np.max(similarity, axis=1)
+        distance = np.maximum(distance, 0.0)
         distance[centroid_indices] = 0.0
         total_distance = float(distance.sum())
         if total_distance <= 0:
@@ -298,7 +339,7 @@ def run_kmeans(normalized_vectors: np.ndarray, *, cluster_count: int, seed: int,
         centroid_indices.append(int(rng.choice(sample_count, p=probabilities)))
 
     centroids = normalized_vectors[centroid_indices].copy()
-    labels = np.zeros(sample_count, dtype=np.int32)
+    labels = np.full(sample_count, -1, dtype=np.int32)
     for _ in range(max_iter):
         next_labels = np.argmax(normalized_vectors @ centroids.T, axis=1).astype(np.int32)
         if np.array_equal(next_labels, labels):
@@ -335,7 +376,12 @@ def build_cluster_centers(normalized_vectors: np.ndarray, labels: np.ndarray, cl
     return np.vstack(centers).astype(np.float32)
 
 
-def build_cluster_summaries(samples: Sequence[ExpressionIndexSample], labels: np.ndarray) -> List[dict[str, Any]]:
+def build_cluster_summaries(
+    samples: Sequence[ExpressionIndexSample],
+    labels: np.ndarray,
+    *,
+    embedding_profile_marker: str,
+) -> List[dict[str, Any]]:
     """生成轻量聚类摘要。"""
 
     summaries: List[dict[str, Any]] = []
@@ -352,6 +398,7 @@ def build_cluster_summaries(samples: Sequence[ExpressionIndexSample], labels: np
         ]
         summaries.append(
             {
+                "embedding_profile_marker": embedding_profile_marker,
                 "cluster_id": cluster_id,
                 "size": len(member_indices),
                 "members": top_members,
@@ -368,6 +415,8 @@ def write_index(
     cluster_centers: np.ndarray,
     labels: np.ndarray,
     embedding_model: str,
+    embedding_profile_marker: str,
+    embedding_profile_version: int,
     args: Namespace,
 ) -> None:
     """写入索引 JSON 与向量 npz。"""
@@ -378,13 +427,17 @@ def write_index(
     vectors_path = output_json.with_suffix(".npz")
     np.savez_compressed(
         vectors_path,
-        vectors=vectors.astype(np.float32),
-        cluster_centers=cluster_centers.astype(np.float32),
+        vectors_0=vectors.astype(np.float32),
+        cluster_centers_0=cluster_centers.astype(np.float32),
     )
     expressions: List[dict[str, Any]] = []
     for index, sample in enumerate(samples):
         item = asdict(sample)
         item["fingerprint"] = expression_fingerprint(sample.id, sample.situation, sample.style)
+        item["embedding_profile_marker"] = embedding_profile_marker
+        item["embedding_model"] = embedding_model
+        item["embedding_dimension"] = int(vectors.shape[1])
+        item["vector_index"] = int(index)
         item["cluster_id"] = int(labels[index])
         expressions.append(item)
 
@@ -393,9 +446,28 @@ def write_index(
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "database_url": DATABASE_URL,
         "embedding_model": embedding_model,
+        "embedding_profile_marker": embedding_profile_marker,
+        "embedding_profile_version": int(embedding_profile_version),
         "embedding_dimension": int(vectors.shape[1]),
+        "embedding_profiles": [
+            {
+                "marker": embedding_profile_marker,
+                "profile_version": int(embedding_profile_version),
+                "embedding_model": embedding_model,
+                "embedding_dimension": int(vectors.shape[1]),
+                "expression_count": len(samples),
+                "cluster_count": int(cluster_centers.shape[0]),
+                "vectors_key": "vectors_0",
+                "cluster_centers_key": "cluster_centers_0",
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        ],
         "sample_count": len(samples),
-        "clusters": build_cluster_summaries(samples, labels),
+        "clusters": build_cluster_summaries(
+            samples,
+            labels,
+            embedding_profile_marker=embedding_profile_marker,
+        ),
         "vectors_file": vectors_path.name,
         "args": {
             "limit": int(args.limit),
@@ -413,19 +485,118 @@ def write_index(
     output_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-async def main_async() -> None:
+def resolve_project_path(raw_path: str) -> Path:
+    """解析项目内路径。"""
+
+    path = Path(normalize_text(raw_path) or DEFAULT_OUTPUT_JSON).expanduser()
+    if not path.is_absolute():
+        path = ROOT_PATH / path
+    return path.resolve()
+
+
+def load_mismatched_expression_ids(index_path: Path, current_marker: str, *, limit: int) -> List[int]:
+    """从索引 JSON 中找出 profile 不一致的表达 ID。"""
+
+    if not index_path.exists():
+        return []
+
+    payload = json.loads(index_path.read_text(encoding="utf-8"))
+    expression_ids: List[int] = []
+    for raw_expression in payload.get("expressions") or []:
+        if not isinstance(raw_expression, dict):
+            continue
+        expression_id = int(raw_expression.get("id") or 0)
+        if expression_id <= 0:
+            continue
+        marker = normalize_text(raw_expression.get("embedding_profile_marker"))
+        if marker == current_marker:
+            continue
+        expression_ids.append(expression_id)
+        if limit > 0 and len(expression_ids) >= limit:
+            break
+    return expression_ids
+
+
+def load_expression_items(expression_ids: List[int]):
+    """按表达 ID 从数据库读取当前表达内容。"""
+
+    if not expression_ids:
+        return []
+
+    from sqlmodel import select
+
+    from src.chat.replyer.expression_vector_index import ExpressionVectorIndexUpsertItem
+    from src.common.database.database import get_db_session
+    from src.common.database.database_model import Expression, ModifiedBy
+
+    id_order = {expression_id: index for index, expression_id in enumerate(expression_ids)}
+    with get_db_session(auto_commit=False) as session:
+        statement = select(
+            Expression.id,
+            Expression.situation,
+            Expression.style,
+            Expression.count,
+            Expression.session_id,
+            Expression.checked,
+            Expression.modified_by,
+        ).where(Expression.id.in_(expression_ids))  # type: ignore[attr-defined]
+        rows = session.exec(statement).all()
+
+    items = []
+    for row in rows:
+        expression_id, situation, style, count, session_id, checked, modified_by = row
+        normalized_situation = normalize_text(situation)
+        normalized_style = normalize_text(style)
+        if expression_id is None or not normalized_situation or not normalized_style:
+            continue
+        modified_by_text = modified_by.value if isinstance(modified_by, ModifiedBy) else normalize_text(modified_by)
+        items.append(
+            ExpressionVectorIndexUpsertItem(
+                id=int(expression_id),
+                situation=normalized_situation,
+                style=normalized_style,
+                count=int(count or 0),
+                session_id=normalize_text(session_id) or None,
+                checked=bool(checked),
+                modified_by=modified_by_text,
+            )
+        )
+    return sorted(items, key=lambda item: id_order.get(item.id, len(id_order)))
+
+
+async def build_index_async(args: Namespace) -> None:
     """执行索引构建。"""
 
-    args = parse_args()
     output_json = resolve_output_path(str(args.output_json))
     samples = load_expression_samples(args)
     if len(samples) < 10:
         raise ValueError(f"可索引表达数量不足: {len(samples)}")
 
+    from src.chat.replyer.expression_vector_index import (
+        EMBEDDING_PROFILE_VERSION,
+        expression_vector_index,
+    )
+
+    embedding_profile = await expression_vector_index.get_current_embedding_profile()
     if normalize_text(args.embedding_cache):
-        embeddings, model_name = load_cached_embeddings(samples, str(args.embedding_cache))
+        embeddings, model_name, profile_marker = load_cached_embeddings(samples, str(args.embedding_cache))
+        if profile_marker != embedding_profile.marker:
+            raise ValueError(
+                f"embedding cache profile 与当前 profile 不一致: "
+                f"cache={profile_marker[:12]}, current={embedding_profile.marker[:12]}"
+            )
     else:
         embeddings, model_name = await embed_expressions(samples, max_concurrent=int(args.max_concurrent))
+    if normalize_text(model_name) != embedding_profile.model_name:
+        raise ValueError(
+            f"表达 embedding 模型与当前 profile 不一致: "
+            f"model={model_name!r}, profile={embedding_profile.model_name!r}"
+        )
+    if embeddings.shape[1] != embedding_profile.dimension:
+        raise ValueError(
+            f"表达 embedding 维度与当前 profile 不一致: "
+            f"embeddings={embeddings.shape[1]}, profile={embedding_profile.dimension}"
+        )
     vectors = l2_normalize(embeddings).astype(np.float32)
     cluster_count = choose_cluster_count(len(samples), int(args.clusters))
     labels = run_kmeans(vectors, cluster_count=cluster_count, seed=int(args.seed))
@@ -437,10 +608,57 @@ async def main_async() -> None:
         cluster_centers=cluster_centers,
         labels=labels,
         embedding_model=model_name,
+        embedding_profile_marker=embedding_profile.marker,
+        embedding_profile_version=EMBEDDING_PROFILE_VERSION,
         args=args,
     )
     print(f"已构建表达向量索引: {output_json}")
-    print(f"表达数: {len(samples)}, 聚类数: {cluster_count}, embedding模型: {model_name}")
+    print(
+        f"表达数: {len(samples)}, 聚类数: {cluster_count}, "
+        f"embedding模型: {model_name}, profile={embedding_profile.marker[:12]}"
+    )
+
+
+async def refresh_profile_async(args: Namespace) -> None:
+    """刷新与当前 embedding profile 不一致的表达。"""
+
+    index_path = resolve_project_path(str(args.index_json))
+
+    from src.chat.replyer.expression_vector_index import expression_vector_index
+
+    current_profile = await expression_vector_index.get_current_embedding_profile()
+    limit = 0 if bool(args.all) else max(1, int(args.limit))
+    expression_ids = load_mismatched_expression_ids(index_path, current_profile.marker, limit=limit)
+    if not expression_ids:
+        print(
+            f"没有需要刷新的表达向量: index={index_path} "
+            f"profile={current_profile.marker[:12]} model={current_profile.model_name}"
+        )
+        return
+
+    items = load_expression_items(expression_ids)
+    if not items:
+        print(f"索引中找到 {len(expression_ids)} 条不匹配表达，但数据库没有可刷新内容")
+        return
+
+    await expression_vector_index.upsert_expressions_and_recluster(
+        index_path=str(index_path),
+        expressions=items,
+    )
+    print(
+        f"已刷新表达向量 profile: count={len(items)} index={index_path} "
+        f"profile={current_profile.marker[:12]} model={current_profile.model_name}"
+    )
+
+
+async def main_async() -> None:
+    """按子命令执行辅助工具。"""
+
+    args = parse_args()
+    if args.command == "refresh-profile":
+        await refresh_profile_async(args)
+        return
+    await build_index_async(args)
 
 
 def main() -> None:

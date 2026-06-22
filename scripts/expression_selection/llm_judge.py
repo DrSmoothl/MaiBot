@@ -1,7 +1,7 @@
-"""对表达选择三方案做自动盲评。
+"""LLM 表达选择盲评器。
 
-脚本读取 ``batch_compare_expression_selection.py`` 产出的 JSON，把三种方案
-稳定随机映射为 A/B/C，只把盲化后的候选交给 LLM 评审，并在结果中回填真实方法。
+读取离线运行器产出的 batch JSON，把三种表达选择方案稳定随机映射为
+A/B/C，只把盲化后的候选交给 LLM 评审，并在结果中回填真实方法。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import sys
 
 from json_repair import repair_json
 
-ROOT_PATH = Path(__file__).resolve().parents[1]
+ROOT_PATH = Path(__file__).resolve().parents[2]
 if str(ROOT_PATH) not in sys_path:
     sys_path.insert(0, str(ROOT_PATH))
 if hasattr(sys.stdout, "reconfigure"):
@@ -30,7 +30,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions  # noqa: E402
 from src.services.llm_service import LLMServiceClient  # noqa: E402
 
-METHODS = ["old_direct", "precise_selection", "vector_recall"]
+DEFAULT_METHODS = ["old_direct", "precise_selection", "vector_recall"]
 BLIND_LABELS = ["A", "B", "C"]
 
 
@@ -62,6 +62,7 @@ def build_argument_parser() -> ArgumentParser:
     parser.add_argument("--input-json", default="", help="batch compare JSON；为空时使用最新一份。")
     parser.add_argument("--limit", type=int, default=0, help="最多评审多少条；0 表示全部。")
     parser.add_argument("--llm-task-name", default="utils", help="评审使用的模型任务名。")
+    parser.add_argument("--model-name", default="", help="指定评审模型名称；为空时使用任务默认模型。")
     parser.add_argument("--max-tokens", type=int, default=512, help="评审最大输出 token。")
     parser.add_argument("--output-dir", default="data/analysis", help="输出目录。")
     return parser
@@ -107,11 +108,28 @@ def stable_hash(value: str) -> int:
     return int.from_bytes(sha256(value.encode("utf-8")).digest()[:8], "big")
 
 
-def build_blind_mapping(sample: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+def get_method_keys(source_payload: dict[str, Any]) -> list[str]:
+    """读取本次盲评要比较的方法名。"""
+
+    raw_method_keys = source_payload.get("method_keys")
+    if not isinstance(raw_method_keys, list):
+        return list(DEFAULT_METHODS)
+
+    method_keys = [
+        str(method_key or "").strip()
+        for method_key in raw_method_keys
+        if str(method_key or "").strip()
+    ]
+    if len(method_keys) != len(BLIND_LABELS):
+        raise ValueError(f"盲评方法数量必须是 {len(BLIND_LABELS)} 个，当前是 {len(method_keys)} 个")
+    return method_keys
+
+
+def build_blind_mapping(sample: dict[str, Any], method_keys: Sequence[str]) -> tuple[dict[str, str], dict[str, str]]:
     """为单个样本生成稳定随机的 A/B/C 到真实方法映射。"""
 
     sample_id = str(sample.get("sample_id") or sample.get("target_message_id") or "")
-    ordered_methods = sorted(METHODS, key=lambda method: stable_hash(f"{sample_id}:{method}"))
+    ordered_methods = sorted(method_keys, key=lambda method: stable_hash(f"{sample_id}:{method}"))
     label_to_method = {label: method for label, method in zip(BLIND_LABELS, ordered_methods, strict=True)}
     method_to_label = {method: label for label, method in label_to_method.items()}
     return label_to_method, method_to_label
@@ -127,9 +145,16 @@ def build_blind_label_order(sample: dict[str, Any]) -> list[str]:
 def method_items(sample: dict[str, Any], method: str) -> list[dict[str, Any]]:
     """读取某个方案的候选表达。"""
 
-    if method == "vector_recall":
-        return list((sample.get("vector_recall") or {}).get("matches") or [])
-    return list((sample.get(method) or {}).get("selected_expressions") or [])
+    method_payload = sample.get(method)
+    if isinstance(method_payload, list):
+        return list(method_payload)
+    if not isinstance(method_payload, dict):
+        return []
+    if isinstance(method_payload.get("matches"), list):
+        return list(method_payload.get("matches") or [])
+    if isinstance(method_payload.get("selected_expressions"), list):
+        return list(method_payload.get("selected_expressions") or [])
+    return []
 
 
 def render_blind_scheme(sample: dict[str, Any], label: str, method: str) -> str:
@@ -231,16 +256,21 @@ def normalize_scores(raw_scores: Any) -> dict[str, int]:
 async def judge_sample(
     *,
     sample: dict[str, Any],
+    method_keys: Sequence[str],
     llm_client: LLMServiceClient,
     args: Namespace,
 ) -> AutoJudgeResult:
     """评审单条样本。"""
 
-    label_to_method, method_to_label = build_blind_mapping(sample)
+    label_to_method, method_to_label = build_blind_mapping(sample, method_keys)
     prompt = build_judge_prompt(sample, label_to_method)
     response = await llm_client.generate_response(
         prompt,
-        LLMGenerationOptions(temperature=0, max_tokens=max(1, int(args.max_tokens))),
+        LLMGenerationOptions(
+            temperature=0,
+            max_tokens=max(1, int(args.max_tokens)),
+            model_name=str(args.model_name or "").strip() or None,
+        ),
     )
     parsed = parse_judge_response(response.response.strip())
     special = str(parsed.get("special") or "").strip().lower()
@@ -274,30 +304,32 @@ async def judge_sample(
     )
 
 
-def build_summary(results: Sequence[AutoJudgeResult]) -> dict[str, Any]:
+def build_summary(results: Sequence[AutoJudgeResult], method_keys: Sequence[str]) -> dict[str, Any]:
     """汇总自动评审结果。"""
 
-    first_place_counts = {method: 0 for method in METHODS}
-    point_totals = {method: 0 for method in METHODS}
-    score_totals = {method: 0 for method in METHODS}
-    score_counts = {method: 0 for method in METHODS}
+    first_place_counts = {method: 0 for method in method_keys}
+    point_totals = {method: 0 for method in method_keys}
+    score_totals = {method: 0 for method in method_keys}
+    score_counts = {method: 0 for method in method_keys}
     special_counts = {"tie": 0, "none": 0}
     for result in results:
         if result.special in special_counts:
             special_counts[result.special] += 1
             continue
         for rank_index, method in enumerate(result.ranking_methods):
+            if method not in first_place_counts:
+                continue
             if rank_index == 0:
                 first_place_counts[method] += 1
             point_totals[method] += max(3 - rank_index, 0)
         for method, score in result.scores_by_method.items():
-            if score > 0:
+            if method in score_totals and score > 0:
                 score_totals[method] += score
                 score_counts[method] += 1
 
     average_scores = {
         method: round(score_totals[method] / score_counts[method], 3) if score_counts[method] else 0
-        for method in METHODS
+        for method in method_keys
     }
     return {
         "sample_count": len(results),
@@ -352,6 +384,7 @@ async def async_main() -> None:
     args = parse_args()
     input_path = resolve_input_path(args.input_json)
     source_payload = json.loads(input_path.read_text(encoding="utf-8"))
+    method_keys = get_method_keys(source_payload)
     samples = list(source_payload.get("samples") or [])
     if int(args.limit) > 0:
         samples = samples[: int(args.limit)]
@@ -364,7 +397,7 @@ async def async_main() -> None:
     )
     results: List[AutoJudgeResult] = []
     for sample in samples:
-        result = await judge_sample(sample=sample, llm_client=llm_client, args=args)
+        result = await judge_sample(sample=sample, method_keys=method_keys, llm_client=llm_client, args=args)
         results.append(result)
         ranking_text = result.special or " > ".join(result.ranking_labels)
         print(f"已评审 {len(results)}/{len(samples)}: {ranking_text} | {result.reason}")
@@ -373,7 +406,8 @@ async def async_main() -> None:
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "input_json": str(input_path),
         "args": vars(args),
-        "summary": build_summary(results),
+        "method_keys": list(method_keys),
+        "summary": build_summary(results, method_keys),
         "results": [asdict(result) for result in results],
     }
     output_dir = resolve_path(args.output_dir)
