@@ -27,6 +27,11 @@ VECTOR_DIVERSITY_LAMBDA = 0.85
 EMBEDDING_PROFILE_CACHE_SECONDS = 600.0
 EMBEDDING_PROFILE_VERSION = 1
 LEGACY_EMBEDDING_PROFILE_MARKER = "__legacy_unmarked__"
+HISTORY_BACKFILL_BATCH_SIZE = 200
+HISTORY_BACKFILL_MIN_INTERVAL_SECONDS = 10.0
+HISTORY_BACKFILL_MAX_INTERVAL_SECONDS = 600.0
+HISTORY_BACKFILL_INTERVAL_SPEED_RATIO = 1.0
+HISTORY_BACKFILL_EMPTY_SCAN_INTERVAL_SECONDS = 300.0
 EMBEDDING_PROFILE_PROBE_TEXTS = [
     "MaiBot 表达检索 embedding profile probe v1：技术问题排查、报错截图、配置异常",
     "MaiBot 表达检索 embedding profile probe v1：轻松吐槽、接梗、日常群聊",
@@ -229,6 +234,8 @@ class ExpressionVectorIndex:
         self._update_lock = asyncio.Lock()
         self._profile_lock = asyncio.Lock()
         self._profile_cache: tuple[float, ExpressionEmbeddingProfile] | None = None
+        self._history_backfill_task: asyncio.Task[None] | None = None
+        self._history_backfill_last_empty_at = 0.0
 
     async def get_current_embedding_profile(self, *, session_id: str = "") -> ExpressionEmbeddingProfile:
         """用固定探针解析当前 embedding 后端 profile，并做短时缓存。"""
@@ -496,6 +503,112 @@ class ExpressionVectorIndex:
             "vector_index": int(vector_index),
             "cluster_id": int(cluster_id),
         }
+
+    @staticmethod
+    def _load_raw_index_expressions(index_path: Path) -> Dict[int, dict[str, Any]]:
+        """读取索引 JSON 中的表达元数据，用于判断历史表达是否需要补建。"""
+
+        if not index_path.exists():
+            return {}
+
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+        payload_version = int(payload.get("version") or 0)
+        if payload_version < 1 or payload_version > VECTOR_INDEX_VERSION:
+            raise ValueError(f"表达向量索引版本不匹配: {payload.get('version')!r}")
+
+        indexed_by_id: Dict[int, dict[str, Any]] = {}
+        for raw_expression in payload.get("expressions") or []:
+            if not isinstance(raw_expression, dict):
+                continue
+            expression_id = int(raw_expression.get("id") or 0)
+            if expression_id <= 0:
+                continue
+            indexed_by_id[expression_id] = raw_expression
+        return indexed_by_id
+
+    @staticmethod
+    def _needs_history_backfill(
+        *,
+        indexed_expression: dict[str, Any] | None,
+        expression_id: int,
+        situation: str,
+        style: str,
+        profile: ExpressionEmbeddingProfile,
+    ) -> bool:
+        """判断数据库表达是否缺失当前 profile 的可用向量。"""
+
+        if indexed_expression is None:
+            return True
+        if normalize_text(indexed_expression.get("embedding_profile_marker")) != profile.marker:
+            return True
+        if int(indexed_expression.get("embedding_dimension") or 0) != profile.dimension:
+            return True
+        fingerprint = expression_fingerprint(expression_id, situation, style)
+        return normalize_text(indexed_expression.get("fingerprint")) != fingerprint
+
+    def _load_history_backfill_items(
+        self,
+        *,
+        index_path: Path,
+        profile: ExpressionEmbeddingProfile,
+        batch_size: int,
+    ) -> List[ExpressionVectorIndexUpsertItem]:
+        """从数据库读取一批缺失或过期的历史表达。"""
+
+        from sqlmodel import select
+
+        from src.common.database.database import get_db_session
+        from src.common.database.database_model import Expression, ModifiedBy
+
+        indexed_by_id = self._load_raw_index_expressions(index_path)
+        items: List[ExpressionVectorIndexUpsertItem] = []
+        with get_db_session(auto_commit=False) as session:
+            statement = (
+                select(
+                    Expression.id,
+                    Expression.situation,
+                    Expression.style,
+                    Expression.count,
+                    Expression.session_id,
+                    Expression.checked,
+                    Expression.modified_by,
+                )
+                .order_by(Expression.id)
+            )
+            rows = session.exec(statement).all()
+
+        for row in rows:
+            expression_id, situation, style, count, session_id, checked, modified_by = row
+            if expression_id is None:
+                continue
+            normalized_situation = normalize_text(situation)
+            normalized_style = normalize_text(style)
+            if not normalized_situation or not normalized_style:
+                continue
+            if not self._needs_history_backfill(
+                indexed_expression=indexed_by_id.get(int(expression_id)),
+                expression_id=int(expression_id),
+                situation=normalized_situation,
+                style=normalized_style,
+                profile=profile,
+            ):
+                continue
+
+            modified_by_text = modified_by.value if isinstance(modified_by, ModifiedBy) else normalize_text(modified_by)
+            items.append(
+                ExpressionVectorIndexUpsertItem(
+                    id=int(expression_id),
+                    situation=normalized_situation,
+                    style=normalized_style,
+                    count=int(count or 0),
+                    session_id=normalize_text(session_id) or None,
+                    checked=bool(checked),
+                    modified_by=modified_by_text,
+                )
+            )
+            if len(items) >= batch_size:
+                break
+        return items
 
     @staticmethod
     def _select_nearest_cluster(vector: np.ndarray, cluster_centers: np.ndarray) -> int:
@@ -970,6 +1083,124 @@ class ExpressionVectorIndex:
                 f"batch_count={len(normalized_items)} total_count={len(raw_expressions)} "
                 f"profile={current_profile.marker[:12]}"
             )
+
+    def ensure_history_backfill_task(
+        self,
+        *,
+        index_path: str,
+    ) -> None:
+        """确保历史表达向量补建后台任务正在运行。"""
+
+        if self._history_backfill_task is not None and not self._history_backfill_task.done():
+            return
+
+        now = time.monotonic()
+        if now - self._history_backfill_last_empty_at < HISTORY_BACKFILL_EMPTY_SCAN_INTERVAL_SECONDS:
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("表达向量历史补建未启动：当前没有运行中的事件循环")
+            return
+
+        task = loop.create_task(
+            self._run_history_backfill_loop(
+                index_path=index_path,
+            )
+        )
+        self._history_backfill_task = task
+        task.add_done_callback(self._handle_history_backfill_done)
+        logger.info(
+            f"表达向量历史补建任务已启动: index={resolve_project_path(index_path)} "
+            f"batch_size={HISTORY_BACKFILL_BATCH_SIZE}"
+        )
+
+    def _handle_history_backfill_done(self, task: asyncio.Task[None]) -> None:
+        """清理历史表达向量补建任务状态。"""
+
+        if self._history_backfill_task is task:
+            self._history_backfill_task = None
+        if task.cancelled():
+            logger.debug("表达向量历史补建任务已取消")
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("表达向量历史补建任务异常退出")
+
+    @staticmethod
+    def _calculate_history_backfill_interval(
+        *,
+        elapsed_seconds: float,
+        min_interval_seconds: float,
+        max_interval_seconds: float,
+        interval_speed_ratio: float,
+    ) -> float:
+        """根据上一批耗时计算下一批间隔。"""
+
+        min_interval = max(0.0, float(min_interval_seconds))
+        max_interval = max(min_interval, float(max_interval_seconds))
+        ratio = max(0.0, float(interval_speed_ratio))
+        dynamic_interval = max(min_interval, float(elapsed_seconds) * ratio)
+        return min(max_interval, dynamic_interval)
+
+    async def _run_history_backfill_loop(
+        self,
+        *,
+        index_path: str,
+    ) -> None:
+        """分批补建历史表达向量；每批结束后按耗时自适应等待。"""
+
+        resolved_index_path = resolve_project_path(index_path)
+        effective_batch_size = HISTORY_BACKFILL_BATCH_SIZE
+        while True:
+            from src.config.config import global_config
+
+            if global_config.expression.expression_selection_mode not in {"vector", "vector_intent"}:
+                logger.info("表达向量历史补建已停止：当前表达选择模式不是向量模式")
+                return
+
+            batch_started_at = time.monotonic()
+            current_profile = await self.get_current_embedding_profile()
+            items = await asyncio.to_thread(
+                self._load_history_backfill_items,
+                index_path=resolved_index_path,
+                profile=current_profile,
+                batch_size=effective_batch_size,
+            )
+            if not items:
+                self._history_backfill_last_empty_at = time.monotonic()
+                logger.info(
+                    f"表达向量历史补建已完成: index={resolved_index_path} "
+                    f"profile={current_profile.marker[:12]}"
+                )
+                return
+
+            await self.upsert_expressions_and_recluster(
+                index_path=str(resolved_index_path),
+                expressions=items,
+            )
+            elapsed_seconds = time.monotonic() - batch_started_at
+            interval_seconds = self._calculate_history_backfill_interval(
+                elapsed_seconds=elapsed_seconds,
+                min_interval_seconds=HISTORY_BACKFILL_MIN_INTERVAL_SECONDS,
+                max_interval_seconds=HISTORY_BACKFILL_MAX_INTERVAL_SECONDS,
+                interval_speed_ratio=HISTORY_BACKFILL_INTERVAL_SPEED_RATIO,
+            )
+            logger.info(
+                f"表达向量历史补建批次完成: batch_count={len(items)} "
+                f"耗时={elapsed_seconds:.2f}s 下批间隔={interval_seconds:.2f}s"
+            )
+            if len(items) < effective_batch_size:
+                self._history_backfill_last_empty_at = time.monotonic()
+                logger.info(
+                    f"表达向量历史补建已追平: index={resolved_index_path} "
+                    f"profile={current_profile.marker[:12]}"
+                )
+                return
+            if interval_seconds > 0:
+                await asyncio.sleep(interval_seconds)
 
     async def select_candidates(
         self,
