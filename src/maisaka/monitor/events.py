@@ -9,6 +9,7 @@ import json
 import time
 
 from src.common.logger import get_logger
+from src.maisaka.display.display_utils import format_tool_call_for_display
 
 logger = get_logger("maisaka_monitor")
 
@@ -83,6 +84,7 @@ def _normalize_tool_call_arguments(arguments: Any) -> tuple[Any, Optional[str]]:
 def _serialize_single_tool_call(tool_call: Any) -> Dict[str, Any]:
     """将不同来源的 tool_call 标准化为前端可直接展示的结构。"""
 
+    display_payload = format_tool_call_for_display(tool_call)
     if isinstance(tool_call, dict):
         function_info = tool_call.get("function")
         if isinstance(function_info, dict):
@@ -100,6 +102,9 @@ def _serialize_single_tool_call(tool_call: Any) -> Dict[str, Any]:
         }
         if arguments_raw is not None:
             serialized["arguments_raw"] = arguments_raw
+        for key in ("source", "source_label", "extra_content"):
+            if display_payload.get(key):
+                serialized[key] = display_payload[key]
         return serialized
 
     raw_arguments = getattr(tool_call, "args", None)
@@ -113,6 +118,9 @@ def _serialize_single_tool_call(tool_call: Any) -> Dict[str, Any]:
     }
     if arguments_raw is not None:
         serialized["arguments_raw"] = arguments_raw
+    for key in ("source", "source_label", "extra_content"):
+        if display_payload.get(key):
+            serialized[key] = display_payload[key]
     return serialized
 
 
@@ -202,6 +210,8 @@ def _serialize_tool_results(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "tool_call_id": str(tool.get("tool_call_id", "")),
             "tool_name": str(tool.get("tool_name", "")),
             "tool_args": _normalize_payload_value(tool.get("tool_args", {})),
+            "tool_call_source": str(tool.get("tool_call_source", "")),
+            "tool_call_source_label": str(tool.get("tool_call_source_label", "")),
             "success": bool(tool.get("success", False)),
             "duration_ms": float(tool.get("duration_ms", 0.0) or 0.0),
             "summary": str(tool.get("summary", "")),

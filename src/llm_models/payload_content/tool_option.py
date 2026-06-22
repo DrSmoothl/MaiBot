@@ -486,6 +486,10 @@ class ToolOptionBuilder:
 ToolDefinitionInput: TypeAlias = ToolOption | Dict[str, Any]
 """统一的工具定义输入类型。"""
 
+TOOL_CALL_SOURCE_EXTRA_KEY = "tool_call_source"
+TOOL_CALL_SOURCE_REASONING = "reasoning"
+TOOL_CALL_SOURCE_RESPONSE = "response"
+
 
 def normalize_tool_option(tool_definition: ToolDefinitionInput) -> ToolOption:
     """将任意支持的工具输入规范化为内部 `ToolOption`。

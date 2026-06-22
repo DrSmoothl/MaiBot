@@ -25,7 +25,7 @@ from .prompt_preview_logger import PromptPreviewLogger
 
 DATA_IMAGE_DIR = REPO_ROOT / "data" / "images"
 DATA_EMOJI_DIR = REPO_ROOT / "data" / "emoji"
-DATA_HTML_IMAGE_DIR = REPO_ROOT / "data" / "html_imgs"
+DATA_PROMPT_IMAGE_DIR = REPO_ROOT / "data" / "prompt_imgs"
 SUPPORTED_STRUCTURED_IMAGE_FORMATS = {"jpg", "jpeg", "png", "webp", "gif"}
 
 
@@ -39,18 +39,59 @@ def _build_prompt_preview_web_uri(file_path: Path) -> str:
     return f"/api/webui/config/maisaka-prompt-preview?path={quote(relative_path.as_posix(), safe='')}"
 
 
+def _build_webui_local_base_url() -> str:
+    """构建终端可直接打开的本机 WebUI 地址。"""
+
+    try:
+        from src.config.config import global_config
+
+        host = str(global_config.webui.host or "127.0.0.1").strip()
+        port = int(global_config.webui.port or 8001)
+    except Exception:
+        host = "127.0.0.1"
+        port = 8001
+
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{port}"
+
+
+def _build_prompt_reasoning_web_uri(file_path: Path) -> str | None:
+    """构建 WebUI 推理过程页面地址。"""
+
+    try:
+        relative_path = file_path.resolve().relative_to(PromptPreviewLogger._BASE_DIR.resolve())
+    except ValueError:
+        return None
+
+    parts = relative_path.parts
+    if len(parts) < 3:
+        return None
+
+    stage, session, filename = parts[0], parts[1], parts[-1]
+    stem = Path(filename).stem
+    if not stage or not session or not stem:
+        return None
+
+    return (
+        f"{_build_webui_local_base_url()}/reasoning-process"
+        f"?stage={quote(stage, safe='')}"
+        f"&session={quote(session, safe='')}"
+        f"&stem={quote(stem, safe='')}"
+    )
+
+
 @dataclass(frozen=True)
 class PromptPreviewAccess:
     """Prompt 预览文件的展示入口和可直接打开的路径。"""
 
     body: RenderableType
-    viewer_path: Path
-    viewer_uri: str
-    viewer_web_uri: str
-    dump_path: Path
-    dump_uri: str
-    structured_path: Path
-    structured_uri: str
+    record_path: Path
+    record_uri: str
+    preview_web_uri: str
+    reasoning_web_uri: str | None
 
 
 @dataclass(frozen=True)
@@ -125,9 +166,9 @@ class PromptCLIVisualizer:
     @staticmethod
     def _build_image_cache_path(image_format: str, image_bytes: bytes) -> Path:
         image_format = PromptCLIVisualizer._normalize_image_format(image_format) or "bin"
-        DATA_HTML_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+        DATA_PROMPT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(image_bytes).hexdigest()
-        return DATA_HTML_IMAGE_DIR / f"{digest}.{image_format}"
+        return DATA_PROMPT_IMAGE_DIR / f"{digest}.{image_format}"
 
     @staticmethod
     def _build_official_image_path(image_format: str, image_bytes: bytes) -> Path | None:
@@ -141,7 +182,7 @@ class PromptCLIVisualizer:
 
     @staticmethod
     def _build_image_file_link(image_format: str, image_base64: str) -> tuple[str, Path] | None:
-        """优先返回已有 data 图片路径；不存在时落盘到 data/html_imgs。"""
+        """优先返回已有 data 图片路径；不存在时落盘到 prompt 图片缓存。"""
         normalized_format = PromptCLIVisualizer._normalize_image_format(image_format) or "bin"
         try:
             image_bytes = b64decode(image_base64)
@@ -220,6 +261,81 @@ class PromptCLIVisualizer:
     @classmethod
     def format_tool_call_for_display(cls, tool_call: Any) -> Dict[str, Any]:
         return normalize_tool_call_for_display(tool_call)
+
+    @classmethod
+    def _serialize_message_content_for_dump(cls, content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                image_pair = cls._extract_image_pair(item)
+                if image_pair is not None:
+                    image_format, image_base64 = image_pair
+                    approx_size = max(0, len(str(image_base64)) * 3 // 4)
+                    parts.append(f"[图片 image/{image_format} {approx_size} B]")
+                    continue
+                image_dict_pair = cls._extract_image_dict_pair(item)
+                if image_dict_pair is not None:
+                    image_format, image_base64 = image_dict_pair
+                    approx_size = max(0, len(str(image_base64)) * 3 // 4)
+                    parts.append(f"[图片 image/{image_format} {approx_size} B]")
+                    continue
+                if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+                    continue
+                try:
+                    parts.append(json.dumps(item, ensure_ascii=False, indent=2, default=str))
+                except Exception:
+                    parts.append(str(item))
+            return "\n".join(part for part in parts if part).strip()
+        if content is None:
+            return ""
+        try:
+            return json.dumps(content, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            return str(content)
+
+    @classmethod
+    def build_prompt_dump_text(cls, messages: list[Any]) -> str:
+        """构建用于结果摘要与调试展示的纯文本 Prompt。"""
+
+        sections: list[str] = []
+        for index, message in enumerate(messages, start=1):
+            if isinstance(message, dict):
+                raw_role = message.get("role", "unknown")
+                content = message.get("content")
+                tool_call_id = message.get("tool_call_id")
+                tool_calls = message.get("tool_calls") or []
+            else:
+                raw_role = getattr(message, "role", "unknown")
+                content = getattr(message, "content", None)
+                tool_call_id = getattr(message, "tool_call_id", None)
+                tool_calls = getattr(message, "tool_calls", None) or []
+
+            role = raw_role.value if hasattr(raw_role, "value") else str(raw_role)
+            block_lines = [f"[{index}] role={role}"]
+            if tool_call_id:
+                block_lines.append(f"tool_call_id={tool_call_id}")
+
+            normalized_content = cls._serialize_message_content_for_dump(content)
+            if normalized_content:
+                block_lines.append("")
+                block_lines.append(normalized_content)
+
+            if tool_calls:
+                block_lines.append("")
+                block_lines.append("tool_calls:")
+                for tool_call in tool_calls:
+                    normalized_tool_call = cls.format_tool_call_for_display(tool_call)
+                    block_lines.append(json.dumps(normalized_tool_call, ensure_ascii=False, indent=2, default=str))
+
+            sections.append("\n".join(block_lines).strip())
+
+        return "\n\n" + ("\n\n" + ("=" * 80) + "\n\n").join(sections) if sections else "[空 Prompt]"
 
     @staticmethod
     def _should_keep_prompt_preview_json_base64() -> bool:
@@ -318,7 +434,7 @@ class PromptCLIVisualizer:
         return value
 
     @classmethod
-    def _build_structured_message_payload(cls, messages: list[Any], *, keep_base64: bool) -> list[dict[str, Any]]:
+    def build_structured_message_payload(cls, messages: list[Any], *, keep_base64: bool) -> list[dict[str, Any]]:
         """构建 WebUI 可直接解析的 Prompt 消息结构。"""
 
         structured_messages: list[dict[str, Any]] = []
@@ -403,7 +519,7 @@ class PromptCLIVisualizer:
                 "selection_reason": selection_reason,
             },
             "metadata": cls._normalize_preview_metadata(metadata),
-            "messages": cls._build_structured_message_payload(messages, keep_base64=keep_base64),
+            "messages": cls.build_structured_message_payload(messages, keep_base64=keep_base64),
             "output": cls._build_structured_output_payload(
                 output_content,
                 output_title,
@@ -416,33 +532,30 @@ class PromptCLIVisualizer:
     @staticmethod
     def _build_preview_access_body(
         *,
-        viewer_label: str,
-        viewer_path: Path,
-        viewer_link_text: str,
-        dump_label: str,
-        dump_path: Path,
-        dump_link_text: str,
+        record_path: Path,
+        record_link_text: str,
     ) -> RenderableType:
-        viewer_uri = build_file_uri(viewer_path)
-        dump_uri = build_file_uri(dump_path)
-        viewer_display_path = build_display_path(viewer_path)
-        dump_display_path = build_display_path(dump_path)
-        if viewer_path == dump_path:
-            return Text.from_markup(
-                f"[bold green]{viewer_label}：{viewer_display_path}[/bold green] "
-                f"[link={viewer_uri}]{viewer_link_text}[/link]"
+        record_uri = build_file_uri(record_path)
+        record_display_path = build_display_path(record_path)
+        reasoning_web_uri = _build_prompt_reasoning_web_uri(record_path)
+        reasoning_line = (
+            Text.from_markup(
+                f"[bold cyan]WebUI 推理页：{reasoning_web_uri}[/bold cyan] "
+                f"[link={reasoning_web_uri}]点击跳转到推理页面[/link]"
             )
-
-        return Group(
-            Text.from_markup(
-                f"[bold green]{viewer_label}：{viewer_display_path}[/bold green] "
-                f"[link={viewer_uri}]{viewer_link_text}[/link]"
-            ),
-            Text.from_markup(
-                f"[magenta]{dump_label}：{dump_display_path}[/magenta] "
-                f"[cyan][link={dump_uri}]{dump_link_text}[/link][/cyan]"
-            ),
+            if reasoning_web_uri
+            else None
         )
+        lines: list[RenderableType] = [
+            Text.from_markup(
+                f"[bold green]结构化记录：{record_display_path}[/bold green] "
+                f"[link={record_uri}]{record_link_text}[/link]"
+            )
+        ]
+        if reasoning_line is not None:
+            lines.append(reasoning_line)
+
+        return Group(*lines)
 
     @classmethod
     def build_prompt_preview_access(
@@ -485,24 +598,17 @@ class PromptCLIVisualizer:
                 ".json": structured_preview_text,
             },
         )
-        structured_path = saved_paths[".json"]
+        record_path = saved_paths[".json"]
         body = cls._build_preview_access_body(
-            viewer_label="结构化记录",
-            viewer_path=structured_path,
-            viewer_link_text="点击打开 JSON 记录",
-            dump_label="结构化记录",
-            dump_path=structured_path,
-            dump_link_text="点击打开 JSON 记录",
+            record_path=record_path,
+            record_link_text="点击打开 JSON 记录",
         )
         return PromptPreviewAccess(
             body=body,
-            viewer_path=structured_path,
-            viewer_uri=build_file_uri(structured_path),
-            viewer_web_uri=_build_prompt_preview_web_uri(structured_path),
-            dump_path=structured_path,
-            dump_uri=build_file_uri(structured_path),
-            structured_path=structured_path,
-            structured_uri=build_file_uri(structured_path),
+            record_path=record_path,
+            record_uri=build_file_uri(record_path),
+            preview_web_uri=_build_prompt_preview_web_uri(record_path),
+            reasoning_web_uri=_build_prompt_reasoning_web_uri(record_path),
         )
 
     @classmethod
@@ -645,22 +751,15 @@ class PromptCLIVisualizer:
                 ".json": structured_preview_text,
             },
         )
-        structured_path = saved_paths[".json"]
+        record_path = saved_paths[".json"]
         body = cls._build_preview_access_body(
-            viewer_label="结构化记录",
-            viewer_path=structured_path,
-            viewer_link_text="点击打开 JSON 记录",
-            dump_label="结构化记录",
-            dump_path=structured_path,
-            dump_link_text="点击打开 JSON 记录",
+            record_path=record_path,
+            record_link_text="点击打开 JSON 记录",
         )
         return PromptPreviewAccess(
             body=body,
-            viewer_path=structured_path,
-            viewer_uri=build_file_uri(structured_path),
-            viewer_web_uri=_build_prompt_preview_web_uri(structured_path),
-            dump_path=structured_path,
-            dump_uri=build_file_uri(structured_path),
-            structured_path=structured_path,
-            structured_uri=build_file_uri(structured_path),
+            record_path=record_path,
+            record_uri=build_file_uri(record_path),
+            preview_web_uri=_build_prompt_preview_web_uri(record_path),
+            reasoning_web_uri=_build_prompt_reasoning_web_uri(record_path),
         )
