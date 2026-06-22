@@ -33,6 +33,6 @@
 - 如果存在工具可以帮助你执行某些动作，完成某些目标，直接使用该工具来完成任务。
 - 如果看到 `<system-reminder>` 中列出了 deferred tools，而你需要其中某个工具，先调用 tool_search() 搜索该工具，等它在后续轮次变为可用后再正常调用。
 {planner_wait_action_rule}
-- finish()：当没有更多操作需要做，使用 finish 结束连续 Planner 和这次思考。
+{planner_finish_rule}
 
 现在，请你输出你对{bot_name}发言的分析，你必须先输出文本内容的分析，然后再进行工具调用：

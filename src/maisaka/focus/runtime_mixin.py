@@ -25,6 +25,7 @@ from src.maisaka.context.messages import (
     SessionBackedMessage,
     ToolResultMessage,
 )
+from src.maisaka.mode_policy import is_no_action_equivalent_cycle_reason
 from .manager import FocusTargetResolution, focus_mode_manager
 
 FOCUS_SWITCH_NEW_MESSAGE_LIMIT = 20
@@ -103,11 +104,7 @@ class MaisakaFocusRuntimeMixin:
             self._consecutive_no_action_count = 0
             return
 
-        no_action_end_reasons = {"timing_no_action", "tool_pause:no_action"}
-        if bool(getattr(global_config.chat, "enable_new_maisaka", False)):
-            no_action_end_reasons.update({"timing_wait", "tool_pause:wait"})
-
-        if cycle_end_reason not in no_action_end_reasons:
+        if not is_no_action_equivalent_cycle_reason(cycle_end_reason):
             self._consecutive_no_action_count = 0
             return
 

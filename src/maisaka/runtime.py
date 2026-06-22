@@ -43,6 +43,7 @@ from src.maisaka.context.messages import (
 from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
 from src.maisaka.display.stage_status_board import remove_stage_status, update_stage_status
 from src.maisaka.focus import MaisakaFocusRuntimeMixin, focus_mode_manager
+from src.maisaka.mode_policy import is_no_action_equivalent_cycle_reason
 from src.maisaka.monitor.events import emit_message_ingested, emit_message_sent, emit_message_updated, emit_session_start
 from src.maisaka.reply_effect import ReplyEffectTracker
 from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
@@ -1165,17 +1166,12 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
     def record_no_action_backoff_cycle_result(self, cycle_end_reason: str) -> None:
         """按整轮结束原因维护 no_action 退避状态。"""
 
-        normalized_reason = str(cycle_end_reason).strip()
-        enable_new_maisaka = bool(getattr(global_config.chat, "enable_new_maisaka", False))
-        if normalized_reason == "timing_no_action" or (enable_new_maisaka and normalized_reason == "timing_wait"):
-            self.record_no_action_decision_result("no_action", source="timing_gate")
+        if is_no_action_equivalent_cycle_reason(cycle_end_reason):
+            source = "timing_gate" if str(cycle_end_reason).strip().startswith("timing_") else "planner"
+            self.record_no_action_decision_result("no_action", source=source)
             return
 
-        if normalized_reason == "tool_pause:no_action" or (enable_new_maisaka and normalized_reason == "tool_pause:wait"):
-            self.record_no_action_decision_result("no_action", source="planner")
-            return
-
-        self.record_no_action_decision_result(normalized_reason, source="cycle")
+        self.record_no_action_decision_result(cycle_end_reason, source="cycle")
 
     def _should_delay_for_no_action_backoff(self, pending_count: int) -> bool:
         """判断当前消息触发是否应被 no_action 退避延迟。"""
