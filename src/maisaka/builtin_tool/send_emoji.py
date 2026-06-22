@@ -1,4 +1,4 @@
-﻿"""send_emoji 内置工具。"""
+"""send_emoji 内置工具。"""
 
 import asyncio
 import math
@@ -407,7 +407,7 @@ async def _select_emoji_with_sub_agent(
         logger.warning(f"{tool_ctx.runtime.log_prefix} 表情包子代理结果解析失败，将回退到候选首项: {exc}")
         if selection_metadata is not None:
             selection_metadata["monitor_detail"] = _build_send_emoji_monitor_detail(
-                request_messages=PromptCLIVisualizer._build_structured_message_payload(
+                request_messages=PromptCLIVisualizer.build_structured_message_payload(
                     request_messages,
                     keep_base64=False,
                 ),
@@ -427,7 +427,7 @@ async def _select_emoji_with_sub_agent(
     if selection_metadata is not None:
         selection_metadata["reason"] = selection.reason.strip()
         selection_metadata["monitor_detail"] = _build_send_emoji_monitor_detail(
-            request_messages=PromptCLIVisualizer._build_structured_message_payload(
+            request_messages=PromptCLIVisualizer.build_structured_message_payload(
                 request_messages,
                 keep_base64=False,
             ),

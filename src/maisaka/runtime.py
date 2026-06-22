@@ -1162,6 +1162,21 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             f"退避={backoff_seconds:.2f} 秒"
         )
 
+    def record_no_action_backoff_cycle_result(self, cycle_end_reason: str) -> None:
+        """按整轮结束原因维护 no_action 退避状态。"""
+
+        normalized_reason = str(cycle_end_reason).strip()
+        enable_new_maisaka = bool(getattr(global_config.chat, "enable_new_maisaka", False))
+        if normalized_reason == "timing_no_action" or (enable_new_maisaka and normalized_reason == "timing_wait"):
+            self.record_no_action_decision_result("no_action", source="timing_gate")
+            return
+
+        if normalized_reason == "tool_pause:no_action" or (enable_new_maisaka and normalized_reason == "tool_pause:wait"):
+            self.record_no_action_decision_result("no_action", source="planner")
+            return
+
+        self.record_no_action_decision_result(normalized_reason, source="cycle")
+
     def _should_delay_for_no_action_backoff(self, pending_count: int) -> bool:
         """判断当前消息触发是否应被 no_action 退避延迟。"""
 

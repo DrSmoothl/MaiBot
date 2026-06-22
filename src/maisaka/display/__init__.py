@@ -5,8 +5,6 @@ from .display_utils import (
     format_token_count,
     format_tool_call_for_display,
     get_request_panel_style,
-    get_role_badge_label,
-    get_role_badge_style,
 )
 from .prompt_cli_renderer import PromptCLIVisualizer
 from .prompt_preview_logger import PromptPreviewLogger
@@ -22,8 +20,6 @@ __all__ = [
     "format_token_count",
     "format_tool_call_for_display",
     "get_request_panel_style",
-    "get_role_badge_label",
-    "get_role_badge_style",
     "remove_stage_status",
     "update_stage_status",
 ]

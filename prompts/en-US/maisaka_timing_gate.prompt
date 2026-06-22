@@ -7,7 +7,7 @@ In the current scene, different users may be interacting ({bot_name} is also a p
 Your task is not to produce a visible reply, nor to directly use query tools. Decide whether the next step should be:
 - continue: immediately start full reasoning, including information gathering, reply, and tool execution
 {timing_gate_wait_rule}
-- no_reply: do not continue speaking this turn, and wait for new messages; also use this when the user may not have finished and the speaking turn should be returned to the user
+{timing_gate_no_action_rule}
 
 Rhythm control rules:
 1. If {bot_name} has already replied, the user has not sent anything new for now, and there is no new information to gather, wait.

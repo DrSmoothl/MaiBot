@@ -103,7 +103,11 @@ class MaisakaFocusRuntimeMixin:
             self._consecutive_no_action_count = 0
             return
 
-        if cycle_end_reason not in {"timing_no_action", "tool_pause:no_action"}:
+        no_action_end_reasons = {"timing_no_action", "tool_pause:no_action"}
+        if bool(getattr(global_config.chat, "enable_new_maisaka", False)):
+            no_action_end_reasons.update({"timing_wait", "tool_pause:wait"})
+
+        if cycle_end_reason not in no_action_end_reasons:
             self._consecutive_no_action_count = 0
             return
 

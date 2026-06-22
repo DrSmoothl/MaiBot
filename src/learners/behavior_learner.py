@@ -1321,9 +1321,8 @@ class BehaviorLearner:
 
         logger.info(
             f"{self.session_id} 行为学习场景画像预览已生成: "
-            f"WebUI={preview_access.viewer_web_uri} "
-            f"HTML={preview_access.viewer_path} "
-            f"JSON={preview_access.dump_path}"
+            f"WebUI={preview_access.preview_web_uri} "
+            f"JSON={preview_access.record_path}"
         )
 
     def _log_learning_context_preview(
@@ -1357,9 +1356,8 @@ class BehaviorLearner:
 
         logger.info(
             f"{self.session_id} 行为学习上下文预览已生成: "
-            f"WebUI={preview_access.viewer_web_uri} "
-            f"HTML={preview_access.viewer_path} "
-            f"TXT={preview_access.dump_path}"
+            f"WebUI={preview_access.preview_web_uri} "
+            f"JSON={preview_access.record_path}"
         )
 
     def _log_behavior_feedback_preview(
@@ -1393,9 +1391,8 @@ class BehaviorLearner:
 
         logger.info(
             f"{self.session_id} 行为路径反馈预览已生成: "
-            f"WebUI={preview_access.viewer_web_uri} "
-            f"HTML={preview_access.viewer_path} "
-            f"TXT={preview_access.dump_path}"
+            f"WebUI={preview_access.preview_web_uri} "
+            f"JSON={preview_access.record_path}"
         )
 
     def _filter_behavior_candidates(

@@ -31,6 +31,7 @@ PROMPT_LOG_ROOT = (PROJECT_ROOT / "logs" / "maisaka_prompt").resolve()
 REPLAY_IMAGE_ROOTS = (
     (PROJECT_ROOT / "data" / "images").resolve(),
     (PROJECT_ROOT / "data" / "emoji").resolve(),
+    (PROJECT_ROOT / "data" / "prompt_imgs").resolve(),
     (PROJECT_ROOT / "data" / "html_imgs").resolve(),
 )
 ALLOWED_SUFFIXES = {".txt", ".html", ".json"}

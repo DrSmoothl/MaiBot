@@ -365,9 +365,8 @@ class JargonLearner:
 
         logger.info(
             f"{self.session_id} 黑话学习上下文预览已生成: "
-            f"WebUI={preview_access.viewer_web_uri} "
-            f"HTML={preview_access.viewer_path} "
-            f"TXT={preview_access.dump_path}"
+            f"WebUI={preview_access.preview_web_uri} "
+            f"JSON={preview_access.record_path}"
         )
 
     def _check_cached_jargons_in_messages(

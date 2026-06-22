@@ -621,6 +621,21 @@ class ChatConfig(ConfigBase):
     )
     """最多保留多少条中期摘要；设为 0 表示不保留。"""
 
+    enable_new_maisaka: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用新 Maisaka",
+                "en_US": "Enable new Maisaka",
+                "ja_JP": "新 Maisaka を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "sparkles",
+            "advanced": True,
+        },
+    )
+    """启用 Maisaka 新实验行为：跳过 Timing Gate，使用 wait 替代 no_action，并让 wait 参与不回复退避。"""
+
     enable_reply_quote: bool = Field(
         default=True,
         json_schema_extra={
@@ -3182,6 +3197,59 @@ class ExpressionConfig(ConfigBase):
         },
     )
     """回复前更精细地挑选表达方式，可能更贴切但会增加模型调用。"""
+
+    expression_selection_mode: Literal["legacy", "vector", "vector_intent"] = Field(
+        default="legacy",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "表达候选选择模式",
+                "en_US": "Expression candidate mode",
+                "ja_JP": "表現候補の選択モード",
+            },
+            "x-widget": "select",
+            "x-icon": "route",
+            "advanced": True,
+            "options": ["legacy", "vector", "vector_intent"],
+            "x-option-descriptions": {
+                "legacy": "传统随机候选",
+                "vector": "向量召回候选，不使用表达选择意图",
+                "vector_intent": "向量召回候选，使用表达选择意图",
+            },
+        },
+    )
+    """表达候选池来源；vector 不使用表达选择意图，vector_intent 会把表达选择意图纳入召回和精排。"""
+
+    expression_vector_index_path: str = Field(
+        default="data/expression_selection/expression_vector_index.json",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "表达向量索引路径",
+                "en_US": "Expression vector index path",
+                "ja_JP": "表現ベクトル索引パス",
+            },
+            "x-widget": "input",
+            "x-icon": "file-search",
+            "advanced": True,
+        },
+    )
+    """向量召回使用的表达索引 JSON；相对路径按项目根目录解析。"""
+
+    expression_vector_candidate_pool_size: int = Field(
+        default=50,
+        ge=1,
+        le=50,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "向量候选上限",
+                "en_US": "Vector candidate limit",
+                "ja_JP": "ベクトル候補上限",
+            },
+            "x-widget": "input",
+            "x-icon": "list-filter",
+            "advanced": True,
+        },
+    )
+    """向量召回后最多交给精细表达选择的候选数；硬上限为 50。"""
 
     max_expression_learner: int = Field(
         default=3,

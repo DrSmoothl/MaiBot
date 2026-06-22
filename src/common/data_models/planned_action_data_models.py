@@ -33,7 +33,7 @@ class PlannedAction(BaseDataModel):
 
     action_name: str = field(
         default_factory=str,
-        metadata={"description": "Planner 选中的动作名称，例如 reply、no_reply 或某个插件动作名。"},
+        metadata={"description": "Planner 选中的动作名称，例如 reply、wait 或某个插件动作名。"},
     )
     target_message: Optional["SessionMessage"] = field(
         default=None,

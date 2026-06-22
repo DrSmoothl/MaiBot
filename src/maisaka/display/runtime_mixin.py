@@ -381,7 +381,7 @@ class MaisakaRuntimeDisplayMixin:
                     border_style=border_style,
                     padding=(0, 1),
                 ),
-                prompt_html_uri=preview_access.viewer_web_uri,
+                prompt_html_uri=preview_access.preview_web_uri,
             )
 
         preview_access = PromptCLIVisualizer.build_text_preview_access(
@@ -400,7 +400,7 @@ class MaisakaRuntimeDisplayMixin:
                 border_style=border_style,
                 padding=(0, 1),
             ),
-            prompt_html_uri=preview_access.viewer_web_uri,
+            prompt_html_uri=preview_access.preview_web_uri,
         )
 
     @staticmethod
