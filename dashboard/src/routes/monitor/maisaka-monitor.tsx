@@ -559,9 +559,10 @@ function parsePromptHtmlReasoningTarget(uri: string): ReasoningRecordTarget | nu
   if (parts.length < 3) return null
 
   const [stage, session, filename] = parts
-  if (!filename.endsWith('.html')) return null
+  const supportedSuffix = ['.html', '.json'].find((suffix) => filename.endsWith(suffix))
+  if (!supportedSuffix) return null
 
-  const stem = filename.slice(0, -'.html'.length)
+  const stem = filename.slice(0, -supportedSuffix.length)
   if (!stage || !session || !stem) return null
 
   return { stage, session, stem }

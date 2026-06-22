@@ -244,7 +244,7 @@ def _safe_custom_prompt_path(language: str, filename: str) -> Path:
 
 
 def _safe_maisaka_prompt_preview_path(relative_path: str) -> Path:
-    """校验并解析 MaiSaka Prompt HTML 预览路径。"""
+    """校验并解析 MaiSaka Prompt 预览路径。"""
 
     normalized_path = relative_path.strip().replace("\\", "/")
     if not normalized_path or normalized_path.startswith("/") or ".." in Path(normalized_path).parts:
@@ -256,8 +256,8 @@ def _safe_maisaka_prompt_preview_path(relative_path: str) -> Path:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Prompt 预览路径越界") from exc
 
-    if preview_path.suffix.lower() != ".html":
-        raise HTTPException(status_code=400, detail="只允许打开 HTML Prompt 预览")
+    if preview_path.suffix.lower() not in {".html", ".json", ".txt"}:
+        raise HTTPException(status_code=400, detail="只允许打开 Prompt 预览文件")
     return preview_path
 
 
@@ -975,13 +975,18 @@ async def reset_prompt_file(language: str, filename: str):
 
 
 @router.get("/maisaka-prompt-preview", response_class=FileResponse)
-async def get_maisaka_prompt_preview(path: str = Query(..., description="logs/maisaka_prompt 下的相对 HTML 路径")):
-    """打开 MaiSaka 监控中生成的 Prompt HTML 预览。"""
+async def get_maisaka_prompt_preview(path: str = Query(..., description="logs/maisaka_prompt 下的相对预览路径")):
+    """打开 MaiSaka 监控中生成的 Prompt 预览。"""
 
     preview_path = _safe_maisaka_prompt_preview_path(path)
     if not preview_path.exists() or not preview_path.is_file():
         raise HTTPException(status_code=404, detail="Prompt 预览文件不存在")
-    return FileResponse(preview_path, media_type="text/html")
+    media_type = {
+        ".html": "text/html",
+        ".json": "application/json",
+        ".txt": "text/plain",
+    }.get(preview_path.suffix.lower(), "application/octet-stream")
+    return FileResponse(preview_path, media_type=media_type)
 
 
 @router.post("/prompt-generator/generate", response_model=PromptGeneratorResponse)

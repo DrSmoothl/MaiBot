@@ -1304,11 +1304,11 @@ class BaseMaisakaReplyGenerator:
         if hook_rewrite_events:
             result.metrics.extra["replyer_hook_rewrite_events"] = list(hook_rewrite_events)
         logger.info(
-            "Replyer KV cache usage - "
-            f"hit_tokens={prompt_cache_hit_tokens}, "
-            f"miss_tokens={prompt_cache_miss_tokens}, "
-            f"hit_rate={prompt_cache_hit_rate:.2f}%, "
-            f"prompt_tokens={generation_result.prompt_tokens}"
+            "Replyer缓存："
+            f"命中={prompt_cache_hit_tokens}, "
+            f"未命中={prompt_cache_miss_tokens}, "
+            f"命中率={prompt_cache_hit_rate:.2f}%, "
+            f"token使用={generation_result.prompt_tokens}"
         )
 
         if not result.success:
