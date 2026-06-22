@@ -82,6 +82,24 @@ function formatRelativeTime(ts: number): string {
   return `${Math.round(diff / 3600)}小时前`
 }
 
+function getToolCallSourceLabel(source?: string, fallbackLabel?: string): string {
+  const normalizedSource = (source ?? '').trim().toLowerCase()
+  if (normalizedSource === 'reasoning') return '推理中调用'
+  if (normalizedSource === 'response') return '正文调用'
+  return fallbackLabel?.trim() || ''
+}
+
+function getToolCallSourceBadgeClassName(source?: string): string {
+  const normalizedSource = (source ?? '').trim().toLowerCase()
+  if (normalizedSource === 'reasoning') {
+    return 'border-teal-500/45 bg-teal-500/10 text-teal-700 dark:text-teal-300'
+  }
+  if (normalizedSource === 'response') {
+    return 'border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  }
+  return 'border-muted-foreground/30 bg-muted/40 text-muted-foreground'
+}
+
 function getFallbackInitial(label: string, fallback: string) {
   const normalizedLabel = label.trim()
   if (normalizedLabel) return normalizedLabel.slice(0, 1)
@@ -501,6 +519,14 @@ function ToolCallBadges({ toolCalls }: { toolCalls: MaisakaToolCall[] }) {
         <Badge key={`${tc.id || tc.name}-${idx}`} variant="secondary" className="text-[10px] gap-1">
           <Wrench className="h-2.5 w-2.5" />
           {tc.name}
+          {getToolCallSourceLabel(tc.source, tc.source_label) && (
+            <span className={cn(
+              'ml-1 rounded-full border px-1 py-0 text-[9px] leading-4',
+              getToolCallSourceBadgeClassName(tc.source),
+            )}>
+              {getToolCallSourceLabel(tc.source, tc.source_label)}
+            </span>
+          )}
         </Badge>
       ))}
     </div>
@@ -697,6 +723,8 @@ function ToolFullJsonBlock({
     summary: string
     tool_args: Record<string, unknown>
     tool_call_id: string
+    tool_call_source?: string
+    tool_call_source_label?: string
     tool_name: string
   }
 }) {
@@ -708,6 +736,8 @@ function ToolFullJsonBlock({
     duration_ms: tool.duration_ms,
     summary: tool.summary,
     prompt_html_uri: tool.prompt_html_uri,
+    tool_call_source: tool.tool_call_source,
+    tool_call_source_label: tool.tool_call_source_label,
   }
 
   return (
@@ -738,6 +768,8 @@ function PlannerToolResultCard({
     summary: string
     tool_args: Record<string, unknown>
     tool_call_id: string
+    tool_call_source?: string
+    tool_call_source_label?: string
     tool_name: string
   }
   index: number
@@ -745,6 +777,7 @@ function PlannerToolResultCard({
 }) {
   const argumentEntries = Object.entries(tool.tool_args ?? {})
   const statusText = tool.success ? '执行成功' : '执行失败'
+  const sourceLabel = getToolCallSourceLabel(tool.tool_call_source, tool.tool_call_source_label)
   const promptHtmlUri = tool.prompt_html_uri?.trim() ?? ''
   const canOpenReasoning = Boolean(promptHtmlUri && parsePromptHtmlReasoningTarget(promptHtmlUri))
 
@@ -759,6 +792,14 @@ function PlannerToolResultCard({
         <Badge variant={tool.success ? 'secondary' : 'destructive'} className="h-5 px-1.5 text-[10px]">
           {statusText}
         </Badge>
+        {sourceLabel && (
+          <Badge
+            variant="outline"
+            className={cn('h-5 px-1.5 text-[10px]', getToolCallSourceBadgeClassName(tool.tool_call_source))}
+          >
+            {sourceLabel}
+          </Badge>
+        )}
         {tool.duration_ms > 0 && (
           <span className="text-xs font-medium text-muted-foreground">{formatMs(tool.duration_ms)}</span>
         )}
@@ -813,6 +854,8 @@ function PlannerToolCallsBlock({
         tool_call_id: toolCall.id,
         tool_name: toolCall.name,
         tool_args: toolCall.arguments ?? {},
+        tool_call_source: toolCall.source,
+        tool_call_source_label: toolCall.source_label,
         success: true,
         duration_ms: 0,
         summary: '',

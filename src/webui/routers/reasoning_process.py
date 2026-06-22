@@ -47,6 +47,39 @@ MESSAGE_TAG_PATTERN = re.compile(r"<message\b(?P<attrs>[^>]*)>", re.IGNORECASE)
 MESSAGE_TAG_ATTR_PATTERN = re.compile(r'([A-Za-z_][\w:-]*)\s*=\s*"([^"]*)"')
 
 
+def _structured_prompt_content_to_text(content: Any) -> str:
+    """将 Prompt JSON 的结构化 content 转为展示/检索用文本。"""
+
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+                continue
+            if isinstance(item, dict) and str(item.get("type") or "").lower() in {"image", "image_url", "input_image"}:
+                image_format = str(item.get("image_format") or item.get("format") or "").strip() or "unknown"
+                size_bytes = item.get("size_bytes")
+                size_text = f" {size_bytes} B" if isinstance(size_bytes, int) else ""
+                parts.append(f"[图片 image/{image_format}{size_text}]")
+                continue
+            try:
+                parts.append(json.dumps(item, ensure_ascii=False, indent=2, default=str))
+            except Exception:
+                parts.append(str(item))
+        return "\n".join(part for part in parts if part).strip()
+    try:
+        return json.dumps(content, ensure_ascii=False, indent=2, default=str)
+    except Exception:
+        return str(content)
+
+
 class ReasoningPromptStageInfo(BaseModel):
     """推理过程类型概要。"""
 
@@ -584,17 +617,11 @@ def _extract_message_ids_from_prompt_payload(payload: dict[str, Any]) -> list[st
     for message in payload.get("messages") or []:
         if not isinstance(message, dict):
             continue
-        append_from_text(message.get("content_text"))
-        content = message.get("content")
-        if isinstance(content, str):
-            append_from_text(content)
+        append_from_text(_structured_prompt_content_to_text(message.get("content")))
 
     output = payload.get("output")
     if isinstance(output, dict):
-        append_from_text(output.get("content_text"))
-        content = output.get("content")
-        if isinstance(content, str):
-            append_from_text(content)
+        append_from_text(_structured_prompt_content_to_text(output.get("content")))
 
     request = payload.get("request")
     if isinstance(request, dict):
@@ -975,18 +1002,6 @@ def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | Non
     if not isinstance(output, dict):
         return None
 
-    output_text = str(output.get("content_text") or "").strip()
-    if output_text:
-        try:
-            parsed_output_text = json.loads(output_text)
-        except json.JSONDecodeError:
-            parsed_output_text = None
-        if isinstance(parsed_output_text, dict):
-            response_text = str(parsed_output_text.get("response") or "").strip()
-            if response_text:
-                return " ".join(line.strip() for line in response_text.splitlines() if line.strip()) or None
-        return " ".join(line.strip() for line in output_text.splitlines() if line.strip())
-
     content = output.get("content")
     if content in (None, "", []):
         return None
@@ -996,7 +1011,8 @@ def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | Non
         response_text = str(content.get("response") or "").strip()
         if response_text:
             return " ".join(line.strip() for line in response_text.splitlines() if line.strip()) or None
-    return json.dumps(content, ensure_ascii=False, default=str)
+    derived_text = _structured_prompt_content_to_text(content)
+    return " ".join(line.strip() for line in derived_text.splitlines() if line.strip()) or None
 
 
 def _extract_output_preview_from_json(file_path: Path, max_chars: int = 160) -> str | None:

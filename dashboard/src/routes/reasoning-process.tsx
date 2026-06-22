@@ -74,7 +74,6 @@ type StructuredPromptMessage = {
   index?: number
   role?: string
   content?: unknown
-  content_text?: string
   tool_call_id?: string
   tool_calls?: unknown[]
 }
@@ -93,7 +92,6 @@ type StructuredPromptPayload = {
   output?: {
     title?: string
     content?: unknown
-    content_text?: string
     tool_calls?: unknown[]
   } | null
   tool_definitions?: unknown[]
@@ -243,10 +241,38 @@ function getStructuredPromptMessageRoleStyle(role?: string, isBotSelf = false): 
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
 function stringifyStructuredValue(value: unknown): string {
   if (typeof value === 'string') return value
   if (value === null || value === undefined) return ''
   return JSON.stringify(value, null, 2)
+}
+
+function stringifyPromptContent(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null || value === undefined) return ''
+  if (!Array.isArray(value)) return stringifyStructuredValue(value)
+
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return item
+      if (isRecord(item) && item.type === 'text' && typeof item.text === 'string') return item.text
+      if (isRecord(item)) {
+        const partType = String(item.type || '').trim().toLowerCase()
+        if (['image', 'image_url', 'input_image'].includes(partType)) {
+          const imageFormat = String(item.image_format || item.format || 'unknown').trim() || 'unknown'
+          const sizeText = typeof item.size_bytes === 'number' ? ` ${item.size_bytes} B` : ''
+          return `[图片 image/${imageFormat}${sizeText}]`
+        }
+      }
+      return stringifyStructuredValue(item)
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim()
 }
 
 function parseStructuredPrompt(content: string): StructuredPromptPayload | null {
@@ -272,7 +298,7 @@ function buildStructuredPromptCopyText(payload: StructuredPromptPayload | null):
   if (metadataLines.length > 0) sections.push(`[元信息]\n${metadataLines.join('\n')}`)
 
   if (payload.output) {
-    const outputText = payload.output.content_text || stringifyStructuredValue(payload.output.content)
+    const outputText = stringifyPromptContent(payload.output.content)
     const toolCallsText = payload.output.tool_calls?.length
       ? `\n\n[工具调用]\n${stringifyStructuredValue(payload.output.tool_calls)}`
       : ''
@@ -283,7 +309,7 @@ function buildStructuredPromptCopyText(payload: StructuredPromptPayload | null):
 
   const messageSections = (payload.messages ?? []).map((message, index) => {
     const role = message.role || 'unknown'
-    const content = message.content_text || stringifyStructuredValue(message.content)
+    const content = stringifyPromptContent(message.content)
     const toolCallId = message.tool_call_id ? `\ntool_call_id: ${message.tool_call_id}` : ''
     const toolCalls = message.tool_calls?.length
       ? `\ntool_calls:\n${stringifyStructuredValue(message.tool_calls)}`
@@ -299,8 +325,42 @@ function buildStructuredPromptCopyText(payload: StructuredPromptPayload | null):
   return sections.join(`\n\n${'='.repeat(80)}\n\n`)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+type ToolCallDisplayItem = {
+  id: string
+  name: string
+  arguments: unknown
+  source: string
+  sourceLabel: string
+}
+
+function normalizeToolCallForDisplay(toolCall: unknown): ToolCallDisplayItem {
+  const toolRecord = isRecord(toolCall) ? toolCall : {}
+  const functionRecord = isRecord(toolRecord.function) ? toolRecord.function : {}
+  const extraContent = isRecord(toolRecord.extra_content) ? toolRecord.extra_content : {}
+  const rawSource = String(toolRecord.source || toolRecord.tool_call_source || extraContent.tool_call_source || '').trim()
+  const normalizedSource = rawSource.toLowerCase()
+  const sourceLabel = normalizedSource === 'reasoning'
+    ? '推理中调用'
+    : normalizedSource === 'response'
+      ? '正文调用'
+      : String(toolRecord.source_label || toolRecord.tool_call_source_label || '').trim()
+  return {
+    id: String(toolRecord.id || toolRecord.call_id || ''),
+    name: String(functionRecord.name || toolRecord.name || toolRecord.func_name || 'unknown'),
+    arguments: functionRecord.arguments ?? toolRecord.arguments ?? toolRecord.args ?? {},
+    source: normalizedSource,
+    sourceLabel,
+  }
+}
+
+function getToolCallSourceClassName(source: string): string {
+  if (source === 'reasoning') {
+    return 'border-teal-500/45 bg-teal-500/10 text-teal-700 dark:text-teal-300'
+  }
+  if (source === 'response') {
+    return 'border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  }
+  return 'border-muted-foreground/30 bg-muted/40 text-muted-foreground'
 }
 
 function formatSchemaType(schema: Record<string, unknown>): string {
@@ -360,7 +420,7 @@ function extractBotSelfNames(prompt: StructuredPromptPayload | null): Set<string
 
   for (const message of prompt?.messages ?? []) {
     if (String(message.role || '').toLowerCase() !== 'system') continue
-    const content = message.content_text || stringifyStructuredValue(message.content)
+    const content = stringifyPromptContent(message.content)
     const focusMatch = content.match(/你需要关注\s+(.+?)\s+与用户/)
     const nameMatch = content.match(/你的名字是([^，。,.\n]+)/)
     const aliasMatch = content.match(/也有人叫你([^。\n]+)/)
@@ -390,7 +450,7 @@ function getFirstMessageTagAttrs(text: string): Record<string, string> {
 function isBotSelfStructuredMessage(message: StructuredPromptMessage, botSelfNames: Set<string>): boolean {
   if (String(message.role || '').toLowerCase() !== 'user') return false
 
-  const text = message.content_text || stringifyStructuredValue(message.content)
+  const text = stringifyPromptContent(message.content)
   const user = getFirstMessageTagAttrs(text).user
   return Boolean(user && botSelfNames.has(normalizeDisplayName(user)))
 }
@@ -586,6 +646,8 @@ function NaturalLanguageText({
 }
 
 function ToolCallsCollapsible({ toolCalls }: { toolCalls: unknown[] }) {
+  const displayToolCalls = toolCalls.map(normalizeToolCallForDisplay)
+
   return (
     <Collapsible className="bg-background/60 mt-2 rounded-md border sm:mt-3">
       <CollapsibleTrigger asChild>
@@ -598,9 +660,49 @@ function ToolCallsCollapsible({ toolCalls }: { toolCalls: unknown[] }) {
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="border-t">
-        <pre className="p-2.5 font-mono text-base leading-7 font-semibold whitespace-pre-wrap sm:p-3">
-          {JSON.stringify(toolCalls, null, 2)}
-        </pre>
+        <div className="space-y-2 p-2.5 sm:p-3">
+          {displayToolCalls.map((toolCall, index) => (
+            <div key={`${toolCall.id || toolCall.name}-${index}`} className="rounded-md border bg-background/70 p-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="font-mono">
+                  {toolCall.name}
+                </Badge>
+                {toolCall.sourceLabel && (
+                  <Badge
+                    variant="outline"
+                    className={cn('px-1.5 py-0 text-[11px]', getToolCallSourceClassName(toolCall.source))}
+                  >
+                    {toolCall.sourceLabel}
+                  </Badge>
+                )}
+                {toolCall.id && (
+                  <span className="text-muted-foreground font-mono text-[11px]">
+                    {toolCall.id}
+                  </span>
+                )}
+              </div>
+              <pre className="mt-2 rounded-md border bg-muted/20 p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
+                {stringifyStructuredValue(toolCall.arguments)}
+              </pre>
+            </div>
+          ))}
+          <Collapsible className="rounded-md border">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="hover:bg-muted/50 flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs transition-colors [&[data-state=open]>svg]:rotate-180"
+              >
+                <span>完整工具调用 JSON</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform" />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="border-t">
+              <pre className="p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap">
+                {JSON.stringify(toolCalls, null, 2)}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
       </CollapsibleContent>
     </Collapsible>
   )
@@ -745,15 +847,12 @@ function hasUnreplayableImagePart(value: unknown): boolean {
 
 function createEditableReplayMessages(prompt: StructuredPromptPayload | null): EditableReplayMessage[] {
   return (prompt?.messages ?? []).map((message, index) => {
-    const shouldUseTextFallback =
-      typeof message.content_text === 'string' && hasUnreplayableImagePart(message.content)
-    const originalContent = shouldUseTextFallback
-      ? message.content_text
-      : message.content ?? message.content_text ?? ''
+    const shouldUseTextFallback = hasUnreplayableImagePart(message.content)
+    const originalContent = shouldUseTextFallback ? stringifyPromptContent(message.content) : message.content ?? ''
     return {
       id: `${message.index ?? index + 1}-${message.role ?? 'unknown'}-${index}`,
       role: String(message.role || 'user'),
-      contentText: typeof originalContent === 'string' ? originalContent : stringifyStructuredValue(originalContent),
+      contentText: typeof originalContent === 'string' ? originalContent : stringifyPromptContent(originalContent),
       originalContent,
       tool_call_id: message.tool_call_id,
       tool_calls: message.tool_calls,
@@ -1766,11 +1865,7 @@ export function ReasoningProcessPage({
                               {structuredPrompt.output.title || '输出结果'}
                             </Badge>
                             <NaturalLanguageText
-                              text={
-                                structuredPrompt.output.content_text ||
-                                stringifyStructuredValue(structuredPrompt.output.content) ||
-                                '空输出'
-                              }
+                              text={stringifyPromptContent(structuredPrompt.output.content) || '空输出'}
                               avatarMap={messageAvatarMap}
                             />
                             {structuredPrompt.output.tool_calls &&
@@ -1809,11 +1904,7 @@ export function ReasoningProcessPage({
                                   )}
                                 </div>
                                 <NaturalLanguageText
-                                  text={
-                                    message.content_text ||
-                                    stringifyStructuredValue(message.content) ||
-                                    '空内容'
-                                  }
+                                  text={stringifyPromptContent(message.content) || '空内容'}
                                   avatarMap={messageAvatarMap}
                                 />
                                 {message.tool_calls && message.tool_calls.length > 0 && (

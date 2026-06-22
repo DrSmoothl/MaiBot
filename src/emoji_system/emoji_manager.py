@@ -487,7 +487,7 @@ class EmojiManager:
         session_id: str = "",
     ) -> Optional[tuple[str, list[str]]]:
         """构建并缓存表情包描述（返回标签化结果，不再走额外识别流程）。"""
-        logger.info(f"Start building cached emoji description, hash={emoji_hash}")
+        # logger.info(f"Start building cached emoji description, hash={emoji_hash}")
         new_emoji = await self.ensure_emoji_saved(emoji_bytes, emoji_hash=emoji_hash)
 
         success_desc, new_emoji = await self.build_emoji_description(new_emoji, session_id=session_id)

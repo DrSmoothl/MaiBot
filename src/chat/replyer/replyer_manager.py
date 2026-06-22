@@ -62,7 +62,7 @@ class ReplyerManager:
             raise
 
         self._repliers[cache_key] = replyer
-        logger.info(f"[ReplyerManager] replyer 创建完成: cache_key={cache_key}")
+        logger.debug(f"Replyer 创建完成: cache_key={cache_key}")
         return replyer
 
 

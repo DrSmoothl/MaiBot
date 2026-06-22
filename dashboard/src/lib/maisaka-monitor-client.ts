@@ -21,6 +21,8 @@ export interface MaisakaToolCall {
   name: string
   arguments?: Record<string, unknown>
   arguments_raw?: string
+  source?: 'reasoning' | 'response' | string
+  source_label?: string
 }
 
 export interface SessionStartEvent {
@@ -179,6 +181,8 @@ export interface MaisakaFinalizedToolResult {
   tool_call_id: string
   tool_name: string
   tool_args: Record<string, unknown>
+  tool_call_source?: string
+  tool_call_source_label?: string
   success: boolean
   duration_ms: number
   summary: string

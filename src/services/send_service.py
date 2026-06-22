@@ -904,7 +904,7 @@ async def _send_via_platform_io(
         if show_log:
             successful_driver_ids = [receipt.driver_id or "unknown" for receipt in delivery_batch.sent_receipts]
             logger.info(
-                f"[SendService] 已通过 Platform IO 将消息发往平台 '{route_key.platform}' "
+                f"已通过 Platform IO 将消息发往平台 '{route_key.platform}' "
                 f"(drivers: {', '.join(successful_driver_ids)}) "
                 f"message={_build_outbound_log_preview(message)}"
             )
