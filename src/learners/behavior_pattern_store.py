@@ -50,6 +50,19 @@ LOW_DOMAIN_SCENE_DELETE_RATES = {
 }
 
 
+def _get_session_log_label(session_id: str) -> str:
+    """获取日志中的聊天流展示名称，无法解析时回退到 session_id。"""
+
+    from src.chat.message_receive.chat_manager import chat_manager
+
+    session_name = chat_manager.get_session_name(session_id)
+    if session_name:
+        return session_name
+
+    chat_manager.get_existing_session_by_session_id(session_id)
+    return chat_manager.get_session_name(session_id) or session_id
+
+
 @dataclass(frozen=True)
 class BehaviorExperienceUpsertItem:
     """待写入的一条行为经验路径。"""
@@ -61,6 +74,14 @@ class BehaviorExperienceUpsertItem:
     scene_start: str
     actor_type: str = ACTOR_OTHER_USER
     learning_type: str = LEARNING_OBSERVED
+
+
+@dataclass(frozen=True)
+class BehaviorExperienceUpsertResult:
+    """行为经验路径写入结果，包含失败时的可读原因。"""
+
+    path: Optional[BehaviorExperiencePath]
+    skipped_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -151,33 +172,38 @@ def _build_evidence_item(
 
 def _normalize_behavior_experience_item(
     item: BehaviorExperienceUpsertItem,
-) -> Optional[_NormalizedBehaviorExperienceItem]:
+) -> tuple[Optional[_NormalizedBehaviorExperienceItem], str]:
     normalized_action = _normalize_text(item.action, max_length=240)
     normalized_outcome = _normalize_text(item.outcome, max_length=240)
     normalized_source_ids = _normalize_source_ids(item.source_ids)
     normalized_actor_type = _coerce_actor_type(item.actor_type)
     normalized_learning_type = _coerce_learning_type(item.learning_type, actor_type=normalized_actor_type)
     if not normalized_action or not normalized_outcome:
+        skipped_reason = "归一化后字段为空"
         logger.warning(
-            "跳过写入行为经验路径：归一化后字段为空 "
+            f"跳过写入行为经验路径：{skipped_reason} "
             f"action={normalized_action!r} outcome={normalized_outcome!r}"
         )
-        return None
+        return None, skipped_reason
     if _should_skip_low_domain_scenario_profile(item.scenario_profile):
+        skipped_reason = "场景画像信号过少"
         logger.info(
-            "跳过写入行为经验路径：场景画像信号过少 "
+            f"跳过写入行为经验路径：{skipped_reason} "
             f"action={normalized_action!r}"
         )
-        return None
+        return None, skipped_reason
 
-    return _NormalizedBehaviorExperienceItem(
-        action=normalized_action,
-        outcome=normalized_outcome,
-        source_ids=normalized_source_ids,
-        scenario_profile=item.scenario_profile,
-        scene_start=item.scene_start,
-        actor_type=normalized_actor_type,
-        learning_type=normalized_learning_type,
+    return (
+        _NormalizedBehaviorExperienceItem(
+            action=normalized_action,
+            outcome=normalized_outcome,
+            source_ids=normalized_source_ids,
+            scenario_profile=item.scenario_profile,
+            scene_start=item.scene_start,
+            actor_type=normalized_actor_type,
+            learning_type=normalized_learning_type,
+        ),
+        "",
     )
 
 
@@ -350,8 +376,29 @@ def upsert_behavior_experiences(
 ) -> list[Optional[BehaviorExperiencePath]]:
     """批量写入行为经验路径，复用同一批次中相同场景画像的场景簇引用。"""
 
-    normalized_items = [_normalize_behavior_experience_item(item) for item in items]
-    results: list[Optional[BehaviorExperiencePath]] = [None for _ in normalized_items]
+    return [
+        result.path
+        for result in upsert_behavior_experiences_with_results(
+            session_id=session_id,
+            items=items,
+        )
+    ]
+
+
+def upsert_behavior_experiences_with_results(
+    *,
+    session_id: str,
+    items: Sequence[BehaviorExperienceUpsertItem],
+) -> list[BehaviorExperienceUpsertResult]:
+    """批量写入行为经验路径，并为每条候选保留跳过原因。"""
+
+    session_log_label = _get_session_log_label(session_id)
+    normalize_results = [_normalize_behavior_experience_item(item) for item in items]
+    normalized_items = [normalized_item for normalized_item, _skipped_reason in normalize_results]
+    results = [
+        BehaviorExperienceUpsertResult(path=None, skipped_reason=skipped_reason)
+        for _normalized_item, skipped_reason in normalize_results
+    ]
     if not any(item is not None for item in normalized_items):
         return results
 
@@ -379,10 +426,12 @@ def upsert_behavior_experiences(
                     scene_cluster_candidates=scene_cluster_candidates,
                 )
                 if graph_refs is None:
+                    skipped_reason = "场景簇引用生成失败"
                     logger.warning(
-                        "跳过写入行为经验路径：场景簇引用生成失败 "
-                        f"session_id={session_id} action={normalized_item.action} outcome={normalized_item.outcome}"
+                        f"跳过写入行为经验路径：{skipped_reason} "
+                        f"chat={session_log_label} action={normalized_item.action} outcome={normalized_item.outcome}"
                     )
+                    results[index] = BehaviorExperienceUpsertResult(path=None, skipped_reason=skipped_reason)
                     continue
                 if all(candidate is not graph_refs.scene_cluster for candidate in scene_cluster_candidates):
                     scene_cluster_candidates.append(graph_refs.scene_cluster)
@@ -404,17 +453,18 @@ def upsert_behavior_experiences(
                     profile_tag_distribution=tag_distribution_by_profile[profile_key],
                 )
                 if path is None:
+                    results[index] = BehaviorExperienceUpsertResult(path=None, skipped_reason="数据库写入未返回路径")
                     continue
                 session.flush()
                 session.refresh(path)
                 session.expunge(path)
-                results[index] = path
+                results[index] = BehaviorExperienceUpsertResult(path=path)
             elapsed_ms = int((perf_counter() - write_start_time) * 1000)
             if elapsed_ms >= 1000:
                 logger.info(
                     "行为经验路径批量写入耗时: "
-                    f"session_id={session_id} 候选={len(items)} "
-                    f"成功={sum(path is not None for path in results)} "
+                    f"chat={session_log_label} 候选={len(items)} "
+                    f"成功={sum(result.path is not None for result in results)} "
                     f"场景画像={len(scene_cluster_by_profile)} "
                     f"预加载场景簇={scene_cluster_count_before} "
                     f"耗时={elapsed_ms}ms"
@@ -423,7 +473,7 @@ def upsert_behavior_experiences(
     except Exception as exc:
         logger.exception(
             "写入行为经验路径失败: "
-            f"session_id={session_id} count={len(items)} error={exc}"
+            f"chat={session_log_label} count={len(items)} error={exc}"
         )
         return results
 
@@ -636,6 +686,7 @@ def apply_behavior_feedback(
 behavior_pattern_to_dict = behavior_experience_to_dict
 upsert_behavior_pattern = upsert_behavior_experience
 upsert_behavior_patterns = upsert_behavior_experiences
+upsert_behavior_patterns_with_results = upsert_behavior_experiences_with_results
 list_behavior_patterns_for_sessions = list_behavior_experiences_for_sessions
 get_behavior_pattern = get_behavior_experience
 mark_behavior_pattern_selected = mark_behavior_experience_selected
