@@ -58,6 +58,11 @@ from src.maisaka.context.post_processor import process_chat_history_after_cycle
 from src.maisaka.context.history import build_prefixed_message_sequence, build_session_message_visible_text
 from src.maisaka.memory.heuristic_injector import heuristic_memory_injector
 from src.maisaka.memory.mid_term import build_mid_term_memory_message, insert_mid_term_memory_message
+from src.maisaka.mode_policy import (
+    is_new_maisaka_enabled,
+    planner_idle_tool_name,
+    should_run_timing_gate,
+)
 from src.maisaka.monitor.events import (
     emit_cycle_end,
     emit_cycle_start,
@@ -701,16 +706,10 @@ class MaisakaReasoningEngine:
         )
 
     @staticmethod
-    def _is_new_maisaka_enabled() -> bool:
-        """判断是否启用新 Maisaka 实验行为。"""
-
-        return bool(getattr(global_config.chat, "enable_new_maisaka", False))
-
-    @staticmethod
     def _build_planner_no_tool_hint(attempt_count: int) -> str:
         """构造 Planner 未选择工具时注入的重试提示。"""
 
-        idle_tool_name = "wait" if MaisakaReasoningEngine._is_new_maisaka_enabled() else "no_action"
+        idle_tool_name = planner_idle_tool_name()
         idle_tool_hint = "需要等待后重新判断时调用 wait" if idle_tool_name == "wait" else "需要先等待新消息时调用 no_action"
         if attempt_count <= 1:
             return (
@@ -771,6 +770,15 @@ class MaisakaReasoningEngine:
         """处理 Planner 未调用工具时的递进提示与终止策略。"""
 
         planner_no_tool_count += 1
+        if is_new_maisaka_enabled():
+            self._clear_planner_no_tool_hints()
+            self._finish_planner_continuation()
+            self._runtime._enter_stop_state()
+            cycle_end_detail = "Planner 未调用工具，新 Maisaka 将其视为本轮思考结束。"
+            planner_extra_lines.append("状态：未调用工具，已结束本轮思考")
+            logger.info(f"{self._runtime.log_prefix} Planner 未调用工具，新 Maisaka 已结束本轮思考")
+            return planner_no_tool_count, "finish", cycle_end_detail, True
+
         if planner_no_tool_count >= PLANNER_NO_TOOL_FINISH_THRESHOLD:
             self._clear_planner_no_tool_hints()
             self._finish_planner_continuation()
@@ -807,7 +815,7 @@ class MaisakaReasoningEngine:
             if message.source != TIMING_GATE_INVALID_TOOL_HINT_SOURCE
         ]
         normalized_tool_text = invalid_tool_text.strip() or "无工具"
-        available_tool_text = "continue 或 wait" if self._is_new_maisaka_enabled() else "continue、no_action 或 wait"
+        available_tool_text = "continue 或 wait" if is_new_maisaka_enabled() else "continue、no_action 或 wait"
         hint_content = (
             "Timing Gate 上一轮选择了非法工具："
             f"{normalized_tool_text}。\n"
@@ -854,26 +862,27 @@ class MaisakaReasoningEngine:
             return
         self._runtime._planner_continuation_active = False
 
+    def _log_consumed_force_next_timing_continue_reason(self) -> None:
+        """消费并记录下一轮强制跳过 Timing Gate 的原因。"""
+
+        consume_force_continue = getattr(self._runtime, "_consume_force_next_timing_continue_reason", None)
+        if not callable(consume_force_continue):
+            return
+        if force_continue_reason := consume_force_continue():
+            logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
+
     def _should_run_initial_timing_gate(self) -> bool:
         """决定本批消息开始时是否需要先进入 Timing Gate。"""
 
-        if self._is_new_maisaka_enabled():
-            consume_force_continue = getattr(self._runtime, "_consume_force_next_timing_continue_reason", None)
-            if callable(consume_force_continue):
-                force_continue_reason = consume_force_continue()
-                if force_continue_reason:
-                    logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
+        if is_new_maisaka_enabled():
+            self._log_consumed_force_next_timing_continue_reason()
             logger.info(f"{self._runtime.log_prefix} Timing Gate 已临时禁用，本轮直接进入 Planner")
             return False
 
-        if not self._is_planner_continuation_active():
+        if should_run_timing_gate(planner_continuation_active=self._is_planner_continuation_active()):
             return True
 
-        consume_force_continue = getattr(self._runtime, "_consume_force_next_timing_continue_reason", None)
-        if callable(consume_force_continue):
-            force_continue_reason = consume_force_continue()
-            if force_continue_reason:
-                logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
+        self._log_consumed_force_next_timing_continue_reason()
         logger.info(f"{self._runtime.log_prefix} 连续 Planner 状态未结束，本轮跳过 Timing Gate")
         return False
 

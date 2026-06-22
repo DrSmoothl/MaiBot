@@ -8,6 +8,7 @@ import json
 
 from sqlmodel import select
 
+from src.chat.replyer.expression_vector_index import ExpressionVectorIndexUpsertItem, expression_vector_index
 from src.chat.utils.utils import is_bot_self
 from src.common.data_models.expression_data_model import MaiExpression
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
@@ -445,7 +446,7 @@ class ExpressionLearner:
         expression_log_title = "待优化的表达方式" if global_config.expression.expression_self_reflect else "学习到的表达"
         logger.info(f"[{session_display_name}] {expression_log_title}：\n{learnt_expressions_str}")
 
-        wrote_expression = False
+        written_expressions: List[MaiExpression] = []
         for situation, style in learnt_expressions:
             before_upsert_result = await self._get_runtime_manager().invoke_hook(
                 "expression.learn.before_upsert",
@@ -479,9 +480,12 @@ class ExpressionLearner:
                 checked=False,
                 modified_by=ModifiedBy.AI if expression_self_reflect else None,
             )
-            wrote_expression = wrote_expression or expression is not None
+            if expression is not None:
+                written_expressions.append(expression)
 
-        return wrote_expression
+        if written_expressions:
+            await self._sync_expression_vector_index_batch(written_expressions)
+        return bool(written_expressions)
 
     def _resolve_learning_session_id(self, messages: List["SessionMessage"]) -> Optional[str]:
         """根据真实消息解析本轮表达学习应该归属的会话 ID。"""
@@ -599,9 +603,8 @@ class ExpressionLearner:
 
         logger.info(
             f"{self.session_id} 表达学习上下文预览已生成: "
-            f"WebUI={preview_access.viewer_web_uri} "
-            f"HTML={preview_access.viewer_path} "
-            f"TXT={preview_access.dump_path}"
+            f"WebUI={preview_access.preview_web_uri} "
+            f"JSON={preview_access.record_path}"
         )
 
     # ====== 过滤方法 ======
@@ -692,12 +695,12 @@ class ExpressionLearner:
             checked: 是否已经完成人工审核。
             modified_by: 最后修改者标记。
         """
-        expr, similarity = self._find_similar_expression(situation, session_id=session_id) or (None, 0)
+        expr, similarity = self._find_similar_expression(situation, style, session_id=session_id) or (None, 0)
         if expr:
             # 根据相似度决定是否使用 LLM 总结
             # 完全匹配（相似度 == 1.0）时不总结，相似匹配时总结
             use_llm_summary = similarity < 1.0
-            return await self._update_existing_expression(
+            expression = await self._update_existing_expression(
                 expr,
                 situation,
                 use_llm_summary=use_llm_summary,
@@ -705,13 +708,48 @@ class ExpressionLearner:
                 checked=checked,
                 modified_by=modified_by,
             )
-        # 没有找到匹配的记录，创建新记录
-        return self._create_expression(
-            situation,
-            style,
-            session_id=session_id,
-            checked=checked,
-            modified_by=modified_by,
+        else:
+            # 没有找到匹配的记录，创建新记录
+            expression = self._create_expression(
+                situation,
+                style,
+                session_id=session_id,
+                checked=checked,
+                modified_by=modified_by,
+            )
+
+        return expression
+
+    @staticmethod
+    def _should_sync_expression_vector_index() -> bool:
+        return global_config.expression.expression_selection_mode in {"vector", "vector_intent"}
+
+    async def _sync_expression_vector_index_batch(self, expressions: Sequence[MaiExpression]) -> None:
+        """表达学习批次写库成功后，同步维护表达向量索引并重聚类。"""
+
+        if not self._should_sync_expression_vector_index():
+            return
+
+        index_items: List[ExpressionVectorIndexUpsertItem] = []
+        for expression in expressions:
+            if expression.item_id is None:
+                raise ValueError("表达方式对象缺少 item_id，无法同步向量索引")
+            modified_by = expression.modified_by.value if isinstance(expression.modified_by, ModifiedBy) else ""
+            index_items.append(
+                ExpressionVectorIndexUpsertItem(
+                    id=expression.item_id,
+                    situation=expression.situation,
+                    style=expression.style,
+                    count=expression.count,
+                    session_id=expression.session_id,
+                    checked=expression.checked,
+                    modified_by=modified_by,
+                )
+            )
+
+        await expression_vector_index.upsert_expressions_and_recluster(
+            index_path=global_config.expression.expression_vector_index_path,
+            expressions=index_items,
         )
 
     def _create_expression(
@@ -864,18 +902,26 @@ class ExpressionLearner:
         return None
 
     def _find_similar_expression(
-        self, situation: str, *, session_id: str, similarity_threshold: float = 0.75
+        self,
+        situation: str,
+        style: str,
+        *,
+        session_id: str,
+        situation_similarity_threshold: float = 0.75,
+        style_similarity_threshold: float = 0.75,
     ) -> Optional[Tuple[MaiExpression, float]]:
         """在数据库中查找相似的表达方式。
 
         Args:
             situation: 当前待匹配的情景描述。
+            style: 当前待匹配的表达风格。
             session_id: 表达方式归属的真实会话 ID。
-            similarity_threshold: 认定为相似表达方式的最低相似度阈值。
+            situation_similarity_threshold: 认定为相似情景的最低相似度阈值。
+            style_similarity_threshold: 认定为相似表达风格的最低相似度阈值。
 
         Returns:
             Optional[Tuple[MaiExpression, float]]: 若找到最相似的表达方式，则返回
-            ``(表达方式对象, 相似度)``；否则返回 ``None``。
+            ``(表达方式对象, 情景相似度)``；否则返回 ``None``。
         """
         try:
             with get_db_session(auto_commit=False) as session:
@@ -887,6 +933,14 @@ class ExpressionLearner:
 
                 for db_expression in expressions:
                     expression = MaiExpression.from_db_instance(db_expression)
+                    style_similarity = difflib.SequenceMatcher(
+                        None,
+                        style,
+                        expression.style,
+                    ).ratio()
+                    if style_similarity <= style_similarity_threshold:
+                        continue
+
                     candidate_situations = [expression.situation, *expression.content]
                     for candidate_situation in candidate_situations:
                         normalized_candidate_situation = candidate_situation.strip()
@@ -897,7 +951,10 @@ class ExpressionLearner:
                             situation,
                             normalized_candidate_situation,
                         ).ratio()
-                        if similarity > similarity_threshold and similarity > best_similarity:
+                        if (
+                            similarity > situation_similarity_threshold
+                            and similarity > best_similarity
+                        ):
                             best_similarity = similarity
                             best_match = expression
 

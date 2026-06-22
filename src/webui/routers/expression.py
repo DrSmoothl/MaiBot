@@ -1015,8 +1015,7 @@ async def get_expression_groups(
                         continue
                     if is_global_expression_group_marker(platform, item_id):
                         is_global = True
-                        continue
-                    chat_ids.update(ChatConfigUtils.get_target_session_ids(target_item))
+                    chat_ids.update(ChatConfigUtils.get_target_session_ids_with_wildcards(target_item))
 
                 if not expression_group.targets:
                     is_global = True
