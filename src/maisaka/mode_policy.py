@@ -12,7 +12,7 @@ NEW_MAISAKA_TIMING_GATE_TOOL_NAMES = {"continue", "wait"}
 PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue", "wait"}
 NEW_MAISAKA_PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue"}
 LEGACY_NO_ACTION_REASONS = {"timing_no_action", "tool_pause:no_action"}
-NEW_MAISAKA_NO_ACTION_REASONS = {*LEGACY_NO_ACTION_REASONS, "timing_wait", "tool_pause:wait"}
+NEW_MAISAKA_NO_ACTION_REASONS = {*LEGACY_NO_ACTION_REASONS, "planner_no_tool_finish", "timing_wait", "tool_pause:wait"}
 
 
 def is_new_maisaka_enabled() -> bool:

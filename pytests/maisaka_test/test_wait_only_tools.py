@@ -1,6 +1,7 @@
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext
 from src.maisaka.builtin_tool import get_builtin_tools, get_timing_tools
+from src.maisaka.mode_policy import is_no_action_equivalent_cycle_reason
 from src.maisaka.reasoning_engine import MaisakaReasoningEngine
 
 
@@ -86,7 +87,8 @@ def test_new_maisaka_treats_planner_no_tool_as_finish(monkeypatch) -> None:
     )
 
     assert count == 1
-    assert cycle_end_reason == "finish"
+    assert cycle_end_reason == "planner_no_tool_finish"
+    assert is_no_action_equivalent_cycle_reason(cycle_end_reason)
     assert "结束" in cycle_end_detail
     assert planner_extra_lines == ["状态：未调用工具，已结束本轮思考"]
     assert should_finish is True

@@ -777,7 +777,7 @@ class MaisakaReasoningEngine:
             cycle_end_detail = "Planner 未调用工具，新 Maisaka 将其视为本轮思考结束。"
             planner_extra_lines.append("状态：未调用工具，已结束本轮思考")
             logger.info(f"{self._runtime.log_prefix} Planner 未调用工具，新 Maisaka 已结束本轮思考")
-            return planner_no_tool_count, "finish", cycle_end_detail, True
+            return planner_no_tool_count, "planner_no_tool_finish", cycle_end_detail, True
 
         if planner_no_tool_count >= PLANNER_NO_TOOL_FINISH_THRESHOLD:
             self._clear_planner_no_tool_hints()
