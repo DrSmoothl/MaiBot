@@ -21,6 +21,12 @@ def is_new_maisaka_enabled() -> bool:
     return bool(getattr(global_config.chat, "enable_new_maisaka", False))
 
 
+def is_reply_necessity_trigger_enabled() -> bool:
+    """判断是否启用新 Maisaka 的回复必要性触发门。"""
+
+    return bool(getattr(global_config.chat, "enable_reply_necessity_trigger", False))
+
+
 def should_run_timing_gate(*, planner_continuation_active: bool) -> bool:
     """判断本轮是否需要运行 Timing Gate。"""
 

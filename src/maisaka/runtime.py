@@ -44,11 +44,20 @@ from src.maisaka.context.messages import (
 from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
 from src.maisaka.display.stage_status_board import remove_stage_status, update_stage_status
 from src.maisaka.focus import MaisakaFocusRuntimeMixin, focus_mode_manager
-from src.maisaka.mode_policy import is_no_action_equivalent_cycle_reason
+from src.maisaka.mode_policy import (
+    is_new_maisaka_enabled,
+    is_no_action_equivalent_cycle_reason,
+    is_reply_necessity_trigger_enabled,
+)
 from src.maisaka.monitor.events import emit_message_ingested, emit_message_sent, emit_message_updated, emit_session_start
 from src.maisaka.reply_effect import ReplyEffectTracker
 from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
 from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids, message_id_from_context_message
+from src.maisaka.reply_necessity import (
+    REPLY_NECESSITY_TRIGGER_SCORE,
+    ReplyNecessityInput,
+    score_reply_necessity,
+)
 from src.mcp_module import MCPManager
 from src.mcp_module.config import build_mcp_server_runtime_configs
 from src.mcp_module.host_llm_bridge import MCPHostLLMBridge
@@ -879,6 +888,86 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         pending_messages = self.message_cache[self._last_processed_index :]
         return len(pending_messages)
 
+    def _count_recent_self_replies(self, window_seconds: float = 300.0) -> int:
+        """统计最近一段时间内麦麦自己已经同步进历史的发言数。"""
+        now = datetime.now()
+        recent_count = 0
+        for message in reversed(self._chat_history):
+            if (now - message.timestamp).total_seconds() > window_seconds:
+                break
+            if message.source == "guided_reply":
+                recent_count += 1
+        return recent_count
+
+    def _count_consecutive_self_replies(self) -> int:
+        """统计历史尾部连续的麦麦发言数，用于控制存在感。"""
+        consecutive_count = 0
+        for message in reversed(self._chat_history):
+            if not message.count_in_context:
+                continue
+            if message.source == "guided_reply":
+                consecutive_count += 1
+                continue
+            break
+        return consecutive_count
+
+    def _score_new_maisaka_reply_necessity(
+        self,
+        *,
+        pending_messages: Sequence[SessionMessage],
+        trigger_threshold: int,
+    ) -> tuple[int, str]:
+        """为新 Maisaka 的消息触发计算轻量回复必要性评分。"""
+        external_messages = [
+            message
+            for message in pending_messages
+            if not is_bot_self(message.platform, message.message_info.user_info.user_id)
+        ]
+        average_interval = self._get_recent_average_external_message_interval()
+        if average_interval is not None and average_interval > 0:
+            last_external_received_at = self._last_external_message_received_at or self._last_message_received_at
+            idle_seconds = max(0.0, time.time() - last_external_received_at)
+            idle_reached_average = idle_seconds >= average_interval
+        else:
+            idle_seconds = 0.0
+            idle_reached_average = False
+
+        score_result = score_reply_necessity(
+            ReplyNecessityInput(
+                texts=[(message.processed_plain_text or "").strip() for message in external_messages],
+                pending_count=len(external_messages),
+                trigger_threshold=trigger_threshold,
+                has_at=any(message.is_at for message in external_messages),
+                has_mention=any(message.is_mentioned for message in external_messages),
+                is_group_chat=self.chat_stream.is_group_session,
+                focus_active=self._is_focus_mode_active_for_current_chat(),
+                recent_self_replies=self._count_recent_self_replies(),
+                consecutive_self_replies=self._count_consecutive_self_replies(),
+                effective_frequency=self._get_effective_reply_frequency(),
+                idle_seconds=idle_seconds,
+                idle_reached_average=idle_reached_average,
+            )
+        )
+        return score_result.score, score_result.detail
+
+    def _should_trigger_new_maisaka_message_turn(
+        self,
+        *,
+        pending_messages: Sequence[SessionMessage],
+        trigger_threshold: int,
+    ) -> bool:
+        """判断新 Maisaka 是否应基于回复必要性进入 Planner。"""
+        score, detail = self._score_new_maisaka_reply_necessity(
+            pending_messages=pending_messages,
+            trigger_threshold=trigger_threshold,
+        )
+        if score >= REPLY_NECESSITY_TRIGGER_SCORE:
+            logger.info(f"{self.log_prefix} 回复必要性评分: {detail} 阈值={REPLY_NECESSITY_TRIGGER_SCORE} 判定=进入Planner")
+            return True
+
+        logger.info(f"{self.log_prefix} 回复必要性评分: {detail} 阈值={REPLY_NECESSITY_TRIGGER_SCORE} 判定=等待更多消息")
+        return False
+
     def _prune_recent_external_message_intervals(self, now: Optional[float] = None) -> None:
         """仅保留最近 30 分钟内的外部消息间隔记录。"""
         current_time = time.time() if now is None else now
@@ -1605,6 +1694,16 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return
 
         trigger_threshold = self._get_message_trigger_threshold()
+        if is_new_maisaka_enabled() and is_reply_necessity_trigger_enabled():
+            if self._should_trigger_new_maisaka_message_turn(
+                pending_messages=self.message_cache[self._last_processed_index :],
+                trigger_threshold=trigger_threshold,
+            ):
+                self._cancel_deferred_message_turn_task()
+                self._message_turn_scheduled = True
+                self._internal_turn_queue.put_nowait("message")
+            return
+
         if pending_count >= trigger_threshold or self._should_trigger_message_turn_by_idle_compensation(
             pending_count=pending_count,
             trigger_threshold=trigger_threshold,

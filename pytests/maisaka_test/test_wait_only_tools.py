@@ -1,7 +1,7 @@
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext
 from src.maisaka.builtin_tool import get_builtin_tools, get_timing_tools
-from src.maisaka.mode_policy import is_no_action_equivalent_cycle_reason
+from src.maisaka.mode_policy import is_no_action_equivalent_cycle_reason, is_reply_necessity_trigger_enabled
 from src.maisaka.reasoning_engine import MaisakaReasoningEngine
 
 
@@ -94,3 +94,13 @@ def test_new_maisaka_treats_planner_no_tool_as_finish(monkeypatch) -> None:
     assert should_finish is True
     assert runtime.finished is True
     assert runtime.stopped is True
+
+
+def test_reply_necessity_trigger_is_optional(monkeypatch) -> None:
+    monkeypatch.setattr(global_config.chat, "enable_reply_necessity_trigger", False, raising=False)
+
+    assert is_reply_necessity_trigger_enabled() is False
+
+    monkeypatch.setattr(global_config.chat, "enable_reply_necessity_trigger", True, raising=False)
+
+    assert is_reply_necessity_trigger_enabled() is True

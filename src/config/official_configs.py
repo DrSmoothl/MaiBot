@@ -636,6 +636,21 @@ class ChatConfig(ConfigBase):
     )
     """启用 Maisaka 新实验行为：跳过 Timing Gate，使用 wait 替代 no_action，并让 wait 参与不回复退避。"""
 
+    enable_reply_necessity_trigger: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用回复必要性触发",
+                "en_US": "Enable reply necessity trigger",
+                "ja_JP": "返信必要度トリガーを有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "activity",
+            "advanced": True,
+        },
+    )
+    """在新 Maisaka 中按回复必要性评分决定是否进入 Planner；关闭时仍按消息数和空窗补偿触发。"""
+
     enable_reply_quote: bool = Field(
         default=True,
         json_schema_extra={
