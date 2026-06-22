@@ -29,14 +29,14 @@ DATA_PROMPT_IMAGE_DIR = REPO_ROOT / "data" / "prompt_imgs"
 SUPPORTED_STRUCTURED_IMAGE_FORMATS = {"jpg", "jpeg", "png", "webp", "gif"}
 
 
-def _build_prompt_preview_web_uri(file_path: Path) -> str:
-    """构建 WebUI 可访问的 Prompt 预览地址。"""
+@dataclass(frozen=True)
+class PromptPreviewRouteTarget:
+    """Prompt 预览记录对应的 WebUI 路由目标。"""
 
-    try:
-        relative_path = file_path.resolve().relative_to(PromptPreviewLogger._BASE_DIR.resolve())
-    except ValueError:
-        return build_file_uri(file_path)
-    return f"/api/webui/config/maisaka-prompt-preview?path={quote(relative_path.as_posix(), safe='')}"
+    relative_path: Path
+    stage: str
+    session: str
+    stem: str
 
 
 def _build_webui_local_base_url() -> str:
@@ -58,9 +58,7 @@ def _build_webui_local_base_url() -> str:
     return f"http://{host}:{port}"
 
 
-def _build_prompt_reasoning_web_uri(file_path: Path) -> str | None:
-    """构建 WebUI 推理过程页面地址。"""
-
+def _resolve_prompt_preview_route_target(file_path: Path) -> PromptPreviewRouteTarget | None:
     try:
         relative_path = file_path.resolve().relative_to(PromptPreviewLogger._BASE_DIR.resolve())
     except ValueError:
@@ -75,11 +73,30 @@ def _build_prompt_reasoning_web_uri(file_path: Path) -> str | None:
     if not stage or not session or not stem:
         return None
 
+    return PromptPreviewRouteTarget(relative_path=relative_path, stage=stage, session=session, stem=stem)
+
+
+def _build_prompt_preview_web_uri(file_path: Path) -> str:
+    """构建 WebUI 可访问的 Prompt 预览地址。"""
+
+    route_target = _resolve_prompt_preview_route_target(file_path)
+    if route_target is None:
+        return build_file_uri(file_path)
+    return f"/api/webui/config/maisaka-prompt-preview?path={quote(route_target.relative_path.as_posix(), safe='')}"
+
+
+def _build_prompt_reasoning_web_uri(file_path: Path) -> str | None:
+    """构建 WebUI 推理过程页面地址。"""
+
+    route_target = _resolve_prompt_preview_route_target(file_path)
+    if route_target is None:
+        return None
+
     return (
         f"{_build_webui_local_base_url()}/reasoning-process"
-        f"?stage={quote(stage, safe='')}"
-        f"&session={quote(session, safe='')}"
-        f"&stem={quote(stem, safe='')}"
+        f"?stage={quote(route_target.stage, safe='')}"
+        f"&session={quote(route_target.session, safe='')}"
+        f"&stem={quote(route_target.stem, safe='')}"
     )
 
 
@@ -540,7 +557,7 @@ class PromptCLIVisualizer:
         reasoning_web_uri = _build_prompt_reasoning_web_uri(record_path)
         reasoning_line = (
             Text.from_markup(
-                f"[bold cyan]WebUI 推理页：{reasoning_web_uri}[/bold cyan] "
+                f"[bold cyan]推理详情浏览：{reasoning_web_uri}[/bold cyan] "
                 f"[link={reasoning_web_uri}]点击跳转到推理页面[/link]"
             )
             if reasoning_web_uri
@@ -556,6 +573,37 @@ class PromptCLIVisualizer:
             lines.append(reasoning_line)
 
         return Group(*lines)
+
+    @classmethod
+    def _save_structured_preview_access(
+        cls,
+        *,
+        chat_id: str,
+        category: str,
+        payload: dict[str, Any],
+    ) -> PromptPreviewAccess:
+        structured_preview_text = json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+        record_path = PromptPreviewLogger.save_preview_file(
+            chat_id,
+            category,
+            structured_preview_text,
+        )
+        body = cls._build_preview_access_body(
+            record_path=record_path,
+            record_link_text="点击打开 JSON 记录",
+        )
+        return PromptPreviewAccess(
+            body=body,
+            record_path=record_path,
+            record_uri=build_file_uri(record_path),
+            preview_web_uri=_build_prompt_preview_web_uri(record_path),
+            reasoning_web_uri=_build_prompt_reasoning_web_uri(record_path),
+        )
 
     @classmethod
     def build_prompt_preview_access(
@@ -575,8 +623,10 @@ class PromptCLIVisualizer:
         """保存 Prompt 预览文件，并返回 CLI 展示入口与浏览器可打开的 URI。"""
 
         keep_json_base64 = cls._should_keep_prompt_preview_json_base64()
-        structured_preview_text = json.dumps(
-            cls._build_structured_preview_payload(
+        return cls._save_structured_preview_access(
+            chat_id=chat_id,
+            category=category,
+            payload=cls._build_structured_preview_payload(
                 messages,
                 request_kind=request_kind,
                 selection_reason=selection_reason,
@@ -587,28 +637,6 @@ class PromptCLIVisualizer:
                 metadata=metadata,
                 keep_base64=keep_json_base64,
             ),
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        )
-        saved_paths = PromptPreviewLogger.save_preview_files(
-            chat_id,
-            category,
-            {
-                ".json": structured_preview_text,
-            },
-        )
-        record_path = saved_paths[".json"]
-        body = cls._build_preview_access_body(
-            record_path=record_path,
-            record_link_text="点击打开 JSON 记录",
-        )
-        return PromptPreviewAccess(
-            body=body,
-            record_path=record_path,
-            record_uri=build_file_uri(record_path),
-            preview_web_uri=_build_prompt_preview_web_uri(record_path),
-            reasoning_web_uri=_build_prompt_reasoning_web_uri(record_path),
         )
 
     @classmethod
@@ -728,8 +756,10 @@ class PromptCLIVisualizer:
         """保存文本型 Prompt 预览文件，并返回对应访问入口。"""
 
         keep_json_base64 = cls._should_keep_prompt_preview_json_base64()
-        structured_preview_text = json.dumps(
-            cls._build_structured_preview_payload(
+        return cls._save_structured_preview_access(
+            chat_id=chat_id,
+            category=category,
+            payload=cls._build_structured_preview_payload(
                 [{"role": "user", "content": content}],
                 request_kind=request_kind,
                 selection_reason=subtitle,
@@ -740,26 +770,4 @@ class PromptCLIVisualizer:
                 metadata=metadata,
                 keep_base64=keep_json_base64,
             ),
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        )
-        saved_paths = PromptPreviewLogger.save_preview_files(
-            chat_id,
-            category,
-            {
-                ".json": structured_preview_text,
-            },
-        )
-        record_path = saved_paths[".json"]
-        body = cls._build_preview_access_body(
-            record_path=record_path,
-            record_link_text="点击打开 JSON 记录",
-        )
-        return PromptPreviewAccess(
-            body=body,
-            record_path=record_path,
-            record_uri=build_file_uri(record_path),
-            preview_web_uri=_build_prompt_preview_web_uri(record_path),
-            reasoning_web_uri=_build_prompt_reasoning_web_uri(record_path),
         )

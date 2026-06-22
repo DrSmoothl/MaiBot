@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
 
 import time
 
@@ -22,34 +21,30 @@ class PromptPreviewLogger:
         base_stem = str(int(time.time() * 1000))
         candidate_stem = base_stem
         suffix_index = 1
-        while any((chat_dir / f"{candidate_stem}{suffix}").exists() for suffix in (".html", ".json", ".txt")):
+        while (chat_dir / f"{candidate_stem}.json").exists():
             candidate_stem = f"{base_stem}_{suffix_index}"
             suffix_index += 1
         return candidate_stem
 
     @classmethod
-    def save_preview_files(
+    def save_preview_file(
         cls,
         chat_id: str,
         category: str,
-        files: Dict[str, str],
-    ) -> Dict[str, Path]:
-        """保存同一份 Prompt 预览的多个文件并执行超量清理。"""
+        content: str,
+    ) -> Path:
+        """保存 Prompt 预览 JSON 并执行超量清理。"""
 
         normalized_category = normalize_preview_name(category)
         chat_dir = (cls._BASE_DIR / normalized_category / build_preview_chat_dir_name(chat_id)).resolve()
         chat_dir.mkdir(parents=True, exist_ok=True)
         stem = cls._build_file_stem(chat_dir)
-        saved_paths: Dict[str, Path] = {}
+        file_path = chat_dir / f"{stem}.json"
         try:
-            for suffix, content in files.items():
-                normalized_suffix = suffix if suffix.startswith(".") else f".{suffix}"
-                file_path = chat_dir / f"{stem}{normalized_suffix}"
-                file_path.write_text(content, encoding="utf-8")
-                saved_paths[normalized_suffix] = file_path
+            file_path.write_text(content, encoding="utf-8")
         finally:
             cls._trim_overflow(chat_dir)
-        return saved_paths
+        return file_path
 
     @classmethod
     def _trim_overflow(cls, chat_dir: Path) -> None:

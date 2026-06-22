@@ -344,7 +344,6 @@ class MaisakaReasoningEngine:
     def _build_behavior_selector_context_text(
         self,
         *,
-        anchor_message: Optional[SessionMessage] = None,
         source_messages: Optional[list[SessionMessage]] = None,
         selected_history: Optional[list[LLMContextMessage]] = None,
     ) -> str:
@@ -372,13 +371,6 @@ class MaisakaReasoningEngine:
                     seen_texts=seen_texts,
                 )
 
-        if anchor_message is not None:
-            self._append_behavior_selector_context_item(
-                context_items,
-                text=str(anchor_message.processed_plain_text or ""),
-                seen_texts=seen_texts,
-            )
-
         if selected_history is None:
             for history_message in reversed(self._runtime._chat_history):
                 if len(context_items) >= BEHAVIOR_SELECTOR_CONTEXT_MESSAGE_LIMIT:
@@ -401,7 +393,6 @@ class MaisakaReasoningEngine:
     async def _select_behavior_reference_message(
         self,
         *,
-        anchor_message: Optional[SessionMessage] = None,
         source_messages: Optional[list[SessionMessage]] = None,
         selected_history: list[LLMContextMessage],
         target_history: Optional[list[LLMContextMessage]] = None,
@@ -415,7 +406,6 @@ class MaisakaReasoningEngine:
                 context_messages=selected_history,
             ),
             context_text=self._build_behavior_selector_context_text(
-                anchor_message=anchor_message,
                 source_messages=source_messages,
                 selected_history=selected_history,
             ),
@@ -491,7 +481,6 @@ class MaisakaReasoningEngine:
             try:
                 return await heuristic_memory_injector.build_injection_message(
                     session_id=str(self._runtime.session_id or ""),
-                    anchor_message=anchor_message,
                 )
             except Exception as exc:
                 logger.debug(f"{self._runtime.log_prefix} 启发式记忆自然拉起失败，已跳过: {exc}")
@@ -520,7 +509,6 @@ class MaisakaReasoningEngine:
         self,
         tool_call: ToolCall,
         latest_thought: str,
-        anchor_message: SessionMessage,
         *,
         append_history: bool = True,
         store_record: bool = True,
@@ -548,7 +536,7 @@ class MaisakaReasoningEngine:
                 self._append_tool_execution_result(tool_call, result)
             return invocation, result, None
 
-        execution_context = self._build_tool_execution_context(latest_thought, anchor_message)
+        execution_context = self._build_tool_execution_context(latest_thought)
         availability_context = self._build_tool_availability_context()
         tool_spec = await self._runtime._tool_registry.get_tool_spec(invocation.tool_name, availability_context)
         result = await self._runtime._tool_registry.invoke(invocation, execution_context)
@@ -567,7 +555,6 @@ class MaisakaReasoningEngine:
 
     async def _run_timing_gate(
         self,
-        anchor_message: SessionMessage,
     ) -> tuple[Literal["continue", "no_action", "wait"], Any, list[str], list[dict[str, Any]]]:
         """运行 Timing Gate 子代理并返回控制决策。"""
 
@@ -647,7 +634,6 @@ class MaisakaReasoningEngine:
         invocation, result, tool_spec = await self._invoke_tool_call(
             selected_tool_call,
             response.content or "",
-            anchor_message,
             append_history=append_history,
             store_record=store_record,
         )
@@ -1047,7 +1033,7 @@ class MaisakaReasoningEngine:
                                     timing_response,
                                     timing_tool_results,
                                     timing_tool_monitor_results,
-                                ) = await self._run_timing_gate(anchor_message)
+                                ) = await self._run_timing_gate()
                                 timing_duration_ms = (time.time() - timing_started_at) * 1000
                                 cycle_detail.time_records["timing_gate"] = timing_duration_ms / 1000
                                 await emit_timing_gate_result(
@@ -1138,7 +1124,6 @@ class MaisakaReasoningEngine:
                                 ) = await self._handle_tool_calls(
                                     response.tool_calls,
                                     reasoning_content,
-                                    anchor_message,
                                 )
                                 cycle_detail.time_records["tool_calls"] = time.time() - tool_started_at
                                 if should_pause:
@@ -1782,13 +1767,11 @@ class MaisakaReasoningEngine:
     def _build_tool_execution_context(
         self,
         latest_thought: str,
-        anchor_message: SessionMessage,
     ) -> ToolExecutionContext:
         """构造统一工具执行上下文。
 
         Args:
             latest_thought: 当前轮的最新思考文本。
-            anchor_message: 当前轮的锚点消息。
 
         Returns:
             ToolExecutionContext: 统一工具执行上下文。
@@ -1803,7 +1786,6 @@ class MaisakaReasoningEngine:
             group_id=str(getattr(chat_stream, "group_id", "") or "").strip(),
             user_id=str(getattr(chat_stream, "user_id", "") or "").strip(),
             platform=str(getattr(chat_stream, "platform", "") or "").strip(),
-            metadata={"anchor_message": anchor_message},
         )
 
     @staticmethod
@@ -2290,14 +2272,12 @@ class MaisakaReasoningEngine:
         self,
         tool_calls: list[ToolCall],
         latest_thought: str,
-        anchor_message: SessionMessage,
     ) -> tuple[bool, str, list[str], list[dict[str, Any]]]:
         """执行一批统一工具调用。
 
         Args:
             tool_calls: 模型返回的工具调用列表。
             latest_thought: 当前轮的最新思考文本。
-            anchor_message: 当前轮的锚点消息。
 
         Returns:
             tuple[bool, str, list[str], list[dict[str, Any]]]: 是否需要暂停当前思考循环、
@@ -2333,7 +2313,7 @@ class MaisakaReasoningEngine:
                 )
             return False, "", tool_result_summaries, tool_monitor_results
 
-        execution_context = self._build_tool_execution_context(latest_thought, anchor_message)
+        execution_context = self._build_tool_execution_context(latest_thought)
         availability_context = self._build_tool_availability_context()
         tool_spec_map = {
             tool_spec.name: tool_spec

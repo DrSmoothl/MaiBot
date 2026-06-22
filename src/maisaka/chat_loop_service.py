@@ -48,7 +48,9 @@ from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner, resolve_enable_visual_timing_gate
 
 TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
+NEW_MAISAKA_TIMING_GATE_TOOL_NAMES = {"continue", "wait"}
 PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue", "wait"}
+NEW_MAISAKA_PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue"}
 PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "behavior_scenario_analyzer": "behavior.scenario_analyzer",
@@ -93,6 +95,7 @@ class ChatResponse:
     duration_ms: float = 0.0
     prompt_section: Optional[RenderableType] = None
     prompt_html_uri: Optional[str] = None
+    reasoning: str = ""
 
 
 logger = get_logger("maisaka_chat_loop")
@@ -581,6 +584,15 @@ class MaisakaChatLoopService:
             "prompt_cache_miss_tokens": prompt_cache_miss_tokens,
         }
 
+    @staticmethod
+    def _resolve_planner_response_content(response: str, reasoning: str) -> str:
+        """在模型只把思考放入原生 reasoning 字段时，仍保留可传给工具的 planner 文本。"""
+
+        normalized_response = str(response or "").strip()
+        if normalized_response:
+            return response
+        return str(reasoning or "").strip()
+
     def _save_debug_planner_request_body(
         self,
         *,
@@ -673,9 +685,9 @@ class MaisakaChatLoopService:
             else 0
         )
         logger.info(
-            "Maisaka KV cache usage - "
-            f"request_kind={request_kind}, "
-            f"hit_tokens={prompt_cache_hit_tokens}, "
+            "Planner缓存："
+            f"{request_kind}, "
+            f"命中={prompt_cache_hit_tokens}, "
             f"miss_tokens={prompt_cache_miss_tokens}, "
             f"hit_rate={prompt_cache_hit_rate:.2f}%, "
             f"prompt_tokens={prompt_tokens}"
@@ -731,6 +743,9 @@ class MaisakaChatLoopService:
             "file_tools_section": tools_section,
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "identity": self.personality_prompt,
+            "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
+            "planner_wait_action_rule": self._build_planner_wait_action_rule(),
+            "timing_gate_no_action_rule": self._build_timing_gate_no_action_rule(),
             "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
         }
 
@@ -758,6 +773,95 @@ class MaisakaChatLoopService:
 
         return "在该聊天中的注意事项：\n" + "\n\n".join(prompt_lines) + "\n"
 
+    @staticmethod
+    def _is_new_maisaka_enabled() -> bool:
+        """判断是否启用新 Maisaka 实验行为。"""
+
+        return bool(getattr(global_config.chat, "enable_new_maisaka", False))
+
+    def _build_planner_idle_focus_rule(self) -> str:
+        """构造 Focus 模式下空闲等待动作提示。"""
+
+        locale = get_locale()
+        if self._is_new_maisaka_enabled():
+            if locale == "en-US":
+                return (
+                    "If the current chat has nothing worth acting on, prefer using `switch_chat` to check another chat. "
+                    "Use `wait` when you should wait before judging again. Only `finish` ends continuous Planner."
+                )
+            if locale == "ja-JP":
+                return (
+                    "現在チャットに行動すべき内容がない場合は、`switch_chat` で別チャットを確認することを優先してください。"
+                    "待ってから再判断すべき場合は `wait` を使ってください。連続 Planner を終了するのは `finish` だけです。"
+                )
+            return (
+                "如果当前聊天没有值得行动的内容，应优先考虑使用 `switch_chat` 去其他聊天看看；"
+                "如果需要等待后重新判断，可以使用 `wait`；只有 `finish` 会结束连续 Planner。"
+            )
+
+        if locale == "en-US":
+            return (
+                "If the current chat has nothing worth acting on, prefer using `switch_chat` to check another chat. "
+                "Use `no_action` when you should wait for new messages; it only waits inside Planner. "
+                "Only `finish` ends continuous Planner."
+            )
+        if locale == "ja-JP":
+            return (
+                "現在チャットに行動すべき内容がない場合は、`switch_chat` で別チャットを確認することを優先してください。"
+                "新しいメッセージを待つべき場合は `no_action` を使ってください。"
+                "これは Planner 内部で待つだけです。連続 Planner を終了するのは `finish` だけです。"
+            )
+        return (
+            "如果当前聊天没有值得行动的内容，应优先考虑使用 `switch_chat` 去其他聊天看看；"
+            "如果需要等待新消息，可以使用 `no_action`，它只是在 Planner 内部等待；只有 `finish` 会结束连续 Planner。"
+        )
+
+    def _build_planner_wait_action_rule(self) -> str:
+        """构造 Planner 中等待/不行动工具提示。"""
+
+        locale = get_locale()
+        if self._is_new_maisaka_enabled():
+            if locale == "en-US":
+                return (
+                    "- wait(): Use this when you should not reply or keep searching for now, "
+                    "when the other person may not have finished speaking, or when you need to wait before judging again. "
+                    "It pauses this Planner round and automatically continues after the wait ends."
+                )
+            if locale == "ja-JP":
+                return (
+                    "- wait()：今は返信や追加検索をすべきではない場合、相手がまだ話し終えていない可能性がある場合、"
+                    "または少し待ってから再判断すべき場合に使ってください。この Planner ラウンドを一時停止し、待機終了後に自動で続行します。"
+                )
+            return "- wait(): 当暂时不应该回复、对方可能还有话没说完，或需要等待一段时间后再次判断时使用。"
+
+        if locale == "en-US":
+            return (
+                "- no_action(): Use this when you should not reply or keep searching for now, "
+                "and should wait for new external messages; it only waits inside Planner and does not end continuous Planner."
+            )
+        if locale == "ja-JP":
+            return (
+                "- no_action()：今は返信や追加検索をすべきではなく、新しい外部メッセージを待つべき場合に使ってください。"
+                "これは Planner 内部で待つだけで、連続 Planner は終了しません。"
+            )
+        return "- no_action()：当暂时不应该回复,保持继续观望时使用。"
+
+    def _build_timing_gate_no_action_rule(self) -> str:
+        """构造 Timing Gate 中 no_action 工具的场景说明。"""
+
+        if self._is_new_maisaka_enabled():
+            return ""
+
+        locale = get_locale()
+        if locale == "en-US":
+            return (
+                "- no_action: do not continue speaking this turn, and wait for new messages; "
+                "also use this when the user may not have finished and the speaking turn should be returned to the user"
+            )
+        if locale == "ja-JP":
+            return "- no_action：このターンでは発言を続けず、新しいメッセージを待つ。ユーザーがまだ話し終えていない可能性があり、発言権をユーザーに返すべき場面でも使う"
+        return "- no_action：本轮不继续发言，等待新的消息；也用于用户可能还没说完、需要先把发言权交还给用户的场景"
+
     def _build_current_chat_attention_tail_message(self) -> str:
         """构建追加到请求末尾的当前聊天专属注意事项。"""
 
@@ -778,6 +882,22 @@ class MaisakaChatLoopService:
             return "- wait：一定時間待ってから再判断する"
 
         return "- wait：固定再等待一段时间，时间到后再重新判断"
+
+    @staticmethod
+    def _get_timing_gate_tool_names() -> set[str]:
+        """返回当前 Timing Gate 应保留的工具链名称。"""
+
+        if MaisakaChatLoopService._is_new_maisaka_enabled():
+            return NEW_MAISAKA_TIMING_GATE_TOOL_NAMES
+        return TIMING_GATE_TOOL_NAMES
+
+    @staticmethod
+    def _get_planner_filtered_timing_tool_names() -> set[str]:
+        """返回当前 Planner 需要隐藏的 Timing Gate 工具链名称。"""
+
+        if MaisakaChatLoopService._is_new_maisaka_enabled():
+            return NEW_MAISAKA_PLANNER_FILTERED_TIMING_TOOL_NAMES
+        return PLANNER_FILTERED_TIMING_TOOL_NAMES
 
     @staticmethod
     def _get_chat_prompt_for_chat(chat_id: str, is_group_chat: Optional[bool]) -> str:
@@ -987,7 +1107,8 @@ class MaisakaChatLoopService:
             prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
         )
 
-        final_response = generation_result.response or ""
+        final_reasoning = generation_result.reasoning or ""
+        final_response = self._resolve_planner_response_content(generation_result.response or "", final_reasoning)
         final_tool_calls = list(generation_result.tool_calls or [])
         after_response_result = await self._get_runtime_manager().invoke_hook(
             "maisaka.planner.after_response",
@@ -1070,7 +1191,7 @@ class MaisakaChatLoopService:
                 metadata=prompt_metadata,
             )
             prompt_section = prompt_section_result.panel
-            prompt_html_uri = prompt_section_result.preview_access.viewer_web_uri
+            prompt_html_uri = prompt_section_result.preview_access.preview_web_uri
 
         raw_message = AssistantMessage(
             content=final_response,
@@ -1092,6 +1213,7 @@ class MaisakaChatLoopService:
             duration_ms=llm_duration_ms,
             prompt_section=prompt_section,
             prompt_html_uri=prompt_html_uri,
+            reasoning=final_reasoning,
         )
 
     @staticmethod
@@ -1185,12 +1307,13 @@ class MaisakaChatLoopService:
         """按请求类型过滤不应暴露的历史工具链。"""
 
         if request_kind == "timing_gate":
+            timing_gate_tool_names = MaisakaChatLoopService._get_timing_gate_tool_names()
             allowed_tool_call_ids = {
                 tool_call.call_id
                 for message in selected_history
                 if isinstance(message, AssistantMessage)
                 for tool_call in message.tool_calls
-                if tool_call.func_name in TIMING_GATE_TOOL_NAMES and tool_call.call_id
+                if tool_call.func_name in timing_gate_tool_names and tool_call.call_id
             }
             filtered_history: List[LLMContextMessage] = []
             for message in selected_history:
@@ -1198,7 +1321,7 @@ class MaisakaChatLoopService:
                     continue
 
                 if isinstance(message, ToolResultMessage):
-                    if message.tool_name in TIMING_GATE_TOOL_NAMES or message.tool_call_id in allowed_tool_call_ids:
+                    if message.tool_name in timing_gate_tool_names or message.tool_call_id in allowed_tool_call_ids:
                         filtered_history.append(message)
                     continue
 
@@ -1206,7 +1329,7 @@ class MaisakaChatLoopService:
                     kept_tool_calls = [
                         tool_call
                         for tool_call in message.tool_calls
-                        if tool_call.func_name in TIMING_GATE_TOOL_NAMES
+                        if tool_call.func_name in timing_gate_tool_names
                     ]
                     if not kept_tool_calls:
                         if message.content.strip():
@@ -1247,15 +1370,16 @@ class MaisakaChatLoopService:
             ]
 
         filtered_history: List[LLMContextMessage] = []
+        planner_filtered_timing_tool_names = MaisakaChatLoopService._get_planner_filtered_timing_tool_names()
         for message in selected_history:
-            if isinstance(message, ToolResultMessage) and message.tool_name in PLANNER_FILTERED_TIMING_TOOL_NAMES:
+            if isinstance(message, ToolResultMessage) and message.tool_name in planner_filtered_timing_tool_names:
                 continue
 
             if isinstance(message, AssistantMessage) and message.tool_calls:
                 kept_tool_calls = [
                     tool_call
                     for tool_call in message.tool_calls
-                    if tool_call.func_name not in PLANNER_FILTERED_TIMING_TOOL_NAMES
+                    if tool_call.func_name not in planner_filtered_timing_tool_names
                 ]
                 if not kept_tool_calls:
                     if message.content.strip():
@@ -1292,4 +1416,3 @@ class MaisakaChatLoopService:
         if request_kind in {"expression_selector", "reply_effect_judge", "behavior_scenario_analyzer"}:
             return False
         return True
-

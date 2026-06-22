@@ -66,7 +66,6 @@ class HeuristicMemoryInjector:
         self,
         *,
         session_id: str,
-        anchor_message: SessionMessage,
     ) -> str:
         """构造给 Planner/Replyer 共享的一次性启发式记忆参考。"""
 
