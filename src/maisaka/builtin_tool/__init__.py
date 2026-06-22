@@ -66,8 +66,8 @@ class BuiltinToolEntry:
         """生成带统一可见性元数据的工具声明。"""
 
         tool_spec = deepcopy(self.get_spec())
-        tool_spec.metadata["builtin_stage"] = self.stage
-        tool_spec.metadata["visibility"] = self.visibility
+        tool_spec.metadata["builtin_stage"] = _get_effective_builtin_stage(self)
+        tool_spec.metadata["visibility"] = _get_effective_builtin_visibility(self)
         return tool_spec
 
 
@@ -88,7 +88,7 @@ def _get_query_person_profile_tool_spec() -> ToolSpec:
 BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("no_action", get_no_action_tool_spec, handle_no_action_tool, stage="both"),
     BuiltinToolEntry("continue", get_continue_tool_spec, handle_continue_tool, stage="timing"),
-    BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="timing"),
+    BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="both"),
     BuiltinToolEntry("finish", get_finish_tool_spec, handle_finish_tool, stage="action"),
     BuiltinToolEntry("reply", get_reply_tool_spec, handle_reply_tool, stage="action"),
     BuiltinToolEntry(
@@ -118,6 +118,30 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
 ]
 
 
+def _is_new_maisaka_enabled() -> bool:
+    """判断是否启用新 Maisaka 实验行为。"""
+
+    return bool(getattr(global_config.chat, "enable_new_maisaka", False))
+
+
+def _get_effective_builtin_stage(entry: BuiltinToolEntry) -> BuiltinToolStage:
+    """根据新 Maisaka 开关解析内置工具的实时阶段。"""
+
+    if entry.name == "no_action" and _is_new_maisaka_enabled():
+        return "timing"
+    if entry.name == "wait" and not _is_new_maisaka_enabled():
+        return "timing"
+    return entry.stage
+
+
+def _get_effective_builtin_visibility(entry: BuiltinToolEntry) -> BuiltinToolVisibility:
+    """根据新 Maisaka 开关解析内置工具的实时可见性。"""
+
+    if entry.name == "no_action" and _is_new_maisaka_enabled():
+        return "hidden"
+    return entry.visibility
+
+
 def _get_builtin_tool_entries(
     *,
     stage: Optional[BuiltinToolStage] = None,
@@ -129,9 +153,9 @@ def _get_builtin_tool_entries(
     entries = BUILTIN_TOOL_ENTRIES
     entries = [entry for entry in entries if _is_builtin_tool_enabled_by_config(entry)]
     if stage is not None:
-        entries = [entry for entry in entries if entry.stage in {stage, "both"}]
+        entries = [entry for entry in entries if _get_effective_builtin_stage(entry) in {stage, "both"}]
     if visibility is not None:
-        entries = [entry for entry in entries if entry.visibility == visibility]
+        entries = [entry for entry in entries if _get_effective_builtin_visibility(entry) == visibility]
     if context is not None:
         entries = [entry for entry in entries if _is_builtin_tool_available(entry, context)]
     return entries

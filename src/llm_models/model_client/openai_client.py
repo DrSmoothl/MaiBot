@@ -47,7 +47,13 @@ from src.llm_models.openai_compat import (
 )
 from src.llm_models.payload_content.message import ImageMessagePart, Message, RoleType, TextMessagePart
 from src.llm_models.payload_content.resp_format import RespFormat, RespFormatType
-from src.llm_models.payload_content.tool_option import ToolCall, ToolOption
+from src.llm_models.payload_content.tool_option import (
+    TOOL_CALL_SOURCE_EXTRA_KEY,
+    TOOL_CALL_SOURCE_REASONING,
+    TOOL_CALL_SOURCE_RESPONSE,
+    ToolCall,
+    ToolOption,
+)
 
 from .adapter_base import (
     AdapterClient,
@@ -161,6 +167,21 @@ def _build_fallback_tool_call_id(prefix: str) -> str:
 
     normalized_prefix = str(prefix).strip() or "tool_call"
     return f"{normalized_prefix}_{uuid4().hex}"
+
+
+def _build_tool_call_extra_content(source: str) -> Dict[str, Any]:
+    """构造工具调用来源元信息。"""
+
+    return {TOOL_CALL_SOURCE_EXTRA_KEY: source}
+
+
+def _set_tool_call_source(tool_call: ToolCall, source: str) -> ToolCall:
+    """给工具调用补充来源标记，保留已有 provider metadata。"""
+
+    extra_content = dict(tool_call.extra_content or {})
+    extra_content[TOOL_CALL_SOURCE_EXTRA_KEY] = source
+    tool_call.extra_content = extra_content
+    return tool_call
 
 
 def _build_reasoning_key(api_provider: APIProvider) -> str:
@@ -650,6 +671,8 @@ def _extract_xml_tool_calls(
     raw_text: str | None,
     parse_mode: ToolArgumentParseMode,
     response: Any,
+    *,
+    source: str,
 ) -> Tuple[str | None, List[ToolCall] | None]:
     """从 XML 风格文本中兜底提取工具调用。"""
     if not isinstance(raw_text, str) or not raw_text.strip():
@@ -698,12 +721,131 @@ def _extract_xml_tool_calls(
                 call_id=_build_fallback_tool_call_id("xml_tool_call"),
                 func_name=function_name,
                 args=arguments,
+                extra_content=_build_tool_call_extra_content(source),
             )
         )
         return ""
 
     cleaned_text = XML_TOOL_CALL_PATTERN.sub(_replace_tool_call, raw_text).strip() or None
     return cleaned_text, tool_calls or None
+
+
+def _get_content_block_value(content_block: Any, key: str) -> Any:
+    """读取 OpenAI 兼容 content block 的字段，兼容 dict 与 SDK 对象。"""
+
+    if isinstance(content_block, dict):
+        return content_block.get(key)
+    return getattr(content_block, key, None)
+
+
+def _extract_content_block_text(content_block: Any) -> str:
+    """从 content block 中提取文本字段。"""
+
+    for key in ("text", "content", "reasoning", "summary"):
+        value = _get_content_block_value(content_block, key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
+def _normalize_content_block_arguments(raw_arguments: Any, parse_mode: ToolArgumentParseMode, response: Any) -> Dict[str, Any]:
+    """将 content block 内的工具参数规范化为字典。"""
+
+    if raw_arguments is None:
+        return {}
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+    if isinstance(raw_arguments, str):
+        normalized_arguments = raw_arguments.strip()
+        if not normalized_arguments:
+            return {}
+        return _parse_tool_arguments(normalized_arguments, parse_mode, response)
+    return {"value": raw_arguments}
+
+
+def _extract_content_block_tool_call(
+    content_block: Any,
+    parse_mode: ToolArgumentParseMode,
+    response: Any,
+    *,
+    source: str,
+) -> ToolCall | None:
+    """从 content block 中提取工具调用。"""
+
+    block_type = str(_get_content_block_value(content_block, "type") or "").strip().lower()
+    if block_type not in {"tool_use", "tool_call", "function_call"}:
+        return None
+
+    function_info = _get_content_block_value(content_block, "function")
+    if function_info is not None:
+        call_name = _get_content_block_value(function_info, "name")
+        raw_arguments = _get_content_block_value(function_info, "arguments")
+    else:
+        call_name = _get_content_block_value(content_block, "name") or _get_content_block_value(content_block, "func_name")
+        raw_arguments = (
+            _get_content_block_value(content_block, "input")
+            or _get_content_block_value(content_block, "arguments")
+            or _get_content_block_value(content_block, "args")
+        )
+
+    if not isinstance(call_name, str) or not call_name.strip():
+        raise RespParseException(response, "响应解析失败，content block 工具调用缺少 name 字段。")
+
+    call_id = (
+        _get_content_block_value(content_block, "id")
+        or _get_content_block_value(content_block, "tool_call_id")
+        or _get_content_block_value(content_block, "call_id")
+        or _build_fallback_tool_call_id("content_block_tool_call")
+    )
+    return ToolCall(
+        call_id=str(call_id),
+        func_name=call_name.strip(),
+        args=_normalize_content_block_arguments(raw_arguments, parse_mode, response),
+        extra_content=_build_tool_call_extra_content(source),
+    )
+
+
+def _extract_content_blocks(
+    message_content: Any,
+    parse_mode: ToolArgumentParseMode,
+    response: Any,
+) -> tuple[str | None, str | None, List[ToolCall] | None]:
+    """解析同时包含 reasoning/text/tool_use 的 content block 响应。"""
+
+    if not isinstance(message_content, list):
+        return None, None, None
+
+    reasoning_parts: List[str] = []
+    content_parts: List[str] = []
+    tool_calls: List[ToolCall] = []
+    for content_block in message_content:
+        block_type = str(_get_content_block_value(content_block, "type") or "").strip().lower()
+        if block_type in {"reasoning", "reasoning_content", "thinking", "thought"}:
+            block_text = _extract_content_block_text(content_block).strip()
+            if block_text:
+                reasoning_parts.append(block_text)
+            continue
+
+        tool_call = _extract_content_block_tool_call(
+            content_block,
+            parse_mode,
+            response,
+            source=TOOL_CALL_SOURCE_RESPONSE,
+        )
+        if tool_call is not None:
+            tool_calls.append(tool_call)
+            continue
+
+        if block_type in {"text", "output_text", "message"}:
+            block_text = _extract_content_block_text(content_block).strip()
+            if block_text:
+                content_parts.append(block_text)
+
+    tool_call_source = TOOL_CALL_SOURCE_REASONING if reasoning_parts and not content_parts else TOOL_CALL_SOURCE_RESPONSE
+    tool_calls = [_set_tool_call_source(tool_call, tool_call_source) for tool_call in tool_calls]
+    reasoning_content = "\n".join(reasoning_parts).strip() or None
+    content = "\n".join(content_parts).strip() or None
+    return reasoning_content, content, tool_calls or None
 
 
 def _log_length_truncation(finish_reason: str | None, model_name: str | None) -> None:
@@ -730,7 +872,12 @@ def _apply_xml_tool_call_fallback(
     if response.tool_calls:
         return
 
-    reasoning_content, tool_calls = _extract_xml_tool_calls(response.reasoning_content, parse_mode, raw_response)
+    reasoning_content, tool_calls = _extract_xml_tool_calls(
+        response.reasoning_content,
+        parse_mode,
+        raw_response,
+        source=TOOL_CALL_SOURCE_REASONING,
+    )
     if reasoning_content != response.reasoning_content:
         response.reasoning_content = reasoning_content
     if tool_calls:
@@ -741,7 +888,12 @@ def _apply_xml_tool_call_fallback(
         logger.warning("OpenAI 兼容响应未返回标准 tool_calls，已从 XML 文本兜底解析工具调用")
         return
 
-    cleaned_content, tool_calls = _extract_xml_tool_calls(response.content, parse_mode, raw_response)
+    cleaned_content, tool_calls = _extract_xml_tool_calls(
+        response.content,
+        parse_mode,
+        raw_response,
+        source=TOOL_CALL_SOURCE_RESPONSE,
+    )
     if cleaned_content != response.content:
         response.content = cleaned_content
     if tool_calls:
@@ -945,7 +1097,15 @@ class _OpenAIStreamAccumulator:
                     else None
                 )
                 call_id = state.call_id or _build_fallback_tool_call_id(f"tool_call_{index}")
-                response.tool_calls.append(ToolCall(call_id=call_id, func_name=state.function_name, args=arguments))
+                source = TOOL_CALL_SOURCE_REASONING if reasoning_content else TOOL_CALL_SOURCE_RESPONSE
+                response.tool_calls.append(
+                    ToolCall(
+                        call_id=call_id,
+                        func_name=state.function_name,
+                        args=arguments,
+                        extra_content=_build_tool_call_extra_content(source),
+                    )
+                )
 
         response.raw_data = {"model": self.model_name} if self.model_name else None
         _apply_xml_tool_call_fallback(response, self.tool_argument_parse_mode, response.raw_data)
@@ -1045,11 +1205,17 @@ def _default_normal_response_parser(
     api_response = APIResponse()
     message_part = choices[0].message
     native_reasoning = _extract_reasoning_content(message_part, reasoning_key)
-    message_content = message_part.content if isinstance(message_part.content, str) else None
+    raw_message_content = message_part.content
+    message_content = raw_message_content if isinstance(raw_message_content, str) else None
+    content_block_reasoning, content_block_content, content_block_tool_calls = _extract_content_blocks(
+        raw_message_content,
+        tool_argument_parse_mode,
+        resp,
+    )
 
     if native_reasoning is not None and reasoning_parse_mode != ReasoningParseMode.NONE:
         api_response.reasoning_content = native_reasoning
-        api_response.content = message_content
+        api_response.content = message_content or content_block_content
     elif isinstance(message_content, str) and message_content:
         reasoning_content, final_content = _extract_reasoning_and_content(
             content=message_content,
@@ -1057,6 +1223,10 @@ def _default_normal_response_parser(
         )
         api_response.reasoning_content = reasoning_content
         api_response.content = final_content
+    else:
+        api_response.reasoning_content = content_block_reasoning
+        api_response.content = content_block_content
+        api_response.tool_calls = content_block_tool_calls
 
     tool_calls = getattr(message_part, "tool_calls", None) or []
     if tool_calls:
@@ -1071,8 +1241,15 @@ def _default_normal_response_parser(
                     call_id=tool_call.id,
                     func_name=tool_call.function.name,
                     args=arguments,
+                    extra_content=_build_tool_call_extra_content(
+                        TOOL_CALL_SOURCE_REASONING
+                        if api_response.reasoning_content
+                        else TOOL_CALL_SOURCE_RESPONSE
+                    ),
                 )
             )
+    elif content_block_tool_calls:
+        api_response.tool_calls = content_block_tool_calls
 
     usage_record = _extract_usage_record(getattr(resp, "usage", None))
     api_response.raw_data = resp
