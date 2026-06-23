@@ -45,7 +45,7 @@ from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
 from src.maisaka.display.stage_status_board import remove_stage_status, update_stage_status
 from src.maisaka.focus import MaisakaFocusRuntimeMixin, focus_mode_manager
 from src.maisaka.monitor.events import emit_message_ingested, emit_message_sent, emit_message_updated, emit_session_start
-from src.maisaka.no_action_backoff import NoActionBackoffController
+from src.maisaka.idle_backoff import IdleBackoffController
 from src.maisaka.reply_effect import ReplyEffectTracker
 from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
 from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids, message_id_from_context_message
@@ -171,7 +171,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._max_internal_rounds = MAX_INTERNAL_ROUNDS
         self._agent_state: Literal["running", "wait", "stop"] = self._STATE_STOP
         self._pending_wait_tool_call_id: Optional[str] = None
-        self._consecutive_no_action_count = 0
+        self._consecutive_idle_count = 0
         self._current_action_tool_names: set[str] = set()
         self.discovered_tool_names: set[str] = set()
         self.deferred_tool_specs_by_name: dict[str, ToolSpec] = {}
@@ -186,7 +186,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         self._reasoning_engine = MaisakaReasoningEngine(self)
         self._message_turn_scheduler = MessageTurnScheduler(self)
-        self._no_action_backoff = NoActionBackoffController(self)
+        self._idle_backoff = IdleBackoffController(self)
         self._forced_turn_enabled = False
         self._forced_turn_message_id = ""
         self._forced_turn_reason = ""
@@ -1090,7 +1090,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         trigger_reason = "@消息" if is_at else "提及消息" if is_mentioned else "触发消息"
         was_armed = self._arm_forced_turn_state(message_id=message.message_id, reason=trigger_reason)
-        self._no_action_backoff.reset()
+        self._idle_backoff.reset()
 
         if was_armed:
             logger.info(
@@ -1099,7 +1099,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return
 
         logger.info(
-            f"{self.log_prefix} 检测到{trigger_reason}，下一次 Timing Gate 将直接视作 continue；"
+            f"{self.log_prefix} 检测到{trigger_reason}，下一轮 Planner 将强制触发；"
             f"消息编号={message.message_id}"
         )
 
@@ -1120,7 +1120,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         trigger_reason = self._forced_turn_reason or "@/提及消息"
         trigger_message_id = self._forced_turn_message_id or "unknown"
-        reason = f"检测到新的{trigger_reason}（消息编号={trigger_message_id}），本轮直接跳过 Timing Gate 并视作 continue。"
+        reason = f"检测到新的{trigger_reason}（消息编号={trigger_message_id}），本轮直接进入 Planner。"
         logger.info(
             f"{self.log_prefix} 已结束本次强制触发状态；"
             f"触发原因={trigger_reason} "
@@ -1145,7 +1145,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         self._planner_continuation_active = True
 
-    def _finish_planner_continuation(self) -> None:
+    def _end_planner_continuation(self) -> None:
         """结束连续 Planner 状态。"""
 
         self._planner_continuation_active = False

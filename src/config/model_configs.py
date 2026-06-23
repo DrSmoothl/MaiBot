@@ -432,19 +432,6 @@ class TaskConfig(ConfigBase):
     """任务硬超时（秒），到点未返回则取消请求并尝试切换下一个模型；防止上游代理静默排队导致主循环饥饿"""
 
 
-def _default_timing_gate_task_config() -> TaskConfig:
-    """创建 Timing Gate 任务默认配置。"""
-
-    return TaskConfig(
-        model_list=[],
-        max_tokens=4096,
-        temperature=0.3,
-        slow_threshold=12.0,
-        selection_strategy="random",
-        hard_timeout=120.0,
-    )
-
-
 class ModelTaskConfig(ConfigBase):
     """模型配置类"""
 
@@ -465,16 +452,6 @@ class ModelTaskConfig(ConfigBase):
         },
     )
     """规划模型，决定麦麦的行动，需要有一定Agent能力的模型"""
-
-    timing_gate: TaskConfig = Field(
-        default_factory=_default_timing_gate_task_config,
-        json_schema_extra={
-            "x-widget": "custom",
-            "x-icon": "timer",
-            "advanced": True,
-        },
-    )
-    """Timing节奏控制模型；辅助麦麦控制回复的频率和时机，留空时继用 planner 模型"""
 
     memory: TaskConfig = Field(
         default_factory=TaskConfig,

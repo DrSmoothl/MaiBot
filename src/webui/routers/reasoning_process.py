@@ -1334,7 +1334,7 @@ def _hydrate_prompt_file_record(
 ) -> ReasoningPromptFile:
     hydrated_record = dict(record)
     stage_name = str(hydrated_record["stage"])
-    should_extract_action_preview = include_action_preview and stage_name in {"planner", "timing_gate"}
+    should_extract_action_preview = include_action_preview and stage_name == "planner"
     should_extract_output_preview = include_output_preview and stage_name == "replyer"
     json_payload: dict[str, Any] | None = None
 
@@ -1345,7 +1345,7 @@ def _hydrate_prompt_file_record(
             _merge_prompt_metadata(hydrated_record, _extract_prompt_metadata_from_json_payload(json_payload))
             if stage_name == "replyer" and (include_previews or should_extract_output_preview):
                 hydrated_record["output_preview"] = _extract_output_preview_from_json_payload(json_payload)
-            elif stage_name in {"planner", "timing_gate"}:
+            elif stage_name == "planner":
                 hydrated_record["action_preview"] = _extract_action_preview_from_json_payload(json_payload)
         else:
             _merge_prompt_metadata(hydrated_record, _extract_prompt_metadata_from_json_head(json_file_path))

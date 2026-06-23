@@ -70,6 +70,7 @@ class MaisakaRuntimeDisplayMixin:
             panel_title = f"{panel_title} [{cycle_id}]"
         panel_subtitle = self._build_cycle_time_records_text(time_records or {})
         renderables: list[RenderableType] = [Text("\n".join(body_lines))]
+        timing_extra_lines = [f"门控动作：{timing_action}"] if timing_action.strip() else None
         timing_panel = self._build_cycle_stage_panel(
             title="Timing Gate",
             border_style="bright_magenta",
@@ -78,7 +79,7 @@ class MaisakaRuntimeDisplayMixin:
             model_name=timing_model_name,
             response_text=timing_response,
             prompt_section=timing_prompt_section,
-            extra_lines=None,
+            extra_lines=timing_extra_lines,
         )
         if timing_panel is not None:
             renderables.append(timing_panel)

@@ -62,9 +62,3 @@ def resolve_enable_visual_planner() -> bool:
     """根据 planner 配置解析当前是否应启用视觉消息。"""
 
     return _resolve_enable_visual_task("planner")
-
-
-def resolve_enable_visual_timing_gate() -> bool:
-    """根据 timing_gate 配置解析当前是否应启用视觉消息。"""
-
-    return _resolve_enable_visual_task("timing_gate", fallback_task_name="planner")

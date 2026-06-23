@@ -310,7 +310,7 @@ class FocusModeManager:
         if normalized_to_session_id in focused_session_ids:
             return f"chat_id={normalized_to_session_id} 已经处于关注状态，不能切换到已关注聊天。"
         if normalized_to_session_id == self._next_focus_blocked_session_id_by_scope.get(from_scope_key, ""):
-            return f"chat_id={normalized_to_session_id} 刚因连续 no_action 退出 Focus，本次不能切换回该聊天。"
+            return f"chat_id={normalized_to_session_id} 刚因连续空闲结束退出 Focus，本次不能切换回该聊天。"
         if normalized_from_session_id not in focused_session_ids:
             return f"当前 chat_id={normalized_from_session_id} 不在关注状态，不能发起切换。"
 

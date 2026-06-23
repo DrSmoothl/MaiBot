@@ -11,7 +11,6 @@ from src.llm_models.payload_content.tool_option import (
 
 _REQUEST_PANEL_STYLE_MAP: dict[str, tuple[str, str]] = {
     "planner": ("MaiSaka 大模型请求 - 对话单步", "green"),
-    "timing_gate": ("MaiSaka 大模型请求 - Timing Gate 子代理", "bright_magenta"),
     "replyer": ("MaiSaka 回复器 Prompt", "bright_yellow"),
     "emotion": ("MaiSaka Emotion Tool Prompt", "bright_cyan"),
     "expression_selector": ("MaiSaka 表达选择子代理 Prompt", "bright_yellow"),

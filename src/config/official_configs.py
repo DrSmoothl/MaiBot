@@ -621,21 +621,6 @@ class ChatConfig(ConfigBase):
     )
     """最多保留多少条中期摘要；设为 0 表示不保留。"""
 
-    enable_new_maisaka: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "启用新 Maisaka",
-                "en_US": "Enable new Maisaka",
-                "ja_JP": "新 Maisaka を有効化",
-            },
-            "x-widget": "switch",
-            "x-icon": "sparkles",
-            "advanced": True,
-        },
-    )
-    """启用 Maisaka 新实验行为：跳过 Timing Gate，Planner 不暴露 no_action/finish；wait 仅用于等待后再判断，不调用工具即结束本轮思考。"""
-
     enable_reply_necessity_trigger: bool = Field(
         default=False,
         json_schema_extra={
@@ -649,7 +634,7 @@ class ChatConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """在新 Maisaka 中按回复必要性评分决定是否进入 Planner；关闭时仍按消息数和空窗补偿触发。"""
+    """按回复必要性评分决定是否进入 Planner；关闭时仍按消息数和空窗补偿触发。"""
 
     enable_reply_quote: bool = Field(
         default=True,
@@ -706,9 +691,9 @@ class ChatConfig(ConfigBase):
         ge=0,
         json_schema_extra={
             "label": {
-                "zh_CN": "no_action 退避基准",
-                "en_US": "no_action backoff base",
-                "ja_JP": "no_action バックオフ基準",
+                "zh_CN": "空闲退避基准",
+                "en_US": "Idle backoff base",
+                "ja_JP": "アイドルバックオフ基準",
             },
             "x-widget": "input",
             "x-icon": "timer",
@@ -723,9 +708,9 @@ class ChatConfig(ConfigBase):
         ge=0,
         json_schema_extra={
             "label": {
-                "zh_CN": "no_action 退避上限",
-                "en_US": "no_action backoff cap",
-                "ja_JP": "no_action バックオフ上限",
+                "zh_CN": "空闲退避上限",
+                "en_US": "Idle backoff cap",
+                "ja_JP": "アイドルバックオフ上限",
             },
             "x-widget": "input",
             "x-icon": "timer-reset",
@@ -740,9 +725,9 @@ class ChatConfig(ConfigBase):
         ge=1,
         json_schema_extra={
             "label": {
-                "zh_CN": "no_action 退避起点",
-                "en_US": "no_action backoff start",
-                "ja_JP": "no_action バックオフ開始",
+                "zh_CN": "空闲退避起点",
+                "en_US": "Idle backoff start",
+                "ja_JP": "アイドルバックオフ開始",
             },
             "x-widget": "input",
             "x-icon": "list-start",
@@ -757,9 +742,9 @@ class ChatConfig(ConfigBase):
         ge=0,
         json_schema_extra={
             "label": {
-                "zh_CN": "no_action 退避绕过消息数",
-                "en_US": "no_action backoff bypass messages",
-                "ja_JP": "no_action バックオフ迂回メッセージ数",
+                "zh_CN": "空闲退避绕过消息数",
+                "en_US": "Idle backoff bypass messages",
+                "ja_JP": "アイドルバックオフ迂回メッセージ数",
             },
             "x-widget": "input",
             "x-icon": "message-square-more",

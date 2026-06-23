@@ -18,7 +18,6 @@ from src.chat.message_receive.message import SessionMessage
 from src.cli.console import console
 from src.common.data_models.message_component_data_model import EmojiComponent, ImageComponent, MessageSequence, TextComponent
 from src.common.logger import get_logger
-from src.common.prompt_i18n import load_prompt
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.learners.behavior_selector import behavior_pattern_selector
@@ -32,7 +31,6 @@ from src.maisaka.utils.tool_record_payload import build_tool_record_payload, nor
 from src.maisaka.builtin_tool import (
     build_builtin_tool_handlers as build_split_builtin_tool_handlers,
     get_builtin_tool_visibility,
-    get_timing_tools,
     is_builtin_tool_in_action_stage,
 )
 from .chat_loop_service import ChatResponse, MaisakaChatLoopService
@@ -50,7 +48,6 @@ from src.maisaka.context.messages import (
     ReferenceMessage,
     ReferenceMessageType,
     SessionBackedMessage,
-    TIMING_GATE_INVALID_TOOL_HINT_SOURCE,
     ToolResultMessage,
     contains_complex_message,
 )
@@ -63,15 +60,10 @@ from src.maisaka.context.history import (
 )
 from src.maisaka.memory.heuristic_injector import heuristic_memory_injector
 from src.maisaka.memory.mid_term import build_mid_term_memory_message, insert_mid_term_memory_message
-from src.maisaka.mode_policy import (
-    is_new_maisaka_enabled,
-    should_run_timing_gate,
-)
 from src.maisaka.monitor.events import (
     emit_cycle_end,
     emit_cycle_start,
     emit_planner_finalized,
-    emit_timing_gate_result,
 )
 from src.maisaka.memory.person_profile import build_person_profile_injection_messages
 from src.maisaka.context.planner_messages import build_planner_user_prefix_from_session_message
@@ -83,11 +75,10 @@ if TYPE_CHECKING:
 
 logger = get_logger("maisaka_reasoning_engine")
 
-TIMING_GATE_CONTEXT_DROP_HEAD_RATIO = 0.7
-TIMING_GATE_MAX_ATTEMPTS = 3
-PLANNER_NO_TOOL_FINISH_THRESHOLD = 3
+TIMING_GATE_DISABLED_ACTION = "disabled"
+TIMING_GATE_DISABLED_MESSAGE = "核心循环已切换为 Planner-only，Timing Gate 本轮未运行。"
 PLANNER_NO_TOOL_HINT_DISPLAY_PREFIX = "[Planner 工具选择提示]"
-HISTORY_SILENT_TOOL_NAMES = {"finish"}
+HISTORY_SILENT_TOOL_NAMES: set[str] = set()
 HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
 BEHAVIOR_SELECTOR_CONTEXT_MESSAGE_LIMIT = 8
@@ -128,13 +119,8 @@ class CycleRuntimeState:
     """一轮内部循环中逐步积累的运行产物。"""
 
     planner_duration_ms: float = 0.0
-    timing_duration_ms: float = 0.0
     current_stage_started_at: float = 0.0
     action_tool_count: int = 0
-    timing_action: Optional[str] = None
-    timing_response: Optional[ChatResponse] = None
-    timing_tool_results: Optional[list[str]] = None
-    timing_tool_monitor_results: Optional[list[dict[str, Any]]] = None
     response: Optional[ChatResponse] = None
     planner_extra_lines: list[str] = field(default_factory=list)
     planner_interrupted: bool = False
@@ -204,28 +190,6 @@ class MaisakaReasoningEngine:
                 interrupted=interrupted,
             )
             self._runtime._chat_loop_service.set_interrupt_flag(None)
-
-    async def _run_timing_gate_sub_agent(
-        self,
-        *,
-        system_prompt: str,
-        tool_definitions: list[dict[str, Any]],
-    ) -> Any:
-        """运行一轮 Timing Gate 子代理请求。
-
-        Timing Gate 阶段不再响应新的 planner 打断，只有主 planner 阶段允许被打断。
-        """
-
-        return await self._runtime.run_sub_agent(
-            context_message_limit=self._runtime._max_context_size,
-            drop_head_context_count=int(
-                self._runtime._max_context_size * TIMING_GATE_CONTEXT_DROP_HEAD_RATIO,
-            ),
-            system_prompt=system_prompt,
-            request_kind="timing_gate",
-            interrupt_flag=None,
-            tool_definitions=tool_definitions,
-        )
 
     async def _run_behavior_scenario_analyzer_sub_agent(
         self,
@@ -457,14 +421,6 @@ class MaisakaReasoningEngine:
         )
         return self._insert_behavior_reference_message(selection.reference_text, history=target_history)
 
-    def _build_timing_gate_system_prompt(self) -> str:
-        """构造 Timing Gate 子代理使用的系统提示词。"""
-
-        return load_prompt(
-            "maisaka_timing_gate",
-            **self._runtime._chat_loop_service.build_prompt_template_context(),
-        )
-
     async def _build_action_tool_definitions(self) -> tuple[list[dict[str, Any]], str]:
         """构造 Action Loop 阶段可见的工具定义与 deferred tools 提示。"""
 
@@ -549,202 +505,6 @@ class MaisakaReasoningEngine:
         injected_messages.extend(profile_messages)
         return injected_messages
 
-    async def _invoke_tool_call(
-        self,
-        tool_call: ToolCall,
-        latest_thought: str,
-        *,
-        append_history: bool = True,
-        store_record: bool = True,
-    ) -> tuple[ToolInvocation, ToolExecutionResult, Optional[ToolSpec]]:
-        """执行单个工具调用，并按需写入记录与历史。"""
-
-        self._log_tool_call_source(tool_call, stage="Timing Gate")
-        invocation = self._build_tool_invocation(tool_call, latest_thought)
-        if self._runtime._tool_registry is None:
-            result = ToolExecutionResult(
-                tool_name=tool_call.func_name,
-                success=False,
-                error_message="统一工具注册表尚未初始化。",
-            )
-            if store_record:
-                await self._record_tool_execution_effects(invocation, result, None)
-            if append_history:
-                self._append_tool_execution_result(tool_call, result)
-            return invocation, result, None
-
-        execution_context = self._build_tool_execution_context(latest_thought)
-        availability_context = self._build_tool_availability_context()
-        tool_spec = await self._runtime._tool_registry.get_tool_spec(invocation.tool_name, availability_context)
-        result = await self._runtime._tool_registry.invoke(invocation, execution_context)
-        if store_record:
-            await self._record_tool_execution_effects(invocation, result, tool_spec)
-        if append_history:
-            self._append_tool_execution_result(tool_call, result)
-        return invocation, result, tool_spec
-
-    async def _run_timing_gate(
-        self,
-    ) -> tuple[Literal["continue", "no_action", "wait"], Any, list[str], list[dict[str, Any]]]:
-        """运行 Timing Gate 子代理并返回控制决策。"""
-
-        if self._runtime._has_forced_turn_trigger():
-            return self._build_forced_continue_timing_result()
-
-        tool_result_summaries: list[str] = []
-        tool_monitor_results: list[dict[str, Any]] = []
-        response: Any = None
-        selected_tool_call: Optional[ToolCall] = None
-        invalid_tool_text = ""
-        for attempt_index in range(TIMING_GATE_MAX_ATTEMPTS):
-            timing_tool_definitions = get_timing_tools(self._build_tool_availability_context())
-            available_timing_tool_names = {
-                str(tool_definition.get("name") or "").strip()
-                for tool_definition in timing_tool_definitions
-                if str(tool_definition.get("name") or "").strip()
-            }
-            response = await self._run_timing_gate_sub_agent(
-                system_prompt=self._build_timing_gate_system_prompt(),
-                tool_definitions=timing_tool_definitions,
-            )
-            selected_tool_call = None
-            for tool_call in response.tool_calls:
-                if tool_call.func_name in available_timing_tool_names:
-                    selected_tool_call = tool_call
-                    break
-
-            if selected_tool_call is not None:
-                break
-
-            invalid_tool_names = [
-                str(tool_call.func_name).strip()
-                for tool_call in response.tool_calls
-                if str(tool_call.func_name).strip()
-            ]
-            invalid_tool_text = "、".join(invalid_tool_names) if invalid_tool_names else "无工具"
-            self._append_timing_gate_invalid_tool_hint(invalid_tool_text)
-            remaining_attempts = TIMING_GATE_MAX_ATTEMPTS - attempt_index - 1
-            if remaining_attempts > 0:
-                logger.warning(
-                    f"{self._runtime.log_prefix} Timing Gate 未返回有效控制工具：{invalid_tool_text}，"
-                    f"将重试 ({attempt_index + 1}/{TIMING_GATE_MAX_ATTEMPTS})"
-                )
-                tool_result_summaries.append(
-                    f"- retry [非法 Timing 工具]: 返回了 {invalid_tool_text}，将重试 "
-                    f"({attempt_index + 1}/{TIMING_GATE_MAX_ATTEMPTS})"
-                )
-                continue
-
-            logger.warning(
-                f"{self._runtime.log_prefix} Timing Gate 连续 {TIMING_GATE_MAX_ATTEMPTS} 次未返回有效控制工具："
-                f"{invalid_tool_text}，将按 no_action 处理"
-            )
-            self._runtime._enter_stop_state()
-            tool_result_summaries.append(
-                f"- no_action [非法 Timing 工具]: 返回了 {invalid_tool_text}，已停止本轮并等待新消息"
-            )
-            return "no_action", response, tool_result_summaries, tool_monitor_results
-
-        if selected_tool_call is None:
-            self._runtime._enter_stop_state()
-            tool_result_summaries.append(
-                "- no_action [非法 Timing 工具]: 已停止本轮并等待新消息"
-            )
-            return "no_action", response, tool_result_summaries, tool_monitor_results
-
-        if invalid_tool_text:
-            self._runtime._chat_history = [
-                message
-                for message in self._runtime._chat_history
-                if message.source != TIMING_GATE_INVALID_TOOL_HINT_SOURCE
-            ]
-
-        append_history = False
-        store_record = selected_tool_call.func_name != "continue"
-        invocation, result, tool_spec = await self._invoke_tool_call(
-            selected_tool_call,
-            response.content or "",
-            append_history=append_history,
-            store_record=store_record,
-        )
-        self._append_tool_display_results(
-            tool_result_summaries=tool_result_summaries,
-            tool_monitor_results=tool_monitor_results,
-            tool_call=selected_tool_call,
-            invocation=invocation,
-            result=result,
-            duration_ms=0.0,
-            tool_spec=tool_spec,
-        )
-        self._append_timing_gate_execution_result(response, selected_tool_call, result)
-
-        timing_action = str(result.metadata.get("timing_action") or selected_tool_call.func_name).strip()
-        available_timing_action_names = {
-            str(tool_definition.get("name") or "").strip()
-            for tool_definition in get_timing_tools(self._build_tool_availability_context())
-            if str(tool_definition.get("name") or "").strip()
-        }
-        if timing_action not in available_timing_action_names:
-            logger.warning(
-                f"{self._runtime.log_prefix} Timing Gate 返回未知动作 {timing_action!r}，将按 no_action 处理"
-            )
-            self._runtime._enter_stop_state()
-            tool_result_summaries.append(
-                f"- no_action [未知 Timing 动作]: 返回了 {timing_action!r}，已停止本轮并等待新消息"
-            )
-            return "no_action", response, tool_result_summaries, tool_monitor_results
-        return timing_action, response, tool_result_summaries, tool_monitor_results
-
-    def _build_forced_continue_timing_result(
-        self,
-    ) -> tuple[Literal["continue"], ChatResponse, list[str], list[dict[str, Any]]]:
-        """构造跳过 Timing Gate 时使用的伪 continue 结果。"""
-
-        reason = self._runtime._consume_forced_turn_reason() or "本轮直接跳过 Timing Gate 并视作 continue。"
-        logger.info(f"{self._runtime.log_prefix} {reason}")
-        return (
-            "continue",
-            ChatResponse(
-                content=reason,
-                tool_calls=[],
-                request_messages=[],
-                raw_message=AssistantMessage(
-                    content="",
-                    timestamp=datetime.now(),
-                    source_kind="perception",
-                ),
-                selected_history_count=min(
-                    sum(1 for message in self._runtime._chat_history if message.count_in_context),
-                    self._runtime._max_context_size,
-                ),
-                tool_count=0,
-                prompt_tokens=0,
-                built_message_count=0,
-                completion_tokens=0,
-                total_tokens=0,
-                model_name="",
-                prompt_section=None,
-            ),
-            [f"- continue [强制跳过]: {reason}"],
-            [],
-        )
-
-    @staticmethod
-    def _build_planner_no_tool_hint(attempt_count: int) -> str:
-        """构造旧模式 Planner 未选择工具时注入的重试提示。"""
-
-        if attempt_count <= 1:
-            return (
-                "你刚刚只输出了分析，但没有选择任何工具。Planner 每轮思考后必须调用至少一个当前可用工具："
-                "需要回复时调用 reply，需要先等待新消息时调用 no_action，需要结束本轮时调用 finish，"
-                "需要信息时调用查询或查看类工具。请重新思考，并在本轮选择一个工具。"
-            )
-
-        return (
-            "严厉提醒：这是你连续第二次没有调用工具。不要只输出分析文本；"
-            "你必须立刻调用一个当前可用工具。没有要回复或查询的内容，也必须调用 no_action 或 finish。"
-        )
-
     @staticmethod
     def _is_planner_no_tool_hint_message(message: LLMContextMessage) -> bool:
         """判断是否为 Planner 无工具重试提示。"""
@@ -763,71 +523,23 @@ class MaisakaReasoningEngine:
             if not self._is_planner_no_tool_hint_message(message)
         ]
 
-    def _insert_planner_no_tool_hint(self, attempt_count: int) -> None:
-        """在最新真实用户消息之后插入 Planner 工具选择提示。"""
-
-        self._clear_planner_no_tool_hints()
-        hint_message = ReferenceMessage(
-            content=self._build_planner_no_tool_hint(attempt_count),
-            timestamp=datetime.now(),
-            reference_type=ReferenceMessageType.PLANNER_TOOL_HINT,
-            remaining_uses_value=None,
-            display_prefix=PLANNER_NO_TOOL_HINT_DISPLAY_PREFIX,
-        )
-
-        insert_index = len(self._runtime._chat_history)
-        for index in range(len(self._runtime._chat_history) - 1, -1, -1):
-            message = self._runtime._chat_history[index]
-            if isinstance(message, SessionBackedMessage) and message.source_kind == "user":
-                insert_index = index + 1
-                break
-
-        self._runtime._chat_history.insert(insert_index, hint_message)
-
     def _handle_planner_no_tool_retry(
         self,
         planner_no_tool_count: int,
         planner_extra_lines: list[str],
     ) -> tuple[int, CycleEnd, bool]:
-        """处理 Planner 未调用工具时的递进提示与终止策略。"""
+        """处理 Planner 未调用工具时的终止策略。"""
 
         planner_no_tool_count += 1
-        if is_new_maisaka_enabled():
-            cycle_end = CycleEnd("planner_no_tool_finish", "Planner 未调用工具，新 Maisaka 将其视为本轮思考结束。")
-            self._finish_planner_no_tool_cycle(
-                planner_extra_lines,
-                status_line="状态：未调用工具，已结束本轮思考",
-            )
-            logger.info(f"{self._runtime.log_prefix} Planner 未调用工具，新 Maisaka 已结束本轮思考")
-            return planner_no_tool_count, cycle_end, True
-
-        if planner_no_tool_count >= PLANNER_NO_TOOL_FINISH_THRESHOLD:
-            cycle_end = CycleEnd(
-                "finish",
-                f"Planner 连续 {PLANNER_NO_TOOL_FINISH_THRESHOLD} 次没有调用工具，"
-                "已视为 finish，结束本轮思考并等待新消息。",
-            )
-            self._finish_planner_no_tool_cycle(
-                planner_extra_lines,
-                status_line=f"状态：连续 {PLANNER_NO_TOOL_FINISH_THRESHOLD} 次未调用工具，已视为 finish",
-            )
-            return planner_no_tool_count, cycle_end, True
-
-        self._insert_planner_no_tool_hint(planner_no_tool_count)
-        cycle_end = CycleEnd(
-            "planner_missing_tool_retry",
-            f"Planner 第 {planner_no_tool_count} 次没有调用工具，已插入工具选择提示并重试。",
+        cycle_end = CycleEnd("planner_no_tool_end", "Planner 未调用工具，已视为本轮思考结束。")
+        self._end_planner_no_tool_cycle(
+            planner_extra_lines,
+            status_line="状态：未调用工具，已结束本轮思考",
         )
-        planner_extra_lines.append(
-            f"状态：第 {planner_no_tool_count} 次未调用工具，已插入工具选择提示"
-        )
-        logger.warning(
-            f"{self._runtime.log_prefix} Planner 第 {planner_no_tool_count} 次未调用工具，"
-            "已插入工具选择提示并重试"
-        )
-        return planner_no_tool_count, cycle_end, False
+        logger.info(f"{self._runtime.log_prefix} Planner 未调用工具，已结束本轮思考")
+        return planner_no_tool_count, cycle_end, True
 
-    def _finish_planner_no_tool_cycle(
+    def _end_planner_no_tool_cycle(
         self,
         planner_extra_lines: list[str],
         *,
@@ -836,7 +548,7 @@ class MaisakaReasoningEngine:
         """结束 Planner 无工具输出导致的当前思考轮。"""
 
         self._clear_planner_no_tool_hints()
-        self._runtime._finish_planner_continuation()
+        self._runtime._end_planner_continuation()
         self._runtime._enter_stop_state()
         planner_extra_lines.append(status_line)
 
@@ -879,21 +591,19 @@ class MaisakaReasoningEngine:
             state.tool_result_summaries = tool_result_summaries
             state.tool_monitor_results = tool_monitor_results
             if should_pause:
-                if pause_tool_name == "finish":
-                    self._runtime._finish_planner_continuation()
                 state.cycle_end = self._cycle_end_for_pause_tool(pause_tool_name)
                 return planner_no_tool_count, True
             state.cycle_end = CycleEnd("tool_continue", "Planner 工具执行完成，继续下一轮内部思考。")
             return planner_no_tool_count, False
 
-        planner_no_tool_count, cycle_end, should_finish_after_no_tool = self._handle_planner_no_tool_retry(
+        planner_no_tool_count, cycle_end, should_end_after_no_tool = self._handle_planner_no_tool_retry(
             planner_no_tool_count,
             planner_extra_lines,
         )
         state.cycle_end = cycle_end
         state.tool_result_summaries = []
         state.tool_monitor_results = []
-        return planner_no_tool_count, should_finish_after_no_tool
+        return planner_no_tool_count, should_end_after_no_tool
 
     async def _run_planner_request(
         self,
@@ -934,83 +644,6 @@ class MaisakaReasoningEngine:
         )
         state.response = response
         state.planner_duration_ms = (time.time() - planner_started_at) * 1000
-
-    def _append_timing_gate_invalid_tool_hint(self, invalid_tool_text: str) -> None:
-        """写入一条仅 Timing Gate 可见的非法工具提示，并保证最多保留最新一条。"""
-
-        self._runtime._chat_history = [
-            message
-            for message in self._runtime._chat_history
-            if message.source != TIMING_GATE_INVALID_TOOL_HINT_SOURCE
-        ]
-        normalized_tool_text = invalid_tool_text.strip() or "无工具"
-        available_tool_text = "continue 或 wait" if is_new_maisaka_enabled() else "continue、no_action 或 wait"
-        hint_content = (
-            "Timing Gate 上一轮选择了非法工具："
-            f"{normalized_tool_text}。\n"
-            f"Timing Gate 只能调用当前可用的 {available_tool_text} 中的一个工具。"
-        )
-        self._runtime._chat_history.append(
-            SessionBackedMessage(
-                raw_message=MessageSequence([TextComponent(hint_content)]),
-                visible_text=hint_content,
-                timestamp=datetime.now(),
-                source_kind=TIMING_GATE_INVALID_TOOL_HINT_SOURCE,
-            )
-        )
-
-    def _should_run_initial_timing_gate(self) -> bool:
-        """决定本批消息开始时是否需要先进入 Timing Gate。"""
-
-        if is_new_maisaka_enabled():
-            if force_continue_reason := self._runtime._consume_forced_turn_reason():
-                logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
-            logger.info(f"{self._runtime.log_prefix} Timing Gate 已临时禁用，本轮直接进入 Planner")
-            return False
-
-        if should_run_timing_gate(planner_continuation_active=self._runtime._is_planner_continuation_active()):
-            return True
-
-        if force_continue_reason := self._runtime._consume_forced_turn_reason():
-            logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
-        logger.info(f"{self._runtime.log_prefix} 连续 Planner 状态未结束，本轮跳过 Timing Gate")
-        return False
-
-    async def _run_timing_gate_round(
-        self,
-        *,
-        cycle_detail: CycleDetail,
-        round_text: str,
-        state: CycleRuntimeState,
-    ) -> None:
-        """执行一次 Timing Gate 并广播门控结果。"""
-
-        self._runtime._update_stage_status("Timing Gate", "等待门控决策", round_text=round_text)
-        timing_started_at = time.time()
-        (
-            timing_action,
-            timing_response,
-            timing_tool_results,
-            timing_tool_monitor_results,
-        ) = await self._run_timing_gate()
-        timing_duration_ms = (time.time() - timing_started_at) * 1000
-        cycle_detail.time_records["timing_gate"] = timing_duration_ms / 1000
-        await emit_timing_gate_result(
-            session_id=self._runtime.session_id,
-            cycle_id=cycle_detail.cycle_id,
-            action=timing_action,
-            content=timing_response.content,
-            tool_calls=timing_response.tool_calls,
-            messages=[],
-            prompt_tokens=timing_response.prompt_tokens,
-            selected_history_count=timing_response.selected_history_count,
-            duration_ms=timing_duration_ms,
-        )
-        state.timing_action = timing_action
-        state.timing_response = timing_response
-        state.timing_tool_results = timing_tool_results
-        state.timing_tool_monitor_results = timing_tool_monitor_results
-        state.timing_duration_ms = timing_duration_ms
 
     async def _handle_planner_interrupt(
         self,
@@ -1073,7 +706,7 @@ class MaisakaReasoningEngine:
 
         await self._ingest_messages(interrupted_messages)
         logger.info(
-            f"{self._runtime.log_prefix} 保持活跃状态，跳过 Timing Gate 直接重试 Planner: "
+            f"{self._runtime.log_prefix} 保持活跃状态，直接重试 Planner: "
             f"回合={round_index + 2}"
         )
         return PlannerInterruptResult(interrupted_response, extra_lines, interrupted_messages)
@@ -1088,21 +721,9 @@ class MaisakaReasoningEngine:
         return str(response.content or "").strip()
 
     @staticmethod
-    def _cycle_end_for_timing_action(timing_action: str) -> CycleEnd:
-        """返回 Timing Gate 非 continue 动作对应的结束原因。"""
-
-        if timing_action == "wait":
-            return CycleEnd("timing_wait", "Timing Gate 选择 wait，本轮不会进入 Planner，将在等待结束后继续。")
-        return CycleEnd("timing_no_action", "Timing Gate 选择 no_action，本轮不会进入 Planner。")
-
-    @staticmethod
     def _cycle_end_for_pause_tool(pause_tool_name: Optional[str]) -> CycleEnd:
         """返回工具要求暂停时对应的结束原因。"""
 
-        if pause_tool_name == "finish":
-            return CycleEnd("finish", "Planner 调用 finish，结束连续 Planner 并等待新消息。")
-        if pause_tool_name == "no_action":
-            return CycleEnd("tool_pause:no_action", "Planner 调用 no_action，保留连续 Planner 状态并等待新消息。")
         if pause_tool_name == "wait":
             return CycleEnd("tool_pause:wait", "Planner 调用 wait，本轮暂停并在等待结束后继续判断。")
         if pause_tool_name:
@@ -1232,20 +853,12 @@ class MaisakaReasoningEngine:
         ):
             cycle_end = self._cycle_end_for_max_rounds(self._runtime._max_internal_rounds)
 
-        timing_response = state.timing_response
         response = state.response
         self._runtime._render_context_usage_panel(
             cycle_id=cycle_detail.cycle_id,
             time_records=dict(completed_cycle.time_records),
-            timing_selected_history_count=timing_response.selected_history_count if timing_response is not None else None,
-            timing_prompt_tokens=timing_response.prompt_tokens if timing_response is not None else None,
-            timing_model_name=timing_response.model_name if timing_response is not None else None,
-            timing_action=state.timing_action or "",
-            timing_response=(timing_response.content or "") if timing_response is not None else "",
-            timing_tool_calls=timing_response.tool_calls if timing_response is not None else None,
-            timing_tool_results=state.timing_tool_results,
-            timing_tool_detail_results=state.timing_tool_monitor_results,
-            timing_prompt_section=timing_response.prompt_section if timing_response is not None else None,
+            timing_action=TIMING_GATE_DISABLED_ACTION,
+            timing_response=TIMING_GATE_DISABLED_MESSAGE,
             planner_selected_history_count=response.selected_history_count if response is not None else None,
             planner_prompt_tokens=response.prompt_tokens if response is not None else None,
             planner_model_name=response.model_name if response is not None else None,
@@ -1259,17 +872,6 @@ class MaisakaReasoningEngine:
         await emit_planner_finalized(
             session_id=self._runtime.session_id,
             cycle_id=cycle_detail.cycle_id,
-            timing_request_messages=timing_response.request_messages if timing_response is not None else None,
-            timing_selected_history_count=timing_response.selected_history_count if timing_response is not None else None,
-            timing_tool_count=timing_response.tool_count if timing_response is not None else None,
-            timing_action=state.timing_action,
-            timing_content=timing_response.content if timing_response is not None else None,
-            timing_tool_calls=timing_response.tool_calls if timing_response is not None else None,
-            timing_tool_results=state.timing_tool_results,
-            timing_prompt_tokens=timing_response.prompt_tokens if timing_response is not None else None,
-            timing_completion_tokens=timing_response.completion_tokens if timing_response is not None else None,
-            timing_total_tokens=timing_response.total_tokens if timing_response is not None else None,
-            timing_duration_ms=state.timing_duration_ms if timing_response is not None else None,
             planner_request_messages=response.request_messages if response is not None else None,
             planner_selected_history_count=response.selected_history_count if response is not None else None,
             planner_tool_count=response.tool_count if response is not None else None,
@@ -1295,8 +897,8 @@ class MaisakaReasoningEngine:
             end_reason=cycle_end.reason,
             end_detail=cycle_end.detail,
         )
-        self._runtime._no_action_backoff.record_cycle_result(cycle_end.reason)
-        self._runtime.record_no_action_cycle_result(cycle_end.reason)
+        self._runtime._idle_backoff.record_cycle_result(cycle_end.reason)
+        self._runtime.record_idle_cycle_result(cycle_end.reason)
         return cycle_end
 
     async def run_loop(self) -> None:
@@ -1328,7 +930,8 @@ class MaisakaReasoningEngine:
                     continue
 
                 try:
-                    timing_gate_required = self._should_run_initial_timing_gate()
+                    if force_continue_reason := self._runtime._consume_forced_turn_reason():
+                        logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
                     planner_no_tool_count = 0
                     round_index = 0
                     while round_index < self._runtime._max_internal_rounds:
@@ -1341,28 +944,6 @@ class MaisakaReasoningEngine:
                         state = CycleRuntimeState()
                         try:
                             await self._refresh_visual_placeholders_for_cycle(cycle_detail)
-
-                            if timing_gate_required:
-                                state.current_stage_started_at = time.time()
-                                await self._run_timing_gate_round(
-                                    cycle_detail=cycle_detail,
-                                    round_text=round_text,
-                                    state=state,
-                                )
-                                if state.timing_action != "continue":
-                                    self._runtime._finish_planner_continuation()
-                                    state.cycle_end = self._cycle_end_for_timing_action(state.timing_action)
-                                    logger.debug(
-                                        f"{self._runtime.log_prefix} Timing Gate 结束当前回合: "
-                                        f"回合={round_index + 1} 动作={state.timing_action}"
-                                    )
-                                    break
-                                timing_gate_required = False
-                            else:
-                                logger.info(
-                                    f"{self._runtime.log_prefix} Timing Gate 已完成 continue，继续执行 Planner: "
-                                    f"回合={round_index + 1}"
-                                )
 
                             self._runtime._start_planner_continuation()
                             await self._run_planner_request(
@@ -1439,7 +1020,7 @@ class MaisakaReasoningEngine:
         timeout_triggered: bool,
         proactive_triggered: bool,
     ) -> None:
-        """回复频率为 0 时只消费消息和维护历史，不进入 Timing Gate/Planner。"""
+        """回复频率为 0 时只消费消息和维护历史，不进入 Planner。"""
 
         self._runtime._clear_forced_turn_state()
         if proactive_triggered:
@@ -1464,7 +1045,7 @@ class MaisakaReasoningEngine:
         trigger_text = " ".join(trigger_labels) if trigger_labels else "无新消息"
         logger.info(
             f"{self._runtime.log_prefix} 回复频率为 0，静默接收并完成历史维护，"
-            f"不进入 Timing Gate/Planner；{trigger_text}"
+            f"不进入 Planner；{trigger_text}"
         )
 
     def _drain_ready_turn_triggers(
@@ -2260,26 +1841,6 @@ class MaisakaReasoningEngine:
             else:
                 del self._runtime._chat_history[index]
             return
-
-    def _append_timing_gate_execution_result(
-        self,
-        response: ChatResponse,
-        tool_call: ToolCall,
-        result: ToolExecutionResult,
-    ) -> None:
-        """将 Timing Gate 的决策链写入历史，供后续门控复用。"""
-
-        self._runtime._chat_history.append(
-            AssistantMessage(
-                content=response.content or "",
-                timestamp=response.raw_message.timestamp,
-                tool_calls=[tool_call],
-                source_kind="timing_gate",
-            )
-        )
-        if tool_call.func_name == "wait":
-            return
-        self._append_tool_execution_result(tool_call, result)
 
     def _build_tool_result_summary(self, tool_call: ToolCall, result: ToolExecutionResult) -> str:
         """构建用于终端展示的工具结果摘要。"""

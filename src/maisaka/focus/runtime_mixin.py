@@ -25,7 +25,7 @@ from src.maisaka.context.messages import (
     SessionBackedMessage,
     ToolResultMessage,
 )
-from src.maisaka.mode_policy import is_no_action_equivalent_cycle_reason
+from src.maisaka.mode_policy import is_idle_cycle_reason
 from .manager import FocusTargetResolution, focus_mode_manager
 
 FOCUS_SWITCH_NEW_MESSAGE_LIMIT = 20
@@ -92,29 +92,29 @@ class MaisakaFocusRuntimeMixin:
 
         return history_messages
 
-    def record_no_action_cycle_result(self, cycle_end_reason: str) -> None:
-        """Track consecutive no_action cycles and release stale group focus."""
+    def record_idle_cycle_result(self, cycle_end_reason: str) -> None:
+        """Track consecutive idle cycles and release stale group focus."""
 
         if not self._is_focus_mode_active_for_current_chat():
-            self._consecutive_no_action_count = 0
+            self._consecutive_idle_count = 0
             return
         if not self.chat_stream.is_group_session:
-            self._consecutive_no_action_count = 0
+            self._consecutive_idle_count = 0
             return
 
-        if not is_no_action_equivalent_cycle_reason(cycle_end_reason):
-            self._consecutive_no_action_count = 0
+        if not is_idle_cycle_reason(cycle_end_reason):
+            self._consecutive_idle_count = 0
             return
 
-        self._consecutive_no_action_count += 1
-        if self._consecutive_no_action_count < FOCUS_NO_ACTION_EXIT_THRESHOLD:
+        self._consecutive_idle_count += 1
+        if self._consecutive_idle_count < FOCUS_NO_ACTION_EXIT_THRESHOLD:
             return
 
-        self._consecutive_no_action_count = 0
-        self._exit_focus_after_consecutive_no_action()
+        self._consecutive_idle_count = 0
+        self._exit_focus_after_consecutive_idle()
 
-    def _exit_focus_after_consecutive_no_action(self) -> None:
-        """Release the current group from focus after repeated no_action cycles."""
+    def _exit_focus_after_consecutive_idle(self) -> None:
+        """Release the current group from focus after repeated idle cycles."""
 
         released = focus_mode_manager.release_focus_and_block_next_entry(self.session_id)
         if not released:
@@ -123,7 +123,7 @@ class MaisakaFocusRuntimeMixin:
         self._cancel_focus_cooldown_timer_task()
         self._clear_focus_cooldown_wakeup_scheduled()
         logger.info(
-            f"{self.log_prefix} 连续 {FOCUS_NO_ACTION_EXIT_THRESHOLD} 次 no_action，"
+            f"{self.log_prefix} 连续 {FOCUS_NO_ACTION_EXIT_THRESHOLD} 次空闲结束，"
             "已退出当前群的 Focus，并阻止它立即重新进入"
         )
 

@@ -27,7 +27,6 @@ from src.llm_models.payload_content.message import Message, MessageBuilder, Role
 from src.llm_models.payload_content.tool_option import ToolCall
 
 FORWARD_PREVIEW_LIMIT = 4
-TIMING_GATE_INVALID_TOOL_HINT_SOURCE = "timing_gate_invalid_tool_hint"
 FOCUS_COOLDOWN_WAKEUP_SOURCE = "focus_cooldown_wakeup"
 FOCUS_AT_WAKEUP_SOURCE = "focus_at_wakeup"
 FOCUS_WAKEUP_SOURCE_KINDS = frozenset({FOCUS_COOLDOWN_WAKEUP_SOURCE, FOCUS_AT_WAKEUP_SOURCE})

@@ -278,56 +278,6 @@ def _serialize_planner_block(
     }
 
 
-def _serialize_timing_gate_block(
-    *,
-    request_messages: Optional[List[Any]],
-    selected_history_count: Optional[int],
-    tool_count: Optional[int],
-    action: Optional[str],
-    content: Optional[str],
-    tool_calls: Optional[List[Any]],
-    tool_results: Optional[List[str]],
-    prompt_tokens: Optional[int],
-    completion_tokens: Optional[int],
-    total_tokens: Optional[int],
-    duration_ms: Optional[float],
-) -> Optional[Dict[str, Any]]:
-    """标准化 Timing Gate 结果区块。"""
-
-    if (
-        request_messages is None
-        and selected_history_count is None
-        and tool_count is None
-        and action is None
-        and content is None
-        and tool_calls is None
-        and tool_results is None
-        and prompt_tokens is None
-        and completion_tokens is None
-        and total_tokens is None
-        and duration_ms is None
-    ):
-        return None
-
-    return {
-        "request": _serialize_request_block(
-            request_messages,
-            selected_history_count,
-            tool_count,
-        ),
-        "result": {
-            "action": action,
-            "content": content,
-            "tool_calls": _serialize_tool_calls_from_objects(list(tool_calls or [])),
-            "tool_results": _normalize_payload_value(list(tool_results or [])),
-            "prompt_tokens": int(prompt_tokens or 0),
-            "completion_tokens": int(completion_tokens or 0),
-            "total_tokens": int(total_tokens or 0),
-            "duration_ms": float(duration_ms or 0.0),
-        },
-    }
-
-
 async def _broadcast(event: str, data: Dict[str, Any]) -> None:
     """通过统一 WebSocket 管理器向监控主题广播事件。"""
 
@@ -527,48 +477,10 @@ async def emit_cycle_end(
     })
 
 
-async def emit_timing_gate_result(
-    session_id: str,
-    cycle_id: int,
-    action: str,
-    content: Optional[str],
-    tool_calls: List[Any],
-    messages: List[Any],
-    prompt_tokens: int,
-    selected_history_count: int,
-    duration_ms: float,
-) -> None:
-    """广播 Timing Gate 结果事件。"""
-
-    await _broadcast("timing_gate.result", {
-        "session_id": session_id,
-        "cycle_id": cycle_id,
-        "action": action,
-        "content": content,
-        "tool_calls": _serialize_tool_calls_from_objects(tool_calls),
-        "messages": _serialize_messages(messages),
-        "prompt_tokens": prompt_tokens,
-        "selected_history_count": selected_history_count,
-        "duration_ms": duration_ms,
-        "timestamp": time.time(),
-    })
-
-
 async def emit_planner_finalized(
     *,
     session_id: str,
     cycle_id: int,
-    timing_request_messages: Optional[List[Any]],
-    timing_selected_history_count: Optional[int],
-    timing_tool_count: Optional[int],
-    timing_action: Optional[str],
-    timing_content: Optional[str],
-    timing_tool_calls: Optional[List[Any]],
-    timing_tool_results: Optional[List[str]],
-    timing_prompt_tokens: Optional[int],
-    timing_completion_tokens: Optional[int],
-    timing_total_tokens: Optional[int],
-    timing_duration_ms: Optional[float],
     planner_request_messages: Optional[List[Any]],
     planner_selected_history_count: Optional[int],
     planner_tool_count: Optional[int],
@@ -592,19 +504,6 @@ async def emit_planner_finalized(
         "session_id": session_id,
         "cycle_id": cycle_id,
         "timestamp": time.time(),
-        "timing_gate": _serialize_timing_gate_block(
-            request_messages=timing_request_messages,
-            selected_history_count=timing_selected_history_count,
-            tool_count=timing_tool_count,
-            action=timing_action,
-            content=timing_content,
-            tool_calls=timing_tool_calls,
-            tool_results=timing_tool_results,
-            prompt_tokens=timing_prompt_tokens,
-            completion_tokens=timing_completion_tokens,
-            total_tokens=timing_total_tokens,
-            duration_ms=timing_duration_ms,
-        ),
         "request": _serialize_request_block(
             planner_request_messages,
             planner_selected_history_count,

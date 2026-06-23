@@ -8,7 +8,7 @@ from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import is_bot_self
 from src.common.logger import get_logger
 from src.maisaka.focus import focus_mode_manager
-from src.maisaka.mode_policy import is_new_maisaka_enabled, is_reply_necessity_trigger_enabled
+from src.maisaka.mode_policy import is_reply_necessity_trigger_enabled
 from src.maisaka.reply_necessity import REPLY_NECESSITY_TRIGGER_SCORE, ReplyNecessityInput, score_reply_necessity
 
 if TYPE_CHECKING:
@@ -189,7 +189,7 @@ class MessageTurnScheduler:
             runtime._enqueue_message_turn()
             return
 
-        if runtime._no_action_backoff.should_delay(pending_count):
+        if runtime._idle_backoff.should_delay(pending_count):
             return
 
         trigger_threshold = runtime._get_message_trigger_threshold()
@@ -197,7 +197,7 @@ class MessageTurnScheduler:
             f"{runtime.log_prefix} 回复频率调度: 频率={formatted_frequency} "
             f"pending={pending_count} 阈值={trigger_threshold}"
         )
-        if is_new_maisaka_enabled() and is_reply_necessity_trigger_enabled():
+        if is_reply_necessity_trigger_enabled():
             if self.should_trigger_by_reply_necessity(
                 pending_messages=runtime.message_cache[runtime._last_processed_index :],
                 trigger_threshold=trigger_threshold,

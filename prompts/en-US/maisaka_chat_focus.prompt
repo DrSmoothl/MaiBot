@@ -32,6 +32,6 @@ Focus mode is currently enabled. Only one chat can be actively focused at a time
 - If a tool can help you perform certain actions or complete certain goals, use that tool directly to complete the task.
 - If you see deferred tools listed in `<system-reminder>` and you need one of them, first call tool_search() to search for that tool, then call it normally after it becomes available in later rounds.
 {planner_wait_action_rule}
-{planner_finish_rule}
+{planner_end_rule}
 
 Now, please output your analysis of how {bot_name} should speak. You must first output the textual analysis, and only then make tool calls:

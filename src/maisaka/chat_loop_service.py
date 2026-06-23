@@ -37,21 +37,15 @@ from src.maisaka.context.messages import (
     AssistantMessage,
     LLMContextMessage,
     SessionBackedMessage,
-    TIMING_GATE_INVALID_TOOL_HINT_SOURCE,
     ToolResultMessage,
     build_llm_message_from_context,
 )
 from src.maisaka.context.history import normalize_tool_call_result_pairs
 from src.maisaka.memory.mid_term import is_mid_term_memory_message
-from src.maisaka.mode_policy import (
-    is_new_maisaka_enabled,
-    planner_filtered_timing_tool_names,
-    timing_gate_tool_names,
-)
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.focus import focus_mode_manager
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
-from src.maisaka.visual.mode_utils import resolve_enable_visual_planner, resolve_enable_visual_timing_gate
+from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
 PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
@@ -61,14 +55,10 @@ REQUEST_TYPE_BY_REQUEST_KIND = {
     "planner": "maisaka.planner",
     "reply_effect_judge": "reply.effect_judge",
     "sub_agent": "maisaka.sub_agent",
-    "timing_gate": "maisaka.timing_gate",
 }
-MODEL_TASK_NAME_BY_REQUEST_KIND = {
-    "timing_gate": "timing_gate",
-}
+MODEL_TASK_NAME_BY_REQUEST_KIND: dict[str, str] = {}
 PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "planner": "planner",
-    "timing_gate": "timing_gate",
     "reply_effect_judge": "reply_effect_judge",
     "expression_selector": "expression_selector",
     "behavior_scenario_analyzer": "behavior_scenario_analyzer",
@@ -745,11 +735,9 @@ class MaisakaChatLoopService:
             "file_tools_section": tools_section,
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "identity": self.personality_prompt,
-            "planner_finish_rule": self._build_planner_finish_rule(),
+            "planner_end_rule": self._build_planner_end_rule(),
             "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
             "planner_wait_action_rule": self._build_planner_wait_action_rule(),
-            "timing_gate_no_action_rule": self._build_timing_gate_no_action_rule(),
-            "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
         }
 
 
@@ -785,60 +773,28 @@ class MaisakaChatLoopService:
     def _build_planner_idle_focus_rule(self) -> str:
         """构造 Focus 模式下空闲等待动作提示。"""
 
-        if is_new_maisaka_enabled():
-            return self._localized_text({
-                "en-US": "If the current chat has nothing worth acting on, prefer using `switch_chat` to check another chat. Use `wait` only when you need to wait before judging again; otherwise end this thought without calling a tool.",
-                "ja-JP": "現在チャットに行動すべき内容がない場合は、`switch_chat` で別チャットを確認することを優先してください。待ってから再判断すべき場合だけ `wait` を使い、それ以外はツールを呼ばずにこの思考を終了してください。",
-                "zh-CN": "如果当前聊天没有值得行动的内容，应优先考虑使用 `switch_chat` 去其他聊天看看；只有需要等待后重新判断时才使用 `wait`，否则不调用工具结束这轮思考。",
-            })
-
         return self._localized_text({
-            "en-US": "If the current chat has nothing worth acting on, prefer using `switch_chat` to check another chat. Use `no_action` when you should wait for new messages; it only waits inside Planner. Only `finish` ends continuous Planner.",
-            "ja-JP": "現在チャットに行動すべき内容がない場合は、`switch_chat` で別チャットを確認することを優先してください。新しいメッセージを待つべき場合は `no_action` を使ってください。これは Planner 内部で待つだけです。連続 Planner を終了するのは `finish` だけです。",
-            "zh-CN": "如果当前聊天没有值得行动的内容，应优先考虑使用 `switch_chat` 去其他聊天看看；如果需要等待新消息，可以使用 `no_action`，它只是在 Planner 内部等待；只有 `finish` 会结束连续 Planner。",
+            "en-US": "If the current chat has nothing worth acting on, prefer using `switch_chat` to check another chat. Use `wait` only when you need to wait before judging again; otherwise end this thought without calling a tool.",
+            "ja-JP": "現在チャットに行動すべき内容がない場合は、`switch_chat` で別チャットを確認することを優先してください。待ってから再判断すべき場合だけ `wait` を使い、それ以外はツールを呼ばずにこの思考を終了してください。",
+            "zh-CN": "如果当前聊天没有值得行动的内容，应优先考虑使用 `switch_chat` 去其他聊天看看；只有需要等待后重新判断时才使用 `wait`，否则不调用工具结束这轮思考。",
         })
 
     def _build_planner_wait_action_rule(self) -> str:
         """构造 Planner 中等待/不行动工具提示。"""
 
-        if is_new_maisaka_enabled():
-            return self._localized_text({
-                "en-US": "- wait(): Use this only when you need to pause for a while and judge again after the wait ends.",
-                "ja-JP": "- wait()：一定時間待ってから再判断する必要がある場合だけ使ってください。",
-                "zh-CN": "- wait(): 只有需要等待一段时间后再次判断时使用。",
-            })
-
         return self._localized_text({
-            "en-US": "- no_action(): Use this when you should not reply or keep searching for now, and should wait for new external messages; it only waits inside Planner and does not end continuous Planner.",
-            "ja-JP": "- no_action()：今は返信や追加検索をすべきではなく、新しい外部メッセージを待つべき場合に使ってください。これは Planner 内部で待つだけで、連続 Planner は終了しません。",
-            "zh-CN": "- no_action()：当暂时不应该回复,保持继续观望时使用。",
+            "en-US": "- wait(): Use this only when you need to pause for a while and judge again after the wait ends.",
+            "ja-JP": "- wait()：一定時間待ってから再判断する必要がある場合だけ使ってください。",
+            "zh-CN": "- wait(): 只有需要等待一段时间后再次判断时使用。",
         })
 
-    def _build_planner_finish_rule(self) -> str:
+    def _build_planner_end_rule(self) -> str:
         """构造 Planner 结束思考提示。"""
 
-        if is_new_maisaka_enabled():
-            return self._localized_text({
-                "en-US": "- When there are no more operations to perform, do not call any tool; end this thinking round with your analysis text only.",
-                "ja-JP": "- これ以上行う操作がない場合は、どのツールも呼ばず、分析テキストだけでこの思考を終了してください。",
-                "zh-CN": "- 当没有更多操作需要做时，不要调用任何工具，只输出分析文本结束这轮思考。",
-            })
         return self._localized_text({
-            "en-US": "- finish(): When there are no more operations to perform, use finish to end continuous Planner and this thinking round.",
-            "ja-JP": "- finish()：これ以上行う操作がない場合は、finish を使って連続 Planner とこの思考を終了してください。",
-            "zh-CN": "- finish()：当没有更多操作需要做，使用 finish 结束这轮思考。",
-        })
-
-    def _build_timing_gate_no_action_rule(self) -> str:
-        """构造 Timing Gate 中 no_action 工具的场景说明。"""
-
-        if is_new_maisaka_enabled():
-            return ""
-
-        return self._localized_text({
-            "en-US": "- no_action: do not continue speaking this turn, and wait for new messages; also use this when the user may not have finished and the speaking turn should be returned to the user",
-            "ja-JP": "- no_action：このターンでは発言を続けず、新しいメッセージを待つ。ユーザーがまだ話し終えていない可能性があり、発言権をユーザーに返すべき場面でも使う",
-            "zh-CN": "- no_action：本轮不继续发言，等待新的消息；也用于用户可能还没说完、需要先把发言权交还给用户的场景",
+            "en-US": "- When there are no more operations to perform, do not call any tool; end this thinking round with your analysis text only.",
+            "ja-JP": "- これ以上行う操作がない場合は、どのツールも呼ばず、分析テキストだけでこの思考を終了してください。",
+            "zh-CN": "- 当没有更多操作需要做时，不要调用任何工具，只输出分析文本结束这轮思考。",
         })
 
     def _build_current_chat_attention_tail_message(self) -> str:
@@ -850,17 +806,6 @@ class MaisakaChatLoopService:
         if not chat_prompt:
             return ""
         return f"当前聊天额外注意事项：\n{chat_prompt}"
-
-    def _build_timing_gate_wait_rule(self) -> str:
-        """构造 Timing Gate 中 wait 工具的场景说明。"""
-
-        locale = get_locale()
-        if locale == "en-US":
-            return "- wait: wait for a fixed period, then judge again"
-        if locale == "ja-JP":
-            return "- wait：一定時間待ってから再判断する"
-
-        return "- wait：固定再等待一段时间，时间到后再重新判断"
 
     @staticmethod
     def _get_chat_prompt_for_chat(chat_id: str, is_group_chat: Optional[bool]) -> str:
@@ -1209,7 +1154,7 @@ class MaisakaChatLoopService:
             else MaisakaChatLoopService._resolve_enable_visual_message(request_kind)
         )
 
-        if request_kind in {"planner", "timing_gate", "sub_agent"}:
+        if request_kind in {"planner", "sub_agent"}:
             pinned_indices = [
                 index
                 for index, message in enumerate(filtered_history)
@@ -1269,62 +1214,6 @@ class MaisakaChatLoopService:
     ) -> List[LLMContextMessage]:
         """按请求类型过滤不应暴露的历史工具链。"""
 
-        if request_kind == "timing_gate":
-            allowed_timing_tool_names = timing_gate_tool_names()
-            allowed_tool_call_ids = {
-                tool_call.call_id
-                for message in selected_history
-                if isinstance(message, AssistantMessage)
-                for tool_call in message.tool_calls
-                if tool_call.func_name in allowed_timing_tool_names and tool_call.call_id
-            }
-            filtered_history: List[LLMContextMessage] = []
-            for message in selected_history:
-                if message.source in {PLANNER_TOOL_HINT_SOURCE, "behavior_pattern"}:
-                    continue
-
-                if isinstance(message, ToolResultMessage):
-                    if message.tool_name in allowed_timing_tool_names or message.tool_call_id in allowed_tool_call_ids:
-                        filtered_history.append(message)
-                    continue
-
-                if isinstance(message, AssistantMessage) and message.tool_calls:
-                    kept_tool_calls = [
-                        tool_call
-                        for tool_call in message.tool_calls
-                        if tool_call.func_name in allowed_timing_tool_names
-                    ]
-                    if not kept_tool_calls:
-                        if message.content.strip():
-                            filtered_history.append(
-                                AssistantMessage(
-                                    content=message.content,
-                                    timestamp=message.timestamp,
-                                    tool_calls=[],
-                                    source_kind=message.source_kind,
-                                )
-                            )
-                        continue
-                    if len(kept_tool_calls) != len(message.tool_calls):
-                        filtered_history.append(
-                            AssistantMessage(
-                                content=message.content,
-                                timestamp=message.timestamp,
-                                tool_calls=kept_tool_calls,
-                                source_kind=message.source_kind,
-                            )
-                        )
-                        continue
-
-                filtered_history.append(message)
-            return filtered_history
-
-        selected_history = [
-            message
-            for message in selected_history
-            if message.source != TIMING_GATE_INVALID_TOOL_HINT_SOURCE
-        ]
-
         if request_kind == "expression_selector":
             return [
                 message
@@ -1339,50 +1228,12 @@ class MaisakaChatLoopService:
                 if message.source != "behavior_pattern"
             ]
 
-        filtered_history: List[LLMContextMessage] = []
-        filtered_timing_tool_names = planner_filtered_timing_tool_names()
-        for message in selected_history:
-            if isinstance(message, ToolResultMessage) and message.tool_name in filtered_timing_tool_names:
-                continue
-
-            if isinstance(message, AssistantMessage) and message.tool_calls:
-                kept_tool_calls = [
-                    tool_call
-                    for tool_call in message.tool_calls
-                    if tool_call.func_name not in filtered_timing_tool_names
-                ]
-                if not kept_tool_calls:
-                    if message.content.strip():
-                        filtered_history.append(
-                            AssistantMessage(
-                                content=message.content,
-                                timestamp=message.timestamp,
-                                tool_calls=[],
-                                source_kind=message.source_kind,
-                            )
-                        )
-                    continue
-                if len(kept_tool_calls) != len(message.tool_calls):
-                    filtered_history.append(
-                        AssistantMessage(
-                            content=message.content,
-                            timestamp=message.timestamp,
-                            tool_calls=kept_tool_calls,
-                            source_kind=message.source_kind,
-                        )
-                    )
-                    continue
-
-            filtered_history.append(message)
-
-        return filtered_history
+        return selected_history
 
     @staticmethod
     def _resolve_enable_visual_message(request_kind: str) -> bool:
         if request_kind == "planner":
             return resolve_enable_visual_planner()
-        if request_kind == "timing_gate":
-            return resolve_enable_visual_timing_gate()
         if request_kind in {"expression_selector", "reply_effect_judge", "behavior_scenario_analyzer"}:
             return False
         return True
