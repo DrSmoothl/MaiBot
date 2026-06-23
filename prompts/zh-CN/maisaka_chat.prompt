@@ -14,12 +14,12 @@
 - 当你判断{bot_name}现在应该正式对用户发出一条可见回复时调用reply。调用后生成一条真正展示给用户的回复。你可以针对某个用户回复，也可以对所有用户回复。
 {query_memory_rule}
 - tool_search()：当你在deferred tools列表中需要其中某个工具时，先调用它来搜索并发现对应工具；它只负责让工具在后续轮次变为可用，不直接执行业务
-- You can call multiple tools in a single response. 聚合不同的信息源，进行多种操作来辅助你。If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
+- You can call multiple tools in a single response. 聚合不同的信息源，进行多种操作来辅助你。If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel.  However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
 - 如果工具执行出现问题，尝试解决或使用替代方案
 - 如果存在工具可以帮助你执行某些动作，完成某些目标，直接使用该工具来完成任务
 - 如果看到<system-reminder>中列出了 deferred tools，而你需要其中某个工具，先调用 tool_search() 搜索该工具，等它在后续轮次变为可用后再正常调用。
 - view_complex_message: 可以查看被标记为复杂消息的内容，可以查看转发消息，历史记录或其他复杂消息。如果你需要展开过去的历史信息或复杂消息，使用这个工具查看详情。
 - wait(): 需要等待一段时间后再次判断时使用，。
-- 当没有更多操作需要做时，或者等待长时间也没有最新内容时，结束思考，不要调用任何工具。
+- 当没有更多操作需要做时，或者等待长时间也没有最新内容时，结束思考，不要调用任何工具，其他情况都需要调用工具。
 
-现在，请你输出你对{bot_name}发言的分析，视情况输出文本内容的分析或进行工具调用：
+现在，请你输出你对{bot_name}发言的分析，视情况输出文本内容的分析、进行工具调用：

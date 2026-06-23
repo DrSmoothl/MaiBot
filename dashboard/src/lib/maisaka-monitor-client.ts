@@ -63,6 +63,8 @@ export interface MessageIngestedEvent {
   speaker_name: string
   content: string
   message_id: string
+  reply_to?: MaisakaReplyPreview | null
+  media?: MaisakaMessageMedia[]
   platform?: string
   user_id?: string
   group_id?: string
@@ -74,6 +76,8 @@ export interface MessageSentEvent {
   speaker_name: string
   content: string
   message_id: string
+  reply_to?: MaisakaReplyPreview | null
+  media?: MaisakaMessageMedia[]
   source_kind?: string
   platform?: string
   user_id?: string
@@ -86,11 +90,29 @@ export interface MessageUpdatedEvent {
   speaker_name: string
   content: string
   message_id: string
+  reply_to?: MaisakaReplyPreview | null
+  media?: MaisakaMessageMedia[]
   source_kind?: string
   platform?: string
   user_id?: string
   group_id?: string
   timestamp: number
+}
+
+export interface MaisakaReplyPreview {
+  message_id: string
+  sender_name: string
+  content: string
+}
+
+export interface MaisakaMessageMedia {
+  kind: 'image' | 'emoji'
+  hash: string
+  text: string
+  url: string
+  data_url?: string
+  default_original?: boolean
+  index?: number
 }
 
 export interface CycleStartEvent {

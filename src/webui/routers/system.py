@@ -118,6 +118,7 @@ _restart_task: asyncio.Task[None] | None = None
 
 CacheImageTarget = Literal["images", "emoji"]
 DatabaseCleanupMode = Literal["all", "older_than_days"]
+MonitorMediaKind = Literal["image", "emoji"]
 
 
 class RestartResponse(BaseModel):
@@ -485,6 +486,32 @@ def _resolve_cache_image_file(target: CacheImageTarget, relative_path: str) -> P
         raise HTTPException(status_code=404, detail=f"未找到指定{label}文件")
     if not _is_cache_image_file(file_path):
         raise HTTPException(status_code=400, detail="只能浏览图片缓存文件")
+    return file_path
+
+
+def _resolve_monitor_media_file(media_kind: MonitorMediaKind, media_hash: str) -> Path:
+    """根据监控事件中的媒体 hash 解析原始图片或表情文件。"""
+
+    normalized_hash = media_hash.strip()
+    if not normalized_hash:
+        raise HTTPException(status_code=400, detail="媒体 hash 不能为空")
+
+    image_type = ImageType.IMAGE if media_kind == "image" else ImageType.EMOJI
+    label = "图片" if media_kind == "image" else "表情包"
+    with get_db_session(auto_commit=False) as session:
+        statement = select(Images).filter_by(image_hash=normalized_hash, image_type=image_type).limit(1)
+        image_record = session.exec(statement).first()
+
+    if image_record is None:
+        raise HTTPException(status_code=404, detail=f"未找到指定{label}记录")
+
+    try:
+        file_path = resolve_stored_image_path(image_record.full_path)
+    except (OSError, RuntimeError, StoredImagePathError) as exc:
+        raise HTTPException(status_code=404, detail=f"无法解析指定{label}文件") from exc
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"未找到指定{label}文件")
     return file_path
 
 
@@ -1530,6 +1557,15 @@ async def preview_local_cache_image(
 ) -> FileResponse:
     """返回本地缓存图片文件预览。"""
     file_path = _resolve_cache_image_file(target, relative_path)
+    media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+    return FileResponse(file_path, media_type=media_type, filename=file_path.name)
+
+
+@router.get("/maisaka-monitor/media/{media_kind}/{media_hash}", response_model=None)
+async def get_maisaka_monitor_media(media_kind: MonitorMediaKind, media_hash: str) -> FileResponse:
+    """返回 MaiSaka 观察面板消息中的原始图片或表情文件。"""
+
+    file_path = _resolve_monitor_media_file(media_kind, media_hash)
     media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
     return FileResponse(file_path, media_type=media_type, filename=file_path.name)
 

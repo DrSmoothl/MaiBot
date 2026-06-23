@@ -368,6 +368,8 @@ async def emit_message_ingested(
     platform: str = "",
     user_id: str = "",
     group_id: str = "",
+    reply_to: Optional[Dict[str, Any]] = None,
+    media: Optional[list[Dict[str, Any]]] = None,
 ) -> None:
     """广播新消息注入事件。"""
 
@@ -379,6 +381,8 @@ async def emit_message_ingested(
         "platform": platform,
         "user_id": user_id,
         "group_id": group_id,
+        "reply_to": _normalize_payload_value(reply_to) if reply_to else None,
+        "media": _normalize_payload_value(media) if media else [],
         "timestamp": timestamp,
     })
 
@@ -394,6 +398,8 @@ async def emit_message_sent(
     platform: str = "",
     user_id: str = "",
     group_id: str = "",
+    reply_to: Optional[Dict[str, Any]] = None,
+    media: Optional[list[Dict[str, Any]]] = None,
 ) -> None:
     """广播 MaiSaka 自己发送的消息事件。"""
 
@@ -406,6 +412,8 @@ async def emit_message_sent(
         "platform": platform,
         "user_id": user_id,
         "group_id": group_id,
+        "reply_to": _normalize_payload_value(reply_to) if reply_to else None,
+        "media": _normalize_payload_value(media) if media else [],
         "timestamp": timestamp,
     })
 
@@ -421,6 +429,8 @@ async def emit_message_updated(
     platform: str = "",
     user_id: str = "",
     group_id: str = "",
+    reply_to: Optional[Dict[str, Any]] = None,
+    media: Optional[list[Dict[str, Any]]] = None,
 ) -> None:
     """广播已有消息内容更新事件。"""
 
@@ -433,6 +443,8 @@ async def emit_message_updated(
         "platform": platform,
         "user_id": user_id,
         "group_id": group_id,
+        "reply_to": _normalize_payload_value(reply_to) if reply_to else None,
+        "media": _normalize_payload_value(media) if media else [],
         "timestamp": timestamp,
     })
 

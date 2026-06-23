@@ -32,7 +32,7 @@ export function Layout({ children }: LayoutProps) {
   const workspaceMode = pathname === '/chat' ? 'chat' : isLogsPath ? 'logs' : 'settings'
   const isSettingsWorkspace = workspaceMode === 'settings'
   const isChatWorkspace = workspaceMode === 'chat'
-  const showBackToTop = isSettingsWorkspace
+  const showBackToTop = isSettingsWorkspace && pathname !== '/planner-monitor'
 
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
