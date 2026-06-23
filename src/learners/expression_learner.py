@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple
 
 import asyncio
-import difflib
 import json
 
 from sqlmodel import select
@@ -24,6 +23,7 @@ from src.prompt.prompt_manager import prompt_manager
 from src.services.llm_service import LLMServiceClient
 
 from .expression_review_store import append_ai_review_log
+from .expression_style_utils import normalize_expression_style_for_learning
 from .expression_utils import check_expression_suitability, parse_expression_response
 
 if TYPE_CHECKING:
@@ -234,15 +234,20 @@ class ExpressionLearner:
             List[dict[str, str]]: 序列化后的表达方式候选。
         """
 
-        return [
-            {
-                "situation": str(situation).strip(),
-                "style": str(style).strip(),
-                "source_id": str(source_id).strip(),
-            }
-            for situation, style, source_id in expressions
-            if str(situation).strip() and str(style).strip()
-        ]
+        serialized_expressions: List[dict[str, str]] = []
+        for situation, style, source_id in expressions:
+            normalized_situation = str(situation).strip()
+            normalized_style = normalize_expression_style_for_learning(str(style).strip())
+            if not normalized_situation or not normalized_style:
+                continue
+            serialized_expressions.append(
+                {
+                    "situation": normalized_situation,
+                    "style": normalized_style,
+                    "source_id": str(source_id).strip(),
+                }
+            )
+        return serialized_expressions
 
     @staticmethod
     def _deserialize_expressions(raw_expressions: Any) -> List[Tuple[str, str, str]]:
@@ -263,7 +268,7 @@ class ExpressionLearner:
             if not isinstance(raw_expression, dict):
                 continue
             situation = str(raw_expression.get("situation") or "").strip()
-            style = str(raw_expression.get("style") or "").strip()
+            style = normalize_expression_style_for_learning(str(raw_expression.get("style") or "").strip())
             source_id = str(raw_expression.get("source_id") or "").strip()
             if not situation or not style:
                 continue
@@ -460,7 +465,7 @@ class ExpressionLearner:
 
             upsert_kwargs = before_upsert_result.kwargs
             situation = str(upsert_kwargs.get("situation", situation) or "").strip()
-            style = str(upsert_kwargs.get("style", style) or "").strip()
+            style = normalize_expression_style_for_learning(str(upsert_kwargs.get("style", style) or "").strip())
             if not situation or not style:
                 logger.info(f"{self.session_id} 表达方式写入 Hook 中止: situation={situation!r}")
                 continue
@@ -653,26 +658,29 @@ class ExpressionLearner:
             if not context:
                 continue
             # 过滤掉包含 SELF 的内容（不学习）
-            if "SELF" in situation or "SELF" in style or "SELF" in context:
+            # 过滤掉 style 与机器人名称/昵称重复的表达
+            normalized_style = normalize_expression_style_for_learning(style)
+            if not normalized_style:
+                logger.info(f"跳过清洗后为空的表达方式：situation={situation}, style={style}, source_id={source_id}")
+                continue
+            if "SELF" in situation or "SELF" in normalized_style or "SELF" in context:
                 logger.info(f"跳过包含 SELF 的表达方式：situation={situation}, style={style}, source_id={source_id}")
                 continue
-            # 过滤掉 style 与机器人名称/昵称重复的表达
-            normalized_style = (style or "").strip()
             if normalized_style and normalized_style.casefold() in banned_casefold:
                 logger.debug(
                     f"跳过 style 与机器人名称重复的表达方式：situation={situation}, style={style}, source_id={source_id}"
                 )
                 continue
             # 过滤掉包含 "[表情" 的内容
-            if "[表情包" in situation or "[表情包" in style or "[表情包" in context:
+            if "[表情包" in situation or "[表情包" in normalized_style or "[表情包" in context:
                 logger.info(f"跳过包含表情标记的表达方式：situation={situation}, style={style}, source_id={source_id}")
                 continue
             # 过滤掉包含 "[图片" 的内容
-            if "[图片" in situation or "[图片" in style or "[图片" in context:
+            if "[图片" in situation or "[图片" in normalized_style or "[图片" in context:
                 logger.info(f"跳过包含图片标记的表达方式：situation={situation}, style={style}, source_id={source_id}")
                 continue
 
-            filtered_expressions.append((situation, style))
+            filtered_expressions.append((situation, normalized_style))
 
         return filtered_expressions
 
@@ -697,8 +705,7 @@ class ExpressionLearner:
         """
         expr, similarity = self._find_similar_expression(situation, style, session_id=session_id) or (None, 0)
         if expr:
-            # 根据相似度决定是否使用 LLM 总结
-            # 完全匹配（相似度 == 1.0）时不总结，相似匹配时总结
+            # 只有完全一致的表达才会合并，因此不再触发相似表达的 LLM 情景概括。
             use_llm_summary = similarity < 1.0
             expression = await self._update_existing_expression(
                 expr,
@@ -907,60 +914,39 @@ class ExpressionLearner:
         style: str,
         *,
         session_id: str,
-        situation_similarity_threshold: float = 0.75,
-        style_similarity_threshold: float = 0.75,
     ) -> Optional[Tuple[MaiExpression, float]]:
-        """在数据库中查找相似的表达方式。
+        """在数据库中查找完全一致的表达方式。
 
         Args:
             situation: 当前待匹配的情景描述。
             style: 当前待匹配的表达风格。
             session_id: 表达方式归属的真实会话 ID。
-            situation_similarity_threshold: 认定为相似情景的最低相似度阈值。
-            style_similarity_threshold: 认定为相似表达风格的最低相似度阈值。
 
         Returns:
-            Optional[Tuple[MaiExpression, float]]: 若找到最相似的表达方式，则返回
-            ``(表达方式对象, 情景相似度)``；否则返回 ``None``。
+            Optional[Tuple[MaiExpression, float]]: 若找到完全一致的表达方式，则返回
+            ``(表达方式对象, 1.0)``；否则返回 ``None``。
         """
+        normalized_situation = situation.strip()
+        normalized_style = normalize_expression_style_for_learning(style)
+        if not normalized_situation or not normalized_style:
+            return None
+
         try:
             with get_db_session(auto_commit=False) as session:
                 statement = select(Expression).filter_by(session_id=session_id)
                 expressions = session.exec(statement).all()
 
-                best_match: Optional[MaiExpression] = None
-                best_similarity = 0.0
-
                 for db_expression in expressions:
                     expression = MaiExpression.from_db_instance(db_expression)
-                    style_similarity = difflib.SequenceMatcher(
-                        None,
-                        style,
-                        expression.style,
-                    ).ratio()
-                    if style_similarity <= style_similarity_threshold:
+                    expression_style = normalize_expression_style_for_learning(expression.style)
+                    if expression_style != normalized_style:
                         continue
 
                     candidate_situations = [expression.situation, *expression.content]
                     for candidate_situation in candidate_situations:
-                        normalized_candidate_situation = candidate_situation.strip()
-                        if not normalized_candidate_situation:
-                            continue
-                        similarity = difflib.SequenceMatcher(
-                            None,
-                            situation,
-                            normalized_candidate_situation,
-                        ).ratio()
-                        if (
-                            similarity > situation_similarity_threshold
-                            and similarity > best_similarity
-                        ):
-                            best_similarity = similarity
-                            best_match = expression
-
-            if best_match:
-                logger.debug(f"找到相似表达方式情景 [ID: {best_match.item_id}]，相似度: {best_similarity:.2f}")
-                return best_match, best_similarity
+                        if candidate_situation.strip() == normalized_situation:
+                            logger.debug(f"找到完全一致表达方式 [ID: {expression.item_id}]")
+                            return expression, 1.0
 
         except Exception as e:
             logger.error(f"查找相似表达方式失败: {e}")

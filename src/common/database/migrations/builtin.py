@@ -36,6 +36,7 @@ from .v27_to_v28 import migrate_v27_to_v28
 from .v28_to_v29 import migrate_v28_to_v29
 from .v29_to_v30 import migrate_v29_to_v30
 from .v30_to_v31 import migrate_v30_to_v31
+from .v31_to_v32 import migrate_v31_to_v32
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -70,7 +71,8 @@ V28_SCHEMA_VERSION = 28
 V29_SCHEMA_VERSION = 29
 V30_SCHEMA_VERSION = 30
 V31_SCHEMA_VERSION = 31
-LATEST_SCHEMA_VERSION = 31
+V32_SCHEMA_VERSION = 32
+LATEST_SCHEMA_VERSION = 32
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -1758,6 +1760,13 @@ def build_default_migration_registry() -> MigrationRegistry:
                 name="v30_to_v31",
                 description="清理泛 tag 和低信息行为场景簇。",
                 handler=migrate_v30_to_v31,
+            ),
+            MigrationStep(
+                version_from=V31_SCHEMA_VERSION,
+                version_to=V32_SCHEMA_VERSION,
+                name="v31_to_v32",
+                description="清理表达方式中由 prompt 示例带出的前缀和示例内容。",
+                handler=migrate_v31_to_v32,
             ),
         ]
     )

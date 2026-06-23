@@ -15,6 +15,10 @@ from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
 from src.config.config import global_config
+from src.learners.expression_style_utils import (
+    is_prompt_example_expression_style,
+    normalize_expression_style_for_learning,
+)
 from src.learners.learner_utils_old import weighted_sample
 from src.maisaka.context.messages import LLMContextMessage
 
@@ -111,16 +115,24 @@ class MaisakaExpressionSelector:
                 )
             rows = session.exec(scoped_query).all()
 
-        all_candidates = [
-            {
-                "id": expression_id,
-                "situation": situation,
-                "style": style,
-                "count": count if count is not None else 1,
-            }
-            for expression_id, situation, style, count in rows
-            if expression_id is not None and situation and style
-        ]
+        all_candidates: List[dict[str, Any]] = []
+        for expression_id, situation, style, count in rows:
+            normalized_style = normalize_expression_style_for_learning(str(style or ""))
+            if (
+                expression_id is None
+                or not situation
+                or not normalized_style
+                or is_prompt_example_expression_style(normalized_style)
+            ):
+                continue
+            all_candidates.append(
+                {
+                    "id": expression_id,
+                    "situation": situation,
+                    "style": normalized_style,
+                    "count": count if count is not None else 1,
+                }
+            )
         return all_candidates
 
     def _sample_legacy_expression_candidates(self, all_candidates: List[dict[str, Any]]) -> List[dict[str, Any]]:
@@ -366,8 +378,8 @@ class MaisakaExpressionSelector:
             if not isinstance(candidate_id, int):
                 continue
             situation = str(raw_candidate.get("situation") or "").strip()
-            style = str(raw_candidate.get("style") or "").strip()
-            if not situation or not style:
+            style = normalize_expression_style_for_learning(str(raw_candidate.get("style") or "").strip())
+            if not situation or not style or is_prompt_example_expression_style(style):
                 continue
             normalized_candidates.append(
                 {
@@ -408,8 +420,8 @@ class MaisakaExpressionSelector:
             if not isinstance(raw_expression, dict):
                 continue
             situation = str(raw_expression.get("situation") or "").strip()
-            style = str(raw_expression.get("style") or "").strip()
-            if not situation or not style:
+            style = normalize_expression_style_for_learning(str(raw_expression.get("style") or "").strip())
+            if not situation or not style or is_prompt_example_expression_style(style):
                 continue
             normalized_expression = {
                 "situation": situation,

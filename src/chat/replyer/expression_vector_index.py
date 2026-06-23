@@ -611,6 +611,54 @@ class ExpressionVectorIndex:
         return items
 
     @staticmethod
+    def _load_current_expression_fingerprints() -> Dict[int, str]:
+        """读取当前数据库中仍有效的表达方式指纹，用于清理过期索引项。"""
+
+        from sqlmodel import select
+
+        from src.common.database.database import get_db_session
+        from src.common.database.database_model import Expression
+
+        fingerprints: Dict[int, str] = {}
+        with get_db_session(auto_commit=False) as session:
+            rows = session.exec(
+                select(
+                    Expression.id,
+                    Expression.situation,
+                    Expression.style,
+                )
+            ).all()
+
+        for expression_id, situation, style in rows:
+            if expression_id is None:
+                continue
+            normalized_situation = normalize_text(situation)
+            normalized_style = normalize_text(style)
+            if not normalized_situation or not normalized_style:
+                continue
+            fingerprints[int(expression_id)] = expression_fingerprint(
+                int(expression_id),
+                normalized_situation,
+                normalized_style,
+            )
+        return fingerprints
+
+    @staticmethod
+    def _is_current_index_expression(
+        raw_expression: dict[str, Any],
+        current_fingerprints: Dict[int, str],
+    ) -> bool:
+        """判断索引表达项是否仍与当前数据库记录一致。"""
+
+        expression_id = int(raw_expression.get("id") or 0)
+        if expression_id <= 0:
+            return False
+        expected_fingerprint = current_fingerprints.get(expression_id)
+        if not expected_fingerprint:
+            return False
+        return normalize_text(raw_expression.get("fingerprint")) == expected_fingerprint
+
+    @staticmethod
     def _select_nearest_cluster(vector: np.ndarray, cluster_centers: np.ndarray) -> int:
         """根据当前聚类中心给新增/更新表达分配最近簇。"""
 
@@ -936,6 +984,7 @@ class ExpressionVectorIndex:
 
         resolved_index_path = resolve_project_path(index_path)
         async with self._update_lock:
+            current_fingerprints = self._load_current_expression_fingerprints()
             vectors_path = resolved_index_path.with_suffix(".npz")
             raw_expressions: List[dict[str, Any]] = []
             vector_by_expression_id: Dict[int, np.ndarray] = {}
@@ -971,8 +1020,10 @@ class ExpressionVectorIndex:
                             _load_npz_array(vectors_path, cluster_centers_key)
                         )
 
-                    for expression_index, raw_expression in enumerate(raw_expressions):
+                    for raw_expression in raw_expressions:
                         expression_id = int(raw_expression.get("id") or 0)
+                        if not self._is_current_index_expression(raw_expression, current_fingerprints):
+                            continue
                         marker = (
                             normalize_text(raw_expression.get("embedding_profile_marker"))
                             or LEGACY_EMBEDDING_PROFILE_MARKER
@@ -1002,7 +1053,7 @@ class ExpressionVectorIndex:
                         )
                     for expression_index, raw_expression in enumerate(raw_expressions):
                         expression_id = int(raw_expression.get("id") or 0)
-                        if expression_id <= 0:
+                        if not self._is_current_index_expression(raw_expression, current_fingerprints):
                             continue
                         raw_expression["embedding_profile_marker"] = legacy_marker
                         raw_expression["embedding_model"] = normalize_text(
@@ -1023,9 +1074,19 @@ class ExpressionVectorIndex:
                     "args": {"source": "incremental_learning"},
                 }
 
+            raw_expressions = [
+                raw_expression
+                for raw_expression in raw_expressions
+                if self._is_current_index_expression(raw_expression, current_fingerprints)
+            ]
             expression_positions = {
                 int(raw_expression.get("id") or 0): index
                 for index, raw_expression in enumerate(raw_expressions)
+            }
+            vector_by_expression_id = {
+                expression_id: vector
+                for expression_id, vector in vector_by_expression_id.items()
+                if expression_id in expression_positions
             }
             for item_index, expression in enumerate(normalized_items):
                 next_expression = self._build_index_expression_item(
