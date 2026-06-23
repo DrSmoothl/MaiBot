@@ -171,6 +171,9 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._max_internal_rounds = MAX_INTERNAL_ROUNDS
         self._agent_state: Literal["running", "wait", "stop"] = self._STATE_STOP
         self._pending_wait_tool_call_id: Optional[str] = None
+        self._pending_wait_started_at: Optional[float] = None
+        self._pending_wait_seconds: Optional[float] = None
+        self._consecutive_wait_count = 0
         self._consecutive_idle_count = 0
         self._current_action_tool_names: set[str] = set()
         self.discovered_tool_names: set[str] = set()
@@ -1555,6 +1558,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
     def _enter_stop_state(self) -> None:
         """切换到停止状态。"""
         self._agent_state = self._STATE_STOP
+        self._reset_consecutive_wait_count("stop_state")
         self._clear_wait_state()
 
     def _enter_running_state(self) -> None:
@@ -1566,7 +1570,31 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         """清理 wait 工具挂起状态与超时任务。"""
 
         self._pending_wait_tool_call_id = None
+        self._pending_wait_started_at = None
+        self._pending_wait_seconds = None
         self._cancel_wait_timeout_task()
+
+    def _reset_consecutive_wait_count(self, reason: str) -> None:
+        """重置连续 wait 计数。"""
+
+        if self._consecutive_wait_count <= 0:
+            return
+        logger.debug(
+            f"{self.log_prefix} 连续 wait 计数已重置: "
+            f"原计数={self._consecutive_wait_count} 原因={reason}"
+        )
+        self._consecutive_wait_count = 0
+
+    def _try_enter_wait_state(self, seconds: Optional[float] = None, tool_call_id: Optional[str] = None) -> tuple[bool, int, int]:
+        """尝试进入 wait 状态，并返回是否成功、当前连续次数和上限。"""
+
+        max_count = max(1, int(global_config.chat.max_consecutive_wait_count))
+        if self._consecutive_wait_count >= max_count:
+            return False, self._consecutive_wait_count, max_count
+
+        self._consecutive_wait_count += 1
+        self._enter_wait_state(seconds=seconds, tool_call_id=tool_call_id)
+        return True, self._consecutive_wait_count, max_count
 
     def _resume_from_wait_for_proactive_trigger(self) -> None:
         """主动触发到来时从 wait 状态恢复运行。"""
@@ -1581,6 +1609,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         """切换到等待状态。"""
         self._agent_state = self._STATE_WAIT
         self._pending_wait_tool_call_id = tool_call_id
+        self._pending_wait_started_at = time.time()
+        self._pending_wait_seconds = seconds
         self._mark_message_turn_unscheduled()
         self._cancel_deferred_message_turn_task()
         self._cancel_wait_timeout_task()
@@ -1617,12 +1647,17 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             if self._wait_timeout_task is not None and self._pending_wait_tool_call_id == tool_call_id:
                 self._wait_timeout_task = None
 
-    def _consume_pending_wait_tool_call_id(self) -> str:
-        """消费当前 wait 工具调用编号，供 wait 完成消息回填。"""
+    def _consume_pending_wait_state(self) -> tuple[str, float, Optional[float]]:
+        """消费当前 wait 挂起状态，供 wait 完成消息回填。"""
 
         tool_call_id = self._pending_wait_tool_call_id or "wait_timeout"
+        started_at = self._pending_wait_started_at
+        requested_seconds = self._pending_wait_seconds
+        elapsed_seconds = max(0.0, time.time() - started_at) if started_at is not None else 0.0
         self._pending_wait_tool_call_id = None
-        return tool_call_id
+        self._pending_wait_started_at = None
+        self._pending_wait_seconds = None
+        return tool_call_id, elapsed_seconds, requested_seconds
 
     def _has_pending_wait_tool_call(self) -> bool:
         """返回当前是否存在等待完成后需要回填的 wait 工具调用。"""

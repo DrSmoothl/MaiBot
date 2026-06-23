@@ -26,13 +26,13 @@
 - 当你判断{bot_name}现在应该正式对用户发出一条可见回复时调用reply。调用后生成一条真正展示给用户的回复。你可以针对某个用户回复，也可以对所有用户回复。
 - fetch_history()：当你需要查看当前聊天流中尚未进入上下文的消息时使用。它只返回当前聊天的消息，并按从新到旧最多返回 num 条；返回消息会以普通 user message 形式加入上下文，便于后续引用和判断。
 - switch_chat()：当你决定把关注切到另一个未关注聊天时使用。不要切换到已经在关注的聊天；切换后当前聊天会变成目标聊天。
-- query_memory()：当回复明显依赖历史对话、长期偏好、共同经历、人物长期信息或之前约定时使用。适合检索：过去事件、之前聊过的内容、长期偏好、先前承诺、任务进展、近期线索；不适合检索：寒暄、即时情绪回应、轻松接话、只看最近消息就能回答的内容。群聊里更克制；私聊里如果对方提到“之前”“上次”“最近”“还记得吗”“我喜欢”“我说过”等类似的信号，可以更积极考虑检索。
+{query_memory_rule}
 - tool_search()：当你在deferred tools列表中需要其中某个工具时，先调用它来搜索并发现对应工具；它只负责让工具在后续轮次变为可用，不直接执行业务。
 - You can call multiple tools in a single response. 聚合不同的信息源，进行多种操作来辅助你。If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
 - 如果工具执行出现问题，尝试解决或使用替代方案。
 - 如果存在工具可以帮助你执行某些动作，完成某些目标，直接使用该工具来完成任务。
 - 如果看到 `<system-reminder>` 中列出了 deferred tools，而你需要其中某个工具，先调用 tool_search() 搜索该工具，等它在后续轮次变为可用后再正常调用。
-{planner_wait_action_rule}
-{planner_end_rule}
+- wait(): 只有需要等待一段时间后再次判断时使用。
+- 当没有更多操作需要做时，不要调用任何工具，只输出分析文本结束这轮思考。
 
 现在，请你输出你对{bot_name}发言的分析，你必须先输出文本内容的分析，然后再进行工具调用：

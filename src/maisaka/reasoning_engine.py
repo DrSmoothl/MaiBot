@@ -547,6 +547,7 @@ class MaisakaReasoningEngine:
 
         self._clear_planner_no_tool_hints()
         self._runtime._end_planner_continuation()
+        self._runtime._reset_consecutive_wait_count("planner_no_tool_end")
         self._runtime._enter_stop_state()
         planner_extra_lines.append(status_line)
 
@@ -724,6 +725,8 @@ class MaisakaReasoningEngine:
 
         if pause_tool_name == "wait":
             return CycleEnd("tool_pause:wait", "Planner 调用 wait，本轮暂停并在等待结束后继续判断。")
+        if pause_tool_name == "wait_rest":
+            return CycleEnd("planner_wait_rest", "Planner 连续 wait 达到上限，本轮进入休息并等待新消息。")
         if pause_tool_name:
             return CycleEnd(f"tool_pause:{pause_tool_name}", f"工具 {pause_tool_name} 要求暂停当前思考循环。")
         return CycleEnd("tool_pause", "工具要求暂停当前思考循环。")
@@ -807,7 +810,7 @@ class MaisakaReasoningEngine:
                 "消息整理",
                 f"待处理消息 {len(cached_messages)} 条",
             )
-            if timeout_triggered:
+            if self._runtime._has_pending_wait_tool_call():
                 self._runtime._chat_history.append(self._build_wait_completed_message(has_new_messages=True))
             await self._ingest_messages(cached_messages)
             trigger_message = cached_messages[-1]
@@ -1074,11 +1077,13 @@ class MaisakaReasoningEngine:
 
     def _build_wait_completed_message(self, *, has_new_messages: bool) -> ToolResultMessage:
         """构造 wait 完成后的工具结果消息。"""
-        tool_call_id = self._runtime._consume_pending_wait_tool_call_id()
+        tool_call_id, elapsed_seconds, requested_seconds = self._runtime._consume_pending_wait_state()
+        elapsed_text = f"{elapsed_seconds:.1f} 秒"
+        requested_text = f"，原计划等待 {requested_seconds:.1f} 秒" if requested_seconds is not None else ""
         content = (
-            "等待已结束，期间收到了新的用户输入。请结合这些新消息继续下一轮思考。"
+            f"等待已结束，实际等待 {elapsed_text}{requested_text}，期间收到了新的用户输入。请结合这些新消息继续下一轮思考。"
             if has_new_messages
-            else "等待已超时，期间没有收到新的用户输入。请基于现有上下文继续下一轮思考。"
+            else f"等待已超时，实际等待 {elapsed_text}{requested_text}，期间没有收到新的用户输入。请基于现有上下文继续下一轮思考。"
         )
         return ToolResultMessage(
             content=content,
@@ -2007,6 +2012,8 @@ class MaisakaReasoningEngine:
             tool_started_at = time.time()
             is_unexpanded_tool = not self._runtime.is_action_tool_currently_available(invocation.tool_name)
             result = await self._runtime._tool_registry.invoke(invocation, execution_context)
+            if invocation.tool_name != "wait":
+                self._runtime._reset_consecutive_wait_count(f"tool:{invocation.tool_name}")
             if is_unexpanded_tool and not result.success:
                 result = self._append_deferred_tool_parameter_hint(result)
             tool_duration_ms = (time.time() - tool_started_at) * 1000
@@ -2033,6 +2040,12 @@ class MaisakaReasoningEngine:
 
             if not result.success and tool_call.func_name == "reply":
                 logger.warning(f"{self._runtime.log_prefix} 回复工具未生成可见消息，将继续下一轮循环")
+
+            if bool(result.metadata.get("wait_rest", False)):
+                self._runtime._reset_consecutive_wait_count("wait_limit_rest")
+                self._runtime._enter_stop_state()
+                self._append_tool_post_history_messages(deferred_post_history_messages)
+                return True, "wait_rest", tool_result_summaries, tool_monitor_results
 
             if bool(result.metadata.get("pause_execution", False)):
                 self._append_tool_post_history_messages(deferred_post_history_messages)

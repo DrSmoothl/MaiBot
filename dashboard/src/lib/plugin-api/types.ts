@@ -197,3 +197,21 @@ export interface PluginConfigSchema {
   layout: ConfigLayoutSchema
   _note?: string
 }
+
+export type PluginRuntimeComponentType = 'action' | 'command' | 'tool'
+
+export interface PluginRuntimeComponent {
+  name: string
+  description: string
+  enabled: boolean
+  plugin_name: string
+  component_type: PluginRuntimeComponentType
+  action_parameters?: Record<string, string>
+  action_require?: string[]
+  associated_types?: string[]
+  activation_type?: string
+  random_activation_probability?: number
+  activation_keywords?: string[]
+  parallel_action?: boolean
+  parameters_schema?: Record<string, unknown>
+}

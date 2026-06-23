@@ -735,9 +735,8 @@ class MaisakaChatLoopService:
             "file_tools_section": tools_section,
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "identity": self.personality_prompt,
-            "planner_end_rule": self._build_planner_end_rule(),
             "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
-            "planner_wait_action_rule": self._build_planner_wait_action_rule(),
+            "query_memory_rule": self._build_query_memory_rule(),
         }
 
 
@@ -779,22 +778,20 @@ class MaisakaChatLoopService:
             "zh-CN": "如果当前聊天没有值得行动的内容，应优先考虑使用 `switch_chat` 去其他聊天看看；只有需要等待后重新判断时才使用 `wait`，否则不调用工具结束这轮思考。",
         })
 
-    def _build_planner_wait_action_rule(self) -> str:
-        """构造 Planner 中等待/不行动工具提示。"""
+    def _build_query_memory_rule(self) -> str:
+        """按当前聊天类型构造记忆检索提示。"""
+
+        if self._is_group_chat:
+            return self._localized_text({
+                "en-US": "- query_memory(): Use it only when the reply clearly depends on past group conversation, shared experiences, public agreements, task progress, or recent clues. Do not retrieve memory for greetings, immediate emotional responses, light banter, or content that can be answered from recent messages alone. Do not bring private-chat or personal-privacy memories into a group chat.",
+                "ja-JP": "- query_memory()：返信がグループ内の過去会話、共有した経験、公開された約束、タスクの進捗、最近の手がかりに明確に依存する場合だけ使ってください。挨拶、その場の感情への反応、軽いやり取り、最近のメッセージだけで答えられる内容では検索しないでください。個人チャットや私的な記憶をグループチャットに持ち込まないでください。",
+                "zh-CN": "- query_memory()：只有回复明显依赖群内过去对话、共同经历、公开约定、任务进展或近期线索时使用；不要为了寒暄、即时情绪回应、轻松接话、只看最近消息就能回答的内容而检索。不要把私聊或个人隐私记忆带到群聊里。",
+            })
 
         return self._localized_text({
-            "en-US": "- wait(): Use this only when you need to pause for a while and judge again after the wait ends.",
-            "ja-JP": "- wait()：一定時間待ってから再判断する必要がある場合だけ使ってください。",
-            "zh-CN": "- wait(): 只有需要等待一段时间后再次判断时使用。",
-        })
-
-    def _build_planner_end_rule(self) -> str:
-        """构造 Planner 结束思考提示。"""
-
-        return self._localized_text({
-            "en-US": "- When there are no more operations to perform, do not call any tool; end this thinking round with your analysis text only.",
-            "ja-JP": "- これ以上行う操作がない場合は、どのツールも呼ばず、分析テキストだけでこの思考を終了してください。",
-            "zh-CN": "- 当没有更多操作需要做时，不要调用任何工具，只输出分析文本结束这轮思考。",
+            "en-US": "- query_memory(): Consider retrieval more actively when the other person mentions signals like \"before\", \"last time\", \"recently\", \"do you remember\", \"I like\", or \"I said\", or when the reply depends on long-term preferences, prior promises, shared experiences, or long-term information about a person.",
+            "ja-JP": "- query_memory()：相手が「前に」「この前」「最近」「覚えてる？」「好き」「言った」などの合図を出した場合、または返信が長期的な好み、以前の約束、共有した経験、人物の長期的な情報に依存する場合は、より積極的に検索を検討できます。",
+            "zh-CN": "- query_memory()：当对方提到“之前”“上次”“最近”“还记得吗”“我喜欢”“我说过”等信号，或回复依赖长期偏好、先前承诺、共同经历、人物长期信息时，可以更积极检索。",
         })
 
     def _build_current_chat_attention_tail_message(self) -> str:

@@ -161,8 +161,12 @@ class MessageTurnScheduler:
 
         if runtime._agent_state == runtime._STATE_WAIT:
             if not runtime._is_reply_frequency_silent():
-                return
-            runtime._enter_stop_state()
+                if runtime.chat_stream.is_group_session:
+                    return
+                logger.info(f"{runtime.log_prefix} 私聊 wait 期间收到新消息，结束等待并进入 Planner")
+                runtime._enter_running_state()
+            else:
+                runtime._enter_stop_state()
 
         if runtime._message_turn_scheduled:
             return

@@ -2,7 +2,7 @@
 
 from src.config.config import global_config
 
-IDLE_CYCLE_REASONS = {"planner_no_tool_end", "tool_pause:wait"}
+IDLE_CYCLE_REASONS = {"planner_no_tool_end", "planner_wait_rest", "tool_pause:wait"}
 
 
 def is_reply_necessity_trigger_enabled() -> bool:
