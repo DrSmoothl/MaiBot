@@ -94,19 +94,20 @@ class WebUIServer:
                     sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
                     if af == _socket.AF_INET6:
                         try:
-                            sock.setsockopt(_socket.IPPROTO_IPV6, _socket.IPV6_V6ONLY, 0)
+                            sock.setsockopt(_socket.IPPROTO_IPV6, _socket.IPV6_V6ONLY, 1)
                         except OSError:
                             pass
                     sock.bind(sa)
                     sock.listen()
                     sockets.append(sock)
                     break
-                except OSError:
+                except OSError as bind_err:
                     if sock is not None:
                         try:
                             sock.close()
                         except OSError:
                             pass
+                    logger.warning(f"⚠️ WebUI 无法绑定到 {host}:{self.port} ({sa}): {bind_err}")
                     continue
 
         return sockets
