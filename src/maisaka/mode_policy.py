@@ -7,10 +7,6 @@ from src.config.config import global_config
 BuiltinStage = Literal["timing", "action", "both"]
 BuiltinVisibility = Literal["visible", "deferred", "hidden"]
 
-TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
-NEW_MAISAKA_TIMING_GATE_TOOL_NAMES = {"continue", "wait"}
-PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue", "wait"}
-NEW_MAISAKA_PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue"}
 LEGACY_NO_ACTION_REASONS = {"timing_no_action", "tool_pause:no_action"}
 NEW_MAISAKA_NO_ACTION_REASONS = {*LEGACY_NO_ACTION_REASONS, "planner_no_tool_finish", "timing_wait", "tool_pause:wait"}
 
@@ -50,19 +46,17 @@ def effective_builtin_visibility(name: str, default_visibility: BuiltinVisibilit
 def timing_gate_tool_names() -> set[str]:
     """返回当前模式保留给 Timing Gate 的工具名。"""
 
-    return NEW_MAISAKA_TIMING_GATE_TOOL_NAMES if is_new_maisaka_enabled() else TIMING_GATE_TOOL_NAMES
+    if is_new_maisaka_enabled():
+        return {"continue", "wait"}
+    return {"continue", "no_action", "wait"}
 
 
 def planner_filtered_timing_tool_names() -> set[str]:
     """返回 Planner 历史中要过滤的 Timing Gate 工具名。"""
 
-    return NEW_MAISAKA_PLANNER_FILTERED_TIMING_TOOL_NAMES if is_new_maisaka_enabled() else PLANNER_FILTERED_TIMING_TOOL_NAMES
-
-
-def planner_idle_tool_name() -> str:
-    """返回 Planner 空闲时应使用的工具名。"""
-
-    return "wait" if is_new_maisaka_enabled() else "no_action"
+    if is_new_maisaka_enabled():
+        return {"continue"}
+    return {"continue", "wait"}
 
 
 def is_no_action_equivalent_cycle_reason(cycle_end_reason: str) -> bool:

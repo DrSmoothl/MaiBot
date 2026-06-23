@@ -81,15 +81,15 @@ def test_new_maisaka_treats_planner_no_tool_as_finish(monkeypatch) -> None:
     engine._runtime = runtime
     planner_extra_lines: list[str] = []
 
-    count, cycle_end_reason, cycle_end_detail, should_finish = engine._handle_planner_no_tool_retry(
+    count, cycle_end, should_finish = engine._handle_planner_no_tool_retry(
         0,
         planner_extra_lines,
     )
 
     assert count == 1
-    assert cycle_end_reason == "planner_no_tool_finish"
-    assert is_no_action_equivalent_cycle_reason(cycle_end_reason)
-    assert "结束" in cycle_end_detail
+    assert cycle_end.reason == "planner_no_tool_finish"
+    assert is_no_action_equivalent_cycle_reason(cycle_end.reason)
+    assert "结束" in cycle_end.detail
     assert planner_extra_lines == ["状态：未调用工具，已结束本轮思考"]
     assert should_finish is True
     assert runtime.finished is True

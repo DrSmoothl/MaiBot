@@ -863,18 +863,6 @@ class MaisakaChatLoopService:
         return "- wait：固定再等待一段时间，时间到后再重新判断"
 
     @staticmethod
-    def _get_timing_gate_tool_names() -> set[str]:
-        """返回当前 Timing Gate 应保留的工具链名称。"""
-
-        return timing_gate_tool_names()
-
-    @staticmethod
-    def _get_planner_filtered_timing_tool_names() -> set[str]:
-        """返回当前 Planner 需要隐藏的 Timing Gate 工具链名称。"""
-
-        return planner_filtered_timing_tool_names()
-
-    @staticmethod
     def _get_chat_prompt_for_chat(chat_id: str, is_group_chat: Optional[bool]) -> str:
         """根据聊天流 ID 获取匹配的额外提示。"""
         return ChatConfigUtils.get_chat_prompt_for_chat(chat_id, is_group_chat)
@@ -1282,13 +1270,13 @@ class MaisakaChatLoopService:
         """按请求类型过滤不应暴露的历史工具链。"""
 
         if request_kind == "timing_gate":
-            timing_gate_tool_names = MaisakaChatLoopService._get_timing_gate_tool_names()
+            allowed_timing_tool_names = timing_gate_tool_names()
             allowed_tool_call_ids = {
                 tool_call.call_id
                 for message in selected_history
                 if isinstance(message, AssistantMessage)
                 for tool_call in message.tool_calls
-                if tool_call.func_name in timing_gate_tool_names and tool_call.call_id
+                if tool_call.func_name in allowed_timing_tool_names and tool_call.call_id
             }
             filtered_history: List[LLMContextMessage] = []
             for message in selected_history:
@@ -1296,7 +1284,7 @@ class MaisakaChatLoopService:
                     continue
 
                 if isinstance(message, ToolResultMessage):
-                    if message.tool_name in timing_gate_tool_names or message.tool_call_id in allowed_tool_call_ids:
+                    if message.tool_name in allowed_timing_tool_names or message.tool_call_id in allowed_tool_call_ids:
                         filtered_history.append(message)
                     continue
 
@@ -1304,7 +1292,7 @@ class MaisakaChatLoopService:
                     kept_tool_calls = [
                         tool_call
                         for tool_call in message.tool_calls
-                        if tool_call.func_name in timing_gate_tool_names
+                        if tool_call.func_name in allowed_timing_tool_names
                     ]
                     if not kept_tool_calls:
                         if message.content.strip():
@@ -1352,16 +1340,16 @@ class MaisakaChatLoopService:
             ]
 
         filtered_history: List[LLMContextMessage] = []
-        planner_filtered_timing_tool_names = MaisakaChatLoopService._get_planner_filtered_timing_tool_names()
+        filtered_timing_tool_names = planner_filtered_timing_tool_names()
         for message in selected_history:
-            if isinstance(message, ToolResultMessage) and message.tool_name in planner_filtered_timing_tool_names:
+            if isinstance(message, ToolResultMessage) and message.tool_name in filtered_timing_tool_names:
                 continue
 
             if isinstance(message, AssistantMessage) and message.tool_calls:
                 kept_tool_calls = [
                     tool_call
                     for tool_call in message.tool_calls
-                    if tool_call.func_name not in planner_filtered_timing_tool_names
+                    if tool_call.func_name not in filtered_timing_tool_names
                 ]
                 if not kept_tool_calls:
                     if message.content.strip():

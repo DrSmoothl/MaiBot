@@ -2,6 +2,7 @@
 
 from base64 import b64decode
 from binascii import Error as BinasciiError
+from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -55,12 +56,15 @@ from src.maisaka.context.messages import (
 )
 from src.maisaka.focus import focus_mode_manager
 from src.maisaka.context.post_processor import process_chat_history_after_cycle
-from src.maisaka.context.history import build_prefixed_message_sequence, build_session_message_visible_text
+from src.maisaka.context.history import (
+    TOOL_RESULT_MEDIA_SOURCE_KIND,
+    build_prefixed_message_sequence,
+    build_session_message_visible_text,
+)
 from src.maisaka.memory.heuristic_injector import heuristic_memory_injector
 from src.maisaka.memory.mid_term import build_mid_term_memory_message, insert_mid_term_memory_message
 from src.maisaka.mode_policy import (
     is_new_maisaka_enabled,
-    planner_idle_tool_name,
     should_run_timing_gate,
 )
 from src.maisaka.monitor.events import (
@@ -85,7 +89,6 @@ PLANNER_NO_TOOL_FINISH_THRESHOLD = 3
 PLANNER_NO_TOOL_HINT_DISPLAY_PREFIX = "[Planner 工具选择提示]"
 HISTORY_SILENT_TOOL_NAMES = {"finish"}
 HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
-TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
 BEHAVIOR_SELECTOR_CONTEXT_MESSAGE_LIMIT = 8
 BEHAVIOR_SELECTOR_CONTEXT_TEXT_LIMIT = 1800
@@ -101,24 +104,60 @@ BEHAVIOR_SCENARIO_CONSTRAINT_TEXT = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class CycleEnd:
+    """内部循环结束原因。"""
+
+    reason: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class TurnStartContext:
+    """一次内部循环触发的前置上下文。"""
+
+    cached_messages: list[SessionMessage]
+    trigger_message: Optional[SessionMessage]
+    timeout_triggered: bool
+    proactive_triggered: bool
+    silent_reply_frequency: bool
+
+
+@dataclass(slots=True)
+class CycleRuntimeState:
+    """一轮内部循环中逐步积累的运行产物。"""
+
+    planner_duration_ms: float = 0.0
+    timing_duration_ms: float = 0.0
+    current_stage_started_at: float = 0.0
+    action_tool_count: int = 0
+    timing_action: Optional[str] = None
+    timing_response: Optional[ChatResponse] = None
+    timing_tool_results: Optional[list[str]] = None
+    timing_tool_monitor_results: Optional[list[dict[str, Any]]] = None
+    response: Optional[ChatResponse] = None
+    planner_extra_lines: list[str] = field(default_factory=list)
+    planner_interrupted: bool = False
+    cycle_end: CycleEnd = field(default_factory=lambda: CycleEnd("continue", "本轮思考完成，继续后续内部轮次。"))
+    tool_result_summaries: list[str] = field(default_factory=list)
+    tool_monitor_results: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class PlannerInterruptResult:
+    """Planner 打断后的收尾信息。"""
+
+    response: ChatResponse
+    extra_lines: list[str]
+    retry_messages: list[SessionMessage]
+
+
 class MaisakaReasoningEngine:
     """负责内部思考、推理与工具执行。"""
 
     def __init__(self, runtime: "MaisakaHeartFlowChatting") -> None:
         self._runtime = runtime
         self._last_reasoning_content: str = ""
-
-    @staticmethod
-    def _get_runtime_manager() -> Any:
-        """获取插件运行时管理器。
-
-        Returns:
-            Any: 插件运行时管理器单例。
-        """
-
-        from src.plugin_runtime.integration import get_plugin_runtime_manager
-
-        return get_plugin_runtime_manager()
 
     @property
     def last_reasoning_content(self) -> str:
@@ -472,7 +511,7 @@ class MaisakaReasoningEngine:
     async def _build_planner_injected_user_messages(
         self,
         *,
-        anchor_message: SessionMessage,
+        profile_message: SessionMessage,
         source_messages: list[SessionMessage],
         deferred_tools_reminder: str,
     ) -> list[str]:
@@ -494,7 +533,7 @@ class MaisakaReasoningEngine:
         async def build_profile_messages() -> list[str]:
             try:
                 return await build_person_profile_injection_messages(
-                    anchor_message=anchor_message,
+                    anchor_message=profile_message,
                     pending_messages=source_messages,
                 )
             except Exception as exc:
@@ -529,14 +568,7 @@ class MaisakaReasoningEngine:
                 error_message="统一工具注册表尚未初始化。",
             )
             if store_record:
-                saved_record = await self._store_tool_execution_record(invocation, result, None)
-                await handle_tool_post_execution_effects(
-                    invocation=invocation,
-                    result=result,
-                    saved_record=saved_record,
-                    chat_stream=self._runtime.chat_stream,
-                    log_prefix=self._runtime.log_prefix,
-                )
+                await self._record_tool_execution_effects(invocation, result, None)
             if append_history:
                 self._append_tool_execution_result(tool_call, result)
             return invocation, result, None
@@ -546,14 +578,7 @@ class MaisakaReasoningEngine:
         tool_spec = await self._runtime._tool_registry.get_tool_spec(invocation.tool_name, availability_context)
         result = await self._runtime._tool_registry.invoke(invocation, execution_context)
         if store_record:
-            saved_record = await self._store_tool_execution_record(invocation, result, tool_spec)
-            await handle_tool_post_execution_effects(
-                invocation=invocation,
-                result=result,
-                saved_record=saved_record,
-                chat_stream=self._runtime.chat_stream,
-                log_prefix=self._runtime.log_prefix,
-            )
+            await self._record_tool_execution_effects(invocation, result, tool_spec)
         if append_history:
             self._append_tool_execution_result(tool_call, result)
         return invocation, result, tool_spec
@@ -563,7 +588,7 @@ class MaisakaReasoningEngine:
     ) -> tuple[Literal["continue", "no_action", "wait"], Any, list[str], list[dict[str, Any]]]:
         """运行 Timing Gate 子代理并返回控制决策。"""
 
-        if self._runtime._force_next_timing_continue:
+        if self._runtime._has_forced_turn_trigger():
             return self._build_forced_continue_timing_result()
 
         tool_result_summaries: list[str] = []
@@ -642,15 +667,14 @@ class MaisakaReasoningEngine:
             append_history=append_history,
             store_record=store_record,
         )
-        tool_result_summaries.append(self._build_tool_result_summary(selected_tool_call, result))
-        tool_monitor_results.append(
-            self._build_tool_monitor_result(
-                selected_tool_call,
-                invocation,
-                result,
-                duration_ms=0.0,
-                tool_spec=tool_spec,
-            )
+        self._append_tool_display_results(
+            tool_result_summaries=tool_result_summaries,
+            tool_monitor_results=tool_monitor_results,
+            tool_call=selected_tool_call,
+            invocation=invocation,
+            result=result,
+            duration_ms=0.0,
+            tool_spec=tool_spec,
         )
         self._append_timing_gate_execution_result(response, selected_tool_call, result)
 
@@ -676,7 +700,7 @@ class MaisakaReasoningEngine:
     ) -> tuple[Literal["continue"], ChatResponse, list[str], list[dict[str, Any]]]:
         """构造跳过 Timing Gate 时使用的伪 continue 结果。"""
 
-        reason = self._runtime._consume_force_next_timing_continue_reason() or "本轮直接跳过 Timing Gate 并视作 continue。"
+        reason = self._runtime._consume_forced_turn_reason() or "本轮直接跳过 Timing Gate 并视作 continue。"
         logger.info(f"{self._runtime.log_prefix} {reason}")
         return (
             "continue",
@@ -707,20 +731,18 @@ class MaisakaReasoningEngine:
 
     @staticmethod
     def _build_planner_no_tool_hint(attempt_count: int) -> str:
-        """构造 Planner 未选择工具时注入的重试提示。"""
+        """构造旧模式 Planner 未选择工具时注入的重试提示。"""
 
-        idle_tool_name = planner_idle_tool_name()
-        idle_tool_hint = "需要等待后重新判断时调用 wait" if idle_tool_name == "wait" else "需要先等待新消息时调用 no_action"
         if attempt_count <= 1:
             return (
                 "你刚刚只输出了分析，但没有选择任何工具。Planner 每轮思考后必须调用至少一个当前可用工具："
-                f"需要回复时调用 reply，{idle_tool_hint}，需要结束本轮时调用 finish，"
+                "需要回复时调用 reply，需要先等待新消息时调用 no_action，需要结束本轮时调用 finish，"
                 "需要信息时调用查询或查看类工具。请重新思考，并在本轮选择一个工具。"
             )
 
         return (
             "严厉提醒：这是你连续第二次没有调用工具。不要只输出分析文本；"
-            f"你必须立刻调用一个当前可用工具。没有要回复或查询的内容，也必须调用 {idle_tool_name} 或 finish。"
+            "你必须立刻调用一个当前可用工具。没有要回复或查询的内容，也必须调用 no_action 或 finish。"
         )
 
     @staticmethod
@@ -766,36 +788,35 @@ class MaisakaReasoningEngine:
         self,
         planner_no_tool_count: int,
         planner_extra_lines: list[str],
-    ) -> tuple[int, str, str, bool]:
+    ) -> tuple[int, CycleEnd, bool]:
         """处理 Planner 未调用工具时的递进提示与终止策略。"""
 
         planner_no_tool_count += 1
         if is_new_maisaka_enabled():
-            self._clear_planner_no_tool_hints()
-            self._finish_planner_continuation()
-            self._runtime._enter_stop_state()
-            cycle_end_detail = "Planner 未调用工具，新 Maisaka 将其视为本轮思考结束。"
-            planner_extra_lines.append("状态：未调用工具，已结束本轮思考")
+            cycle_end = CycleEnd("planner_no_tool_finish", "Planner 未调用工具，新 Maisaka 将其视为本轮思考结束。")
+            self._finish_planner_no_tool_cycle(
+                planner_extra_lines,
+                status_line="状态：未调用工具，已结束本轮思考",
+            )
             logger.info(f"{self._runtime.log_prefix} Planner 未调用工具，新 Maisaka 已结束本轮思考")
-            return planner_no_tool_count, "planner_no_tool_finish", cycle_end_detail, True
+            return planner_no_tool_count, cycle_end, True
 
         if planner_no_tool_count >= PLANNER_NO_TOOL_FINISH_THRESHOLD:
-            self._clear_planner_no_tool_hints()
-            self._finish_planner_continuation()
-            self._runtime._enter_stop_state()
-            cycle_end_detail = (
+            cycle_end = CycleEnd(
+                "finish",
                 f"Planner 连续 {PLANNER_NO_TOOL_FINISH_THRESHOLD} 次没有调用工具，"
-                "已视为 finish，结束本轮思考并等待新消息。"
+                "已视为 finish，结束本轮思考并等待新消息。",
             )
-            planner_extra_lines.append(
-                f"状态：连续 {PLANNER_NO_TOOL_FINISH_THRESHOLD} 次未调用工具，已视为 finish"
+            self._finish_planner_no_tool_cycle(
+                planner_extra_lines,
+                status_line=f"状态：连续 {PLANNER_NO_TOOL_FINISH_THRESHOLD} 次未调用工具，已视为 finish",
             )
-            return planner_no_tool_count, "finish", cycle_end_detail, True
+            return planner_no_tool_count, cycle_end, True
 
         self._insert_planner_no_tool_hint(planner_no_tool_count)
-        cycle_end_detail = (
-            f"Planner 第 {planner_no_tool_count} 次没有调用工具，"
-            "已插入工具选择提示并重试。"
+        cycle_end = CycleEnd(
+            "planner_missing_tool_retry",
+            f"Planner 第 {planner_no_tool_count} 次没有调用工具，已插入工具选择提示并重试。",
         )
         planner_extra_lines.append(
             f"状态：第 {planner_no_tool_count} 次未调用工具，已插入工具选择提示"
@@ -804,7 +825,115 @@ class MaisakaReasoningEngine:
             f"{self._runtime.log_prefix} Planner 第 {planner_no_tool_count} 次未调用工具，"
             "已插入工具选择提示并重试"
         )
-        return planner_no_tool_count, "planner_missing_tool_retry", cycle_end_detail, False
+        return planner_no_tool_count, cycle_end, False
+
+    def _finish_planner_no_tool_cycle(
+        self,
+        planner_extra_lines: list[str],
+        *,
+        status_line: str,
+    ) -> None:
+        """结束 Planner 无工具输出导致的当前思考轮。"""
+
+        self._clear_planner_no_tool_hints()
+        self._runtime._finish_planner_continuation()
+        self._runtime._enter_stop_state()
+        planner_extra_lines.append(status_line)
+
+    async def _handle_planner_response_actions(
+        self,
+        *,
+        response: ChatResponse,
+        cycle_detail: CycleDetail,
+        state: CycleRuntimeState,
+        planner_no_tool_count: int,
+        planner_extra_lines: list[str],
+    ) -> tuple[int, bool]:
+        """处理 Planner 响应中的工具调用，或无工具输出策略。"""
+
+        reasoning_content = self._get_effective_planner_thought(response)
+        if self._should_replace_reasoning(reasoning_content):
+            reasoning_content = "我应该根据我上面思考的内容进行反思，重新思考我下一步的行动，我需要分析当前场景，对话，然后直接输出我的想法："
+            response.content = reasoning_content
+            response.reasoning = reasoning_content
+            response.raw_message.content = reasoning_content
+            logger.info(f"{self._runtime.log_prefix} 当前思考与上一轮过于相似，已替换为重新思考提示")
+
+        self._last_reasoning_content = reasoning_content
+        self._runtime._chat_history.append(response.raw_message)
+
+        if response.tool_calls:
+            planner_no_tool_count = 0
+            self._clear_planner_no_tool_hints()
+            tool_started_at = time.time()
+            (
+                should_pause,
+                pause_tool_name,
+                tool_result_summaries,
+                tool_monitor_results,
+            ) = await self._handle_tool_calls(
+                response.tool_calls,
+                reasoning_content,
+            )
+            cycle_detail.time_records["tool_calls"] = time.time() - tool_started_at
+            state.tool_result_summaries = tool_result_summaries
+            state.tool_monitor_results = tool_monitor_results
+            if should_pause:
+                if pause_tool_name == "finish":
+                    self._runtime._finish_planner_continuation()
+                state.cycle_end = self._cycle_end_for_pause_tool(pause_tool_name)
+                return planner_no_tool_count, True
+            state.cycle_end = CycleEnd("tool_continue", "Planner 工具执行完成，继续下一轮内部思考。")
+            return planner_no_tool_count, False
+
+        planner_no_tool_count, cycle_end, should_finish_after_no_tool = self._handle_planner_no_tool_retry(
+            planner_no_tool_count,
+            planner_extra_lines,
+        )
+        state.cycle_end = cycle_end
+        state.tool_result_summaries = []
+        state.tool_monitor_results = []
+        return planner_no_tool_count, should_finish_after_no_tool
+
+    async def _run_planner_request(
+        self,
+        *,
+        trigger_message: SessionMessage,
+        source_messages: list[SessionMessage],
+        round_index: int,
+        round_text: str,
+        state: CycleRuntimeState,
+    ) -> None:
+        """准备上下文并执行一次 Planner 请求。"""
+
+        planner_started_at = time.time()
+        self._runtime._update_stage_status("Planner", "组织上下文并请求模型", round_text=round_text)
+        action_tool_definitions, deferred_tools_reminder = await self._build_action_tool_definitions()
+        injected_user_messages = await self._build_planner_injected_user_messages(
+            profile_message=trigger_message,
+            source_messages=source_messages,
+            deferred_tools_reminder=deferred_tools_reminder,
+        )
+        if not resolve_enable_visual_planner():
+            log_pending_image_recognition_before_text_planner(
+                self._runtime._chat_history,
+                log_prefix=self._runtime.log_prefix,
+            )
+        logger.info(
+            f"{self._runtime.log_prefix} 规划器开始执行: "
+            f"回合={round_index + 1} "
+            f"历史消息数={len(self._runtime._chat_history)} "
+            f"开始时间={planner_started_at:.3f}"
+        )
+        state.current_stage_started_at = planner_started_at
+        state.action_tool_count = len(action_tool_definitions)
+        response = await self._run_interruptible_planner(
+            injected_user_messages=injected_user_messages or None,
+            tail_user_messages=self._runtime.build_focus_tail_user_messages() or None,
+            tool_definitions=action_tool_definitions,
+        )
+        state.response = response
+        state.planner_duration_ms = (time.time() - planner_started_at) * 1000
 
     def _append_timing_gate_invalid_tool_hint(self, invalid_tool_text: str) -> None:
         """写入一条仅 Timing Gate 可见的非法工具提示，并保证最多保留最新一条。"""
@@ -830,70 +959,124 @@ class MaisakaReasoningEngine:
             )
         )
 
-    @staticmethod
-    def _mark_timing_gate_completed(timing_action: str) -> bool:
-        """根据门控动作决定下一轮是否还需要重新执行 timing。"""
-
-        return timing_action != "continue"
-
-    def _is_planner_continuation_active(self) -> bool:
-        """判断当前是否处于连续 Planner 状态。"""
-
-        is_active = getattr(self._runtime, "_is_planner_continuation_active", None)
-        if callable(is_active):
-            return bool(is_active())
-        return bool(getattr(self._runtime, "_planner_continuation_active", False))
-
-    def _start_planner_continuation(self) -> None:
-        """进入连续 Planner 状态。"""
-
-        start_continuation = getattr(self._runtime, "_start_planner_continuation", None)
-        if callable(start_continuation):
-            start_continuation()
-            return
-        self._runtime._planner_continuation_active = True
-
-    def _finish_planner_continuation(self) -> None:
-        """结束连续 Planner 状态。"""
-
-        finish_continuation = getattr(self._runtime, "_finish_planner_continuation", None)
-        if callable(finish_continuation):
-            finish_continuation()
-            return
-        self._runtime._planner_continuation_active = False
-
-    def _log_consumed_force_next_timing_continue_reason(self) -> None:
-        """消费并记录下一轮强制跳过 Timing Gate 的原因。"""
-
-        consume_force_continue = getattr(self._runtime, "_consume_force_next_timing_continue_reason", None)
-        if not callable(consume_force_continue):
-            return
-        if force_continue_reason := consume_force_continue():
-            logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
-
     def _should_run_initial_timing_gate(self) -> bool:
         """决定本批消息开始时是否需要先进入 Timing Gate。"""
 
         if is_new_maisaka_enabled():
-            self._log_consumed_force_next_timing_continue_reason()
+            if force_continue_reason := self._runtime._consume_forced_turn_reason():
+                logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
             logger.info(f"{self._runtime.log_prefix} Timing Gate 已临时禁用，本轮直接进入 Planner")
             return False
 
-        if should_run_timing_gate(planner_continuation_active=self._is_planner_continuation_active()):
+        if should_run_timing_gate(planner_continuation_active=self._runtime._is_planner_continuation_active()):
             return True
 
-        self._log_consumed_force_next_timing_continue_reason()
+        if force_continue_reason := self._runtime._consume_forced_turn_reason():
+            logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
         logger.info(f"{self._runtime.log_prefix} 连续 Planner 状态未结束，本轮跳过 Timing Gate")
         return False
 
-    @staticmethod
-    def _should_retry_planner_after_interrupt(
+    async def _run_timing_gate_round(
+        self,
         *,
+        cycle_detail: CycleDetail,
+        round_text: str,
+        state: CycleRuntimeState,
+    ) -> None:
+        """执行一次 Timing Gate 并广播门控结果。"""
+
+        self._runtime._update_stage_status("Timing Gate", "等待门控决策", round_text=round_text)
+        timing_started_at = time.time()
+        (
+            timing_action,
+            timing_response,
+            timing_tool_results,
+            timing_tool_monitor_results,
+        ) = await self._run_timing_gate()
+        timing_duration_ms = (time.time() - timing_started_at) * 1000
+        cycle_detail.time_records["timing_gate"] = timing_duration_ms / 1000
+        await emit_timing_gate_result(
+            session_id=self._runtime.session_id,
+            cycle_id=cycle_detail.cycle_id,
+            action=timing_action,
+            content=timing_response.content,
+            tool_calls=timing_response.tool_calls,
+            messages=[],
+            prompt_tokens=timing_response.prompt_tokens,
+            selected_history_count=timing_response.selected_history_count,
+            duration_ms=timing_duration_ms,
+        )
+        state.timing_action = timing_action
+        state.timing_response = timing_response
+        state.timing_tool_results = timing_tool_results
+        state.timing_tool_monitor_results = timing_tool_monitor_results
+        state.timing_duration_ms = timing_duration_ms
+
+    async def _handle_planner_interrupt(
+        self,
+        *,
+        exc: ReqAbortException,
         round_index: int,
-        max_internal_rounds: int,
-        has_pending_messages: bool,
-    ) -> bool:
-        return has_pending_messages and round_index < max_internal_rounds
+        round_text: str,
+        current_stage_started_at: float,
+        action_tool_count: int,
+    ) -> PlannerInterruptResult:
+        """处理 Planner 流式请求被新消息打断后的监控响应与重试消息。"""
+
+        self._runtime._update_stage_status(
+            "Planner 已打断",
+            str(exc) or "收到外部中断信号",
+            round_text=round_text,
+        )
+        interrupted_at = time.time()
+        interrupted_text = "Planner 收到新消息，开始重新决策"
+        interrupted_response = ChatResponse(
+            content=interrupted_text,
+            tool_calls=[],
+            request_messages=[],
+            raw_message=AssistantMessage(
+                content=interrupted_text,
+                timestamp=datetime.now(),
+                tool_calls=[],
+                source_kind="perception",
+            ),
+            selected_history_count=len(self._runtime._chat_history),
+            tool_count=action_tool_count,
+            prompt_tokens=0,
+            built_message_count=0,
+            completion_tokens=0,
+            total_tokens=0,
+            model_name="",
+            prompt_section=None,
+            reasoning="",
+        )
+        extra_lines = [
+            "状态：已被新消息打断",
+            "打断位置：Planner 请求流式响应阶段",
+            f"打断耗时：{interrupted_at - current_stage_started_at:.3f} 秒",
+        ]
+        logger.info(
+            f"{self._runtime.log_prefix} Planner 打断成功: "
+            f"回合={round_index + 1} "
+            f"开始时间={current_stage_started_at:.3f} "
+            f"打断时间={interrupted_at:.3f} "
+            f"耗时={interrupted_at - current_stage_started_at:.3f} 秒"
+        )
+        if not self._runtime._has_pending_messages() or round_index >= self._runtime._max_internal_rounds:
+            return PlannerInterruptResult(interrupted_response, extra_lines, [])
+
+        await self._runtime._wait_for_message_quiet_period()
+        self._runtime._mark_message_turn_unscheduled()
+        interrupted_messages = self._runtime._collect_pending_messages()
+        if not interrupted_messages:
+            return PlannerInterruptResult(interrupted_response, extra_lines, [])
+
+        await self._ingest_messages(interrupted_messages)
+        logger.info(
+            f"{self._runtime.log_prefix} 保持活跃状态，跳过 Timing Gate 直接重试 Planner: "
+            f"回合={round_index + 2}"
+        )
+        return PlannerInterruptResult(interrupted_response, extra_lines, interrupted_messages)
 
     @staticmethod
     def _get_effective_planner_thought(response: ChatResponse) -> str:
@@ -904,6 +1087,218 @@ class MaisakaReasoningEngine:
             return reasoning_content
         return str(response.content or "").strip()
 
+    @staticmethod
+    def _cycle_end_for_timing_action(timing_action: str) -> CycleEnd:
+        """返回 Timing Gate 非 continue 动作对应的结束原因。"""
+
+        if timing_action == "wait":
+            return CycleEnd("timing_wait", "Timing Gate 选择 wait，本轮不会进入 Planner，将在等待结束后继续。")
+        return CycleEnd("timing_no_action", "Timing Gate 选择 no_action，本轮不会进入 Planner。")
+
+    @staticmethod
+    def _cycle_end_for_pause_tool(pause_tool_name: Optional[str]) -> CycleEnd:
+        """返回工具要求暂停时对应的结束原因。"""
+
+        if pause_tool_name == "finish":
+            return CycleEnd("finish", "Planner 调用 finish，结束连续 Planner 并等待新消息。")
+        if pause_tool_name == "no_action":
+            return CycleEnd("tool_pause:no_action", "Planner 调用 no_action，保留连续 Planner 状态并等待新消息。")
+        if pause_tool_name == "wait":
+            return CycleEnd("tool_pause:wait", "Planner 调用 wait，本轮暂停并在等待结束后继续判断。")
+        if pause_tool_name:
+            return CycleEnd(f"tool_pause:{pause_tool_name}", f"工具 {pause_tool_name} 要求暂停当前思考循环。")
+        return CycleEnd("tool_pause", "工具要求暂停当前思考循环。")
+
+    @staticmethod
+    def _cycle_end_for_max_rounds(max_internal_rounds: int) -> CycleEnd:
+        """返回达到内部思考轮次上限时的结束原因。"""
+
+        return CycleEnd("max_rounds", f"已达到内部思考轮次上限 {max_internal_rounds}，本轮处理结束。")
+
+    async def _collect_pending_messages_before_next_round(self, round_index: int) -> list[SessionMessage]:
+        """在后续内部轮次开始前合并新消息。"""
+
+        if round_index <= 0 or not self._runtime._has_pending_messages():
+            return []
+
+        await self._runtime._wait_for_message_quiet_period()
+        self._runtime._mark_message_turn_unscheduled()
+        pending_round_messages = self._runtime._collect_pending_messages()
+        if pending_round_messages:
+            await self._ingest_messages(pending_round_messages)
+            logger.info(
+                f"{self._runtime.log_prefix} 内部轮次开始前已合并新消息: "
+                f"消息数={len(pending_round_messages)} 回合={round_index + 1}"
+            )
+        return pending_round_messages
+
+    async def _start_cycle_round(self, round_index: int) -> tuple[CycleDetail, str]:
+        """启动一轮内部循环并广播开始事件。"""
+
+        cycle_detail = self._start_cycle()
+        round_text = f"第 {round_index + 1}/{self._runtime._max_internal_rounds} 轮"
+        self._runtime._log_cycle_started(cycle_detail, round_index)
+        self._runtime._update_stage_status("启动循环", f"循环 {cycle_detail.cycle_id}", round_text=round_text)
+        await emit_cycle_start(
+            session_id=self._runtime.session_id,
+            cycle_id=cycle_detail.cycle_id,
+            round_index=round_index,
+            max_rounds=self._runtime._max_internal_rounds,
+            history_count=len(self._runtime._chat_history),
+        )
+        return cycle_detail, round_text
+
+    async def _refresh_visual_placeholders_for_cycle(self, cycle_detail: CycleDetail) -> None:
+        """刷新本轮开始前可用的视觉占位消息。"""
+
+        visual_refresh_started_at = time.time()
+        refreshed_message_count = await self._refresh_chat_history_visual_placeholders()
+        cycle_detail.time_records["visual_refresh"] = time.time() - visual_refresh_started_at
+        if refreshed_message_count > 0:
+            logger.info(f"{self._runtime.log_prefix} 本轮思考前已刷新 {refreshed_message_count} 条视觉占位历史消息")
+
+    async def _prepare_turn_start_context(
+        self,
+        queued_trigger: Literal["message", "timeout", "proactive"],
+    ) -> TurnStartContext:
+        """消费触发信号并准备本轮初始消息与触发消息。"""
+
+        message_triggered, timeout_triggered, proactive_triggered = self._drain_ready_turn_triggers(queued_trigger)
+        if proactive_triggered:
+            self._runtime._clear_focus_cooldown_wakeup_scheduled()
+        silent_reply_frequency = self._runtime._is_reply_frequency_silent()
+
+        if (
+            self._runtime._agent_state == self._runtime._STATE_WAIT
+            and not (timeout_triggered or proactive_triggered)
+            and not silent_reply_frequency
+        ):
+            self._runtime._mark_message_turn_unscheduled()
+            logger.debug(f"{self._runtime.log_prefix} 当前仍处于 wait 状态，忽略消息触发并继续等待超时")
+            return TurnStartContext([], None, timeout_triggered, proactive_triggered, silent_reply_frequency)
+
+        if message_triggered:
+            await self._runtime._wait_for_message_quiet_period()
+            self._runtime._mark_message_turn_unscheduled()
+
+        cached_messages = self._runtime._collect_pending_messages() if self._runtime._has_pending_messages() else []
+        if cached_messages:
+            self._runtime._enter_running_state()
+            self._runtime._update_stage_status(
+                "消息整理",
+                f"待处理消息 {len(cached_messages)} 条",
+            )
+            if timeout_triggered:
+                self._runtime._chat_history.append(self._build_wait_completed_message(has_new_messages=True))
+            await self._ingest_messages(cached_messages)
+            trigger_message = cached_messages[-1]
+        else:
+            trigger_message = (
+                self._runtime._consume_proactive_trigger_message()
+                if proactive_triggered
+                else self._runtime.message_cache[-1]
+                if self._runtime.message_cache
+                else None
+            )
+            if trigger_message is None:
+                logger.warning(f"{self._runtime.log_prefix} wait 超时后没有可复用的触发消息，跳过本轮")
+                return TurnStartContext([], None, timeout_triggered, proactive_triggered, silent_reply_frequency)
+            logger.info(f"{self._runtime.log_prefix} 等待超时后开始新一轮思考")
+            if self._runtime._has_pending_wait_tool_call():
+                self._runtime._chat_history.append(self._build_wait_completed_message(has_new_messages=False))
+
+        return TurnStartContext(
+            cached_messages,
+            trigger_message,
+            timeout_triggered,
+            proactive_triggered,
+            silent_reply_frequency,
+        )
+
+    async def _finalize_cycle(
+        self,
+        *,
+        cycle_detail: CycleDetail,
+        round_index: int,
+        state: CycleRuntimeState,
+    ) -> CycleEnd:
+        """渲染并广播一次内部循环的收尾信息。"""
+
+        completed_cycle = await self._end_cycle(cycle_detail)
+        cycle_end = state.cycle_end
+        if (
+            round_index + 1 >= self._runtime._max_internal_rounds
+            and cycle_end.reason in {"continue", "tool_continue"}
+        ):
+            cycle_end = self._cycle_end_for_max_rounds(self._runtime._max_internal_rounds)
+
+        timing_response = state.timing_response
+        response = state.response
+        self._runtime._render_context_usage_panel(
+            cycle_id=cycle_detail.cycle_id,
+            time_records=dict(completed_cycle.time_records),
+            timing_selected_history_count=timing_response.selected_history_count if timing_response is not None else None,
+            timing_prompt_tokens=timing_response.prompt_tokens if timing_response is not None else None,
+            timing_model_name=timing_response.model_name if timing_response is not None else None,
+            timing_action=state.timing_action or "",
+            timing_response=(timing_response.content or "") if timing_response is not None else "",
+            timing_tool_calls=timing_response.tool_calls if timing_response is not None else None,
+            timing_tool_results=state.timing_tool_results,
+            timing_tool_detail_results=state.timing_tool_monitor_results,
+            timing_prompt_section=timing_response.prompt_section if timing_response is not None else None,
+            planner_selected_history_count=response.selected_history_count if response is not None else None,
+            planner_prompt_tokens=response.prompt_tokens if response is not None else None,
+            planner_model_name=response.model_name if response is not None else None,
+            planner_response=(response.content or "") if response is not None else "",
+            planner_tool_calls=response.tool_calls if response is not None else None,
+            planner_tool_results=state.tool_result_summaries,
+            planner_tool_detail_results=state.tool_monitor_results,
+            planner_prompt_section=response.prompt_section if response is not None else None,
+            planner_extra_lines=state.planner_extra_lines,
+        )
+        await emit_planner_finalized(
+            session_id=self._runtime.session_id,
+            cycle_id=cycle_detail.cycle_id,
+            timing_request_messages=timing_response.request_messages if timing_response is not None else None,
+            timing_selected_history_count=timing_response.selected_history_count if timing_response is not None else None,
+            timing_tool_count=timing_response.tool_count if timing_response is not None else None,
+            timing_action=state.timing_action,
+            timing_content=timing_response.content if timing_response is not None else None,
+            timing_tool_calls=timing_response.tool_calls if timing_response is not None else None,
+            timing_tool_results=state.timing_tool_results,
+            timing_prompt_tokens=timing_response.prompt_tokens if timing_response is not None else None,
+            timing_completion_tokens=timing_response.completion_tokens if timing_response is not None else None,
+            timing_total_tokens=timing_response.total_tokens if timing_response is not None else None,
+            timing_duration_ms=state.timing_duration_ms if timing_response is not None else None,
+            planner_request_messages=response.request_messages if response is not None else None,
+            planner_selected_history_count=response.selected_history_count if response is not None else None,
+            planner_tool_count=response.tool_count if response is not None else None,
+            planner_content=response.content if response is not None else None,
+            planner_tool_calls=response.tool_calls if response is not None else None,
+            planner_prompt_tokens=response.prompt_tokens if response is not None else None,
+            planner_completion_tokens=response.completion_tokens if response is not None else None,
+            planner_total_tokens=response.total_tokens if response is not None else None,
+            planner_duration_ms=state.planner_duration_ms if response is not None else None,
+            planner_prompt_html_uri=response.prompt_html_uri if response is not None else None,
+            tools=state.tool_monitor_results,
+            time_records=dict(completed_cycle.time_records),
+            agent_state=self._runtime._agent_state,
+            planner_interrupted=state.planner_interrupted,
+            end_reason=cycle_end.reason,
+            end_detail=cycle_end.detail,
+        )
+        await emit_cycle_end(
+            session_id=self._runtime.session_id,
+            cycle_id=cycle_detail.cycle_id,
+            time_records=dict(completed_cycle.time_records),
+            agent_state=self._runtime._agent_state,
+            end_reason=cycle_end.reason,
+            end_detail=cycle_end.detail,
+        )
+        self._runtime._no_action_backoff.record_cycle_result(cycle_end.reason)
+        self._runtime.record_no_action_cycle_result(cycle_end.reason)
+        return cycle_end
+
     async def run_loop(self) -> None:
         """独立消费消息批次，并执行对应的内部思考轮次。"""
         try:
@@ -913,69 +1308,22 @@ class MaisakaReasoningEngine:
                     self._runtime.session_id,
                     is_group_chat=self._runtime.chat_stream.is_group_session,
                 ):
-                    self._runtime._message_turn_scheduled = False
+                    self._runtime._mark_message_turn_unscheduled()
                     logger.debug(f"{self._runtime.log_prefix} 当前不在 focus 状态，忽略已排队的 Maisaka 触发")
                     continue
 
-                message_triggered, timeout_triggered, proactive_triggered = self._drain_ready_turn_triggers(
-                    queued_trigger
-                )
-                if proactive_triggered:
-                    self._runtime._focus_cooldown_wakeup_scheduled = False
-                silent_reply_frequency = self._runtime._is_reply_frequency_silent()
-
-                if (
-                    self._runtime._agent_state == self._runtime._STATE_WAIT
-                    and not (timeout_triggered or proactive_triggered)
-                    and not silent_reply_frequency
-                ):
-                    self._runtime._message_turn_scheduled = False
-                    logger.debug(f"{self._runtime.log_prefix} 当前仍处于 wait 状态，忽略消息触发并继续等待超时")
+                turn_start_context = await self._prepare_turn_start_context(queued_trigger)
+                if turn_start_context.trigger_message is None:
                     continue
 
-                if message_triggered:
-                    await self._runtime._wait_for_message_quiet_period()
-                    self._runtime._message_turn_scheduled = False
+                cached_messages = turn_start_context.cached_messages
+                trigger_message = turn_start_context.trigger_message
 
-                cached_messages = (
-                    self._runtime._collect_pending_messages()
-                    if self._runtime._has_pending_messages()
-                    else []
-                )
-                if cached_messages:
-                    self._runtime._agent_state = self._runtime._STATE_RUNNING
-                    self._runtime._update_stage_status(
-                        "消息整理",
-                        f"待处理消息 {len(cached_messages)} 条",
-                    )
-                    if timeout_triggered:
-                        self._runtime._chat_history.append(
-                            self._build_wait_completed_message(has_new_messages=True)
-                        )
-                    await self._ingest_messages(cached_messages)
-                    anchor_message = cached_messages[-1]
-                else:
-                    anchor_message = (
-                        self._runtime._proactive_anchor_message
-                        if proactive_triggered
-                        else self._get_timeout_anchor_message()
-                    )
-                    if anchor_message is None:
-                        logger.warning(f"{self._runtime.log_prefix} wait 超时后没有可复用的锚点消息，跳过本轮")
-                        continue
-                    if proactive_triggered:
-                        self._runtime._proactive_anchor_message = None
-                    logger.info(f"{self._runtime.log_prefix} 等待超时后开始新一轮思考")
-                    if self._runtime._pending_wait_tool_call_id:
-                        self._runtime._chat_history.append(
-                            self._build_wait_completed_message(has_new_messages=False)
-                        )
-
-                if silent_reply_frequency:
+                if turn_start_context.silent_reply_frequency:
                     await self._handle_silent_turn(
                         cached_messages=cached_messages,
-                        timeout_triggered=timeout_triggered,
-                        proactive_triggered=proactive_triggered,
+                        timeout_triggered=turn_start_context.timeout_triggered,
+                        proactive_triggered=turn_start_context.proactive_triggered,
                     )
                     continue
 
@@ -984,355 +1332,91 @@ class MaisakaReasoningEngine:
                     planner_no_tool_count = 0
                     round_index = 0
                     while round_index < self._runtime._max_internal_rounds:
-                        if round_index > 0 and self._runtime._has_pending_messages():
-                            await self._runtime._wait_for_message_quiet_period()
-                            self._runtime._message_turn_scheduled = False
-                            pending_round_messages = self._runtime._collect_pending_messages()
-                            if pending_round_messages:
-                                await self._ingest_messages(pending_round_messages)
-                                cached_messages = pending_round_messages
-                                anchor_message = pending_round_messages[-1]
-                                logger.info(
-                                    f"{self._runtime.log_prefix} 内部轮次开始前已合并新消息: "
-                                    f"消息数={len(pending_round_messages)} 回合={round_index + 1}"
-                                )
+                        pending_round_messages = await self._collect_pending_messages_before_next_round(round_index)
+                        if pending_round_messages:
+                            cached_messages = pending_round_messages
+                            trigger_message = pending_round_messages[-1]
 
-                        cycle_detail = self._start_cycle()
-                        round_text = f"第 {round_index + 1}/{self._runtime._max_internal_rounds} 轮"
-                        self._runtime._log_cycle_started(cycle_detail, round_index)
-                        self._runtime._update_stage_status("启动循环", f"循环 {cycle_detail.cycle_id}", round_text=round_text)
-                        await emit_cycle_start(
-                            session_id=self._runtime.session_id,
-                            cycle_id=cycle_detail.cycle_id,
-                            round_index=round_index,
-                            max_rounds=self._runtime._max_internal_rounds,
-                            history_count=len(self._runtime._chat_history),
-                        )
-                        planner_started_at = 0.0
-                        planner_duration_ms = 0.0
-                        timing_duration_ms = 0.0
-                        current_stage_started_at = 0.0
-                        timing_action: Optional[str] = None
-                        timing_response: Optional[ChatResponse] = None
-                        timing_tool_results: Optional[list[str]] = None
-                        timing_tool_monitor_results: Optional[list[dict[str, Any]]] = None
-                        response: Optional[ChatResponse] = None
-                        action_tool_definitions: list[dict[str, Any]] = []
-                        planner_extra_lines: list[str] = []
-                        planner_interrupted = False
-                        cycle_end_reason = "continue"
-                        cycle_end_detail = "本轮思考完成，继续后续内部轮次。"
-                        tool_result_summaries: list[str] = []
-                        tool_monitor_results: list[dict[str, Any]] = []
+                        cycle_detail, round_text = await self._start_cycle_round(round_index)
+                        state = CycleRuntimeState()
                         try:
-                            visual_refresh_started_at = time.time()
-                            refreshed_message_count = await self._refresh_chat_history_visual_placeholders()
-                            cycle_detail.time_records["visual_refresh"] = time.time() - visual_refresh_started_at
-                            if refreshed_message_count > 0:
-                                logger.info(
-                                    f"{self._runtime.log_prefix} 本轮思考前已刷新 {refreshed_message_count} 条视觉占位历史消息"
-                                )
+                            await self._refresh_visual_placeholders_for_cycle(cycle_detail)
 
                             if timing_gate_required:
-                                self._runtime._update_stage_status("Timing Gate", "等待门控决策", round_text=round_text)
-                                current_stage_started_at = time.time()
-                                timing_started_at = time.time()
-                                (
-                                    timing_action,
-                                    timing_response,
-                                    timing_tool_results,
-                                    timing_tool_monitor_results,
-                                ) = await self._run_timing_gate()
-                                timing_duration_ms = (time.time() - timing_started_at) * 1000
-                                cycle_detail.time_records["timing_gate"] = timing_duration_ms / 1000
-                                await emit_timing_gate_result(
-                                    session_id=self._runtime.session_id,
-                                    cycle_id=cycle_detail.cycle_id,
-                                    action=timing_action,
-                                    content=timing_response.content,
-                                    tool_calls=timing_response.tool_calls,
-                                    messages=[],
-                                    prompt_tokens=timing_response.prompt_tokens,
-                                    selected_history_count=timing_response.selected_history_count,
-                                    duration_ms=timing_duration_ms,
+                                state.current_stage_started_at = time.time()
+                                await self._run_timing_gate_round(
+                                    cycle_detail=cycle_detail,
+                                    round_text=round_text,
+                                    state=state,
                                 )
-                                timing_gate_required = self._mark_timing_gate_completed(timing_action)
-                                if timing_action != "continue":
-                                    self._finish_planner_continuation()
-                                    if timing_action == "wait":
-                                        cycle_end_reason = "timing_wait"
-                                        cycle_end_detail = "Timing Gate 选择 wait，本轮不会进入 Planner，将在等待结束后继续。"
-                                    else:
-                                        cycle_end_reason = "timing_no_action"
-                                        cycle_end_detail = "Timing Gate 选择 no_action，本轮不会进入 Planner。"
+                                if state.timing_action != "continue":
+                                    self._runtime._finish_planner_continuation()
+                                    state.cycle_end = self._cycle_end_for_timing_action(state.timing_action)
                                     logger.debug(
                                         f"{self._runtime.log_prefix} Timing Gate 结束当前回合: "
-                                        f"回合={round_index + 1} 动作={timing_action}"
+                                        f"回合={round_index + 1} 动作={state.timing_action}"
                                     )
                                     break
+                                timing_gate_required = False
                             else:
                                 logger.info(
                                     f"{self._runtime.log_prefix} Timing Gate 已完成 continue，继续执行 Planner: "
                                     f"回合={round_index + 1}"
                                 )
 
-                            self._start_planner_continuation()
-                            planner_started_at = time.time()
-                            current_stage_started_at = planner_started_at
-                            self._runtime._update_stage_status("Planner", "组织上下文并请求模型", round_text=round_text)
-                            action_tool_definitions, deferred_tools_reminder = await self._build_action_tool_definitions()
-                            injected_user_messages = await self._build_planner_injected_user_messages(
-                                anchor_message=anchor_message,
-                                source_messages=cached_messages or [anchor_message],
-                                deferred_tools_reminder=deferred_tools_reminder,
+                            self._runtime._start_planner_continuation()
+                            await self._run_planner_request(
+                                trigger_message=trigger_message,
+                                source_messages=cached_messages or [trigger_message],
+                                round_index=round_index,
+                                round_text=round_text,
+                                state=state,
                             )
-                            if not resolve_enable_visual_planner():
-                                log_pending_image_recognition_before_text_planner(
-                                    self._runtime._chat_history,
-                                    log_prefix=self._runtime.log_prefix,
-                                )
-                            logger.info(
-                                f"{self._runtime.log_prefix} 规划器开始执行: "
-                                f"回合={round_index + 1} "
-                                f"历史消息数={len(self._runtime._chat_history)} "
-                                f"开始时间={planner_started_at:.3f}"
-                            )
-                            response = await self._run_interruptible_planner(
-                                injected_user_messages=injected_user_messages or None,
-                                tail_user_messages=self._runtime.build_focus_tail_user_messages() or None,
-                                tool_definitions=action_tool_definitions,
-                            )
-                            planner_duration_ms = (time.time() - planner_started_at) * 1000
-                            cycle_detail.time_records["planner"] = planner_duration_ms / 1000
+                            cycle_detail.time_records["planner"] = state.planner_duration_ms / 1000
                             # logger.info(
                             #     f"{self._runtime.log_prefix} 规划器执行完成: "
                             #     f"回合={round_index + 1} "
                             #     f"耗时={cycle_detail.time_records['planner']:.3f} 秒"
                             # )
-                            reasoning_content = self._get_effective_planner_thought(response)
-                            if self._should_replace_reasoning(reasoning_content):
-                                reasoning_content = "我应该根据我上面思考的内容进行反思，重新思考我下一步的行动，我需要分析当前场景，对话，然后直接输出我的想法："
-                                response.content = reasoning_content
-                                response.reasoning = reasoning_content
-                                response.raw_message.content = reasoning_content
-                                logger.info(f"{self._runtime.log_prefix} 当前思考与上一轮过于相似，已替换为重新思考提示")
-
-                            self._last_reasoning_content = reasoning_content
-                            self._runtime._chat_history.append(response.raw_message)
-                            tool_monitor_results = []
-
-                            if response.tool_calls:
-                                planner_no_tool_count = 0
-                                self._clear_planner_no_tool_hints()
-                                tool_started_at = time.time()
-                                (
-                                    should_pause,
-                                    pause_tool_name,
-                                    tool_result_summaries,
-                                    tool_monitor_results,
-                                ) = await self._handle_tool_calls(
-                                    response.tool_calls,
-                                    reasoning_content,
-                                )
-                                cycle_detail.time_records["tool_calls"] = time.time() - tool_started_at
-                                if should_pause:
-                                    if pause_tool_name == "finish":
-                                        self._finish_planner_continuation()
-                                        cycle_end_reason = "finish"
-                                        cycle_end_detail = "Planner 调用 finish，结束连续 Planner 并等待新消息。"
-                                    elif pause_tool_name == "no_action":
-                                        cycle_end_reason = "tool_pause:no_action"
-                                        cycle_end_detail = "Planner 调用 no_action，保留连续 Planner 状态并等待新消息。"
-                                    elif pause_tool_name == "wait":
-                                        cycle_end_reason = "tool_pause:wait"
-                                        cycle_end_detail = "Planner 调用 wait，本轮暂停并在等待结束后继续判断。"
-                                    elif pause_tool_name:
-                                        cycle_end_reason = f"tool_pause:{pause_tool_name}"
-                                        cycle_end_detail = f"工具 {pause_tool_name} 要求暂停当前思考循环。"
-                                    else:
-                                        cycle_end_reason = "tool_pause"
-                                        cycle_end_detail = "工具要求暂停当前思考循环。"
-                                    break
-                                cycle_end_reason = "tool_continue"
-                                cycle_end_detail = "Planner 工具执行完成，继续下一轮内部思考。"
-                                continue
-
-                            (
-                                planner_no_tool_count,
-                                cycle_end_reason,
-                                cycle_end_detail,
-                                should_finish_after_no_tool,
-                            ) = self._handle_planner_no_tool_retry(
-                                planner_no_tool_count,
-                                planner_extra_lines,
+                            planner_no_tool_count, should_break_after_action = await self._handle_planner_response_actions(
+                                response=state.response,
+                                cycle_detail=cycle_detail,
+                                state=state,
+                                planner_no_tool_count=planner_no_tool_count,
+                                planner_extra_lines=state.planner_extra_lines,
                             )
-                            if should_finish_after_no_tool:
+                            if should_break_after_action:
                                 break
                             continue
                         except ReqAbortException as exc:
-                            planner_interrupted = True
-                            cycle_end_reason = "planner_interrupted"
-                            cycle_end_detail = "Planner 被新消息打断，当前轮结束。"
-                            self._runtime._update_stage_status(
-                                "Planner 已打断",
-                                str(exc) or "收到外部中断信号",
-                                round_text=round_text,
-                            )
-                            interrupted_at = time.time()
-                            interrupted_stage_label = "Planner"
-                            interrupted_text = "Planner 收到新消息，开始重新决策"
-                            interrupted_response = ChatResponse(
-                                content=interrupted_text or None,
-                                tool_calls=[],
-                                request_messages=[],
-                                raw_message=AssistantMessage(
-                                    content=interrupted_text,
-                                    timestamp=datetime.now(),
-                                    tool_calls=[],
-                                    source_kind="perception",
-                                ),
-                                selected_history_count=len(self._runtime._chat_history),
-                                tool_count=len(action_tool_definitions),
-                                prompt_tokens=0,
-                                built_message_count=0,
-                                completion_tokens=0,
-                                total_tokens=0,
-                                model_name="",
-                                prompt_section=None,
-                                reasoning="",
-                            )
-                            interrupted_extra_lines = [
-                                "状态：已被新消息打断",
-                                f"打断位置：{interrupted_stage_label} 请求流式响应阶段",
-                                f"打断耗时：{interrupted_at - current_stage_started_at:.3f} 秒",
-                            ]
-                            response = interrupted_response
-                            planner_extra_lines = interrupted_extra_lines
-                            logger.info(
-                                f"{self._runtime.log_prefix} {interrupted_stage_label} 打断成功: "
-                                f"回合={round_index + 1} "
-                                f"开始时间={current_stage_started_at:.3f} "
-                                f"打断时间={interrupted_at:.3f} "
-                                f"耗时={interrupted_at - current_stage_started_at:.3f} 秒"
-                            )
-                            if not self._should_retry_planner_after_interrupt(
+                            state.planner_interrupted = True
+                            state.cycle_end = CycleEnd("planner_interrupted", "Planner 被新消息打断，当前轮结束。")
+                            interrupt_result = await self._handle_planner_interrupt(
+                                exc=exc,
                                 round_index=round_index,
-                                max_internal_rounds=self._runtime._max_internal_rounds,
-                                has_pending_messages=self._runtime._has_pending_messages(),
-                            ):
-                                break
-
-                            await self._runtime._wait_for_message_quiet_period()
-                            self._runtime._message_turn_scheduled = False
-                            interrupted_messages = self._runtime._collect_pending_messages()
-                            if not interrupted_messages:
-                                break
-
-                            await self._ingest_messages(interrupted_messages)
-                            cached_messages = interrupted_messages
-                            anchor_message = interrupted_messages[-1]
-                            logger.info(
-                                f"{self._runtime.log_prefix} 淇濇寔娲昏穬鐘舵€侊紝璺宠繃 Timing Gate 鐩存帴閲嶈瘯 Planner: "
-                                f"鍥炲悎={round_index + 2}"
+                                round_text=round_text,
+                                current_stage_started_at=state.current_stage_started_at,
+                                action_tool_count=state.action_tool_count,
                             )
+                            state.response = interrupt_result.response
+                            state.planner_extra_lines = interrupt_result.extra_lines
+                            if not interrupt_result.retry_messages:
+                                break
+
+                            cached_messages = interrupt_result.retry_messages
+                            trigger_message = interrupt_result.retry_messages[-1]
                             continue
                         finally:
-                            completed_cycle = await self._end_cycle(cycle_detail)
-                            if (
-                                round_index + 1 >= self._runtime._max_internal_rounds
-                                and cycle_end_reason in {"continue", "tool_continue"}
-                            ):
-                                cycle_end_reason = "max_rounds"
-                                cycle_end_detail = (
-                                    f"已达到内部思考轮次上限 {self._runtime._max_internal_rounds}，"
-                                    "本轮处理结束。"
-                                )
-                            self._runtime._render_context_usage_panel(
-                                cycle_id=cycle_detail.cycle_id,
-                                time_records=dict(completed_cycle.time_records),
-                                timing_selected_history_count=(
-                                    timing_response.selected_history_count if timing_response is not None else None
-                                ),
-                                timing_prompt_tokens=(
-                                    timing_response.prompt_tokens if timing_response is not None else None
-                                ),
-                                timing_model_name=timing_response.model_name if timing_response is not None else None,
-                                timing_action=timing_action or "",
-                                timing_response=timing_response.content or "" if timing_response is not None else "",
-                                timing_tool_calls=timing_response.tool_calls if timing_response is not None else None,
-                                timing_tool_results=timing_tool_results,
-                                timing_tool_detail_results=timing_tool_monitor_results,
-                                timing_prompt_section=(
-                                    timing_response.prompt_section if timing_response is not None else None
-                                ),
-                                planner_selected_history_count=(
-                                    response.selected_history_count if response is not None else None
-                                ),
-                                planner_prompt_tokens=response.prompt_tokens if response is not None else None,
-                                planner_model_name=response.model_name if response is not None else None,
-                                planner_response=response.content or "" if response is not None else "",
-                                planner_tool_calls=response.tool_calls if response is not None else None,
-                                planner_tool_results=tool_result_summaries,
-                                planner_tool_detail_results=tool_monitor_results,
-                                planner_prompt_section=response.prompt_section if response is not None else None,
-                                planner_extra_lines=planner_extra_lines,
+                            state.cycle_end = await self._finalize_cycle(
+                                cycle_detail=cycle_detail,
+                                round_index=round_index,
+                                state=state,
                             )
-                            await emit_planner_finalized(
-                                session_id=self._runtime.session_id,
-                                cycle_id=cycle_detail.cycle_id,
-                                timing_request_messages=(
-                                    timing_response.request_messages if timing_response is not None else None
-                                ),
-                                timing_selected_history_count=(
-                                    timing_response.selected_history_count if timing_response is not None else None
-                                ),
-                                timing_tool_count=timing_response.tool_count if timing_response is not None else None,
-                                timing_action=timing_action,
-                                timing_content=timing_response.content if timing_response is not None else None,
-                                timing_tool_calls=timing_response.tool_calls if timing_response is not None else None,
-                                timing_tool_results=timing_tool_results,
-                                timing_prompt_tokens=timing_response.prompt_tokens if timing_response is not None else None,
-                                timing_completion_tokens=(
-                                    timing_response.completion_tokens if timing_response is not None else None
-                                ),
-                                timing_total_tokens=timing_response.total_tokens if timing_response is not None else None,
-                                timing_duration_ms=timing_duration_ms if timing_response is not None else None,
-                                planner_request_messages=response.request_messages if response is not None else None,
-                                planner_selected_history_count=(
-                                    response.selected_history_count if response is not None else None
-                                ),
-                                planner_tool_count=response.tool_count if response is not None else None,
-                                planner_content=response.content if response is not None else None,
-                                planner_tool_calls=response.tool_calls if response is not None else None,
-                                planner_prompt_tokens=response.prompt_tokens if response is not None else None,
-                                planner_completion_tokens=(
-                                    response.completion_tokens if response is not None else None
-                                ),
-                                planner_total_tokens=response.total_tokens if response is not None else None,
-                                planner_duration_ms=planner_duration_ms if response is not None else None,
-                                planner_prompt_html_uri=response.prompt_html_uri if response is not None else None,
-                                tools=tool_monitor_results,
-                                time_records=dict(completed_cycle.time_records),
-                                agent_state=self._runtime._agent_state,
-                                planner_interrupted=planner_interrupted,
-                                end_reason=cycle_end_reason,
-                                end_detail=cycle_end_detail,
-                            )
-                            await emit_cycle_end(
-                                session_id=self._runtime.session_id,
-                                cycle_id=cycle_detail.cycle_id,
-                                time_records=dict(completed_cycle.time_records),
-                                agent_state=self._runtime._agent_state,
-                                end_reason=cycle_end_reason,
-                                end_detail=cycle_end_detail,
-                            )
-                            self._runtime.record_no_action_backoff_cycle_result(cycle_end_reason)
-                            self._runtime.record_no_action_cycle_result(cycle_end_reason)
-                            if not planner_interrupted:
+                            if not state.planner_interrupted:
                                 round_index += 1
                 finally:
                     if self._runtime._agent_state == self._runtime._STATE_RUNNING:
-                        self._runtime._agent_state = self._runtime._STATE_STOP
+                        self._runtime._enter_stop_state()
                     if self._runtime._running:
                         self._runtime._update_stage_status("等待消息", "本轮处理结束")
         except asyncio.CancelledError:
@@ -1357,9 +1441,9 @@ class MaisakaReasoningEngine:
     ) -> None:
         """回复频率为 0 时只消费消息和维护历史，不进入 Timing Gate/Planner。"""
 
-        self._runtime._clear_force_next_timing_continue_state()
+        self._runtime._clear_forced_turn_state()
         if proactive_triggered:
-            self._runtime._proactive_anchor_message = None
+            self._runtime._consume_proactive_trigger_message()
 
         cycle_detail = CycleDetail(cycle_id=self._runtime._cycle_counter)
         await self._post_process_chat_history_after_cycle(
@@ -1411,16 +1495,9 @@ class MaisakaReasoningEngine:
 
         return message_triggered, timeout_triggered, proactive_triggered
 
-    def _get_timeout_anchor_message(self) -> Optional[SessionMessage]:
-        """在 wait 超时后复用最近一条真实用户消息作为锚点。"""
-        if self._runtime.message_cache:
-            return self._runtime.message_cache[-1]
-        return None
-
     def _build_wait_completed_message(self, *, has_new_messages: bool) -> ToolResultMessage:
         """构造 wait 完成后的工具结果消息。"""
-        tool_call_id = self._runtime._pending_wait_tool_call_id or "wait_timeout"
-        self._runtime._pending_wait_tool_call_id = None
+        tool_call_id = self._runtime._consume_pending_wait_tool_call_id()
         content = (
             "等待已结束，期间收到了新的用户输入。请结合这些新消息继续下一轮思考。"
             if has_new_messages
@@ -1712,11 +1789,6 @@ class MaisakaReasoningEngine:
         logger.debug(f"{self._runtime.log_prefix} 思考内容相似度: {similarity:.2f}")
         return similarity > 0.9
 
-    @staticmethod
-    def _post_process_reply_text(reply_text: str) -> list[str]:
-        """沿用旧回复链的文本后处理，执行分段与错别字注入。"""
-        return BuiltinToolRuntimeContext.post_process_reply_text(reply_text)
-
     def _build_tool_invocation(self, tool_call: ToolCall, latest_thought: str) -> ToolInvocation:
         """将模型输出的工具调用转换为统一调用对象。
 
@@ -1854,6 +1926,23 @@ class MaisakaReasoningEngine:
             return None
 
         return saved_record if isinstance(saved_record, dict) else None
+
+    async def _record_tool_execution_effects(
+        self,
+        invocation: ToolInvocation,
+        result: ToolExecutionResult,
+        tool_spec: Optional[ToolSpec],
+    ) -> None:
+        """落库工具记录并执行工具后置副作用。"""
+
+        saved_record = await self._store_tool_execution_record(invocation, result, tool_spec)
+        await handle_tool_post_execution_effects(
+            invocation=invocation,
+            result=result,
+            saved_record=saved_record,
+            chat_stream=self._runtime.chat_stream,
+            log_prefix=self._runtime.log_prefix,
+        )
 
     def _append_tool_execution_result(
         self,
@@ -2277,6 +2366,30 @@ class MaisakaReasoningEngine:
             tool_monitor_result["prompt_html_uri"] = prompt_html_uri
         return tool_monitor_result
 
+    def _append_tool_display_results(
+        self,
+        *,
+        tool_result_summaries: list[str],
+        tool_monitor_results: list[dict[str, Any]],
+        tool_call: ToolCall,
+        invocation: ToolInvocation,
+        result: ToolExecutionResult,
+        duration_ms: float,
+        tool_spec: Optional[ToolSpec],
+    ) -> None:
+        """追加终端摘要和监控详情。"""
+
+        tool_result_summaries.append(self._build_tool_result_summary(tool_call, result))
+        tool_monitor_results.append(
+            self._build_tool_monitor_result(
+                tool_call,
+                invocation,
+                result,
+                duration_ms,
+                tool_spec=tool_spec,
+            )
+        )
+
     async def _handle_tool_calls(
         self,
         tool_calls: list[ToolCall],
@@ -2307,18 +2420,16 @@ class MaisakaReasoningEngine:
                     success=False,
                     error_message="统一工具注册表尚未初始化。",
                 )
-                saved_record = await self._store_tool_execution_record(invocation, result, None)
-                await handle_tool_post_execution_effects(
+                await self._record_tool_execution_effects(invocation, result, None)
+                self._append_tool_execution_result(tool_call, result)
+                self._append_tool_display_results(
+                    tool_result_summaries=tool_result_summaries,
+                    tool_monitor_results=tool_monitor_results,
+                    tool_call=tool_call,
                     invocation=invocation,
                     result=result,
-                    saved_record=saved_record,
-                    chat_stream=self._runtime.chat_stream,
-                    log_prefix=self._runtime.log_prefix,
-                )
-                self._append_tool_execution_result(tool_call, result)
-                tool_result_summaries.append(self._build_tool_result_summary(tool_call, result))
-                tool_monitor_results.append(
-                    self._build_tool_monitor_result(tool_call, invocation, result, duration_ms=0.0, tool_spec=None)
+                    duration_ms=0.0,
+                    tool_spec=None,
                 )
             return False, "", tool_result_summaries, tool_monitor_results
 
@@ -2342,17 +2453,10 @@ class MaisakaReasoningEngine:
             if is_unexpanded_tool and not result.success:
                 result = self._append_deferred_tool_parameter_hint(result)
             tool_duration_ms = (time.time() - tool_started_at) * 1000
-            saved_record = await self._store_tool_execution_record(
+            await self._record_tool_execution_effects(
                 invocation,
                 result,
                 tool_spec_map.get(invocation.tool_name),
-            )
-            await handle_tool_post_execution_effects(
-                invocation=invocation,
-                result=result,
-                saved_record=saved_record,
-                chat_stream=self._runtime.chat_stream,
-                log_prefix=self._runtime.log_prefix,
             )
             self._append_tool_execution_result(tool_call, result, append_post_history=False)
             deferred_post_history_messages.extend(
@@ -2360,15 +2464,14 @@ class MaisakaReasoningEngine:
                 for message in result.post_history_messages
                 if isinstance(message, LLMContextMessage)
             )
-            tool_result_summaries.append(self._build_tool_result_summary(tool_call, result))
-            tool_monitor_results.append(
-                self._build_tool_monitor_result(
-                    tool_call,
-                    invocation,
-                    result,
-                    tool_duration_ms,
-                    tool_spec=tool_spec_map.get(invocation.tool_name),
-                )
+            self._append_tool_display_results(
+                tool_result_summaries=tool_result_summaries,
+                tool_monitor_results=tool_monitor_results,
+                tool_call=tool_call,
+                invocation=invocation,
+                result=result,
+                duration_ms=tool_duration_ms,
+                tool_spec=tool_spec_map.get(invocation.tool_name),
             )
 
             if not result.success and tool_call.func_name == "reply":

@@ -634,7 +634,7 @@ class ChatConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """启用 Maisaka 新实验行为：跳过 Timing Gate，使用 wait 替代 no_action，并让 wait 参与不回复退避。"""
+    """启用 Maisaka 新实验行为：跳过 Timing Gate，Planner 不暴露 no_action/finish；wait 仅用于等待后再判断，不调用工具即结束本轮思考。"""
 
     enable_reply_necessity_trigger: bool = Field(
         default=False,

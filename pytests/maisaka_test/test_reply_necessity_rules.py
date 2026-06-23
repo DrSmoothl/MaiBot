@@ -5,6 +5,7 @@ from src.chat.message_receive.message import SessionMessage
 from src.common.data_models.mai_message_data_model import MessageInfo, UserInfo
 from src.maisaka.reply_necessity import REPLY_NECESSITY_TRIGGER_SCORE, strip_reply_necessity_noise
 from src.maisaka.runtime import MaisakaHeartFlowChatting
+from src.maisaka.turn_scheduler import MessageTurnScheduler
 
 
 def _runtime() -> MaisakaHeartFlowChatting:
@@ -14,6 +15,9 @@ def _runtime() -> MaisakaHeartFlowChatting:
     runtime._is_focus_mode_active_for_current_chat = lambda: False
     runtime._get_effective_reply_frequency = lambda: 1.0
     runtime._get_recent_average_external_message_interval = lambda: None
+    runtime._last_external_message_received_at = None
+    runtime._last_message_received_at = 0.0
+    runtime._message_turn_scheduler = MessageTurnScheduler(runtime)
     return runtime
 
 
@@ -35,7 +39,7 @@ def _message(text: str, *, user_id: str = "user-1", is_at: bool = False) -> Sess
 
 def _score(text: str, *, is_at: bool = False) -> int:
     runtime = _runtime()
-    score, _ = runtime._score_new_maisaka_reply_necessity(
+    score, _ = runtime._message_turn_scheduler.score_reply_necessity(
         pending_messages=[_message(text, is_at=is_at)],
         trigger_threshold=1,
     )
@@ -44,7 +48,7 @@ def _score(text: str, *, is_at: bool = False) -> int:
 
 def test_reply_necessity_ignores_bot_self_messages() -> None:
     runtime = _runtime()
-    score, _ = runtime._score_new_maisaka_reply_necessity(
+    score, _ = runtime._message_turn_scheduler.score_reply_necessity(
         pending_messages=[_message("@麦麦 帮我看看为什么会这样？", user_id="2814567326", is_at=True)],
         trigger_threshold=1,
     )

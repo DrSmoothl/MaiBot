@@ -20,6 +20,7 @@ from src.common.data_models.message_component_data_model import (
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.core.tooling import ToolExecutionResult
+from src.plugin_runtime.integration import get_plugin_runtime_manager
 
 from src.maisaka.context.messages import SessionBackedMessage
 from src.maisaka.context.message_adapter import format_speaker_content
@@ -458,7 +459,7 @@ class BuiltinToolRuntimeContext:
     def get_runtime_manager(self) -> Any:
         """获取插件运行时管理器。"""
 
-        return self.engine._get_runtime_manager()
+        return get_plugin_runtime_manager()
 
     def _should_include_planner_chat_id(self) -> bool:
         """当前上下文写入规划器历史时是否需要保留聊天流 ID。"""
