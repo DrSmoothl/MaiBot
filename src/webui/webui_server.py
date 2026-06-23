@@ -33,12 +33,12 @@ class _ASGIProxy:
 class WebUIServer:
     """独立的 WebUI 服务器"""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8001, register_config_reload: bool = True):
-        self.host = host
+    def __init__(self, hosts: list[str] | None = None, port: int = 8001, register_config_reload: bool = True):
+        self.hosts = hosts or ["127.0.0.1", "::1"]
         self.port = port
         from src.webui.app import create_app, show_access_token
 
-        self._app = create_app(host=host, port=port, enable_static=True)
+        self._app = create_app(host=self.hosts[0], port=port, enable_static=True)
         self.app = _ASGIProxy(self._app)
         self._server: Optional[Any] = None
         self._reload_callback_registered = False
@@ -77,9 +77,68 @@ class WebUIServer:
     async def reload_app(self) -> None:
         from src.webui.app import create_app
 
-        self._app = create_app(host=self.host, port=self.port, enable_static=True)
+        self._app = create_app(host=self.hosts[0], port=self.port, enable_static=True)
         self.app.set_app(self._app)
         logger.info("WebUI 应用已热重载")
+
+    def _create_bound_sockets(self) -> list:
+        import socket as _socket
+
+        sockets = []
+        for host in self.hosts:
+            addr_info_list = _socket.getaddrinfo(host, self.port, _socket.AF_UNSPEC, _socket.SOCK_STREAM)
+            for af, socktype, proto, _, sa in addr_info_list:
+                sock = None
+                try:
+                    sock = _socket.socket(af, socktype, proto)
+                    sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+                    if af == _socket.AF_INET6:
+                        try:
+                            sock.setsockopt(_socket.IPPROTO_IPV6, _socket.IPV6_V6ONLY, 0)
+                        except OSError:
+                            pass
+                    sock.bind(sa)
+                    sock.listen()
+                    sockets.append(sock)
+                    break
+                except OSError:
+                    if sock is not None:
+                        try:
+                            sock.close()
+                        except OSError:
+                            pass
+                    continue
+
+        return sockets
+
+    def _log_bind_addresses(self) -> None:
+        has_v4_localhost = False
+        has_v6_localhost = False
+        has_v4_wildcard = False
+        has_v6_wildcard = False
+
+        for host in self.hosts:
+            if ":" in host:
+                logger.info(f"🌐 访问地址: http://[{host}]:{self.port}")
+                if host == "::":
+                    has_v6_wildcard = True
+                elif host == "::1":
+                    has_v6_localhost = True
+            else:
+                logger.info(f"🌐 访问地址: http://{host}:{self.port}")
+                if host == "0.0.0.0":
+                    has_v4_wildcard = True
+                elif host == "127.0.0.1":
+                    has_v4_localhost = True
+
+        if has_v4_wildcard or has_v6_wildcard:
+            local = []
+            if has_v4_wildcard or has_v4_localhost:
+                local.append(f"http://localhost:{self.port}")
+            if has_v6_wildcard or has_v6_localhost:
+                local.append(f"http://[::1]:{self.port}")
+            if local:
+                logger.info(f"💡 本机访问: {'， '.join(local)}")
 
     async def start(self):
         """启动服务器"""
@@ -87,18 +146,25 @@ class WebUIServer:
         from uvicorn import Server as UvicornServer
 
         self._maybe_register_reload_callback()
-        assert_port_available(
-            host=self.host,
-            port=self.port,
-            service_name="WebUI 服务器",
-            logger=logger,
-            config_hint="webui.port (config/bot_config.toml)",
-            allow_reuse_addr=True,
-        )
+
+        for host in self.hosts:
+            assert_port_available(
+                host=host,
+                port=self.port,
+                service_name="WebUI 服务器",
+                logger=logger,
+                config_hint="webui.port (config/bot_config.toml)",
+                allow_reuse_addr=True,
+            )
+
+        sockets = self._create_bound_sockets()
+        if not sockets:
+            logger.error("❌ WebUI 无法绑定到任何指定地址")
+            raise OSError("WebUI 无法绑定到任何指定地址")
 
         config = Config(
             app=self.app,
-            host=self.host,
+            host=self.hosts[0],
             port=self.port,
             log_config=None,
             access_log=False,
@@ -106,33 +172,22 @@ class WebUIServer:
         self._server = UvicornServer(config=config)
 
         logger.info("🌐 WebUI 服务器启动中...")
-
-        # 根据地址类型显示正确的访问地址
-        if ":" in self.host:
-            # IPv6 地址需要用方括号包裹
-            logger.info(f"🌐 访问地址: http://[{self.host}]:{self.port}")
-            if self.host == "::":
-                logger.info(f"💡 IPv6 本机访问: http://[::1]:{self.port}")
-                logger.info(f"💡 IPv4 本机访问: http://127.0.0.1:{self.port}")
-            elif self.host == "::1":
-                logger.info("💡 仅支持 IPv6 本地访问")
-        else:
-            # IPv4 地址
-            logger.info(f"🌐 访问地址: http://{self.host}:{self.port}")
-            if self.host == "0.0.0.0":
-                logger.info(f"💡 本机访问: http://localhost:{self.port} 或 http://127.0.0.1:{self.port}")
+        self._log_bind_addresses()
+        if len(self.hosts) > 1:
+            logger.info("🔗 WebUI 已绑定到多个地址")
 
         try:
-            await self._server.serve()
+            await self._server.serve(sockets=sockets)
         except OSError as e:
             if is_port_conflict_error(e):
-                log_port_conflict(
-                    logger,
-                    service_name="WebUI 服务器",
-                    host=self.host,
-                    port=self.port,
-                    config_hint="webui.port (config/bot_config.toml)",
-                )
+                for host in self.hosts:
+                    log_port_conflict(
+                        logger,
+                        service_name="WebUI 服务器",
+                        host=host,
+                        port=self.port,
+                        config_hint="webui.port (config/bot_config.toml)",
+                    )
             else:
                 logger.error(f"❌ WebUI 服务器启动失败 (网络错误): {e}")
             raise
@@ -161,8 +216,8 @@ class WebUIServer:
 class ThreadedWebUIServer:
     """在专用线程中运行 WebUI，避免阻塞主事件循环。"""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8001) -> None:
-        self.host = host
+    def __init__(self, hosts: list[str] | None = None, port: int = 8001) -> None:
+        self.hosts = hosts or ["127.0.0.1", "::1"]
         self.port = port
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -201,7 +256,7 @@ class ThreadedWebUIServer:
 
         try:
             self._server = WebUIServer(
-                host=self.host,
+                hosts=self.hosts,
                 port=self.port,
                 register_config_reload=False,
             )
@@ -314,7 +369,7 @@ def get_webui_server() -> WebUIServer:
         from src.config.startup_bindings import resolve_webui_bind_address
 
         bind_address = resolve_webui_bind_address()
-        _webui_server = WebUIServer(host=bind_address.host, port=bind_address.port)
+        _webui_server = WebUIServer(hosts=bind_address.hosts, port=bind_address.port)
     return _webui_server
 
 
@@ -325,5 +380,5 @@ def get_threaded_webui_server() -> ThreadedWebUIServer:
         from src.config.startup_bindings import resolve_webui_bind_address
 
         bind_address = resolve_webui_bind_address()
-        _threaded_webui_server = ThreadedWebUIServer(host=bind_address.host, port=bind_address.port)
+        _threaded_webui_server = ThreadedWebUIServer(hosts=bind_address.hosts, port=bind_address.port)
     return _threaded_webui_server

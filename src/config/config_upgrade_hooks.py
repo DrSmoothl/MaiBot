@@ -272,6 +272,25 @@ def _add_precise_expression_selection_default(data: dict[str, Any]) -> list[str]
     return ["expression.enable_precise_expression_selection"]
 
 
+def _normalize_webui_host_to_list(data: dict[str, Any]) -> list[str]:
+    """
+    8.14.13: 将 WebUI host 从 str 转换为 list[str]。
+    旧配置中 host 为单地址字符串（如 "127.0.0.1"），新配置为列表。
+    """
+    webui = _as_dict(data.get("webui"))
+    if webui is None:
+        return []
+
+    host = webui.get("host")
+    if isinstance(host, list):
+        return []
+    if isinstance(host, str):
+        webui["host"] = [host]
+        return ["webui.host"]
+
+    return []
+
+
 def _normalize_group_list_fields(section: dict[str, Any], list_key: str, old_inner_key: str) -> bool:
     group_list = _as_list(section.get(list_key))
     if group_list is None:
@@ -371,6 +390,11 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.12.9",
         config_names=("bot_config.toml",),
         migrate=_add_precise_expression_selection_default,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.14.13",
+        config_names=("bot_config.toml",),
+        migrate=_normalize_webui_host_to_list,
     ),
 )
 MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = ()
