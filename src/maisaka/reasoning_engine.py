@@ -75,8 +75,6 @@ if TYPE_CHECKING:
 
 logger = get_logger("maisaka_reasoning_engine")
 
-TIMING_GATE_DISABLED_ACTION = "disabled"
-TIMING_GATE_DISABLED_MESSAGE = "核心循环已切换为 Planner-only，Timing Gate 本轮未运行。"
 PLANNER_NO_TOOL_HINT_DISPLAY_PREFIX = "[Planner 工具选择提示]"
 HISTORY_SILENT_TOOL_NAMES: set[str] = set()
 HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
@@ -857,8 +855,6 @@ class MaisakaReasoningEngine:
         self._runtime._render_context_usage_panel(
             cycle_id=cycle_detail.cycle_id,
             time_records=dict(completed_cycle.time_records),
-            timing_action=TIMING_GATE_DISABLED_ACTION,
-            timing_response=TIMING_GATE_DISABLED_MESSAGE,
             planner_selected_history_count=response.selected_history_count if response is not None else None,
             planner_prompt_tokens=response.prompt_tokens if response is not None else None,
             planner_model_name=response.model_name if response is not None else None,

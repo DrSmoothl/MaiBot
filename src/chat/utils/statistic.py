@@ -365,6 +365,28 @@ def _json_for_html_script(value: object) -> str:
     )
 
 
+def _build_llm_owner_costs(costs_by_type: defaultdict[str, float]) -> dict[str, float]:
+    """按 LLM 调用来源聚合花费，区分本体与各插件。"""
+
+    owner_costs: defaultdict[str, float] = defaultdict(float)
+    for request_type, cost in costs_by_type.items():
+        normalized_request_type = str(request_type or "").strip()
+        if normalized_request_type.startswith("plugin."):
+            plugin_id = normalized_request_type.removeprefix("plugin.").strip()
+            if plugin_id.endswith(".asr"):
+                plugin_id = plugin_id.removesuffix(".asr").strip()
+            owner_label = f"插件 {plugin_id}" if plugin_id else "插件（未知）"
+        else:
+            owner_label = "本体"
+        owner_costs[owner_label] += float(cost or 0.0)
+
+    return {
+        owner_label: owner_costs[owner_label]
+        for owner_label in sorted(owner_costs.keys(), key=lambda label: (label != "本体", label))
+        if owner_costs[owner_label] > 0
+    }
+
+
 class StatisticOutputTask(AsyncTask):
     """统计输出任务"""
 
@@ -1453,6 +1475,12 @@ class StatisticOutputTask(AsyncTask):
             chat_costs = [stat_data[COST_BY_CHAT][chat_id] for chat_id in sorted_chat_cost_ids]
             chat_cost_labels_json = _json_for_html_script(chat_cost_labels)
             chat_costs_json = _json_for_html_script(chat_costs)
+
+            owner_costs_by_label = _build_llm_owner_costs(stat_data[COST_BY_TYPE])
+            owner_cost_labels = list(owner_costs_by_label.keys())
+            owner_costs = [owner_costs_by_label[label] for label in owner_cost_labels]
+            owner_cost_labels_json = _json_for_html_script(owner_cost_labels)
+            owner_costs_json = _json_for_html_script(owner_costs)
             # 生成HTML
             return f"""
             <div id=\"{div_id}\" class=\"tab-content\">
@@ -1564,6 +1592,13 @@ class StatisticOutputTask(AsyncTask):
                 <h2>数据分布图表</h2>
                 <div class="pie-chart-grid">
                     <div class="pie-chart-card">
+                        <h3>调用来源花费分布</h3>
+                        <div class="pie-chart-canvas-wrap">
+                            <canvas id="ownerPieChart_{div_id}"></canvas>
+                        </div>
+                        <div id="ownerPieLegend_{div_id}" class="pie-chart-legend"></div>
+                    </div>
+                    <div class="pie-chart-card">
                         <h3>模型花费分布</h3>
                         <div class="pie-chart-canvas-wrap">
                             <canvas id="modelPieChart_{div_id}"></canvas>
@@ -1664,6 +1699,30 @@ class StatisticOutputTask(AsyncTask):
                             }});
                             renderPieLegend_{div_id}(chart, legendId);
                             return chart;
+                        }}
+
+                        // 调用来源花费分布饼图
+                        const ownerLabels = {owner_cost_labels_json};
+                        if (ownerLabels.length > 0) {{
+                            const ownerData = {{
+                                labels: ownerLabels,
+                                datasets: [{{
+                                    data: {owner_costs_json},
+                                    backgroundColor: getPieColors(ownerLabels.length),
+                                    borderColor: getPieColors(ownerLabels.length),
+                                    borderWidth: 2
+                                }}]
+                            }};
+
+                            createPieChart_{div_id}('ownerPieChart_{div_id}', 'ownerPieLegend_{div_id}', ownerData, function(context) {{
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
+                            }});
+                        }} else {{
+                            document.getElementById('ownerPieChart_{div_id}').style.display = 'none';
+                            document.getElementById('ownerPieLegend_{div_id}').style.display = 'none';
+                            document.querySelector('#ownerPieChart_{div_id}').closest('.pie-chart-card').querySelector('h3').textContent = '调用来源花费分布 (无数据)';
                         }}
 
                         // 模型花费分布饼图

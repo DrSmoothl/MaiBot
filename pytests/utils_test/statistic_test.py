@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from types import ModuleType
@@ -94,6 +95,30 @@ def _is_bot_self(platform: str, user_id: str) -> bool:
     return False
 
 
+def test_build_llm_owner_costs_groups_core_and_plugins() -> None:
+    """LLM 来源花费统计应区分本体与不同插件。"""
+
+    costs_by_type = defaultdict(
+        float,
+        {
+            "maisaka.replyer": 1.25,
+            "A_Memorix.person_fact_writeback": 0.5,
+            "plugin.weather": 0.75,
+            "plugin.music.asr": 0.25,
+            "plugin.todo": 0.4,
+        },
+    )
+
+    owner_costs = statistic._build_llm_owner_costs(costs_by_type)
+
+    assert owner_costs == {
+        "本体": 1.75,
+        "插件 music": 0.25,
+        "插件 todo": 0.4,
+        "插件 weather": 0.75,
+    }
+
+
 def test_statistic_read_queries_disable_auto_commit(monkeypatch: pytest.MonkeyPatch) -> None:
     """统计模块的纯读查询应关闭自动提交，避免 Session 退出后对象被 expire。"""
     calls: list[bool] = []
@@ -178,6 +203,8 @@ def test_html_report_encodes_chat_names_in_tables_and_charts(tmp_path) -> None:
     for period_key, _duration, _label in task.stat_period:
         period_data = task._build_stat_period_data()
         period_data[statistic.MSG_CNT_BY_CHAT]["g_validation"] = 1
+        period_data[statistic.COST_BY_TYPE]["maisaka.replyer"] = 0.1
+        period_data[statistic.COST_BY_TYPE]["plugin.weather"] = 0.2
         period_data[statistic.COST_BY_CHAT]["g_validation"] = 0.12
         period_data[statistic.COST_BY_CHAT][statistic.GLOBAL_COST_SESSION_KEY] = 0.34
         period_data[statistic.TOTAL_MSG_CNT] = 1
@@ -199,6 +226,10 @@ def test_html_report_encodes_chat_names_in_tables_and_charts(tmp_path) -> None:
     assert "overflow-y: auto;" in generated_html
     assert "maintainAspectRatio: false" in generated_html
     assert "display: false" in generated_html
+    assert "调用来源花费分布" in generated_html
+    assert "ownerPieChart" in generated_html
+    assert "本体" in generated_html
+    assert "插件 weather" in generated_html
     assert "聊天流花费分布" in generated_html
     assert "全局" in generated_html
     assert "chatCostPieChart" in generated_html
