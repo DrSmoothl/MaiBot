@@ -91,9 +91,11 @@ def _build_parameters_schema_from_property_map(property_map: Dict[str, Any]) -> 
 def _build_empty_object_schema() -> Dict[str, Any]:
     """构建无参工具使用的空对象 Schema。"""
 
+    # 带 required: []，否则 DeepSeek 等严格校验会报 null is not of type "array"
     return {
         "type": "object",
         "properties": {},
+        "required": [],
     }
 
 
@@ -199,8 +201,7 @@ class ToolParam:
             schema["items"] = deepcopy(self.items_schema)
         if self.param_type == ToolParamType.OBJECT:
             schema["properties"] = deepcopy(self.properties or {})
-            if self.required_properties:
-                schema["required"] = list(self.required_properties)
+            schema["required"] = list(self.required_properties)
             if self.additional_properties is not None:
                 schema["additionalProperties"] = deepcopy(self.additional_properties)
         return schema
@@ -324,7 +325,11 @@ class ToolOption:
             Dict[str, Any] | None: 工具参数 Schema。无参数工具时返回 `None`。
         """
         if self.parameters_schema_override is not None:
-            return deepcopy(self.parameters_schema_override)
+            schema = deepcopy(self.parameters_schema_override)
+            # override 工具的 required 可能缺失或非数组，统一规整为列表以满足严格校验
+            if schema.get("type") == "object" and not isinstance(schema.get("required"), list):
+                schema["required"] = []
+            return schema
         if not self.params:
             return None
         return {
