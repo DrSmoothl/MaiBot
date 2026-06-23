@@ -50,6 +50,42 @@ export interface ExpressionGroupListResponse {
   data: ExpressionGroupInfo[]
 }
 
+export interface ExpressionClusterMember {
+  id: number
+  situation: string
+  style: string
+  count: number
+  chat_id?: string | null
+  chat_name?: string | null
+  checked: boolean
+  modified_by: 'ai' | 'user' | null
+}
+
+export interface ExpressionClusterSummary {
+  embedding_profile_marker: string
+  cluster_id: number
+  size: number
+  members: ExpressionClusterMember[]
+}
+
+export interface ExpressionClusterListResponse {
+  success: boolean
+  index_exists: boolean
+  index_path: string
+  generated_at: string | null
+  updated_at: string | null
+  embedding_model: string | null
+  embedding_dimension: number | null
+  sample_count: number
+  clusters: ExpressionClusterSummary[]
+}
+
+export interface ExpressionClusterMemberListResponse {
+  success: boolean
+  cluster: ExpressionClusterSummary | null
+  data: ExpressionClusterMember[]
+}
+
 export interface ExpressionExportItem {
   situation: string
   style: string

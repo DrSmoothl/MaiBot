@@ -3,6 +3,7 @@ import {
   Download,
   FileClock,
   MessageSquare,
+  Network,
   Plus,
   Search,
   Trash2,
@@ -57,6 +58,7 @@ import {
   ExpressionEditDialog,
   LegacyExpressionImportDialog,
 } from './ExpressionDialogs'
+import { ExpressionClusterBrowser } from './ExpressionClusterBrowser'
 import { ExpressionList } from './ExpressionList'
 import { ExpressionReviewLogPanel } from './ExpressionReviewLogPanel'
 
@@ -118,7 +120,7 @@ export function ExpressionManagementPage() {
   const [deleteConfirmExpression, setDeleteConfirmExpression] = useState<Expression | null>(null)
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false)
-  const [activeView, setActiveView] = useState<'list' | 'logs' | 'quick'>('list')
+  const [activeView, setActiveView] = useState<'list' | 'logs' | 'quick' | 'clusters'>('list')
 
   // 兄弟读：聊天流 / 互通组 / 统计 / 审核统计统一以 'expression' 前缀分层，
   // list.invalidate() 失效 ['expression'] 前缀时一并刷新（读失败局部呈现，不弹全局 toast）
@@ -224,7 +226,7 @@ export function ExpressionManagementPage() {
     })
 
   // 顶部视图切换（表达 / 快速审核 / AI审核记录）
-  const handleActiveViewChange = (view: 'list' | 'logs' | 'quick') => {
+  const handleActiveViewChange = (view: 'list' | 'logs' | 'quick' | 'clusters') => {
     setActiveView(view)
     if (view === 'list') {
       list.refetch()
@@ -233,10 +235,9 @@ export function ExpressionManagementPage() {
     reviewStatsQuery.refetch()
   }
 
-  // 查看详情（事件驱动的读取，失败用 toast 反馈用户动作）
-  const handleViewDetail = async (expression: Expression) => {
+  const handleViewExpressionById = async (expressionId: number) => {
     try {
-      const result = await getExpressionDetail(expression.id)
+      const result = await getExpressionDetail(expressionId)
       setSelectedExpression(result)
       setIsDetailDialogOpen(true)
     } catch (error) {
@@ -246,6 +247,11 @@ export function ExpressionManagementPage() {
         variant: 'destructive',
       })
     }
+  }
+
+  // 查看详情（事件驱动的读取，失败用 toast 反馈用户动作）
+  const handleViewDetail = async (expression: Expression) => {
+    await handleViewExpressionById(expression.id)
   }
 
   // 编辑表达方式
@@ -400,8 +406,8 @@ export function ExpressionManagementPage() {
       <div className="mb-4 flex shrink-0 flex-col gap-3 sm:mb-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <Tabs
-            value={activeView === 'quick' ? 'quick' : 'list'}
-            onValueChange={(value) => handleActiveViewChange(value as 'list' | 'quick')}
+            value={activeView === 'quick' ? 'quick' : activeView === 'clusters' ? 'clusters' : 'list'}
+            onValueChange={(value) => handleActiveViewChange(value as 'list' | 'quick' | 'clusters')}
             className="-mx-1 w-[calc(100%+0.5rem)] px-1 sm:mx-0 sm:w-auto sm:p-0"
           >
             <DashboardTabBar className="h-10 sm:w-fit">
@@ -417,6 +423,10 @@ export function ExpressionManagementPage() {
                     {uncheckedCount > 99 ? '99+' : uncheckedCount}
                   </span>
                 )}
+              </DashboardTabTrigger>
+              <DashboardTabTrigger value="clusters" className="h-10 flex-1 gap-2 sm:h-9 sm:flex-none">
+                <Network className="h-4 w-4" />
+                <span>聚类</span>
               </DashboardTabTrigger>
             </DashboardTabBar>
           </Tabs>
@@ -730,6 +740,10 @@ export function ExpressionManagementPage() {
             onReviewed={refreshAll}
           />
         </div>
+      )}
+
+      {activeView === 'clusters' && (
+        <ExpressionClusterBrowser onOpenExpression={handleViewExpressionById} />
       )}
 
       {/* 详情对话框 */}

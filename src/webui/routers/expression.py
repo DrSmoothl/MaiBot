@@ -15,6 +15,7 @@ from sqlalchemy import case, func
 from sqlmodel import col, delete, select
 
 from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
+from src.chat.replyer.expression_vector_index import normalize_text, resolve_project_path
 from src.common.database.database import get_db_session
 from src.common.database.database_model import ChatSession, Expression, Messages, ModifiedBy
 from src.common.logger import get_logger
@@ -931,6 +932,50 @@ class ExpressionGroupListResponse(BaseModel):
     data: List[ExpressionGroupInfo]
 
 
+class ExpressionClusterMemberResponse(BaseModel):
+    """表达聚类成员。"""
+
+    id: int
+    situation: str
+    style: str
+    count: int = 0
+    chat_id: Optional[str] = None
+    chat_name: Optional[str] = None
+    checked: bool = False
+    modified_by: Optional[str] = None
+
+
+class ExpressionClusterSummaryResponse(BaseModel):
+    """表达聚类摘要。"""
+
+    embedding_profile_marker: str
+    cluster_id: int
+    size: int
+    members: List[ExpressionClusterMemberResponse] = Field(default_factory=list)
+
+
+class ExpressionClusterListResponse(BaseModel):
+    """表达聚类列表响应。"""
+
+    success: bool = True
+    index_exists: bool
+    index_path: str
+    generated_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    embedding_model: Optional[str] = None
+    embedding_dimension: Optional[int] = None
+    sample_count: int = 0
+    clusters: List[ExpressionClusterSummaryResponse] = Field(default_factory=list)
+
+
+class ExpressionClusterMemberListResponse(BaseModel):
+    """表达聚类成员列表响应。"""
+
+    success: bool = True
+    cluster: Optional[ExpressionClusterSummaryResponse] = None
+    data: List[ExpressionClusterMemberResponse] = Field(default_factory=list)
+
+
 @router.get("/chats", response_model=ChatListResponse)
 async def get_chat_list(
     include_legacy: bool = Query(False, description="是否显示旧格式/非当前账号的表达方式聊天流"),
@@ -1039,6 +1084,145 @@ async def get_expression_groups(
     except Exception as e:
         logger.exception(f"获取表达互通组失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取表达互通组失败: {str(e)}") from e
+
+
+def read_expression_vector_index_payload() -> tuple[Path, Optional[dict[str, Any]]]:
+    """读取当前表达向量索引 JSON。"""
+
+    index_path = resolve_project_path(global_config.expression.expression_vector_index_path)
+    if not index_path.exists():
+        return index_path, None
+    payload = json.loads(index_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"表达向量索引格式异常: {index_path}")
+    return index_path, payload
+
+
+def expression_cluster_member_to_response(raw_member: dict[str, Any]) -> ExpressionClusterMemberResponse:
+    """将索引中的表达聚类成员转换为 WebUI 响应。"""
+
+    expression_id = int(raw_member.get("id") or 0)
+    chat_id = normalize_text(raw_member.get("session_id")) or None
+    modified_by = normalize_text(raw_member.get("modified_by")).lower() or None
+    return ExpressionClusterMemberResponse(
+        id=expression_id,
+        situation=normalize_text(raw_member.get("situation")),
+        style=normalize_text(raw_member.get("style")),
+        count=int(raw_member.get("count") or 0),
+        chat_id=chat_id,
+        chat_name=get_chat_name(chat_id) if chat_id else None,
+        checked=bool(raw_member.get("checked", False)),
+        modified_by=modified_by,
+    )
+
+
+def expression_cluster_summary_to_response(raw_cluster: dict[str, Any]) -> ExpressionClusterSummaryResponse:
+    """将索引中的表达聚类摘要转换为 WebUI 响应。"""
+
+    return ExpressionClusterSummaryResponse(
+        embedding_profile_marker=normalize_text(raw_cluster.get("embedding_profile_marker")),
+        cluster_id=int(raw_cluster.get("cluster_id") or 0),
+        size=int(raw_cluster.get("size") or 0),
+        members=[
+            expression_cluster_member_to_response(raw_member)
+            for raw_member in raw_cluster.get("members") or []
+            if isinstance(raw_member, dict)
+        ],
+    )
+
+
+def get_cluster_summaries(payload: dict[str, Any]) -> List[ExpressionClusterSummaryResponse]:
+    """读取并排序表达聚类摘要。"""
+
+    clusters = [
+        expression_cluster_summary_to_response(raw_cluster)
+        for raw_cluster in payload.get("clusters") or []
+        if isinstance(raw_cluster, dict)
+    ]
+    return sorted(clusters, key=lambda item: (-item.size, item.embedding_profile_marker, item.cluster_id))
+
+
+def find_cluster_summary(
+    clusters: List[ExpressionClusterSummaryResponse],
+    *,
+    cluster_id: int,
+    profile_marker: Optional[str],
+) -> Optional[ExpressionClusterSummaryResponse]:
+    """定位指定表达聚类摘要。"""
+
+    normalized_profile_marker = normalize_text(profile_marker)
+    for cluster in clusters:
+        if cluster.cluster_id != cluster_id:
+            continue
+        if normalized_profile_marker and cluster.embedding_profile_marker != normalized_profile_marker:
+            continue
+        return cluster
+    return None
+
+
+@router.get("/clusters", response_model=ExpressionClusterListResponse)
+async def get_expression_clusters() -> ExpressionClusterListResponse:
+    """获取表达向量聚类摘要。"""
+
+    try:
+        index_path, payload = read_expression_vector_index_payload()
+        if payload is None:
+            return ExpressionClusterListResponse(index_exists=False, index_path=str(index_path))
+
+        return ExpressionClusterListResponse(
+            index_exists=True,
+            index_path=str(index_path),
+            generated_at=normalize_text(payload.get("generated_at")) or None,
+            updated_at=normalize_text(payload.get("updated_at")) or None,
+            embedding_model=normalize_text(payload.get("embedding_model")) or None,
+            embedding_dimension=int(payload.get("embedding_dimension") or 0) or None,
+            sample_count=int(payload.get("sample_count") or 0),
+            clusters=get_cluster_summaries(payload),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"获取表达聚类失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取表达聚类失败: {str(e)}") from e
+
+
+@router.get("/clusters/{cluster_id}/members", response_model=ExpressionClusterMemberListResponse)
+async def get_expression_cluster_members(
+    cluster_id: int,
+    profile_marker: Optional[str] = Query(None, description="embedding profile marker"),
+) -> ExpressionClusterMemberListResponse:
+    """获取指定表达聚类的完整成员列表。"""
+
+    try:
+        _, payload = read_expression_vector_index_payload()
+        if payload is None:
+            return ExpressionClusterMemberListResponse(cluster=None, data=[])
+
+        clusters = get_cluster_summaries(payload)
+        cluster = find_cluster_summary(clusters, cluster_id=cluster_id, profile_marker=profile_marker)
+        if cluster is None:
+            raise HTTPException(status_code=404, detail=f"未找到表达聚类: {cluster_id}")
+
+        members: List[ExpressionClusterMemberResponse] = []
+        for raw_expression in payload.get("expressions") or []:
+            if not isinstance(raw_expression, dict):
+                continue
+            if int(raw_expression.get("cluster_id") or 0) != cluster_id:
+                continue
+            raw_profile_marker = normalize_text(raw_expression.get("embedding_profile_marker"))
+            if cluster.embedding_profile_marker and raw_profile_marker != cluster.embedding_profile_marker:
+                continue
+            members.append(expression_cluster_member_to_response(raw_expression))
+        members.sort(key=lambda item: (-item.count, item.id))
+
+        return ExpressionClusterMemberListResponse(cluster=cluster, data=members)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"获取表达聚类成员失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取表达聚类成员失败: {str(e)}") from e
 
 
 @router.get("/list", response_model=ExpressionListResponse)

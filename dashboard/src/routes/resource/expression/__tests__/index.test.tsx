@@ -20,6 +20,8 @@ vi.mock('@/lib/expression-api', () => ({
   getChatList: vi.fn(),
   getExpressionList: vi.fn(),
   getExpressionStats: vi.fn(),
+  getExpressionClusters: vi.fn(),
+  getExpressionClusterMembers: vi.fn(),
   getReviewStats: vi.fn(),
   getExpressionGroups: vi.fn(),
   getExpressionDetail: vi.fn(),
@@ -116,6 +118,22 @@ beforeEach(() => {
   } as never)
   vi.mocked(expressionApi.getExpressionStats).mockResolvedValue({
     total: 2, recent_7days: 1, chat_count: 1, top_chats: {},
+  } as never)
+  vi.mocked(expressionApi.getExpressionClusters).mockResolvedValue({
+    success: true,
+    index_exists: true,
+    index_path: 'data/expression_selection/expression_vector_index.json',
+    generated_at: null,
+    updated_at: null,
+    embedding_model: 'test',
+    embedding_dimension: 3,
+    sample_count: 1,
+    clusters: [],
+  } as never)
+  vi.mocked(expressionApi.getExpressionClusterMembers).mockResolvedValue({
+    success: true,
+    cluster: null,
+    data: [],
   } as never)
   vi.mocked(expressionApi.getReviewStats).mockResolvedValue({
     total: 2, unchecked: 1, passed: 1, ai_checked: 0, user_checked: 1,
