@@ -279,55 +279,17 @@ class BaseMaisakaReplyGenerator:
         """构建 replyer 的最终输出格式说明。"""
 
         locale = BaseMaisakaReplyGenerator._get_prompt_locale()
-        if not global_config.experimental.enable_replyer_format_output:
-            if locale.startswith("en"):
-                return (
-                    "Please do not output any extra content (including unnecessary prefixes or suffixes, "
-                    "colons, brackets, stickers, plain at, or @). Only output the message content itself."
-                )
-            if locale.startswith("ja"):
-                return (
-                    "余計な内容（不要な前置きや後置き、コロン、括弧、スタンプ、通常の at や @ など）は出力せず、"
-                    "発言内容だけを出力してください。"
-                )
-            return "请注意不要输出多余内容(包括不必要的前后缀，冒号，括号，表情包，@等 )，只输出发言内容就好。"
-
         if locale.startswith("en"):
             return (
-                "Only output the message fragments to send. Do not output explanations, Markdown, or code fences. "
-                "Use `<text>text</text>` for normal text; "
-                'to mention someone, use `<at msg_id="message id">display name</at>`; '
-                "use `<emoji>emotion or sticker description</emoji>` when you want to send a sticker. "
-                "To resend an existing image from context, use "
-                '`<image msg_id="message id" index="0">optional description</image>`; '
-                'for tool-result media, use `media_index="tool_result:call_x:0"` instead of `msg_id`. '
-                "You may combine fragments in send order, for example: "
-                '`<text>fine</text><image msg_id="123" index="0">that image</image>`.'
+                "Please do not output any extra content (including unnecessary prefixes or suffixes, "
+                "colons, brackets, stickers, plain at, or @). Only output the message content itself."
             )
-
         if locale.startswith("ja"):
             return (
-                "送信するメッセージフラグメントだけを出力してください。説明、Markdown、コードブロックは出力しないでください。"
-                "通常の文字は `<text>文字</text>` を使います；"
-                '`<at msg_id="メッセージID">表示名</at>` で at できます；'
-                "スタンプを送りたいときは `<emoji>感情またはスタンプ説明</emoji>` を使います。"
-                "文脈中の既存画像を送りたいときは "
-                '`<image msg_id="メッセージID" index="0">任意の説明</image>` を使います。'
-                'ツール結果のメディアは `msg_id` の代わりに `media_index="tool_result:call_x:0"` を使います。'
-                "送信順に複数のフラグメントを組み合わせてもかまいません。例："
-                '`<text>まあいいか</text><image msg_id="123" index="0">その画像</image>`。'
+                "余計な内容（不要な前置きや後置き、コロン、括弧、スタンプ、通常の at や @ など）は出力せず、"
+                "発言内容だけを出力してください。"
             )
-
-        return (
-            "请只输出要发送的消息片段，不要输出解释、Markdown 或代码块。"
-            "普通文字使用 `<text>文字</text>`；"
-            '需要 at 某人时，使用 `<at msg_id="消息编号">显示名</at>`；'
-            "想发送表情包时，使用 `<emoji>情绪或表情描述</emoji>`。"
-            '想转发上下文里已有图片时，使用 `<image msg_id="消息编号" index="0">可选描述</image>`。'
-            '工具返回媒体用 `media_index="tool_result:call_x:0"` 代替 `msg_id`。'
-            "可以按发送顺序组合多个片段，例如："
-            '`<text>行吧</text><image msg_id="123" index="0">那张图</image>`。'
-        )
+        return "请注意不要输出多余内容(包括不必要的前后缀，冒号，括号，表情包，@等 )，只输出发言内容就好。"
 
     @staticmethod
     def _replace_regex_capture_groups(reaction: str, match: re.Match[str]) -> str:
@@ -448,8 +410,6 @@ class BaseMaisakaReplyGenerator:
         return system_prompt
 
     def _build_reply_instruction(self) -> str:
-        if global_config.experimental.enable_replyer_format_output:
-            return self._build_replyer_output_instruction()
         return "请自然地回复。不要输出多余说明、括号、@ 或额外标记，只输出实际要发送的内容。"
 
     def _build_final_user_message(

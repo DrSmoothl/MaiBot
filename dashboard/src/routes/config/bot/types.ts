@@ -41,7 +41,6 @@ export interface ExperimentalConfig {
   enable_behavior_learning: boolean
   behavior_learning_list: LearningItem[]
   behavior_groups: ChatStreamGroup[]
-  enable_replyer_format_output: boolean
   focus_mode: boolean
   focus_on_private: boolean
   focus_chat_whitelist: TargetItem[]

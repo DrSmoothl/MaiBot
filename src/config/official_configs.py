@@ -910,22 +910,6 @@ class ExperimentalConfig(ConfigBase):
     )
     """_wrap_让多个群聊或私聊共享学到的行为经验。"""
 
-    enable_replyer_format_output: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "Replyer 格式化输出",
-                "en_US": "Replyer formatted output",
-                "ja_JP": "Replyer フォーマット出力",
-            },
-            "x-widget": "switch",
-            "x-icon": "braces",
-        },
-    )
-    """
-    允许模型输出 @、表情、图片等结构化片段；不熟悉时建议关闭。
-    """
-
     focus_mode: bool = Field(
         default=False,
         json_schema_extra={
