@@ -326,8 +326,8 @@ class ToolOption:
         """
         if self.parameters_schema_override is not None:
             schema = deepcopy(self.parameters_schema_override)
-            # override 工具常省略 required，补齐以满足 DeepSeek 等严格校验
-            if schema.get("type") == "object" and "required" not in schema:
+            # override 工具的 required 可能缺失或非数组，统一规整为列表以满足严格校验
+            if schema.get("type") == "object" and not isinstance(schema.get("required"), list):
                 schema["required"] = []
             return schema
         if not self.params:
