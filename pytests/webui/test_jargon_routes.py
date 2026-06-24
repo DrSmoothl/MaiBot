@@ -154,6 +154,7 @@ def test_list_jargons_with_pagination(client: TestClient, sample_jargons):
     data = response.json()
     assert data["total"] == 3
     assert len(data["data"]) == 2
+    assert all(item["raw_content"] is None for item in data["data"])
 
     response = client.get("/api/webui/jargon/list?page=2&page_size=2")
     assert response.status_code == 200

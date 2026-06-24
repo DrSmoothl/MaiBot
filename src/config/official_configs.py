@@ -37,6 +37,7 @@ class BotConfig(ConfigBase):
     """机器人配置类"""
 
     __ui_label__ = "基础"
+    __ui_order__ = 10
 
     platform: str = Field(
         default="",
@@ -263,6 +264,7 @@ class VisualConfig(ConfigBase):
     """视觉配置类"""
 
     __ui_label__ = "视觉"
+    __ui_order__ = 60
 
     planner_mode: Literal["text", "multimodal", "auto"] = Field(
         default="auto",
@@ -356,7 +358,7 @@ class VisualConfig(ConfigBase):
             "x-widget": "input",
             "x-icon": "image",
             "x-layout": "inline-right",
-            "x-input-width": "8rem",
+            "x-input-width": "min(100%, 5.5rem)",
             "x-row": "visual-image-compression",
             "label": {
                 "zh_CN": "最大图片大小(MB)",
@@ -373,6 +375,7 @@ class VisualConfig(ConfigBase):
             "x-widget": "select",
             "x-icon": "minimize-2",
             "x-layout": "inline-right",
+            "x-input-width": "min(100%, 8.5rem)",
             "x-row": "visual-image-compression",
             "x-option-descriptions": OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS,
             "label": {
@@ -457,6 +460,7 @@ class ChatConfig(ConfigBase):
     """聊天配置类"""
 
     __ui_label__ = "聊天"
+    __ui_order__ = 20
 
     talk_value: float = Field(
         default=1,
@@ -768,6 +772,8 @@ class ChatConfig(ConfigBase):
             },
             "x-widget": "input",
             "x-icon": "timer",
+            "x-layout": "inline-right",
+            "x-input-width": "7.5rem",
             "x-description-display": "icon",
             "advanced": False,
         },
@@ -915,6 +921,7 @@ class ExperimentalConfig(ConfigBase):
 
     __ui_label__ = "实验性功能"
     __ui_advanced__ = True
+    __ui_order__ = 30
 
     enable_behavior_learning: bool = Field(
         default=False,
@@ -1046,6 +1053,7 @@ class MessageReceiveConfig(ConfigBase):
 
     __ui_label__ = "消息接收"
     __ui_advanced__ = True
+    __ui_order__ = 70
 
     image_parse_threshold: int = Field(
         default=5,
@@ -2949,6 +2957,7 @@ class AMemorixConfig(ConfigBase):
     """长期记忆配置"""
 
     __ui_label__ = "记忆"
+    __ui_order__ = 50
 
     plugin: AMemorixPluginConfig = Field(
         default_factory=AMemorixPluginConfig,
@@ -3209,6 +3218,7 @@ class ExpressionConfig(ConfigBase):
     """表达配置类"""
 
     __ui_label__ = "学习"
+    __ui_order__ = 40
 
     expression_checked_only: bool = Field(
         default=True,
@@ -3406,6 +3416,7 @@ class VoiceConfig(ConfigBase):
 
     __ui_label__ = "语音"
     __ui_advanced__ = True
+    __ui_order__ = 90
 
     enable_asr: bool = Field(
         default=False,
@@ -3422,6 +3433,7 @@ class EmojiConfig(ConfigBase):
 
     __ui_label__ = "表情"
     __ui_advanced__ = True
+    __ui_order__ = 80
 
     emoji_send_num: int = Field(
         default=25,
@@ -3611,6 +3623,7 @@ class ResponsePostProcessConfig(ConfigBase):
 
     __ui_label__ = "后处理"
     __ui_advanced__ = True
+    __ui_order__ = 100
 
     enable_response_post_process: bool = Field(
         default=True,
@@ -3814,6 +3827,7 @@ class LogConfig(ConfigBase):
 
     __ui_label__ = "调试"
     __ui_advanced__ = True
+    __ui_order__ = 130
 
     date_style: str = Field(
         default="m-d H:i:s",
@@ -4348,6 +4362,7 @@ class WebUIConfig(ConfigBase):
 
     __ui_label__ = "WebUI"
     __ui_advanced__ = True
+    __ui_order__ = 110
 
     enabled: bool = Field(
         default=True,
@@ -4446,8 +4461,9 @@ class WebUIConfig(ConfigBase):
                 "en_US": "Allowed IPs",
                 "ja_JP": "許可 IP",
             },
-            "x-widget": "input",
+            "x-widget": "comma-list",
             "x-icon": "network",
+            "x-placeholder": "127.0.0.1",
         },
     )
     """允许访问 WebUI 的 IP，多个用逗号分隔。"""
@@ -4460,8 +4476,9 @@ class WebUIConfig(ConfigBase):
                 "en_US": "Trusted proxy IPs",
                 "ja_JP": "信頼プロキシ IP",
             },
-            "x-widget": "input",
+            "x-widget": "comma-list",
             "x-icon": "server",
+            "x-placeholder": "127.0.0.1",
         },
     )
     """可信反向代理 IP；只有这些代理传来的真实 IP 会被信任。"""
@@ -4936,6 +4953,7 @@ class PluginConfig(ConfigBase):
 
     __ui_label__ = "插件"
     __ui_advanced__ = True
+    __ui_order__ = 120
 
     permission: list[str] = Field(
         default_factory=list,

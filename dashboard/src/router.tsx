@@ -69,15 +69,6 @@ const botConfigRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/config/bot'), 'BotConfigPage'),
 })
 
-// 配置路由 - 旧模型厂商配置入口，已合并到模型配置页
-const modelProviderConfigRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: '/config/modelProvider',
-  beforeLoad: () => {
-    throw redirect({ to: '/config/model' })
-  },
-})
-
 // 配置路由 - 麦麦模型配置
 const modelConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -85,7 +76,7 @@ const modelConfigRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/config/model'), 'ModelConfigPage'),
 })
 
-// 配置路由 - 麦麦适配器配置（已停用，引导跳转到插件配置；旧实现保留在 ./routes/config/adapter）
+// 配置路由 - Prompt 管理
 const promptManagementRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/prompts',
@@ -97,12 +88,6 @@ const promptGeneratorRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/prompt-generator',
   component: lazyRouteComponent(() => import('./routes/prompt-generator'), 'PromptGeneratorPage'),
-})
-
-const adapterConfigRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: '/config/adapter',
-  component: lazyRouteComponent(() => import('./routes/config/adapter-disabled'), 'AdapterConfigPage'),
 })
 
 // 资源管理路由 - 表情包管理
@@ -338,11 +323,9 @@ const routeTree = rootRoute.addChildren([
   protectedRoute.addChildren([
     indexRoute,
     botConfigRoute,
-    modelProviderConfigRoute,
     modelConfigRoute,
     promptManagementRoute,
     promptGeneratorRoute,
-    adapterConfigRoute,
     emojiManagementRoute,
     expressionManagementRoute,
     jargonManagementRoute,

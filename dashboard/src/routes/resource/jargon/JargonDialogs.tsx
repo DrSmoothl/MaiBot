@@ -40,7 +40,12 @@ import { cn } from '@/lib/utils'
 
 import { createJargon, updateJargon } from '@/lib/jargon-api'
 
-import type { Jargon, JargonChatInfo, JargonCreateRequest, JargonUpdateRequest } from '@/types/jargon'
+import type {
+  Jargon,
+  JargonChatInfo,
+  JargonCreateRequest,
+  JargonUpdateRequest,
+} from '@/types/jargon'
 
 // ====================
 // 信息项组件
@@ -58,7 +63,7 @@ function InfoItem({
 }) {
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground flex items-center gap-1">
+      <Label className="text-muted-foreground flex items-center gap-1 text-xs">
         {Icon && <Icon className="h-3 w-3" />}
         {label}
       </Label>
@@ -84,18 +89,20 @@ interface JargonDetailDialogProps {
   jargon: Jargon | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  loadingRawContent?: boolean
 }
 
 export function JargonDetailDialog({
   jargon,
   open,
   onOpenChange,
+  loadingRawContent = false,
 }: JargonDetailDialogProps) {
   if (!jargon) return null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] grid grid-rows-[auto_1fr_auto] overflow-hidden">
+      <DialogContent className="grid max-h-[80vh] max-w-2xl grid-rows-[auto_1fr_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>黑话详情</DialogTitle>
           <DialogDescription>查看黑话的完整信息</DialogDescription>
@@ -107,23 +114,32 @@ export function JargonDetailDialog({
               <InfoItem icon={Hash} label="记录ID" value={jargon.id.toString()} mono />
               <InfoItem label="使用次数" value={jargon.count.toString()} />
             </div>
-            
+
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">内容</Label>
-              <div className="text-sm p-2 bg-muted rounded break-all whitespace-pre-wrap">{jargon.content}</div>
+              <Label className="text-muted-foreground text-xs">内容</Label>
+              <div className="bg-muted rounded p-2 text-sm break-all whitespace-pre-wrap">
+                {jargon.content}
+              </div>
             </div>
 
-            {jargon.raw_content && (
+            {loadingRawContent ? (
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">原始内容</Label>
-                <div className="text-sm p-2 bg-muted rounded break-all">
+                <Label className="text-muted-foreground text-xs">原始内容</Label>
+                <div className="bg-muted text-muted-foreground rounded p-2 text-sm">
+                  原始内容加载中...
+                </div>
+              </div>
+            ) : jargon.raw_content ? (
+              <div className="space-y-1">
+                <Label className="text-muted-foreground text-xs">原始内容</Label>
+                <div className="bg-muted rounded p-2 text-sm break-all">
                   {(() => {
                     try {
                       const rawArray = JSON.parse(jargon.raw_content)
                       if (Array.isArray(rawArray)) {
                         return rawArray.map((item, index) => (
                           <div key={index}>
-                            {index > 0 && <hr className="my-3 border-border" />}
+                            {index > 0 && <hr className="border-border my-3" />}
                             <div className="whitespace-pre-wrap">{item}</div>
                           </div>
                         ))
@@ -135,25 +151,25 @@ export function JargonDetailDialog({
                   })()}
                 </div>
               </div>
-            )}
+            ) : null}
 
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">含义</Label>
-              <div className="text-sm p-2 bg-muted rounded break-all">
-                {jargon.meaning ? (
-                  <MarkdownRenderer content={jargon.meaning} />
-                ) : (
-                  '-'
-                )}
+              <Label className="text-muted-foreground text-xs">含义</Label>
+              <div className="bg-muted rounded p-2 text-sm break-all">
+                {jargon.meaning ? <MarkdownRenderer content={jargon.meaning} /> : '-'}
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <InfoItem label="聊天" value={formatJargonChatDisplay(jargon)} />
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">状态</Label>
+                <Label className="text-muted-foreground text-xs">状态</Label>
                 <div className="flex items-center gap-2">
-                  {jargon.is_jargon === true && <Badge variant="default" className="bg-green-600">是黑话</Badge>}
+                  {jargon.is_jargon === true && (
+                    <Badge variant="default" className="bg-green-600">
+                      是黑话
+                    </Badge>
+                  )}
                   {jargon.is_jargon === false && <Badge variant="secondary">非黑话</Badge>}
                   {jargon.is_jargon === null && <Badge variant="outline">未判定</Badge>}
                   {jargon.created_by === 'MANUAL' ? (
@@ -161,12 +177,19 @@ export function JargonDetailDialog({
                   ) : (
                     <Badge variant="secondary">AI</Badge>
                   )}
-                  {jargon.is_global && <Badge variant="outline" className="border-blue-500 text-blue-500">全局</Badge>}
-                  {jargon.is_complete && <Badge variant="outline" className="border-purple-500 text-purple-500">推断完成</Badge>}
+                  {jargon.is_global && (
+                    <Badge variant="outline" className="border-blue-500 text-blue-500">
+                      全局
+                    </Badge>
+                  )}
+                  {jargon.is_complete && (
+                    <Badge variant="outline" className="border-purple-500 text-purple-500">
+                      推断完成
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
-
           </div>
         </DialogBody>
 
@@ -242,59 +265,63 @@ export function JargonCreateDialog({
         </DialogHeader>
 
         <DialogBody>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="content">
-              内容 <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="content"
-              value={formData.content}
-              onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-              placeholder="输入黑话内容"
-            />
-          </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="content">
+                内容 <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="content"
+                value={formData.content}
+                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                placeholder="输入黑话内容"
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="meaning">含义</Label>
-            <Textarea
-              id="meaning"
-              value={formData.meaning || ''}
- onChange={(e) => setFormData({ ...formData, meaning: e.target.value })}
-              placeholder="输入黑话含义（可选）"
-              rows={3}
-            />
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="meaning">含义</Label>
+              <Textarea
+                id="meaning"
+                value={formData.meaning || ''}
+                onChange={(e) => setFormData({ ...formData, meaning: e.target.value })}
+                placeholder="输入黑话含义（可选）"
+                rows={3}
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label>
-              聊天 <span className="text-destructive">*</span>
-            </Label>
-            <MultiSelect
-              options={chatList.map((chat) => ({
-                label: chat.chat_name,
-                value: chat.session_id,
-              }))}
-              selected={formData.session_ids || []}
-              onChange={(values) => setFormData({ ...formData, session_ids: values, session_id: values[0] })}
-              placeholder="选择关联的聊天"
-              emptyText="没有可选聊天"
-            />
-          </div>
+            <div className="space-y-2">
+              <Label>
+                聊天 <span className="text-destructive">*</span>
+              </Label>
+              <MultiSelect
+                options={chatList.map((chat) => ({
+                  label: chat.chat_name,
+                  value: chat.session_id,
+                }))}
+                selected={formData.session_ids || []}
+                onChange={(values) =>
+                  setFormData({ ...formData, session_ids: values, session_id: values[0] })
+                }
+                placeholder="选择关联的聊天"
+                emptyText="没有可选聊天"
+              />
+            </div>
 
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="is_global"
-              checked={formData.is_global}
-              onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })}
-            />
-            <Label htmlFor="is_global">设为全局黑话</Label>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="is_global"
+                checked={formData.is_global}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })}
+              />
+              <Label htmlFor="is_global">设为全局黑话</Label>
+            </div>
           </div>
-        </div>
         </DialogBody>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
           <Button data-dialog-action="confirm" onClick={handleCreate} disabled={saving}>
             {saving ? '创建中...' : '创建'}
           </Button>
@@ -332,7 +359,9 @@ export function JargonEditDialog({
         content: jargon.content,
         meaning: jargon.meaning || '',
         session_id: jargon.session_id,
-        session_ids: jargon.session_ids?.length ? jargon.session_ids : [jargon.session_id].filter(Boolean),
+        session_ids: jargon.session_ids?.length
+          ? jargon.session_ids
+          : [jargon.session_id].filter(Boolean),
         is_global: jargon.is_global,
         is_jargon: jargon.is_jargon,
       })
@@ -380,72 +409,83 @@ export function JargonEditDialog({
         </DialogHeader>
 
         <DialogBody>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="edit_content">内容</Label>
-            <Input
-              id="edit_content"
-              value={formData.content || ''}
-              onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-              placeholder="输入黑话内容"
-            />
-          </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit_content">内容</Label>
+              <Input
+                id="edit_content"
+                value={formData.content || ''}
+                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                placeholder="输入黑话内容"
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="edit_meaning">含义</Label>
-            <Textarea
-              id="edit_meaning"
-              value={formData.meaning || ''}
-              onChange={(e) => setFormData({ ...formData, meaning: e.target.value })}
-              placeholder="输入黑话含义"
-              rows={3}
-            />
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_meaning">含义</Label>
+              <Textarea
+                id="edit_meaning"
+                value={formData.meaning || ''}
+                onChange={(e) => setFormData({ ...formData, meaning: e.target.value })}
+                placeholder="输入黑话含义"
+                rows={3}
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label>聊天</Label>
-            <MultiSelect
-              options={chatList.map((chat) => ({
-                label: chat.chat_name,
-                value: chat.session_id,
-              }))}
-              selected={formData.session_ids || []}
-              onChange={(values) => setFormData({ ...formData, session_ids: values, session_id: values[0] })}
-              placeholder="选择关联的聊天"
-              emptyText="没有可选聊天"
-            />
-          </div>
+            <div className="space-y-2">
+              <Label>聊天</Label>
+              <MultiSelect
+                options={chatList.map((chat) => ({
+                  label: chat.chat_name,
+                  value: chat.session_id,
+                }))}
+                selected={formData.session_ids || []}
+                onChange={(values) =>
+                  setFormData({ ...formData, session_ids: values, session_id: values[0] })
+                }
+                placeholder="选择关联的聊天"
+                emptyText="没有可选聊天"
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label>黑话状态</Label>
-            <Select
-              value={formData.is_jargon === null ? 'null' : formData.is_jargon?.toString() || 'null'}
-              onValueChange={(value) => setFormData({ ...formData, is_jargon: value === 'null' ? null : value === 'true' })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="null">未判定</SelectItem>
-                <SelectItem value="true">是黑话</SelectItem>
-                <SelectItem value="false">非黑话</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="space-y-2">
+              <Label>黑话状态</Label>
+              <Select
+                value={
+                  formData.is_jargon === null ? 'null' : formData.is_jargon?.toString() || 'null'
+                }
+                onValueChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    is_jargon: value === 'null' ? null : value === 'true',
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="null">未判定</SelectItem>
+                  <SelectItem value="true">是黑话</SelectItem>
+                  <SelectItem value="false">非黑话</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="edit_is_global"
-              checked={formData.is_global}
-              onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })}
-            />
-            <Label htmlFor="edit_is_global">全局黑话</Label>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="edit_is_global"
+                checked={formData.is_global}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })}
+              />
+              <Label htmlFor="edit_is_global">全局黑话</Label>
+            </div>
           </div>
-        </div>
         </DialogBody>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
           <Button data-dialog-action="confirm" onClick={handleSave} disabled={saving}>
             {saving ? '保存中...' : '保存'}
           </Button>
@@ -521,7 +561,10 @@ export function BatchDeleteConfirmDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
             确认删除
           </AlertDialogAction>
         </AlertDialogFooter>

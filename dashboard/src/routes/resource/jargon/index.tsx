@@ -62,6 +62,7 @@ export function JargonManagementPage() {
   const [deleteConfirmJargon, setDeleteConfirmJargon] = useState<Jargon | null>(null)
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
   const [scopePanelCollapsed, setScopePanelCollapsed] = useState(false)
+  const [detailLoadingId, setDetailLoadingId] = useState<number | null>(null)
   const { toast } = useToast()
 
   // 黑话列表：分页/搜索/筛选/多选统一由 useDataList 承载，翻页/改参自动重置页码并清空选中
@@ -85,7 +86,9 @@ export function JargonManagementPage() {
         page_size: pageSize,
         search: search || undefined,
         session_id:
-          filters.summary !== 'global_count' && filters.scope !== 'global' && filters.chatId !== 'all'
+          filters.summary !== 'global_count' &&
+          filters.scope !== 'global' &&
+          filters.chatId !== 'all'
             ? filters.chatId
             : undefined,
         jargon_status: summaryStatus,
@@ -146,18 +149,22 @@ export function JargonManagementPage() {
   // 任何写操作成功后，按 'jargon' 前缀整体失效（列表 + 统计 + 聊天列表）
   const invalidateJargon = () => list.invalidate()
 
-  // 查看详情（事件驱动的读取，失败用 toast 反馈用户动作）
+  // 列表行先即时打开详情弹窗，原始上下文等大字段再按需补齐。
   const handleViewDetail = async (jargon: Jargon) => {
+    setSelectedJargon(jargon)
+    setIsDetailDialogOpen(true)
+    setDetailLoadingId(jargon.id)
     try {
       const response = await getJargonDetail(jargon.id)
-      setSelectedJargon(response.data)
-      setIsDetailDialogOpen(true)
+      setSelectedJargon((current) => (current?.id === jargon.id ? response.data : current))
     } catch (error) {
       toast({
         title: '加载详情失败',
         description: error instanceof Error ? error.message : '无法加载黑话详情',
         variant: 'destructive',
       })
+    } finally {
+      setDetailLoadingId((currentId) => (currentId === jargon.id ? null : currentId))
     }
   }
 
@@ -268,16 +275,13 @@ export function JargonManagementPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col p-4 sm:p-6">
-      <ScrollArea className="flex-1">
-        <div className="space-y-4 pr-4 sm:space-y-6">
+    <div className="flex h-[calc(100vh-4rem)] flex-col p-3 sm:p-4">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-3 pr-3">
           {/* 统计标签 */}
           <AccentPanel showRetroStripes={false} className="bg-muted rounded-lg border">
             <Tabs value={summaryFilter} onValueChange={handleSummaryChange}>
-              <DashboardTabBar
-                variant="grid"
-                className="grid-cols-2 sm:grid-cols-3 lg:grid-cols-6"
-              >
+              <DashboardTabBar variant="grid" className="grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
                 {[
                   {
                     value: 'total',
@@ -319,7 +323,7 @@ export function JargonManagementPage() {
                   <DashboardTabTrigger
                     key={item.value}
                     value={item.value}
-                    className="h-10 gap-2"
+                    className="h-8 gap-1.5 px-2 text-xs"
                     aria-label={`${item.label} ${item.count}`}
                   >
                     <span>{item.label}</span>
@@ -334,10 +338,12 @@ export function JargonManagementPage() {
 
           {/* 搜索和筛选 */}
           <AccentPanel className="bg-card border" showRetroStripeDivider={false}>
-            <div className="p-3">
+            <div className="p-2.5">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
                 <div className="space-y-1">
-                  <Label htmlFor="search">搜索</Label>
+                  <Label htmlFor="search" className="text-xs">
+                    搜索
+                  </Label>
                   <div className="relative">
                     <Search className="text-muted-foreground absolute top-2 left-2.5 h-4 w-4" />
                     <Input
@@ -350,7 +356,9 @@ export function JargonManagementPage() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="page-size">每页显示</Label>
+                  <Label htmlFor="page-size" className="text-xs">
+                    每页显示
+                  </Label>
                   <Select
                     value={pageSize.toString()}
                     onValueChange={(value) => list.setPageSize(parseInt(value))}
@@ -378,7 +386,7 @@ export function JargonManagementPage() {
 
               {/* 批量操作工具栏 */}
               {selectedIds.size > 0 && (
-                <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
+                <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2">
                   <span className="text-muted-foreground text-sm">
                     已选择 {selectedIds.size} 个
                   </span>
@@ -408,19 +416,19 @@ export function JargonManagementPage() {
 
           {/* 黑话列表 */}
           <div
-            className={`grid grid-cols-1 gap-4 transition-[grid-template-columns] duration-200 lg:h-[calc(100vh-19rem)] lg:min-h-[30rem] lg:items-stretch ${
+            className={`grid grid-cols-1 gap-3 transition-[grid-template-columns] duration-200 lg:h-[calc(100vh-15.5rem)] lg:min-h-[34rem] lg:items-stretch ${
               scopePanelCollapsed
                 ? 'lg:grid-cols-[3.25rem_minmax(0,1fr)]'
-                : 'lg:grid-cols-[12rem_minmax(0,1fr)]'
+                : 'lg:grid-cols-[11rem_minmax(0,1fr)]'
             }`}
           >
             <ChatScopeFilterPanel
-              title="范围"
               modes={[
                 { label: '全部', value: 'all' },
                 { label: '全局', value: 'global' },
                 { label: '非全局', value: 'local' },
               ]}
+              modeColumns={1}
               activeMode={scopeFilter}
               onModeChange={handleScopeChange}
               items={
@@ -446,6 +454,8 @@ export function JargonManagementPage() {
               onCollapsedChange={setScopePanelCollapsed}
               collapseLabel="折叠范围列表"
               expandLabel="展开范围列表"
+              className="[&_[data-chat-scope-panel-header=true]]:px-2 [&_[data-chat-scope-panel-header=true]]:py-1 [&_[data-chat-scope-panel-item=true]]:py-1.5 [&_[data-chat-scope-panel-mode=true]]:py-0.5 [&_[data-chat-scope-panel-modes=true]]:p-0.5"
+              listClassName="space-y-0.5 p-1"
             />
 
             <div className="min-h-0 lg:h-full">
@@ -487,6 +497,7 @@ export function JargonManagementPage() {
         jargon={selectedJargon}
         open={isDetailDialogOpen}
         onOpenChange={setIsDetailDialogOpen}
+        loadingRawContent={detailLoadingId === selectedJargon?.id}
       />
 
       {/* 创建对话框 */}

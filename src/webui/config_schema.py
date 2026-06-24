@@ -83,11 +83,14 @@ class ConfigSchemaGenerator:
         ui_parent = getattr(config_class, "__ui_parent__", "")
         ui_label = getattr(config_class, "__ui_label__", "")
         ui_advanced = bool(getattr(config_class, "__ui_advanced__", False))
+        ui_order = int(getattr(config_class, "__ui_order__", 0))
         if ui_parent:
             schema["uiParent"] = ui_parent
         if ui_label:
             schema["uiLabel"] = ui_label
         schema["uiAdvanced"] = ui_advanced
+        if ui_order:
+            schema["uiOrder"] = ui_order
 
         return schema
 

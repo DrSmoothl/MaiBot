@@ -27,6 +27,7 @@ interface ChatScopeFilterPanelProps<TMode extends string> {
   title?: string
   emptyContent?: ReactNode
   footer?: ReactNode
+  modeColumns?: number
   collapsed?: boolean
   collapseLabel?: string
   expandLabel?: string
@@ -45,6 +46,7 @@ export function ChatScopeFilterPanel<TMode extends string>({
   title,
   emptyContent,
   footer,
+  modeColumns,
   collapsed = false,
   collapseLabel = '折叠列表',
   expandLabel = '展开列表',
@@ -57,7 +59,7 @@ export function ChatScopeFilterPanel<TMode extends string>({
       data-chat-scope-panel="true"
       data-collapsed={collapsed ? 'true' : 'false'}
       className={cn(
-        'flex min-h-0 flex-col border-2 bg-card lg:h-full lg:self-stretch lg:overflow-hidden',
+        'bg-card flex min-h-0 flex-col border-2 lg:h-full lg:self-stretch lg:overflow-hidden',
         className
       )}
     >
@@ -72,7 +74,7 @@ export function ChatScopeFilterPanel<TMode extends string>({
             <button
               type="button"
               onClick={() => onCollapsedChange(!collapsed)}
-              className="flex h-8 w-7 items-center justify-center border-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-8 w-7 items-center justify-center border-2 transition-colors"
               aria-label={collapsed ? expandLabel : collapseLabel}
               aria-expanded={!collapsed}
               title={collapsed ? expandLabel : collapseLabel}
@@ -87,7 +89,13 @@ export function ChatScopeFilterPanel<TMode extends string>({
           {!collapsed && (
             <div className="min-w-0 space-y-2">
               {title && <h2 className="text-sm font-medium">{title}</h2>}
-              <div data-chat-scope-panel-modes="true" className="grid gap-0.5 border-2 bg-muted p-1" style={{ gridTemplateColumns: `repeat(${modes.length}, minmax(0, 1fr))` }}>
+              <div
+                data-chat-scope-panel-modes="true"
+                className="bg-muted grid gap-0.5 border-2 p-1"
+                style={{
+                  gridTemplateColumns: `repeat(${modeColumns ?? modes.length}, minmax(0, 1fr))`,
+                }}
+              >
                 {modes.map((mode) => (
                   <button
                     key={mode.value}
@@ -115,10 +123,7 @@ export function ChatScopeFilterPanel<TMode extends string>({
         <>
           <div
             data-chat-scope-panel-list="true"
-            className={cn(
-              'min-h-0 flex-1 space-y-1 overflow-y-auto p-2',
-              listClassName
-            )}
+            className={cn('min-h-0 flex-1 space-y-1 overflow-y-auto p-2', listClassName)}
           >
             {items.length > 0
               ? items.map((item) => {

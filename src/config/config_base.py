@@ -141,6 +141,7 @@ class ConfigBase(BaseModel, AttrDocBase):
     __ui_parent__: ClassVar[str] = ""  # 父配置类在 Config 中的字段名，空表示独立 Tab
     __ui_label__: ClassVar[str] = ""  # Tab 显示名称（仅做 Tab 主人时使用），空则使用 classDoc
     __ui_advanced__: ClassVar[bool] = False  # 是否默认收起到 WebUI 配置页的“更多”Tab 中
+    __ui_order__: ClassVar[int] = 0  # WebUI 配置页 Tab 排序，数值越小越靠前
 
     @classmethod
     def from_dict(cls, attribute_data: AttributeData, data: dict[str, Any]):

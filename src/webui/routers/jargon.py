@@ -555,7 +555,7 @@ def jargon_list_row_to_dict(
     return {
         "id": row["id"],
         "content": row["content"],
-        "raw_content": row["raw_content"],
+        "raw_content": row["raw_content"] if "raw_content" in row else None,
         "meaning": row["meaning"],
         "session_id": session_id,
         "session_ids": session_ids,
@@ -578,6 +578,24 @@ def build_jargon_compatible_select() -> Any:
         col(Jargon.id).label("id"),
         col(Jargon.content).label("content"),
         col(Jargon.raw_content).label("raw_content"),
+        col(Jargon.meaning).label("meaning"),
+        col(Jargon.session_id_dict).label("session_id_dict"),
+        col(Jargon.count).label("count"),
+        col(Jargon.is_jargon).label("is_jargon"),
+        col(Jargon.is_complete).label("is_complete"),
+        col(Jargon.is_global).label("is_global"),
+        col(Jargon.created_by).label("created_by"),
+        cast(col(Jargon.created_timestamp), SQLString).label("created_timestamp"),
+        cast(col(Jargon.updated_timestamp), SQLString).label("updated_timestamp"),
+    )
+
+
+def build_jargon_list_select() -> Any:
+    """构建黑话列表读取列，列表页不读取原始上下文大字段。"""
+
+    return select(
+        col(Jargon.id).label("id"),
+        col(Jargon.content).label("content"),
         col(Jargon.meaning).label("meaning"),
         col(Jargon.session_id_dict).label("session_id_dict"),
         col(Jargon.count).label("count"),
@@ -624,7 +642,7 @@ async def get_jargon_list(
     """
     try:
         statement = apply_jargon_list_filters(
-            build_jargon_compatible_select(),
+            build_jargon_list_select(),
             search=search,
             session_id=session_id,
             jargon_status=jargon_status,

@@ -1,4 +1,15 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Code2,
+  Info,
+  Layout,
+  RefreshCw,
+  Save,
+  X,
+} from 'lucide-react'
 import { parse as parseToml } from 'smol-toml'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -22,18 +33,6 @@ import {
 import { fieldHooks } from '@/lib/field-hooks'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { cn } from '@/lib/utils'
-
-import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Code2,
-  Info,
-  Layout,
-  RefreshCw,
-  Save,
-  X,
-} from 'lucide-react'
 
 import type { ConfigSchema } from '@/types/config-schema'
 import {
@@ -59,7 +58,6 @@ import {
   MultipleReplyStyleHook,
   RegexRulesHook,
   useAutoSave,
-  useConfigAutoSave,
 } from './bot/hooks'
 
 type ConfigSectionData = Record<string, unknown>
@@ -68,28 +66,12 @@ type ConfigSectionData = Record<string, unknown>
 const TOAST_DISPLAY_DELAY = 500
 const FILE_MODE_NOTICE_DISMISSED_KEY = 'bot-config-file-mode-notice-dismissed'
 
-/** Tab 标签页的首选排列顺序 (host field name) */
-const TAB_ORDER = [
-  'bot',
-  'chat',
-  'experimental',
-  'expression',
-  'a_memorix',
-  'visual',
-  'message_receive',
-  'emoji',
-  'voice',
-  'response_post_process',
-  'webui',
-  'plugin',
-  'log',
-]
-
 // ==================== Tab 分组类型与构建 ====================
 interface TabGroup {
   id: string
   label: string
   advanced: boolean
+  order: number
   sections: string[]
 }
 
@@ -127,6 +109,7 @@ function buildTabGroupsFromSchema(schema: ConfigSchema): TabGroup[] {
         id: fieldName,
         label: fieldSchema.uiLabel,
         advanced: Boolean(fieldSchema.uiAdvanced),
+        order: fieldSchema.uiOrder ?? Number.POSITIVE_INFINITY,
         sections: [fieldName],
       })
     }
@@ -144,11 +127,12 @@ function buildTabGroupsFromSchema(schema: ConfigSchema): TabGroup[] {
     }
   }
 
-  // 按 TAB_ORDER 排序；未列入的 tab 追加到末尾
   return Array.from(hosts.values()).sort((a, b) => {
-    const ai = TAB_ORDER.indexOf(a.id)
-    const bi = TAB_ORDER.indexOf(b.id)
-    return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi)
+    const orderDelta = a.order - b.order
+    if (orderDelta !== 0) {
+      return orderDelta
+    }
+    return a.label.localeCompare(b.label, 'zh-CN')
   })
 }
 
@@ -177,34 +161,7 @@ function BotConfigPageContent() {
   const { toast } = useToast()
   const { triggerRestart, isRestarting } = useRestart()
 
-  // 配置状态
-  const [botConfig, setBotConfig] = useState<ConfigSectionData | null>(null)
-  const [personalityConfig, setPersonalityConfig] = useState<ConfigSectionData | null>(null)
-  const [chatConfig, setChatConfig] = useState<ConfigSectionData | null>(null)
-  const [experimentalConfig, setExperimentalConfig] = useState<ConfigSectionData | null>(null)
-  const [expressionConfig, setExpressionConfig] = useState<ConfigSectionData | null>(null)
-  const [jargonConfig, setJargonConfig] = useState<ConfigSectionData | null>(null)
-  const [emojiConfig, setEmojiConfig] = useState<ConfigSectionData | null>(null)
-  const [visualConfig, setVisualConfig] = useState<ConfigSectionData | null>(null)
-  const [voiceConfig, setVoiceConfig] = useState<ConfigSectionData | null>(null)
-  const [messageReceiveConfig, setMessageReceiveConfig] = useState<ConfigSectionData | null>(null)
-  const [keywordReactionConfig, setKeywordReactionConfig] = useState<ConfigSectionData | null>(null)
-  const [responsePostProcessConfig, setResponsePostProcessConfig] =
-    useState<ConfigSectionData | null>(null)
-  const [chineseTypoConfig, setChineseTypoConfig] = useState<ConfigSectionData | null>(null)
-  const [responseSplitterConfig, setResponseSplitterConfig] = useState<ConfigSectionData | null>(
-    null
-  )
-  const [logConfig, setLogConfig] = useState<ConfigSectionData | null>(null)
-  const [debugConfig, setDebugConfig] = useState<ConfigSectionData | null>(null)
-  const [maimMessageConfig, setMaimMessageConfig] = useState<ConfigSectionData | null>(null)
-  const [telemetryConfig, setTelemetryConfig] = useState<ConfigSectionData | null>(null)
-  const [webuiConfig, setWebuiConfig] = useState<ConfigSectionData | null>(null)
-  const [databaseConfig, setDatabaseConfig] = useState<ConfigSectionData | null>(null)
-  const [mcpConfig, setMcpConfig] = useState<ConfigSectionData | null>(null)
-  const [pluginConfig, setPluginConfig] = useState<ConfigSectionData | null>(null)
-  const [pluginRuntimeConfig, setPluginRuntimeConfig] = useState<ConfigSectionData | null>(null)
-  const [aMemorixConfig, setAMemorixConfig] = useState<ConfigSectionData | null>(null)
+  const [sectionValues, setSectionValues] = useState<Record<string, ConfigSectionData | null>>({})
 
   // Schema 状态（用于动态 tab 分组）
   const [configSchema, setConfigSchema] = useState<ConfigSchema | null>(null)
@@ -289,89 +246,29 @@ function BotConfigPageContent() {
     const { memory: _legacyMemory, ...configWithoutLegacyMemory } = config
     configRef.current = configWithoutLegacyMemory
 
-    setBotConfig((config.bot ?? {}) as ConfigSectionData)
-    setPersonalityConfig((config.personality ?? {}) as ConfigSectionData)
-    setChatConfig((config.chat ?? {}) as ConfigSectionData)
-    setExperimentalConfig((config.experimental ?? {}) as ConfigSectionData)
-    setExpressionConfig((config.expression ?? {}) as ConfigSectionData)
-    setJargonConfig((config.jargon ?? {}) as ConfigSectionData)
-    setEmojiConfig((config.emoji ?? {}) as ConfigSectionData)
-    setVisualConfig((config.visual ?? {}) as ConfigSectionData)
-    setVoiceConfig((config.voice ?? {}) as ConfigSectionData)
-    setMessageReceiveConfig((config.message_receive ?? {}) as ConfigSectionData)
-    setKeywordReactionConfig((config.keyword_reaction ?? {}) as ConfigSectionData)
-    setResponsePostProcessConfig((config.response_post_process ?? {}) as ConfigSectionData)
-    setChineseTypoConfig((config.chinese_typo ?? {}) as ConfigSectionData)
-    setResponseSplitterConfig((config.response_splitter ?? {}) as ConfigSectionData)
-    setLogConfig((config.log ?? {}) as ConfigSectionData)
-    setDebugConfig((config.debug ?? {}) as ConfigSectionData)
-    setMaimMessageConfig((config.maim_message ?? {}) as ConfigSectionData)
-    setTelemetryConfig((config.telemetry ?? {}) as ConfigSectionData)
-    setWebuiConfig((config.webui ?? {}) as ConfigSectionData)
-    setDatabaseConfig((config.database ?? {}) as ConfigSectionData)
-    setMcpConfig((config.mcp ?? {}) as ConfigSectionData)
-    setPluginConfig((config.plugin ?? {}) as ConfigSectionData)
-    setPluginRuntimeConfig((config.plugin_runtime ?? {}) as ConfigSectionData)
-    setAMemorixConfig((config.a_memorix ?? {}) as ConfigSectionData)
+    setSectionValues(
+      Object.fromEntries(
+        Object.entries(configWithoutLegacyMemory).map(([sectionName, sectionValue]) => [
+          sectionName,
+          (sectionValue ?? {}) as ConfigSectionData,
+        ])
+      )
+    )
   }, [])
 
   /**
    * 构建完整的配置对象用于保存
    */
   const buildFullConfig = useCallback(() => {
+    const cleanSectionValues = Object.fromEntries(
+      Object.entries(sectionValues).filter(([, value]) => value !== null)
+    )
+
     return {
       ...configRef.current,
-      bot: botConfig,
-      personality: personalityConfig,
-      chat: chatConfig,
-      experimental: experimentalConfig,
-      expression: expressionConfig,
-      jargon: jargonConfig,
-      emoji: emojiConfig,
-      visual: visualConfig,
-      voice: voiceConfig,
-      message_receive: messageReceiveConfig,
-      keyword_reaction: keywordReactionConfig,
-      response_post_process: responsePostProcessConfig,
-      chinese_typo: chineseTypoConfig,
-      response_splitter: responseSplitterConfig,
-      log: logConfig,
-      debug: debugConfig,
-      maim_message: maimMessageConfig,
-      telemetry: telemetryConfig,
-      webui: webuiConfig,
-      database: databaseConfig,
-      mcp: mcpConfig,
-      plugin: pluginConfig,
-      plugin_runtime: pluginRuntimeConfig,
-      a_memorix: aMemorixConfig,
+      ...cleanSectionValues,
     }
-  }, [
-    botConfig,
-    personalityConfig,
-    chatConfig,
-    experimentalConfig,
-    expressionConfig,
-    jargonConfig,
-    emojiConfig,
-    visualConfig,
-    voiceConfig,
-    messageReceiveConfig,
-    keywordReactionConfig,
-    responsePostProcessConfig,
-    chineseTypoConfig,
-    responseSplitterConfig,
-    logConfig,
-    debugConfig,
-    maimMessageConfig,
-    telemetryConfig,
-    webuiConfig,
-    databaseConfig,
-    mcpConfig,
-    pluginConfig,
-    pluginRuntimeConfig,
-    aMemorixConfig,
-  ])
+  }, [sectionValues])
 
   // 加载源代码
   const loadSourceCode = useCallback(async () => {
@@ -483,60 +380,11 @@ function BotConfigPageContent() {
     }
   }, [])
 
-  // 使用模块化的 useAutoSave hook
   const { triggerAutoSave, cancelPendingAutoSave } = useAutoSave(
     initialLoadRef.current,
     setAutoSaving,
     setHasUnsavedChanges
   )
-
-  // 使用 useConfigAutoSave hook 简化配置变化监听
-  // 注意: useConfigAutoSave 是一个 hook，不能在条件语句或循环中调用
-  // 因此我们仍然需要逐个调用，但代码更简洁
-  useConfigAutoSave(botConfig, 'bot', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(personalityConfig, 'personality', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(chatConfig, 'chat', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(experimentalConfig, 'experimental', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(expressionConfig, 'expression', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(jargonConfig, 'jargon', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(emojiConfig, 'emoji', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(visualConfig, 'visual', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(voiceConfig, 'voice', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(
-    messageReceiveConfig,
-    'message_receive',
-    initialLoadRef.current,
-    triggerAutoSave
-  )
-  useConfigAutoSave(
-    keywordReactionConfig,
-    'keyword_reaction',
-    initialLoadRef.current,
-    triggerAutoSave
-  )
-  useConfigAutoSave(
-    responsePostProcessConfig,
-    'response_post_process',
-    initialLoadRef.current,
-    triggerAutoSave
-  )
-  useConfigAutoSave(chineseTypoConfig, 'chinese_typo', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(
-    responseSplitterConfig,
-    'response_splitter',
-    initialLoadRef.current,
-    triggerAutoSave
-  )
-  useConfigAutoSave(logConfig, 'log', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(debugConfig, 'debug', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(maimMessageConfig, 'maim_message', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(telemetryConfig, 'telemetry', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(webuiConfig, 'webui', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(databaseConfig, 'database', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(mcpConfig, 'mcp', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(pluginConfig, 'plugin', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(pluginRuntimeConfig, 'plugin_runtime', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(aMemorixConfig, 'a_memorix', initialLoadRef.current, triggerAutoSave)
 
   const dismissFileModeNotice = useCallback(() => {
     localStorage.setItem(FILE_MODE_NOTICE_DISMISSED_KEY, 'true')
@@ -709,91 +557,13 @@ function BotConfigPageContent() {
     return buildTabGroupsFromSchema(configSchema)
   }, [configSchema])
 
-  const sectionValues = useMemo<Record<string, ConfigSectionData | null>>(
-    () => ({
-      bot: botConfig,
-      personality: personalityConfig,
-      chat: chatConfig,
-      experimental: experimentalConfig,
-      expression: expressionConfig,
-      jargon: jargonConfig,
-      emoji: emojiConfig,
-      visual: visualConfig,
-      voice: voiceConfig,
-      message_receive: messageReceiveConfig,
-      keyword_reaction: keywordReactionConfig,
-      response_post_process: responsePostProcessConfig,
-      chinese_typo: chineseTypoConfig,
-      response_splitter: responseSplitterConfig,
-      log: logConfig,
-      debug: debugConfig,
-      maim_message: maimMessageConfig,
-      telemetry: telemetryConfig,
-      webui: webuiConfig,
-      database: databaseConfig,
-      mcp: mcpConfig,
-      plugin: pluginConfig,
-      plugin_runtime: pluginRuntimeConfig,
-      a_memorix: aMemorixConfig,
-    }),
-    [
-      botConfig,
-      personalityConfig,
-      chatConfig,
-      experimentalConfig,
-      expressionConfig,
-      jargonConfig,
-      emojiConfig,
-      visualConfig,
-      voiceConfig,
-      messageReceiveConfig,
-      keywordReactionConfig,
-      responsePostProcessConfig,
-      chineseTypoConfig,
-      responseSplitterConfig,
-      logConfig,
-      debugConfig,
-      maimMessageConfig,
-      telemetryConfig,
-      webuiConfig,
-      databaseConfig,
-      mcpConfig,
-      pluginConfig,
-      pluginRuntimeConfig,
-      aMemorixConfig,
-    ]
-  )
-
   const setSectionValue = useCallback((sectionName: string, value: ConfigSectionData) => {
-    const sectionSetterMap: Record<string, (nextValue: ConfigSectionData) => void> = {
-      bot: setBotConfig,
-      personality: setPersonalityConfig,
-      chat: setChatConfig,
-      experimental: setExperimentalConfig,
-      expression: setExpressionConfig,
-      jargon: setJargonConfig,
-      emoji: setEmojiConfig,
-      visual: setVisualConfig,
-      voice: setVoiceConfig,
-      message_receive: setMessageReceiveConfig,
-      keyword_reaction: setKeywordReactionConfig,
-      response_post_process: setResponsePostProcessConfig,
-      chinese_typo: setChineseTypoConfig,
-      response_splitter: setResponseSplitterConfig,
-      log: setLogConfig,
-      debug: setDebugConfig,
-      maim_message: setMaimMessageConfig,
-      telemetry: setTelemetryConfig,
-      webui: setWebuiConfig,
-      database: setDatabaseConfig,
-      mcp: setMcpConfig,
-      plugin: setPluginConfig,
-      plugin_runtime: setPluginRuntimeConfig,
-      a_memorix: setAMemorixConfig,
-    }
-
-    sectionSetterMap[sectionName]?.(value)
-  }, [])
+    setSectionValues((current) => ({
+      ...current,
+      [sectionName]: value,
+    }))
+    triggerAutoSave(sectionName, value)
+  }, [triggerAutoSave])
 
   if (loading) {
     return (

@@ -65,7 +65,8 @@ class ChatConfig(ConfigBase):
 ```
 
 ## Creating Hook Components
-Hooks allow you to provide custom UI for complex configuration sections or fields.
+Hooks allow you to provide custom UI for complex fields. Prefer backend schema metadata for
+ordinary layout, labels, defaults, options, and validation ranges.
 
 ### FieldHookComponent Interface
 A Hook component receives the following props:
@@ -78,18 +79,22 @@ A Hook component receives the following props:
 ```typescript
 import type { FieldHookComponent } from '@/lib/field-hooks'
 
-export const CustomSectionHook: FieldHookComponent = ({
+export const TalkValueRulesHook: FieldHookComponent = ({
   fieldPath,
   value,
   onChange
 }) => {
+  const rules = Array.isArray(value) ? value : []
+
   return (
-    <div className="custom-section">
-      <h3>Custom UI</h3>
-      <input 
-        value={value.some_prop} 
-        onChange={(e) => onChange({ ...value, some_prop: e.target.value })}
-      />
+    <div>
+      <h3>{fieldPath}</h3>
+      <button
+        type="button"
+        onClick={() => onChange([...rules, { platform: '', item_id: '', value: 1 }])}
+      >
+        Add rule
+      </button>
     </div>
   )
 }
@@ -99,8 +104,8 @@ export const CustomSectionHook: FieldHookComponent = ({
 Register hooks in your component's lifecycle:
 ```typescript
 useEffect(() => {
-  fieldHooks.register('chat', ChatSectionHook, 'replace')
-  return () => fieldHooks.unregister('chat')
+  fieldHooks.register('chat.talk_value_rules', TalkValueRulesHook, 'replace')
+  return () => fieldHooks.unregister('chat.talk_value_rules')
 }, [])
 ```
 
