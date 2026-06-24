@@ -4,8 +4,9 @@ Requirements:
 2. long_summary should preserve the topic flow, participants' positions, conclusions reached, pending tasks, and important details so the context can be restored later.
 3. brief should summarize this chat segment in 1-3 sentences.
 4. keywords should contain 3-8 specific keywords. Prefer the chat's own language and avoid vague terms.
-5. Output exactly one JSON object, without Markdown code fences or extra explanation. The object must follow {{"long_summary":"...","brief":"...","keywords":["..."]}}.
-6. The chat history will be provided as multiple original-style messages. Use the message boundaries as context.
+5. match_segments should contain 3-5 query-like passages for future semantic matching. Think about "in what situations might these details be needed" and "what topics, people, tasks, or keywords are these details connected to"; write each item as a natural short sentence with matchable scenarios, intents, or associations.
+6. Output exactly one JSON object, without Markdown code fences or extra explanation. The object must follow {{"long_summary":"...","brief":"...","keywords":["..."],"match_segments":["..."]}}.
+7. The chat history will be provided as multiple original-style messages. Use the message boundaries as context.
 
 Time range: {time_range}
 Participants: {participants_text}

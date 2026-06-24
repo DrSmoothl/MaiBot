@@ -1,4 +1,4 @@
-﻿"""view_complex_message 内置工具。"""
+"""view_forward_message 内置工具。"""
 
 from typing import Optional
 
@@ -13,21 +13,21 @@ from src.maisaka.context.messages import (
 
 from .context import BuiltinToolRuntimeContext
 
-logger = get_logger("maisaka_builtin_view_complex_message")
+logger = get_logger("maisaka_builtin_view_forward_message")
 
 
 def get_tool_spec() -> ToolSpec:
-    """获取 view_complex_message 工具声明。"""
+    """获取 view_forward_message 工具声明。"""
 
     return ToolSpec(
-        name="view_complex_message",
-        description="根据 msg_id 查看复杂消息的完整内容，适用于标记为 [消息类型]复杂消息 的消息，包括转发消息、文件消息和聊天记录摘要。（图片不是复杂消息，不需要展开）",
+        name="view_forward_message",
+        description="根据 msg_id 查看合并转发消息的完整内容。仅适用于上下文中出现转发消息预览、且需要查看更多转发细节的场景。",
         parameters_schema={
             "type": "object",
             "properties": {
                 "msg_id": {
                     "type": "string",
-                    "description": "复杂消息的msg_id。",
+                    "description": "转发消息的 msg_id。",
                 },
             },
             "required": ["msg_id"],
@@ -53,7 +53,7 @@ def _find_context_message_by_id(tool_ctx: BuiltinToolRuntimeContext, message_id:
 
 
 async def _build_full_content_for_context_message(message: SessionBackedMessage) -> str:
-    """优先使用原始消息展开，合成复杂消息则直接展开上下文组件。"""
+    """优先使用原始消息展开，合成转发消息则直接展开上下文组件。"""
 
     original_message = getattr(message, "original_message", None)
     if original_message is not None:
@@ -66,14 +66,14 @@ async def handle_tool(
     invocation: ToolInvocation,
     context: Optional[ToolExecutionContext] = None,
 ) -> ToolExecutionResult:
-    """执行 view_complex_message 内置工具。"""
+    """执行 view_forward_message 内置工具。"""
 
     del context
     target_message_id = str(invocation.arguments.get("msg_id") or "").strip()
     if not target_message_id:
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            "查看复杂消息工具需要提供有效的 `msg_id` 参数。",
+            "查看转发消息工具需要提供有效的 `msg_id` 参数。",
         )
 
     target_context_message = _find_context_message_by_id(tool_ctx, target_message_id)
@@ -83,7 +83,7 @@ async def handle_tool(
     if target_context_message is None and target_source_message is None:
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            f"未找到目标复杂消息，msg_id={target_message_id}",
+            f"未找到目标转发消息，msg_id={target_message_id}",
         )
 
     target_sequence = (
@@ -92,10 +92,10 @@ async def handle_tool(
     if not contains_complex_message(target_sequence):
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            f"目标消息不是可展开查看的复杂消息，msg_id={target_message_id}",
+            f"目标消息不是可展开查看的转发消息，msg_id={target_message_id}",
         )
 
-    logger.info(f"{tool_ctx.runtime.log_prefix} 触发复杂消息查看工具，目标消息编号={target_message_id}")
+    logger.info(f"{tool_ctx.runtime.log_prefix} 触发转发消息浏览工具，目标消息编号={target_message_id}")
     try:
         if target_context_message is not None:
             full_content = await _build_full_content_for_context_message(target_context_message)
@@ -103,17 +103,17 @@ async def handle_tool(
             full_content = await build_full_complex_message_content(target_source_message)
     except Exception as exc:
         logger.exception(
-            f"{tool_ctx.runtime.log_prefix} 查看复杂消息时发生异常: 目标消息编号={target_message_id} 异常={exc}"
+            f"{tool_ctx.runtime.log_prefix} 查看转发消息时发生异常: 目标消息编号={target_message_id} 异常={exc}"
         )
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            "查看复杂消息完整内容时发生异常。",
+            "查看转发消息完整内容时发生异常。",
         )
 
     if not full_content:
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            f"复杂消息内容为空，msg_id={target_message_id}",
+            f"转发消息内容为空，msg_id={target_message_id}",
         )
 
     return tool_ctx.build_success_result(
@@ -121,7 +121,7 @@ async def handle_tool(
         full_content,
         structured_content={
             "msg_id": target_message_id,
-            "message_type": "complex",
+            "message_type": "forward",
             "full_content": full_content,
         },
     )

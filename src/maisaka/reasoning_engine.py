@@ -58,8 +58,17 @@ from src.maisaka.context.history import (
     build_prefixed_message_sequence,
     build_session_message_visible_text,
 )
+from src.maisaka.jargon_context_matcher import (
+    build_jargon_reference_message,
+    extract_jargon_reference_contents,
+)
 from src.maisaka.memory.heuristic_injector import heuristic_memory_injector
-from src.maisaka.memory.mid_term import build_mid_term_memory_message, insert_mid_term_memory_message
+from src.maisaka.memory.mid_term import (
+    build_mid_term_memory_message,
+    build_mid_term_memory_reference_message,
+    insert_mid_term_memory_message,
+    is_mid_term_memory_reference_message,
+)
 from src.maisaka.monitor.events import (
     emit_planner_finalized,
 )
@@ -499,6 +508,68 @@ class MaisakaReasoningEngine:
         injected_messages.extend(profile_messages)
         return injected_messages
 
+    def _refresh_jargon_reference_message(self) -> Optional[ReferenceMessage]:
+        """基于当前 planner 上下文刷新黑话参考消息。"""
+
+        existing_jargon_contents = extract_jargon_reference_contents(self._runtime._chat_history)
+        selected_history, _ = self._runtime._chat_loop_service.select_llm_context_messages(
+            self._runtime._chat_history,
+            request_kind="planner",
+            max_context_size=self._runtime._max_context_size,
+            is_group_chat=self._runtime.chat_stream.is_group_session,
+        )
+        reference_message = build_jargon_reference_message(
+            session_id=str(self._runtime.session_id or ""),
+            context_messages=selected_history,
+            excluded_contents=existing_jargon_contents,
+        )
+        if reference_message is None:
+            return None
+        self._runtime._chat_history.append(reference_message)
+        return reference_message
+
+    async def _refresh_mid_term_memory_reference_message(self) -> Optional[ReferenceMessage]:
+        """基于当前 planner 上下文刷新中期记忆参考消息。"""
+
+        if not bool(global_config.chat.mid_term_memory):
+            return None
+
+        selected_history, _ = self._runtime._chat_loop_service.select_llm_context_messages(
+            self._runtime._chat_history,
+            request_kind="planner",
+            max_context_size=self._runtime._max_context_size,
+            is_group_chat=self._runtime.chat_stream.is_group_session,
+        )
+        reference_message = await build_mid_term_memory_reference_message(
+            history=self._runtime._chat_history,
+            selected_history=selected_history,
+            session_id=str(self._runtime.session_id or ""),
+            log_prefix=self._runtime.log_prefix,
+        )
+        if reference_message is None:
+            return None
+
+        if self._has_mid_term_memory_reference_message(reference_message):
+            return None
+
+        self._runtime._chat_history.append(reference_message)
+        return reference_message
+
+    def _has_mid_term_memory_reference_message(self, reference_message: ReferenceMessage) -> bool:
+        """判断历史中是否已经存在相同的中期记忆参考。"""
+
+        normalized_content = " ".join(reference_message.content.split()).strip()
+        if not normalized_content:
+            return False
+
+        for history_message in self._runtime._chat_history:
+            if not is_mid_term_memory_reference_message(history_message):
+                continue
+            history_content = " ".join(str(history_message.content or "").split()).strip()
+            if history_content == normalized_content:
+                return True
+        return False
+
     @staticmethod
     def _is_planner_no_tool_hint_message(message: LLMContextMessage) -> bool:
         """判断是否为 Planner 无工具重试提示。"""
@@ -614,6 +685,18 @@ class MaisakaReasoningEngine:
         planner_started_at = time.time()
         self._runtime._update_stage_status("Planner", "组织上下文并请求模型", round_text=round_text)
         action_tool_definitions, deferred_tools_reminder = await self._build_action_tool_definitions()
+        try:
+            jargon_reference_message = self._refresh_jargon_reference_message()
+            if jargon_reference_message is not None:
+                logger.debug(f"{self._runtime.log_prefix} 已刷新黑话参考消息")
+        except Exception as exc:
+            logger.debug(f"{self._runtime.log_prefix} 黑话参考消息刷新失败，已跳过: {exc}")
+        try:
+            mid_term_reference_message = await self._refresh_mid_term_memory_reference_message()
+            if mid_term_reference_message is not None:
+                logger.debug(f"{self._runtime.log_prefix} 已刷新中期记忆参考消息")
+        except Exception as exc:
+            logger.debug(f"{self._runtime.log_prefix} 中期记忆参考刷新失败，已跳过: {exc}", exc_info=True)
         injected_user_messages = await self._build_planner_injected_user_messages(
             profile_message=trigger_message,
             source_messages=source_messages,
