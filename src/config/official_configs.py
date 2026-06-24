@@ -4351,19 +4351,19 @@ class WebUIConfig(ConfigBase):
     )
     """是否启动 WebUI 管理界面。"""
 
-    host: str = Field(
-        default="127.0.0.1",
+    host: list[str] = Field(
+        default=["127.0.0.1", "::1"],
         json_schema_extra={
             "label": {
                 "zh_CN": "WebUI 主机",
                 "en_US": "WebUI host",
                 "ja_JP": "WebUI ホスト",
             },
-            "x-widget": "input",
+            "x-widget": "tags",
             "x-icon": "globe",
         },
     )
-    """WebUI 监听地址；本机使用通常填 127.0.0.1。"""
+    """WebUI 监听地址列表；可同时绑定 IPv4 和 IPv6，例如 ["0.0.0.0", "::"]。"""
 
     port: int = Field(
         default=8001,

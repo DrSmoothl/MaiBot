@@ -126,5 +126,5 @@ def get_global_server() -> Server:
     global global_server
     if global_server is None:
         bind_address = resolve_main_bind_address()
-        global_server = Server(host=bind_address.host, port=bind_address.port)
+        global_server = Server(host=bind_address.hosts[0], port=bind_address.port)  # 消息服务只需单一地址，取第一个
     return global_server

@@ -45,7 +45,7 @@ def _build_webui_local_base_url() -> str:
     try:
         from src.config.config import global_config
 
-        host = str(global_config.webui.host or "127.0.0.1").strip()
+        host = _select_webui_local_host(global_config.webui.host)
         port = int(global_config.webui.port or 8001)
     except Exception:
         host = "127.0.0.1"
@@ -56,6 +56,22 @@ def _build_webui_local_base_url() -> str:
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     return f"http://{host}:{port}"
+
+
+def _select_webui_local_host(hosts: Any) -> str:
+    """从 WebUI 监听地址中选择适合终端打开的本机地址。"""
+
+    if isinstance(hosts, str):
+        return hosts.strip() or "127.0.0.1"
+    if isinstance(hosts, list):
+        normalized_hosts = [host.strip() for host in hosts if isinstance(host, str) and host.strip()]
+        if "127.0.0.1" in normalized_hosts:
+            return "127.0.0.1"
+        if "::1" in normalized_hosts:
+            return "::1"
+        if normalized_hosts:
+            return normalized_hosts[0]
+    return "127.0.0.1"
 
 
 def _resolve_prompt_preview_route_target(file_path: Path) -> PromptPreviewRouteTarget | None:
