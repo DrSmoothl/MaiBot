@@ -4359,7 +4359,7 @@ class WebUIConfig(ConfigBase):
                 "en_US": "WebUI host",
                 "ja_JP": "WebUI ホスト",
             },
-            "x-widget": "input",
+            "x-widget": "tags",
             "x-icon": "globe",
         },
     )
