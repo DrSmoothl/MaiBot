@@ -8,7 +8,7 @@ Extraction rules:
 - Exclude: personal names, @, content inside stickers/images, pure punctuation, and regular function words (such as 的, 了, 呢, 啊, etc.)
 - Each term is recommended to be 2-8 characters long (not mandatory), and should be as short as possible
 - Please extract as many possible jargon items as you can, up to 30 in total
-- Do not summarize SELF's messages, because those are your own messages, so do not repeatedly learn from your own messages
+- You may extract from USER, ASSISTANT, TOOL_CALL, TOOL_RESULT, and other sources, but do not extract from sticker/image content
 
 The jargon must be one of the following types:
 - Abbreviations made of letters and formed from the initials of Chinese pinyin, such as: nb, yyds, xswl
@@ -26,6 +26,6 @@ Only output a JSON array, and do not output duplicate content. Each element shou
 
 Field descriptions:
 - content: the original jargon candidate text
-- source_id: the source number corresponding to that jargon, namely the number in the source_id field in the chat log above (for example [source_id:3] corresponds to "3"); output only the number itself
+- source_id: the source number corresponding to that jargon, namely the numeric source_id in `<message source_id="3">` or `<learning-source source_id="3">` in the chat log above; output only the number itself
 
 Output JSON:

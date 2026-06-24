@@ -1,7 +1,7 @@
 """Maisaka 消息触发调度。"""
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Sequence
+from typing import Sequence, TYPE_CHECKING
 import time
 
 from src.chat.message_receive.message import SessionMessage
@@ -91,23 +91,22 @@ class MessageTurnScheduler:
         *,
         pending_messages: Sequence[SessionMessage],
         trigger_threshold: int,
+        schedule_detail: str | None = None,
     ) -> bool:
         """判断新 Maisaka 是否应基于回复必要性进入 Planner。"""
         score, detail = self.score_reply_necessity(
             pending_messages=pending_messages,
             trigger_threshold=trigger_threshold,
         )
+        decision = "进入Planner" if score >= REPLY_NECESSITY_TRIGGER_SCORE else "等待更多消息"
+        schedule_detail_prefix = f"{schedule_detail} " if schedule_detail else ""
+        logger.info(
+            f"{self._runtime.log_prefix} 回复调度: {schedule_detail_prefix}"
+            f"必要性: {detail} 评分阈值={REPLY_NECESSITY_TRIGGER_SCORE} 判定={decision}"
+        )
         if score >= REPLY_NECESSITY_TRIGGER_SCORE:
-            logger.info(
-                f"{self._runtime.log_prefix} 回复必要性评分: {detail} "
-                f"阈值={REPLY_NECESSITY_TRIGGER_SCORE} 判定=进入Planner"
-            )
             return True
 
-        logger.info(
-            f"{self._runtime.log_prefix} 回复必要性评分: {detail} "
-            f"阈值={REPLY_NECESSITY_TRIGGER_SCORE} 判定=等待更多消息"
-        )
         return False
 
     def _calculate_idle_compensation(
@@ -197,18 +196,17 @@ class MessageTurnScheduler:
             return
 
         trigger_threshold = runtime._get_message_trigger_threshold()
-        logger.info(
-            f"{runtime.log_prefix} 回复频率调度: 频率={formatted_frequency} "
-            f"pending={pending_count} 阈值={trigger_threshold}"
-        )
+        schedule_detail = f"频率={formatted_frequency} pending={pending_count} 消息阈值={trigger_threshold}"
         if is_reply_necessity_trigger_enabled():
             if self.should_trigger_by_reply_necessity(
                 pending_messages=runtime.message_cache[runtime._last_processed_index :],
                 trigger_threshold=trigger_threshold,
+                schedule_detail=schedule_detail,
             ):
                 runtime._enqueue_message_turn()
             return
 
+        logger.info(f"{runtime.log_prefix} 回复频率调度: {schedule_detail}")
         if pending_count >= trigger_threshold:
             logger.info(
                 f"{runtime.log_prefix} 回复频率调度: pending={pending_count} 达到阈值={trigger_threshold} "

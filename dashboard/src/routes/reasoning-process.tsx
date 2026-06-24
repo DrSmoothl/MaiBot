@@ -11,15 +11,25 @@ import {
   FileCode2,
   FileJson,
   FileText,
-  Layers,
   Loader2,
   Play,
   RefreshCw,
   Search,
   Timer,
+  Trash2,
 } from 'lucide-react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -45,6 +55,7 @@ import {
   listReasoningPromptFiles,
   listReasoningPromptStages,
   replayReasoningPrompt,
+  clearReasoningPromptStage,
   type ReasoningPromptFile,
   type ReasoningPromptMessageAvatar,
   type ReasoningReplayResponse,
@@ -56,18 +67,35 @@ import { cn } from '@/lib/utils'
 const PAGE_SIZE = 50
 const AUTO_SESSION = 'auto'
 const ALL_GROUP_SESSIONS = '__all_group_chats__'
-const PRIMARY_STAGE_NAMES = ['timing_gate', 'planner', 'replyer']
+const CORE_STAGE_NAMES = ['planner', 'replyer']
+const REMOVED_STAGE_NAMES = ['timing_gate']
 const NATURAL_LANGUAGE_TEXT_STYLE: CSSProperties = {
   fontFamily:
     "'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif",
 }
 const STAGE_LABELS: Record<string, string> = {
-  emotion: '情绪分析',
+  behavior_consolidator: '行为整合',
+  behavior_feedback: '行为反馈',
+  behavior_learner: '行为学习',
+  behavior_scenario_analyzer: '行为场景分析',
+  behavior_selector: '行为选择',
+  emotion: '表情包发送',
   expression_learner: '表达学习',
+  expression_selection: '表达选择',
+  expression_selector: '表达选择',
+  jargon_learner: '黑话抽取',
+  jargon_learning_update: '黑话含义推断',
   planner: '规划器',
   reply_effect_judge: '回复效果评估',
   replyer: '回复器',
   timing_gate: '时机判断',
+}
+
+type StageCategoryRow = {
+  key: string
+  label: string
+  items: ReasoningPromptStageInfo[]
+  collapsedByDefault?: boolean
 }
 
 type StructuredPromptMessage = {
@@ -76,6 +104,26 @@ type StructuredPromptMessage = {
   content?: unknown
   tool_call_id?: string
   tool_calls?: unknown[]
+}
+
+type StructuredPromptOutput = {
+  title?: string
+  content?: unknown
+  tool_calls?: unknown[]
+}
+
+type StructuredPromptLlmCall = {
+  inference_stage: string
+  request?: {
+    kind?: string
+    selection_reason?: string
+  }
+  metadata?: {
+    model_name?: string
+    duration_ms?: number
+  }
+  messages?: StructuredPromptMessage[]
+  output?: StructuredPromptOutput | null
 }
 
 type StructuredPromptPayload = {
@@ -89,12 +137,9 @@ type StructuredPromptPayload = {
     duration_ms?: number
   }
   messages?: StructuredPromptMessage[]
-  output?: {
-    title?: string
-    content?: unknown
-    tool_calls?: unknown[]
-  } | null
+  output?: StructuredPromptOutput | null
   tool_definitions?: unknown[]
+  jargon_learning_calls?: StructuredPromptLlmCall[]
 }
 
 function getInitialSearchParams(): URLSearchParams {
@@ -151,6 +196,38 @@ type ReasoningPromptMessageAvatarMap = Record<string, ReasoningPromptMessageAvat
 
 function formatStageName(stage: string): string {
   return STAGE_LABELS[stage] ?? stage
+}
+
+function isLearnerStage(stage: string): boolean {
+  return stage.includes('learner') || stage.includes('learning')
+}
+
+function buildStageCategoryRows(stageCards: ReasoningPromptStageInfo[]): StageCategoryRow[] {
+  const stageInfoByName = new Map(stageCards.map((item) => [item.name, item]))
+  const usedStageNames = new Set<string>()
+  const takeNamedStages = (stageNames: string[]) => stageNames.flatMap((stageName) => {
+    const item = stageInfoByName.get(stageName)
+    if (!item) return []
+    usedStageNames.add(stageName)
+    return [item]
+  })
+  const takeMatchingStages = (predicate: (stage: string) => boolean) => stageCards.filter((item) => {
+    if (usedStageNames.has(item.name) || !predicate(item.name)) return false
+    usedStageNames.add(item.name)
+    return true
+  })
+
+  const coreStages = takeNamedStages(CORE_STAGE_NAMES)
+  const learnerStages = takeMatchingStages(isLearnerStage)
+  const removedStages = takeNamedStages(REMOVED_STAGE_NAMES)
+  const otherStages = takeMatchingStages(() => true)
+
+  return [
+    { key: 'core', label: '主流程', items: coreStages },
+    { key: 'learners', label: '学习器', items: learnerStages },
+    { key: 'others', label: '其余', items: otherStages },
+    { key: 'removed', label: '不再使用', items: removedStages, collapsedByDefault: true },
+  ].filter((row) => row.items.length > 0)
 }
 
 function formatTime(timestamp: number | null, modifiedAt: number): string {
@@ -284,6 +361,44 @@ function parseStructuredPrompt(content: string): StructuredPromptPayload | null 
     return null
   }
   return null
+}
+
+function extractJargonInferenceStage(payload: StructuredPromptPayload, fallbackIndex: number): string {
+  const selectionReason = payload.request?.selection_reason ?? ''
+  const stageLine = selectionReason
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('推断阶段:'))
+  if (stageLine) {
+    return stageLine.split(':', 2)[1]?.trim() || `stage_${fallbackIndex + 1}`
+  }
+  return `stage_${fallbackIndex + 1}`
+}
+
+function combineJargonLearningUpdatePayloads(
+  payloads: StructuredPromptPayload[],
+  displayTitle: string
+): StructuredPromptPayload {
+  const jargonLearningCalls = payloads.map((payload, payloadIndex) => ({
+    inference_stage: extractJargonInferenceStage(payload, payloadIndex),
+    request: payload.request,
+    metadata: payload.metadata,
+    messages: payload.messages ?? [],
+    output: payload.output ?? null,
+  }))
+
+  return {
+    schema_version: 3,
+    request: {
+      kind: 'jargon_learning_update',
+      selection_reason: `词条: ${displayTitle || '未知黑话'}\n包含 ${payloads.length} 次黑话含义推断调用。`,
+    },
+    metadata: payloads[0]?.metadata ?? {},
+    messages: [],
+    output: null,
+    tool_definitions: [],
+    jargon_learning_calls: jargonLearningCalls,
+  }
 }
 
 function buildStructuredPromptCopyText(payload: StructuredPromptPayload | null): string {
@@ -496,7 +611,7 @@ function getReasoningRecordTitle(
   const parts = [
     formatStageName(item.stage),
     getSessionDisplayName(item.session_id, sessionInfo, item.session_display_name),
-    item.stem,
+    item.display_title || item.stem,
   ]
 
   if (platform && chatType && targetId) {
@@ -1173,6 +1288,9 @@ export function ReasoningProcessPage({
   const [htmlPreviewUrl, setHtmlPreviewUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [contentLoading, setContentLoading] = useState(false)
+  const [clearingStage, setClearingStage] = useState<string | null>(null)
+  const [pendingClearStage, setPendingClearStage] = useState<ReasoningPromptStageInfo | null>(null)
+  const [collapsedStageRows, setCollapsedStageRows] = useState<Set<string>>(() => new Set(['removed']))
   const [error, setError] = useState<string | null>(null)
   const [browsingStage, setBrowsingStage] = useState(
     () => Boolean(initialSearchParams.get('stage') || initialSearchParams.get('session') || initialTargetStem)
@@ -1185,16 +1303,7 @@ export function ReasoningProcessPage({
     if (stageInfos.length > 0) return stageInfos
     return stages.map((name) => ({ name, session_count: 0, latest_modified_at: 0 }))
   }, [stageInfos, stages])
-  const primaryStageCards = useMemo(() => {
-    const stageInfoByName = new Map(stageCards.map((item) => [item.name, item]))
-    return PRIMARY_STAGE_NAMES.flatMap((name) => {
-      const item = stageInfoByName.get(name)
-      return item ? [item] : []
-    })
-  }, [stageCards])
-  const secondaryStageCards = useMemo(() => {
-    return stageCards.filter((item) => !PRIMARY_STAGE_NAMES.includes(item.name))
-  }, [stageCards])
+  const stageCategoryRows = useMemo(() => buildStageCategoryRows(stageCards), [stageCards])
   const sessionInfoByName = useMemo(() => {
     return new Map(sessionInfos.map((item) => [item.name, item]))
   }, [sessionInfos])
@@ -1326,7 +1435,13 @@ export function ReasoningProcessPage({
         }
       }
 
-      if (!selected?.json_path) {
+      const jsonPaths = selected?.related_json_paths?.length
+        ? selected.related_json_paths
+        : selected?.json_path
+          ? [selected.json_path]
+          : []
+
+      if (jsonPaths.length === 0) {
         setJsonContent('')
         setMessageAvatarMap({})
         return
@@ -1336,20 +1451,37 @@ export function ReasoningProcessPage({
       setMessageAvatarMap({})
       setContentLoading(true)
       try {
-        const data = await getReasoningPromptFile(selected.json_path)
+        const loadedJsonFiles = await Promise.all(jsonPaths.map((path) => getReasoningPromptFile(path)))
+        const data = loadedJsonFiles[0]
         const avatarEntries = avatarFetchEnabled
           ? await Promise.all(
-              Object.entries(data.message_avatars ?? {}).map(async ([messageId, avatar]) => [
-                messageId,
-                {
-                  ...avatar,
-                  avatar_url: avatar.avatar_url ? await resolveApiPath(avatar.avatar_url) : null,
-                },
-              ] as const)
+              loadedJsonFiles.flatMap((file) =>
+                Object.entries(file.message_avatars ?? {}).map(async ([messageId, avatar]) => [
+                  messageId,
+                  {
+                    ...avatar,
+                    avatar_url: avatar.avatar_url ? await resolveApiPath(avatar.avatar_url) : null,
+                  },
+                ] as const)
+              )
             )
           : []
+        const loadedPayloads = loadedJsonFiles
+          .map((file) => parseStructuredPrompt(file.content))
+          .filter((payload): payload is StructuredPromptPayload => Boolean(payload))
+        const combinedContent =
+          selected.stage === 'jargon_learning_update' && loadedPayloads.length > 1
+            ? JSON.stringify(
+                combineJargonLearningUpdatePayloads(
+                  loadedPayloads,
+                  selected.display_title || selected.action_preview || ''
+                ),
+                null,
+                2
+              )
+            : data.content
         if (!ignore) {
-          setJsonContent(data.content)
+          setJsonContent(combinedContent)
           setMessageAvatarMap(Object.fromEntries(avatarEntries))
         }
       } catch (err) {
@@ -1405,6 +1537,41 @@ export function ReasoningProcessPage({
       setSelected(null)
       setBrowsingStage(true)
     })
+  }
+
+  async function handleConfirmClearStage() {
+    if (!pendingClearStage) return
+    const stageName = pendingClearStage.name
+    const label = formatStageName(stageName)
+
+    setClearingStage(stageName)
+    try {
+      const result = await clearReasoningPromptStage(stageName)
+      toast({
+        title: '已清空推理过程',
+        description: `${label}：删除 ${result.deleted_files} 个文件`,
+      })
+      setStageInfos((current) => current.filter((item) => item.name !== stageName))
+      setStages((current) => current.filter((item) => item !== stageName))
+      if (stage === stageName) {
+        setItems([])
+        setSessions([])
+        setSessionInfos([])
+        setTotal(0)
+        setSelected(null)
+        setBrowsingStage(false)
+      }
+      setRefreshKey((current) => current + 1)
+      setPendingClearStage(null)
+    } catch (err) {
+      toast({
+        title: '清空失败',
+        description: err instanceof Error ? err.message : '请稍后再试',
+        variant: 'destructive',
+      })
+    } finally {
+      setClearingStage(null)
+    }
   }
 
   async function handleCopyPrompt() {
@@ -1539,40 +1706,139 @@ export function ReasoningProcessPage({
   )
   const toolbarPortal = embedded && toolbarVisible && toolbarRoot ? createPortal(toolbarContent, toolbarRoot) : null
   const showBrowsingControlsInline = browsingStage && (!embedded || !toolbarVisible || !toolbarRoot)
-  const renderStageCard = (item: ReasoningPromptStageInfo, compact = false) => (
-    <button
+  const renderStageCard = (item: ReasoningPromptStageInfo) => (
+    <div
       key={item.name}
-      type="button"
-      onClick={() => enterStage(item.name)}
       className={cn(
-        'flex flex-col justify-between rounded-md border text-left transition-colors',
-        'hover:border-primary hover:bg-primary/10 focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
-        compact ? 'min-h-16 p-2.5 sm:min-h-20 sm:p-3' : 'min-h-24 p-3 sm:min-h-32 sm:p-4'
+        'group relative flex min-h-20 flex-col rounded-md border bg-background text-left shadow-sm',
+        'transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out',
+        'hover:-translate-y-0.5 hover:border-primary/80 hover:bg-primary/5 hover:shadow-md',
+        'focus-within:-translate-y-0.5 focus-within:border-primary/80 focus-within:bg-primary/5 focus-within:shadow-md'
       )}
     >
-      <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
-        <div
-          className={cn(
-            'text-primary font-extrabold tracking-normal uppercase',
-            compact ? 'text-sm sm:text-base' : 'text-base sm:text-lg'
-          )}
-        >
-          {item.name}
+      <button
+        type="button"
+        onClick={() => enterStage(item.name)}
+        className="flex min-h-20 flex-1 cursor-pointer flex-col justify-between rounded-md p-3 pr-10 text-left focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <div className="space-y-1.5">
+          <div className="text-primary text-sm font-extrabold tracking-normal uppercase transition-colors group-hover:text-primary sm:text-base">
+            {item.name}
+          </div>
+          <div className="text-foreground text-sm font-semibold transition-colors group-hover:text-primary">
+            {formatStageName(item.name)}
+          </div>
         </div>
-        <div className={cn('text-foreground font-semibold', compact ? 'text-sm' : 'text-base')}>
-          {formatStageName(item.name)}
+        <div className="text-muted-foreground mt-2 text-xs transition-colors group-hover:text-foreground/80">
+          {item.session_count} 个会话
+          {item.latest_modified_at > 0 ? ` · 最新 ${formatTime(null, item.latest_modified_at)}` : ''}
         </div>
-      </div>
-      <div className={cn('text-muted-foreground text-xs', compact ? 'mt-2' : 'mt-4')}>
-        {item.session_count} 个会话
-        {item.latest_modified_at > 0 ? ` · 最新 ${formatTime(null, item.latest_modified_at)}` : ''}
-      </div>
-    </button>
+      </button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="absolute right-2 bottom-2 h-7 w-7 p-0 opacity-70 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+        title={`清空${formatStageName(item.name)}`}
+        aria-label={`清空${formatStageName(item.name)}`}
+        disabled={clearingStage === item.name}
+        onClick={() => setPendingClearStage(item)}
+      >
+        {clearingStage === item.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+      </Button>
+    </div>
   )
+
+  const renderStageRow = (row: StageCategoryRow) => {
+    const collapsed = collapsedStageRows.has(row.key)
+    const setRowOpen = (open: boolean) => {
+      setCollapsedStageRows((current) => {
+        const next = new Set(current)
+        if (open) {
+          next.delete(row.key)
+        } else {
+          next.add(row.key)
+        }
+        return next
+      })
+    }
+
+    if (!row.collapsedByDefault) {
+      return (
+        <section key={row.key} className="grid gap-2 sm:grid-cols-[72px_minmax(0,1fr)] sm:items-start">
+          <div className="text-muted-foreground px-1 pt-1 text-xs font-medium sm:pt-3">
+            {row.label}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+            {row.items.map((item) => renderStageCard(item))}
+          </div>
+        </section>
+      )
+    }
+
+    return (
+      <Collapsible key={row.key} open={!collapsed} onOpenChange={setRowOpen}>
+        <section className="grid gap-2 sm:grid-cols-[72px_minmax(0,1fr)] sm:items-start">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1 px-1 pt-1 text-left text-xs font-medium transition-colors sm:pt-3"
+            >
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsed && '-rotate-90')} />
+              {row.label}
+              <span className="text-muted-foreground/80">({row.items.length})</span>
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+              {row.items.map((item) => renderStageCard(item))}
+            </div>
+          </CollapsibleContent>
+        </section>
+      </Collapsible>
+    )
+  }
+
+  const pendingClearStageLabel = pendingClearStage ? formatStageName(pendingClearStage.name) : ''
+  const pendingClearStageDeleting = pendingClearStage ? clearingStage === pendingClearStage.name : false
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col gap-2 overflow-hidden sm:gap-3', embedded ? 'p-0' : 'p-2 lg:p-4')}>
       {toolbarPortal}
+
+      <AlertDialog
+        open={Boolean(pendingClearStage)}
+        onOpenChange={(open) => {
+          if (!open && !pendingClearStageDeleting) {
+            setPendingClearStage(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>清空推理过程记录</AlertDialogTitle>
+            <AlertDialogDescription>
+              将清空「{pendingClearStageLabel}」下的全部推理过程日志。
+              {pendingClearStage?.session_count ? ` 当前包含 ${pendingClearStage.session_count} 个会话。` : ''}
+              此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pendingClearStageDeleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={pendingClearStageDeleting}
+              onClick={(event) => {
+                event.preventDefault()
+                void handleConfirmClearStage()
+              }}
+            >
+              {pendingClearStageDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              确认清空
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {!embedded && (
         <div className="flex flex-shrink-0 items-start justify-between gap-3">
@@ -1601,24 +1867,9 @@ export function ReasoningProcessPage({
 
       {!browsingStage ? (
         <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-md">
-          <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b px-3 sm:h-12 sm:px-4">
-            <Layers className="text-muted-foreground h-4 w-4" />
-            <div className="text-sm font-medium">选择推理类型</div>
-          </div>
           <ScrollArea className="min-h-0 flex-1">
-            <div className="space-y-3 p-2 sm:space-y-4 sm:p-3">
-              {primaryStageCards.length > 0 && (
-                <div className="grid grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3">
-                  {primaryStageCards.map((item) => renderStageCard(item, true))}
-                </div>
-              )}
-              {secondaryStageCards.length > 0 && (
-                <div className="border-t pt-3">
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    {secondaryStageCards.map((item) => renderStageCard(item, true))}
-                  </div>
-                </div>
-              )}
+            <div className="space-y-4 p-2 sm:p-3">
+              {stageCategoryRows.map(renderStageRow)}
               {!loading && stageCards.length === 0 && (
                 <div className="text-muted-foreground px-3 py-10 text-center text-sm">
                   没有找到推理过程类型
@@ -1658,7 +1909,7 @@ export function ReasoningProcessPage({
                   const durationText = formatDurationMs(item.duration_ms)
                   const metadataText = getReasoningMetadataText(item)
                   const rawPreviewText =
-                    item.stage === 'replyer' ? item.output_preview : item.action_preview
+                    item.display_title || (item.stage === 'replyer' ? item.output_preview : item.action_preview)
                   const previewText = rawPreviewText ? formatPromptPreviewText(rawPreviewText) : ''
                   return (
                     <button
@@ -1858,6 +2109,95 @@ export function ReasoningProcessPage({
                             />
                           </div>
                         )}
+
+                        {structuredPrompt.jargon_learning_calls &&
+                          structuredPrompt.jargon_learning_calls.length > 0 && (
+                            <div className="space-y-3">
+                              {structuredPrompt.jargon_learning_calls.map((llmCall, callIndex) => (
+                                <div
+                                  key={`${llmCall.inference_stage}-${callIndex}`}
+                                  className="space-y-2 rounded-md border p-2.5 sm:p-3"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge variant="secondary">
+                                      #{callIndex + 1} {llmCall.inference_stage}
+                                    </Badge>
+                                    {llmCall.metadata?.model_name && (
+                                      <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+                                        <Cpu className="h-3.5 w-3.5" />
+                                        {llmCall.metadata.model_name}
+                                      </span>
+                                    )}
+                                    {typeof llmCall.metadata?.duration_ms === 'number' && (
+                                      <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+                                        <Timer className="h-3.5 w-3.5" />
+                                        {formatDurationMs(llmCall.metadata.duration_ms)}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    {(llmCall.messages ?? []).map((message, messageIndex) => {
+                                      const isBotSelfMessage = isBotSelfStructuredMessage(message, botSelfNames)
+                                      const roleStyle = getStructuredPromptMessageRoleStyle(
+                                        message.role,
+                                        isBotSelfMessage
+                                      )
+                                      return (
+                                        <div
+                                          key={`${message.index ?? messageIndex}-${message.role ?? 'unknown'}`}
+                                          className={cn(
+                                            'relative rounded-md border px-2.5 pt-9 pb-2.5 sm:px-3 sm:pt-10 sm:pb-3',
+                                            roleStyle.containerClassName
+                                          )}
+                                        >
+                                          <div className="absolute top-1.5 left-1.5 flex flex-wrap items-center gap-1.5 sm:top-2 sm:left-2">
+                                            <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+                                              输入 #{message.index ?? messageIndex + 1}
+                                            </Badge>
+                                            <Badge
+                                              variant="outline"
+                                              className={cn('px-1.5 py-0 text-[11px]', roleStyle.badgeClassName)}
+                                            >
+                                              {roleStyle.label}
+                                            </Badge>
+                                            {message.tool_call_id && (
+                                              <span className="text-muted-foreground text-xs">
+                                                tool_call_id: {message.tool_call_id}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <NaturalLanguageText
+                                            text={stringifyPromptContent(message.content) || '空内容'}
+                                            avatarMap={messageAvatarMap}
+                                          />
+                                          {message.tool_calls && message.tool_calls.length > 0 && (
+                                            <ToolCallsCollapsible toolCalls={message.tool_calls} />
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+
+                                  {llmCall.output && (
+                                    <div className="rounded-md border p-2.5 sm:p-3">
+                                      <Badge variant="outline" className="mb-2">
+                                        {llmCall.output.title || '输出结果'}
+                                      </Badge>
+                                      <NaturalLanguageText
+                                        text={stringifyPromptContent(llmCall.output.content) || '空输出'}
+                                        avatarMap={messageAvatarMap}
+                                      />
+                                      {llmCall.output.tool_calls &&
+                                        llmCall.output.tool_calls.length > 0 && (
+                                          <ToolCallsCollapsible toolCalls={llmCall.output.tool_calls} />
+                                        )}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
                         {structuredPrompt.output && (
                           <div className="rounded-md border p-2.5 sm:p-3">

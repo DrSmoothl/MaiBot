@@ -18,9 +18,9 @@ export interface ChatScopeItem {
 }
 
 interface ChatScopeFilterPanelProps<TMode extends string> {
-  modes: ChatScopeMode<TMode>[]
-  activeMode: TMode
-  onModeChange: (mode: TMode) => void
+  modes?: ChatScopeMode<TMode>[]
+  activeMode?: TMode
+  onModeChange?: (mode: TMode) => void
   items: ChatScopeItem[]
   selectedItemId?: string | number | null
   onItemSelect?: (id: string | number) => void
@@ -54,6 +54,9 @@ export function ChatScopeFilterPanel<TMode extends string>({
   className,
   listClassName,
 }: ChatScopeFilterPanelProps<TMode>) {
+  const modeItems = modes ?? []
+  const hasModes = modeItems.length > 0
+
   return (
     <aside
       data-chat-scope-panel="true"
@@ -89,31 +92,33 @@ export function ChatScopeFilterPanel<TMode extends string>({
           {!collapsed && (
             <div className="min-w-0 space-y-2">
               {title && <h2 className="text-sm font-medium">{title}</h2>}
-              <div
-                data-chat-scope-panel-modes="true"
-                className="bg-muted grid gap-0.5 border-2 p-1"
-                style={{
-                  gridTemplateColumns: `repeat(${modeColumns ?? modes.length}, minmax(0, 1fr))`,
-                }}
-              >
-                {modes.map((mode) => (
-                  <button
-                    key={mode.value}
-                    type="button"
-                    onClick={() => onModeChange(mode.value)}
-                    data-chat-scope-panel-mode="true"
-                    data-active={activeMode === mode.value ? 'true' : 'false'}
-                    className={cn(
-                      'min-w-0 px-1.5 py-1 text-xs transition-colors',
-                      activeMode === mode.value
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    <span className="block truncate">{mode.label}</span>
-                  </button>
-                ))}
-              </div>
+              {hasModes && (
+                <div
+                  data-chat-scope-panel-modes="true"
+                  className="bg-muted grid gap-0.5 border-2 p-1"
+                  style={{
+                    gridTemplateColumns: `repeat(${modeColumns ?? modeItems.length}, minmax(0, 1fr))`,
+                  }}
+                >
+                  {modeItems.map((mode) => (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => onModeChange?.(mode.value)}
+                      data-chat-scope-panel-mode="true"
+                      data-active={activeMode === mode.value ? 'true' : 'false'}
+                      className={cn(
+                        'min-w-0 px-1.5 py-1 text-xs transition-colors',
+                        activeMode === mode.value
+                          ? 'bg-background text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      <span className="block truncate">{mode.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

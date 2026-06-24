@@ -23,6 +23,7 @@ MAX_JARGON_REFERENCE_MATCHES = 10
 _PLANNER_MESSAGE_PREFIX_RE = re.compile(r"^<message\b[^>]*>\s*", re.IGNORECASE)
 _JARGON_REFERENCE_ITEM_RE = re.compile(r"^\s*(?:\d+\.\s*)?(?P<content>.+?)：")
 _JARGON_REFERENCE_HEADER = "以下黑话来自当前上下文中其他用户消息的机械匹配，仅作理解聊天语境的参考："
+_JARGON_REFERENCE_DISPLAY_PREFIX = "[黑话参考]"
 
 
 @dataclass(slots=True)
@@ -94,6 +95,13 @@ def extract_jargon_reference_contents(messages: Sequence[LLMContextMessage]) -> 
             continue
         contents.update(_extract_jargon_reference_contents_from_text(message.content))
     return contents
+
+
+def is_jargon_reference_text(content: object) -> bool:
+    """判断一段文本是否是黑话参考消息。"""
+
+    text = _PLANNER_MESSAGE_PREFIX_RE.sub("", str(content or "").strip(), count=1).lstrip()
+    return text.startswith(_JARGON_REFERENCE_DISPLAY_PREFIX) or text.startswith(_JARGON_REFERENCE_HEADER)
 
 
 def match_jargons_for_context(

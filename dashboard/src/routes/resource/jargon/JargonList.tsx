@@ -52,29 +52,28 @@ interface JargonListProps {
 /**
  * 渲染黑话状态徽章
  */
-function renderJargonStatus(isJargon: boolean | null) {
-  if (isJargon === true) {
-    return (
-      <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-        <Check className="mr-1 h-3 w-3" />
-        是黑话
-      </Badge>
-    )
-  } else if (isJargon === false) {
-    return (
-      <Badge variant="secondary">
-        <X className="mr-1 h-3 w-3" />
-        非黑话
-      </Badge>
-    )
-  } else {
-    return (
-      <Badge variant="outline">
-        <HelpCircle className="mr-1 h-3 w-3" />
-        未判定
-      </Badge>
-    )
-  }
+function renderJargonStatus(jargon: Jargon) {
+  return (
+    <>
+      {jargon.is_jargon ? (
+        <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+          <Check className="mr-1 h-3 w-3" />
+          是黑话
+        </Badge>
+      ) : (
+        <Badge variant="secondary">
+          <X className="mr-1 h-3 w-3" />
+          无黑话
+        </Badge>
+      )}
+      {jargon.is_legacy_empty_meaning && (
+        <Badge variant="outline">
+          <HelpCircle className="mr-1 h-3 w-3" />
+          旧数据
+        </Badge>
+      )}
+    </>
+  )
 }
 
 function renderCreatedBy(createdBy: Jargon['created_by']) {
@@ -207,7 +206,7 @@ export function JargonList({
                   )}
                   <TableCell className="px-2 py-1.5">
                     <div className="flex flex-wrap gap-1">
-                      {renderJargonStatus(jargon.is_jargon)}
+                      {renderJargonStatus(jargon)}
                       {renderCreatedBy(jargon.created_by)}
                     </div>
                   </TableCell>
@@ -279,7 +278,7 @@ export function JargonList({
                     </p>
                   )}
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    {renderJargonStatus(jargon.is_jargon)}
+                    {renderJargonStatus(jargon)}
                     {renderCreatedBy(jargon.created_by)}
                     <span className="text-muted-foreground">次数: {jargon.count}</span>
                   </div>

@@ -9,7 +9,8 @@ export interface StatsData {
   total: number
   confirmed_jargon: number
   confirmed_not_jargon: number
-  pending: number
+  manual_jargon: number
+  pending?: number
   global_count: number
   complete_count: number
   chat_count: number

@@ -18,6 +18,8 @@ export type ReasoningPromptFile = {
   json_path: string | null
   output_preview: string | null
   action_preview: string | null
+  display_title: string | null
+  related_json_paths: string[]
   has_behavior_choice_insert: boolean
   model_name: string | null
   duration_ms: number | null
@@ -57,6 +59,11 @@ export type ReasoningPromptListResponse = {
 export type ReasoningPromptStagesResponse = {
   stages: string[]
   stage_infos: ReasoningPromptStageInfo[]
+}
+
+export type ReasoningPromptClearStageResponse = {
+  stage: string
+  deleted_files: number
 }
 
 export type ReasoningPromptContentResponse = {
@@ -141,6 +148,12 @@ export async function listReasoningPromptStages(): Promise<ReasoningPromptStages
   return backendApi.get<ReasoningPromptStagesResponse>(`${API_BASE}/stages`, {
     cache: 'no-store',
     errorMessage: '加载推理过程类型失败',
+  })
+}
+
+export async function clearReasoningPromptStage(stage: string): Promise<ReasoningPromptClearStageResponse> {
+  return backendApi.delete<ReasoningPromptClearStageResponse>(`${API_BASE}/stages/${encodeURIComponent(stage)}`, {
+    errorMessage: '清空推理过程失败',
   })
 }
 

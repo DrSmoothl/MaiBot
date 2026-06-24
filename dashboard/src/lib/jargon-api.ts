@@ -37,7 +37,7 @@ export async function getJargonList(params: {
   page_size?: number
   search?: string
   session_id?: string
-  jargon_status?: 'confirmed_jargon' | 'confirmed_not_jargon' | 'pending'
+  jargon_status?: 'confirmed_jargon' | 'confirmed_not_jargon' | 'manual_jargon' | 'pending'
   is_jargon?: boolean | null
   is_complete?: boolean
   is_global?: boolean

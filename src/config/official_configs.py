@@ -3428,6 +3428,69 @@ class VoiceConfig(ConfigBase):
     """开启后麦麦可以把语音消息识别成文字再处理。"""
 
 
+class EmojiCacheCleanupConfig(ConfigBase):
+    """表情包缓存自动清理配置。"""
+
+    enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "trash-2",
+            "label": {
+                "zh_CN": "启用表情包缓存自动清理",
+                "en_US": "Enable emoji cache cleanup",
+                "ja_JP": "絵文字キャッシュ自動クリーンアップを有効化",
+            },
+        },
+    )
+    """开启后会自动删除长期未注册、未使用的表情包缓存。"""
+
+    check_interval_hours: float = Field(
+        default=6.0,
+        ge=1.0 / 60.0,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "clock",
+            "label": {
+                "zh_CN": "表情包清理检查间隔（小时）",
+                "en_US": "Emoji cleanup check interval (hours)",
+                "ja_JP": "絵文字クリーンアップ確認間隔（時間）",
+            },
+        },
+    )
+    """每隔多少小时检查一次旧表情包缓存。"""
+
+    emoji_file_retention_days: int = Field(
+        default=30,
+        ge=1,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "calendar-days",
+            "label": {
+                "zh_CN": "未注册表情包文件保留天数",
+                "en_US": "Unregistered emoji file retention days",
+                "ja_JP": "未登録絵文字ファイル保持日数",
+            },
+        },
+    )
+    """未注册表情包文件多久没被使用后可以删除；已注册表情包永远不会由该任务删除。"""
+
+    no_file_record_retention_days: int = Field(
+        default=30,
+        ge=1,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "database",
+            "label": {
+                "zh_CN": "未注册表情包无文件记录保留天数",
+                "en_US": "Unregistered emoji no-file record retention days",
+                "ja_JP": "未登録絵文字のファイルなし記録保持日数",
+            },
+        },
+    )
+    """未注册表情包文件删掉后，描述缓存记录还能保留多久。"""
+
+
 class EmojiConfig(ConfigBase):
     """表情包配置类"""
 
@@ -3539,6 +3602,9 @@ class EmojiConfig(ConfigBase):
         },
     )
     """开启后只保存内容合适的表情。"""
+
+    cache_cleanup: EmojiCacheCleanupConfig = Field(default_factory=EmojiCacheCleanupConfig)
+    """定期清理未注册表情包缓存，减少磁盘占用；已注册表情包不会被清理。"""
 
 
 class KeywordRuleConfig(ConfigBase):

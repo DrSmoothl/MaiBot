@@ -19,10 +19,10 @@ class MaiJargon(BaseDatabaseDataModel[Jargon]):
         content: str,
         meaning: str,
         item_id: Optional[int] = None,
-        raw_content: Optional[str] = None,
+        evidence_messages: Optional[str] = None,
         session_id_list: Optional[Dict[str, int]] = None,
         count: int = 0,
-        is_jargon: Optional[bool] = True,
+        is_jargon: Optional[bool] = False,
         is_complete: bool = False,
         is_global: bool = False,
         last_inference_count: int = 0,
@@ -34,8 +34,8 @@ class MaiJargon(BaseDatabaseDataModel[Jargon]):
         """自增主键ID"""
         self.content = content
         """黑话内容"""
-        self.raw_content = raw_content
-        """原始内容，未处理的黑话内容"""
+        self.evidence_messages = evidence_messages
+        """黑话证据消息引用，格式为二维列表的 JSON 字符串"""
         self.meaning = meaning
         """黑话含义"""
         self.session_id_list = session_id_list or {}
@@ -70,7 +70,7 @@ class MaiJargon(BaseDatabaseDataModel[Jargon]):
             item_id=db_record.id,
             content=db_record.content,
             meaning=db_record.meaning,
-            raw_content=db_record.raw_content,
+            evidence_messages=db_record.evidence_messages,
             session_id_list=json_list,
             count=db_record.count,
             is_jargon=db_record.is_jargon,
@@ -87,7 +87,7 @@ class MaiJargon(BaseDatabaseDataModel[Jargon]):
         dumped_session_id_list = json.dumps(self.session_id_list)
         return Jargon(
             content=self.content,
-            raw_content=self.raw_content,
+            evidence_messages=self.evidence_messages,
             meaning=self.meaning,
             session_id_dict=dumped_session_id_list,
             count=self.count,

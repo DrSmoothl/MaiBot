@@ -1,4 +1,4 @@
-import { Hash } from 'lucide-react'
+import { Hash, HelpCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import {
@@ -89,14 +89,12 @@ interface JargonDetailDialogProps {
   jargon: Jargon | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  loadingRawContent?: boolean
 }
 
 export function JargonDetailDialog({
   jargon,
   open,
   onOpenChange,
-  loadingRawContent = false,
 }: JargonDetailDialogProps) {
   if (!jargon) return null
 
@@ -122,37 +120,6 @@ export function JargonDetailDialog({
               </div>
             </div>
 
-            {loadingRawContent ? (
-              <div className="space-y-1">
-                <Label className="text-muted-foreground text-xs">原始内容</Label>
-                <div className="bg-muted text-muted-foreground rounded p-2 text-sm">
-                  原始内容加载中...
-                </div>
-              </div>
-            ) : jargon.raw_content ? (
-              <div className="space-y-1">
-                <Label className="text-muted-foreground text-xs">原始内容</Label>
-                <div className="bg-muted rounded p-2 text-sm break-all">
-                  {(() => {
-                    try {
-                      const rawArray = JSON.parse(jargon.raw_content)
-                      if (Array.isArray(rawArray)) {
-                        return rawArray.map((item, index) => (
-                          <div key={index}>
-                            {index > 0 && <hr className="border-border my-3" />}
-                            <div className="whitespace-pre-wrap">{item}</div>
-                          </div>
-                        ))
-                      }
-                      return <div className="whitespace-pre-wrap">{jargon.raw_content}</div>
-                    } catch {
-                      return <div className="whitespace-pre-wrap">{jargon.raw_content}</div>
-                    }
-                  })()}
-                </div>
-              </div>
-            ) : null}
-
             <div className="space-y-1">
               <Label className="text-muted-foreground text-xs">含义</Label>
               <div className="bg-muted rounded p-2 text-sm break-all">
@@ -170,8 +137,13 @@ export function JargonDetailDialog({
                       是黑话
                     </Badge>
                   )}
-                  {jargon.is_jargon === false && <Badge variant="secondary">非黑话</Badge>}
-                  {jargon.is_jargon === null && <Badge variant="outline">未判定</Badge>}
+                  {jargon.is_jargon !== true && <Badge variant="secondary">无黑话</Badge>}
+                  {jargon.is_legacy_empty_meaning && (
+                    <Badge variant="outline">
+                      <HelpCircle className="mr-1 h-3 w-3" />
+                      旧数据
+                    </Badge>
+                  )}
                   {jargon.created_by === 'MANUAL' ? (
                     <Badge variant="outline">手动</Badge>
                   ) : (
@@ -450,13 +422,11 @@ export function JargonEditDialog({
             <div className="space-y-2">
               <Label>黑话状态</Label>
               <Select
-                value={
-                  formData.is_jargon === null ? 'null' : formData.is_jargon?.toString() || 'null'
-                }
+                value={formData.is_jargon ? 'true' : 'false'}
                 onValueChange={(value) =>
                   setFormData({
                     ...formData,
-                    is_jargon: value === 'null' ? null : value === 'true',
+                    is_jargon: value === 'true',
                   })
                 }
               >
@@ -464,9 +434,8 @@ export function JargonEditDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="null">未判定</SelectItem>
                   <SelectItem value="true">是黑话</SelectItem>
-                  <SelectItem value="false">非黑话</SelectItem>
+                  <SelectItem value="false">无黑话</SelectItem>
                 </SelectContent>
               </Select>
             </div>

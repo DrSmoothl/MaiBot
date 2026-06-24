@@ -63,6 +63,7 @@ export interface UseDataListResult<TItem, TFilters, TId> {
   // 筛选（泛型袋；setFilter 自动重置页码并清空选中）
   filters: TFilters
   setFilter: <K extends keyof TFilters>(key: K, value: TFilters[K]) => void
+  updateFilters: (updater: (filters: TFilters) => TFilters) => void
   resetFilters: () => void
   // 多选（参数变即清空；toggleAll 只针对当前页可见项）
   selectedIds: Set<TId>
@@ -151,6 +152,15 @@ export function useDataList<TItem, TFilters, TId = string>(
     [clearSelection],
   )
 
+  const updateFilters = useCallback(
+    (updater: (filters: TFilters) => TFilters) => {
+      setFilters((prev) => updater(prev))
+      setPageRaw(1)
+      clearSelection()
+    },
+    [clearSelection],
+  )
+
   const resetFilters = useCallback(() => {
     setFilters(initialFiltersRef.current)
     setPageRaw(1)
@@ -212,6 +222,7 @@ export function useDataList<TItem, TFilters, TId = string>(
     setSearchInput,
     filters,
     setFilter,
+    updateFilters,
     resetFilters,
     selectedIds,
     toggle,
