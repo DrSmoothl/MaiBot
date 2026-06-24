@@ -1,10 +1,66 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { useState, type ReactNode } from 'react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ListFieldEditor } from '@/components/ListFieldEditor'
 
+const dndState = vi.hoisted(() => ({
+  onDragEnd: undefined as ((event: unknown) => void) | undefined,
+  sortableItems: [] as string[],
+}))
+
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/core')>()
+
+  return {
+    ...actual,
+    DndContext: ({
+      children,
+      onDragEnd,
+    }: {
+      children: ReactNode
+      onDragEnd?: (event: unknown) => void
+    }) => {
+      dndState.onDragEnd = onDragEnd
+      return <div>{children}</div>
+    },
+  }
+})
+
+vi.mock('@dnd-kit/sortable', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/sortable')>()
+
+  return {
+    ...actual,
+    SortableContext: ({
+      children,
+      items,
+    }: {
+      children: ReactNode
+      items: string[]
+    }) => {
+      dndState.sortableItems = [...items]
+      return <div>{children}</div>
+    },
+    useSortable: () => ({
+      attributes: {},
+      listeners: {},
+      setNodeRef: vi.fn(),
+      transform: null,
+      transition: undefined,
+      isDragging: false,
+    }),
+  }
+})
+
 describe('ListFieldEditor', () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn()
+    dndState.onDragEnd = undefined
+    dndState.sortableItems = []
+  })
+
   it('将 multiple=true 的 select 子字段渲染为多选下拉', async () => {
     const user = userEvent.setup()
     const handleChange = vi.fn()
@@ -104,5 +160,35 @@ describe('ListFieldEditor', () => {
     fireEvent.change(input, { target: { value: 'group-b' } })
 
     expect(handleChange).toHaveBeenLastCalledWith([{ push_groups: ['group-b'] }])
+  })
+
+  it('拖拽排序后正在编辑的数字项状态会跟随项目移动', () => {
+    const ControlledListFieldEditor = () => {
+      const [items, setItems] = useState<unknown[]>([1, 2])
+
+      return (
+        <ListFieldEditor
+          value={items}
+          onChange={setItems}
+          itemType="number"
+        />
+      )
+    }
+
+    render(<ControlledListFieldEditor />)
+
+    const inputs = screen.getAllByRole('spinbutton')
+    fireEvent.focus(inputs[0])
+    fireEvent.change(inputs[0], { target: { value: '10' } })
+
+    expect(dndState.onDragEnd).toBeDefined()
+    act(() => {
+      dndState.onDragEnd?.({
+        active: { id: dndState.sortableItems[0] },
+        over: { id: dndState.sortableItems[1] },
+      })
+    })
+
+    expect(screen.getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['2', '10'])
   })
 })

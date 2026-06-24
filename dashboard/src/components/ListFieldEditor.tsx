@@ -439,7 +439,8 @@ export function ListFieldEditor({
       newIds.push(getItemId(i))
     }
     return newIds
-  }, [items.length, getItemId])
+    // 同长度排序也会改变每个位置对应的数据项，需要重新读取已重排的 ID 映射。
+  }, [items, getItemId])
 
   // DnD 传感器配置
   const sensors = useSensors(
@@ -460,11 +461,17 @@ export function ListFieldEditor({
       if (over && active.id !== over.id) {
         const oldIndex = sortableIds.indexOf(active.id as string)
         const newIndex = sortableIds.indexOf(over.id as string)
+        if (oldIndex === -1 || newIndex === -1) return
+
         const newItems = arrayMove(items, oldIndex, newIndex)
+        // key 必须跟随被拖拽的数据项移动，避免 React 按旧位置复用输入框等子组件状态。
+        arrayMove(sortableIds, oldIndex, newIndex).forEach((id, index) => {
+          itemIds.set(index, id)
+        })
         onChange(newItems)
       }
     },
-    [items, sortableIds, onChange]
+    [items, sortableIds, itemIds, onChange]
   )
 
   // 添加新项
@@ -501,11 +508,17 @@ export function ListFieldEditor({
     (index: number) => {
       if (minItems != null && items.length <= minItems) return
       const newItems = items.filter((_: unknown, i: number) => i !== index)
-      // 清理 itemIds 映射
-      itemIds.delete(index)
+      // 删除后后续数据项会前移，对应的 key 也要前移。
+      sortableIds
+        .filter((_: string, i: number) => i !== index)
+        .forEach((id, nextIndex) => {
+          itemIds.set(nextIndex, id)
+        })
+      // 前移后 Map 中仍会残留旧的最后一项索引，需要按新长度删除尾部 ID。
+      itemIds.delete(newItems.length)
       onChange(newItems)
     },
-    [items, minItems, itemIds, onChange]
+    [items, minItems, sortableIds, itemIds, onChange]
   )
 
   const canAdd = maxItems == null || items.length < maxItems
