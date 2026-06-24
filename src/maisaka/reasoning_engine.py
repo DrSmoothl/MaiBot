@@ -61,8 +61,6 @@ from src.maisaka.context.history import (
 from src.maisaka.memory.heuristic_injector import heuristic_memory_injector
 from src.maisaka.memory.mid_term import build_mid_term_memory_message, insert_mid_term_memory_message
 from src.maisaka.monitor.events import (
-    emit_cycle_end,
-    emit_cycle_start,
     emit_planner_finalized,
 )
 from src.maisaka.memory.person_profile import build_person_profile_injection_messages
@@ -75,8 +73,6 @@ if TYPE_CHECKING:
 
 logger = get_logger("maisaka_reasoning_engine")
 
-PLANNER_NO_TOOL_HINT_DISPLAY_PREFIX = "[Planner 工具选择提示]"
-HISTORY_SILENT_TOOL_NAMES: set[str] = set()
 HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
 BEHAVIOR_SELECTOR_CONTEXT_MESSAGE_LIMIT = 8
@@ -755,19 +751,12 @@ class MaisakaReasoningEngine:
         return pending_round_messages
 
     async def _start_cycle_round(self, round_index: int) -> tuple[CycleDetail, str]:
-        """启动一轮内部循环并广播开始事件。"""
+        """启动一轮内部循环。"""
 
         cycle_detail = self._start_cycle()
         round_text = f"第 {round_index + 1}/{self._runtime._max_internal_rounds} 轮"
         self._runtime._log_cycle_started(cycle_detail, round_index)
         self._runtime._update_stage_status("启动循环", f"循环 {cycle_detail.cycle_id}", round_text=round_text)
-        await emit_cycle_start(
-            session_id=self._runtime.session_id,
-            cycle_id=cycle_detail.cycle_id,
-            round_index=round_index,
-            max_rounds=self._runtime._max_internal_rounds,
-            history_count=len(self._runtime._chat_history),
-        )
         return cycle_detail, round_text
 
     async def _refresh_visual_placeholders_for_cycle(self, cycle_detail: CycleDetail) -> None:
@@ -885,14 +874,6 @@ class MaisakaReasoningEngine:
             time_records=dict(completed_cycle.time_records),
             agent_state=self._runtime._agent_state,
             planner_interrupted=state.planner_interrupted,
-            end_reason=cycle_end.reason,
-            end_detail=cycle_end.detail,
-        )
-        await emit_cycle_end(
-            session_id=self._runtime.session_id,
-            cycle_id=cycle_detail.cycle_id,
-            time_records=dict(completed_cycle.time_records),
-            agent_state=self._runtime._agent_state,
             end_reason=cycle_end.reason,
             end_detail=cycle_end.detail,
         )
@@ -1540,10 +1521,6 @@ class MaisakaReasoningEngine:
             result: 统一工具执行结果。
         """
 
-        if tool_call.func_name in HISTORY_SILENT_TOOL_NAMES:
-            self._remove_tool_call_from_history(tool_call)
-            return
-
         if (
             tool_call.func_name in HISTORY_DEFERRED_TOOL_RESULT_NAMES
             and result.success
@@ -1814,34 +1791,6 @@ class MaisakaReasoningEngine:
                     f"{self._runtime.log_prefix} 调度 tool result 图片识别失败: "
                     f"media_index={media_index} image_hash={image.binary_hash} error={exc}"
                 )
-
-    def _remove_tool_call_from_history(self, tool_call: ToolCall) -> None:
-        """从历史里的 assistant 消息中移除控制类工具调用。"""
-
-        tool_call_id = str(tool_call.call_id or "").strip()
-        if not tool_call_id:
-            return
-
-        for index in range(len(self._runtime._chat_history) - 1, -1, -1):
-            message = self._runtime._chat_history[index]
-            if not isinstance(message, AssistantMessage) or not message.tool_calls:
-                continue
-
-            remaining_tool_calls = [
-                existing_tool_call
-                for existing_tool_call in message.tool_calls
-                if str(existing_tool_call.call_id or "").strip() != tool_call_id
-            ]
-            if len(remaining_tool_calls) == len(message.tool_calls):
-                continue
-
-            if remaining_tool_calls:
-                message.tool_calls = remaining_tool_calls
-            elif message.content.strip():
-                message.tool_calls = []
-            else:
-                del self._runtime._chat_history[index]
-            return
 
     def _build_tool_result_summary(self, tool_call: ToolCall, result: ToolExecutionResult) -> str:
         """构建用于终端展示的工具结果摘要。"""

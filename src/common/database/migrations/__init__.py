@@ -35,6 +35,7 @@ from .builtin import (
     V30_SCHEMA_VERSION,
     V31_SCHEMA_VERSION,
     V32_SCHEMA_VERSION,
+    V33_SCHEMA_VERSION,
     build_default_migration_registry,
     build_default_schema_version_resolver,
 )
@@ -121,6 +122,7 @@ __all__ = [
     "V30_SCHEMA_VERSION",
     "V31_SCHEMA_VERSION",
     "V32_SCHEMA_VERSION",
+    "V33_SCHEMA_VERSION",
     "MigrationExecutionContext",
     "MigrationPlan",
     "MigrationPlanner",

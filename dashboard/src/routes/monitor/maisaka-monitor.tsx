@@ -1141,8 +1141,6 @@ function TimelineEventRenderer({
       return <MessageIngestedCard data={entry.data as MessageIngestedEvent} />
     case 'message.sent':
       return <MessageSentCard data={entry.data as MessageSentEvent} />
-    case 'cycle.start':
-      return null
     case 'timing_gate.result':
       return <TimingGateCard data={entry.data as TimingGateResultEvent} />
     case 'planner.response':
@@ -1162,8 +1160,6 @@ function TimelineEventRenderer({
       )
     case 'tool.execution':
       return <ToolExecutionCard data={entry.data as ToolExecutionEvent} />
-    case 'cycle.end':
-      return null
     case 'replier.response':
       return <ReplierResponseCard data={entry.data as ReplierResponseEvent} />
     // planner.request, replier.request 和 session.start 通常不需要在 timeline 中主要展示
@@ -1243,7 +1239,7 @@ export function MaisakaMonitor() {
   // 统计当前会话的各事件类型计数
   const stats = {
     messages: timeline.filter((e) => e.type === 'message.ingested' || e.type === 'message.sent').length,
-    cycles: timeline.filter((e) => e.type === 'cycle.start').length,
+    cycles: timeline.filter((e) => e.type === 'planner.finalized').length,
     toolCalls: timeline.reduce((count, entry) => {
       if (entry.type === 'tool.execution') {
         return count + 1

@@ -449,46 +449,6 @@ async def emit_message_updated(
     })
 
 
-async def emit_cycle_start(
-    session_id: str,
-    cycle_id: int,
-    round_index: int,
-    max_rounds: int,
-    history_count: int,
-) -> None:
-    """广播推理循环开始事件。"""
-
-    await _broadcast("cycle.start", {
-        "session_id": session_id,
-        "cycle_id": cycle_id,
-        "round_index": round_index,
-        "max_rounds": max_rounds,
-        "history_count": history_count,
-        "timestamp": time.time(),
-    })
-
-
-async def emit_cycle_end(
-    session_id: str,
-    cycle_id: int,
-    time_records: Dict[str, float],
-    agent_state: str,
-    end_reason: str,
-    end_detail: str,
-) -> None:
-    """广播单个推理循环结束事件。"""
-
-    await _broadcast("cycle.end", {
-        "session_id": session_id,
-        "cycle_id": cycle_id,
-        "time_records": _normalize_payload_value(time_records),
-        "agent_state": agent_state,
-        "end_reason": end_reason,
-        "end_detail": end_detail,
-        "timestamp": time.time(),
-    })
-
-
 async def emit_planner_finalized(
     *,
     session_id: str,

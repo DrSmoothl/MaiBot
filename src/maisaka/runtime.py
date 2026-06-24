@@ -1,7 +1,5 @@
 ﻿"""Maisaka 非 CLI 运行时。"""
 
-from base64 import b64encode
-
 import asyncio
 import json
 import time
@@ -17,11 +15,9 @@ from src.chat.replyer.expression_vector_index import expression_vector_index
 from src.chat.utils.utils import get_bot_account, is_bot_self, is_mentioned_bot_in_message
 from src.common.data_models.mai_message_data_model import GroupInfo, MessageInfo, UserInfo
 from src.common.data_models.message_component_data_model import (
-    EmojiComponent,
     ForwardNodeComponent,
     ImageComponent,
     MessageSequence,
-    ReplyComponent,
     TextComponent,
 )
 from src.common.logger import get_logger
@@ -49,12 +45,16 @@ from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
 from src.maisaka.display.stage_status_board import remove_stage_status, update_stage_status
 from src.maisaka.focus import MaisakaFocusRuntimeMixin, focus_mode_manager
 from src.maisaka.monitor.events import emit_message_ingested, emit_message_sent, emit_message_updated, emit_session_start
+from src.maisaka.monitor.message_payload import (
+    build_monitor_message_content,
+    build_monitor_message_media,
+    build_monitor_reply_preview,
+)
 from src.maisaka.idle_backoff import IdleBackoffController
 from src.maisaka.reply_effect import ReplyEffectTracker
 from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
 from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids, message_id_from_context_message
 from src.maisaka.turn_scheduler import MessageTurnScheduler
-from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 from src.mcp_module import MCPManager
 from src.mcp_module.config import build_mcp_server_runtime_configs
 from src.mcp_module.host_llm_bridge import MCPHostLLMBridge
@@ -79,7 +79,6 @@ EXTERNAL_MESSAGE_BURST_INTERVAL_SECONDS = 5.0
 # 空窗补偿所用平均消息间隔的下限：即便统计值偏小也不会低于该值，
 # 限制「沉默时间」被折算成消息的速度，避免低活跃群聊里反复触发回复。
 IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS = 30.0
-MAX_INLINE_MONITOR_MEDIA_BYTES = 2 * 1024 * 1024
 
 
 class PlannerInterruptController:
@@ -619,54 +618,13 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             logger.debug(f"{self.log_prefix} 广播已发送消息到监控面板失败: {exc}")
 
     def _build_monitor_message_content(self, message: SessionMessage) -> str:
-        """生成监控面板使用的消息可见文本，避免纯图片消息被展示为空。"""
+        """生成监控面板使用的消息可见文本。"""
 
-        has_reply = any(isinstance(component, ReplyComponent) for component in message.raw_message.components)
-        has_media = self._has_monitor_message_media(message)
-
-        if has_media:
-            self._refresh_monitor_visual_components(message)
-
-        if has_reply or has_media:
-            try:
-                from src.maisaka.context.message_adapter import build_visible_text_from_sequence
-
-                body_sequence = MessageSequence([
-                    component
-                    for component in message.raw_message.components
-                    if not isinstance(component, (EmojiComponent, ImageComponent, ReplyComponent))
-                ])
-                body_text = build_visible_text_from_sequence(body_sequence).strip()
-                if body_text or has_media:
-                    return body_text
-            except Exception as exc:
-                logger.debug(
-                    f"{self.log_prefix} 构造监控消息正文失败: "
-                    f"message_id={message.message_id} error={exc}"
-                )
-
-        plain_text = (message.processed_plain_text or "").strip()
-        if plain_text:
-            return plain_text
-
-        try:
-            from src.maisaka.context.message_adapter import build_visible_text_from_sequence
-            from src.maisaka.visual.chat_history_refresher import _refresh_pending_visual_components
-
-            _refresh_pending_visual_components(message.raw_message.components)
-            self._register_monitor_visual_placeholder_refresh(message)
-            return build_visible_text_from_sequence(message.raw_message).strip()
-        except Exception as exc:
-            logger.debug(
-                f"{self.log_prefix} 构造监控消息可见文本失败: "
-                f"message_id={message.message_id} error={exc}"
-            )
-            return ""
-
-    def _has_monitor_message_media(self, message: SessionMessage) -> bool:
-        """判断监控面板是否需要为消息单独展示图片或表情。"""
-
-        return any(isinstance(component, (EmojiComponent, ImageComponent)) for component in message.raw_message.components)
+        return build_monitor_message_content(
+            message,
+            refresh_visual_components=self._refresh_monitor_visual_components,
+            log_prefix=self.log_prefix,
+        )
 
     def _refresh_monitor_visual_components(self, message: SessionMessage) -> None:
         """刷新待识别图片描述，并登记识别完成后的监控面板更新。"""
@@ -685,91 +643,16 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
     def _build_monitor_message_media(self, message: SessionMessage) -> list[dict[str, Any]]:
         """构造监控面板可切换展示的原始图片或表情。"""
 
-        try:
-            default_original = resolve_enable_visual_planner()
-        except Exception as exc:
-            logger.debug(f"{self.log_prefix} 解析监控媒体默认展示模式失败: {exc}")
-            default_original = False
-        media_items: list[dict[str, Any]] = []
-        for index, component in enumerate(message.raw_message.components):
-            if isinstance(component, ImageComponent):
-                media_kind = "image"
-                label = "[图片，识别中.....]"
-            elif isinstance(component, EmojiComponent):
-                media_kind = "emoji"
-                label = "[表情包]"
-            else:
-                continue
-
-            if not component.binary_hash:
-                continue
-
-            media_items.append({
-                "kind": media_kind,
-                "hash": component.binary_hash,
-                "text": component.content.strip() or label,
-                "url": f"/api/webui/system/maisaka-monitor/media/{media_kind}/{component.binary_hash}",
-                "data_url": self._build_monitor_media_data_url(component),
-                "default_original": default_original,
-                "index": index,
-            })
-        return media_items
-
-    def _build_monitor_media_data_url(self, component: ImageComponent | EmojiComponent) -> str:
-        """为未落库的小体积图片/表情生成观察面板可直接展示的 data URL。"""
-
-        binary_data = bytes(component.binary_data or b"")
-        if not binary_data or len(binary_data) > MAX_INLINE_MONITOR_MEDIA_BYTES:
-            return ""
-        mime_type = self._guess_monitor_media_mime_type(binary_data)
-        return f"data:{mime_type};base64,{b64encode(binary_data).decode('ascii')}"
-
-    @staticmethod
-    def _guess_monitor_media_mime_type(binary_data: bytes) -> str:
-        """根据文件头判断常见图片 MIME 类型。"""
-
-        if binary_data.startswith(b"\xff\xd8\xff"):
-            return "image/jpeg"
-        if binary_data.startswith(b"GIF8"):
-            return "image/gif"
-        if binary_data.startswith(b"RIFF") and b"WEBP" in binary_data[:16]:
-            return "image/webp"
-        if binary_data.startswith(b"BM"):
-            return "image/bmp"
-        return "image/png"
+        return build_monitor_message_media(message, log_prefix=self.log_prefix)
 
     def _build_monitor_reply_preview(self, message: SessionMessage) -> Optional[dict[str, str]]:
         """构造监控面板中的回复引用预览。"""
 
-        for component in message.raw_message.components:
-            if not isinstance(component, ReplyComponent):
-                continue
-
-            target_message_id = str(component.target_message_id or "").strip()
-            target_content = str(component.target_message_content or "").strip()
-            target_sender = (
-                str(component.target_message_sender_cardname or "").strip()
-                or str(component.target_message_sender_nickname or "").strip()
-                or str(component.target_message_sender_id or "").strip()
-            )
-            if not target_content and target_message_id:
-                target_message = self.find_source_message_by_id(target_message_id)
-                if target_message is not None:
-                    target_content = self._build_monitor_message_content(target_message).strip()
-                    target_user = target_message.message_info.user_info
-                    target_sender = (
-                        target_user.user_cardname
-                        or target_user.user_nickname
-                        or target_user.user_id
-                    )
-
-            return {
-                "message_id": target_message_id,
-                "sender_name": target_sender or "未知用户",
-                "content": target_content or "原消息已无法访问",
-            }
-
-        return None
+        return build_monitor_reply_preview(
+            message,
+            find_source_message_by_id=self.find_source_message_by_id,
+            build_source_content=self._build_monitor_message_content,
+        )
 
     def _register_monitor_visual_placeholder_refresh(self, message: SessionMessage) -> None:
         """登记监控面板中待识别图片的后续刷新。"""

@@ -115,15 +115,6 @@ export interface MaisakaMessageMedia {
   index?: number
 }
 
-export interface CycleStartEvent {
-  session_id: string
-  cycle_id: number
-  round_index: number
-  max_rounds: number
-  history_count: number
-  timestamp: number
-}
-
 export interface TimingGateResultEvent {
   session_id: string
   cycle_id: number
@@ -229,16 +220,6 @@ export interface PlannerFinalizedEvent {
   }
 }
 
-export interface CycleEndEvent {
-  session_id: string
-  cycle_id: number
-  time_records: Record<string, number>
-  agent_state: string
-  end_reason?: string
-  end_detail?: string
-  timestamp: number
-}
-
 export interface ReplierRequestEvent {
   session_id: string
   messages: MaisakaMessage[]
@@ -269,13 +250,11 @@ export type MaisakaMonitorEvent =
   | { type: 'message.ingested'; data: MessageIngestedEvent }
   | { type: 'message.sent'; data: MessageSentEvent }
   | { type: 'message.updated'; data: MessageUpdatedEvent }
-  | { type: 'cycle.start'; data: CycleStartEvent }
   | { type: 'timing_gate.result'; data: TimingGateResultEvent }
   | { type: 'planner.request'; data: PlannerRequestEvent }
   | { type: 'planner.response'; data: PlannerResponseEvent }
   | { type: 'planner.finalized'; data: PlannerFinalizedEvent }
   | { type: 'tool.execution'; data: ToolExecutionEvent }
-  | { type: 'cycle.end'; data: CycleEndEvent }
   | { type: 'replier.request'; data: ReplierRequestEvent }
   | { type: 'replier.response'; data: ReplierResponseEvent }
 
