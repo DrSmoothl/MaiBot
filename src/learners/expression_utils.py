@@ -166,7 +166,7 @@ async def check_expression_suitability(
 
     generation_result = await judge_llm.generate_response(
         prompt=prompt,
-        options=LLMGenerationOptions(temperature=0.6, max_tokens=1024),
+        options=LLMGenerationOptions(temperature=0.6),
         session_id=session_id,
     )
     response = generation_result.response
