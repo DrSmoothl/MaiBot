@@ -1,10 +1,8 @@
-import json
 import random
 import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
 from src.chat.message_receive.chat_manager import BotChatSession
@@ -47,12 +45,10 @@ from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.plugin_runtime.hook_payloads import deserialize_prompt_messages, serialize_prompt_messages
 
-from .local_mai_replyer import build_local_mai_replyer_messages
 from .maisaka_expression_selector import maisaka_expression_selector
 
 logger = get_logger("replyer")
 
-DEBUG_REPLY_CACHE_DIR = Path("logs/debug_reply_cache")
 REPLYER_MAX_HOOK_RETRIES = 3
 TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 
@@ -490,9 +486,6 @@ class BaseMaisakaReplyGenerator:
         enable_visual_message: bool = False,
         reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> List[Message]:
-        if global_config.debug.enable_local_mai_replyer:
-            return build_local_mai_replyer_messages(reply_reason, reply_tool_args)
-
         messages: List[Message] = []
         keywords_reaction_prompt = self._build_keyword_reaction_prompt(
             chat_history=chat_history,
@@ -647,40 +640,6 @@ class BaseMaisakaReplyGenerator:
 
         return get_plugin_runtime_manager()
 
-    @staticmethod
-    def _build_debug_request_filename(stream_id: str, model_name: str) -> str:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        raw_name = f"{timestamp}_{stream_id or 'unknown'}_{model_name or 'unknown'}.json"
-        return "".join(char if char.isalnum() or char in ("-", "_", ".") else "_" for char in raw_name)
-
-    def _save_debug_reply_request_body(
-        self,
-        *,
-        stream_id: str,
-        model_name: str,
-        messages: List[Message],
-        response_body: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        if not global_config.debug.record_reply_request:
-            return
-
-        try:
-            DEBUG_REPLY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            request_body = {
-                "model": model_name,
-                "request_type": self.request_type,
-                "stream_id": stream_id,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-                "messages": serialize_prompt_messages(messages),
-                "response_body": response_body or {},
-            }
-            file_path = DEBUG_REPLY_CACHE_DIR / self._build_debug_request_filename(stream_id, model_name)
-            with file_path.open("w", encoding="utf-8") as file:
-                json.dump(request_body, file, ensure_ascii=False, indent=2)
-            logger.info(f"Replyer 请求体已保存: {file_path.resolve()}")
-        except Exception as exc:
-            logger.warning(f"保存 Replyer 请求体失败: {exc}")
-
     async def _build_reply_context(
         self,
         chat_history: List[LLMContextMessage],
@@ -729,141 +688,6 @@ class BaseMaisakaReplyGenerator:
 
         return not cls._is_replyer_filtered_history_message(message)
 
-    async def _generate_local_mai_reply_with_context(
-        self,
-        *,
-        result: ReplyGenerationResult,
-        finalize: Callable[[bool], Tuple[bool, ReplyGenerationResult]],
-        overall_started_at: float,
-        stream_id: Optional[str],
-        reply_reason: str,
-        reply_tool_args: Dict[str, Any],
-    ) -> Tuple[bool, ReplyGenerationResult]:
-        """执行本地麦麦 replyer 的极简生成流程。"""
-
-        preview_chat_id = self._resolve_session_id(stream_id)
-        result.selected_expression_ids = []
-        result.selected_expression_details = []
-
-        prompt_started_at = time.perf_counter()
-        try:
-            request_messages = build_local_mai_replyer_messages(reply_reason or "", reply_tool_args)
-        except Exception as exc:
-            result.error_message = f"构建本地麦麦 Replyer 提示词失败: {exc}"
-            result.metrics = GenerationMetrics(
-                overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
-            )
-            return finalize(False)
-
-        prompt_ms = round((time.perf_counter() - prompt_started_at) * 1000, 2)
-        prompt_preview = PromptCLIVisualizer.build_prompt_dump_text(request_messages)
-
-        async def message_factory(_client: object, model_info: Optional[ModelInfo] = None) -> List[Message]:
-            del _client
-            del model_info
-            return request_messages
-
-        llm_started_at = time.perf_counter()
-        try:
-            generation_result = await self.express_model.generate_response_with_messages(
-                message_factory=message_factory,
-                options=LLMGenerationOptions(),
-            )
-        except Exception as exc:
-            logger.exception("本地麦麦 Replyer 调用失败")
-            result.error_message = str(exc)
-            result.metrics = GenerationMetrics(
-                prompt_ms=prompt_ms,
-                llm_ms=round((time.perf_counter() - llm_started_at) * 1000, 2),
-                overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
-            )
-            return finalize(False)
-
-        llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
-        response_text = (generation_result.response or "").strip()
-        result.completion.request_prompt = prompt_preview
-        result.request_message_count = len(request_messages)
-        result.request_messages = PromptCLIVisualizer.build_structured_message_payload(
-            request_messages,
-            keep_base64=False,
-        )
-        self._save_debug_reply_request_body(
-            stream_id=preview_chat_id,
-            model_name=generation_result.model_name or "",
-            messages=request_messages,
-            response_body={
-                "response": generation_result.response,
-                "reasoning": generation_result.reasoning,
-                "model_name": generation_result.model_name,
-                "tool_calls": [
-                    {
-                        "id": tool_call.call_id,
-                        "name": tool_call.func_name,
-                        "arguments": tool_call.args,
-                        "extra_content": tool_call.extra_content,
-                    }
-                    for tool_call in (generation_result.tool_calls or [])
-                ],
-                "prompt_tokens": generation_result.prompt_tokens,
-                "completion_tokens": generation_result.completion_tokens,
-                "total_tokens": generation_result.total_tokens,
-                "prompt_cache_hit_tokens": getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                "prompt_cache_miss_tokens": getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-                "replyer_retry_count": 0,
-                "local_mai_replyer": True,
-            },
-        )
-
-        result.success = bool(response_text)
-        result.completion = LLMCompletionResult(
-            request_prompt=prompt_preview,
-            response_text=response_text,
-            reasoning_text=generation_result.reasoning or "",
-            model_name=generation_result.model_name or "",
-            tool_calls=generation_result.tool_calls or [],
-            prompt_tokens=generation_result.prompt_tokens,
-            completion_tokens=generation_result.completion_tokens,
-            total_tokens=generation_result.total_tokens,
-        )
-        result.metrics = GenerationMetrics(
-            prompt_ms=prompt_ms,
-            llm_ms=llm_ms,
-            overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
-            stage_logs=[
-                f"prompt: {prompt_ms} ms",
-                f"llm: {llm_ms} ms",
-            ],
-        )
-        prompt_cache_hit_tokens = getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0
-        prompt_cache_miss_tokens = getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0
-        if prompt_cache_miss_tokens == 0 and prompt_cache_hit_tokens > 0:
-            prompt_cache_miss_tokens = max(generation_result.prompt_tokens - prompt_cache_hit_tokens, 0)
-        prompt_cache_total_tokens = prompt_cache_hit_tokens + prompt_cache_miss_tokens
-        prompt_cache_hit_rate = (
-            prompt_cache_hit_tokens / prompt_cache_total_tokens * 100 if prompt_cache_total_tokens > 0 else 0
-        )
-        result.metrics.extra["prompt_cache_hit_tokens"] = prompt_cache_hit_tokens
-        result.metrics.extra["prompt_cache_miss_tokens"] = prompt_cache_miss_tokens
-        result.metrics.extra["prompt_cache_hit_rate"] = round(prompt_cache_hit_rate, 2)
-        result.metrics.extra["replyer_retry_count"] = 0
-        result.metrics.extra["replyer_attempt_count"] = 1
-        result.metrics.extra["replyer_aggregate_prompt_tokens"] = generation_result.prompt_tokens
-        result.metrics.extra["replyer_aggregate_completion_tokens"] = generation_result.completion_tokens
-        result.metrics.extra["replyer_aggregate_total_tokens"] = generation_result.total_tokens
-        result.metrics.extra["local_mai_replyer"] = True
-
-        if not result.success:
-            result.error_message = "本地麦麦 Replyer 返回了空内容"
-            logger.warning("本地麦麦 Replyer 返回了空内容")
-            return finalize(False)
-
-        logger.info(
-            f"本地麦麦 Replyer 生成成功 文本={response_text!r} "
-            f"总耗时ms={result.metrics.overall_ms}"
-        )
-        result.text_fragments = [response_text]
-        return finalize(True)
-
     async def generate_reply_with_context(
         self,
         extra_info: str = "",
@@ -905,16 +729,6 @@ class BaseMaisakaReplyGenerator:
             return finalize(False)
 
         active_reply_tool_args = self._normalize_reply_tool_args(reply_tool_args)
-        if global_config.debug.enable_local_mai_replyer:
-            return await self._generate_local_mai_reply_with_context(
-                result=result,
-                finalize=finalize,
-                overall_started_at=overall_started_at,
-                stream_id=stream_id,
-                reply_reason=reply_reason,
-                reply_tool_args=active_reply_tool_args,
-            )
-
         if chat_history is None:
             result.error_message = "聊天历史为空"
             return finalize(False)
@@ -1094,31 +908,6 @@ class BaseMaisakaReplyGenerator:
             result.request_messages = PromptCLIVisualizer.build_structured_message_payload(
                 request_messages,
                 keep_base64=False,
-            )
-            self._save_debug_reply_request_body(
-                stream_id=preview_chat_id,
-                model_name=generation_result.model_name or "",
-                messages=request_messages,
-                response_body={
-                    "response": generation_result.response,
-                    "reasoning": generation_result.reasoning,
-                    "model_name": generation_result.model_name,
-                    "tool_calls": [
-                        {
-                            "id": tool_call.call_id,
-                            "name": tool_call.func_name,
-                            "arguments": tool_call.args,
-                            "extra_content": tool_call.extra_content,
-                        }
-                        for tool_call in (generation_result.tool_calls or [])
-                    ],
-                    "prompt_tokens": generation_result.prompt_tokens,
-                    "completion_tokens": generation_result.completion_tokens,
-                    "total_tokens": generation_result.total_tokens,
-                    "prompt_cache_hit_tokens": getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                    "prompt_cache_miss_tokens": getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-                    "replyer_retry_count": retry_count,
-                },
             )
             llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
             response_text = (generation_result.response or "").strip()

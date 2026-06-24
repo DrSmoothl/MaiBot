@@ -148,6 +148,87 @@ class VoiceComponent(BaseMessageComponentModel, ByteComponent):
         return Seg(type="voice", data=base64.b64encode(self.binary_data).decode())
 
 
+class FileComponent(BaseMessageComponentModel):
+    """文件组件，包含文件消息的基础元信息。"""
+
+    @property
+    def format_name(self) -> str:
+        return "file"
+
+    def __init__(
+        self,
+        *,
+        name: str = "",
+        size: str | int = "",
+        url: str = "",
+        file_id: str = "",
+        mime_type: str = "",
+        base64_data: str = "",
+    ) -> None:
+        self.name = str(name or "").strip()
+        """文件名"""
+        self.size = str(size or "").strip()
+        """文件大小，保留原始字符串表示以兼容不同平台。"""
+        self.url = str(url or "").strip()
+        """文件下载链接"""
+        self.file_id = str(file_id or "").strip()
+        """平台文件 ID"""
+        self.mime_type = str(mime_type or "").strip()
+        """文件 MIME 类型"""
+        self.base64_data = str(base64_data or "").strip()
+        """文件内容 Base64，通常仅 WebUI 本地消息携带。"""
+
+    async def to_seg(self) -> Seg:
+        return Seg(type="file", data=self.to_payload())
+
+    def to_payload(self) -> Dict[str, Any]:
+        """转换为稳定的文件消息负载。"""
+
+        payload: Dict[str, Any] = {}
+        if self.name:
+            payload["name"] = self.name
+        if self.size:
+            payload["size"] = self.size
+        if self.url:
+            payload["url"] = self.url
+        if self.file_id:
+            payload["file_id"] = self.file_id
+        if self.mime_type:
+            payload["mime_type"] = self.mime_type
+        if self.base64_data:
+            payload["base64"] = self.base64_data
+        return payload
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "FileComponent":
+        """从平台或历史负载构造文件组件。"""
+
+        return cls(
+            name=payload.get("name") or payload.get("file") or payload.get("file_name") or payload.get("filename") or "",
+            size=payload.get("size") or payload.get("file_size") or "",
+            url=payload.get("url") or payload.get("file_url") or "",
+            file_id=payload.get("file_id") or payload.get("id") or "",
+            mime_type=payload.get("mime_type") or payload.get("mimeType") or "",
+            base64_data=payload.get("base64") or "",
+        )
+
+    def to_plain_text(self) -> str:
+        """构造文件组件的可读文本。"""
+
+        text_parts: List[str] = []
+        if self.name:
+            text_parts.append(self.name)
+        if self.size:
+            text_parts.append(f"大小: {self.size}")
+        if self.mime_type:
+            text_parts.append(f"类型: {self.mime_type}")
+        if self.url:
+            text_parts.append(f"链接: {self.url}")
+        if self.file_id:
+            text_parts.append(f"文件ID: {self.file_id}")
+        return "[文件]" if not text_parts else f"[文件] {'，'.join(text_parts)}"
+
+
 class AtComponent(BaseMessageComponentModel):
     """@组件，包含一个被@的用户的ID，用于表示该组件是一个@某人的消息片段"""
 
@@ -242,6 +323,7 @@ StandardMessageComponents = Union[
     ImageComponent,
     EmojiComponent,
     VoiceComponent,
+    FileComponent,
     AtComponent,
     ReplyComponent,
     ForwardNodeComponent,
@@ -322,6 +404,29 @@ class MessageSequence:
         self.components.append(VoiceComponent(binary_hash=hash_str, content=content, binary_data=binary_data))
         return self
 
+    def file(
+        self,
+        *,
+        name: str = "",
+        size: str | int = "",
+        url: str = "",
+        file_id: str = "",
+        mime_type: str = "",
+        base64_data: str = "",
+    ):
+        """在消息组件序列末尾追加一个文件组件"""
+        self.components.append(
+            FileComponent(
+                name=name,
+                size=size,
+                url=url,
+                file_id=file_id,
+                mime_type=mime_type,
+                base64_data=base64_data,
+            )
+        )
+        return self
+
     def at(self, target_user_id: str):
         """在消息组件序列末尾追加一个@组件"""
         self.components.append(AtComponent(target_user_id))
@@ -353,6 +458,8 @@ class MessageSequence:
             return {"type": "emoji", "data": self._ensure_binary_component_content(item, "[表情包]"), "hash": item.binary_hash}
         elif isinstance(item, VoiceComponent):
             return {"type": "voice", "data": self._ensure_binary_component_content(item, "[语音消息]"), "hash": item.binary_hash}
+        elif isinstance(item, FileComponent):
+            return {"type": "file", "data": item.to_payload()}
         elif isinstance(item, AtComponent):
             return {
                 "type": "at",
@@ -404,6 +511,11 @@ class MessageSequence:
             return EmojiComponent(binary_hash=item["hash"], content=item["data"])
         elif item_type == "voice":
             return VoiceComponent(binary_hash=item["hash"], content=item["data"])
+        elif item_type == "file":
+            raw_data = item.get("data")
+            if isinstance(raw_data, dict):
+                return FileComponent.from_payload(raw_data)
+            return FileComponent(name=str(raw_data or ""))
         elif item_type == "at":
             return AtComponent(
                 target_user_id=item["data"]["target_user_id"],
@@ -413,7 +525,12 @@ class MessageSequence:
         elif item_type == "reply":
             return ReplyComponent(target_message_id=item["data"])
         elif item_type == "dict":
-            return DictComponent(data=item.get("data") or {})
+            raw_data = item.get("data") or {}
+            if isinstance(raw_data, dict) and str(raw_data.get("type") or "").strip().lower() == "file":
+                raw_payload = raw_data.get("data", raw_data)
+                if isinstance(raw_payload, dict):
+                    return FileComponent.from_payload(raw_payload)
+            return DictComponent(data=raw_data)
         elif item_type == "forward":
             forward_components = []
             for fc in item["data"]:

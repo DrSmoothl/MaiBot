@@ -1065,15 +1065,12 @@ def create_message_data(
     for file in normalized_files:
         message_segments.append(
             {
-                "type": "dict",
+                "type": "file",
                 "data": {
-                    "type": "file",
-                    "data": {
-                        "name": file.get("name", ""),
-                        "mime_type": file.get("mime_type", ""),
-                        "size": file.get("size", 0),
-                        "base64": file.get("base64", ""),
-                    },
+                    "name": file.get("name", ""),
+                    "mime_type": file.get("mime_type", ""),
+                    "size": file.get("size", 0),
+                    "base64": file.get("base64", ""),
                 },
             }
         )

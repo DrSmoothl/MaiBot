@@ -621,6 +621,61 @@ class ChatConfig(ConfigBase):
     )
     """最多保留多少条中期摘要；设为 0 表示不保留。"""
 
+    mid_term_memory_recall_enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "中期摘要召回",
+                "en_US": "Recall mid-term summaries",
+                "ja_JP": "中期要約の想起",
+            },
+            "x-widget": "switch",
+            "x-icon": "search",
+            "x-row": "context-sizes",
+            "advanced": True,
+        },
+    )
+    """进入 Planner 前，是否用当前上下文 embedding 匹配并注入一条相关中期摘要。"""
+
+    mid_term_memory_recall_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "中期召回阈值",
+                "en_US": "Mid-term recall threshold",
+                "ja_JP": "中期想起しきい値",
+            },
+            "x-widget": "input",
+            "x-icon": "search",
+            "x-layout": "inline-right",
+            "x-input-width": "6.5rem",
+            "x-row": "context-sizes",
+            "advanced": True,
+        },
+    )
+    """当前上下文与中期摘要匹配段的 embedding 相似度必须大于该阈值，才会注入参考。"""
+
+    mid_term_memory_recall_context_length: int = Field(
+        default=2400,
+        ge=200,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "中期召回上下文长度",
+                "en_US": "Mid-term recall context length",
+                "ja_JP": "中期想起コンテキスト長",
+            },
+            "x-widget": "input",
+            "x-icon": "text",
+            "x-layout": "inline-right",
+            "x-input-width": "6.5rem",
+            "x-row": "context-sizes",
+            "advanced": True,
+        },
+    )
+    """生成中期摘要召回 query embedding 时，最多编织多少字符的当前 Planner 上下文。"""
+
     enable_reply_necessity_trigger: bool = Field(
         default=False,
         json_schema_extra={
@@ -4053,49 +4108,6 @@ class DebugConfig(ConfigBase):
     )
     """记录回复效果评分，方便观察回复质量。"""
 
-    enable_local_mai_replyer: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "启用本地麦麦 Replyer",
-                "en_US": "Enable local Mai replyer",
-                "ja_JP": "ローカル Mai Replyer を有効化",
-            },
-            "x-widget": "switch",
-            "x-icon": "route",
-            "advanced": True,
-        },
-    )
-    """如果你不知道这是什么，请勿打开"""
-
-    record_reply_request: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "记录 Replyer 请求",
-                "en_US": "Record Replyer request",
-                "ja_JP": "Replyer リクエスト記録",
-            },
-            "x-widget": "switch",
-            "x-icon": "file-json",
-        },
-    )
-    """保存 Replyer 的请求内容，方便排查回复问题。"""
-
-    record_planner_request: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "记录 Planner 请求",
-                "en_US": "Record Planner request",
-                "ja_JP": "Planner リクエスト記録",
-            },
-            "x-widget": "switch",
-            "x-icon": "file-json",
-        },
-    )
-    """保存 Planner 的完整请求和回复，日志体积会变大。"""
-
     keep_prompt_preview_json_base64: bool = Field(
         default=False,
         json_schema_extra={
@@ -4361,6 +4373,7 @@ class WebUIConfig(ConfigBase):
             },
             "x-widget": "tags",
             "x-icon": "globe",
+            "x-placeholder": "127.0.0.1",
         },
     )
     """WebUI 监听地址列表；可同时绑定 IPv4 和 IPv6，例如 ["0.0.0.0", "::"]。"""
@@ -4934,6 +4947,7 @@ class PluginConfig(ConfigBase):
             },
             "x-widget": "tags",
             "x-icon": "shield-check",
+            "x-placeholder": "qq:123456789",
         },
     )
     """允许用聊天命令管理插件的用户，格式如 qq:123456789。"""

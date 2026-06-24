@@ -15,6 +15,7 @@ from src.common.data_models.message_component_data_model import (
     AtComponent,
     DictComponent,
     EmojiComponent,
+    FileComponent,
     ForwardNodeComponent,
     ImageComponent,
     MessageSequence,
@@ -113,16 +114,13 @@ def _append_at_component(builder: MessageBuilder, component: AtComponent) -> boo
 
 
 def contains_complex_message(message_sequence: MessageSequence) -> bool:
-    """判断消息序列中是否包含复杂消息组件。"""
+    """判断消息序列中是否包含需要通过转发浏览工具展开的组件。"""
 
-    return any(
-        isinstance(component, ForwardNodeComponent) or _is_expandable_dict_component(component)
-        for component in message_sequence.components
-    )
+    return any(isinstance(component, ForwardNodeComponent) for component in message_sequence.components)
 
 
 async def build_full_complex_message_content(message: SessionMessage) -> str:
-    """构造复杂消息的完整文本内容。"""
+    """构造转发消息的完整文本内容。"""
 
     if _prepare_unresolved_visual_components(message.raw_message.components):
         await message.process(
@@ -140,23 +138,13 @@ async def build_full_complex_message_content(message: SessionMessage) -> str:
 
 
 def build_full_complex_message_content_from_sequence(message_sequence: MessageSequence) -> str:
-    """从消息组件序列构造复杂消息的完整文本内容。"""
+    """从消息组件序列构造转发消息的完整文本内容。"""
 
     return _build_complex_message_full_text(message_sequence)
 
 
-def _is_expandable_dict_component(component: StandardMessageComponents) -> bool:
-    """判断字典组件是否属于可通过复杂消息工具展开的类型。"""
-
-    if not isinstance(component, DictComponent) or not isinstance(component.data, dict):
-        return False
-
-    raw_type = str(component.data.get("type") or "").strip().lower()
-    return raw_type in {"file", "mid_term_memory"}
-
-
 def _prepare_unresolved_visual_components(components: Sequence[StandardMessageComponents]) -> bool:
-    """检查复杂消息内是否存在需要补充识图文本的图片或表情。"""
+    """检查转发消息内是否存在需要补充识图文本的图片或表情。"""
 
     found_unresolved = False
     for component in components:
@@ -187,16 +175,12 @@ def _prepare_unresolved_visual_components(components: Sequence[StandardMessageCo
 
 
 def _build_complex_message_full_text(message_sequence: MessageSequence) -> str:
-    """构造复杂消息工具返回的完整文本。"""
+    """构造转发消息浏览工具返回的完整文本。"""
 
     full_parts: list[str] = []
     for component in message_sequence.components:
         if isinstance(component, ForwardNodeComponent):
             full_parts.append(_build_forward_full_text(component))
-            continue
-
-        if _is_expandable_dict_component(component):
-            full_parts.append(_render_expandable_dict_component(component))
 
     return "\n".join(part for part in full_parts if part).strip()
 
@@ -213,50 +197,8 @@ def _build_forward_full_text(component: ForwardNodeComponent) -> str:
     return "\n".join(forward_lines)
 
 
-def _render_expandable_dict_component(component: DictComponent) -> str:
-    """渲染可展开的字典组件。"""
-
-    raw_type = str(component.data.get("type") or "").strip().lower()
-    raw_payload = component.data.get("data", {})
-    if raw_type == "mid_term_memory" and isinstance(raw_payload, dict):
-        from src.maisaka.memory.mid_term import build_mid_term_memory_full_text
-
-        return build_mid_term_memory_full_text(raw_payload)
-    if raw_type == "file" and isinstance(raw_payload, dict):
-        return _render_file_dict_payload(raw_payload)
-    return "[复杂消息]"
-
-
-def _render_file_dict_payload(payload: dict) -> str:
-    """渲染文件消息的完整内容。"""
-
-    file_name = str(
-        payload.get("name")
-        or payload.get("file")
-        or payload.get("file_name")
-        or payload.get("filename")
-        or ""
-    ).strip()
-    file_size = str(payload.get("size") or payload.get("file_size") or "").strip()
-    file_url = str(payload.get("url") or payload.get("file_url") or "").strip()
-    file_id = str(payload.get("file_id") or payload.get("id") or "").strip()
-
-    file_lines = ["【文件消息】"]
-    if file_name:
-        file_lines.append(f"文件名: {file_name}")
-    if file_size:
-        file_lines.append(f"大小: {file_size}")
-    if file_url:
-        file_lines.append(f"链接: {file_url}")
-    if file_id:
-        file_lines.append(f"文件ID: {file_id}")
-    if len(file_lines) == 1:
-        file_lines.append("未提供文件详情")
-    return "\n".join(file_lines)
-
-
 def _build_complex_message_prompt_text(message_sequence: MessageSequence) -> str:
-    """将复杂消息转换为适合注入 Prompt 的摘要文本。"""
+    """将转发消息转换为适合注入 Prompt 的摘要文本。"""
 
     prompt_parts: list[str] = []
     for component in message_sequence.components:
@@ -281,6 +223,9 @@ def _render_component_for_prompt(component: StandardMessageComponents) -> str:
     if isinstance(component, VoiceComponent):
         return component.content.strip() if component.content else "[语音消息]"
 
+    if isinstance(component, FileComponent):
+        return component.to_plain_text()
+
     if isinstance(component, AtComponent):
         return _render_at_component_text(component)
 
@@ -291,12 +236,10 @@ def _render_component_for_prompt(component: StandardMessageComponents) -> str:
         return _build_forward_preview_block(component)
 
     if isinstance(component, DictComponent):
-        if _is_expandable_dict_component(component):
-            return _build_dict_preview_block(component)
         raw_type = component.data.get("type") if isinstance(component.data, dict) else None
         if isinstance(raw_type, str) and raw_type.strip():
             return f"[{raw_type.strip()}消息]"
-        return "[复杂消息]"
+        return "[非标准消息]"
 
     return ""
 
@@ -304,7 +247,7 @@ def _render_component_for_prompt(component: StandardMessageComponents) -> str:
 def _build_forward_preview_block(component: ForwardNodeComponent) -> str:
     """构造转发消息的预览块。"""
 
-    preview_lines = ["[消息类型]复杂消息", "转发消息", f"预览前{FORWARD_PREVIEW_LIMIT}条："]
+    preview_lines = ["[消息类型]转发消息", f"预览前{FORWARD_PREVIEW_LIMIT}条："]
     preview_nodes = component.forward_components[:FORWARD_PREVIEW_LIMIT]
 
     for node in preview_nodes:
@@ -315,36 +258,9 @@ def _build_forward_preview_block(component: ForwardNodeComponent) -> str:
     total_count = len(component.forward_components)
     if total_count > FORWARD_PREVIEW_LIMIT:
         preview_lines.append("......")
-        preview_lines.append(f"共{total_count}条，可以选择使用 view_complex_message 查看完整内容。")
+        preview_lines.append(f"共{total_count}条，可以使用 view_forward_message 查看完整转发内容。")
 
     return "\n".join(preview_lines).strip()
-
-
-def _build_dict_preview_block(component: DictComponent) -> str:
-    """构造字典复杂消息的提示文本。"""
-
-    raw_type = str(component.data.get("type") or "").strip().lower()
-    if raw_type == "mid_term_memory":
-        raw_payload = component.data.get("data", {})
-        if isinstance(raw_payload, dict):
-            from src.maisaka.memory.mid_term import build_mid_term_memory_preview_text
-
-            return build_mid_term_memory_preview_text(raw_payload)
-        return "[消息类型]复杂消息"
-    if raw_type == "file":
-        raw_payload = component.data.get("data", {})
-        file_name = ""
-        if isinstance(raw_payload, dict):
-            file_name = str(raw_payload.get("name") or raw_payload.get("file") or "").strip()
-        preview = f"文件消息: {file_name}" if file_name else "文件消息"
-        return "\n".join(
-            [
-                "[消息类型]复杂消息",
-                preview,
-                "可以选择使用 view_complex_message 查看完整内容。",
-            ]
-        )
-    return "[消息类型]复杂消息"
 
 
 def _render_components_inline(components: Sequence[StandardMessageComponents]) -> str:
@@ -422,6 +338,11 @@ def _build_message_from_sequence(
         if isinstance(component, VoiceComponent):
             voice_text = component.content.strip() if component.content else "[语音消息]"
             builder.add_text_content(voice_text)
+            has_content = True
+            continue
+
+        if isinstance(component, FileComponent):
+            builder.add_text_content(component.to_plain_text())
             has_content = True
             continue
 

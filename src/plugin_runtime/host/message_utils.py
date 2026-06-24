@@ -11,6 +11,7 @@ from src.common.data_models.message_component_data_model import (
     AtComponent,
     DictComponent,
     EmojiComponent,
+    FileComponent,
     ForwardComponent,
     ForwardNodeComponent,
     ImageComponent,
@@ -126,6 +127,9 @@ class PluginMessageUtils:
             if include_binary_data and component.binary_data:
                 serialized["binary_data_base64"] = base64.b64encode(component.binary_data).decode("utf-8")
             return serialized
+
+        if isinstance(component, FileComponent):
+            return {"type": "file", "data": component.to_payload()}
 
         if isinstance(component, AtComponent):
             return {
@@ -253,6 +257,12 @@ class PluginMessageUtils:
         if item_type == "voice":
             return PluginMessageUtils._build_binary_component(VoiceComponent, item)
 
+        if item_type == "file":
+            item_data = item.get("data")
+            if isinstance(item_data, dict):
+                return FileComponent.from_payload(item_data)
+            return FileComponent(name=str(item_data or ""))
+
         if item_type == "at":
             item_data = item.get("data", {})
             if not isinstance(item_data, dict):
@@ -320,6 +330,10 @@ class PluginMessageUtils:
 
         component_data = item.get("data")
         if isinstance(component_data, dict):
+            if str(component_data.get("type") or "").strip().lower() == "file":
+                raw_payload = component_data.get("data", component_data)
+                if isinstance(raw_payload, dict):
+                    return FileComponent.from_payload(raw_payload)
             return DictComponent(data=component_data)
         return DictComponent(data=item)
 

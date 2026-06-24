@@ -54,55 +54,6 @@ def register_jargon_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
     return registry.register_hook_specs(
         [
             HookSpec(
-                name="jargon.query.before_search",
-                description="Maisaka 黑话查询工具执行检索前触发，可改写词条列表、检索参数或直接中止。",
-                parameters_schema=build_object_schema(
-                    {
-                        "words": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "准备查询的黑话词条列表。",
-                        },
-                        "session_id": {"type": "string", "description": "当前会话 ID。"},
-                        "limit": {"type": "integer", "description": "单个词条的最大返回条数。"},
-                        "case_sensitive": {"type": "boolean", "description": "是否大小写敏感。"},
-                        "enable_fuzzy_fallback": {"type": "boolean", "description": "是否允许精确命中失败后回退模糊检索。"},
-                        "abort_message": {"type": "string", "description": "Hook 主动中止时的失败提示。"},
-                    },
-                    required=["words", "session_id", "limit", "case_sensitive", "enable_fuzzy_fallback"],
-                ),
-                default_timeout_ms=5000,
-                allow_abort=True,
-                allow_kwargs_mutation=True,
-            ),
-            HookSpec(
-                name="jargon.query.after_search",
-                description="Maisaka 黑话查询工具完成检索后触发，可改写结果列表或中止返回。",
-                parameters_schema=build_object_schema(
-                    {
-                        "words": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "实际查询的黑话词条列表。",
-                        },
-                        "session_id": {"type": "string", "description": "当前会话 ID。"},
-                        "limit": {"type": "integer", "description": "单个词条的最大返回条数。"},
-                        "case_sensitive": {"type": "boolean", "description": "是否大小写敏感。"},
-                        "enable_fuzzy_fallback": {"type": "boolean", "description": "是否启用了模糊检索回退。"},
-                        "results": {
-                            "type": "array",
-                            "items": {"type": "object"},
-                            "description": "查询结果列表。",
-                        },
-                        "abort_message": {"type": "string", "description": "Hook 主动中止时的失败提示。"},
-                    },
-                    required=["words", "session_id", "limit", "case_sensitive", "enable_fuzzy_fallback", "results"],
-                ),
-                default_timeout_ms=5000,
-                allow_abort=True,
-                allow_kwargs_mutation=True,
-            ),
-            HookSpec(
                 name="jargon.extract.before_persist",
                 description="黑话条目准备写入数据库前触发，可改写去重后的条目列表或跳过本次持久化。",
                 parameters_schema=build_object_schema(

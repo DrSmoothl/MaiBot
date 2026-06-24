@@ -2,11 +2,9 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
 import asyncio
-import json
 import time
 
 from rich.console import RenderableType
@@ -66,7 +64,6 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "sub_agent": "sub_agent",
 }
 CONTEXT_SELECTION_CACHE_STABILITY_RATIO = 2.0
-DEBUG_PLANNER_CACHE_DIR = Path("logs/debug_planner_cache")
 
 
 @dataclass(slots=True)
@@ -546,37 +543,6 @@ class MaisakaChatLoopService:
         return llm_client
 
     @staticmethod
-    def _build_debug_request_filename(session_id: str, model_name: str, request_kind: str) -> str:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        raw_name = f"{timestamp}_{request_kind or 'planner'}_{session_id or 'unknown'}_{model_name or 'unknown'}.json"
-        return "".join(char if char.isalnum() or char in ("-", "_", ".") else "_" for char in raw_name)
-
-    @staticmethod
-    def _serialize_llm_response_body(
-        *,
-        response: str,
-        reasoning: str,
-        model_name: str,
-        tool_calls: Sequence[ToolCall],
-        prompt_tokens: int,
-        completion_tokens: int,
-        total_tokens: int,
-        prompt_cache_hit_tokens: int,
-        prompt_cache_miss_tokens: int,
-    ) -> dict[str, Any]:
-        return {
-            "response": response,
-            "reasoning": reasoning,
-            "model_name": model_name,
-            "tool_calls": serialize_tool_calls(list(tool_calls)),
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "prompt_cache_hit_tokens": prompt_cache_hit_tokens,
-            "prompt_cache_miss_tokens": prompt_cache_miss_tokens,
-        }
-
-    @staticmethod
     def _resolve_planner_response_content(response: str, reasoning: str) -> str:
         """在模型只把思考放入原生 reasoning 字段时，仍保留可传给工具的 planner 文本。"""
 
@@ -584,50 +550,6 @@ class MaisakaChatLoopService:
         if normalized_response:
             return response
         return str(reasoning or "").strip()
-
-    def _save_debug_planner_request_body(
-        self,
-        *,
-        request_kind: str,
-        model_name: str,
-        messages: Sequence[Message],
-        tool_definitions: Sequence[ToolDefinitionInput],
-        response_format: RespFormat | None,
-        selection_reason: str,
-        selected_history_count: int,
-        response_body: dict[str, Any],
-        final_response_body: dict[str, Any],
-    ) -> None:
-        if request_kind != "planner" or not bool(getattr(global_config.debug, "record_planner_request", False)):
-            return
-
-        try:
-            DEBUG_PLANNER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            request_body = {
-                "model": model_name,
-                "request_type": self._resolve_llm_request_type(request_kind),
-                "request_kind": request_kind,
-                "session_id": self._session_id,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-                "selected_history_count": selected_history_count,
-                "built_message_count": len(messages),
-                "selection_reason": selection_reason,
-                "messages": serialize_prompt_messages(list(messages)),
-                "tool_definitions": serialize_tool_definitions(list(tool_definitions)),
-                "response_format": response_format,
-                "response_body": response_body,
-                "final_response_body": final_response_body,
-            }
-            file_path = DEBUG_PLANNER_CACHE_DIR / self._build_debug_request_filename(
-                self._session_id,
-                model_name,
-                request_kind,
-            )
-            with file_path.open("w", encoding="utf-8") as file:
-                json.dump(request_body, file, ensure_ascii=False, indent=2, default=str)
-            logger.info(f"Planner 请求与回复体已保存: {file_path.resolve()}")
-        except Exception as exc:
-            logger.warning(f"保存 Planner 请求与回复体失败: {exc}")
 
     @staticmethod
     def _get_runtime_manager() -> Any:
@@ -1042,38 +964,6 @@ class MaisakaChatLoopService:
             generation_result.completion_tokens,
         )
         total_tokens = self._coerce_int(after_response_kwargs.get("total_tokens"), generation_result.total_tokens)
-        self._save_debug_planner_request_body(
-            request_kind=request_kind,
-            model_name=generation_result.model_name or "",
-            messages=built_messages,
-            tool_definitions=all_tools,
-            response_format=response_format,
-            selection_reason=selection_reason,
-            selected_history_count=len(selected_history),
-            response_body=self._serialize_llm_response_body(
-                response=generation_result.response or "",
-                reasoning=generation_result.reasoning or "",
-                model_name=generation_result.model_name or "",
-                tool_calls=generation_result.tool_calls or [],
-                prompt_tokens=generation_result.prompt_tokens,
-                completion_tokens=generation_result.completion_tokens,
-                total_tokens=generation_result.total_tokens,
-                prompt_cache_hit_tokens=getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-            ),
-            final_response_body=self._serialize_llm_response_body(
-                response=final_response,
-                reasoning=generation_result.reasoning or "",
-                model_name=generation_result.model_name or "",
-                tool_calls=final_tool_calls,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                prompt_cache_hit_tokens=getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-            ),
-        )
-
         display_model_name = (generation_result.model_name or "").strip()
         prompt_selection_reason = selection_reason
         if display_model_name:
@@ -1142,7 +1032,6 @@ class MaisakaChatLoopService:
             int(base_context_size * CONTEXT_SELECTION_CACHE_STABILITY_RATIO),
         )
         selected_indices: List[int] = []
-        pinned_indices: List[int] = []
         counted_message_count = 0
 
         active_enable_visual_message = (
@@ -1150,18 +1039,6 @@ class MaisakaChatLoopService:
             if enable_visual_message is not None
             else MaisakaChatLoopService._resolve_enable_visual_message(request_kind)
         )
-
-        if request_kind in {"planner", "sub_agent"}:
-            pinned_indices = [
-                index
-                for index, message in enumerate(filtered_history)
-                if is_mid_term_memory_message(message)
-                and build_llm_message_from_context(
-                    message,
-                    enable_visual_message=active_enable_visual_message,
-                )
-                is not None
-            ]
 
         for index in range(len(filtered_history) - 1, -1, -1):
             message = filtered_history[index]
@@ -1180,7 +1057,7 @@ class MaisakaChatLoopService:
                 if counted_message_count >= effective_context_size:
                     break
 
-        selected_indices = sorted(set(selected_indices).union(pinned_indices))
+        selected_indices = sorted(set(selected_indices))
 
         if not selected_indices:
             return [], "实际发送 0 条消息（tool 0 条，普通消息 0 条）"
@@ -1189,14 +1066,11 @@ class MaisakaChatLoopService:
         selected_history, _ = normalize_tool_call_result_pairs(selected_history)
         tool_message_count = sum(1 for message in selected_history if isinstance(message, ToolResultMessage))
         normal_message_count = len(selected_history) - tool_message_count
-        pinned_message_count = sum(1 for message in selected_history if is_mid_term_memory_message(message))
         stability_text = f"|cache_window {base_context_size}->{effective_context_size}"
-        pinned_text = f"|中期摘要 {pinned_message_count} 条" if pinned_message_count else ""
         selection_reason = (
             f"实际发送 {len(selected_history)} 条消息"
             f"|消息 {normal_message_count} 条|tool {tool_message_count} 条"
             f"{stability_text}"
-            f"{pinned_text}"
         )
         return (
             selected_history,
@@ -1218,11 +1092,18 @@ class MaisakaChatLoopService:
                 if isinstance(message, SessionBackedMessage)
             ]
 
+        if request_kind == "planner":
+            return [
+                message
+                for message in selected_history
+                if not is_mid_term_memory_message(message)
+            ]
+
         if request_kind != "planner":
             return [
                 message
                 for message in selected_history
-                if message.source != "behavior_pattern"
+                if message.source != "behavior_pattern" and not is_mid_term_memory_message(message)
             ]
 
         return selected_history

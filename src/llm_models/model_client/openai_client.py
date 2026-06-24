@@ -5,8 +5,6 @@ import io
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Tuple, cast
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -80,8 +78,6 @@ from ..request_snapshot import (
 
 logger = get_logger("llm_models")
 
-DEBUG_REPLY_CACHE_DIR = Path("logs/debug_reply_cache")
-
 SUPPORTED_OPENAI_IMAGE_FORMATS = {"jpeg", "png", "webp"}
 """OpenAI 兼容图片输入稳定支持的格式集合。"""
 
@@ -135,31 +131,6 @@ PROVIDER_REASONING_KEYS_BY_DOMAIN: Dict[str, str] = {
     "openrouter.ai": "reasoning",
 }
 """按 provider 域名指定的原生推理字段名。"""
-
-
-def _build_debug_provider_request_filename(model_name: str) -> str:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    raw_name = f"provider_{timestamp}_{model_name or 'unknown'}.json"
-    return "".join(char if char.isalnum() or char in ("-", "_", ".") else "_" for char in raw_name)
-
-
-def _save_debug_provider_request_payload(model_name: str, request_payload: Dict[str, Any]) -> None:
-    if model_name != "deepseek-v4p":
-        return
-
-    from src.config.config import global_config
-
-    if not global_config.debug.record_reply_request:
-        return
-
-    try:
-        DEBUG_REPLY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        file_path = DEBUG_REPLY_CACHE_DIR / _build_debug_provider_request_filename(model_name)
-        with file_path.open("w", encoding="utf-8") as file:
-            json.dump(request_payload, file, ensure_ascii=False, indent=2)
-        logger.info(f"DeepSeek provider 请求体已保存: {file_path.resolve()}")
-    except Exception as exc:
-        logger.warning(f"保存 DeepSeek provider 请求体失败: {exc}")
 
 
 def _build_fallback_tool_call_id(prefix: str) -> str:
@@ -1414,18 +1385,6 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                 "temperature": _snapshot_openai_argument(temperature_argument),
                 "tools": tools_payload,
             }
-            _save_debug_provider_request_payload(
-                model_info.name,
-                {
-                    "base_url": self.api_provider.base_url,
-                    "endpoint": "/chat/completions",
-                    "model_name": model_info.name,
-                    "model_identifier": model_info.model_identifier,
-                    "created_at": datetime.now().isoformat(timespec="seconds"),
-                    "request_kwargs": snapshot_provider_request["request_kwargs"],
-                },
-            )
-
             if model_info.force_stream_mode:
                 stream_task: asyncio.Task[AsyncStream[ChatCompletionChunk]] = asyncio.create_task(
                     self.client.chat.completions.create(

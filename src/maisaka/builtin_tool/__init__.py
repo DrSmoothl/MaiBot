@@ -13,8 +13,6 @@ from src.maisaka.focus import focus_mode_manager
 from .context import BuiltinToolRuntimeContext
 from .fetch_history import get_tool_spec as get_fetch_history_tool_spec
 from .fetch_history import handle_tool as handle_fetch_history_tool
-from .query_jargon import get_tool_spec as get_query_jargon_tool_spec
-from .query_jargon import handle_tool as handle_query_jargon_tool
 from .query_memory import get_tool_spec as get_query_memory_tool_spec
 from .query_memory import handle_tool as handle_query_memory_tool
 from .query_person_profile import get_tool_spec as get_query_person_profile_tool_spec
@@ -29,8 +27,8 @@ from .switch_chat import get_tool_spec as get_switch_chat_tool_spec
 from .switch_chat import handle_tool as handle_switch_chat_tool
 from .tool_search import get_tool_spec as get_tool_search_tool_spec
 from .tool_search import handle_tool as handle_tool_search_tool
-from .view_complex_message import get_tool_spec as get_view_complex_message_tool_spec
-from .view_complex_message import handle_tool as handle_view_complex_message_tool
+from .view_forward_message import get_tool_spec as get_view_forward_message_tool_spec
+from .view_forward_message import handle_tool as handle_view_forward_message_tool
 from .wait import get_tool_spec as get_wait_tool_spec
 from .wait import handle_tool as handle_wait_tool
 
@@ -82,12 +80,12 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="both"),
     BuiltinToolEntry("reply", get_reply_tool_spec, handle_reply_tool, stage="action"),
     BuiltinToolEntry(
-        "view_complex_message",
-        get_view_complex_message_tool_spec,
-        handle_view_complex_message_tool,
+        "view_forward_message",
+        get_view_forward_message_tool_spec,
+        handle_view_forward_message_tool,
         stage="action",
+        visibility="deferred",
     ),
-    BuiltinToolEntry("query_jargon", get_query_jargon_tool_spec, handle_query_jargon_tool, stage="action"),
     BuiltinToolEntry("query_memory", _get_query_memory_tool_spec, handle_query_memory_tool, stage="action"),
     BuiltinToolEntry(
         "query_person_profile",

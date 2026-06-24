@@ -1,17 +1,19 @@
 """Maisaka 聊天记录中期摘要消息。"""
 
-import json
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha1
 from html import escape
+from math import sqrt
 from typing import Any, Sequence
-
 from json_repair import repair_json
 from pydantic import BaseModel
+import json
+import re
+
 
 from src.common.data_models.message_component_data_model import DictComponent, MessageSequence
+from src.common.data_models.embedding_service_data_models import EmbeddingResult
 from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
 from src.config.config import global_config
@@ -22,14 +24,25 @@ from src.llm_models.payload_content.message import (
     RoleType,
     TextMessagePart,
 )
-from src.maisaka.context.messages import ComplexSessionMessage, LLMContextMessage, build_llm_message_from_context
+from src.maisaka.context.messages import (
+    ComplexSessionMessage,
+    LLMContextMessage,
+    ReferenceMessage,
+    ReferenceMessageType,
+    build_llm_message_from_context,
+)
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 
 MID_TERM_MEMORY_COMPONENT_TYPE = "mid_term_memory"
 MID_TERM_MEMORY_SOURCE_KIND = "mid_term_memory"
 MID_TERM_MEMORY_COMPLEX_TYPE = "mid_term_memory"
 MID_TERM_MEMORY_USER_NAME = "聊天记录摘要"
+MID_TERM_MEMORY_REFERENCE_MARKER = "【中期记忆-内部参考】"
 MAX_SUMMARY_INPUT_CHARS = 16000
+MID_TERM_MEMORY_RECALL_CONTEXT_MESSAGE_LIMIT = 12
+MID_TERM_MEMORY_RECALL_CONTEXT_TEXT_LIMIT = 2400
+MID_TERM_MEMORY_RECALL_SUMMARY_TEXT_LIMIT = 1400
+MID_TERM_MEMORY_DEFAULT_RECALL_THRESHOLD = 0.8
 
 logger = get_logger("maisaka_mid_term_memory")
 
@@ -40,6 +53,7 @@ class MidTermMemorySummaryModel(BaseModel):
     long_summary: str
     brief: str
     keywords: list[str]
+    match_segments: list[str] = []
 
 
 @dataclass(slots=True)
@@ -53,6 +67,16 @@ class MidTermMemoryBuildResult:
     model_name: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class MidTermMemoryRecallCandidate:
+    """一条中期摘要匹配段的召回候选。"""
+
+    message: ComplexSessionMessage
+    payload: dict[str, Any]
+    segment_text: str
+    score: float
+
+
 def is_mid_term_memory_message(message: LLMContextMessage) -> bool:
     """判断上下文消息是否为中期摘要消息。"""
 
@@ -63,13 +87,23 @@ def is_mid_term_memory_message(message: LLMContextMessage) -> bool:
     )
 
 
+def is_mid_term_memory_reference_message(message: LLMContextMessage) -> bool:
+    """判断上下文消息是否为中期记忆召回参考。"""
+
+    return (
+        isinstance(message, ReferenceMessage)
+        and message.reference_type == ReferenceMessageType.MEMORY
+        and message.content.startswith(MID_TERM_MEMORY_REFERENCE_MARKER)
+    )
+
+
 async def build_mid_term_memory_message(
     removed_messages: Sequence[LLMContextMessage],
     *,
     session_id: str,
     log_prefix: str = "",
 ) -> MidTermMemoryBuildResult | None:
-    """将被裁切的聊天历史总结成一条可展开的复杂消息。"""
+    """将被裁切的聊天历史总结成一条中期摘要消息。"""
 
     summary_source_messages = _select_summary_source_messages(removed_messages)
     if not summary_source_messages:
@@ -123,11 +157,16 @@ async def build_mid_term_memory_message(
         )
         return None
 
+    match_segment_embeddings = await _build_match_segment_embeddings(
+        summary_payload.match_segments,
+        session_id=session_id,
+    )
     message = build_mid_term_memory_complex_message(
         summary_payload,
         time_range=time_range,
         participants=participants,
         source_messages=summary_source_messages,
+        match_segment_embeddings=match_segment_embeddings,
     )
     logger.info(
         f"{log_prefix} 中期聊天记录摘要生成内容: "
@@ -135,6 +174,7 @@ async def build_mid_term_memory_message(
         f"时间范围={time_range} "
         f"参与人物={'、'.join(participants) if participants else '未知'} "
         f"关键词={'、'.join(summary_payload.keywords) if summary_payload.keywords else '无'}\n"
+        f"匹配段={len(match_segment_embeddings)} 条\n"
         f"brief:\n{summary_payload.brief.strip()}\n"
         f"long_summary:\n{summary_payload.long_summary.strip()}"
     )
@@ -165,8 +205,9 @@ def build_mid_term_memory_complex_message(
     time_range: str,
     participants: Sequence[str],
     source_messages: Sequence[LLMContextMessage],
+    match_segment_embeddings: Sequence[dict[str, Any]] | None = None,
 ) -> ComplexSessionMessage:
-    """基于摘要内容构造复杂消息。"""
+    """基于摘要内容构造中期摘要上下文消息。"""
 
     timestamp = _resolve_summary_timestamp(source_messages)
     keywords = _normalize_keywords(summary_payload.keywords)
@@ -186,6 +227,7 @@ def build_mid_term_memory_complex_message(
             "keywords": keywords,
             "brief": summary_payload.brief.strip(),
             "long_summary": summary_payload.long_summary.strip(),
+            "match_segments": list(match_segment_embeddings or []),
         },
     }
     preview_text = build_mid_term_memory_preview_text(payload["data"])
@@ -240,25 +282,25 @@ def build_mid_term_memory_preview_text(payload: dict[str, Any]) -> str:
     brief = str(payload.get("brief") or "").strip() or "无"
     return "\n".join(
         [
-            "[消息类型]复杂消息",
-            "聊天记录摘要",
+            "[聊天记录摘要]",
             f"时间范围: {time_range}",
             f"参与人物: {'、'.join(participants) if participants else '未知'}",
             f"关键词: {'、'.join(keywords) if keywords else '无'}",
             f"brief: {brief}",
-            "可以选择使用 view_complex_message 查看这段聊天记录的完整信息，获取关键信息和细节信息。",
         ]
     )
 
 
 def build_mid_term_memory_full_text(payload: dict[str, Any]) -> str:
-    """构造中期摘要通过复杂消息工具展开后的完整内容。"""
+    """构造中期摘要的完整内容。"""
 
     time_range = str(payload.get("time_range") or "未知").strip()
     participants = _coerce_str_list(payload.get("participants"))
     keywords = _coerce_str_list(payload.get("keywords"))
     brief = str(payload.get("brief") or "").strip() or "无"
     long_summary = str(payload.get("long_summary") or "").strip() or brief
+    match_segments = _extract_match_segment_texts(payload)
+    match_segment_lines = ["匹配段:"] + [f"- {segment}" for segment in match_segments]
     return "\n".join(
         [
             "【聊天记录摘要】",
@@ -271,8 +313,74 @@ def build_mid_term_memory_full_text(payload: dict[str, Any]) -> str:
             "",
             "long_summary:",
             long_summary,
+            "",
+            *(match_segment_lines if match_segments else []),
         ]
     ).strip()
+
+
+async def build_mid_term_memory_reference_message(
+    *,
+    history: Sequence[LLMContextMessage],
+    selected_history: Sequence[LLMContextMessage],
+    session_id: str,
+    log_prefix: str = "",
+) -> ReferenceMessage | None:
+    """基于当前 Planner 上下文召回最相关的一条中期摘要。"""
+
+    if not _is_mid_term_memory_recall_enabled():
+        return None
+
+    query_text = _build_mid_term_memory_recall_query_text(selected_history)
+    if not query_text:
+        return None
+
+    candidates = _collect_mid_term_memory_recall_candidates(history)
+    recalled_keys, recalled_segments = _collect_recalled_mid_term_memory_reference_identities(selected_history)
+    candidates = [
+        candidate
+        for candidate in candidates
+        if not _is_mid_term_memory_candidate_already_recalled(
+            candidate,
+            recalled_keys=recalled_keys,
+            recalled_segments=recalled_segments,
+        )
+    ]
+    if not candidates:
+        if recalled_keys or recalled_segments:
+            logger.debug(f"{log_prefix} 当前上下文已包含全部匹配的中期记忆参考，跳过重复召回")
+        return None
+
+    from src.services.embedding_service import EmbeddingServiceClient
+
+    embedding_client = EmbeddingServiceClient(
+        task_name="embedding",
+        request_type="maisaka.mid_term_memory_recall",
+        session_id=session_id,
+    )
+    query_result = await embedding_client.embed_text(query_text, session_id=session_id)
+    best_candidate = _select_best_recall_candidate(
+        candidates,
+        query_embedding=query_result.embedding,
+        threshold=_get_mid_term_memory_recall_threshold(),
+    )
+    if best_candidate is None:
+        logger.debug(f"{log_prefix} 中期记忆召回未命中阈值")
+        return None
+
+    logger.info(
+        f"{log_prefix} 中期记忆召回命中: "
+        f"msg_id={best_candidate.message.message_id} "
+        f"score={best_candidate.score:.4f} "
+        f"segment={_truncate(best_candidate.segment_text, 120)}"
+    )
+    return ReferenceMessage(
+        content=_format_mid_term_memory_reference(best_candidate),
+        timestamp=datetime.now(),
+        reference_type=ReferenceMessageType.MEMORY,
+        remaining_uses_value=None,
+        display_prefix="[参考消息]",
+    )
 
 
 def _find_last_mid_term_memory_index(history: Sequence[LLMContextMessage]) -> int:
@@ -462,12 +570,14 @@ def _parse_summary_response(response: str) -> MidTermMemorySummaryModel | None:
     long_summary = str(payload.get("long_summary") or "").strip()
     brief = str(payload.get("brief") or "").strip()
     keywords = _normalize_keywords(payload.get("keywords"))
+    match_segments = _normalize_match_segments(payload.get("match_segments"))
     if not long_summary or not brief:
         return None
     return MidTermMemorySummaryModel(
         long_summary=long_summary,
         brief=brief,
         keywords=keywords,
+        match_segments=match_segments,
     )
 
 
@@ -538,6 +648,283 @@ def _coerce_str_list(value: Any) -> list[str]:
         if text:
             normalized_values.append(text)
     return normalized_values
+
+
+async def _build_match_segment_embeddings(
+    match_segments: Sequence[str],
+    *,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    normalized_segments = _normalize_match_segments(list(match_segments))
+    if not normalized_segments:
+        return []
+
+    from src.services.embedding_service import EmbeddingServiceClient
+
+    embedding_client = EmbeddingServiceClient(
+        task_name="embedding",
+        request_type="maisaka.mid_term_memory_match_segment",
+        session_id=session_id,
+    )
+    embedding_results = await embedding_client.embed_texts(
+        normalized_segments,
+        max_concurrent=2,
+        session_id=session_id,
+    )
+    return [
+        _build_match_segment_payload(segment, embedding_result)
+        for segment, embedding_result in zip(normalized_segments, embedding_results, strict=True)
+    ]
+
+
+def _build_match_segment_payload(segment: str, embedding_result: EmbeddingResult) -> dict[str, Any]:
+    return {
+        "text": segment,
+        "embedding": [float(value) for value in embedding_result.embedding],
+        "model_name": embedding_result.model_name,
+    }
+
+
+def _normalize_match_segments(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_segments = re.split(r"\n+", value)
+    elif isinstance(value, list):
+        raw_segments = value
+    else:
+        raw_segments = []
+
+    segments: list[str] = []
+    seen: set[str] = set()
+    for raw_segment in raw_segments:
+        if isinstance(raw_segment, dict):
+            raw_segment = raw_segment.get("text") or raw_segment.get("query") or raw_segment.get("content")
+        segment = " ".join(str(raw_segment or "").split()).strip()
+        if not segment or segment in seen:
+            continue
+        seen.add(segment)
+        segments.append(segment)
+    return segments[:5]
+
+
+def _get_mid_term_memory_payload(message: LLMContextMessage) -> dict[str, Any]:
+    if not is_mid_term_memory_message(message):
+        return {}
+
+    raw_message = getattr(message, "raw_message", None)
+    for component in getattr(raw_message, "components", []) or []:
+        if not isinstance(component, DictComponent) or not isinstance(component.data, dict):
+            continue
+        raw_type = str(component.data.get("type") or "").strip()
+        if raw_type != MID_TERM_MEMORY_COMPONENT_TYPE:
+            continue
+        payload = component.data.get("data", {})
+        return payload if isinstance(payload, dict) else {}
+    return {}
+
+
+def _extract_match_segment_texts(payload: dict[str, Any]) -> list[str]:
+    return _normalize_match_segments(payload.get("match_segments"))
+
+
+def _collect_mid_term_memory_recall_candidates(
+    history: Sequence[LLMContextMessage],
+) -> list[MidTermMemoryRecallCandidate]:
+    candidates: list[MidTermMemoryRecallCandidate] = []
+    for message in history:
+        if not isinstance(message, ComplexSessionMessage) or not is_mid_term_memory_message(message):
+            continue
+
+        payload = _get_mid_term_memory_payload(message)
+        for segment_payload in payload.get("match_segments", []) or []:
+            if not isinstance(segment_payload, dict):
+                continue
+            segment_text = str(segment_payload.get("text") or "").strip()
+            embedding = segment_payload.get("embedding")
+            if not segment_text or not isinstance(embedding, list) or not embedding:
+                continue
+            candidates.append(
+                MidTermMemoryRecallCandidate(
+                    message=message,
+                    payload=payload,
+                    segment_text=segment_text,
+                    score=0.0,
+                )
+            )
+    return candidates
+
+
+def _collect_recalled_mid_term_memory_reference_identities(
+    messages: Sequence[LLMContextMessage],
+) -> tuple[set[tuple[str, str]], set[str]]:
+    recalled_keys: set[tuple[str, str]] = set()
+    recalled_segments: set[str] = set()
+    for message in messages:
+        if not is_mid_term_memory_reference_message(message):
+            continue
+
+        message_id = _extract_labeled_reference_value(message.content, "摘要ID")
+        segment_text = _extract_labeled_reference_value(message.content, "匹配段")
+        normalized_segment = _normalize_reference_identity_text(segment_text)
+        if not normalized_segment:
+            continue
+
+        recalled_segments.add(normalized_segment)
+        normalized_message_id = _normalize_reference_identity_text(message_id)
+        if normalized_message_id:
+            recalled_keys.add((normalized_message_id, normalized_segment))
+    return recalled_keys, recalled_segments
+
+
+def _is_mid_term_memory_candidate_already_recalled(
+    candidate: MidTermMemoryRecallCandidate,
+    *,
+    recalled_keys: set[tuple[str, str]],
+    recalled_segments: set[str],
+) -> bool:
+    normalized_segment = _normalize_reference_identity_text(candidate.segment_text)
+    if not normalized_segment:
+        return False
+
+    message_id = _normalize_reference_identity_text(candidate.message.message_id)
+    if message_id and (message_id, normalized_segment) in recalled_keys:
+        return True
+    return normalized_segment in recalled_segments
+
+
+def _extract_labeled_reference_value(content: str, label: str) -> str:
+    prefix = f"{label}:"
+    for line in str(content or "").splitlines():
+        normalized_line = line.strip()
+        if normalized_line.startswith(prefix):
+            return normalized_line.removeprefix(prefix).strip()
+    return ""
+
+
+def _normalize_reference_identity_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _select_best_recall_candidate(
+    candidates: Sequence[MidTermMemoryRecallCandidate],
+    *,
+    query_embedding: Sequence[float],
+    threshold: float,
+) -> MidTermMemoryRecallCandidate | None:
+    best_candidate: MidTermMemoryRecallCandidate | None = None
+    for candidate in candidates:
+        segment_embedding = _get_candidate_embedding(candidate.payload, candidate.segment_text)
+        if not segment_embedding:
+            continue
+        score = _cosine_similarity(query_embedding, segment_embedding)
+        scored_candidate = MidTermMemoryRecallCandidate(
+            message=candidate.message,
+            payload=candidate.payload,
+            segment_text=candidate.segment_text,
+            score=score,
+        )
+        if best_candidate is None or scored_candidate.score > best_candidate.score:
+            best_candidate = scored_candidate
+
+    if best_candidate is None or best_candidate.score <= threshold:
+        return None
+    return best_candidate
+
+
+def _get_candidate_embedding(payload: dict[str, Any], segment_text: str) -> list[float]:
+    for segment_payload in payload.get("match_segments", []) or []:
+        if not isinstance(segment_payload, dict):
+            continue
+        if str(segment_payload.get("text") or "").strip() != segment_text:
+            continue
+        embedding = segment_payload.get("embedding")
+        if not isinstance(embedding, list):
+            return []
+        return [float(value) for value in embedding]
+    return []
+
+
+def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
+    if len(left) != len(right):
+        raise ValueError(f"中期记忆召回 embedding 维度不一致: query={len(left)} segment={len(right)}")
+    if not left:
+        return 0.0
+
+    dot_product = sum(
+        float(left_value) * float(right_value)
+        for left_value, right_value in zip(left, right, strict=True)
+    )
+    left_norm = sqrt(sum(float(value) * float(value) for value in left))
+    right_norm = sqrt(sum(float(value) * float(value) for value in right))
+    if left_norm <= 0 or right_norm <= 0:
+        return 0.0
+    return dot_product / (left_norm * right_norm)
+
+
+def _build_mid_term_memory_recall_query_text(selected_history: Sequence[LLMContextMessage]) -> str:
+    query_items: list[str] = []
+    for message in selected_history:
+        if is_mid_term_memory_message(message) or is_mid_term_memory_reference_message(message):
+            continue
+        if isinstance(message, ReferenceMessage):
+            continue
+
+        text = " ".join(str(message.processed_plain_text or "").split()).strip()
+        if not text:
+            continue
+        if len(text) > 360:
+            text = text[-360:].strip()
+        query_items.append(text)
+
+    query_text = "\n".join(query_items[-MID_TERM_MEMORY_RECALL_CONTEXT_MESSAGE_LIMIT:])
+    max_chars = _get_mid_term_memory_recall_context_limit()
+    if len(query_text) <= max_chars:
+        return query_text
+    return query_text[-max_chars:]
+
+
+def _format_mid_term_memory_reference(candidate: MidTermMemoryRecallCandidate) -> str:
+    payload = candidate.payload
+    message_id = str(candidate.message.message_id or "").strip()
+    time_range = str(payload.get("time_range") or "未知").strip()
+    participants = _coerce_str_list(payload.get("participants"))
+    keywords = _coerce_str_list(payload.get("keywords"))
+    brief = str(payload.get("brief") or "").strip() or "无"
+    long_summary = str(payload.get("long_summary") or "").strip() or brief
+    if len(long_summary) > MID_TERM_MEMORY_RECALL_SUMMARY_TEXT_LIMIT:
+        long_summary = long_summary[:MID_TERM_MEMORY_RECALL_SUMMARY_TEXT_LIMIT].rstrip() + "..."
+
+    return "\n".join(
+        [
+            MID_TERM_MEMORY_REFERENCE_MARKER,
+            "以下是根据当前上下文匹配到的一条中期聊天摘要，只作为内部参考；仅在自然相关时使用，不要生硬复述。",
+            *([f"摘要ID: {message_id}"] if message_id else []),
+            f"匹配分数: {candidate.score:.4f}",
+            f"匹配段: {candidate.segment_text}",
+            f"时间范围: {time_range}",
+            f"参与人物: {'、'.join(participants) if participants else '未知'}",
+            f"关键词: {'、'.join(keywords) if keywords else '无'}",
+            "",
+            "brief:",
+            brief,
+            "",
+            "long_summary:",
+            long_summary,
+        ]
+    ).strip()
+
+
+def _is_mid_term_memory_recall_enabled() -> bool:
+    return bool(getattr(global_config.chat, "mid_term_memory_recall_enabled", True))
+
+
+def _get_mid_term_memory_recall_threshold() -> float:
+    value = getattr(global_config.chat, "mid_term_memory_recall_threshold", MID_TERM_MEMORY_DEFAULT_RECALL_THRESHOLD)
+    return min(1.0, max(0.0, float(value)))
+
+
+def _get_mid_term_memory_recall_context_limit() -> int:
+    value = getattr(global_config.chat, "mid_term_memory_recall_context_length", MID_TERM_MEMORY_RECALL_CONTEXT_TEXT_LIMIT)
+    return max(200, int(value))
 
 
 def _resolve_summary_timestamp(messages: Sequence[LLMContextMessage]) -> datetime:

@@ -9,6 +9,7 @@ from src.common.data_models.message_component_data_model import (
     AtComponent,
     DictComponent,
     EmojiComponent,
+    FileComponent,
     ForwardComponent,
     ForwardNodeComponent,
     ImageComponent,
@@ -79,6 +80,9 @@ def serialize_message_component(component: StandardMessageComponents) -> Optiona
             image_type_name="",
             fallback_text=component.content,
         )
+
+    if isinstance(component, FileComponent):
+        return {"type": "file", "data": component.to_payload()}
 
     if isinstance(component, AtComponent):
         return {
