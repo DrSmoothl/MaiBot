@@ -8,7 +8,7 @@ IDLE_CYCLE_REASONS = {"planner_no_tool_end", "planner_wait_rest", "tool_pause:wa
 def get_reply_trigger_mode() -> str:
     """读取当前回复触发模式。"""
 
-    return global_config.chat.reply_trigger_mode
+    return global_config.chat.reply_timing.reply_trigger_mode
 
 
 def is_reply_necessity_trigger_enabled() -> bool:

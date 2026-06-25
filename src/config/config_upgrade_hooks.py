@@ -61,9 +61,9 @@ def set_nested_config_value(data: dict[str, Any], path: tuple[str, ...], value: 
 
 
 def _reset_group_chat_prompt_to_default(data: dict[str, Any]) -> list[str]:
-    default_group_chat_prompt = ChatConfig().group_chat_prompt
-    changed = set_nested_config_value(data, ("chat", "group_chat_prompt"), default_group_chat_prompt)
-    return ["chat.group_chat_prompt"] if changed else []
+    default_group_chat_prompt = ChatConfig().reply_style.group_chat_prompt
+    changed = set_nested_config_value(data, ("chat", "reply_style", "group_chat_prompt"), default_group_chat_prompt)
+    return ["chat.reply_style.group_chat_prompt"] if changed else []
 
 
 def _as_dict(value: Any) -> dict[str, Any] | None:
@@ -275,6 +275,63 @@ def _normalize_webui_host_to_list(data: dict[str, Any]) -> list[str]:
     return []
 
 
+def _move_chat_config_key(chat: dict[str, Any], section_name: str, key: str) -> bool:
+    if key not in chat:
+        return False
+
+    section = _as_dict(chat.get(section_name))
+    if section is None:
+        section = {}
+        chat[section_name] = section
+
+    if key not in section:
+        section[key] = chat[key]
+    chat.pop(key, None)
+    return True
+
+
+def _split_chat_config_sections(data: dict[str, Any]) -> list[str]:
+    """
+    8.14.19: 将 chat 中的回复时机/频率与回复方式拆到独立子配置段。
+    """
+
+    chat = _as_dict(data.get("chat"))
+    if chat is None:
+        return []
+
+    moved_paths: list[str] = []
+    timing_keys = (
+        "talk_value",
+        "private_talk_value",
+        "mentioned_bot_reply",
+        "inevitable_at_reply",
+        "reply_trigger_mode",
+        "planner_interrupt_max_consecutive_count",
+        "max_consecutive_wait_count",
+        "no_action_backoff_base_seconds",
+        "no_action_backoff_cap_seconds",
+        "no_action_backoff_start_count",
+        "no_action_backoff_bypass_pending_count",
+        "enable_talk_value_rules",
+        "talk_value_rules",
+    )
+    style_keys = (
+        "enable_reply_quote",
+        "group_chat_prompt",
+        "private_chat_prompts",
+        "chat_prompts",
+    )
+
+    for key in timing_keys:
+        if _move_chat_config_key(chat, "reply_timing", key):
+            moved_paths.append(f"chat.reply_timing.{key}")
+    for key in style_keys:
+        if _move_chat_config_key(chat, "reply_style", key):
+            moved_paths.append(f"chat.reply_style.{key}")
+
+    return moved_paths
+
+
 def _normalize_group_list_fields(section: dict[str, Any], list_key: str, old_inner_key: str) -> bool:
     group_list = _as_list(section.get(list_key))
     if group_list is None:
@@ -374,6 +431,11 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.14.13",
         config_names=("bot_config.toml",),
         migrate=_normalize_webui_host_to_list,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.14.19",
+        config_names=("bot_config.toml",),
+        migrate=_split_chat_config_sections,
     ),
 )
 MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = ()

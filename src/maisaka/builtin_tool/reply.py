@@ -145,7 +145,7 @@ async def handle_tool(
     }
     if not _use_expression_intent():
         reply_tool_args.pop("expression_intent", None)
-    enable_reply_quote = bool(config_module.global_config.chat.enable_reply_quote)
+    enable_reply_quote = bool(config_module.global_config.chat.reply_style.enable_reply_quote)
     effective_set_quote = set_quote and enable_reply_quote
 
     if not target_message_id:

@@ -22,11 +22,11 @@ class IdleBackoffController:
         self._until = 0.0
 
     def _get_backoff_seconds(self) -> float:
-        base_seconds = max(0.0, float(global_config.chat.no_action_backoff_base_seconds))
-        cap_seconds = max(0.0, float(global_config.chat.no_action_backoff_cap_seconds))
+        base_seconds = max(0.0, float(global_config.chat.reply_timing.no_action_backoff_base_seconds))
+        cap_seconds = max(0.0, float(global_config.chat.reply_timing.no_action_backoff_cap_seconds))
         if base_seconds <= 0 or cap_seconds <= 0:
             return 0.0
-        start_count = max(1, int(global_config.chat.no_action_backoff_start_count))
+        start_count = max(1, int(global_config.chat.reply_timing.no_action_backoff_start_count))
         if self._count < start_count:
             return 0.0
 
@@ -82,7 +82,7 @@ class IdleBackoffController:
             self._until = 0.0
             return False
 
-        bypass_pending_count = max(0, int(global_config.chat.no_action_backoff_bypass_pending_count))
+        bypass_pending_count = max(0, int(global_config.chat.reply_timing.no_action_backoff_bypass_pending_count))
         if bypass_pending_count > 0 and pending_count >= bypass_pending_count:
             logger.info(
                 f"{runtime.log_prefix} 空闲退避被待处理消息数绕过: "

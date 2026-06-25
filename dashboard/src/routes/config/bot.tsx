@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronLeft,
@@ -346,8 +346,8 @@ function BotConfigPageContent() {
       ['bot.qq_account', HiddenFieldHook, 'hidden'],
       ['bot.platforms', HiddenFieldHook, 'hidden'],
       ['personality.multiple_reply_style', MultipleReplyStyleHook],
-      ['chat.chat_prompts', ChatPromptsHook],
-      ['chat.talk_value_rules', ChatTalkValueRulesHook],
+      ['chat.reply_style.chat_prompts', ChatPromptsHook],
+      ['chat.reply_timing.talk_value_rules', ChatTalkValueRulesHook],
       ['experimental.focus_chat_whitelist', FocusWhitelistHook],
       ['experimental.focus_groups', BehaviorFocusGroupsHook],
       ['experimental.behavior_groups', BehaviorGroupsHook],
@@ -808,6 +808,105 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     setTabGuideVisible(false)
   }
 
+  const updateSectionValueByPath = (sectionName: string, restPath: string[], value: unknown) => {
+    const currentSectionValue = sectionValues[sectionName] ?? {}
+    const nextSectionValue =
+      restPath.length === 0
+        ? (value as ConfigSectionData)
+        : updateNestedValue(currentSectionValue, restPath, value)
+
+    setSectionValue(sectionName, nextSectionValue)
+    setHasUnsavedChanges(true)
+  }
+
+  const getSubtabLabel = (schema: ConfigSchema, fallback: string) => {
+    return schema.uiSubLabel || schema.uiLabel || schema.classDoc || fallback
+  }
+
+  const getObjectSubcategoryEntries = (sectionSchema: ConfigSchema) => {
+    const sectionFieldByName = new Map(sectionSchema.fields.map((field) => [field.name, field]))
+    return Object.entries(sectionSchema.nested ?? {}).filter(([subcategoryName]) => {
+      return sectionFieldByName.get(subcategoryName)?.type === 'object'
+    })
+  }
+
+  const renderSubtabbedContent = (tabNestedEntries: readonly (readonly [string, ConfigSchema])[]) => {
+    const subtabPanes: Array<{ content: ReactNode; id: string; label: string }> = []
+
+    for (const [sectionName, sectionSchema] of tabNestedEntries) {
+      const sectionValue = (sectionValues[sectionName] ?? {}) as ConfigSectionData
+      const subcategoryEntries = sectionSchema.uiUseSubTabs ? getObjectSubcategoryEntries(sectionSchema) : []
+      const subcategoryNames = new Set(subcategoryEntries.map(([subcategoryName]) => subcategoryName))
+      const rootFields = sectionSchema.fields.filter((field) => !subcategoryNames.has(field.name))
+      const rootSchema: ConfigSchema = {
+        ...sectionSchema,
+        className: `${sectionSchema.className}Root`,
+        fields: rootFields,
+        nested: {},
+      }
+
+      if (rootFields.length > 0) {
+        subtabPanes.push({
+          id: sectionName,
+          label: sectionSchema.uiRootSubLabel || getSubtabLabel(sectionSchema, sectionName),
+          content: (
+            <DynamicConfigForm
+              schema={rootSchema}
+              values={sectionValue}
+              onChange={(fieldPath, value) => updateSectionValueByPath(sectionName, fieldPath.split('.'), value)}
+              basePath={sectionName}
+              hooks={fieldHooks}
+              advancedVisible={advancedVisible}
+              sectionColumns={1}
+            />
+          ),
+        })
+      }
+
+      for (const [subcategoryName, subcategorySchema] of subcategoryEntries) {
+        subtabPanes.push({
+          id: `${sectionName}.${subcategoryName}`,
+          label: getSubtabLabel(subcategorySchema, subcategoryName),
+          content: (
+            <DynamicConfigForm
+              schema={subcategorySchema}
+              values={(sectionValue[subcategoryName] as Record<string, unknown>) || {}}
+              onChange={(fieldPath, value) =>
+                updateSectionValueByPath(sectionName, [subcategoryName, ...fieldPath.split('.')], value)
+              }
+              basePath={`${sectionName}.${subcategoryName}`}
+              hooks={fieldHooks}
+              advancedVisible={advancedVisible}
+              sectionColumns={1}
+            />
+          ),
+        })
+      }
+    }
+
+    if (subtabPanes.length === 0) {
+      return null
+    }
+
+    return (
+      <Tabs defaultValue={subtabPanes[0].id} className="space-y-3">
+        <DashboardTabBar variant="scroll" className="bg-background/80 border">
+          {subtabPanes.map((pane) => (
+            <DashboardTabTrigger key={pane.id} value={pane.id} className="text-xs">
+              {pane.label}
+            </DashboardTabTrigger>
+          ))}
+        </DashboardTabBar>
+
+        {subtabPanes.map((pane) => (
+          <TabsContent key={pane.id} value={pane.id} className="mt-0">
+            {pane.content}
+          </TabsContent>
+        ))}
+      </Tabs>
+    )
+  }
+
   const renderTabContent = (tab: TabGroup) => {
     const tabNestedEntries = tab.sections
       .map((sectionName) => [sectionName, configSchema.nested?.[sectionName]] as const)
@@ -815,6 +914,10 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
     if (tabNestedEntries.length === 0) {
       return null
+    }
+
+    if (tabNestedEntries.some(([, sectionSchema]) => sectionSchema.uiUseSubTabs)) {
+      return renderSubtabbedContent(tabNestedEntries)
     }
 
     const values = Object.fromEntries(
@@ -838,14 +941,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             return
           }
 
-          const currentSectionValue = sectionValues[sectionName] ?? {}
-          const nextSectionValue =
-            restPath.length === 0
-              ? (value as ConfigSectionData)
-              : updateNestedValue(currentSectionValue, restPath, value)
-
-          setSectionValue(sectionName, nextSectionValue)
-          setHasUnsavedChanges(true)
+          updateSectionValueByPath(sectionName, restPath, value)
         }}
         hooks={fieldHooks}
         advancedVisible={advancedVisible}

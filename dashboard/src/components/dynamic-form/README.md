@@ -104,8 +104,8 @@ export const TalkValueRulesHook: FieldHookComponent = ({
 Register hooks in your component's lifecycle:
 ```typescript
 useEffect(() => {
-  fieldHooks.register('chat.talk_value_rules', TalkValueRulesHook, 'replace')
-  return () => fieldHooks.unregister('chat.talk_value_rules')
+  fieldHooks.register('chat.reply_timing.talk_value_rules', TalkValueRulesHook, 'replace')
+  return () => fieldHooks.unregister('chat.reply_timing.talk_value_rules')
 }, [])
 ```
 

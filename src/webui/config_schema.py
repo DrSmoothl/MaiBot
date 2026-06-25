@@ -84,10 +84,19 @@ class ConfigSchemaGenerator:
         ui_label = getattr(config_class, "__ui_label__", "")
         ui_advanced = bool(getattr(config_class, "__ui_advanced__", False))
         ui_order = int(getattr(config_class, "__ui_order__", 0))
+        ui_use_subtabs = bool(getattr(config_class, "__ui_use_subtabs__", False))
+        ui_sub_label = getattr(config_class, "__ui_sub_label__", "")
+        ui_root_sub_label = getattr(config_class, "__ui_root_sub_label__", "")
         if ui_parent:
             schema["uiParent"] = ui_parent
         if ui_label:
             schema["uiLabel"] = ui_label
+        if ui_use_subtabs:
+            schema["uiUseSubTabs"] = ui_use_subtabs
+        if ui_sub_label:
+            schema["uiSubLabel"] = ui_sub_label
+        if ui_root_sub_label:
+            schema["uiRootSubLabel"] = ui_root_sub_label
         schema["uiAdvanced"] = ui_advanced
         if ui_order:
             schema["uiOrder"] = ui_order

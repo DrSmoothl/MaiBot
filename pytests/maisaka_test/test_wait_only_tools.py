@@ -173,7 +173,7 @@ def test_private_chat_message_breaks_wait(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_wait_tool_rejects_after_consecutive_limit(monkeypatch) -> None:
-    monkeypatch.setattr(global_config.chat, "max_consecutive_wait_count", 5, raising=False)
+    monkeypatch.setattr(global_config.chat.reply_timing, "max_consecutive_wait_count", 5, raising=False)
 
     class DummyRuntime:
         def __init__(self) -> None:
@@ -181,7 +181,7 @@ async def test_wait_tool_rejects_after_consecutive_limit(monkeypatch) -> None:
 
         def _try_enter_wait_state(self, seconds=None, tool_call_id=None):
             del seconds, tool_call_id
-            max_count = int(global_config.chat.max_consecutive_wait_count)
+            max_count = int(global_config.chat.reply_timing.max_consecutive_wait_count)
             if self.count >= max_count:
                 return False, self.count, max_count
             self.count += 1

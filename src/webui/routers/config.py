@@ -117,9 +117,12 @@ class PromptGeneratorParsedResult(BaseModel):
     personality: str = Field(default="", description="对应 [personality].personality")
     reply_style: str = Field(default="", description="对应 [personality].reply_style")
     multiple_reply_style: List[str] = Field(default_factory=list, description="对应 multiple_reply_style")
-    group_chat_prompt: str = Field(default="", description="对应 [chat].group_chat_prompt")
-    private_chat_prompts: str = Field(default="", description="对应 [chat].private_chat_prompts")
-    chat_prompts: List[PromptGeneratorChatPrompt] = Field(default_factory=list, description="对应 [[chat.chat_prompts]]")
+    group_chat_prompt: str = Field(default="", description="对应 [chat.reply_style].group_chat_prompt")
+    private_chat_prompts: str = Field(default="", description="对应 [chat.reply_style].private_chat_prompts")
+    chat_prompts: List[PromptGeneratorChatPrompt] = Field(
+        default_factory=list,
+        description="对应 [[chat.reply_style.chat_prompts]]",
+    )
     notes: List[str] = Field(default_factory=list, description="生成说明或人工检查建议")
 
 
@@ -434,7 +437,7 @@ def _build_prompt_generator_reference_config() -> str:
         [
             "]",
             "",
-            "[chat]",
+            "[chat.reply_style]",
             f"group_chat_prompt = {_toml_string(_PROMPT_GENERATOR_REFERENCE_CONFIG['group_chat_prompt'])}",
             f"private_chat_prompts = {_toml_string(_PROMPT_GENERATOR_REFERENCE_CONFIG['private_chat_prompts'])}",
         ]
@@ -466,8 +469,8 @@ def _build_prompt_generator_instruction(request: PromptGeneratorRequest) -> str:
   "personality": "对应 [personality].personality。使用第二人称描述稳定人格、身份和长期特质，建议 80-220 字，不要写成小说设定。",
   "reply_style": "对应 [personality].reply_style。描述麦麦说话方式、回复长度、语气、互动习惯和禁用表达。",
   "multiple_reply_style": ["可选备用表达风格，每项一段，最多 5 项"],
-  "group_chat_prompt": "对应 [chat].group_chat_prompt。只写群聊场景规则，不要重复人格设定。",
-  "private_chat_prompts": "对应 [chat].private_chat_prompts。只写私聊场景规则，不要重复人格设定。",
+  "group_chat_prompt": "对应 [chat.reply_style].group_chat_prompt。只写群聊场景规则，不要重复人格设定。",
+  "private_chat_prompts": "对应 [chat.reply_style].private_chat_prompts。只写私聊场景规则，不要重复人格设定。",
   "chat_prompts": [
     {{"platform": "", "item_id": "", "rule_type": "group", "prompt": "如果原文明确提到某个平台或群/私聊专属规则，才生成此项；否则返回空数组"}}
   ],
@@ -612,7 +615,7 @@ def _build_prompt_generator_toml(result: PromptGeneratorParsedResult) -> str:
         lines.extend(
             [
                 "",
-                "[[chat.chat_prompts]]",
+                "[[chat.reply_style.chat_prompts]]",
                 f"platform = {_toml_string(chat_prompt.platform)}",
                 f"item_id = {_toml_string(chat_prompt.item_id)}",
                 f"rule_type = {_toml_string(chat_prompt.rule_type)}",
@@ -644,7 +647,7 @@ def _build_prompt_generator_block_toml(section: str, field: str, value: Any) -> 
                 continue
             lines.extend(
                 [
-                    "[[chat.chat_prompts]]",
+                    "[[chat.reply_style.chat_prompts]]",
                     f"platform = {_toml_string(_coerce_prompt_generator_string(item.get('platform')))}",
                     f"item_id = {_toml_string(_coerce_prompt_generator_string(item.get('item_id')))}",
                     f"rule_type = {_toml_string(_coerce_prompt_generator_string(item.get('rule_type')) or 'group')}",
@@ -716,29 +719,29 @@ def _build_prompt_generator_config_blocks(result: PromptGeneratorParsedResult) -
         )
     if result.group_chat_prompt:
         add_block(
-            "chat.group_chat_prompt",
-            "chat",
+            "chat.reply_style.group_chat_prompt",
+            "chat.reply_style",
             "group_chat_prompt",
             "群聊提示词",
-            "写入 bot_config.toml 的 [chat].group_chat_prompt，会覆盖当前群聊提示词。",
+            "写入 bot_config.toml 的 [chat.reply_style].group_chat_prompt，会覆盖当前群聊提示词。",
             result.group_chat_prompt,
         )
     if result.private_chat_prompts:
         add_block(
-            "chat.private_chat_prompts",
-            "chat",
+            "chat.reply_style.private_chat_prompts",
+            "chat.reply_style",
             "private_chat_prompts",
             "私聊提示词",
-            "写入 bot_config.toml 的 [chat].private_chat_prompts，会覆盖当前私聊提示词。",
+            "写入 bot_config.toml 的 [chat.reply_style].private_chat_prompts，会覆盖当前私聊提示词。",
             result.private_chat_prompts,
         )
     if result.chat_prompts:
         add_block(
-            "chat.chat_prompts",
-            "chat",
+            "chat.reply_style.chat_prompts",
+            "chat.reply_style",
             "chat_prompts",
             "额外聊天流 Prompt",
-            "写入 bot_config.toml 的 [[chat.chat_prompts]]，会替换当前额外 Prompt 列表。",
+            "写入 bot_config.toml 的 [[chat.reply_style.chat_prompts]]，会替换当前额外 Prompt 列表。",
             [_prompt_generator_chat_prompt_to_dict(item) for item in result.chat_prompts],
         )
 
@@ -749,9 +752,9 @@ _PROMPT_GENERATOR_ALLOWED_BLOCK_FIELDS = {
     ("personality", "personality"),
     ("personality", "reply_style"),
     ("personality", "multiple_reply_style"),
-    ("chat", "group_chat_prompt"),
-    ("chat", "private_chat_prompts"),
-    ("chat", "chat_prompts"),
+    ("chat.reply_style", "group_chat_prompt"),
+    ("chat.reply_style", "private_chat_prompts"),
+    ("chat.reply_style", "chat_prompts"),
 }
 
 
@@ -804,6 +807,20 @@ def _normalize_prompt_generator_block_value(block: PromptGeneratorConfigBlock) -
     raise HTTPException(status_code=400, detail=f"无法识别配置字段: {section}.{field}")
 
 
+def _resolve_prompt_generator_section(config_data: Dict[str, Any], section: str) -> Dict[str, Any]:
+    """按点分配置节定位可写入的 TOML 表。"""
+
+    current: Any = config_data
+    for section_part in section.split("."):
+        if not isinstance(current, dict) or section_part not in current:
+            raise HTTPException(status_code=404, detail=f"配置节 '{section}' 不存在")
+        current = current[section_part]
+
+    if not isinstance(current, dict):
+        raise HTTPException(status_code=400, detail=f"配置节 '{section}' 不是可写对象")
+    return current
+
+
 def _apply_prompt_generator_config_blocks(blocks: List[PromptGeneratorConfigBlock]) -> PromptGeneratorApplyResponse:
     """把选中的人设生成器配置块写入 bot_config.toml。"""
 
@@ -823,11 +840,7 @@ def _apply_prompt_generator_config_blocks(blocks: List[PromptGeneratorConfigBloc
         section_updates.setdefault(section, {})[field] = value
 
     for section, section_data in section_updates.items():
-        if section not in config_data:
-            raise HTTPException(status_code=404, detail=f"配置节 '{section}' 不存在")
-        if not isinstance(config_data[section], dict):
-            raise HTTPException(status_code=400, detail=f"配置节 '{section}' 不是可写对象")
-        _update_toml_doc(config_data[section], section_data)
+        _update_toml_doc(_resolve_prompt_generator_section(config_data, section), section_data)
 
     try:
         plain_config_data = _coerce_config_numeric_values(_toml_to_plain_dict(config_data), Config)

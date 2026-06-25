@@ -142,6 +142,9 @@ class ConfigBase(BaseModel, AttrDocBase):
     __ui_label__: ClassVar[str] = ""  # Tab 显示名称（仅做 Tab 主人时使用），空则使用 classDoc
     __ui_advanced__: ClassVar[bool] = False  # 是否默认收起到 WebUI 配置页的“更多”Tab 中
     __ui_order__: ClassVar[int] = 0  # WebUI 配置页 Tab 排序，数值越小越靠前
+    __ui_use_subtabs__: ClassVar[bool] = False  # 是否在该配置 Tab 下启用子 Tab
+    __ui_sub_label__: ClassVar[str] = ""  # 作为子 Tab 时显示的名称，空则使用 uiLabel
+    __ui_root_sub_label__: ClassVar[str] = ""  # 当前配置根字段子 Tab 名称
 
     @classmethod
     def from_dict(cls, attribute_data: AttributeData, data: dict[str, Any]):

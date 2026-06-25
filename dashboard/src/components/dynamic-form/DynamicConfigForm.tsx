@@ -494,7 +494,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
   )
 
   const renderVisibleFields = () => {
-    if (basePath !== 'chat') {
+    if (basePath !== 'chat.reply_timing') {
       return renderFieldList(visibleFields)
     }
 
@@ -509,13 +509,10 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
     }
 
     return (
-      <div className="grid min-w-0 items-start gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="min-w-0">
-          {renderFieldList(commonFields)}
-        </div>
-        <div className="min-w-0">
-          {renderFieldList(talkRuleFields)}
-        </div>
+      <div className="min-w-0 space-y-4">
+        {renderFieldList(commonFields)}
+        <Separator className="my-2 bg-border/50" />
+        {renderFieldList(talkRuleFields)}
       </div>
     )
   }

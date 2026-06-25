@@ -674,10 +674,10 @@ class MaisakaChatLoopService:
         prompt_lines: List[str] = []
 
         if self._is_group_chat is True:
-            if group_chat_prompt := str(global_config.chat.group_chat_prompt or "").strip():
+            if group_chat_prompt := str(global_config.chat.reply_style.group_chat_prompt or "").strip():
                 prompt_lines.append(f"通用注意事项：\n{group_chat_prompt}")
         elif self._is_group_chat is False:
-            if private_chat_prompt := str(global_config.chat.private_chat_prompts or "").strip():
+            if private_chat_prompt := str(global_config.chat.reply_style.private_chat_prompts or "").strip():
                 prompt_lines.append(f"通用注意事项：\n{private_chat_prompt}")
 
         if not prompt_lines:

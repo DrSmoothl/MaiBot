@@ -68,6 +68,9 @@ export interface ConfigSchema {
   uiLabel?: string
   uiAdvanced?: boolean
   uiOrder?: number
+  uiUseSubTabs?: boolean
+  uiSubLabel?: string
+  uiRootSubLabel?: string
 }
 
 export interface ConfigSchemaResponse {

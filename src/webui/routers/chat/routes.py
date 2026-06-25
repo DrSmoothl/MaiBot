@@ -318,14 +318,15 @@ def _get_talk_rule_details(chat_session: ChatSession) -> Dict[str, Any]:
 
     session_id = chat_session.session_id
     is_group_chat = _get_chat_type(chat_session) == "group"
-    base_value = float(global_config.chat.talk_value if is_group_chat else global_config.chat.private_talk_value)
+    reply_timing_config = global_config.chat.reply_timing
+    base_value = float(reply_timing_config.talk_value if is_group_chat else reply_timing_config.private_talk_value)
     effective_value = float(ChatConfigUtils.get_talk_value(session_id, is_group_chat=is_group_chat))
     local_time = datetime.now().strftime("%H:%M")
     current_time = datetime.now().time()
     now_min = current_time.hour * 60 + current_time.minute
     rules = [
         rule_detail
-        for rule in global_config.chat.talk_value_rules
+        for rule in reply_timing_config.talk_value_rules
         if (rule_detail := _talk_rule_to_dict(rule, session_id, is_group_chat, now_min)) is not None
     ]
     selected_index: Optional[int] = None
@@ -354,7 +355,7 @@ def _get_talk_rule_details(chat_session: ChatSession) -> Dict[str, Any]:
     )
 
     return {
-        "enabled": bool(global_config.chat.enable_talk_value_rules),
+        "enabled": bool(reply_timing_config.enable_talk_value_rules),
         "base_value": base_value,
         "base_value_label": _format_frequency(base_value),
         "effective_value": effective_value,
@@ -431,7 +432,11 @@ async def _save_chat_talk_frequency_rule(
     if not isinstance(chat_config, dict):
         raise HTTPException(status_code=400, detail="配置文件缺少 [chat] 配置节")
 
-    raw_rules = chat_config.get("talk_value_rules")
+    reply_timing_config = chat_config.get("reply_timing")
+    if not isinstance(reply_timing_config, dict):
+        raise HTTPException(status_code=400, detail="配置文件缺少 [chat.reply_timing] 配置节")
+
+    raw_rules = reply_timing_config.get("talk_value_rules")
     rules = (
         [_talk_rule_to_config_dict(rule) for rule in raw_rules]
         if raw_rules is not None and not isinstance(raw_rules, (str, bytes, dict))
@@ -454,8 +459,8 @@ async def _save_chat_talk_frequency_rule(
     else:
         rules[target_index] = next_rule
 
-    chat_config["enable_talk_value_rules"] = True
-    chat_config["talk_value_rules"] = rules
+    reply_timing_config["enable_talk_value_rules"] = True
+    reply_timing_config["talk_value_rules"] = rules
     save_toml_with_format(config_data, str(config_path))
 
     if not await config_manager.reload_config(changed_scopes=["bot"]):
@@ -477,7 +482,11 @@ async def _delete_chat_talk_frequency_rule(chat_session: ChatSession, rule_time:
     if not isinstance(chat_config, dict):
         raise HTTPException(status_code=400, detail="配置文件缺少 [chat] 配置节")
 
-    raw_rules = chat_config.get("talk_value_rules")
+    reply_timing_config = chat_config.get("reply_timing")
+    if not isinstance(reply_timing_config, dict):
+        raise HTTPException(status_code=400, detail="配置文件缺少 [chat.reply_timing] 配置节")
+
+    raw_rules = reply_timing_config.get("talk_value_rules")
     rules = (
         [_talk_rule_to_config_dict(rule) for rule in raw_rules]
         if raw_rules is not None and not isinstance(raw_rules, (str, bytes, dict))
@@ -494,7 +503,7 @@ async def _delete_chat_talk_frequency_rule(chat_session: ChatSession, rule_time:
     if len(next_rules) == len(rules):
         raise HTTPException(status_code=404, detail="未找到可删除的当前聊天流发言频率规则")
 
-    chat_config["talk_value_rules"] = next_rules
+    reply_timing_config["talk_value_rules"] = next_rules
     save_toml_with_format(config_data, str(config_path))
 
     if not await config_manager.reload_config(changed_scopes=["bot"]):
