@@ -487,7 +487,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
       <div
         data-dynamic-field={schema.name}
         data-dynamic-field-widget="switch"
-        className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-1.5"
+        className="grid min-h-10 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-1.5"
       >
         <div className="min-w-0">
           {renderFieldHeader()}
@@ -784,7 +784,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
       <div
         data-dynamic-field={schema.name}
         data-dynamic-field-widget={schema['x-widget'] ?? schema.type}
-        className="grid min-w-0 grid-cols-1 items-center gap-1.5 py-1.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3"
+        className="grid min-h-10 min-w-0 grid-cols-1 items-center gap-1.5 py-1.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3"
         style={{ '--field-input-width': inlineRightInputWidth } as React.CSSProperties}
       >
         <div className="min-w-0">

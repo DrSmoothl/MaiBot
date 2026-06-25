@@ -977,6 +977,64 @@ function TalkFrequencySection({ detail }: { detail: ChatStreamDetail }) {
   )
 }
 
+function PromptTextBlock({
+  content,
+  emptyText,
+  title,
+}: {
+  content: string
+  emptyText: string
+  title: string
+}) {
+  const normalizedContent = content.trim()
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium">{title}</div>
+      {normalizedContent ? (
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/25 p-3 text-xs leading-5 text-foreground">
+          {normalizedContent}
+        </pre>
+      ) : (
+        <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          {emptyText}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ChatPromptSection({ detail }: { detail: ChatStreamDetail }) {
+  return (
+    <section className="space-y-3 rounded-md border p-3">
+      <div className="font-medium">聊天 Prompt</div>
+      <PromptTextBlock
+        title={detail.prompts.base_prompt_title}
+        content={detail.prompts.base_prompt}
+        emptyText="当前基础 Prompt 为空。"
+      />
+      <div className="space-y-2">
+        <div className="text-sm font-medium">额外聊天流 Prompt</div>
+        {detail.prompts.chat_prompts.length === 0 ? (
+          <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+            当前聊天流没有命中的额外 Prompt。
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {detail.prompts.chat_prompts.map((prompt, index) => (
+              <pre
+                key={`${index}:${prompt.slice(0, 24)}`}
+                className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/25 p-3 text-xs leading-5 text-foreground"
+              >
+                {prompt.trim()}
+              </pre>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -1362,6 +1420,7 @@ function ChatDetailContent({
       </section>
 
       <TalkFrequencySection detail={detail} />
+      <ChatPromptSection detail={detail} />
       <ConfigStatusRows detail={detail} />
     </div>
   )

@@ -1,9 +1,11 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import {
   Check,
   ChevronLeft,
   ChevronRight,
   Code2,
+  ExternalLink,
   Info,
   Layout,
   RefreshCw,
@@ -900,6 +902,17 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
         {subtabPanes.map((pane) => (
           <TabsContent key={pane.id} value={pane.id} className="mt-0">
+            {pane.id === 'chat' && (
+              <div className="mb-3 flex flex-col gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                <span>需要按具体聊天流调整发言频率或查看聊天 Prompt 时，可以前往聊天管理。</span>
+                <Button asChild size="sm" variant="outline" className="h-8 shrink-0 self-start sm:self-center">
+                  <Link to="/chat-management">
+                    <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                    聊天管理
+                  </Link>
+                </Button>
+              </div>
+            )}
             {pane.content}
           </TabsContent>
         ))}

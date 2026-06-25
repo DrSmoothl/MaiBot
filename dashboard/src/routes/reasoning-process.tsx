@@ -1470,11 +1470,11 @@ export function ReasoningProcessPage({
           .map((file) => parseStructuredPrompt(file.content))
           .filter((payload): payload is StructuredPromptPayload => Boolean(payload))
         const combinedContent =
-          selected.stage === 'jargon_learning_update' && loadedPayloads.length > 1
+          selected?.stage === 'jargon_learning_update' && loadedPayloads.length > 1
             ? JSON.stringify(
                 combineJargonLearningUpdatePayloads(
                   loadedPayloads,
-                  selected.display_title || selected.action_preview || ''
+                  selected?.display_title || selected?.action_preview || ''
                 ),
                 null,
                 2

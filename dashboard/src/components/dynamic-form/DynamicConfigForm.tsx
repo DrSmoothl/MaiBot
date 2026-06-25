@@ -454,6 +454,12 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
     return rows
   }
 
+  const horizontalSeparatorClassName =
+    "md:border-l md:border-border/50 md:pl-3 " +
+    "md:[&:nth-child(2n+1)]:border-l-0 md:[&:nth-child(2n+1)]:pl-0 " +
+    "xl:[&:nth-child(2n+1)]:border-l xl:[&:nth-child(2n+1)]:border-border/50 xl:[&:nth-child(2n+1)]:pl-3 " +
+    "xl:[&:nth-child(3n+1)]:border-l-0 xl:[&:nth-child(3n+1)]:pl-0"
+
   const renderRows = (rows: FieldSchema[][]) => (
     <>
       {rows.map((row) => {
@@ -465,14 +471,24 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
               key={row.map((field) => field.name).join('|')}
               data-config-row={rowKey}
               className={cn(
-                "grid min-w-0 gap-3 py-0.5",
+                "grid min-w-0 items-stretch gap-3 py-0.5",
                 isVisualImageCompressionRow
                   ? "grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.1fr)] items-center"
-                  : "md:grid-cols-[repeat(auto-fit,minmax(min(18rem,100%),1fr))]",
+                  : "md:grid-cols-2 xl:grid-cols-3",
               )}
             >
-              {row.map((field) => (
-                <div key={field.name} className="min-w-0">{renderField(field)}</div>
+              {row.map((field, fieldIndex) => (
+                <div
+                  key={field.name}
+                  className={cn(
+                    "flex min-w-0 items-stretch",
+                    isVisualImageCompressionRow
+                      ? fieldIndex > 0 && "md:border-l md:border-border/50 md:pl-3"
+                      : horizontalSeparatorClassName,
+                  )}
+                >
+                  <div className="min-w-0 flex-1">{renderField(field)}</div>
+                </div>
               ))}
             </div>
           ) : (

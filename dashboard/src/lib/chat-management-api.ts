@@ -65,6 +65,13 @@ export interface ChatTalkFrequencyDetail {
   matched_rules: ChatTalkFrequencyRule[]
 }
 
+export interface ChatPromptDetail {
+  base_prompt_type: ChatStreamType | string
+  base_prompt_title: string
+  base_prompt: string
+  chat_prompts: string[]
+}
+
 export interface ChatStreamDetail {
   session_id: string
   display_name: string
@@ -77,6 +84,7 @@ export interface ChatStreamDetail {
   behavior?: ChatLearningStatus
   jargon: ChatLearningStatus
   talk_frequency: ChatTalkFrequencyDetail
+  prompts: ChatPromptDetail
 }
 
 interface ChatStreamsResponse {

@@ -365,6 +365,24 @@ def _get_talk_rule_details(chat_session: ChatSession) -> Dict[str, Any]:
     }
 
 
+def _get_chat_prompt_details(chat_session: ChatSession) -> Dict[str, Any]:
+    """获取当前聊天流实际使用的基础 Prompt 与额外聊天流 Prompt。"""
+
+    session_id = chat_session.session_id
+    is_group_chat = _get_chat_type(chat_session) == "group"
+    reply_style_config = global_config.chat.reply_style
+    base_prompt_type = "group" if is_group_chat else "private"
+    base_prompt_title = "群聊提示词" if is_group_chat else "私聊提示词"
+    base_prompt = reply_style_config.group_chat_prompt if is_group_chat else reply_style_config.private_chat_prompts
+    chat_prompts = ChatConfigUtils.get_chat_prompts_for_chat(session_id, is_group_chat)
+    return {
+        "base_prompt_type": base_prompt_type,
+        "base_prompt_title": base_prompt_title,
+        "base_prompt": base_prompt,
+        "chat_prompts": chat_prompts,
+    }
+
+
 def _normalize_talk_rule_time(rule_time: Optional[str]) -> str:
     """校验并规范化发言频率规则时间。"""
 
@@ -544,6 +562,7 @@ def _chat_session_detail_to_response(chat_session: ChatSession) -> Dict[str, Any
             "matched_rule": _target_config_to_dict(JargonConfigUtils._find_jargon_config_item(session_id)),
         },
         "talk_frequency": _get_talk_rule_details(chat_session),
+        "prompts": _get_chat_prompt_details(chat_session),
     }
 
 
