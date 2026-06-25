@@ -54,7 +54,9 @@ REQUEST_TYPE_BY_REQUEST_KIND = {
     "reply_effect_judge": "reply.effect_judge",
     "sub_agent": "maisaka.sub_agent",
 }
-MODEL_TASK_NAME_BY_REQUEST_KIND: dict[str, str] = {}
+MODEL_TASK_NAME_BY_REQUEST_KIND: dict[str, str] = {
+    "expression_selector": "expression_use",
+}
 PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "planner": "planner",
     "reply_effect_judge": "reply_effect_judge",

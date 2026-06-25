@@ -1093,7 +1093,26 @@
 }
 
 :root[data-dashboard-style='future-retro'] [data-config-bot-tab-list='true'] {
+  height: 3.25rem !important;
   padding: 0.375rem 0.25rem !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-config-bot-subtab-list='true'] {
+  height: 2.75rem !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-config-bot-tab-list='true']
+  [data-dashboard-tabs-trigger='true'] {
+  font-size: 1.125rem !important;
+  font-weight: 800;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-config-bot-subtab-list='true']
+  [data-dashboard-tabs-trigger='true'] {
+  font-size: 1rem !important;
+  font-weight: 800;
 }
 
 :root[data-dashboard-style='future-retro'] [data-emoji-status-tabs='true'] {

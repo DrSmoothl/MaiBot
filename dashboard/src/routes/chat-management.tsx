@@ -5,9 +5,11 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Edit3,
   Info,
   Plus,
   RefreshCw,
+  Save,
   Search,
   Trash2,
   UserRound,
@@ -43,15 +45,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Textarea } from '@/components/ui/textarea'
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
 import {
   deleteChatStream,
+  deleteChatStreamPrompt,
   deleteChatStreamTalkFrequency,
   getChatStreamDetail,
   getChatStreams,
+  updateChatStreamLearning,
   updateChatStreamTalkFrequency,
+  upsertChatStreamPrompt,
   type ChatConfigRule,
   type ChatLearningStatus,
+  type ChatPromptRule,
   type ChatStream,
   type ChatStreamDeleteResult,
   type ChatTalkFrequencyRule,
@@ -66,6 +73,7 @@ const PAGE_SIZE = 10
 type ChatTypeFilter = 'all' | ChatStreamType
 type ChatManagementView = 'groups' | 'streams'
 type MutualGroupKind = 'expression' | 'jargon'
+type LearningKind = 'expression' | 'jargon' | 'behavior'
 
 interface TargetItem {
   platform: string
@@ -301,16 +309,64 @@ function ChatStreamAvatar({ chat }: { chat: ChatStream }) {
   )
 }
 
-function ConfigStatusRow({ title, status }: { title: string; status: ChatLearningStatus }) {
+function ConfigStatusRow({
+  detail,
+  kind,
+  title,
+  status,
+}: {
+  detail: ChatStreamDetail
+  kind: LearningKind
+  title: string
+  status: ChatLearningStatus
+}) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const updateMutation = useMutation({
+    mutationFn: (payload: { learn: boolean; use: boolean }) =>
+      updateChatStreamLearning(detail.session_id, kind, payload),
+    onSuccess: (nextDetail) => {
+      queryClient.setQueryData(['chat-stream-detail', detail.session_id], nextDetail)
+      void queryClient.invalidateQueries({ queryKey: ['chat-streams'] })
+      toast({ title: `${title}学习配置已保存` })
+    },
+    onError: (error) => {
+      toast({
+        title: `${title}学习配置保存失败`,
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    },
+  })
+  const isSaving = updateMutation.isPending
+
+  const saveStatus = (nextStatus: { learn: boolean; use: boolean }) => {
+    updateMutation.mutate(nextStatus)
+  }
+
   return (
     <div className="grid gap-3 rounded-md border p-3 text-sm lg:grid-cols-[5rem_1fr_1fr_minmax(12rem,1.5fr)] lg:items-center">
       <div className="text-base font-medium">{title}</div>
       <div className="flex items-center justify-between gap-3 lg:justify-start">
-        <span className="text-muted-foreground">使用</span>
+        <Label className="flex items-center gap-2 text-muted-foreground">
+          <Checkbox
+            checked={status.use}
+            disabled={isSaving}
+            onCheckedChange={(checked) => saveStatus({ use: checked === true, learn: status.learn })}
+          />
+          使用
+        </Label>
         <StatusBadge enabled={status.use} />
       </div>
       <div className="flex items-center justify-between gap-3 lg:justify-start">
-        <span className="text-muted-foreground">学习</span>
+        <Label className="flex items-center gap-2 text-muted-foreground">
+          <Checkbox
+            checked={status.learn}
+            disabled={isSaving}
+            onCheckedChange={(checked) => saveStatus({ use: status.use, learn: checked === true })}
+          />
+          学习
+        </Label>
         <StatusBadge enabled={status.learn} />
       </div>
       <div className="min-w-0 text-xs text-muted-foreground">
@@ -1003,6 +1059,139 @@ function PromptTextBlock({
   )
 }
 
+function PromptRuleEditor({
+  detail,
+  prompt,
+}: {
+  detail: ChatStreamDetail
+  prompt: ChatPromptRule
+}) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [draft, setDraft] = useState(prompt.prompt)
+  const saveMutation = useMutation({
+    mutationFn: () => upsertChatStreamPrompt(detail.session_id, { prompt: draft }, prompt.index),
+    onSuccess: (nextDetail) => {
+      queryClient.setQueryData(['chat-stream-detail', detail.session_id], nextDetail)
+      toast({ title: '聊天 Prompt 已保存' })
+    },
+    onError: (error) => {
+      toast({
+        title: '聊天 Prompt 保存失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    },
+  })
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteChatStreamPrompt(detail.session_id, prompt.index),
+    onSuccess: (nextDetail) => {
+      queryClient.setQueryData(['chat-stream-detail', detail.session_id], nextDetail)
+      toast({ title: '聊天 Prompt 已删除' })
+    },
+    onError: (error) => {
+      toast({
+        title: '聊天 Prompt 删除失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    },
+  })
+  const isBusy = saveMutation.isPending || deleteMutation.isPending
+  const normalizedDraft = draft.trim()
+  const changed = normalizedDraft !== prompt.prompt.trim()
+
+  useEffect(() => {
+    setDraft(prompt.prompt)
+  }, [prompt.prompt])
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 text-xs text-muted-foreground">
+          专属目标：<span className="break-all font-mono">{prompt.platform}:{prompt.item_id}:{prompt.rule_type}</span>
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          disabled={isBusy}
+          aria-label="删除聊天 Prompt"
+          onClick={() => deleteMutation.mutate()}
+        >
+          <Trash2 className="h-4 w-4 text-destructive" />
+        </Button>
+      </div>
+      <Textarea
+        value={draft}
+        disabled={isBusy}
+        onChange={(event) => setDraft(event.target.value)}
+        className="min-h-24 text-xs leading-5"
+      />
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          disabled={!changed || !normalizedDraft || isBusy}
+          onClick={() => saveMutation.mutate()}
+        >
+          <Save className="mr-2 h-3.5 w-3.5" />
+          保存
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function NewPromptEditor({ detail }: { detail: ChatStreamDetail }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [draft, setDraft] = useState('')
+  const saveMutation = useMutation({
+    mutationFn: () => upsertChatStreamPrompt(detail.session_id, { prompt: draft }),
+    onSuccess: (nextDetail) => {
+      setDraft('')
+      queryClient.setQueryData(['chat-stream-detail', detail.session_id], nextDetail)
+      toast({ title: '聊天 Prompt 已新增' })
+    },
+    onError: (error) => {
+      toast({
+        title: '聊天 Prompt 新增失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    },
+  })
+  const normalizedDraft = draft.trim()
+
+  return (
+    <div className="space-y-2 rounded-md border border-dashed p-3">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Edit3 className="h-4 w-4" />
+        新增当前聊天流专属 Prompt
+      </div>
+      <Textarea
+        value={draft}
+        disabled={saveMutation.isPending}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder="只写这个聊天流额外需要遵守的发言要求。"
+        className="min-h-24 text-xs leading-5"
+      />
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          disabled={!normalizedDraft || saveMutation.isPending}
+          onClick={() => saveMutation.mutate()}
+        >
+          <Plus className="mr-2 h-3.5 w-3.5" />
+          新增
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function ChatPromptSection({ detail }: { detail: ChatStreamDetail }) {
   return (
     <section className="space-y-3 rounded-md border p-3">
@@ -1016,21 +1205,17 @@ function ChatPromptSection({ detail }: { detail: ChatStreamDetail }) {
         <div className="text-sm font-medium">额外聊天流 Prompt</div>
         {detail.prompts.chat_prompts.length === 0 ? (
           <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-            当前聊天流没有命中的额外 Prompt。
+            当前聊天流没有专属额外 Prompt。
           </div>
         ) : (
           <div className="space-y-2">
             {detail.prompts.chat_prompts.map((prompt, index) => (
-              <pre
-                key={`${index}:${prompt.slice(0, 24)}`}
-                className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/25 p-3 text-xs leading-5 text-foreground"
-              >
-                {prompt.trim()}
-              </pre>
+              <PromptRuleEditor key={`${prompt.index}:${index}`} detail={detail} prompt={prompt} />
             ))}
           </div>
         )}
       </div>
+      <NewPromptEditor detail={detail} />
     </section>
   )
 }
@@ -1353,20 +1538,26 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
 
 function ConfigStatusRows({ detail }: { detail: ChatStreamDetail }) {
   const configRows = [
-    { title: '表达', status: detail.expression, visible: true },
-    { title: '黑话', status: detail.jargon, visible: true },
+    { kind: 'expression' as const, title: '表达', status: detail.expression },
+    { kind: 'jargon' as const, title: '黑话', status: detail.jargon },
     {
+      kind: 'behavior' as const,
       title: '行为',
       status: detail.behavior,
-      visible: Boolean(detail.behavior && (detail.behavior.use || detail.behavior.learn)),
     },
   ]
 
   return (
     <section className="space-y-2">
       {configRows.map((row) =>
-        row.visible && row.status ? (
-          <ConfigStatusRow key={row.title} title={row.title} status={row.status} />
+        row.status ? (
+          <ConfigStatusRow
+            key={row.kind}
+            detail={detail}
+            kind={row.kind}
+            title={row.title}
+            status={row.status}
+          />
         ) : null
       )}
     </section>

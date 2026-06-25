@@ -77,6 +77,13 @@ interface TabGroup {
   sections: string[]
 }
 
+interface SubtabPane {
+  advanced: boolean
+  content: ReactNode
+  id: string
+  label: string
+}
+
 /**
  * 从 schema 的 nested 字段解析出 tab 分组信息。
  * - 有 uiLabel 且无 uiParent → 独立 tab
@@ -774,6 +781,8 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
   const { configSchema, sectionValues, setHasUnsavedChanges, setSectionValue, tabGroups } = props
   const [expanded, setExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState(tabGroups[0]?.id ?? '')
+  const [expandedSubtabGroups, setExpandedSubtabGroups] = useState<Record<string, boolean>>({})
+  const [activeSubtabByGroup, setActiveSubtabByGroup] = useState<Record<string, string>>({})
   const [advancedVisible, setAdvancedVisible] = useState(false)
   const [tabGuideVisible, setTabGuideVisible] = useState(
     () => localStorage.getItem('bot-config-tabs-guide-dismissed') !== 'true'
@@ -832,13 +841,72 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     })
   }
 
-  const renderSubtabbedContent = (tabNestedEntries: readonly (readonly [string, ConfigSchema])[]) => {
-    const subtabPanes: Array<{ content: ReactNode; id: string; label: string }> = []
+  const renderSubtabbedContent = (tabId: string, tabNestedEntries: readonly (readonly [string, ConfigSchema])[]) => {
+    const subtabPanes: SubtabPane[] = []
+    const chatManagementHintPaneIds = new Set(['chat.reply_timing', 'chat.reply_style'])
+    const entryMap = new Map<string, ConfigSchema>(
+      tabNestedEntries.map(([sectionName, schema]) => [sectionName, schema]),
+    )
+    const childSectionsByParent = new Map<string, Array<readonly [string, ConfigSchema]>>()
 
     for (const [sectionName, sectionSchema] of tabNestedEntries) {
+      const parentName = sectionSchema.uiParent
+      if (!parentName || !entryMap.has(parentName)) {
+        continue
+      }
+
+      const childSections = childSectionsByParent.get(parentName) ?? []
+      childSections.push([sectionName, sectionSchema])
+      childSectionsByParent.set(parentName, childSections)
+    }
+
+    const collectDescendantEntries = (parentName: string): Array<readonly [string, ConfigSchema]> => {
+      const directChildEntries = childSectionsByParent.get(parentName) ?? []
+
+      return directChildEntries.flatMap(([childName, childSchema]) => {
+        return [[childName, childSchema] as const, ...collectDescendantEntries(childName)]
+      })
+    }
+
+    const renderSectionGroupContent = (sectionEntries: Array<readonly [string, ConfigSchema]>) => {
+      const values = Object.fromEntries(
+        sectionEntries.map(([sectionName]) => [sectionName, sectionValues[sectionName] ?? {}])
+      )
+      const groupSchema: ConfigSchema = {
+        className: sectionEntries.map(([sectionName]) => sectionName).join('.'),
+        classDoc: sectionEntries[0]?.[1].uiLabel || sectionEntries[0]?.[1].classDoc || '',
+        fields: [],
+        nested: Object.fromEntries(sectionEntries),
+      }
+
+      return (
+        <DynamicConfigForm
+          schema={groupSchema}
+          values={values}
+          onChange={(fieldPath, value) => {
+            const [sectionName, ...restPath] = fieldPath.split('.')
+            if (!sectionName) {
+              return
+            }
+
+            updateSectionValueByPath(sectionName, restPath, value)
+          }}
+          hooks={fieldHooks}
+          advancedVisible={advancedVisible}
+          sectionColumns={2}
+        />
+      )
+    }
+
+    for (const [sectionName, sectionSchema] of tabNestedEntries) {
+      if (sectionSchema.uiParent && entryMap.has(sectionSchema.uiParent)) {
+        continue
+      }
+
       const sectionValue = (sectionValues[sectionName] ?? {}) as ConfigSectionData
-      const subcategoryEntries = sectionSchema.uiUseSubTabs ? getObjectSubcategoryEntries(sectionSchema) : []
-      const subcategoryNames = new Set(subcategoryEntries.map(([subcategoryName]) => subcategoryName))
+      const allSubcategoryEntries = sectionSchema.uiUseSubTabs ? getObjectSubcategoryEntries(sectionSchema) : []
+      const subcategoryEntries = allSubcategoryEntries
+      const subcategoryNames = new Set(allSubcategoryEntries.map(([subcategoryName]) => subcategoryName))
       const rootFields = sectionSchema.fields.filter((field) => !subcategoryNames.has(field.name))
       const rootSchema: ConfigSchema = {
         ...sectionSchema,
@@ -849,6 +917,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
       if (rootFields.length > 0) {
         subtabPanes.push({
+          advanced: Boolean(sectionSchema.uiAdvanced),
           id: sectionName,
           label: sectionSchema.uiRootSubLabel || getSubtabLabel(sectionSchema, sectionName),
           content: (
@@ -867,6 +936,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
       for (const [subcategoryName, subcategorySchema] of subcategoryEntries) {
         subtabPanes.push({
+          advanced: Boolean(subcategorySchema.uiAdvanced),
           id: `${sectionName}.${subcategoryName}`,
           label: getSubtabLabel(subcategorySchema, subcategoryName),
           content: (
@@ -884,25 +954,100 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
           ),
         })
       }
+
+      for (const [childName, childSchema] of childSectionsByParent.get(sectionName) ?? []) {
+        const sectionGroupEntries = [[childName, childSchema] as const, ...collectDescendantEntries(childName)]
+        subtabPanes.push({
+          advanced: Boolean(childSchema.uiAdvanced),
+          id: childName,
+          label: getSubtabLabel(childSchema, childName),
+          content: renderSectionGroupContent(sectionGroupEntries),
+        })
+      }
     }
 
     if (subtabPanes.length === 0) {
       return null
     }
 
+    const subtabExpanded = Boolean(expandedSubtabGroups[tabId])
+    const defaultSubtabPanes = subtabPanes.filter((pane) => !pane.advanced)
+    const expandedSubtabPanes = subtabPanes.filter((pane) => pane.advanced)
+    const visibleSubtabPanes = subtabExpanded ? [...defaultSubtabPanes, ...expandedSubtabPanes] : defaultSubtabPanes
+    const hasCollapsibleSubtabs = subtabPanes.some((pane) => pane.advanced)
+    const firstExpandedSubtabId = visibleSubtabPanes.find((pane) => pane.advanced)?.id
+    const visibleSubtabIds = new Set(visibleSubtabPanes.map((pane) => pane.id))
+    const activeSubtab = activeSubtabByGroup[tabId]
+    const resolvedActiveSubtab = visibleSubtabIds.has(activeSubtab)
+      ? activeSubtab
+      : visibleSubtabPanes[0]?.id ?? subtabPanes[0].id
+
+    const toggleSubtabsExpanded = () => {
+      if (subtabExpanded && subtabPanes.find((pane) => pane.id === resolvedActiveSubtab)?.advanced) {
+        setActiveSubtabByGroup((current) => ({
+          ...current,
+          [tabId]: defaultSubtabPanes[0]?.id ?? subtabPanes[0].id,
+        }))
+      }
+
+      setExpandedSubtabGroups((current) => ({
+        ...current,
+        [tabId]: !subtabExpanded,
+      }))
+    }
+
     return (
-      <Tabs defaultValue={subtabPanes[0].id} className="space-y-3">
-        <DashboardTabBar variant="scroll" className="bg-background/80 border">
-          {subtabPanes.map((pane) => (
-            <DashboardTabTrigger key={pane.id} value={pane.id} className="text-xs">
-              {pane.label}
-            </DashboardTabTrigger>
+      <Tabs
+        key={subtabPanes.map((pane) => pane.id).join('|')}
+        value={resolvedActiveSubtab}
+        onValueChange={(value) =>
+          setActiveSubtabByGroup((current) => ({
+            ...current,
+            [tabId]: value,
+          }))
+        }
+        className="space-y-3"
+      >
+        <DashboardTabBar data-config-bot-subtab-list="true" variant="scroll" className="bg-background/80 h-11 border">
+          {visibleSubtabPanes.map((pane) => (
+            <Fragment key={pane.id}>
+              {pane.id === firstExpandedSubtabId && (
+                <span className="bg-border/90 mx-1 hidden h-7 w-[2px] transition-opacity duration-200 sm:block" />
+              )}
+              <DashboardTabTrigger
+                value={pane.id}
+                data-config-bot-extra-tab={pane.advanced ? 'true' : undefined}
+                className={cn(
+                  'min-h-8 text-base font-semibold',
+                  pane.advanced &&
+                    'text-muted-foreground/80 decoration-border/80 hover:bg-background/70 data-[state=active]:bg-primary/10 data-[state=active]:text-primary underline decoration-dashed underline-offset-4 data-[state=active]:shadow-none motion-safe:animate-[config-tab-enter_180ms_ease-out_both]'
+                )}
+              >
+                {pane.label}
+              </DashboardTabTrigger>
+            </Fragment>
           ))}
+          {hasCollapsibleSubtabs && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="group h-8 shrink-0 gap-1 self-center px-2 text-sm leading-none transition-all duration-200 ease-out sm:px-2.5"
+              onClick={toggleSubtabsExpanded}
+            >
+              {subtabExpanded ? (
+                <ChevronLeft className="h-3.5 w-3.5 transition-transform duration-200 group-hover:-translate-x-0.5" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+              )}
+              {subtabExpanded ? '收起' : '更多'}
+            </Button>
+          )}
         </DashboardTabBar>
 
-        {subtabPanes.map((pane) => (
+        {visibleSubtabPanes.map((pane) => (
           <TabsContent key={pane.id} value={pane.id} className="mt-0">
-            {pane.id === 'chat' && (
+            {chatManagementHintPaneIds.has(pane.id) && (
               <div className="mb-3 flex flex-col gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                 <span>需要按具体聊天流调整发言频率或查看聊天 Prompt 时，可以前往聊天管理。</span>
                 <Button asChild size="sm" variant="outline" className="h-8 shrink-0 self-start sm:self-center">
@@ -930,7 +1075,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     }
 
     if (tabNestedEntries.some(([, sectionSchema]) => sectionSchema.uiUseSubTabs)) {
-      return renderSubtabbedContent(tabNestedEntries)
+      return renderSubtabbedContent(tab.id, tabNestedEntries)
     }
 
     const values = Object.fromEntries(
@@ -965,7 +1110,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-      <DashboardTabBar data-config-bot-tab-list="true" className="sm:flex-wrap">
+      <DashboardTabBar data-config-bot-tab-list="true" className="h-[3.25rem] min-h-[3.25rem] sm:flex-wrap">
         {visibleTabGroups.map((tab) => {
           const isExpandedOnlyTab = tab.advanced
           return (
@@ -977,6 +1122,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
                 value={tab.id}
                 data-config-bot-extra-tab={isExpandedOnlyTab ? 'true' : undefined}
                 className={cn(
+                  'min-h-9 text-lg font-semibold',
                   isExpandedOnlyTab &&
                     'text-muted-foreground/80 decoration-border/80 hover:bg-background/70 data-[state=active]:bg-primary/10 data-[state=active]:text-primary underline decoration-dashed underline-offset-4 data-[state=active]:shadow-none motion-safe:animate-[config-tab-enter_180ms_ease-out_both]'
                 )}
@@ -991,7 +1137,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             type="button"
             variant="ghost"
             size="sm"
-            className="group h-7 shrink-0 gap-1 self-center px-1.5 text-xs leading-none transition-all duration-200 ease-out sm:px-2"
+            className="group h-9 shrink-0 gap-1 self-center px-2 text-sm leading-none transition-all duration-200 ease-out sm:px-2.5"
             onClick={toggleExpanded}
           >
             {expanded ? (
@@ -1006,7 +1152,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
           type="button"
           variant={advancedVisible ? 'default' : 'outline'}
           size="sm"
-          className="h-7 shrink-0 self-center px-2 text-xs leading-none transition-all duration-200 ease-out sm:ml-auto"
+          className="h-9 shrink-0 self-center px-2.5 text-sm leading-none transition-all duration-200 ease-out sm:ml-auto"
           onClick={() => setAdvancedVisible((current) => !current)}
         >
           高级设置

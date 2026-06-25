@@ -20,8 +20,13 @@ OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
 }
 
 REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS = {
-    "frequency": "按回复频率折算消息阈值，消息不足时使用空窗补偿",
-    "reply_necessity": "用本地启发式回复必要性评分决定是否进入 Planner",
+    "frequency": "按照新消息数量决定思考",
+    "reply_necessity": "综合新消息数量、内容、过往发言决定思考",
+}
+
+REPLY_TRIGGER_MODE_OPTION_LABELS = {
+    "frequency": "频率触发",
+    "reply_necessity": "必要性触发",
 }
 
 """
@@ -545,6 +550,7 @@ class ChatReplyTimingConfig(ConfigBase):
             "x-icon": "activity",
             "x-layout": "inline-right",
             "x-input-width": "12rem",
+            "x-option-labels": REPLY_TRIGGER_MODE_OPTION_LABELS,
             "x-option-descriptions": REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS,
         },
     )
@@ -767,21 +773,6 @@ class ChatConfig(ConfigBase):
     __ui_use_subtabs__ = True
     __ui_root_sub_label__ = "基础设置"
 
-    self_message_special_mark: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "自身消息特殊标注",
-                "en_US": "Special mark for self messages",
-                "ja_JP": "自分のメッセージ特別マーク",
-            },
-            "x-widget": "switch",
-            "x-icon": "badge-check",
-            "x-row": "context-sizes",
-        },
-    )
-    """加强标记麦麦自己的消息，减少把自己当成别人的情况。"""
-
     max_context_size: int = Field(
         default=40,
         json_schema_extra={
@@ -794,7 +785,7 @@ class ChatConfig(ConfigBase):
             "x-icon": "layers",
             "x-layout": "inline-right",
             "x-input-width": "6.5rem",
-            "x-row": "context-sizes",
+            "x-row": "chat-context-controls",
         },
     )
     """群聊回复时参考的最近消息数量；越大越懂上下文，也更耗模型。"""
@@ -811,7 +802,7 @@ class ChatConfig(ConfigBase):
             "x-icon": "layers",
             "x-layout": "inline-right",
             "x-input-width": "6.5rem",
-            "x-row": "context-sizes",
+            "x-row": "chat-context-controls",
         },
     )
     """私聊回复时参考的最近消息数量。"""
@@ -826,7 +817,7 @@ class ChatConfig(ConfigBase):
             },
             "x-widget": "switch",
             "x-icon": "scissors",
-            "x-row": "context-sizes",
+            "x-row": "chat-context-controls",
         },
     )
     """压缩部分上下文，减少模型消耗；一般建议开启。"""
@@ -841,7 +832,7 @@ class ChatConfig(ConfigBase):
             },
             "x-widget": "switch",
             "x-icon": "archive",
-            "x-row": "context-sizes",
+            "x-row": "chat-recall-controls",
         },
     )
     """打开后会主动召回最近聊天发生的事情。"""
@@ -859,10 +850,25 @@ class ChatConfig(ConfigBase):
             "x-icon": "archive",
             "x-layout": "inline-right",
             "x-input-width": "6.5rem",
-            "x-row": "context-sizes",
+            "x-row": "chat-recall-controls",
         },
     )
     """最多保留多少条聊天回想；设为 0 表示不保留。"""
+
+    self_message_special_mark: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "自身消息特殊标注",
+                "en_US": "Special mark for self messages",
+                "ja_JP": "自分のメッセージ特別マーク",
+            },
+            "x-widget": "switch",
+            "x-icon": "badge-check",
+            "x-row": "self-message-mark",
+        },
+    )
+    """加强标记麦麦自己的消息，减少把自己当成别人的情况。"""
 
     reply_timing: ChatReplyTimingConfig = Field(default_factory=ChatReplyTimingConfig)
     """什么时候回复、回复频率与等待退避配置。"""
@@ -3187,6 +3193,7 @@ class ExpressionConfig(ConfigBase):
             },
             "x-widget": "switch",
             "x-icon": "check",
+            "x-row": "expression-learning-switches",
         },
     )
     """只使用人工确认过的表达方式，更稳但学习效果会慢一些。"""
@@ -3201,6 +3208,7 @@ class ExpressionConfig(ConfigBase):
             },
             "x-widget": "switch",
             "x-icon": "sparkles",
+            "x-row": "expression-learning-switches",
         },
     )
     """写入表达方式前先让 AI 检查，减少学到奇怪内容。"""
@@ -3635,6 +3643,7 @@ class KeywordReactionConfig(ConfigBase):
 class ResponsePostProcessConfig(ConfigBase):
     """回复后处理配置类"""
 
+    __ui_parent__ = "chat"
     __ui_label__ = "后处理"
     __ui_advanced__ = True
     __ui_order__ = 100

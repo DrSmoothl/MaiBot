@@ -79,11 +79,11 @@ def test_planner_no_tool_ends_cycle() -> None:
 
 
 def test_reply_necessity_trigger_is_optional(monkeypatch) -> None:
-    monkeypatch.setattr(global_config.chat, "enable_reply_necessity_trigger", False, raising=False)
+    monkeypatch.setattr(global_config.chat.reply_timing, "reply_trigger_mode", "frequency")
 
     assert is_reply_necessity_trigger_enabled() is False
 
-    monkeypatch.setattr(global_config.chat, "enable_reply_necessity_trigger", True, raising=False)
+    monkeypatch.setattr(global_config.chat.reply_timing, "reply_trigger_mode", "reply_necessity")
 
     assert is_reply_necessity_trigger_enabled() is True
 

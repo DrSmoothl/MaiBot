@@ -271,14 +271,14 @@ class MaisakaExpressionSelector:
         candidates: List[dict[str, Any]],
     ) -> str:
         candidate_lines = [
-            f"{candidate['id']}: 情景={candidate['situation']} | 风格={candidate['style']} | count={candidate['count']}"
+            f"{candidate['id']}: 情景={candidate['situation']} | 风格={candidate['style']}"
             for candidate in candidates
         ]
 
         return (
             "你是 Maisaka 的表达方式选择子代理。\n"
             "你只负责根据下方真实聊天上下文，为这一次可见回复挑选最合适的表达方式。\n"
-            "请只从下面候选中选择 0 到 3 条最适合当前语境的表达方式。\n"
+            "请只从下面候选中选择 0 到 5 条最适合当前语境的表达方式。\n"
             "优先考虑自然、贴合上下文、不生硬、不模板化。\n"
             "如果没有明显合适的，就返回空数组。\n"
             '严格只输出 JSON，对象格式为 {"selected_ids":[123,456]}。\n\n'

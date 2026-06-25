@@ -69,7 +69,15 @@ export interface ChatPromptDetail {
   base_prompt_type: ChatStreamType | string
   base_prompt_title: string
   base_prompt: string
-  chat_prompts: string[]
+  chat_prompts: ChatPromptRule[]
+}
+
+export interface ChatPromptRule {
+  index: number
+  platform: string
+  item_id: string
+  rule_type: ChatStreamType | string
+  prompt: string
 }
 
 export interface ChatStreamDetail {
@@ -123,6 +131,15 @@ interface UpdateTalkFrequencyPayload {
   value: number
 }
 
+interface UpdateLearningPayload {
+  use: boolean
+  learn: boolean
+}
+
+interface UpdateChatPromptPayload {
+  prompt: string
+}
+
 export async function getChatStreams(limit = 1000): Promise<ChatStream[]> {
   const result = await backendApi.get<ChatStreamsResponse>('/api/chat/sessions', {
     query: { limit },
@@ -166,6 +183,59 @@ export async function deleteChatStreamTalkFrequency(
     {
       query: { time },
       errorMessage: '删除发言频率规则失败',
+    }
+  )
+  if (!result.detail) {
+    throw new Error('聊天流详情为空')
+  }
+  return result.detail
+}
+
+export async function updateChatStreamLearning(
+  sessionId: string,
+  kind: 'expression' | 'jargon' | 'behavior',
+  payload: UpdateLearningPayload
+): Promise<ChatStreamDetail> {
+  const result = await backendApi.put<ChatStreamDetailResponse>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/learning/${kind}`,
+    {
+      body: payload,
+      errorMessage: '保存学习配置失败',
+    }
+  )
+  if (!result.detail) {
+    throw new Error('聊天流详情为空')
+  }
+  return result.detail
+}
+
+export async function upsertChatStreamPrompt(
+  sessionId: string,
+  payload: UpdateChatPromptPayload,
+  index?: number
+): Promise<ChatStreamDetail> {
+  const result = await backendApi.put<ChatStreamDetailResponse>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/prompts`,
+    {
+      body: payload,
+      query: index === undefined ? undefined : { index },
+      errorMessage: '保存聊天 Prompt 失败',
+    }
+  )
+  if (!result.detail) {
+    throw new Error('聊天流详情为空')
+  }
+  return result.detail
+}
+
+export async function deleteChatStreamPrompt(
+  sessionId: string,
+  index: number
+): Promise<ChatStreamDetail> {
+  const result = await backendApi.delete<ChatStreamDetailResponse>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/prompts/${index}`,
+    {
+      errorMessage: '删除聊天 Prompt 失败',
     }
   )
   if (!result.detail) {

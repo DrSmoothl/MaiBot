@@ -150,12 +150,10 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
     if isinstance(add_cfg, dict):
         if add_cfg.get("at_bot") or add_cfg.get("is_mentioned"):
             is_mentioned = True
-            # 当提供数值型 is_mentioned 时，当作概率提升
-            try:
-                if add_cfg.get("is_mentioned") not in (None, ""):
-                    reply_probability = float(add_cfg.get("is_mentioned"))  # type: ignore
-            except Exception:
-                pass
+            # 当提供数值型 is_mentioned 时，当作概率提升；布尔提及标记只负责标记命中。
+            raw_mention_boost = add_cfg.get("is_mentioned")
+            if raw_mention_boost not in (None, "") and not isinstance(raw_mention_boost, bool):
+                reply_probability = float(raw_mention_boost)
 
     # 2) 已经在上游设置过的 message.is_mentioned
     if getattr(message, "is_mentioned", False):
@@ -221,10 +219,11 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
                 break
 
     # 7) 概率设置
-    if is_at and getattr(global_config.chat, "inevitable_at_reply", 1):
+    reply_timing_config = global_config.chat.reply_timing
+    if is_at and reply_timing_config.inevitable_at_reply:
         reply_probability = 1.0
         logger.debug("被@，回复概率设置为100%")
-    elif is_mentioned and getattr(global_config.chat, "mentioned_bot_reply", 1):
+    elif is_mentioned and reply_timing_config.mentioned_bot_reply:
         reply_probability = max(reply_probability, 1.0)
         logger.debug("被提及，回复概率设置为100%")
 
