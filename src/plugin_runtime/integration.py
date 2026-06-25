@@ -27,6 +27,8 @@ from typing import (
 
 import asyncio
 import inspect
+import shutil
+import stat
 
 import tomlkit
 
@@ -376,6 +378,55 @@ class PluginRuntimeManager(
 
         self._apply_blocked_plugin_reasons_to_supervisors()
 
+    @staticmethod
+    def _is_plugin_load_residue_dir(plugin_path: Path) -> bool:
+        """判断目录是否为插件加载前可安全清理的残留目录。"""
+        if not plugin_path.exists() or not plugin_path.is_dir() or plugin_path.is_symlink():
+            return False
+        if is_reserved_plugin_directory(plugin_path):
+            return False
+
+        try:
+            entries = list(plugin_path.iterdir())
+        except OSError:
+            return False
+
+        if not entries:
+            return False
+
+        allowed_names = {".git", "__pycache__"}
+        entry_names = {entry.name for entry in entries}
+        if not entry_names.issubset(allowed_names):
+            return False
+
+        return all(entry.is_dir() and not entry.is_symlink() for entry in entries)
+
+    @classmethod
+    def _cleanup_plugin_load_residue_dirs(cls, plugin_dirs: Sequence[Path]) -> List[Path]:
+        """清理插件系统加载前可判定的卸载残留目录。"""
+        removed_paths: List[Path] = []
+
+        def remove_readonly(func: Any, target_path: str, _: Any) -> None:
+            Path(target_path).chmod(stat.S_IWRITE)
+            func(target_path)
+
+        for plugin_root in plugin_dirs:
+            if not plugin_root.is_dir():
+                continue
+            for plugin_path in plugin_root.iterdir():
+                if not cls._is_plugin_load_residue_dir(plugin_path):
+                    continue
+                try:
+                    shutil.rmtree(plugin_path, onerror=remove_readonly)
+                    removed_paths.append(plugin_path)
+                except Exception as exc:
+                    logger.warning(f"清理插件加载残留目录失败: {plugin_path}: {exc}")
+
+        if removed_paths:
+            cleaned_names = ", ".join(path.name for path in removed_paths)
+            logger.info(f"插件系统加载前已清理 {len(removed_paths)} 个残留目录: {cleaned_names}")
+        return removed_paths
+
     async def _start_supervisors(
         self,
         builtin_dirs: Sequence[Path],
@@ -473,6 +524,7 @@ class PluginRuntimeManager(
         """
 
         builtin_dirs, third_party_dirs = self._resolve_runtime_plugin_dirs()
+        self._cleanup_plugin_load_residue_dirs(third_party_dirs)
         if duplicate_plugin_ids := self._find_duplicate_plugin_ids(builtin_dirs + third_party_dirs):
             details = "; ".join(
                 f"{plugin_id}: {', '.join(str(path) for path in paths)}"
@@ -510,6 +562,7 @@ class PluginRuntimeManager(
             return
 
         builtin_dirs, third_party_dirs = self._resolve_runtime_plugin_dirs()
+        self._cleanup_plugin_load_residue_dirs(third_party_dirs)
 
         if duplicate_plugin_ids := self._find_duplicate_plugin_ids(builtin_dirs + third_party_dirs):
             details = "; ".join(
