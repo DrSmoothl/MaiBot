@@ -573,7 +573,7 @@ class ChatReplyTimingConfig(ConfigBase):
     """思考时来了新消息，最多重新思考多少次。"""
 
     max_consecutive_wait_count: int = Field(
-        default=5,
+        default=3,
         ge=1,
         json_schema_extra={
             "label": {
@@ -583,7 +583,6 @@ class ChatReplyTimingConfig(ConfigBase):
             },
             "x-widget": "input",
             "x-icon": "timer-reset",
-            "advanced": True,
         },
     )
     """Planner 最多连续调用 wait 多少次；达到上限后 wait 工具会拒绝继续进入等待。"""

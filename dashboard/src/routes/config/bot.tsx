@@ -1110,7 +1110,10 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-      <DashboardTabBar data-config-bot-tab-list="true" className="h-[3.25rem] min-h-[3.25rem] sm:flex-wrap">
+      <DashboardTabBar
+        data-config-bot-tab-list="true"
+        className="h-auto min-h-[3.25rem] content-start items-stretch sm:flex-wrap"
+      >
         {visibleTabGroups.map((tab) => {
           const isExpandedOnlyTab = tab.advanced
           return (
