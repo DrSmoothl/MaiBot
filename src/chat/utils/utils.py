@@ -655,8 +655,11 @@ def protect_kaomoji(sentence):
     kaomoji_matches = kaomoji_pattern.findall(sentence)
     placeholder_to_kaomoji = {}
 
-    for idx, match in enumerate(kaomoji_matches):
+    for match in kaomoji_matches:
         kaomoji = match[0] or match[1]
+        if kaomoji.startswith("[表情包") and kaomoji.endswith("]"):
+            continue
+        idx = len(placeholder_to_kaomoji)
         placeholder = f"__KAOMOJI_{idx}__"
         sentence = sentence.replace(kaomoji, placeholder, 1)
         placeholder_to_kaomoji[placeholder] = kaomoji
