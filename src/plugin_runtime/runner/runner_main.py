@@ -63,6 +63,7 @@ from src.plugin_runtime.protocol.envelope import (
 )
 from src.plugin_runtime.protocol.errors import ErrorCode
 from src.plugin_runtime.runner.log_handler import RunnerIPCLogHandler
+from src.plugin_runtime.runner.plugin_paths import PluginPaths, build_plugin_paths
 from src.plugin_runtime.runner.plugin_loader import PluginCandidate, PluginLoader, PluginMeta
 from src.plugin_runtime.runner.rpc_client import RPCClient
 
@@ -664,7 +665,7 @@ class PluginRunner:
             return await result
         return result
 
-    def _inject_context(self, plugin_id: str, instance: object) -> None:
+    def _inject_context(self, plugin_id: str, instance: object, plugin_dir: Optional[str] = None) -> None:
         """为插件实例创建并注入 PluginContext。
 
         对新版 MaiBotPlugin（具有 _set_context 方法）：创建 PluginContext 并注入。
@@ -734,10 +735,51 @@ class PluginRunner:
                 return resp.payload.get("result")
             return resp.payload
 
-        ctx = PluginContext(plugin_id=plugin_id, rpc_call=_rpc_call)
+        plugin_paths = build_plugin_paths(plugin_id, _PROJECT_ROOT)
+        ctx = self._create_plugin_context(
+            PluginContext,
+            plugin_id=plugin_id,
+            rpc_call=_rpc_call,
+            plugin_paths=plugin_paths,
+        )
+        self._warn_legacy_plugin_data_dir(plugin_id, plugin_dir, plugin_paths.data_dir)
         self._ensure_context_llm_helpers(ctx)
         cast(_ContextAwarePlugin, instance)._set_context(ctx)
         logger.debug(f"已为插件 {plugin_id} 注入 PluginContext")
+
+    @staticmethod
+    def _create_plugin_context(
+        context_class: Any,
+        *,
+        plugin_id: str,
+        rpc_call: Callable[..., Any],
+        plugin_paths: PluginPaths,
+    ) -> Any:
+        """创建 PluginContext，并兼容尚未正式支持 paths 参数的 SDK。"""
+
+        context_signature = inspect.signature(context_class)
+        if "paths" in context_signature.parameters:
+            return context_class(plugin_id=plugin_id, rpc_call=rpc_call, paths=plugin_paths)
+
+        ctx = context_class(plugin_id=plugin_id, rpc_call=rpc_call)
+        ctx.paths = plugin_paths
+        return ctx
+
+    @staticmethod
+    def _warn_legacy_plugin_data_dir(plugin_id: str, plugin_dir: Optional[str], data_dir: Path) -> None:
+        """提示插件作者迁移旧式源码目录 data。"""
+
+        if not plugin_dir:
+            return
+
+        legacy_data_dir = Path(plugin_dir) / "data"
+        if not legacy_data_dir.exists():
+            return
+
+        logger.warning(
+            f"插件 {plugin_id} 检测到旧式数据目录 {legacy_data_dir}，"
+            f"建议迁移到统一持久化目录 {data_dir}"
+        )
 
     @staticmethod
     def _ensure_context_llm_helpers(ctx: Any) -> None:
@@ -1468,7 +1510,7 @@ class PluginRunner:
         Returns:
             PluginActivationStatus: 插件激活结果。
         """
-        self._inject_context(meta.plugin_id, meta.instance)
+        self._inject_context(meta.plugin_id, meta.instance, meta.plugin_dir)
         try:
             plugin_config = self._apply_plugin_config(meta)
         except PluginConfigVersionError as exc:
