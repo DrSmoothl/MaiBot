@@ -7,9 +7,10 @@
  */
 import { ApiError, backendApi, requireSuccess } from '@/lib/http'
 
-import type { PluginConfigSchema } from './types'
+import type { PluginConfigSchema, PluginRuntimeComponent } from './types'
 
 const API_BASE = '/api/webui/plugins/config'
+const RUNTIME_API_BASE = '/api/webui/plugins/runtime'
 
 /**
  * 获取插件配置 Schema
@@ -103,4 +104,19 @@ export async function togglePlugin(
     `${API_BASE}/${pluginId}/toggle`,
     { errorMessage: '切换插件状态失败' }
   )
+}
+
+/**
+ * 获取插件当前注册的运行时组件
+ */
+export async function getPluginRuntimeComponents(pluginId: string): Promise<PluginRuntimeComponent[]> {
+  const data = await backendApi.get<{
+    success: boolean
+    components?: PluginRuntimeComponent[]
+    message?: string
+  }>(`${RUNTIME_API_BASE}/plugins/${pluginId}/components`, {
+    errorMessage: '获取插件组件失败',
+  })
+  const checked = requireSuccess(data, '获取插件组件失败')
+  return checked.components ?? []
 }

@@ -128,6 +128,23 @@ describe('useDataList', () => {
       expect(result.current.filters.status).toBe('active')
     })
 
+    it('批量更新筛选时只产生一个合并后的筛选对象', async () => {
+      const { result } = renderDataList({ queryFn: makeQueryFn(95) })
+      await waitFor(() => expect(result.current.totalPages).toBe(5))
+      act(() => result.current.goToPage(3))
+
+      act(() =>
+        result.current.updateFilters((filters) => ({
+          ...filters,
+          status: 'active',
+          flagged: true,
+        })),
+      )
+
+      expect(result.current.page).toBe(1)
+      expect(result.current.filters).toEqual({ status: 'active', flagged: true })
+    })
+
     it('改搜索输入时重置页码到 1', async () => {
       const { result } = renderDataList({ queryFn: makeQueryFn(95) })
       await waitFor(() => expect(result.current.totalPages).toBe(5))

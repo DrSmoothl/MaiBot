@@ -1,10 +1,8 @@
-﻿import json
 import random
 import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
 from src.chat.message_receive.chat_manager import BotChatSession
@@ -47,12 +45,10 @@ from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.plugin_runtime.hook_payloads import deserialize_prompt_messages, serialize_prompt_messages
 
-from .local_mai_replyer import build_local_mai_replyer_messages
 from .maisaka_expression_selector import maisaka_expression_selector
 
 logger = get_logger("replyer")
 
-DEBUG_REPLY_CACHE_DIR = Path("logs/debug_reply_cache")
 REPLYER_MAX_HOOK_RETRIES = 3
 TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 
@@ -251,10 +247,10 @@ class BaseMaisakaReplyGenerator:
         prompt_lines: List[str] = []
 
         if is_group_chat is True:
-            if group_chat_prompt := global_config.chat.group_chat_prompt.strip():
+            if group_chat_prompt := global_config.chat.reply_style.group_chat_prompt.strip():
                 prompt_lines.append(f"通用注意事项：\n{group_chat_prompt}")
         elif is_group_chat is False:
-            if private_chat_prompt := global_config.chat.private_chat_prompts.strip():
+            if private_chat_prompt := global_config.chat.reply_style.private_chat_prompts.strip():
                 prompt_lines.append(f"通用注意事项：\n{private_chat_prompt}")
 
         if chat_prompt := self._get_chat_prompt_for_chat(session_id, is_group_chat).strip():
@@ -279,55 +275,17 @@ class BaseMaisakaReplyGenerator:
         """构建 replyer 的最终输出格式说明。"""
 
         locale = BaseMaisakaReplyGenerator._get_prompt_locale()
-        if not global_config.experimental.enable_replyer_format_output:
-            if locale.startswith("en"):
-                return (
-                    "Please do not output any extra content (including unnecessary prefixes or suffixes, "
-                    "colons, brackets, stickers, plain at, or @). Only output the message content itself."
-                )
-            if locale.startswith("ja"):
-                return (
-                    "余計な内容（不要な前置きや後置き、コロン、括弧、スタンプ、通常の at や @ など）は出力せず、"
-                    "発言内容だけを出力してください。"
-                )
-            return "请注意不要输出多余内容(包括不必要的前后缀，冒号，括号，表情包，@等 )，只输出发言内容就好。"
-
         if locale.startswith("en"):
             return (
-                "Only output the message fragments to send. Do not output explanations, Markdown, or code fences. "
-                "Use `<text>text</text>` for normal text; "
-                'to mention someone, use `<at msg_id="message id">display name</at>`; '
-                "use `<emoji>emotion or sticker description</emoji>` when you want to send a sticker. "
-                "To resend an existing image from context, use "
-                '`<image msg_id="message id" index="0">optional description</image>`; '
-                'for tool-result media, use `media_index="tool_result:call_x:0"` instead of `msg_id`. '
-                "You may combine fragments in send order, for example: "
-                '`<text>fine</text><image msg_id="123" index="0">that image</image>`.'
+                "Please do not output any extra content (including unnecessary prefixes or suffixes, "
+                "colons, brackets, stickers, plain at, or @). Only output the message content itself."
             )
-
         if locale.startswith("ja"):
             return (
-                "送信するメッセージフラグメントだけを出力してください。説明、Markdown、コードブロックは出力しないでください。"
-                "通常の文字は `<text>文字</text>` を使います；"
-                '`<at msg_id="メッセージID">表示名</at>` で at できます；'
-                "スタンプを送りたいときは `<emoji>感情またはスタンプ説明</emoji>` を使います。"
-                "文脈中の既存画像を送りたいときは "
-                '`<image msg_id="メッセージID" index="0">任意の説明</image>` を使います。'
-                'ツール結果のメディアは `msg_id` の代わりに `media_index="tool_result:call_x:0"` を使います。'
-                "送信順に複数のフラグメントを組み合わせてもかまいません。例："
-                '`<text>まあいいか</text><image msg_id="123" index="0">その画像</image>`。'
+                "余計な内容（不要な前置きや後置き、コロン、括弧、スタンプ、通常の at や @ など）は出力せず、"
+                "発言内容だけを出力してください。"
             )
-
-        return (
-            "请只输出要发送的消息片段，不要输出解释、Markdown 或代码块。"
-            "普通文字使用 `<text>文字</text>`；"
-            '需要 at 某人时，使用 `<at msg_id="消息编号">显示名</at>`；'
-            "想发送表情包时，使用 `<emoji>情绪或表情描述</emoji>`。"
-            '想转发上下文里已有图片时，使用 `<image msg_id="消息编号" index="0">可选描述</image>`。'
-            '工具返回媒体用 `media_index="tool_result:call_x:0"` 代替 `msg_id`。'
-            "可以按发送顺序组合多个片段，例如："
-            '`<text>行吧</text><image msg_id="123" index="0">那张图</image>`。'
-        )
+        return "请注意不要输出多余内容(包括不必要的前后缀，冒号，括号，表情包，@等 )，只输出发言内容就好。"
 
     @staticmethod
     def _replace_regex_capture_groups(reaction: str, match: re.Match[str]) -> str:
@@ -448,8 +406,6 @@ class BaseMaisakaReplyGenerator:
         return system_prompt
 
     def _build_reply_instruction(self) -> str:
-        if global_config.experimental.enable_replyer_format_output:
-            return self._build_replyer_output_instruction()
         return "请自然地回复。不要输出多余说明、括号、@ 或额外标记，只输出实际要发送的内容。"
 
     def _build_final_user_message(
@@ -530,9 +486,6 @@ class BaseMaisakaReplyGenerator:
         enable_visual_message: bool = False,
         reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> List[Message]:
-        if global_config.debug.enable_local_mai_replyer:
-            return build_local_mai_replyer_messages(reply_reason, reply_tool_args)
-
         messages: List[Message] = []
         keywords_reaction_prompt = self._build_keyword_reaction_prompt(
             chat_history=chat_history,
@@ -687,40 +640,6 @@ class BaseMaisakaReplyGenerator:
 
         return get_plugin_runtime_manager()
 
-    @staticmethod
-    def _build_debug_request_filename(stream_id: str, model_name: str) -> str:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        raw_name = f"{timestamp}_{stream_id or 'unknown'}_{model_name or 'unknown'}.json"
-        return "".join(char if char.isalnum() or char in ("-", "_", ".") else "_" for char in raw_name)
-
-    def _save_debug_reply_request_body(
-        self,
-        *,
-        stream_id: str,
-        model_name: str,
-        messages: List[Message],
-        response_body: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        if not global_config.debug.record_reply_request:
-            return
-
-        try:
-            DEBUG_REPLY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            request_body = {
-                "model": model_name,
-                "request_type": self.request_type,
-                "stream_id": stream_id,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-                "messages": serialize_prompt_messages(messages),
-                "response_body": response_body or {},
-            }
-            file_path = DEBUG_REPLY_CACHE_DIR / self._build_debug_request_filename(stream_id, model_name)
-            with file_path.open("w", encoding="utf-8") as file:
-                json.dump(request_body, file, ensure_ascii=False, indent=2)
-            logger.info(f"Replyer 请求体已保存: {file_path.resolve()}")
-        except Exception as exc:
-            logger.warning(f"保存 Replyer 请求体失败: {exc}")
-
     async def _build_reply_context(
         self,
         chat_history: List[LLMContextMessage],
@@ -765,144 +684,9 @@ class BaseMaisakaReplyGenerator:
 
     @classmethod
     def _should_keep_replyer_history_message(cls, message: LLMContextMessage) -> bool:
-        """replyer 只接收真实聊天上下文，不接收参考、工具结果、工具媒体和中期摘要。"""
+        """replyer 只接收真实聊天上下文，不接收参考、工具结果、工具媒体和聊天回想。"""
 
         return not cls._is_replyer_filtered_history_message(message)
-
-    async def _generate_local_mai_reply_with_context(
-        self,
-        *,
-        result: ReplyGenerationResult,
-        finalize: Callable[[bool], Tuple[bool, ReplyGenerationResult]],
-        overall_started_at: float,
-        stream_id: Optional[str],
-        reply_reason: str,
-        reply_tool_args: Dict[str, Any],
-    ) -> Tuple[bool, ReplyGenerationResult]:
-        """执行本地麦麦 replyer 的极简生成流程。"""
-
-        preview_chat_id = self._resolve_session_id(stream_id)
-        result.selected_expression_ids = []
-        result.selected_expression_details = []
-
-        prompt_started_at = time.perf_counter()
-        try:
-            request_messages = build_local_mai_replyer_messages(reply_reason or "", reply_tool_args)
-        except Exception as exc:
-            result.error_message = f"构建本地麦麦 Replyer 提示词失败: {exc}"
-            result.metrics = GenerationMetrics(
-                overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
-            )
-            return finalize(False)
-
-        prompt_ms = round((time.perf_counter() - prompt_started_at) * 1000, 2)
-        prompt_preview = PromptCLIVisualizer._build_prompt_dump_text(request_messages)
-
-        async def message_factory(_client: object, model_info: Optional[ModelInfo] = None) -> List[Message]:
-            del _client
-            del model_info
-            return request_messages
-
-        llm_started_at = time.perf_counter()
-        try:
-            generation_result = await self.express_model.generate_response_with_messages(
-                message_factory=message_factory,
-                options=LLMGenerationOptions(),
-            )
-        except Exception as exc:
-            logger.exception("本地麦麦 Replyer 调用失败")
-            result.error_message = str(exc)
-            result.metrics = GenerationMetrics(
-                prompt_ms=prompt_ms,
-                llm_ms=round((time.perf_counter() - llm_started_at) * 1000, 2),
-                overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
-            )
-            return finalize(False)
-
-        llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
-        response_text = (generation_result.response or "").strip()
-        result.completion.request_prompt = prompt_preview
-        result.request_message_count = len(request_messages)
-        result.request_messages = PromptCLIVisualizer._build_structured_message_payload(
-            request_messages,
-            keep_base64=False,
-        )
-        self._save_debug_reply_request_body(
-            stream_id=preview_chat_id,
-            model_name=generation_result.model_name or "",
-            messages=request_messages,
-            response_body={
-                "response": generation_result.response,
-                "reasoning": generation_result.reasoning,
-                "model_name": generation_result.model_name,
-                "tool_calls": [
-                    {
-                        "id": tool_call.call_id,
-                        "name": tool_call.func_name,
-                        "arguments": tool_call.args,
-                        "extra_content": tool_call.extra_content,
-                    }
-                    for tool_call in (generation_result.tool_calls or [])
-                ],
-                "prompt_tokens": generation_result.prompt_tokens,
-                "completion_tokens": generation_result.completion_tokens,
-                "total_tokens": generation_result.total_tokens,
-                "prompt_cache_hit_tokens": getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                "prompt_cache_miss_tokens": getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-                "replyer_retry_count": 0,
-                "local_mai_replyer": True,
-            },
-        )
-
-        result.success = bool(response_text)
-        result.completion = LLMCompletionResult(
-            request_prompt=prompt_preview,
-            response_text=response_text,
-            reasoning_text=generation_result.reasoning or "",
-            model_name=generation_result.model_name or "",
-            tool_calls=generation_result.tool_calls or [],
-            prompt_tokens=generation_result.prompt_tokens,
-            completion_tokens=generation_result.completion_tokens,
-            total_tokens=generation_result.total_tokens,
-        )
-        result.metrics = GenerationMetrics(
-            prompt_ms=prompt_ms,
-            llm_ms=llm_ms,
-            overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
-            stage_logs=[
-                f"prompt: {prompt_ms} ms",
-                f"llm: {llm_ms} ms",
-            ],
-        )
-        prompt_cache_hit_tokens = getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0
-        prompt_cache_miss_tokens = getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0
-        if prompt_cache_miss_tokens == 0 and prompt_cache_hit_tokens > 0:
-            prompt_cache_miss_tokens = max(generation_result.prompt_tokens - prompt_cache_hit_tokens, 0)
-        prompt_cache_total_tokens = prompt_cache_hit_tokens + prompt_cache_miss_tokens
-        prompt_cache_hit_rate = (
-            prompt_cache_hit_tokens / prompt_cache_total_tokens * 100 if prompt_cache_total_tokens > 0 else 0
-        )
-        result.metrics.extra["prompt_cache_hit_tokens"] = prompt_cache_hit_tokens
-        result.metrics.extra["prompt_cache_miss_tokens"] = prompt_cache_miss_tokens
-        result.metrics.extra["prompt_cache_hit_rate"] = round(prompt_cache_hit_rate, 2)
-        result.metrics.extra["replyer_retry_count"] = 0
-        result.metrics.extra["replyer_attempt_count"] = 1
-        result.metrics.extra["replyer_aggregate_prompt_tokens"] = generation_result.prompt_tokens
-        result.metrics.extra["replyer_aggregate_completion_tokens"] = generation_result.completion_tokens
-        result.metrics.extra["replyer_aggregate_total_tokens"] = generation_result.total_tokens
-        result.metrics.extra["local_mai_replyer"] = True
-
-        if not result.success:
-            result.error_message = "本地麦麦 Replyer 返回了空内容"
-            logger.warning("本地麦麦 Replyer 返回了空内容")
-            return finalize(False)
-
-        logger.info(
-            f"本地麦麦 Replyer 生成成功 文本={response_text!r} "
-            f"总耗时ms={result.metrics.overall_ms}"
-        )
-        result.text_fragments = [response_text]
-        return finalize(True)
 
     async def generate_reply_with_context(
         self,
@@ -945,16 +729,6 @@ class BaseMaisakaReplyGenerator:
             return finalize(False)
 
         active_reply_tool_args = self._normalize_reply_tool_args(reply_tool_args)
-        if global_config.debug.enable_local_mai_replyer:
-            return await self._generate_local_mai_reply_with_context(
-                result=result,
-                finalize=finalize,
-                overall_started_at=overall_started_at,
-                stream_id=stream_id,
-                reply_reason=reply_reason,
-                reply_tool_args=active_reply_tool_args,
-            )
-
         if chat_history is None:
             result.error_message = "聊天历史为空"
             return finalize(False)
@@ -1065,7 +839,7 @@ class BaseMaisakaReplyGenerator:
                 return finalize(False)
 
             prompt_ms = round((time.perf_counter() - prompt_started_at) * 1000, 2)
-            prompt_preview = PromptCLIVisualizer._build_prompt_dump_text(request_messages)
+            prompt_preview = PromptCLIVisualizer.build_prompt_dump_text(request_messages)
 
             async def message_factory(
                 _client: object,
@@ -1103,7 +877,7 @@ class BaseMaisakaReplyGenerator:
                     reply_tool_args=dict(reply_tool_args_for_attempt),
                 )
                 prompt_ms = round((time.perf_counter() - prompt_started_at) * 1000, 2)
-                prompt_preview = PromptCLIVisualizer._build_prompt_dump_text(request_messages)
+                prompt_preview = PromptCLIVisualizer.build_prompt_dump_text(request_messages)
                 return request_messages
 
             llm_started_at = time.perf_counter()
@@ -1131,34 +905,9 @@ class BaseMaisakaReplyGenerator:
 
             result.completion.request_prompt = prompt_preview
             result.request_message_count = len(request_messages)
-            result.request_messages = PromptCLIVisualizer._build_structured_message_payload(
+            result.request_messages = PromptCLIVisualizer.build_structured_message_payload(
                 request_messages,
                 keep_base64=False,
-            )
-            self._save_debug_reply_request_body(
-                stream_id=preview_chat_id,
-                model_name=generation_result.model_name or "",
-                messages=request_messages,
-                response_body={
-                    "response": generation_result.response,
-                    "reasoning": generation_result.reasoning,
-                    "model_name": generation_result.model_name,
-                    "tool_calls": [
-                        {
-                            "id": tool_call.call_id,
-                            "name": tool_call.func_name,
-                            "arguments": tool_call.args,
-                            "extra_content": tool_call.extra_content,
-                        }
-                        for tool_call in (generation_result.tool_calls or [])
-                    ],
-                    "prompt_tokens": generation_result.prompt_tokens,
-                    "completion_tokens": generation_result.completion_tokens,
-                    "total_tokens": generation_result.total_tokens,
-                    "prompt_cache_hit_tokens": getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                    "prompt_cache_miss_tokens": getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-                    "replyer_retry_count": retry_count,
-                },
             )
             llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
             response_text = (generation_result.response or "").strip()
@@ -1304,11 +1053,11 @@ class BaseMaisakaReplyGenerator:
         if hook_rewrite_events:
             result.metrics.extra["replyer_hook_rewrite_events"] = list(hook_rewrite_events)
         logger.info(
-            "Replyer KV cache usage - "
-            f"hit_tokens={prompt_cache_hit_tokens}, "
-            f"miss_tokens={prompt_cache_miss_tokens}, "
-            f"hit_rate={prompt_cache_hit_rate:.2f}%, "
-            f"prompt_tokens={generation_result.prompt_tokens}"
+            "Replyer缓存："
+            f"命中={prompt_cache_hit_tokens}, "
+            f"未命中={prompt_cache_miss_tokens}, "
+            f"命中率={prompt_cache_hit_rate:.2f}%, "
+            f"token使用={generation_result.prompt_tokens}"
         )
 
         if not result.success:

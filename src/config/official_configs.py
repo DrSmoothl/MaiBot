@@ -19,6 +19,16 @@ OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
     "discard": "丢弃超过最大大小的图片组件",
 }
 
+REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS = {
+    "frequency": "按照新消息数量决定思考",
+    "reply_necessity": "综合新消息数量、内容、过往发言决定思考",
+}
+
+REPLY_TRIGGER_MODE_OPTION_LABELS = {
+    "frequency": "频率触发",
+    "reply_necessity": "必要性触发",
+}
+
 """
 须知：
 1. 本文件中记录了所有的配置项
@@ -37,6 +47,7 @@ class BotConfig(ConfigBase):
     """机器人配置类"""
 
     __ui_label__ = "基础"
+    __ui_order__ = 10
 
     platform: str = Field(
         default="",
@@ -263,6 +274,7 @@ class VisualConfig(ConfigBase):
     """视觉配置类"""
 
     __ui_label__ = "视觉"
+    __ui_order__ = 60
 
     planner_mode: Literal["text", "multimodal", "auto"] = Field(
         default="auto",
@@ -356,7 +368,7 @@ class VisualConfig(ConfigBase):
             "x-widget": "input",
             "x-icon": "image",
             "x-layout": "inline-right",
-            "x-input-width": "8rem",
+            "x-input-width": "min(100%, 5.5rem)",
             "x-row": "visual-image-compression",
             "label": {
                 "zh_CN": "最大图片大小(MB)",
@@ -373,6 +385,7 @@ class VisualConfig(ConfigBase):
             "x-widget": "select",
             "x-icon": "minimize-2",
             "x-layout": "inline-right",
+            "x-input-width": "min(100%, 8.5rem)",
             "x-row": "visual-image-compression",
             "x-option-descriptions": OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS,
             "label": {
@@ -453,10 +466,11 @@ class TalkRulesItem(ConfigBase):
     """该规则下的发言频率；0 更安静，1 按正常频率。"""
 
 
-class ChatConfig(ConfigBase):
-    """聊天配置类"""
+class ChatReplyTimingConfig(ConfigBase):
+    """聊天回复时机与频率配置类"""
 
-    __ui_label__ = "聊天"
+    __ui_label__ = "什么时候发言"
+    __ui_icon__ = "activity"
 
     talk_value: float = Field(
         default=1,
@@ -524,136 +538,23 @@ class ChatConfig(ConfigBase):
     )
     """开启后，被 @ 时会尽量回复。"""
 
-    self_message_special_mark: bool = Field(
-        default=True,
+    reply_trigger_mode: Literal["frequency", "reply_necessity"] = Field(
+        default="frequency",
         json_schema_extra={
             "label": {
-                "zh_CN": "自身消息特殊标注",
-                "en_US": "Special mark for self messages",
-                "ja_JP": "自分のメッセージ特別マーク",
+                "zh_CN": "回复触发模式",
+                "en_US": "Reply trigger mode",
+                "ja_JP": "返信トリガーモード",
             },
-            "x-widget": "switch",
-            "x-icon": "badge-check",
-            "x-row": "reply-switches",
-        },
-    )
-    """加强标记麦麦自己的消息，减少把自己当成别人的情况。"""
-
-    max_context_size: int = Field(
-        default=40,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "群聊上下文",
-                "en_US": "Group context size",
-                "ja_JP": "グループ文脈数",
-            },
-            "x-widget": "input",
-            "x-icon": "layers",
+            "x-widget": "select",
+            "x-icon": "activity",
             "x-layout": "inline-right",
-            "x-input-width": "6.5rem",
-            "x-row": "context-sizes",
+            "x-input-width": "12rem",
+            "x-option-labels": REPLY_TRIGGER_MODE_OPTION_LABELS,
+            "x-option-descriptions": REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS,
         },
     )
-    """群聊回复时参考的最近消息数量；越大越懂上下文，也更耗模型。"""
-
-    max_private_context_size: int = Field(
-        default=60,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "私聊上下文",
-                "en_US": "Private context size",
-                "ja_JP": "個別チャット文脈数",
-            },
-            "x-widget": "input",
-            "x-icon": "layers",
-            "x-layout": "inline-right",
-            "x-input-width": "6.5rem",
-            "x-row": "context-sizes",
-        },
-    )
-    """私聊回复时参考的最近消息数量。"""
-
-    enable_context_optimization: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "优化上下文",
-                "en_US": "Optimize context",
-                "ja_JP": "コンテキスト最適化",
-            },
-            "x-widget": "switch",
-            "x-icon": "scissors",
-            "x-row": "context-sizes",
-        },
-    )
-    """压缩部分上下文，减少模型消耗；一般建议开启。"""
-
-    mid_term_memory: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "中期聊天摘要",
-                "en_US": "Mid-term chat summaries",
-                "ja_JP": "中期チャット要約",
-            },
-            "x-widget": "switch",
-            "x-icon": "archive",
-            "x-row": "context-sizes",
-        },
-    )
-    """长对话被截断时，自动把旧内容概括成摘要继续参考。"""
-
-    mid_term_memory_lenth: int = Field(
-        default=10,
-        ge=0,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "中期摘要保留数",
-                "en_US": "Mid-term summary limit",
-                "ja_JP": "中期要約保持数",
-            },
-            "x-widget": "input",
-            "x-icon": "archive",
-            "x-layout": "inline-right",
-            "x-input-width": "6.5rem",
-            "x-row": "context-sizes",
-        },
-    )
-    """最多保留多少条中期摘要；设为 0 表示不保留。"""
-
-    enable_reply_quote: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "启用引用回复",
-                "en_US": "Enable quoted replies",
-                "ja_JP": "引用返信を有効化",
-            },
-            "x-widget": "switch",
-            "x-icon": "quote",
-            "advanced": True,
-        },
-    )
-    """回复时是否可以引用上一条或相关消息。"""
-
-    typing_speed: float = Field(
-        default=1.0,
-        ge=0,
-        le=2,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "聊天速度",
-                "en_US": "Typing speed",
-                "ja_JP": "チャット速度",
-            },
-            "x-widget": "slider",
-            "x-icon": "keyboard",
-            "x-row": "reply-speed",
-            "step": 0.1,
-            "advanced": True,
-        },
-    )
-    """模拟打字等待时间；0 最快，1 默认，2 更慢。"""
+    """控制新消息何时进入 Planner。"""
 
     planner_interrupt_max_consecutive_count: int = Field(
         default=0,
@@ -671,17 +572,34 @@ class ChatConfig(ConfigBase):
     )
     """思考时来了新消息，最多重新思考多少次。"""
 
+    max_consecutive_wait_count: int = Field(
+        default=3,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "连续 wait 上限",
+                "en_US": "Max consecutive wait",
+                "ja_JP": "連続 wait 上限",
+            },
+            "x-widget": "input",
+            "x-icon": "timer-reset",
+        },
+    )
+    """Planner 最多连续调用 wait 多少次；达到上限后 wait 工具会拒绝继续进入等待。"""
+
     no_action_backoff_base_seconds: float = Field(
         default=15,
         ge=0,
         json_schema_extra={
             "label": {
-                "zh_CN": "no_action 退避基准",
-                "en_US": "no_action backoff base",
-                "ja_JP": "no_action バックオフ基準",
+                "zh_CN": "空闲退避基准",
+                "en_US": "Idle backoff base",
+                "ja_JP": "アイドルバックオフ基準",
             },
             "x-widget": "input",
             "x-icon": "timer",
+            "x-layout": "inline-right",
+            "x-input-width": "7.5rem",
             "x-description-display": "icon",
             "advanced": False,
         },
@@ -693,9 +611,9 @@ class ChatConfig(ConfigBase):
         ge=0,
         json_schema_extra={
             "label": {
-                "zh_CN": "no_action 退避上限",
-                "en_US": "no_action backoff cap",
-                "ja_JP": "no_action バックオフ上限",
+                "zh_CN": "空闲退避上限",
+                "en_US": "Idle backoff cap",
+                "ja_JP": "アイドルバックオフ上限",
             },
             "x-widget": "input",
             "x-icon": "timer-reset",
@@ -710,9 +628,9 @@ class ChatConfig(ConfigBase):
         ge=1,
         json_schema_extra={
             "label": {
-                "zh_CN": "no_action 退避起点",
-                "en_US": "no_action backoff start",
-                "ja_JP": "no_action バックオフ開始",
+                "zh_CN": "空闲退避起点",
+                "en_US": "Idle backoff start",
+                "ja_JP": "アイドルバックオフ開始",
             },
             "x-widget": "input",
             "x-icon": "list-start",
@@ -727,9 +645,9 @@ class ChatConfig(ConfigBase):
         ge=0,
         json_schema_extra={
             "label": {
-                "zh_CN": "no_action 退避绕过消息数",
-                "en_US": "no_action backoff bypass messages",
-                "ja_JP": "no_action バックオフ迂回メッセージ数",
+                "zh_CN": "空闲退避绕过消息数",
+                "en_US": "Idle backoff bypass messages",
+                "ja_JP": "アイドルバックオフ迂回メッセージ数",
             },
             "x-widget": "input",
             "x-icon": "message-square-more",
@@ -738,6 +656,61 @@ class ChatConfig(ConfigBase):
         },
     )
     """等待期间新消息达到多少条就立刻重新处理；0 表示不按条数打断等待。"""
+
+    enable_talk_value_rules: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用动态发言频率规则",
+                "en_US": "Enable dynamic talk frequency rules",
+                "ja_JP": "動的な発言頻度ルールを有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "settings",
+        },
+    )
+    """开启后，可以按聊天或时间段单独调整发言频率。"""
+
+    talk_value_rules: list[TalkRulesItem] = Field(
+        default_factory=lambda: [
+            TalkRulesItem(platform="", item_id="", rule_type="group", time="00:00-08:59", value=0.8),
+            TalkRulesItem(platform="", item_id="", rule_type="group", time="09:00-18:59", value=1.0),
+        ],
+        json_schema_extra={
+            "label": {
+                "zh_CN": "动态发言频率规则",
+                "en_US": "Dynamic talk frequency rules",
+                "ja_JP": "動的な発言頻度ルール",
+            },
+            "x-widget": "custom",
+            "x-icon": "list",
+        },
+    )
+    """
+    _wrap_动态发言频率规则；可让麦麦在某些群、私聊或时段更活跃或更安静。
+    """
+
+
+class ChatReplyStyleConfig(ConfigBase):
+    """聊天回复方式配置类"""
+
+    __ui_label__ = "如何发言"
+    __ui_icon__ = "message-square"
+
+    enable_reply_quote: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用引用回复",
+                "en_US": "Enable quoted replies",
+                "ja_JP": "引用返信を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "quote",
+            "advanced": True,
+        },
+    )
+    """回复时是否可以引用上一条或相关消息。"""
 
     group_chat_prompt: str = Field(
         default=(
@@ -790,38 +763,117 @@ class ChatConfig(ConfigBase):
     )
     """给指定群聊或私聊额外补充聊天要求；有特殊群规或语气要求时再加。"""
 
-    enable_talk_value_rules: bool = Field(
-        default=False,
+
+class ChatConfig(ConfigBase):
+    """聊天配置类"""
+
+    __ui_label__ = "聊天"
+    __ui_order__ = 20
+    __ui_use_subtabs__ = True
+    __ui_root_sub_label__ = "基础设置"
+
+    max_context_size: int = Field(
+        default=40,
         json_schema_extra={
             "label": {
-                "zh_CN": "启用动态发言频率规则",
-                "en_US": "Enable dynamic talk frequency rules",
-                "ja_JP": "動的な発言頻度ルールを有効化",
+                "zh_CN": "群聊上下文",
+                "en_US": "Group context size",
+                "ja_JP": "グループ文脈数",
+            },
+            "x-widget": "input",
+            "x-icon": "layers",
+            "x-layout": "inline-right",
+            "x-input-width": "6.5rem",
+            "x-row": "chat-context-controls",
+        },
+    )
+    """群聊回复时参考的最近消息数量；越大越懂上下文，也更耗模型。"""
+
+    max_private_context_size: int = Field(
+        default=60,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "私聊上下文",
+                "en_US": "Private context size",
+                "ja_JP": "個別チャット文脈数",
+            },
+            "x-widget": "input",
+            "x-icon": "layers",
+            "x-layout": "inline-right",
+            "x-input-width": "6.5rem",
+            "x-row": "chat-context-controls",
+        },
+    )
+    """私聊回复时参考的最近消息数量。"""
+
+    enable_context_optimization: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "优化上下文",
+                "en_US": "Optimize context",
+                "ja_JP": "コンテキスト最適化",
             },
             "x-widget": "switch",
-            "x-icon": "settings",
+            "x-icon": "scissors",
+            "x-row": "chat-context-controls",
         },
     )
-    """开启后，可以按聊天或时间段单独调整发言频率。"""
+    """压缩部分上下文，减少模型消耗；一般建议开启。"""
 
-    talk_value_rules: list[TalkRulesItem] = Field(
-        default_factory=lambda: [
-            TalkRulesItem(platform="", item_id="", rule_type="group", time="00:00-08:59", value=0.8),
-            TalkRulesItem(platform="", item_id="", rule_type="group", time="09:00-18:59", value=1.0),
-        ],
+    mid_term_memory: bool = Field(
+        default=True,
         json_schema_extra={
             "label": {
-                "zh_CN": "动态发言频率规则",
-                "en_US": "Dynamic talk frequency rules",
-                "ja_JP": "動的な発言頻度ルール",
+                "zh_CN": "聊天回想",
+                "en_US": "Chat recall",
+                "ja_JP": "チャット回想",
             },
-            "x-widget": "custom",
-            "x-icon": "list",
+            "x-widget": "switch",
+            "x-icon": "archive",
+            "x-row": "chat-recall-controls",
         },
     )
-    """
-    _wrap_动态发言频率规则；可让麦麦在某些群、私聊或时段更活跃或更安静。
-    """
+    """打开后会主动召回最近聊天发生的事情。"""
+
+    mid_term_memory_lenth: int = Field(
+        default=10,
+        ge=0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "聊天回想保留数",
+                "en_US": "Chat recall limit",
+                "ja_JP": "チャット回想保持数",
+            },
+            "x-widget": "input",
+            "x-icon": "archive",
+            "x-layout": "inline-right",
+            "x-input-width": "6.5rem",
+            "x-row": "chat-recall-controls",
+        },
+    )
+    """最多保留多少条聊天回想；设为 0 表示不保留。"""
+
+    self_message_special_mark: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "自身消息特殊标注",
+                "en_US": "Special mark for self messages",
+                "ja_JP": "自分のメッセージ特別マーク",
+            },
+            "x-widget": "switch",
+            "x-icon": "badge-check",
+            "x-row": "self-message-mark",
+        },
+    )
+    """加强标记麦麦自己的消息，减少把自己当成别人的情况。"""
+
+    reply_timing: ChatReplyTimingConfig = Field(default_factory=ChatReplyTimingConfig)
+    """什么时候回复、回复频率与等待退避配置。"""
+
+    reply_style: ChatReplyStyleConfig = Field(default_factory=ChatReplyStyleConfig)
+    """如何回复、引用回复与聊天 Prompt 配置。"""
 
 
 class ExperimentalConfig(ConfigBase):
@@ -829,6 +881,7 @@ class ExperimentalConfig(ConfigBase):
 
     __ui_label__ = "实验性功能"
     __ui_advanced__ = True
+    __ui_order__ = 30
 
     enable_behavior_learning: bool = Field(
         default=False,
@@ -880,23 +933,6 @@ class ExperimentalConfig(ConfigBase):
     )
     """_wrap_让多个群聊或私聊共享学到的行为经验。"""
 
-    enable_replyer_format_output: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "Replyer 格式化输出",
-                "en_US": "Replyer formatted output",
-                "ja_JP": "Replyer フォーマット出力",
-            },
-            "x-widget": "switch",
-            "x-icon": "braces",
-            "advanced": True,
-        },
-    )
-    """
-    允许模型输出 @、表情、图片等结构化片段；不熟悉时建议关闭。
-    """
-
     focus_mode: bool = Field(
         default=False,
         json_schema_extra={
@@ -907,7 +943,6 @@ class ExperimentalConfig(ConfigBase):
             },
             "x-widget": "switch",
             "x-icon": "target",
-            "advanced": True,
         },
     )
     """让麦麦同一时间只专注一个聊天流，适合直播或高强度聊天场景。"""
@@ -922,10 +957,23 @@ class ExperimentalConfig(ConfigBase):
             },
             "x-widget": "switch",
             "x-icon": "message-circle",
-            "advanced": True,
         },
     )
     """Focus 模式是否也作用于私聊。"""
+
+    focus_chat_whitelist: list["TargetItem"] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "Focus 白名单",
+                "en_US": "Focus whitelist",
+                "ja_JP": "Focus ホワイトリスト",
+            },
+            "x-widget": "custom",
+            "x-icon": "list-checks",
+        },
+    )
+    """_wrap_Focus 白名单。配置后只有命中的群聊或私聊会进入 Focus；留空表示所有符合聊天类型开关的聊天都可进入 Focus。"""
 
     focus_groups: list["ChatStreamGroup"] = Field(
         default_factory=list,
@@ -937,7 +985,6 @@ class ExperimentalConfig(ConfigBase):
             },
             "x-widget": "custom",
             "x-icon": "users",
-            "advanced": True,
         },
     )
     """_wrap_把聊天流分组后，同组共享 Focus，不同组互不抢占。"""
@@ -956,7 +1003,6 @@ class ExperimentalConfig(ConfigBase):
             "x-layout": "inline-right",
             "x-input-width": "12rem",
             "x-row": "focus-cool-time",
-            "advanced": True,
         },
     )
     """当前关注的聊天多久没继续处理后，允许被其他聊天唤醒。"""
@@ -967,6 +1013,7 @@ class MessageReceiveConfig(ConfigBase):
 
     __ui_label__ = "消息接收"
     __ui_advanced__ = True
+    __ui_order__ = 70
 
     image_parse_threshold: int = Field(
         default=5,
@@ -2870,6 +2917,7 @@ class AMemorixConfig(ConfigBase):
     """长期记忆配置"""
 
     __ui_label__ = "记忆"
+    __ui_order__ = 50
 
     plugin: AMemorixPluginConfig = Field(
         default_factory=AMemorixPluginConfig,
@@ -3130,6 +3178,9 @@ class ExpressionConfig(ConfigBase):
     """表达配置类"""
 
     __ui_label__ = "学习"
+    __ui_order__ = 40
+    __ui_use_subtabs__ = True
+    __ui_sub_label__ = "表达"
 
     expression_checked_only: bool = Field(
         default=True,
@@ -3141,6 +3192,7 @@ class ExpressionConfig(ConfigBase):
             },
             "x-widget": "switch",
             "x-icon": "check",
+            "x-row": "expression-learning-switches",
         },
     )
     """只使用人工确认过的表达方式，更稳但学习效果会慢一些。"""
@@ -3155,24 +3207,68 @@ class ExpressionConfig(ConfigBase):
             },
             "x-widget": "switch",
             "x-icon": "sparkles",
+            "x-row": "expression-learning-switches",
         },
     )
     """写入表达方式前先让 AI 检查，减少学到奇怪内容。"""
 
-    enable_precise_expression_selection: bool = Field(
-        default=False,
+    expression_selection_mode: Literal["legacy", "vector", "vector_intent"] = Field(
+        default="legacy",
         json_schema_extra={
             "label": {
-                "zh_CN": "启用精细表达选择",
-                "en_US": "Enable precise expression selection",
-                "ja_JP": "精密な表現選択を有効化",
+                "zh_CN": "表达使用方式",
+                "en_US": "Expression usage mode",
+                "ja_JP": "表現の使用方法",
             },
-            "x-widget": "switch",
-            "x-icon": "target",
+            "x-widget": "select",
+            "x-icon": "route",
             "advanced": False,
+            "options": ["legacy", "vector", "vector_intent"],
+            "x-option-labels": {
+                "legacy": "随手",
+                "vector": "精细",
+                "vector_intent": "超级精细",
+            },
+            "x-option-descriptions": {
+                "legacy": "使用 LLM 进行选择，效果一般",
+                "vector": "使用嵌入模型进行选择，效果较好（需要配置嵌入模型）",
+                "vector_intent": "使用特殊构建的回复方式加上嵌入模型进行选择，效果非常好（需要配置嵌入模型）",
+            },
         },
     )
-    """回复前更精细地挑选表达方式，可能更贴切但会增加模型调用。"""
+    """表达方式的使用策略：legacy 使用 LLM 选择，vector 使用嵌入召回，vector_intent 会额外使用表达选择意图。"""
+
+    expression_vector_index_path: str = Field(
+        default="data/expression_selection/expression_vector_index.json",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "表达向量索引路径",
+                "en_US": "Expression vector index path",
+                "ja_JP": "表現ベクトル索引パス",
+            },
+            "x-widget": "input",
+            "x-icon": "file-search",
+            "advanced": True,
+        },
+    )
+    """向量召回使用的表达索引 JSON；相对路径按项目根目录解析。"""
+
+    expression_vector_candidate_pool_size: int = Field(
+        default=50,
+        ge=1,
+        le=50,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "向量候选上限",
+                "en_US": "Vector candidate limit",
+                "ja_JP": "ベクトル候補上限",
+            },
+            "x-widget": "input",
+            "x-icon": "list-filter",
+            "advanced": True,
+        },
+    )
+    """向量召回后最多交给表达方式 LLM 选择的候选数；硬上限为 50。"""
 
     max_expression_learner: int = Field(
         default=3,
@@ -3231,6 +3327,7 @@ class JargonConfig(ConfigBase):
 
     __ui_parent__ = "expression"
     __ui_label__ = "黑话"
+    __ui_sub_label__ = "黑话"
 
     learning_list: list[LearningItem] = Field(
         default_factory=lambda: [
@@ -3274,6 +3371,7 @@ class VoiceConfig(ConfigBase):
 
     __ui_label__ = "语音"
     __ui_advanced__ = True
+    __ui_order__ = 90
 
     enable_asr: bool = Field(
         default=False,
@@ -3285,11 +3383,75 @@ class VoiceConfig(ConfigBase):
     """开启后麦麦可以把语音消息识别成文字再处理。"""
 
 
+class EmojiCacheCleanupConfig(ConfigBase):
+    """表情包缓存自动清理配置。"""
+
+    enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "trash-2",
+            "label": {
+                "zh_CN": "启用表情包缓存自动清理",
+                "en_US": "Enable emoji cache cleanup",
+                "ja_JP": "絵文字キャッシュ自動クリーンアップを有効化",
+            },
+        },
+    )
+    """开启后会自动删除长期未注册、未使用的表情包缓存。"""
+
+    check_interval_hours: float = Field(
+        default=6.0,
+        ge=1.0 / 60.0,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "clock",
+            "label": {
+                "zh_CN": "表情包清理检查间隔（小时）",
+                "en_US": "Emoji cleanup check interval (hours)",
+                "ja_JP": "絵文字クリーンアップ確認間隔（時間）",
+            },
+        },
+    )
+    """每隔多少小时检查一次旧表情包缓存。"""
+
+    emoji_file_retention_days: int = Field(
+        default=30,
+        ge=1,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "calendar-days",
+            "label": {
+                "zh_CN": "未注册表情包文件保留天数",
+                "en_US": "Unregistered emoji file retention days",
+                "ja_JP": "未登録絵文字ファイル保持日数",
+            },
+        },
+    )
+    """未注册表情包文件多久没被使用后可以删除；已注册表情包永远不会由该任务删除。"""
+
+    no_file_record_retention_days: int = Field(
+        default=30,
+        ge=1,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "database",
+            "label": {
+                "zh_CN": "未注册表情包无文件记录保留天数",
+                "en_US": "Unregistered emoji no-file record retention days",
+                "ja_JP": "未登録絵文字のファイルなし記録保持日数",
+            },
+        },
+    )
+    """未注册表情包文件删掉后，描述缓存记录还能保留多久。"""
+
+
 class EmojiConfig(ConfigBase):
     """表情包配置类"""
 
     __ui_label__ = "表情"
     __ui_advanced__ = True
+    __ui_order__ = 80
 
     emoji_send_num: int = Field(
         default=25,
@@ -3396,6 +3558,9 @@ class EmojiConfig(ConfigBase):
     )
     """开启后只保存内容合适的表情。"""
 
+    cache_cleanup: EmojiCacheCleanupConfig = Field(default_factory=EmojiCacheCleanupConfig)
+    """定期清理未注册表情包缓存，减少磁盘占用；已注册表情包不会被清理。"""
+
 
 class KeywordRuleConfig(ConfigBase):
     """关键词规则配置类"""
@@ -3477,8 +3642,10 @@ class KeywordReactionConfig(ConfigBase):
 class ResponsePostProcessConfig(ConfigBase):
     """回复后处理配置类"""
 
+    __ui_parent__ = "chat"
     __ui_label__ = "后处理"
     __ui_advanced__ = True
+    __ui_order__ = 100
 
     enable_response_post_process: bool = Field(
         default=True,
@@ -3493,6 +3660,25 @@ class ResponsePostProcessConfig(ConfigBase):
         },
     )
     """开启后会对回复做错别字、分段等后处理。"""
+
+    typing_speed: float = Field(
+        default=1.0,
+        ge=0,
+        le=2,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "打字速度",
+                "en_US": "Typing speed",
+                "ja_JP": "タイピング速度",
+            },
+            "x-widget": "slider",
+            "x-icon": "keyboard",
+            "x-row": "reply-speed",
+            "step": 0.1,
+            "advanced": True,
+        },
+    )
+    """模拟打字等待时间；0 最快，1 默认，2 更慢。"""
 
 
 class ChineseTypoConfig(ConfigBase):
@@ -3682,6 +3868,7 @@ class LogConfig(ConfigBase):
 
     __ui_label__ = "调试"
     __ui_advanced__ = True
+    __ui_order__ = 130
 
     date_style: str = Field(
         default="m-d H:i:s",
@@ -3976,49 +4163,6 @@ class DebugConfig(ConfigBase):
     )
     """记录回复效果评分，方便观察回复质量。"""
 
-    enable_local_mai_replyer: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "启用本地麦麦 Replyer",
-                "en_US": "Enable local Mai replyer",
-                "ja_JP": "ローカル Mai Replyer を有効化",
-            },
-            "x-widget": "switch",
-            "x-icon": "route",
-            "advanced": True,
-        },
-    )
-    """如果你不知道这是什么，请勿打开"""
-
-    record_reply_request: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "记录 Replyer 请求",
-                "en_US": "Record Replyer request",
-                "ja_JP": "Replyer リクエスト記録",
-            },
-            "x-widget": "switch",
-            "x-icon": "file-json",
-        },
-    )
-    """保存 Replyer 的请求内容，方便排查回复问题。"""
-
-    record_planner_request: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "记录 Planner 请求",
-                "en_US": "Record Planner request",
-                "ja_JP": "Planner リクエスト記録",
-            },
-            "x-widget": "switch",
-            "x-icon": "file-json",
-        },
-    )
-    """保存 Planner 的完整请求和回复，日志体积会变大。"""
-
     keep_prompt_preview_json_base64: bool = Field(
         default=False,
         json_schema_extra={
@@ -4259,6 +4403,7 @@ class WebUIConfig(ConfigBase):
 
     __ui_label__ = "WebUI"
     __ui_advanced__ = True
+    __ui_order__ = 110
 
     enabled: bool = Field(
         default=True,
@@ -4274,19 +4419,20 @@ class WebUIConfig(ConfigBase):
     )
     """是否启动 WebUI 管理界面。"""
 
-    host: str = Field(
-        default="127.0.0.1",
+    host: list[str] = Field(
+        default=["127.0.0.1", "::1"],
         json_schema_extra={
             "label": {
                 "zh_CN": "WebUI 主机",
                 "en_US": "WebUI host",
                 "ja_JP": "WebUI ホスト",
             },
-            "x-widget": "input",
+            "x-widget": "tags",
             "x-icon": "globe",
+            "x-placeholder": "127.0.0.1",
         },
     )
-    """WebUI 监听地址；本机使用通常填 127.0.0.1。"""
+    """WebUI 监听地址列表；可同时绑定 IPv4 和 IPv6，例如 ["0.0.0.0", "::"]。"""
 
     port: int = Field(
         default=8001,
@@ -4356,8 +4502,9 @@ class WebUIConfig(ConfigBase):
                 "en_US": "Allowed IPs",
                 "ja_JP": "許可 IP",
             },
-            "x-widget": "input",
+            "x-widget": "comma-list",
             "x-icon": "network",
+            "x-placeholder": "127.0.0.1",
         },
     )
     """允许访问 WebUI 的 IP，多个用逗号分隔。"""
@@ -4370,8 +4517,9 @@ class WebUIConfig(ConfigBase):
                 "en_US": "Trusted proxy IPs",
                 "ja_JP": "信頼プロキシ IP",
             },
-            "x-widget": "input",
+            "x-widget": "comma-list",
             "x-icon": "server",
+            "x-placeholder": "127.0.0.1",
         },
     )
     """可信反向代理 IP；只有这些代理传来的真实 IP 会被信任。"""
@@ -4846,6 +4994,7 @@ class PluginConfig(ConfigBase):
 
     __ui_label__ = "插件"
     __ui_advanced__ = True
+    __ui_order__ = 120
 
     permission: list[str] = Field(
         default_factory=list,
@@ -4857,6 +5006,7 @@ class PluginConfig(ConfigBase):
             },
             "x-widget": "tags",
             "x-icon": "shield-check",
+            "x-placeholder": "qq:123456789",
         },
     )
     """允许用聊天命令管理插件的用户，格式如 qq:123456789。"""

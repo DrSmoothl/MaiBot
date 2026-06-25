@@ -1,15 +1,19 @@
+from dataclasses import dataclass
 from datetime import datetime
+from time import perf_counter
 from typing import Any, Optional, Sequence
 
 from sqlmodel import Session, select
 
 import json
+import random
 
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
     BehaviorAction,
     BehaviorExperiencePath,
     BehaviorOutcome,
+    BehaviorSceneCluster,
 )
 from src.common.logger import get_logger
 
@@ -39,6 +43,56 @@ MAX_BEHAVIOR_SCORE = 8.0
 NEGATIVE_FEEDBACK_STATUSES = {"failed", "blocked", "abandoned"}
 POSITIVE_FEEDBACK_STATUSES = {"success", "succeeded", "completed"}
 PARTIAL_POSITIVE_FEEDBACK_STATUSES = {"partial_success"}
+LOW_DOMAIN_SCENE_DELETE_RATES = {
+    1: 1.0,
+    2: 0.75,
+    3: 0.5,
+}
+
+
+def _get_session_log_label(session_id: str) -> str:
+    """获取日志中的聊天流展示名称，无法解析时回退到 session_id。"""
+
+    from src.chat.message_receive.chat_manager import chat_manager
+
+    session_name = chat_manager.get_session_name(session_id)
+    if session_name:
+        return session_name
+
+    chat_manager.get_existing_session_by_session_id(session_id)
+    return chat_manager.get_session_name(session_id) or session_id
+
+
+@dataclass(frozen=True)
+class BehaviorExperienceUpsertItem:
+    """待写入的一条行为经验路径。"""
+
+    action: str
+    outcome: str
+    source_ids: Sequence[str]
+    scenario_profile: BehaviorScenarioProfile
+    scene_start: str
+    actor_type: str = ACTOR_OTHER_USER
+    learning_type: str = LEARNING_OBSERVED
+
+
+@dataclass(frozen=True)
+class BehaviorExperienceUpsertResult:
+    """行为经验路径写入结果，包含失败时的可读原因。"""
+
+    path: Optional[BehaviorExperiencePath]
+    skipped_reason: str = ""
+
+
+@dataclass(frozen=True)
+class _NormalizedBehaviorExperienceItem:
+    action: str
+    outcome: str
+    source_ids: list[str]
+    scenario_profile: BehaviorScenarioProfile
+    scene_start: str
+    actor_type: str
+    learning_type: str
 
 
 def _load_json_list(raw_value: Any) -> list[Any]:
@@ -114,6 +168,66 @@ def _build_evidence_item(
     if profile_tag_distribution:
         evidence_item["profile_tag_distribution"] = list(profile_tag_distribution)
     return evidence_item
+
+
+def _normalize_behavior_experience_item(
+    item: BehaviorExperienceUpsertItem,
+) -> tuple[Optional[_NormalizedBehaviorExperienceItem], str]:
+    normalized_action = _normalize_text(item.action, max_length=240)
+    normalized_outcome = _normalize_text(item.outcome, max_length=240)
+    normalized_source_ids = _normalize_source_ids(item.source_ids)
+    normalized_actor_type = _coerce_actor_type(item.actor_type)
+    normalized_learning_type = _coerce_learning_type(item.learning_type, actor_type=normalized_actor_type)
+    if not normalized_action or not normalized_outcome:
+        skipped_reason = "归一化后字段为空"
+        logger.warning(
+            f"跳过写入行为经验路径：{skipped_reason} "
+            f"action={normalized_action!r} outcome={normalized_outcome!r}"
+        )
+        return None, skipped_reason
+    if _should_skip_low_domain_scenario_profile(item.scenario_profile):
+        skipped_reason = "场景画像信号过少"
+        logger.info(
+            f"跳过写入行为经验路径：{skipped_reason} "
+            f"action={normalized_action!r}"
+        )
+        return None, skipped_reason
+
+    return (
+        _NormalizedBehaviorExperienceItem(
+            action=normalized_action,
+            outcome=normalized_outcome,
+            source_ids=normalized_source_ids,
+            scenario_profile=item.scenario_profile,
+            scene_start=item.scene_start,
+            actor_type=normalized_actor_type,
+            learning_type=normalized_learning_type,
+        ),
+        "",
+    )
+
+
+def _normalize_profile_tag_kind(raw_value: object) -> str:
+    return " ".join(str(raw_value or "").lower().split()).strip()
+
+
+def _should_skip_low_domain_scenario_profile(profile: BehaviorScenarioProfile) -> bool:
+    """按 domain 簇数量随机过滤泛化能力不足的场景画像。"""
+
+    if not profile.has_signal:
+        return True
+
+    domain_cluster_count = 0
+    for cluster in profile.tag_clusters:
+        if not cluster.all_values():
+            continue
+        if _normalize_profile_tag_kind(cluster.kind) == "domain":
+            domain_cluster_count += 1
+
+    if domain_cluster_count == 0:
+        return True
+    delete_rate = LOW_DOMAIN_SCENE_DELETE_RATES.get(domain_cluster_count, 0.0)
+    return delete_rate >= 1.0 or random.random() < delete_rate
 
 
 def _merge_profile_tag_distribution_from_evidence(evidence_list: Any) -> list[dict[str, float | str]]:
@@ -238,99 +352,203 @@ def upsert_behavior_experience(
     actor_type: str = ACTOR_OTHER_USER,
     learning_type: str = LEARNING_OBSERVED,
 ) -> Optional[BehaviorExperiencePath]:
-    normalized_action = _normalize_text(action, max_length=240)
-    normalized_outcome = _normalize_text(outcome, max_length=240)
-    normalized_source_ids = _normalize_source_ids(source_ids)
-    normalized_actor_type = _coerce_actor_type(actor_type)
-    normalized_learning_type = _coerce_learning_type(learning_type, actor_type=normalized_actor_type)
-    if not normalized_action or not normalized_outcome:
-        logger.warning(
-            "跳过写入行为经验路径：归一化后字段为空 "
-            f"action={normalized_action!r} outcome={normalized_outcome!r}"
+    paths = upsert_behavior_experiences(
+        session_id=session_id,
+        items=[
+            BehaviorExperienceUpsertItem(
+                action=action,
+                outcome=outcome,
+                source_ids=source_ids,
+                scenario_profile=scenario_profile,
+                scene_start=scene_start,
+                actor_type=actor_type,
+                learning_type=learning_type,
+            )
+        ],
+    )
+    return paths[0] if paths else None
+
+
+def upsert_behavior_experiences(
+    *,
+    session_id: str,
+    items: Sequence[BehaviorExperienceUpsertItem],
+) -> list[Optional[BehaviorExperiencePath]]:
+    """批量写入行为经验路径，复用同一批次中相同场景画像的场景簇引用。"""
+
+    return [
+        result.path
+        for result in upsert_behavior_experiences_with_results(
+            session_id=session_id,
+            items=items,
         )
-        return None
+    ]
+
+
+def upsert_behavior_experiences_with_results(
+    *,
+    session_id: str,
+    items: Sequence[BehaviorExperienceUpsertItem],
+) -> list[BehaviorExperienceUpsertResult]:
+    """批量写入行为经验路径，并为每条候选保留跳过原因。"""
+
+    session_log_label = _get_session_log_label(session_id)
+    normalize_results = [_normalize_behavior_experience_item(item) for item in items]
+    normalized_items = [normalized_item for normalized_item, _skipped_reason in normalize_results]
+    results = [
+        BehaviorExperienceUpsertResult(path=None, skipped_reason=skipped_reason)
+        for _normalized_item, skipped_reason in normalize_results
+    ]
+    if not any(item is not None for item in normalized_items):
+        return results
 
     try:
         with get_db_session() as session:
-            graph_refs = upsert_behavior_graph_refs(
-                session=session,
-                session_id=session_id,
-                profile=scenario_profile,
-                scene_start=scene_start,
-                action=normalized_action,
-                outcome=normalized_outcome,
-            )
-            if graph_refs is None:
-                logger.warning(
-                    "跳过写入行为经验路径：场景簇引用生成失败 "
-                    f"session_id={session_id} action={normalized_action} outcome={normalized_outcome}"
-                )
-                return None
+            write_start_time = perf_counter()
+            scene_cluster_by_profile: dict[int, Any] = {}
+            scene_cluster_candidates = list(session.exec(select(BehaviorSceneCluster)).all())
+            tag_distribution_by_profile: dict[int, list[dict[str, float | str]]] = {}
+            scene_cluster_count_before = len(scene_cluster_candidates)
 
-            profile_tag_distribution = build_profile_tag_distribution(
-                scenario_profile,
-                tag_lookup=_load_tag_cluster_lookup(session),
-            )
-            now = datetime.now()
-            evidence_item = _build_evidence_item(
-                action=normalized_action,
-                outcome=normalized_outcome,
-                source_ids=normalized_source_ids,
-                actor_type=normalized_actor_type,
-                learning_type=normalized_learning_type,
-                profile_tag_distribution=profile_tag_distribution,
-            )
+            for index, normalized_item in enumerate(normalized_items):
+                if normalized_item is None:
+                    continue
 
-            statement = (
-                select(BehaviorExperiencePath)
-                .where(BehaviorExperiencePath.session_id == session_id)
-                .where(BehaviorExperiencePath.scene_cluster_id == graph_refs.scene_cluster_id)
-                .where(BehaviorExperiencePath.action_id == graph_refs.action_id)
-                .where(BehaviorExperiencePath.outcome_id == graph_refs.outcome_id)
-                .where(BehaviorExperiencePath.actor_type == normalized_actor_type)
-                .where(BehaviorExperiencePath.learning_type == normalized_learning_type)
-            )
-            path = session.exec(statement).first()
-            if path is None:
-                path = BehaviorExperiencePath(
+                profile_key = id(normalized_item.scenario_profile)
+                graph_refs = upsert_behavior_graph_refs(
+                    session=session,
                     session_id=session_id,
+                    profile=normalized_item.scenario_profile,
+                    scene_start=normalized_item.scene_start,
+                    action=normalized_item.action,
+                    outcome=normalized_item.outcome,
+                    scene_cluster=scene_cluster_by_profile.get(profile_key),
+                    scene_cluster_candidates=scene_cluster_candidates,
+                )
+                if graph_refs is None:
+                    skipped_reason = "场景簇引用生成失败"
+                    logger.warning(
+                        f"跳过写入行为经验路径：{skipped_reason} "
+                        f"chat={session_log_label} action={normalized_item.action} outcome={normalized_item.outcome}"
+                    )
+                    results[index] = BehaviorExperienceUpsertResult(path=None, skipped_reason=skipped_reason)
+                    continue
+                if all(candidate is not graph_refs.scene_cluster for candidate in scene_cluster_candidates):
+                    scene_cluster_candidates.append(graph_refs.scene_cluster)
+                scene_cluster_by_profile.setdefault(profile_key, graph_refs.scene_cluster)
+
+                if profile_key not in tag_distribution_by_profile:
+                    tag_distribution_by_profile[profile_key] = build_profile_tag_distribution(
+                        normalized_item.scenario_profile,
+                        tag_lookup=_load_tag_cluster_lookup(session),
+                    )
+
+                path = _upsert_normalized_behavior_experience(
+                    session=session,
+                    session_id=session_id,
+                    item=normalized_item,
                     scene_cluster_id=graph_refs.scene_cluster_id,
                     action_id=graph_refs.action_id,
                     outcome_id=graph_refs.outcome_id,
-                    actor_type=normalized_actor_type,
-                    learning_type=normalized_learning_type,
-                    evidence_list=_dump_json_list([evidence_item]),
-                    feedback_list=_dump_json_list([]),
-                    count=1,
-                    activation_count=0,
-                    success_count=0,
-                    failure_count=0,
-                    score=0.0,
-                    enabled=True,
-                    last_active_time=now,
-                    create_time=now,
-                    update_time=now,
+                    profile_tag_distribution=tag_distribution_by_profile[profile_key],
                 )
-            else:
-                evidence_items = _load_json_list(path.evidence_list)
-                evidence_items.append(evidence_item)
-                path.evidence_list = _dump_json_list(evidence_items[-EVIDENCE_HISTORY_LIMIT:])
-                path.count += 1
-                path.last_active_time = now
-                path.update_time = now
-
-            session.add(path)
-            session.flush()
-            session.refresh(path)
-            session.expunge(path)
-            return path
+                if path is None:
+                    results[index] = BehaviorExperienceUpsertResult(path=None, skipped_reason="数据库写入未返回路径")
+                    continue
+                session.flush()
+                session.refresh(path)
+                session.expunge(path)
+                results[index] = BehaviorExperienceUpsertResult(path=path)
+            elapsed_ms = int((perf_counter() - write_start_time) * 1000)
+            if elapsed_ms >= 1000:
+                logger.info(
+                    "行为经验路径批量写入耗时: "
+                    f"chat={session_log_label} 候选={len(items)} "
+                    f"成功={sum(result.path is not None for result in results)} "
+                    f"场景画像={len(scene_cluster_by_profile)} "
+                    f"预加载场景簇={scene_cluster_count_before} "
+                    f"耗时={elapsed_ms}ms"
+                )
+            return results
     except Exception as exc:
         logger.exception(
             "写入行为经验路径失败: "
-            f"session_id={session_id} action={normalized_action} outcome={normalized_outcome} "
-            f"source_ids={normalized_source_ids} error={exc}"
+            f"chat={session_log_label} count={len(items)} error={exc}"
         )
-        return None
+        return results
+
+
+def _collect_source_ids_by_profile(items: Sequence[BehaviorExperienceUpsertItem]) -> dict[int, list[str]]:
+    source_ids_by_profile: dict[int, list[str]] = {}
+    for item in items:
+        profile_key = id(item.scenario_profile)
+        source_ids = source_ids_by_profile.setdefault(profile_key, [])
+        for source_id in _normalize_source_ids(item.source_ids):
+            if source_id not in source_ids:
+                source_ids.append(source_id)
+    return source_ids_by_profile
+
+
+def _upsert_normalized_behavior_experience(
+    *,
+    session: Session,
+    session_id: str,
+    item: _NormalizedBehaviorExperienceItem,
+    scene_cluster_id: int,
+    action_id: int,
+    outcome_id: int,
+    profile_tag_distribution: Sequence[dict[str, Any]],
+) -> Optional[BehaviorExperiencePath]:
+    now = datetime.now()
+    evidence_item = _build_evidence_item(
+        action=item.action,
+        outcome=item.outcome,
+        source_ids=item.source_ids,
+        actor_type=item.actor_type,
+        learning_type=item.learning_type,
+        profile_tag_distribution=profile_tag_distribution,
+    )
+
+    statement = (
+        select(BehaviorExperiencePath)
+        .where(BehaviorExperiencePath.session_id == session_id)
+        .where(BehaviorExperiencePath.scene_cluster_id == scene_cluster_id)
+        .where(BehaviorExperiencePath.action_id == action_id)
+        .where(BehaviorExperiencePath.outcome_id == outcome_id)
+        .where(BehaviorExperiencePath.actor_type == item.actor_type)
+        .where(BehaviorExperiencePath.learning_type == item.learning_type)
+    )
+    path = session.exec(statement).first()
+    if path is None:
+        path = BehaviorExperiencePath(
+            session_id=session_id,
+            scene_cluster_id=scene_cluster_id,
+            action_id=action_id,
+            outcome_id=outcome_id,
+            actor_type=item.actor_type,
+            learning_type=item.learning_type,
+            evidence_list=_dump_json_list([evidence_item]),
+            feedback_list=_dump_json_list([]),
+            count=1,
+            activation_count=0,
+            success_count=0,
+            failure_count=0,
+            score=0.0,
+            enabled=True,
+            last_active_time=now,
+            create_time=now,
+            update_time=now,
+        )
+    else:
+        evidence_items = _load_json_list(path.evidence_list)
+        evidence_items.append(evidence_item)
+        path.evidence_list = _dump_json_list(evidence_items[-EVIDENCE_HISTORY_LIMIT:])
+        path.count += 1
+        path.last_active_time = now
+        path.update_time = now
+
+    session.add(path)
+    return path
 
 
 def list_behavior_experiences_for_sessions(
@@ -467,6 +685,8 @@ def apply_behavior_feedback(
 # 兼容旧调用命名；运行时实体已经是 BehaviorExperiencePath。
 behavior_pattern_to_dict = behavior_experience_to_dict
 upsert_behavior_pattern = upsert_behavior_experience
+upsert_behavior_patterns = upsert_behavior_experiences
+upsert_behavior_patterns_with_results = upsert_behavior_experiences_with_results
 list_behavior_patterns_for_sessions = list_behavior_experiences_for_sessions
 get_behavior_pattern = get_behavior_experience
 mark_behavior_pattern_selected = mark_behavior_experience_selected

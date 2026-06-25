@@ -20,6 +20,7 @@ from src.common.database.database_model import (
 )
 from src.common.logger import get_logger
 
+from .behavior_generic_tags import is_behavior_generic_tag
 from .behavior_scenario import BehaviorScenarioProfile, BehaviorScenarioTagCluster
 
 logger = get_logger("behavior_scene_cluster")
@@ -102,6 +103,8 @@ def _tag_cluster_values(cluster: BehaviorScenarioTagCluster) -> list[str]:
     values: list[str] = []
     for value in cluster.tags:
         display_value = _normalize_display_text(value, max_length=80)
+        if is_behavior_generic_tag(cluster.kind, display_value):
+            continue
         if display_value and display_value not in values:
             values.append(display_value)
     return values
@@ -560,12 +563,20 @@ def upsert_behavior_graph_refs(
     scene_start: str,
     action: str,
     outcome: str,
+    scene_cluster: Optional[BehaviorSceneCluster] = None,
+    scene_cluster_candidates: Optional[Sequence[BehaviorSceneCluster]] = None,
 ) -> Optional[BehaviorGraphRefs]:
     """写入场景簇、动作和结果，并返回可用于创建经验路径的引用。"""
 
     normalized_action = _normalize_display_text(action, max_length=240)
     normalized_outcome = _normalize_display_text(outcome, max_length=220)
-    scene_cluster = _upsert_scene_cluster(session, session_id=session_id, profile=profile)
+    if scene_cluster is None:
+        scene_cluster = _upsert_scene_cluster(
+            session,
+            session_id=session_id,
+            profile=profile,
+            cluster_candidates=scene_cluster_candidates,
+        )
     del scene_start
     if scene_cluster is None or scene_cluster.id is None:
         return None
@@ -857,6 +868,7 @@ def _upsert_scene_cluster(
     *,
     session_id: str,
     profile: BehaviorScenarioProfile,
+    cluster_candidates: Optional[Sequence[BehaviorSceneCluster]] = None,
 ) -> Optional[BehaviorSceneCluster]:
     _upsert_profile_tag_clusters(session, profile)
     tag_lookup = _load_tag_cluster_lookup(session)
@@ -864,14 +876,17 @@ def _upsert_scene_cluster(
     if not distribution:
         return None
 
-    cluster_candidates = [
+    candidate_pool = cluster_candidates
+    if candidate_pool is None:
+        candidate_pool = session.exec(select(BehaviorSceneCluster)).all()
+    matched_cluster_candidates = [
         cluster
-        for cluster in session.exec(select(BehaviorSceneCluster)).all()
+        for cluster in candidate_pool
         if _scene_cluster_matches_sessions(cluster.session_id, {session_id})
     ]
     best_cluster: Optional[BehaviorSceneCluster] = None
     best_overlap = 0.0
-    for candidate in cluster_candidates:
+    for candidate in matched_cluster_candidates:
         overlap = _cluster_distribution_overlap(
             _load_cluster_distribution(candidate.tag_distribution),
             distribution,

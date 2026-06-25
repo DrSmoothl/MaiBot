@@ -14,7 +14,9 @@ MODULE_COLORS: Dict[str, Tuple[str, Optional[str], bool]] = {
     # 消息处理
     "chat": ("#5fff00", None, False),
     "image": ("#5f87d7", None, False),
+    "image_cache_cleanup": ("#5f87d7", None, False),
     "emoji": ("#ffaf00", None, False),  # 橙黄色，偏向橙色
+    "emoji_cache_cleanup": ("#ffaf00", None, False),  # 与表情包模块保持一致
     # 核心模块
     "main": ("#ffffff", None, True),  # 亮白色 + 粗体 (主程序)
     "config": ("#a2ff00", None, False),
@@ -27,6 +29,7 @@ MODULE_COLORS: Dict[str, Tuple[str, Optional[str], bool]] = {
     "planner": ("#008080", None, False),
     "maisaka_reasoning_engine": ("#0fd5d5", None, False),
     "maisaka_chat_loop": ("#1bb2ed", None, False),
+    "maisaka_turn_scheduler": ("#ff8700", None, False),
     "maisaka_runtime": ("#e5810f", None, False),
     "chat_message": ("#00d7ff", None, False),
     "chat_stream": ("#00ffff", None, False),
@@ -115,7 +118,9 @@ MODULE_ALIASES = {
     "replyer": "言语",
     "llm_api": "生成API",
     "image": "图片",
+    "image_cache_cleanup": "图片缓存清理",
     "emoji": "表情包",
+    "emoji_cache_cleanup": "表情包缓存清理",
     "chat": "所见",
     "chat_image": "识图",
     "action_manager": "动作",

@@ -486,7 +486,9 @@ function updateTimelineMessageContent(event: MaisakaMonitorEvent, sessionId: str
   const dataRecord = event.data as unknown as Record<string, unknown>
   const messageId = typeof dataRecord.message_id === 'string' ? dataRecord.message_id : ''
   const content = typeof dataRecord.content === 'string' ? dataRecord.content : ''
-  if (!messageId || !content) {
+  const replyTo = dataRecord.reply_to
+  const media = Array.isArray(dataRecord.media) ? dataRecord.media : []
+  if (!messageId) {
     return false
   }
 
@@ -510,6 +512,8 @@ function updateTimelineMessageContent(event: MaisakaMonitorEvent, sessionId: str
       data: {
         ...entryData,
         content,
+        reply_to: replyTo,
+        media,
       } as TimelineEntry['data'],
     }
   })

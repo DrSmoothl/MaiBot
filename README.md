@@ -3,7 +3,7 @@
 <div align="center">
 
   <!-- Language Switcher -->
-  <a href="#-双语--bilingual">双语 / Bilingual</a> | <a href="docs/README_CN.md">中文</a> | <a href="#english">English</a>
+  <a href="#-双语--bilingual">双语 / Bilingual</a> | <a href="docs/README_CN.md">中文</a> | <a href="docs/README_EN.md">English</a>
 
   <br>
   <br>
@@ -19,6 +19,7 @@
     <img src="https://img.shields.io/github/contributors/Mai-with-u/MaiBot.svg?style=flat&label=Contributors" alt="Contributors">
     <img src="https://img.shields.io/github/forks/Mai-with-u/MaiBot.svg?style=flat&label=Forks" alt="Forks">
     <img src="https://img.shields.io/github/stars/Mai-with-u/MaiBot?style=flat&label=Stars" alt="Stars">
+    <a href="https://trendshift.io/repositories/20445" target="_blank"><img src="https://trendshift.io/api/badge/repositories/20445" alt="Mai-with-u%2FMaiBot | Trendshift" width="250" height="55"></a>
     <a href="https://deepwiki.com/DrSmoothl/MaiBot"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   </p>
 </div>
@@ -82,8 +83,8 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 ## 🔥 更新和安装
 <sub><sup>Updates and Installation</sup></sub>
 
-> **最新版本: v1.0.7** ([📄 更新日志](changelogs/changelog.md))  
-> <sub><sup><strong>Latest Version: v1.0.0</strong> (<a href="changelogs/changelog.md">📄 Changelog</a>)</sup></sub>
+> **最新版本: v1.0.8** ([📄 更新日志](changelogs/changelog.md))  
+> <sub><sup><strong>Latest Version: v1.0.7</strong> (<a href="changelogs/changelog.md">📄 Changelog</a>)</sup></sub>
 
 - **下载**：前往 [Release](https://github.com/MaiM-with-u/MaiBot/releases/) 页面下载最新版本。  
   <sub><sup><strong>Download</strong>: Visit the <a href="https://github.com/MaiM-with-u/MaiBot/releases/">Release</a> page to get the latest version.</sup></sub>

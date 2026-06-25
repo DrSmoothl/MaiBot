@@ -59,6 +59,19 @@ class TalkFrequencyUpdateRequest(BaseModel):
     value: float = Field(ge=0, le=1)
 
 
+class LearningUpdateRequest(BaseModel):
+    """聊天流学习配置编辑请求。"""
+
+    use: bool = True
+    learn: bool = True
+
+
+class ChatPromptUpdateRequest(BaseModel):
+    """聊天流专属 Prompt 编辑请求。"""
+
+    prompt: str = Field(default="")
+
+
 def _datetime_to_timestamp(value: Optional[datetime]) -> Optional[float]:
     """将数据库时间转换为前端更易处理的秒级时间戳。"""
 
@@ -282,6 +295,31 @@ def _target_config_to_dict(config_item: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _learning_item_to_config_dict(config_item: Any) -> Dict[str, Any]:
+    """把学习配置项转换为可保存的普通字典。"""
+
+    platform, item_id, rule_type = ChatConfigUtils._target_values(config_item)
+    return {
+        "platform": platform,
+        "item_id": item_id,
+        "type": rule_type or "group",
+        "use": bool(getattr(config_item, "use", True) if not isinstance(config_item, dict) else config_item.get("use", True)),
+        "learn": bool(
+            getattr(config_item, "learn", True) if not isinstance(config_item, dict) else config_item.get("learn", True)
+        ),
+    }
+
+
+def _is_same_learning_target(rule: Dict[str, Any], chat_session: ChatSession) -> bool:
+    """判断学习规则是否精确作用于当前聊天流。"""
+
+    return (
+        str(rule.get("platform") or "").strip() == str(chat_session.platform or "").strip()
+        and str(rule.get("item_id") or "").strip() == _get_chat_target_id(chat_session)
+        and str(rule.get("type") or rule.get("rule_type") or "").strip() == _get_chat_type(chat_session)
+    )
+
+
 def _format_frequency(value: float) -> str:
     normalized_value = max(0.0, float(value))
     return f"{normalized_value:.3f}（{normalized_value * 100:.1f}%）"
@@ -318,14 +356,15 @@ def _get_talk_rule_details(chat_session: ChatSession) -> Dict[str, Any]:
 
     session_id = chat_session.session_id
     is_group_chat = _get_chat_type(chat_session) == "group"
-    base_value = float(global_config.chat.talk_value if is_group_chat else global_config.chat.private_talk_value)
+    reply_timing_config = global_config.chat.reply_timing
+    base_value = float(reply_timing_config.talk_value if is_group_chat else reply_timing_config.private_talk_value)
     effective_value = float(ChatConfigUtils.get_talk_value(session_id, is_group_chat=is_group_chat))
     local_time = datetime.now().strftime("%H:%M")
     current_time = datetime.now().time()
     now_min = current_time.hour * 60 + current_time.minute
     rules = [
         rule_detail
-        for rule in global_config.chat.talk_value_rules
+        for rule in reply_timing_config.talk_value_rules
         if (rule_detail := _talk_rule_to_dict(rule, session_id, is_group_chat, now_min)) is not None
     ]
     selected_index: Optional[int] = None
@@ -354,13 +393,101 @@ def _get_talk_rule_details(chat_session: ChatSession) -> Dict[str, Any]:
     )
 
     return {
-        "enabled": bool(global_config.chat.enable_talk_value_rules),
+        "enabled": bool(reply_timing_config.enable_talk_value_rules),
         "base_value": base_value,
         "base_value_label": _format_frequency(base_value),
         "effective_value": effective_value,
         "effective_value_label": _format_frequency(effective_value),
         "current_time": local_time,
         "matched_rules": sorted_rules,
+    }
+
+
+def _chat_prompt_item_values(chat_prompt_item: Any) -> Optional[Dict[str, Any]]:
+    """解析一条聊天 Prompt 配置，兼容旧字符串格式。"""
+
+    if hasattr(chat_prompt_item, "platform"):
+        platform = str(chat_prompt_item.platform or "").strip()
+        item_id = str(chat_prompt_item.item_id or "").strip()
+        rule_type = str(chat_prompt_item.rule_type or "").strip()
+        prompt = str(chat_prompt_item.prompt or "").strip()
+    elif isinstance(chat_prompt_item, dict):
+        platform = str(chat_prompt_item.get("platform") or "").strip()
+        item_id = str(chat_prompt_item.get("item_id") or "").strip()
+        rule_type = str(chat_prompt_item.get("rule_type") or chat_prompt_item.get("type") or "").strip()
+        prompt = str(chat_prompt_item.get("prompt") or "").strip()
+    elif isinstance(chat_prompt_item, str):
+        parts = chat_prompt_item.split(":", 3)
+        if len(parts) != 4:
+            return None
+        platform, item_id, rule_type, prompt = [part.strip() for part in parts]
+    else:
+        return None
+
+    if not platform or not item_id or not prompt or rule_type not in {"group", "private"}:
+        return None
+    return {
+        "platform": platform,
+        "item_id": item_id,
+        "rule_type": rule_type,
+        "prompt": prompt,
+    }
+
+
+def _chat_prompt_to_config_dict(chat_prompt_item: Any) -> Optional[Dict[str, Any]]:
+    """把聊天 Prompt 配置转换为可保存的普通字典。"""
+
+    values = _chat_prompt_item_values(chat_prompt_item)
+    if values is None:
+        return None
+    return {
+        "platform": values["platform"],
+        "item_id": values["item_id"],
+        "rule_type": values["rule_type"],
+        "prompt": values["prompt"],
+    }
+
+
+def _is_same_prompt_target(prompt_item: Dict[str, Any], chat_session: ChatSession) -> bool:
+    """判断 Prompt 配置是否精确作用于当前聊天流。"""
+
+    return (
+        str(prompt_item.get("platform") or "").strip() == str(chat_session.platform or "").strip()
+        and str(prompt_item.get("item_id") or "").strip() == _get_chat_target_id(chat_session)
+        and str(prompt_item.get("rule_type") or "").strip() == _get_chat_type(chat_session)
+    )
+
+
+def _get_chat_prompt_details(chat_session: ChatSession) -> Dict[str, Any]:
+    """获取当前聊天流实际使用的基础 Prompt 与额外聊天流 Prompt。"""
+
+    session_id = chat_session.session_id
+    is_group_chat = _get_chat_type(chat_session) == "group"
+    reply_style_config = global_config.chat.reply_style
+    base_prompt_type = "group" if is_group_chat else "private"
+    base_prompt_title = "群聊提示词" if is_group_chat else "私聊提示词"
+    base_prompt = reply_style_config.group_chat_prompt if is_group_chat else reply_style_config.private_chat_prompts
+    chat_prompts = []
+    for index, chat_prompt_item in enumerate(reply_style_config.chat_prompts):
+        prompt_config = _chat_prompt_item_values(chat_prompt_item)
+        if prompt_config is None:
+            continue
+        if not _is_same_prompt_target(prompt_config, chat_session):
+            continue
+        chat_prompts.append(
+            {
+                "index": index,
+                "platform": prompt_config["platform"],
+                "item_id": prompt_config["item_id"],
+                "rule_type": prompt_config["rule_type"],
+                "prompt": prompt_config["prompt"],
+            }
+        )
+    return {
+        "base_prompt_type": base_prompt_type,
+        "base_prompt_title": base_prompt_title,
+        "base_prompt": base_prompt,
+        "chat_prompts": chat_prompts,
     }
 
 
@@ -431,7 +558,11 @@ async def _save_chat_talk_frequency_rule(
     if not isinstance(chat_config, dict):
         raise HTTPException(status_code=400, detail="配置文件缺少 [chat] 配置节")
 
-    raw_rules = chat_config.get("talk_value_rules")
+    reply_timing_config = chat_config.get("reply_timing")
+    if not isinstance(reply_timing_config, dict):
+        raise HTTPException(status_code=400, detail="配置文件缺少 [chat.reply_timing] 配置节")
+
+    raw_rules = reply_timing_config.get("talk_value_rules")
     rules = (
         [_talk_rule_to_config_dict(rule) for rule in raw_rules]
         if raw_rules is not None and not isinstance(raw_rules, (str, bytes, dict))
@@ -454,8 +585,8 @@ async def _save_chat_talk_frequency_rule(
     else:
         rules[target_index] = next_rule
 
-    chat_config["enable_talk_value_rules"] = True
-    chat_config["talk_value_rules"] = rules
+    reply_timing_config["enable_talk_value_rules"] = True
+    reply_timing_config["talk_value_rules"] = rules
     save_toml_with_format(config_data, str(config_path))
 
     if not await config_manager.reload_config(changed_scopes=["bot"]):
@@ -477,7 +608,11 @@ async def _delete_chat_talk_frequency_rule(chat_session: ChatSession, rule_time:
     if not isinstance(chat_config, dict):
         raise HTTPException(status_code=400, detail="配置文件缺少 [chat] 配置节")
 
-    raw_rules = chat_config.get("talk_value_rules")
+    reply_timing_config = chat_config.get("reply_timing")
+    if not isinstance(reply_timing_config, dict):
+        raise HTTPException(status_code=400, detail="配置文件缺少 [chat.reply_timing] 配置节")
+
+    raw_rules = reply_timing_config.get("talk_value_rules")
     rules = (
         [_talk_rule_to_config_dict(rule) for rule in raw_rules]
         if raw_rules is not None and not isinstance(raw_rules, (str, bytes, dict))
@@ -494,7 +629,166 @@ async def _delete_chat_talk_frequency_rule(chat_session: ChatSession, rule_time:
     if len(next_rules) == len(rules):
         raise HTTPException(status_code=404, detail="未找到可删除的当前聊天流发言频率规则")
 
-    chat_config["talk_value_rules"] = next_rules
+    reply_timing_config["talk_value_rules"] = next_rules
+    save_toml_with_format(config_data, str(config_path))
+
+    if not await config_manager.reload_config(changed_scopes=["bot"]):
+        raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
+
+
+def _get_config_table(config_data: Any, section_name: str) -> Any:
+    """读取配置节，缺失时给出清晰错误。"""
+
+    config_section = config_data.get(section_name)
+    if not isinstance(config_section, dict):
+        raise HTTPException(status_code=400, detail=f"配置文件缺少 [{section_name}] 配置节")
+    return config_section
+
+
+async def _save_chat_learning_rule(chat_session: ChatSession, kind: str, request: LearningUpdateRequest) -> None:
+    """写入当前聊天流的精确学习规则，并热重载配置。"""
+
+    learning_config_map = {
+        "expression": ("expression", "learning_list"),
+        "jargon": ("jargon", "learning_list"),
+        "behavior": ("experimental", "behavior_learning_list"),
+    }
+    config_target = learning_config_map.get(kind)
+    if config_target is None:
+        raise HTTPException(status_code=400, detail="未知学习类型")
+
+    config_path = BOT_CONFIG_PATH
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail="配置文件不存在")
+
+    next_rule = {
+        "platform": str(chat_session.platform or "").strip(),
+        "item_id": _get_chat_target_id(chat_session),
+        "type": _get_chat_type(chat_session),
+        "use": bool(request.use),
+        "learn": bool(request.learn),
+    }
+    if not next_rule["platform"] or not next_rule["item_id"]:
+        raise HTTPException(status_code=400, detail="聊天流缺少平台或目标 ID，无法保存学习规则")
+
+    with config_path.open("r", encoding="utf-8") as config_file:
+        config_data = tomlkit.load(config_file)
+
+    section_name, field_name = config_target
+    config_section = _get_config_table(config_data, section_name)
+    raw_rules = config_section.get(field_name)
+    rules = (
+        [_learning_item_to_config_dict(rule) for rule in raw_rules]
+        if raw_rules is not None and not isinstance(raw_rules, (str, bytes, dict))
+        else []
+    )
+    replace_index: Optional[int] = None
+    for index, rule in enumerate(rules):
+        if _is_same_learning_target(rule, chat_session):
+            replace_index = index
+            break
+
+    if replace_index is None:
+        rules.append(next_rule)
+    else:
+        rules[replace_index] = next_rule
+
+    config_section[field_name] = rules
+    if kind == "behavior" and request.learn:
+        config_section["enable_behavior_learning"] = True
+    save_toml_with_format(config_data, str(config_path))
+
+    if not await config_manager.reload_config(changed_scopes=["bot"]):
+        raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
+
+
+async def _save_chat_prompt_rule(
+    chat_session: ChatSession,
+    prompt_index: Optional[int],
+    request: ChatPromptUpdateRequest,
+) -> None:
+    """新增或更新当前聊天流的一条专属 Prompt，并热重载配置。"""
+
+    config_path = BOT_CONFIG_PATH
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail="配置文件不存在")
+
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt 不能为空")
+
+    next_prompt = {
+        "platform": str(chat_session.platform or "").strip(),
+        "item_id": _get_chat_target_id(chat_session),
+        "rule_type": _get_chat_type(chat_session),
+        "prompt": prompt,
+    }
+    if not next_prompt["platform"] or not next_prompt["item_id"]:
+        raise HTTPException(status_code=400, detail="聊天流缺少平台或目标 ID，无法保存 Prompt")
+
+    with config_path.open("r", encoding="utf-8") as config_file:
+        config_data = tomlkit.load(config_file)
+
+    chat_config = _get_config_table(config_data, "chat")
+    reply_style_config = chat_config.get("reply_style")
+    if not isinstance(reply_style_config, dict):
+        raise HTTPException(status_code=400, detail="配置文件缺少 [chat.reply_style] 配置节")
+
+    raw_prompts = reply_style_config.get("chat_prompts")
+    prompts = (
+        [
+            prompt_config
+            for item in raw_prompts
+            if (prompt_config := _chat_prompt_to_config_dict(item)) is not None
+        ]
+        if raw_prompts is not None and not isinstance(raw_prompts, (str, bytes, dict))
+        else []
+    )
+
+    if prompt_index is None:
+        prompts.append(next_prompt)
+    elif 0 <= prompt_index < len(prompts) and _is_same_prompt_target(prompts[prompt_index], chat_session):
+        prompts[prompt_index] = next_prompt
+    else:
+        raise HTTPException(status_code=404, detail="未找到可修改的当前聊天流 Prompt")
+
+    reply_style_config["chat_prompts"] = prompts
+    save_toml_with_format(config_data, str(config_path))
+
+    if not await config_manager.reload_config(changed_scopes=["bot"]):
+        raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
+
+
+async def _delete_chat_prompt_rule(chat_session: ChatSession, prompt_index: int) -> None:
+    """删除当前聊天流的一条专属 Prompt，并热重载配置。"""
+
+    config_path = BOT_CONFIG_PATH
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail="配置文件不存在")
+
+    with config_path.open("r", encoding="utf-8") as config_file:
+        config_data = tomlkit.load(config_file)
+
+    chat_config = _get_config_table(config_data, "chat")
+    reply_style_config = chat_config.get("reply_style")
+    if not isinstance(reply_style_config, dict):
+        raise HTTPException(status_code=400, detail="配置文件缺少 [chat.reply_style] 配置节")
+
+    raw_prompts = reply_style_config.get("chat_prompts")
+    prompts = (
+        [
+            prompt_config
+            for item in raw_prompts
+            if (prompt_config := _chat_prompt_to_config_dict(item)) is not None
+        ]
+        if raw_prompts is not None and not isinstance(raw_prompts, (str, bytes, dict))
+        else []
+    )
+    if not (0 <= prompt_index < len(prompts)) or not _is_same_prompt_target(prompts[prompt_index], chat_session):
+        raise HTTPException(status_code=404, detail="未找到可删除的当前聊天流 Prompt")
+
+    del prompts[prompt_index]
+    reply_style_config["chat_prompts"] = prompts
     save_toml_with_format(config_data, str(config_path))
 
     if not await config_manager.reload_config(changed_scopes=["bot"]):
@@ -535,6 +829,7 @@ def _chat_session_detail_to_response(chat_session: ChatSession) -> Dict[str, Any
             "matched_rule": _target_config_to_dict(JargonConfigUtils._find_jargon_config_item(session_id)),
         },
         "talk_frequency": _get_talk_rule_details(chat_session),
+        "prompts": _get_chat_prompt_details(chat_session),
     }
 
 
@@ -838,6 +1133,74 @@ async def delete_chat_session_talk_frequency(
         raise HTTPException(status_code=404, detail=f"聊天流不存在: {normalized_session_id}")
 
     await _delete_chat_talk_frequency_rule(chat_session, time)
+    return {"success": True, "detail": _chat_session_detail_to_response(chat_session)}
+
+
+@router.put("/sessions/{session_id}/learning/{kind}")
+async def update_chat_session_learning(
+    session_id: str,
+    kind: str,
+    request: LearningUpdateRequest,
+) -> Dict[str, object]:
+    """为当前聊天流新增或更新一条精确学习配置。"""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise HTTPException(status_code=400, detail="缺少聊天流 session_id")
+
+    with get_db_session() as session:
+        chat_session = session.exec(
+            select(ChatSession).where(col(ChatSession.session_id) == normalized_session_id)
+        ).first()
+
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail=f"聊天流不存在: {normalized_session_id}")
+
+    await _save_chat_learning_rule(chat_session, kind, request)
+    return {"success": True, "detail": _chat_session_detail_to_response(chat_session)}
+
+
+@router.put("/sessions/{session_id}/prompts")
+async def upsert_chat_session_prompt(
+    session_id: str,
+    request: ChatPromptUpdateRequest,
+    index: Optional[int] = Query(default=None, ge=0),
+) -> Dict[str, object]:
+    """为当前聊天流新增或更新一条专属 Prompt。"""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise HTTPException(status_code=400, detail="缺少聊天流 session_id")
+
+    with get_db_session() as session:
+        chat_session = session.exec(
+            select(ChatSession).where(col(ChatSession.session_id) == normalized_session_id)
+        ).first()
+
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail=f"聊天流不存在: {normalized_session_id}")
+
+    await _save_chat_prompt_rule(chat_session, index, request)
+    return {"success": True, "detail": _chat_session_detail_to_response(chat_session)}
+
+
+@router.delete("/sessions/{session_id}/prompts/{index}")
+async def delete_chat_session_prompt(session_id: str, index: int) -> Dict[str, object]:
+    """删除当前聊天流的一条专属 Prompt。"""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise HTTPException(status_code=400, detail="缺少聊天流 session_id")
+
+    with get_db_session() as session:
+        chat_session = session.exec(
+            select(ChatSession).where(col(ChatSession.session_id) == normalized_session_id)
+        ).first()
+
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail=f"聊天流不存在: {normalized_session_id}")
+
+    await _delete_chat_prompt_rule(chat_session, index)
     return {"success": True, "detail": _chat_session_detail_to_response(chat_session)}
 
 

@@ -1,4 +1,17 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Code2,
+  ExternalLink,
+  Info,
+  Layout,
+  RefreshCw,
+  Save,
+  X,
+} from 'lucide-react'
 import { parse as parseToml } from 'smol-toml'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -23,18 +36,6 @@ import { fieldHooks } from '@/lib/field-hooks'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { cn } from '@/lib/utils'
 
-import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Code2,
-  Info,
-  Layout,
-  RefreshCw,
-  Save,
-  X,
-} from 'lucide-react'
-
 import type { ConfigSchema } from '@/types/config-schema'
 import {
   AliasNamesHook,
@@ -49,6 +50,7 @@ import {
   ChatTalkValueRulesHook,
   ExpressionGroupsHook,
   ExpressionLearningListHook,
+  FocusWhitelistHook,
   JargonGroupsHook,
   JargonLearningListHook,
   KeywordRulesHook,
@@ -58,7 +60,6 @@ import {
   MultipleReplyStyleHook,
   RegexRulesHook,
   useAutoSave,
-  useConfigAutoSave,
 } from './bot/hooks'
 
 type ConfigSectionData = Record<string, unknown>
@@ -67,29 +68,20 @@ type ConfigSectionData = Record<string, unknown>
 const TOAST_DISPLAY_DELAY = 500
 const FILE_MODE_NOTICE_DISMISSED_KEY = 'bot-config-file-mode-notice-dismissed'
 
-/** Tab 标签页的首选排列顺序 (host field name) */
-const TAB_ORDER = [
-  'bot',
-  'chat',
-  'experimental',
-  'expression',
-  'a_memorix',
-  'visual',
-  'message_receive',
-  'emoji',
-  'voice',
-  'response_post_process',
-  'webui',
-  'plugin',
-  'log',
-]
-
 // ==================== Tab 分组类型与构建 ====================
 interface TabGroup {
   id: string
   label: string
   advanced: boolean
+  order: number
   sections: string[]
+}
+
+interface SubtabPane {
+  advanced: boolean
+  content: ReactNode
+  id: string
+  label: string
 }
 
 /**
@@ -126,6 +118,7 @@ function buildTabGroupsFromSchema(schema: ConfigSchema): TabGroup[] {
         id: fieldName,
         label: fieldSchema.uiLabel,
         advanced: Boolean(fieldSchema.uiAdvanced),
+        order: fieldSchema.uiOrder ?? Number.POSITIVE_INFINITY,
         sections: [fieldName],
       })
     }
@@ -143,11 +136,12 @@ function buildTabGroupsFromSchema(schema: ConfigSchema): TabGroup[] {
     }
   }
 
-  // 按 TAB_ORDER 排序；未列入的 tab 追加到末尾
   return Array.from(hosts.values()).sort((a, b) => {
-    const ai = TAB_ORDER.indexOf(a.id)
-    const bi = TAB_ORDER.indexOf(b.id)
-    return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi)
+    const orderDelta = a.order - b.order
+    if (orderDelta !== 0) {
+      return orderDelta
+    }
+    return a.label.localeCompare(b.label, 'zh-CN')
   })
 }
 
@@ -176,34 +170,7 @@ function BotConfigPageContent() {
   const { toast } = useToast()
   const { triggerRestart, isRestarting } = useRestart()
 
-  // 配置状态
-  const [botConfig, setBotConfig] = useState<ConfigSectionData | null>(null)
-  const [personalityConfig, setPersonalityConfig] = useState<ConfigSectionData | null>(null)
-  const [chatConfig, setChatConfig] = useState<ConfigSectionData | null>(null)
-  const [experimentalConfig, setExperimentalConfig] = useState<ConfigSectionData | null>(null)
-  const [expressionConfig, setExpressionConfig] = useState<ConfigSectionData | null>(null)
-  const [jargonConfig, setJargonConfig] = useState<ConfigSectionData | null>(null)
-  const [emojiConfig, setEmojiConfig] = useState<ConfigSectionData | null>(null)
-  const [visualConfig, setVisualConfig] = useState<ConfigSectionData | null>(null)
-  const [voiceConfig, setVoiceConfig] = useState<ConfigSectionData | null>(null)
-  const [messageReceiveConfig, setMessageReceiveConfig] = useState<ConfigSectionData | null>(null)
-  const [keywordReactionConfig, setKeywordReactionConfig] = useState<ConfigSectionData | null>(null)
-  const [responsePostProcessConfig, setResponsePostProcessConfig] =
-    useState<ConfigSectionData | null>(null)
-  const [chineseTypoConfig, setChineseTypoConfig] = useState<ConfigSectionData | null>(null)
-  const [responseSplitterConfig, setResponseSplitterConfig] = useState<ConfigSectionData | null>(
-    null
-  )
-  const [logConfig, setLogConfig] = useState<ConfigSectionData | null>(null)
-  const [debugConfig, setDebugConfig] = useState<ConfigSectionData | null>(null)
-  const [maimMessageConfig, setMaimMessageConfig] = useState<ConfigSectionData | null>(null)
-  const [telemetryConfig, setTelemetryConfig] = useState<ConfigSectionData | null>(null)
-  const [webuiConfig, setWebuiConfig] = useState<ConfigSectionData | null>(null)
-  const [databaseConfig, setDatabaseConfig] = useState<ConfigSectionData | null>(null)
-  const [mcpConfig, setMcpConfig] = useState<ConfigSectionData | null>(null)
-  const [pluginConfig, setPluginConfig] = useState<ConfigSectionData | null>(null)
-  const [pluginRuntimeConfig, setPluginRuntimeConfig] = useState<ConfigSectionData | null>(null)
-  const [aMemorixConfig, setAMemorixConfig] = useState<ConfigSectionData | null>(null)
+  const [sectionValues, setSectionValues] = useState<Record<string, ConfigSectionData | null>>({})
 
   // Schema 状态（用于动态 tab 分组）
   const [configSchema, setConfigSchema] = useState<ConfigSchema | null>(null)
@@ -288,89 +255,29 @@ function BotConfigPageContent() {
     const { memory: _legacyMemory, ...configWithoutLegacyMemory } = config
     configRef.current = configWithoutLegacyMemory
 
-    setBotConfig((config.bot ?? {}) as ConfigSectionData)
-    setPersonalityConfig((config.personality ?? {}) as ConfigSectionData)
-    setChatConfig((config.chat ?? {}) as ConfigSectionData)
-    setExperimentalConfig((config.experimental ?? {}) as ConfigSectionData)
-    setExpressionConfig((config.expression ?? {}) as ConfigSectionData)
-    setJargonConfig((config.jargon ?? {}) as ConfigSectionData)
-    setEmojiConfig((config.emoji ?? {}) as ConfigSectionData)
-    setVisualConfig((config.visual ?? {}) as ConfigSectionData)
-    setVoiceConfig((config.voice ?? {}) as ConfigSectionData)
-    setMessageReceiveConfig((config.message_receive ?? {}) as ConfigSectionData)
-    setKeywordReactionConfig((config.keyword_reaction ?? {}) as ConfigSectionData)
-    setResponsePostProcessConfig((config.response_post_process ?? {}) as ConfigSectionData)
-    setChineseTypoConfig((config.chinese_typo ?? {}) as ConfigSectionData)
-    setResponseSplitterConfig((config.response_splitter ?? {}) as ConfigSectionData)
-    setLogConfig((config.log ?? {}) as ConfigSectionData)
-    setDebugConfig((config.debug ?? {}) as ConfigSectionData)
-    setMaimMessageConfig((config.maim_message ?? {}) as ConfigSectionData)
-    setTelemetryConfig((config.telemetry ?? {}) as ConfigSectionData)
-    setWebuiConfig((config.webui ?? {}) as ConfigSectionData)
-    setDatabaseConfig((config.database ?? {}) as ConfigSectionData)
-    setMcpConfig((config.mcp ?? {}) as ConfigSectionData)
-    setPluginConfig((config.plugin ?? {}) as ConfigSectionData)
-    setPluginRuntimeConfig((config.plugin_runtime ?? {}) as ConfigSectionData)
-    setAMemorixConfig((config.a_memorix ?? {}) as ConfigSectionData)
+    setSectionValues(
+      Object.fromEntries(
+        Object.entries(configWithoutLegacyMemory).map(([sectionName, sectionValue]) => [
+          sectionName,
+          (sectionValue ?? {}) as ConfigSectionData,
+        ])
+      )
+    )
   }, [])
 
   /**
    * 构建完整的配置对象用于保存
    */
   const buildFullConfig = useCallback(() => {
+    const cleanSectionValues = Object.fromEntries(
+      Object.entries(sectionValues).filter(([, value]) => value !== null)
+    )
+
     return {
       ...configRef.current,
-      bot: botConfig,
-      personality: personalityConfig,
-      chat: chatConfig,
-      experimental: experimentalConfig,
-      expression: expressionConfig,
-      jargon: jargonConfig,
-      emoji: emojiConfig,
-      visual: visualConfig,
-      voice: voiceConfig,
-      message_receive: messageReceiveConfig,
-      keyword_reaction: keywordReactionConfig,
-      response_post_process: responsePostProcessConfig,
-      chinese_typo: chineseTypoConfig,
-      response_splitter: responseSplitterConfig,
-      log: logConfig,
-      debug: debugConfig,
-      maim_message: maimMessageConfig,
-      telemetry: telemetryConfig,
-      webui: webuiConfig,
-      database: databaseConfig,
-      mcp: mcpConfig,
-      plugin: pluginConfig,
-      plugin_runtime: pluginRuntimeConfig,
-      a_memorix: aMemorixConfig,
+      ...cleanSectionValues,
     }
-  }, [
-    botConfig,
-    personalityConfig,
-    chatConfig,
-    experimentalConfig,
-    expressionConfig,
-    jargonConfig,
-    emojiConfig,
-    visualConfig,
-    voiceConfig,
-    messageReceiveConfig,
-    keywordReactionConfig,
-    responsePostProcessConfig,
-    chineseTypoConfig,
-    responseSplitterConfig,
-    logConfig,
-    debugConfig,
-    maimMessageConfig,
-    telemetryConfig,
-    webuiConfig,
-    databaseConfig,
-    mcpConfig,
-    pluginConfig,
-    pluginRuntimeConfig,
-    aMemorixConfig,
-  ])
+  }, [sectionValues])
 
   // 加载源代码
   const loadSourceCode = useCallback(async () => {
@@ -448,8 +355,9 @@ function BotConfigPageContent() {
       ['bot.qq_account', HiddenFieldHook, 'hidden'],
       ['bot.platforms', HiddenFieldHook, 'hidden'],
       ['personality.multiple_reply_style', MultipleReplyStyleHook],
-      ['chat.chat_prompts', ChatPromptsHook],
-      ['chat.talk_value_rules', ChatTalkValueRulesHook],
+      ['chat.reply_style.chat_prompts', ChatPromptsHook],
+      ['chat.reply_timing.talk_value_rules', ChatTalkValueRulesHook],
+      ['experimental.focus_chat_whitelist', FocusWhitelistHook],
       ['experimental.focus_groups', BehaviorFocusGroupsHook],
       ['experimental.behavior_groups', BehaviorGroupsHook],
       ['experimental.behavior_learning_list', BehaviorLearningListHook],
@@ -481,60 +389,11 @@ function BotConfigPageContent() {
     }
   }, [])
 
-  // 使用模块化的 useAutoSave hook
   const { triggerAutoSave, cancelPendingAutoSave } = useAutoSave(
     initialLoadRef.current,
     setAutoSaving,
     setHasUnsavedChanges
   )
-
-  // 使用 useConfigAutoSave hook 简化配置变化监听
-  // 注意: useConfigAutoSave 是一个 hook，不能在条件语句或循环中调用
-  // 因此我们仍然需要逐个调用，但代码更简洁
-  useConfigAutoSave(botConfig, 'bot', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(personalityConfig, 'personality', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(chatConfig, 'chat', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(experimentalConfig, 'experimental', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(expressionConfig, 'expression', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(jargonConfig, 'jargon', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(emojiConfig, 'emoji', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(visualConfig, 'visual', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(voiceConfig, 'voice', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(
-    messageReceiveConfig,
-    'message_receive',
-    initialLoadRef.current,
-    triggerAutoSave
-  )
-  useConfigAutoSave(
-    keywordReactionConfig,
-    'keyword_reaction',
-    initialLoadRef.current,
-    triggerAutoSave
-  )
-  useConfigAutoSave(
-    responsePostProcessConfig,
-    'response_post_process',
-    initialLoadRef.current,
-    triggerAutoSave
-  )
-  useConfigAutoSave(chineseTypoConfig, 'chinese_typo', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(
-    responseSplitterConfig,
-    'response_splitter',
-    initialLoadRef.current,
-    triggerAutoSave
-  )
-  useConfigAutoSave(logConfig, 'log', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(debugConfig, 'debug', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(maimMessageConfig, 'maim_message', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(telemetryConfig, 'telemetry', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(webuiConfig, 'webui', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(databaseConfig, 'database', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(mcpConfig, 'mcp', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(pluginConfig, 'plugin', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(pluginRuntimeConfig, 'plugin_runtime', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(aMemorixConfig, 'a_memorix', initialLoadRef.current, triggerAutoSave)
 
   const dismissFileModeNotice = useCallback(() => {
     localStorage.setItem(FILE_MODE_NOTICE_DISMISSED_KEY, 'true')
@@ -707,91 +566,13 @@ function BotConfigPageContent() {
     return buildTabGroupsFromSchema(configSchema)
   }, [configSchema])
 
-  const sectionValues = useMemo<Record<string, ConfigSectionData | null>>(
-    () => ({
-      bot: botConfig,
-      personality: personalityConfig,
-      chat: chatConfig,
-      experimental: experimentalConfig,
-      expression: expressionConfig,
-      jargon: jargonConfig,
-      emoji: emojiConfig,
-      visual: visualConfig,
-      voice: voiceConfig,
-      message_receive: messageReceiveConfig,
-      keyword_reaction: keywordReactionConfig,
-      response_post_process: responsePostProcessConfig,
-      chinese_typo: chineseTypoConfig,
-      response_splitter: responseSplitterConfig,
-      log: logConfig,
-      debug: debugConfig,
-      maim_message: maimMessageConfig,
-      telemetry: telemetryConfig,
-      webui: webuiConfig,
-      database: databaseConfig,
-      mcp: mcpConfig,
-      plugin: pluginConfig,
-      plugin_runtime: pluginRuntimeConfig,
-      a_memorix: aMemorixConfig,
-    }),
-    [
-      botConfig,
-      personalityConfig,
-      chatConfig,
-      experimentalConfig,
-      expressionConfig,
-      jargonConfig,
-      emojiConfig,
-      visualConfig,
-      voiceConfig,
-      messageReceiveConfig,
-      keywordReactionConfig,
-      responsePostProcessConfig,
-      chineseTypoConfig,
-      responseSplitterConfig,
-      logConfig,
-      debugConfig,
-      maimMessageConfig,
-      telemetryConfig,
-      webuiConfig,
-      databaseConfig,
-      mcpConfig,
-      pluginConfig,
-      pluginRuntimeConfig,
-      aMemorixConfig,
-    ]
-  )
-
   const setSectionValue = useCallback((sectionName: string, value: ConfigSectionData) => {
-    const sectionSetterMap: Record<string, (nextValue: ConfigSectionData) => void> = {
-      bot: setBotConfig,
-      personality: setPersonalityConfig,
-      chat: setChatConfig,
-      experimental: setExperimentalConfig,
-      expression: setExpressionConfig,
-      jargon: setJargonConfig,
-      emoji: setEmojiConfig,
-      visual: setVisualConfig,
-      voice: setVoiceConfig,
-      message_receive: setMessageReceiveConfig,
-      keyword_reaction: setKeywordReactionConfig,
-      response_post_process: setResponsePostProcessConfig,
-      chinese_typo: setChineseTypoConfig,
-      response_splitter: setResponseSplitterConfig,
-      log: setLogConfig,
-      debug: setDebugConfig,
-      maim_message: setMaimMessageConfig,
-      telemetry: setTelemetryConfig,
-      webui: setWebuiConfig,
-      database: setDatabaseConfig,
-      mcp: setMcpConfig,
-      plugin: setPluginConfig,
-      plugin_runtime: setPluginRuntimeConfig,
-      a_memorix: setAMemorixConfig,
-    }
-
-    sectionSetterMap[sectionName]?.(value)
-  }, [])
+    setSectionValues((current) => ({
+      ...current,
+      [sectionName]: value,
+    }))
+    triggerAutoSave(sectionName, value)
+  }, [triggerAutoSave])
 
   if (loading) {
     return (
@@ -1000,6 +781,8 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
   const { configSchema, sectionValues, setHasUnsavedChanges, setSectionValue, tabGroups } = props
   const [expanded, setExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState(tabGroups[0]?.id ?? '')
+  const [expandedSubtabGroups, setExpandedSubtabGroups] = useState<Record<string, boolean>>({})
+  const [activeSubtabByGroup, setActiveSubtabByGroup] = useState<Record<string, string>>({})
   const [advancedVisible, setAdvancedVisible] = useState(false)
   const [tabGuideVisible, setTabGuideVisible] = useState(
     () => localStorage.getItem('bot-config-tabs-guide-dismissed') !== 'true'
@@ -1036,6 +819,252 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     setTabGuideVisible(false)
   }
 
+  const updateSectionValueByPath = (sectionName: string, restPath: string[], value: unknown) => {
+    const currentSectionValue = sectionValues[sectionName] ?? {}
+    const nextSectionValue =
+      restPath.length === 0
+        ? (value as ConfigSectionData)
+        : updateNestedValue(currentSectionValue, restPath, value)
+
+    setSectionValue(sectionName, nextSectionValue)
+    setHasUnsavedChanges(true)
+  }
+
+  const getSubtabLabel = (schema: ConfigSchema, fallback: string) => {
+    return schema.uiSubLabel || schema.uiLabel || schema.classDoc || fallback
+  }
+
+  const getObjectSubcategoryEntries = (sectionSchema: ConfigSchema) => {
+    const sectionFieldByName = new Map(sectionSchema.fields.map((field) => [field.name, field]))
+    return Object.entries(sectionSchema.nested ?? {}).filter(([subcategoryName]) => {
+      return sectionFieldByName.get(subcategoryName)?.type === 'object'
+    })
+  }
+
+  const renderSubtabbedContent = (tabId: string, tabNestedEntries: readonly (readonly [string, ConfigSchema])[]) => {
+    const subtabPanes: SubtabPane[] = []
+    const chatManagementHintPaneIds = new Set(['chat.reply_timing', 'chat.reply_style'])
+    const entryMap = new Map<string, ConfigSchema>(
+      tabNestedEntries.map(([sectionName, schema]) => [sectionName, schema]),
+    )
+    const childSectionsByParent = new Map<string, Array<readonly [string, ConfigSchema]>>()
+
+    for (const [sectionName, sectionSchema] of tabNestedEntries) {
+      const parentName = sectionSchema.uiParent
+      if (!parentName || !entryMap.has(parentName)) {
+        continue
+      }
+
+      const childSections = childSectionsByParent.get(parentName) ?? []
+      childSections.push([sectionName, sectionSchema])
+      childSectionsByParent.set(parentName, childSections)
+    }
+
+    const collectDescendantEntries = (parentName: string): Array<readonly [string, ConfigSchema]> => {
+      const directChildEntries = childSectionsByParent.get(parentName) ?? []
+
+      return directChildEntries.flatMap(([childName, childSchema]) => {
+        return [[childName, childSchema] as const, ...collectDescendantEntries(childName)]
+      })
+    }
+
+    const renderSectionGroupContent = (sectionEntries: Array<readonly [string, ConfigSchema]>) => {
+      const values = Object.fromEntries(
+        sectionEntries.map(([sectionName]) => [sectionName, sectionValues[sectionName] ?? {}])
+      )
+      const groupSchema: ConfigSchema = {
+        className: sectionEntries.map(([sectionName]) => sectionName).join('.'),
+        classDoc: sectionEntries[0]?.[1].uiLabel || sectionEntries[0]?.[1].classDoc || '',
+        fields: [],
+        nested: Object.fromEntries(sectionEntries),
+      }
+
+      return (
+        <DynamicConfigForm
+          schema={groupSchema}
+          values={values}
+          onChange={(fieldPath, value) => {
+            const [sectionName, ...restPath] = fieldPath.split('.')
+            if (!sectionName) {
+              return
+            }
+
+            updateSectionValueByPath(sectionName, restPath, value)
+          }}
+          hooks={fieldHooks}
+          advancedVisible={advancedVisible}
+          sectionColumns={2}
+        />
+      )
+    }
+
+    for (const [sectionName, sectionSchema] of tabNestedEntries) {
+      if (sectionSchema.uiParent && entryMap.has(sectionSchema.uiParent)) {
+        continue
+      }
+
+      const sectionValue = (sectionValues[sectionName] ?? {}) as ConfigSectionData
+      const allSubcategoryEntries = sectionSchema.uiUseSubTabs ? getObjectSubcategoryEntries(sectionSchema) : []
+      const subcategoryEntries = allSubcategoryEntries
+      const subcategoryNames = new Set(allSubcategoryEntries.map(([subcategoryName]) => subcategoryName))
+      const rootFields = sectionSchema.fields.filter((field) => !subcategoryNames.has(field.name))
+      const rootSchema: ConfigSchema = {
+        ...sectionSchema,
+        className: `${sectionSchema.className}Root`,
+        fields: rootFields,
+        nested: {},
+      }
+
+      if (rootFields.length > 0) {
+        subtabPanes.push({
+          advanced: Boolean(sectionSchema.uiAdvanced),
+          id: sectionName,
+          label: sectionSchema.uiRootSubLabel || getSubtabLabel(sectionSchema, sectionName),
+          content: (
+            <DynamicConfigForm
+              schema={rootSchema}
+              values={sectionValue}
+              onChange={(fieldPath, value) => updateSectionValueByPath(sectionName, fieldPath.split('.'), value)}
+              basePath={sectionName}
+              hooks={fieldHooks}
+              advancedVisible={advancedVisible}
+              sectionColumns={1}
+            />
+          ),
+        })
+      }
+
+      for (const [subcategoryName, subcategorySchema] of subcategoryEntries) {
+        subtabPanes.push({
+          advanced: Boolean(subcategorySchema.uiAdvanced),
+          id: `${sectionName}.${subcategoryName}`,
+          label: getSubtabLabel(subcategorySchema, subcategoryName),
+          content: (
+            <DynamicConfigForm
+              schema={subcategorySchema}
+              values={(sectionValue[subcategoryName] as Record<string, unknown>) || {}}
+              onChange={(fieldPath, value) =>
+                updateSectionValueByPath(sectionName, [subcategoryName, ...fieldPath.split('.')], value)
+              }
+              basePath={`${sectionName}.${subcategoryName}`}
+              hooks={fieldHooks}
+              advancedVisible={advancedVisible}
+              sectionColumns={1}
+            />
+          ),
+        })
+      }
+
+      for (const [childName, childSchema] of childSectionsByParent.get(sectionName) ?? []) {
+        const sectionGroupEntries = [[childName, childSchema] as const, ...collectDescendantEntries(childName)]
+        subtabPanes.push({
+          advanced: Boolean(childSchema.uiAdvanced),
+          id: childName,
+          label: getSubtabLabel(childSchema, childName),
+          content: renderSectionGroupContent(sectionGroupEntries),
+        })
+      }
+    }
+
+    if (subtabPanes.length === 0) {
+      return null
+    }
+
+    const subtabExpanded = Boolean(expandedSubtabGroups[tabId])
+    const defaultSubtabPanes = subtabPanes.filter((pane) => !pane.advanced)
+    const expandedSubtabPanes = subtabPanes.filter((pane) => pane.advanced)
+    const visibleSubtabPanes = subtabExpanded ? [...defaultSubtabPanes, ...expandedSubtabPanes] : defaultSubtabPanes
+    const hasCollapsibleSubtabs = subtabPanes.some((pane) => pane.advanced)
+    const firstExpandedSubtabId = visibleSubtabPanes.find((pane) => pane.advanced)?.id
+    const visibleSubtabIds = new Set(visibleSubtabPanes.map((pane) => pane.id))
+    const activeSubtab = activeSubtabByGroup[tabId]
+    const resolvedActiveSubtab = visibleSubtabIds.has(activeSubtab)
+      ? activeSubtab
+      : visibleSubtabPanes[0]?.id ?? subtabPanes[0].id
+
+    const toggleSubtabsExpanded = () => {
+      if (subtabExpanded && subtabPanes.find((pane) => pane.id === resolvedActiveSubtab)?.advanced) {
+        setActiveSubtabByGroup((current) => ({
+          ...current,
+          [tabId]: defaultSubtabPanes[0]?.id ?? subtabPanes[0].id,
+        }))
+      }
+
+      setExpandedSubtabGroups((current) => ({
+        ...current,
+        [tabId]: !subtabExpanded,
+      }))
+    }
+
+    return (
+      <Tabs
+        key={subtabPanes.map((pane) => pane.id).join('|')}
+        value={resolvedActiveSubtab}
+        onValueChange={(value) =>
+          setActiveSubtabByGroup((current) => ({
+            ...current,
+            [tabId]: value,
+          }))
+        }
+        className="space-y-3"
+      >
+        <DashboardTabBar data-config-bot-subtab-list="true" variant="scroll" className="bg-background/80 h-11 border">
+          {visibleSubtabPanes.map((pane) => (
+            <Fragment key={pane.id}>
+              {pane.id === firstExpandedSubtabId && (
+                <span className="bg-border/90 mx-1 hidden h-7 w-[2px] transition-opacity duration-200 sm:block" />
+              )}
+              <DashboardTabTrigger
+                value={pane.id}
+                data-config-bot-extra-tab={pane.advanced ? 'true' : undefined}
+                className={cn(
+                  'min-h-8 text-base font-semibold',
+                  pane.advanced &&
+                    'text-muted-foreground/80 decoration-border/80 hover:bg-background/70 data-[state=active]:bg-primary/10 data-[state=active]:text-primary underline decoration-dashed underline-offset-4 data-[state=active]:shadow-none motion-safe:animate-[config-tab-enter_180ms_ease-out_both]'
+                )}
+              >
+                {pane.label}
+              </DashboardTabTrigger>
+            </Fragment>
+          ))}
+          {hasCollapsibleSubtabs && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="group h-8 shrink-0 gap-1 self-center px-2 text-sm leading-none transition-all duration-200 ease-out sm:px-2.5"
+              onClick={toggleSubtabsExpanded}
+            >
+              {subtabExpanded ? (
+                <ChevronLeft className="h-3.5 w-3.5 transition-transform duration-200 group-hover:-translate-x-0.5" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+              )}
+              {subtabExpanded ? '收起' : '更多'}
+            </Button>
+          )}
+        </DashboardTabBar>
+
+        {visibleSubtabPanes.map((pane) => (
+          <TabsContent key={pane.id} value={pane.id} className="mt-0">
+            {chatManagementHintPaneIds.has(pane.id) && (
+              <div className="mb-3 flex flex-col gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                <span>需要按具体聊天流调整发言频率或查看聊天 Prompt 时，可以前往聊天管理。</span>
+                <Button asChild size="sm" variant="outline" className="h-8 shrink-0 self-start sm:self-center">
+                  <Link to="/chat-management">
+                    <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                    聊天管理
+                  </Link>
+                </Button>
+              </div>
+            )}
+            {pane.content}
+          </TabsContent>
+        ))}
+      </Tabs>
+    )
+  }
+
   const renderTabContent = (tab: TabGroup) => {
     const tabNestedEntries = tab.sections
       .map((sectionName) => [sectionName, configSchema.nested?.[sectionName]] as const)
@@ -1043,6 +1072,10 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
     if (tabNestedEntries.length === 0) {
       return null
+    }
+
+    if (tabNestedEntries.some(([, sectionSchema]) => sectionSchema.uiUseSubTabs)) {
+      return renderSubtabbedContent(tab.id, tabNestedEntries)
     }
 
     const values = Object.fromEntries(
@@ -1066,14 +1099,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             return
           }
 
-          const currentSectionValue = sectionValues[sectionName] ?? {}
-          const nextSectionValue =
-            restPath.length === 0
-              ? (value as ConfigSectionData)
-              : updateNestedValue(currentSectionValue, restPath, value)
-
-          setSectionValue(sectionName, nextSectionValue)
-          setHasUnsavedChanges(true)
+          updateSectionValueByPath(sectionName, restPath, value)
         }}
         hooks={fieldHooks}
         advancedVisible={advancedVisible}
@@ -1084,7 +1110,10 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-      <DashboardTabBar data-config-bot-tab-list="true" className="sm:flex-wrap">
+      <DashboardTabBar
+        data-config-bot-tab-list="true"
+        className="h-auto min-h-[3.25rem] content-start items-stretch sm:flex-wrap"
+      >
         {visibleTabGroups.map((tab) => {
           const isExpandedOnlyTab = tab.advanced
           return (
@@ -1096,6 +1125,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
                 value={tab.id}
                 data-config-bot-extra-tab={isExpandedOnlyTab ? 'true' : undefined}
                 className={cn(
+                  'min-h-9 text-lg font-semibold',
                   isExpandedOnlyTab &&
                     'text-muted-foreground/80 decoration-border/80 hover:bg-background/70 data-[state=active]:bg-primary/10 data-[state=active]:text-primary underline decoration-dashed underline-offset-4 data-[state=active]:shadow-none motion-safe:animate-[config-tab-enter_180ms_ease-out_both]'
                 )}
@@ -1110,7 +1140,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             type="button"
             variant="ghost"
             size="sm"
-            className="group h-7 shrink-0 gap-1 self-center px-1.5 text-xs leading-none transition-all duration-200 ease-out sm:px-2"
+            className="group h-9 shrink-0 gap-1 self-center px-2 text-sm leading-none transition-all duration-200 ease-out sm:px-2.5"
             onClick={toggleExpanded}
           >
             {expanded ? (
@@ -1125,7 +1155,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
           type="button"
           variant={advancedVisible ? 'default' : 'outline'}
           size="sm"
-          className="h-7 shrink-0 self-center px-2 text-xs leading-none transition-all duration-200 ease-out sm:ml-auto"
+          className="h-9 shrink-0 self-center px-2.5 text-sm leading-none transition-all duration-200 ease-out sm:ml-auto"
           onClick={() => setAdvancedVisible((current) => !current)}
         >
           高级设置

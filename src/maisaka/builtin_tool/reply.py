@@ -1,7 +1,7 @@
 ﻿"""reply 内置工具。"""
 
-import traceback
 from typing import Any, Optional
+import traceback
 
 from src.chat.replyer.replyer_manager import replyer_manager
 from src.cli.maisaka_cli_sender import CLI_PLATFORM_NAME, render_cli_message
@@ -18,6 +18,10 @@ logger = get_logger("maisaka_builtin_reply")
 _REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote", "reference_info"}
 
 
+def _use_expression_intent() -> bool:
+    return config_module.global_config.expression.expression_selection_mode == "vector_intent"
+
+
 async def _run_expression_selector(tool_ctx: BuiltinToolRuntimeContext, system_prompt: str) -> str:
     """运行 replyer 侧表达方式选择子代理，并返回文本结果。"""
     response = await tool_ctx.runtime.run_sub_agent(
@@ -31,26 +35,64 @@ async def _run_expression_selector(tool_ctx: BuiltinToolRuntimeContext, system_p
 def get_tool_spec() -> ToolSpec:
     """获取 reply 工具声明。"""
 
+    properties: dict[str, Any] = {
+        "msg_id": {
+            "type": "string",
+            "description": "要回复的消息msg_id。",
+        },
+        "set_quote": {
+            "type": "boolean",
+            "description": "以引用回复的方式发送这条回复，不用每句都引用。",
+            "default": True,
+        },
+        "reply_guide": {
+            "type": "string",
+            "description": "回复需要注意的事项和回复指引",
+        },
+    }
+    if _use_expression_intent():
+        properties["expression_intent"] = {
+            "type": "object",
+            "description": (
+                "可选。给 replyer 表达方式选择使用的结构化意图，不是回复正文。"
+                "当这次回复需要特定语气、场景或话术时填写，避免表达选择只按关键词匹配。"
+            ),
+            "properties": {
+                "focus": {
+                    "type": "string",
+                    "description": "本次表达主要应该贴合的目标消息、片段或话题。",
+                },
+                "reply_act": {
+                    "type": "string",
+                    "description": "这次回复要完成的动作，例如澄清、安抚、调侃、追问、解释边界。",
+                },
+                "scene": {
+                    "type": "string",
+                    "description": "当前表达场景，例如技术排查、截图分享、撒娇玩笑、价格询问。",
+                },
+                "tone": {
+                    "type": "string",
+                    "description": "期望语气，例如轻松、可靠、吐槽、委婉、简短肯定。",
+                },
+                "prefer": {
+                    "type": "array",
+                    "description": "优先考虑的表达类型或话术倾向。",
+                    "items": {"type": "string"},
+                },
+                "avoid": {
+                    "type": "array",
+                    "description": "需要避免的表达类型、误判方向或不该注入的具体结论。",
+                    "items": {"type": "string"},
+                },
+            },
+        }
+
     return ToolSpec(
         name="reply",
         description="根据当前思考生成并发送一条可见回复。",
         parameters_schema={
             "type": "object",
-            "properties": {
-                "msg_id": {
-                    "type": "string",
-                    "description": "要回复的消息msg_id。",
-                },
-                "set_quote": {
-                    "type": "boolean",
-                    "description": "以引用回复的方式发送这条回复，不用每句都引用。",
-                    "default": True,
-                },
-                "reply_guide": {
-                    "type": "string",
-                    "description": "回复需要注意的事项和回复指引",
-                },
-            },
+            "properties": properties,
             "required": ["msg_id"],
         },
         provider_name="maisaka_builtin",
@@ -101,7 +143,9 @@ async def handle_tool(
         for key, value in dict(invocation.arguments or {}).items()
         if key not in _REPLY_TOOL_INTERNAL_ARGUMENTS
     }
-    enable_reply_quote = bool(config_module.global_config.chat.enable_reply_quote)
+    if not _use_expression_intent():
+        reply_tool_args.pop("expression_intent", None)
+    enable_reply_quote = bool(config_module.global_config.chat.reply_style.enable_reply_quote)
     effective_set_quote = set_quote and enable_reply_quote
 
     if not target_message_id:

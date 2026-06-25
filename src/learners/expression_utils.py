@@ -1,13 +1,16 @@
-import json
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from json_repair import repair_json
+
+import json
+import re
 
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
 from src.common.logger import get_logger
 from src.prompt.prompt_manager import prompt_manager
 from src.services.llm_service import LLMServiceClient
+
+from .expression_style_utils import normalize_expression_style_for_learning
 
 logger = get_logger("expression_utils")
 
@@ -127,7 +130,12 @@ def parse_evaluation_response(response: str) -> Dict[str, Any]:
     }
 
 
-async def check_expression_suitability(situation: str, style: str) -> Tuple[bool, str, Optional[str]]:
+async def check_expression_suitability(
+    situation: str,
+    style: str,
+    *,
+    session_id: str = "",
+) -> Tuple[bool, str, Optional[str]]:
     """
     执行单次 LLM 评估。
 
@@ -154,11 +162,12 @@ async def check_expression_suitability(situation: str, style: str) -> Tuple[bool
 
     prompt = await prompt_manager.render_prompt(prompt_template)
 
-    logger.info(f"正在评估表达方式: situation={situation}, style={style}")
+    logger.info(f"正在优化表达方式: situation={situation}, style={style}")
 
     generation_result = await judge_llm.generate_response(
         prompt=prompt,
-        options=LLMGenerationOptions(temperature=0.6, max_tokens=1024),
+        options=LLMGenerationOptions(temperature=0.6),
+        session_id=session_id,
     )
     response = generation_result.response
 
@@ -246,7 +255,7 @@ def parse_expression_response(response: str) -> Tuple[List[Tuple[str, str, str]]
             continue
 
         situation = str(item.get("situation", "")).strip()
-        style = str(item.get("style", "")).strip()
+        style = normalize_expression_style_for_learning(str(item.get("style", "")).strip())
         source_id = str(item.get("source_id", "")).strip()
 
         if situation and style and source_id:
@@ -258,6 +267,13 @@ def parse_expression_response(response: str) -> Tuple[List[Tuple[str, str, str]]
             jargon_entries.append((content, source_id))
 
     return expressions, jargon_entries
+
+
+def parse_jargon_response(response: str) -> List[Tuple[str, str]]:
+    """解析独立黑话学习 LLM 响应，提取 (content, source_id) 列表。"""
+
+    _, jargon_entries = parse_expression_response(response)
+    return jargon_entries
 
 
 def is_single_char_jargon(content: str) -> bool:

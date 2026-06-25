@@ -8,6 +8,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,6 +32,7 @@ PROMPT_LOG_ROOT = (PROJECT_ROOT / "logs" / "maisaka_prompt").resolve()
 REPLAY_IMAGE_ROOTS = (
     (PROJECT_ROOT / "data" / "images").resolve(),
     (PROJECT_ROOT / "data" / "emoji").resolve(),
+    (PROJECT_ROOT / "data" / "prompt_imgs").resolve(),
     (PROJECT_ROOT / "data" / "html_imgs").resolve(),
 )
 ALLOWED_SUFFIXES = {".txt", ".html", ".json"}
@@ -45,6 +47,145 @@ PROMPT_METADATA_SCRIPT_PATTERN = re.compile(
 )
 MESSAGE_TAG_PATTERN = re.compile(r"<message\b(?P<attrs>[^>]*)>", re.IGNORECASE)
 MESSAGE_TAG_ATTR_PATTERN = re.compile(r'([A-Za-z_][\w:-]*)\s*=\s*"([^"]*)"')
+
+
+def _structured_prompt_content_to_text(content: Any) -> str:
+    """将 Prompt JSON 的结构化 content 转为展示/检索用文本。"""
+
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+                continue
+            if isinstance(item, dict) and str(item.get("type") or "").lower() in {"image", "image_url", "input_image"}:
+                image_format = str(item.get("image_format") or item.get("format") or "").strip() or "unknown"
+                size_bytes = item.get("size_bytes")
+                size_text = f" {size_bytes} B" if isinstance(size_bytes, int) else ""
+                parts.append(f"[图片 image/{image_format}{size_text}]")
+                continue
+            try:
+                parts.append(json.dumps(item, ensure_ascii=False, indent=2, default=str))
+            except Exception:
+                parts.append(str(item))
+        return "\n".join(part for part in parts if part).strip()
+    try:
+        return json.dumps(content, ensure_ascii=False, indent=2, default=str)
+    except Exception:
+        return str(content)
+
+
+def _format_count_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if value is None:
+        return "无"
+    return str(value)
+
+
+def _format_jargon_learning_entry(entry: Any, index: int) -> str:
+    if not isinstance(entry, dict):
+        return f"{index}. {_structured_prompt_content_to_text(entry) or '空条目'}"
+
+    content = str(entry.get("content") or "").strip() or "空词条"
+    parts = [f"{index}. {content}"]
+    source_id = str(entry.get("source_id") or "").strip()
+    if source_id:
+        parts.append(f"source_id={source_id}")
+    reason = str(entry.get("reason") or "").strip()
+    if reason:
+        parts.append(f"原因: {reason}")
+
+    raw_content = entry.get("raw_content")
+    if isinstance(raw_content, list):
+        parts.append(f"原始上下文 {len(raw_content)} 条")
+    evidence_messages = entry.get("evidence_messages")
+    if isinstance(evidence_messages, list):
+        parts.append(f"证据消息 {len(evidence_messages)} 条")
+    return "；".join(parts)
+
+
+def _format_jargon_learning_entries(title: str, entries: Any) -> str:
+    if not isinstance(entries, list) or not entries:
+        return f"[{title}]\n无"
+
+    lines = [f"[{title}]"]
+    lines.extend(_format_jargon_learning_entry(entry, index) for index, entry in enumerate(entries, start=1))
+    return "\n".join(lines)
+
+
+def _is_jargon_learning_update_payload(payload: dict[str, Any]) -> bool:
+    return str(payload.get("record_type") or "").strip() == "jargon_learning_update"
+
+
+def _is_jargon_learning_update_preview_payload(payload: dict[str, Any]) -> bool:
+    request = payload.get("request")
+    return isinstance(request, dict) and request.get("kind") == "jargon_learning_update"
+
+
+def _build_jargon_learning_update_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """将黑话学习更新日志包装成 dashboard 可展示的 Prompt JSON 结构。"""
+
+    session_name = str(payload.get("session_name") or payload.get("learning_session_id") or "").strip()
+    status = str(payload.get("status") or "").strip() or "unknown"
+    wrote_database = payload.get("wrote_database")
+    summary_lines = [
+        "这是黑话学习更新过程日志，不是可重放的 LLM prompt。",
+        f"状态: {status}",
+        f"会话: {session_name or '未知'}",
+        f"创建时间: {_format_count_value(payload.get('created_at'))}",
+        f"学习素材数: {_format_count_value(payload.get('source_item_count'))}",
+        f"解析候选: {_format_count_value(payload.get('parsed_entry_count'))}",
+        f"接受条目: {_format_count_value(payload.get('accepted_entry_count'))}",
+        f"跳过条目: {_format_count_value(payload.get('skipped_entry_count'))}",
+        f"新增: {_format_count_value(payload.get('saved'))}",
+        f"更新: {_format_count_value(payload.get('updated'))}",
+        f"写入数据库: {_format_count_value(wrote_database)}",
+    ]
+    details = "\n\n".join(
+        [
+            "\n".join(summary_lines),
+            _format_jargon_learning_entries("解析候选", payload.get("parsed_entries")),
+            _format_jargon_learning_entries("接受条目", payload.get("accepted_entries")),
+            _format_jargon_learning_entries("跳过条目", payload.get("skipped_entries")),
+        ]
+    )
+    preview_payload = {
+        "schema_version": payload.get("schema_version") or 1,
+        "request": {
+            "kind": "jargon_learning_update",
+            "selection_reason": "\n".join(summary_lines),
+        },
+        "metadata": {},
+        "messages": [],
+        "output": {
+            "title": "黑话学习更新日志",
+            "content": details,
+        },
+        "tool_definitions": [],
+    }
+    return preview_payload
+
+
+def _normalize_prompt_json_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if _is_jargon_learning_update_payload(payload):
+        return _build_jargon_learning_update_preview_payload(payload)
+    return payload
+
+
+def _is_legacy_jargon_learning_update_file(file_path: Path) -> bool:
+    try:
+        content_head = file_path.read_text(encoding="utf-8", errors="replace")[:2048]
+    except OSError:
+        return False
+    return '"record_type"' in content_head and '"jargon_learning_update"' in content_head
 
 
 class ReasoningPromptStageInfo(BaseModel):
@@ -85,6 +226,8 @@ class ReasoningPromptFile(BaseModel):
     json_path: str | None = None
     output_preview: str | None = None
     action_preview: str | None = None
+    display_title: str | None = None
+    related_json_paths: list[str] = Field(default_factory=list)
     has_behavior_choice_insert: bool = False
     model_name: str | None = None
     duration_ms: float | None = None
@@ -111,6 +254,13 @@ class ReasoningPromptStagesResponse(BaseModel):
 
     stages: list[str] = Field(default_factory=list)
     stage_infos: list[ReasoningPromptStageInfo] = Field(default_factory=list)
+
+
+class ReasoningPromptClearStageResponse(BaseModel):
+    """清空某类推理过程日志的响应。"""
+
+    stage: str
+    deleted_files: int = 0
 
 
 class ReasoningPromptMessageAvatar(BaseModel):
@@ -551,7 +701,7 @@ def _load_prompt_json(file_path: Path) -> dict[str, Any]:
         payload = json.loads(file_path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return {}
-    return payload if isinstance(payload, dict) else {}
+    return _normalize_prompt_json_payload(payload) if isinstance(payload, dict) else {}
 
 
 def _parse_message_tag_attrs(text: str) -> list[dict[str, str]]:
@@ -584,17 +734,11 @@ def _extract_message_ids_from_prompt_payload(payload: dict[str, Any]) -> list[st
     for message in payload.get("messages") or []:
         if not isinstance(message, dict):
             continue
-        append_from_text(message.get("content_text"))
-        content = message.get("content")
-        if isinstance(content, str):
-            append_from_text(content)
+        append_from_text(_structured_prompt_content_to_text(message.get("content")))
 
     output = payload.get("output")
     if isinstance(output, dict):
-        append_from_text(output.get("content_text"))
-        content = output.get("content")
-        if isinstance(content, str):
-            append_from_text(content)
+        append_from_text(_structured_prompt_content_to_text(output.get("content")))
 
     request = payload.get("request")
     if isinstance(request, dict):
@@ -909,7 +1053,9 @@ def _extract_prompt_metadata(file_path: Path) -> dict[str, object]:
             raw_payload = json.loads(content)
         except (TypeError, ValueError, json.JSONDecodeError):
             return {}
-        return _extract_prompt_metadata_from_json_payload(raw_payload if isinstance(raw_payload, dict) else {})
+        return _extract_prompt_metadata_from_json_payload(
+            _normalize_prompt_json_payload(raw_payload) if isinstance(raw_payload, dict) else {}
+        )
     if suffix == ".html":
         return _extract_prompt_metadata_from_html(content)
     return _extract_prompt_metadata_from_text(content)
@@ -975,18 +1121,6 @@ def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | Non
     if not isinstance(output, dict):
         return None
 
-    output_text = str(output.get("content_text") or "").strip()
-    if output_text:
-        try:
-            parsed_output_text = json.loads(output_text)
-        except json.JSONDecodeError:
-            parsed_output_text = None
-        if isinstance(parsed_output_text, dict):
-            response_text = str(parsed_output_text.get("response") or "").strip()
-            if response_text:
-                return " ".join(line.strip() for line in response_text.splitlines() if line.strip()) or None
-        return " ".join(line.strip() for line in output_text.splitlines() if line.strip())
-
     content = output.get("content")
     if content in (None, "", []):
         return None
@@ -996,7 +1130,8 @@ def _extract_output_text_from_json_payload(payload: dict[str, Any]) -> str | Non
         response_text = str(content.get("response") or "").strip()
         if response_text:
             return " ".join(line.strip() for line in response_text.splitlines() if line.strip()) or None
-    return json.dumps(content, ensure_ascii=False, default=str)
+    derived_text = _structured_prompt_content_to_text(content)
+    return " ".join(line.strip() for line in derived_text.splitlines() if line.strip()) or None
 
 
 def _extract_output_preview_from_json(file_path: Path, max_chars: int = 160) -> str | None:
@@ -1056,6 +1191,9 @@ def _extract_action_preview_from_json(file_path: Path, max_actions: int = 4) -> 
 def _extract_action_preview_from_json_payload(payload: dict[str, Any], max_actions: int = 4) -> str | None:
     """从 prompt JSON payload 中提取动作摘要。"""
 
+    if _is_jargon_learning_update_preview_payload(payload):
+        return _extract_output_preview_from_json_payload(payload, max_chars=160)
+
     output = payload.get("output")
     action_names: list[str] = []
 
@@ -1072,6 +1210,119 @@ def _extract_action_preview_from_json_payload(payload: dict[str, Any], max_actio
     return preview
 
 
+JARGON_UPDATE_STAGE_ORDER = {"with_context": 0, "content_only": 1, "compare": 2}
+
+
+def _extract_jargon_learning_update_info(payload: dict[str, Any]) -> tuple[str, str]:
+    request = payload.get("request")
+    if not isinstance(request, dict):
+        return "", ""
+
+    selection_reason = str(request.get("selection_reason") or "")
+    jargon_name = ""
+    inference_stage = ""
+    for raw_line in selection_reason.splitlines():
+        line = raw_line.strip()
+        if line.startswith("词条:"):
+            jargon_name = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("推断阶段:"):
+            inference_stage = line.split(":", 1)[1].strip()
+            continue
+    return jargon_name, inference_stage
+
+
+def _group_jargon_learning_update_records(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    """把同一黑话的一轮三次含义推断合并成一条 WebUI 列表记录。"""
+
+    if not records:
+        return records
+
+    prepared_records: list[dict[str, object]] = []
+    for record in records:
+        if record.get("stage") != "jargon_learning_update" or not isinstance(record.get("json_path"), str):
+            prepared_records.append(record)
+            continue
+
+        json_file_path = _resolve_record_file_path(record, "json_path", {".json"})
+        if json_file_path is None:
+            prepared_records.append(record)
+            continue
+
+        payload = _load_prompt_json(json_file_path)
+        jargon_name, inference_stage = _extract_jargon_learning_update_info(payload)
+        if not jargon_name:
+            prepared_records.append(record)
+            continue
+
+        prepared_record = dict(record)
+        prepared_record["display_title"] = jargon_name
+        prepared_record["_jargon_name"] = jargon_name
+        prepared_record["_inference_stage"] = inference_stage
+        prepared_records.append(prepared_record)
+
+    grouped_records: list[dict[str, object]] = []
+    pending_groups: dict[tuple[str, str], list[dict[str, object]]] = {}
+
+    def flush_group(group_key: tuple[str, str]) -> None:
+        group = pending_groups.pop(group_key, [])
+        if not group:
+            return
+
+        group.sort(
+            key=lambda item: (
+                JARGON_UPDATE_STAGE_ORDER.get(str(item.get("_inference_stage") or ""), 99),
+                float(item.get("modified_at") or 0),
+            )
+        )
+        base = dict(group[-1])
+        related_json_paths = [str(item["json_path"]) for item in group if isinstance(item.get("json_path"), str)]
+        base["related_json_paths"] = related_json_paths
+        base["size"] = sum(int(item.get("size") or 0) for item in group)
+        base["modified_at"] = max(float(item.get("modified_at") or 0) for item in group)
+        timestamps = [int(item["timestamp"]) for item in group if isinstance(item.get("timestamp"), int)]
+        if timestamps:
+            base["timestamp"] = max(timestamps)
+        base["stem"] = str(base.get("stem") or "")
+        base["action_preview"] = str(base.get("display_title") or "")
+        base.pop("_jargon_name", None)
+        base.pop("_inference_stage", None)
+        grouped_records.append(base)
+
+    for record in sorted(prepared_records, key=lambda item: float(item.get("modified_at") or 0)):
+        jargon_name = str(record.get("_jargon_name") or "")
+        inference_stage = str(record.get("_inference_stage") or "")
+        if not jargon_name:
+            grouped_records.append(record)
+            continue
+
+        group_key = (str(record.get("session_id") or ""), jargon_name)
+        group = pending_groups.get(group_key)
+        if group:
+            first_modified_at = float(group[0].get("modified_at") or 0)
+            stage_names = {str(item.get("_inference_stage") or "") for item in group}
+            if (
+                abs(float(record.get("modified_at") or 0) - first_modified_at) > 120
+                or (inference_stage and inference_stage in stage_names)
+                or "compare" in stage_names
+            ):
+                flush_group(group_key)
+
+        pending_groups.setdefault(group_key, []).append(record)
+
+    for group_key in list(pending_groups):
+        flush_group(group_key)
+
+    grouped_records.sort(
+        key=lambda item: (
+            float(item["modified_at"]),
+            int(item["timestamp"]) if isinstance(item.get("timestamp"), int) else 0,
+        ),
+        reverse=True,
+    )
+    return grouped_records
+
+
 def _matches_prompt_file_search(item: ReasoningPromptFile, normalized_search: str) -> bool:
     """判断推理过程条目是否匹配搜索词。"""
 
@@ -1082,6 +1333,7 @@ def _matches_prompt_file_search(item: ReasoningPromptFile, normalized_search: st
         or normalized_search in (item.resolved_session_id or "").casefold()
         or normalized_search in (item.output_preview or "").casefold()
         or normalized_search in (item.action_preview or "").casefold()
+        or normalized_search in (item.display_title or "").casefold()
         or normalized_search in (item.model_name or "").casefold()
         or normalized_search in (str(item.duration_ms) if item.duration_ms is not None else "")
         or normalized_search in item.stem.casefold()
@@ -1225,6 +1477,12 @@ def _collect_prompt_file_records_for_session(
                 continue
 
             stage_name, session_id = parts[0], parts[1]
+            if (
+                stage_name == "jargon_learning_update"
+                and file_suffix == ".json"
+                and _is_legacy_jargon_learning_update_file(file_path)
+            ):
+                continue
             stem = file_path.stem
             key = (stage_name, session_id, stem)
             session_info = session_info_map.get(session_id)
@@ -1270,7 +1528,7 @@ def _collect_prompt_file_records_for_session(
         ),
         reverse=True,
     )
-    return items
+    return _group_jargon_learning_update_records(items) if stage == "jargon_learning_update" else items
 
 
 def _collect_prompt_file_records(
@@ -1317,7 +1575,7 @@ def _hydrate_prompt_file_record(
 ) -> ReasoningPromptFile:
     hydrated_record = dict(record)
     stage_name = str(hydrated_record["stage"])
-    should_extract_action_preview = include_action_preview and stage_name in {"planner", "timing_gate"}
+    should_extract_action_preview = include_action_preview and stage_name in {"jargon_learning_update", "planner"}
     should_extract_output_preview = include_output_preview and stage_name == "replyer"
     json_payload: dict[str, Any] | None = None
 
@@ -1328,8 +1586,9 @@ def _hydrate_prompt_file_record(
             _merge_prompt_metadata(hydrated_record, _extract_prompt_metadata_from_json_payload(json_payload))
             if stage_name == "replyer" and (include_previews or should_extract_output_preview):
                 hydrated_record["output_preview"] = _extract_output_preview_from_json_payload(json_payload)
-            elif stage_name in {"planner", "timing_gate"}:
-                hydrated_record["action_preview"] = _extract_action_preview_from_json_payload(json_payload)
+            elif stage_name == "planner" or _is_jargon_learning_update_preview_payload(json_payload):
+                if not hydrated_record.get("display_title"):
+                    hydrated_record["action_preview"] = _extract_action_preview_from_json_payload(json_payload)
         else:
             _merge_prompt_metadata(hydrated_record, _extract_prompt_metadata_from_json_head(json_file_path))
 
@@ -1440,6 +1699,24 @@ async def list_reasoning_prompt_stages():
     )
 
 
+@router.delete("/stages/{stage}", response_model=ReasoningPromptClearStageResponse)
+async def clear_reasoning_prompt_stage(stage: str):
+    """清空指定类型的推理过程日志。"""
+
+    stage_name = _resolve_stage_name(stage)
+    stage_dir = (PROMPT_LOG_ROOT / stage_name).resolve()
+    if not stage_dir.is_relative_to(PROMPT_LOG_ROOT):
+        raise HTTPException(status_code=400, detail="无效的推理过程类型")
+    if not stage_dir.exists():
+        return ReasoningPromptClearStageResponse(stage=stage_name, deleted_files=0)
+    if not stage_dir.is_dir():
+        raise HTTPException(status_code=400, detail="推理过程路径不是目录")
+
+    deleted_files = sum(1 for path in stage_dir.rglob("*") if path.is_file())
+    shutil.rmtree(stage_dir)
+    return ReasoningPromptClearStageResponse(stage=stage_name, deleted_files=deleted_files)
+
+
 @router.get("/files", response_model=ReasoningPromptListResponse)
 async def list_reasoning_prompt_files(
     stage: str = Query("planner"),
@@ -1537,9 +1814,20 @@ async def get_reasoning_prompt_file(path: str = Query(...)):
 
     file_path = _resolve_prompt_log_path(path, {".txt", ".json"})
     stat = file_path.stat()
-    metadata = _extract_prompt_metadata(file_path)
     content = file_path.read_text(encoding="utf-8", errors="replace")
-    message_avatars = _load_prompt_message_avatar_map(path, content) if file_path.suffix.lower() == ".json" else {}
+    if file_path.suffix.lower() == ".json":
+        try:
+            raw_payload = json.loads(content)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raw_payload = {}
+        payload = _normalize_prompt_json_payload(raw_payload) if isinstance(raw_payload, dict) else {}
+        metadata = _extract_prompt_metadata_from_json_payload(payload)
+        if isinstance(raw_payload, dict) and _is_jargon_learning_update_payload(raw_payload):
+            content = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        message_avatars = _load_prompt_message_avatar_map(path, content)
+    else:
+        metadata = _extract_prompt_metadata(file_path)
+        message_avatars = {}
 
     return ReasoningPromptContentResponse(
         path=_relative_posix_path(file_path),

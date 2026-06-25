@@ -23,6 +23,7 @@ export type XWidgetType =
   | 'tags'
   | 'talk-time'
   | 'textarea'
+  | 'comma-list'
 
 export type LocalizedText = string | Record<string, string>
 export type DescriptionDisplayMode = 'inline' | 'icon' | 'label-hover'
@@ -47,7 +48,9 @@ export interface FieldSchema {
   'x-input-width'?: string
   'x-description-display'?: DescriptionDisplayMode
   'x-collapsed-by-default'?: boolean
+  'x-option-labels'?: Record<string, string>
   'x-option-descriptions'?: Record<string, string>
+  'x-placeholder'?: string
   'x-row'?: string
   'x-display-as-section'?: boolean
   'x-textarea-min-height'?: number
@@ -64,6 +67,10 @@ export interface ConfigSchema {
   uiParent?: string
   uiLabel?: string
   uiAdvanced?: boolean
+  uiOrder?: number
+  uiUseSubTabs?: boolean
+  uiSubLabel?: string
+  uiRootSubLabel?: string
 }
 
 export interface ConfigSchemaResponse {

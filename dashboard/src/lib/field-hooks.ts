@@ -50,7 +50,7 @@ export class FieldHookRegistry {
 
   /**
    * Register a hook for a specific field path
-   * @param fieldPath The field path (e.g., 'chat.talk_value')
+   * @param fieldPath The field path (e.g., 'chat.reply_timing.talk_value')
    * @param component The React component to register
    * @param type The hook type ('replace' or 'wrapper')
    */

@@ -25,10 +25,12 @@ from src.maisaka.context.messages import (
     SessionBackedMessage,
     ToolResultMessage,
 )
+from src.maisaka.mode_policy import is_idle_cycle_reason
 from .manager import FocusTargetResolution, focus_mode_manager
 
 FOCUS_SWITCH_NEW_MESSAGE_LIMIT = 20
 FOCUS_NO_ACTION_EXIT_THRESHOLD = 5
+FOCUS_EVENT_UNREAD_COUNT_THRESHOLD = 3
 
 logger = get_logger("maisaka_runtime")
 
@@ -39,7 +41,10 @@ class MaisakaFocusRuntimeMixin:
     def _is_focus_mode_active_for_current_chat(self) -> bool:
         """Return whether focus mode applies to this runtime's chat."""
 
-        return focus_mode_manager.is_enabled_for_chat(is_group_chat=self.chat_stream.is_group_session)
+        return focus_mode_manager.is_enabled_for_session(
+            self.session_id,
+            is_group_chat=self.chat_stream.is_group_session,
+        )
 
     def _get_pending_attention_flags(self) -> tuple[bool, bool]:
         """Return whether pending messages contain @ or mention signals."""
@@ -53,11 +58,9 @@ class MaisakaFocusRuntimeMixin:
         """Refresh unread and attention flags after focus-mode manual reading."""
 
         self._last_processed_index = len(self.message_cache)
-        self._message_turn_scheduled = False
-        self._message_debounce_required = False
-        self._force_next_timing_continue = False
-        self._force_next_timing_message_id = ""
-        self._force_next_timing_reason = ""
+        self._mark_message_turn_unscheduled()
+        self._clear_message_debounce_required()
+        self._clear_forced_turn_state()
         self._cancel_deferred_message_turn_task()
         focus_mode_manager.mark_read(self.session_id)
 
@@ -89,38 +92,38 @@ class MaisakaFocusRuntimeMixin:
 
         return history_messages
 
-    def record_no_action_cycle_result(self, cycle_end_reason: str) -> None:
-        """Track consecutive no_action cycles and release stale group focus."""
+    def record_idle_cycle_result(self, cycle_end_reason: str) -> None:
+        """Track consecutive idle cycles and release stale group focus."""
 
         if not self._is_focus_mode_active_for_current_chat():
-            self._consecutive_no_action_count = 0
+            self._consecutive_idle_count = 0
             return
         if not self.chat_stream.is_group_session:
-            self._consecutive_no_action_count = 0
+            self._consecutive_idle_count = 0
             return
 
-        if cycle_end_reason not in {"timing_no_action", "tool_pause:no_action"}:
-            self._consecutive_no_action_count = 0
+        if not is_idle_cycle_reason(cycle_end_reason):
+            self._consecutive_idle_count = 0
             return
 
-        self._consecutive_no_action_count += 1
-        if self._consecutive_no_action_count < FOCUS_NO_ACTION_EXIT_THRESHOLD:
+        self._consecutive_idle_count += 1
+        if self._consecutive_idle_count < FOCUS_NO_ACTION_EXIT_THRESHOLD:
             return
 
-        self._consecutive_no_action_count = 0
-        self._exit_focus_after_consecutive_no_action()
+        self._consecutive_idle_count = 0
+        self._exit_focus_after_consecutive_idle()
 
-    def _exit_focus_after_consecutive_no_action(self) -> None:
-        """Release the current group from focus after repeated no_action cycles."""
+    def _exit_focus_after_consecutive_idle(self) -> None:
+        """Release the current group from focus after repeated idle cycles."""
 
         released = focus_mode_manager.release_focus_and_block_next_entry(self.session_id)
         if not released:
             return
 
         self._cancel_focus_cooldown_timer_task()
-        self._focus_cooldown_wakeup_scheduled = False
+        self._clear_focus_cooldown_wakeup_scheduled()
         logger.info(
-            f"{self.log_prefix} 连续 {FOCUS_NO_ACTION_EXIT_THRESHOLD} 次 no_action，"
+            f"{self.log_prefix} 连续 {FOCUS_NO_ACTION_EXIT_THRESHOLD} 次空闲结束，"
             "已退出当前群的 Focus，并阻止它立即重新进入"
         )
 
@@ -230,7 +233,10 @@ class MaisakaFocusRuntimeMixin:
         for runtime in running_runtimes:
             if not focus_mode_manager.is_in_focus_set(runtime.session_id):
                 continue
-            if not focus_mode_manager.is_enabled_for_chat(is_group_chat=runtime.chat_stream.is_group_session):
+            if not focus_mode_manager.is_enabled_for_session(
+                runtime.session_id,
+                is_group_chat=runtime.chat_stream.is_group_session,
+            ):
                 continue
             if trigger_session_id and not focus_mode_manager.is_same_focus_scope(runtime.session_id, trigger_session_id):
                 continue
@@ -238,7 +244,7 @@ class MaisakaFocusRuntimeMixin:
                 continue
             if runtime._focus_cooldown_wakeup_scheduled:
                 continue
-            if runtime._proactive_anchor_message is not None:
+            if runtime._proactive_trigger_message is not None:
                 continue
             if runtime._message_turn_scheduled and runtime._has_pending_messages():
                 continue
@@ -266,7 +272,10 @@ class MaisakaFocusRuntimeMixin:
         for runtime in running_runtimes:
             if runtime.session_id == focus_session_id:
                 continue
-            if not focus_mode_manager.is_enabled_for_chat(is_group_chat=runtime.chat_stream.is_group_session):
+            if not focus_mode_manager.is_enabled_for_session(
+                runtime.session_id,
+                is_group_chat=runtime.chat_stream.is_group_session,
+            ):
                 continue
             if not focus_mode_manager.is_same_focus_scope(runtime.session_id, focus_session_id):
                 continue
@@ -307,7 +316,7 @@ class MaisakaFocusRuntimeMixin:
             f'focus_cool_time="{focus_mode_manager.get_focus_cool_time():.0f}" '
             f'reason="{escape(wakeup_reason, quote=True)}">\n'
             f"{reason_text}\n"
-            "请结合最新的 focus_chat_overview 判断是否需要切换或处理其它聊天。\n"
+            "请结合最新的 focus_chat_event 判断是否需要切换或处理其它聊天。\n"
             "</focus_cooldown_wakeup>"
         )
         wakeup_message = SessionMessage(
@@ -332,13 +341,8 @@ class MaisakaFocusRuntimeMixin:
                 source_kind=FOCUS_AT_WAKEUP_SOURCE if wakeup_reason == "at" else FOCUS_COOLDOWN_WAKEUP_SOURCE,
             )
         )
-        self._proactive_anchor_message = wakeup_message
         self._focus_cooldown_wakeup_scheduled = True
-        if self._agent_state == self._STATE_WAIT:
-            self._agent_state = self._STATE_RUNNING
-            self._pending_wait_tool_call_id = None
-            self._cancel_wait_timeout_task()
-        self._internal_turn_queue.put_nowait("proactive")
+        self._queue_proactive_turn(wakeup_message)
         logger.info(
             f"{self.log_prefix} focus_mode 强制唤醒已排队: "
             f"trigger_session_id={trigger_session_id} reason={wakeup_reason} "
@@ -354,11 +358,10 @@ class MaisakaFocusRuntimeMixin:
             is_group_chat=self.chat_stream.is_group_session,
         ):
             return []
-        overview_message = self._build_focus_chat_overview_message()
-        return [overview_message] if overview_message else []
+        return self._build_focus_chat_event_messages()
 
-    def _build_focus_chat_overview_message(self) -> str:
-        """Build a focus-mode overview for currently running chat sessions."""
+    def _build_focus_chat_event_messages(self) -> list[str]:
+        """Build focus-mode event messages for currently running chat sessions."""
 
         from src.chat.heart_flow.heartflow_manager import heartflow_manager
 
@@ -370,13 +373,36 @@ class MaisakaFocusRuntimeMixin:
         )
         bot_name = global_config.bot.nickname.strip()
         focus_scope_key = focus_mode_manager.get_focus_scope_key(self.session_id)
-        lines = [
-            f'<focus_chat_overview current_chat_id="{escape(self.session_id, quote=True)}" '
-            f'focus_scope="{escape(focus_scope_key, quote=True)}">',
-            "以下是当前其他聊天的状态。"
-        ]
+        unviewed_seconds_threshold = focus_mode_manager.get_focus_cool_time()
+        event_messages: list[str] = []
+
+        def append_event(
+            *,
+            event_type: str,
+            chat_attrs: Sequence[str],
+            reason: str,
+            latest_messages: Sequence[SessionMessage],
+            extra_attrs: Sequence[str] = (),
+        ) -> None:
+            event_messages.append(
+                self._format_focus_event(
+                    event_type=event_type,
+                    attrs=[
+                        f'current_chat_id="{escape(self.session_id, quote=True)}"',
+                        f'focus_scope="{escape(focus_scope_key, quote=True)}"',
+                        *chat_attrs,
+                        *extra_attrs,
+                    ],
+                    reason=reason,
+                    latest_messages=latest_messages,
+                )
+            )
+
         for chat_runtime in running_runtimes:
-            if not focus_mode_manager.is_enabled_for_chat(is_group_chat=chat_runtime.chat_stream.is_group_session):
+            if not focus_mode_manager.is_enabled_for_session(
+                chat_runtime.session_id,
+                is_group_chat=chat_runtime.chat_stream.is_group_session,
+            ):
                 continue
             if not focus_mode_manager.is_same_focus_scope(chat_runtime.session_id, self.session_id):
                 continue
@@ -384,31 +410,101 @@ class MaisakaFocusRuntimeMixin:
             unread_count = chat_runtime._get_pending_message_count()
             has_pending_at, has_pending_mention = chat_runtime._get_pending_attention_flags()
             latest_messages = self._get_latest_messages_for_focus_overview(chat_session, chat_runtime)
-            chat_type = "group" if chat_session.is_group_session else "private"
-            target_id = chat_session.group_id if chat_session.is_group_session else chat_session.user_id
-            last_read_at = focus_mode_manager.get_last_read_at(chat_session.session_id)
-            chat_lines = [
-                f'  <chat chat_id="{escape(chat_session.session_id, quote=True)}" '
-                f'platform="{escape(chat_session.platform, quote=True)}" '
-                f'id="{escape(target_id or "", quote=True)}" '
-                f'type="{escape(chat_type, quote=True)}">',
-                f"    未读（未决策消息）消息数: {unread_count}",
-            ]
+            chat_attrs = self._build_focus_event_chat_attrs(chat_session, unread_count)
+
             if has_pending_at:
-                chat_lines.append(f"    是否有人 @ {bot_name}: 是")
+                append_event(
+                    event_type="at",
+                    chat_attrs=chat_attrs,
+                    reason=f"有人 @ {bot_name}",
+                    latest_messages=latest_messages,
+                )
             if has_pending_mention:
-                chat_lines.append(f"    是否有人提及{bot_name}: 是")
-            chat_lines.extend(
-                [
-                    "    最新一条消息:",
-                    *self._format_focus_latest_messages(latest_messages),
-                    f"    上次阅读时间: {self._format_focus_datetime(last_read_at)}",
-                    "  </chat>",
-                ]
-            )
-            lines.extend(chat_lines)
-        lines.append("</focus_chat_overview>")
+                append_event(
+                    event_type="mention",
+                    chat_attrs=chat_attrs,
+                    reason=f"有人提及{bot_name}",
+                    latest_messages=latest_messages,
+                )
+            if unread_count >= FOCUS_EVENT_UNREAD_COUNT_THRESHOLD:
+                append_event(
+                    event_type="unread_count",
+                    chat_attrs=chat_attrs,
+                    extra_attrs=[f'threshold="{FOCUS_EVENT_UNREAD_COUNT_THRESHOLD}"'],
+                    reason=(
+                        f"未读（未决策消息）消息数 {unread_count} "
+                        f"已达到阈值 {FOCUS_EVENT_UNREAD_COUNT_THRESHOLD}"
+                    ),
+                    latest_messages=latest_messages,
+                )
+
+            oldest_pending_at = self._get_focus_oldest_pending_message_at(chat_runtime)
+            if self._calculate_focus_unviewed_seconds(oldest_pending_at) >= unviewed_seconds_threshold:
+                append_event(
+                    event_type="unviewed_time",
+                    chat_attrs=chat_attrs,
+                    extra_attrs=[
+                        f'threshold_seconds="{unviewed_seconds_threshold:.0f}"',
+                        f'oldest_unread_at="{escape(self._format_focus_datetime(oldest_pending_at), quote=True)}"',
+                    ],
+                    reason=f"最早未查看消息已达到 {unviewed_seconds_threshold:.0f} 秒未查看阈值",
+                    latest_messages=latest_messages,
+                )
+
+        return event_messages
+
+    @staticmethod
+    def _build_focus_event_chat_attrs(chat_session: BotChatSession, unread_count: int) -> list[str]:
+        chat_type = "group" if chat_session.is_group_session else "private"
+        target_id = chat_session.group_id if chat_session.is_group_session else chat_session.user_id
+        return [
+            f'chat_id="{escape(chat_session.session_id, quote=True)}"',
+            f'platform="{escape(chat_session.platform, quote=True)}"',
+            f'id="{escape(target_id or "", quote=True)}"',
+            f'type="{escape(chat_type, quote=True)}"',
+            f'unread_count="{unread_count}"',
+        ]
+
+    @staticmethod
+    def _format_focus_event(
+        *,
+        event_type: str,
+        attrs: Sequence[str],
+        reason: str,
+        latest_messages: Sequence[SessionMessage],
+    ) -> str:
+        attrs_text = " ".join(attrs)
+        lines = [
+            f'<focus_chat_event event_type="{escape(event_type, quote=True)}" {attrs_text}>',
+            f"原因: {reason}",
+            "最新一条消息:",
+            *MaisakaFocusRuntimeMixin._format_focus_latest_messages(latest_messages),
+            "</focus_chat_event>",
+        ]
         return "\n".join(lines)
+
+    @staticmethod
+    def _get_focus_oldest_pending_message_at(chat_runtime: Any) -> Optional[datetime]:
+        pending_messages = chat_runtime.message_cache[chat_runtime._last_processed_index :]
+        oldest_timestamp: Optional[datetime] = None
+        seen_message_ids: set[str] = set()
+        for message in pending_messages:
+            message_id = str(message.message_id or "").strip()
+            if message_id:
+                if message_id in seen_message_ids:
+                    continue
+                seen_message_ids.add(message_id)
+            message_timestamp = message.timestamp
+            if oldest_timestamp is None or message_timestamp < oldest_timestamp:
+                oldest_timestamp = message_timestamp
+        return oldest_timestamp
+
+    @staticmethod
+    def _calculate_focus_unviewed_seconds(oldest_pending_at: Optional[datetime]) -> float:
+        if oldest_pending_at is None:
+            return 0.0
+        current_time = datetime.now(oldest_pending_at.tzinfo) if oldest_pending_at.tzinfo else datetime.now()
+        return max(0.0, (current_time - oldest_pending_at).total_seconds())
 
     @staticmethod
     def _get_latest_messages_for_focus_overview(
@@ -607,35 +703,34 @@ class MaisakaFocusRuntimeMixin:
             f"（未读 {target_unread_count} 条，最多 {FOCUS_SWITCH_NEW_MESSAGE_LIMIT} 条）。\n"
             "</focus_switch>"
         )
-        switch_anchor_message = SessionMessage(
+        switch_trigger_message = SessionMessage(
             message_id=switch_message_id,
             timestamp=switch_timestamp,
             platform=target_session.platform,
         )
-        switch_anchor_message.session_id = target_session.session_id
-        switch_anchor_message.message_info = MessageInfo(
+        switch_trigger_message.session_id = target_session.session_id
+        switch_trigger_message.message_info = MessageInfo(
             user_info=target_runtime._build_runtime_user_info(),
             group_info=target_runtime._build_group_info(),
             additional_config={},
         )
-        switch_anchor_message.raw_message = MessageSequence([TextComponent(switch_notice)])
-        switch_anchor_message.processed_plain_text = switch_notice
+        switch_trigger_message.raw_message = MessageSequence([TextComponent(switch_notice)])
+        switch_trigger_message.processed_plain_text = switch_notice
 
         copied_history.append(
             SessionBackedMessage.from_session_message(
-                switch_anchor_message,
-                raw_message=switch_anchor_message.raw_message,
+                switch_trigger_message,
+                raw_message=switch_trigger_message.raw_message,
                 visible_text=switch_notice,
                 source_kind="focus_switch",
             )
         )
         copied_history.extend(recent_context_messages)
         target_runtime._chat_history = copied_history
-        target_runtime._message_turn_scheduled = False
-        target_runtime._message_debounce_required = False
-        target_runtime._proactive_anchor_message = switch_anchor_message
+        target_runtime._mark_message_turn_unscheduled()
+        target_runtime._clear_message_debounce_required()
         target_runtime._enter_stop_state()
-        target_runtime._internal_turn_queue.put_nowait("proactive")
+        target_runtime._queue_proactive_turn(switch_trigger_message)
 
         self._enter_stop_state()
         structured_content = {

@@ -91,7 +91,6 @@ def sample_jargons_fixture(session: Session, sample_chat_session: ChatSession):
         Jargon(
             id=1,
             content="yyds",
-            raw_content="永远的神",
             meaning="永远的神",
             session_id_dict=json.dumps({sample_chat_session.session_id: 10}),
             count=10,
@@ -101,7 +100,6 @@ def sample_jargons_fixture(session: Session, sample_chat_session: ChatSession):
         Jargon(
             id=2,
             content="awsl",
-            raw_content="啊我死了",
             meaning="啊我死了",
             session_id_dict=json.dumps({sample_chat_session.session_id: 5}),
             count=5,
@@ -111,7 +109,6 @@ def sample_jargons_fixture(session: Session, sample_chat_session: ChatSession):
         Jargon(
             id=3,
             content="hello",
-            raw_content=None,
             meaning="你好",
             session_id_dict=json.dumps({sample_chat_session.session_id: 2}),
             count=2,
@@ -154,7 +151,6 @@ def test_list_jargons_with_pagination(client: TestClient, sample_jargons):
     data = response.json()
     assert data["total"] == 3
     assert len(data["data"]) == 2
-
     response = client.get("/api/webui/jargon/list?page=2&page_size=2")
     assert response.status_code == 200
     data = response.json()
@@ -176,7 +172,7 @@ def test_list_jargons_with_search(client: TestClient, sample_jargons):
     data = response.json()
     assert data["total"] == 0
 
-    # raw_content 不参与搜索
+    # 原始上下文已不再持久化，不参与搜索
     response = client.get("/api/webui/jargon/list?search=永远")
     assert response.status_code == 200
     data = response.json()
@@ -244,6 +240,49 @@ def test_list_jargons_with_is_jargon_filter(client: TestClient, sample_jargons):
     assert data["data"][0]["content"] == "hello"
 
 
+def test_legacy_jargon_without_meaning_is_treated_as_not_jargon(
+    client: TestClient,
+    session: Session,
+    sample_chat_session: ChatSession,
+):
+    """旧的 is_jargon=True 但 meaning 为空记录应归入无黑话，并带旧数据标记。"""
+
+    session.add(
+        Jargon(
+            id=301,
+            content="旧空含义",
+            meaning="",
+            session_id_dict=json.dumps({sample_chat_session.session_id: 1}),
+            count=1,
+            is_jargon=True,
+        )
+    )
+    session.commit()
+
+    response = client.get("/api/webui/jargon/list?jargon_status=confirmed_jargon")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 0
+
+    response = client.get("/api/webui/jargon/list?jargon_status=confirmed_not_jargon")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["data"][0]["content"] == "旧空含义"
+    assert data["data"][0]["is_jargon"] is False
+    assert data["data"][0]["is_legacy_empty_meaning"] is True
+
+    response = client.get("/api/webui/jargon/list?is_jargon=true")
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+    response = client.get("/api/webui/jargon/stats/summary")
+    assert response.status_code == 200
+    stats = response.json()["data"]
+    assert stats["confirmed_jargon"] == 0
+    assert stats["confirmed_not_jargon"] == 1
+
+
 def test_get_jargon_detail(client: TestClient, sample_jargons):
     """测试 GET /jargon/{id} 获取详情"""
     jargon_id = sample_jargons[0].id
@@ -270,7 +309,6 @@ def test_create_jargon(client: TestClient, sample_chat_session: ChatSession):
     """测试 POST /jargon/ 创建黑话"""
     request_data = {
         "content": "新黑话",
-        "raw_content": "原始内容",
         "meaning": "含义",
         "session_id": sample_chat_session.session_id,
     }
@@ -360,7 +398,6 @@ def test_create_duplicate_manual_jargon_returns_400(
     session.add(
         Jargon(
             content="手动重复",
-            raw_content=None,
             meaning="旧含义",
             session_id_dict=json.dumps({sample_chat_session.session_id: 1}),
             count=0,
@@ -383,6 +420,44 @@ def test_create_duplicate_manual_jargon_returns_400(
 
     assert response.status_code == 400
     assert "已存在相同内容的手动黑话" in response.json()["detail"]
+
+
+def test_list_jargons_with_manual_jargon_status(client: TestClient, sample_chat_session: ChatSession, session: Session):
+    """手动黑话筛选应只返回手动创建的记录。"""
+
+    session.add(
+        Jargon(
+            content="手动筛选",
+            meaning="手动含义",
+            session_id_dict=json.dumps({sample_chat_session.session_id: 1}),
+            count=0,
+            is_jargon=True,
+            is_complete=False,
+            is_global=False,
+            created_by=JargonCreatedBy.MANUAL,
+        )
+    )
+    session.add(
+        Jargon(
+            content="AI筛选",
+            meaning="AI含义",
+            session_id_dict=json.dumps({sample_chat_session.session_id: 1}),
+            count=0,
+            is_jargon=True,
+            is_complete=False,
+            is_global=False,
+            created_by=JargonCreatedBy.AI,
+        )
+    )
+    session.commit()
+
+    response = client.get("/api/webui/jargon/list?jargon_status=manual_jargon")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["total"] == 1
+    assert data["data"][0]["content"] == "手动筛选"
+    assert data["data"][0]["created_by"] == JargonCreatedBy.MANUAL.value
 
 
 def test_update_jargon(client: TestClient, sample_jargons):
@@ -505,6 +580,7 @@ def test_get_stats(client: TestClient, sample_jargons):
     assert stats["confirmed_jargon"] == 2
     assert stats["confirmed_not_jargon"] == 1
     assert stats["pending"] == 0
+    assert stats["manual_jargon"] == 0
     assert stats["complete_count"] == 0
     assert stats["chat_count"] == 1
     assert isinstance(stats["top_chats"], dict)
@@ -625,7 +701,6 @@ def test_jargon_response_fields(client: TestClient, sample_jargons, sample_chat_
     required_fields = [
         "id",
         "content",
-        "raw_content",
         "meaning",
         "session_id",
         "session_ids",
@@ -633,6 +708,7 @@ def test_jargon_response_fields(client: TestClient, sample_jargons, sample_chat_
         "chat_names",
         "count",
         "is_jargon",
+        "is_legacy_empty_meaning",
         "is_complete",
         "is_global",
         "created_by",
@@ -643,6 +719,7 @@ def test_jargon_response_fields(client: TestClient, sample_jargons, sample_chat_
         assert field in data
     assert "chat_id" not in data
     assert "stream_id" not in data
+    assert "raw_content" not in data
     assert "inference_with_context" not in data
     assert "inference_content_only" not in data
     assert datetime.fromisoformat(data["created_timestamp"])
@@ -664,9 +741,9 @@ def test_create_jargon_without_optional_fields(client: TestClient, sample_chat_s
     assert response.status_code == 200
 
     data = response.json()["data"]
-    assert data["raw_content"] is None
     assert data["meaning"] == ""
-    assert data["is_jargon"] is True
+    assert data["is_jargon"] is False
+    assert data["is_legacy_empty_meaning"] is False
     assert data["created_by"] == JargonCreatedBy.MANUAL.value
 
 

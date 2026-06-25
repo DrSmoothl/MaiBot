@@ -6,11 +6,6 @@ from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, Float, Index,
 from sqlmodel import Field, LargeBinary, SQLModel
 
 
-class ModelUser(str, Enum):
-    SYSTEM = "system"
-    PLUGIN = "plugin"
-
-
 class ImageType(str, Enum):
     EMOJI = "emoji"
     IMAGE = "image"
@@ -74,8 +69,7 @@ class ModelUsage(SQLModel, table=True):
     model_api_provider_name: str = Field(index=True, max_length=255)  # 模型API供应商名称
 
     # 请求相关信息
-    endpoint: Optional[str] = Field(default=None, max_length=255, nullable=True)  # 模型API的具体endpoint
-    user_type: ModelUser = Field(sa_column=Column(SQLEnum(ModelUser)), default=ModelUser.SYSTEM)  # 模型使用者类型
+    session_id: str = Field(default="", index=True, max_length=255)  # 对应真实聊天流；非聊天上下文为空字符串
     task_name: Optional[str] = Field(default=None, index=True, max_length=100, nullable=True)  # 模型任务配置名称
     request_type: str = Field(max_length=50)  # 内部请求类型，记录哪种模块使用了此模型
     time_cost: float = Field(sa_column=Column(Float))  # 本次请求耗时，单位秒
@@ -420,9 +414,9 @@ class Jargon(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)  # 自增主键
 
     content: str = Field(index=True, max_length=255)  # 黑话内容
-    raw_content: Optional[str] = Field(
+    evidence_messages: Optional[str] = Field(
         default=None, sa_column=Column(Text, nullable=True)
-    )  # 原始内容，未处理的黑话内容，为List[str]
+    )  # 黑话证据消息引用，格式为[[{"platform": "...", "message_id": "..."}]]
 
     meaning: str = Field(sa_column=Column(Text, nullable=False))  # 黑话含义
     session_id_dict: str = Field(
@@ -430,7 +424,7 @@ class Jargon(SQLModel, table=True):
     )  # 会话ID列表，格式为{"session_id": session_count, ...}
 
     count: int = Field(default=0)  # 使用次数
-    is_jargon: Optional[bool] = Field(default=True)  # 是否为黑话，False表示为白话
+    is_jargon: Optional[bool] = Field(default=False)  # 是否为黑话，False表示为无黑话
     is_complete: bool = Field(default=False)  # 是否为已经完成全部推断（count > 100后不再推断）
     is_global: bool = Field(default=False)  # 是否为全局黑话（独立于session_id_dict）
     last_inference_count: int = Field(default=0)  # 上一次进行推断时的count值，用于判断是否需要重新推断

@@ -238,7 +238,7 @@ class ChatConfigUtils:
             logger.debug(f"解析额外 Prompt 聊天流失败: session_id={session_id} error={e}")
             chat_stream = None
 
-        for chat_prompt_item in global_config.chat.chat_prompts:
+        for chat_prompt_item in global_config.chat.reply_style.chat_prompts:
             if hasattr(chat_prompt_item, "platform"):
                 platform = str(chat_prompt_item.platform or "").strip()
                 item_id = str(chat_prompt_item.item_id or "").strip()
@@ -285,15 +285,20 @@ class ChatConfigUtils:
     @staticmethod
     def get_chat_prompt_for_chat(session_id: str, is_group_chat: Optional[bool]) -> str:
         """根据聊天流 ID 获取匹配的额外 Prompt，允许同一聊天流配置多条。"""
-        if not session_id or not global_config.chat.chat_prompts:
-            return ""
-
-        prompt_contents = list(ChatConfigUtils._iter_matching_chat_prompts(session_id, is_group_chat))
+        prompt_contents = ChatConfigUtils.get_chat_prompts_for_chat(session_id, is_group_chat)
         if not prompt_contents:
             return ""
 
         logger.debug(f"匹配到 {len(prompt_contents)} 条聊天额外 Prompt: session_id={session_id}")
         return "\n".join(prompt_contents)
+
+    @staticmethod
+    def get_chat_prompts_for_chat(session_id: str, is_group_chat: Optional[bool]) -> list[str]:
+        """根据聊天流 ID 获取匹配的额外 Prompt 列表，允许同一聊天流配置多条。"""
+        if not session_id or not global_config.chat.reply_style.chat_prompts:
+            return []
+
+        return list(ChatConfigUtils._iter_matching_chat_prompts(session_id, is_group_chat))
 
     @staticmethod
     def _target_values(target_item) -> tuple[str, str, str]:
@@ -516,17 +521,17 @@ class ChatConfigUtils:
             is_group_chat = ChatConfigUtils._resolve_is_group_chat(session_id)
 
         result = (
-            global_config.chat.talk_value
+            global_config.chat.reply_timing.talk_value
             if is_group_chat is not False
-            else global_config.chat.private_talk_value
+            else global_config.chat.reply_timing.private_talk_value
         ) or 0.0
-        if not global_config.chat.enable_talk_value_rules or not global_config.chat.talk_value_rules:
+        if not global_config.chat.reply_timing.enable_talk_value_rules or not global_config.chat.reply_timing.talk_value_rules:
             return result
         local_time = time.localtime()
         now_min = local_time.tm_hour * 60 + local_time.tm_min
 
         matched_rules = []
-        for rule in global_config.chat.talk_value_rules:
+        for rule in global_config.chat.reply_timing.talk_value_rules:
             target_priority = ChatConfigUtils._talk_rule_target_priority(rule, session_id, is_group_chat)
             if target_priority is None:
                 continue

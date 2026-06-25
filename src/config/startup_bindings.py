@@ -15,24 +15,26 @@ BOT_CONFIG_PATH: Path = (CONFIG_DIR / "bot_config.toml").resolve().absolute()
 class BindAddress:
     """启动阶段使用的绑定地址。"""
 
-    host: str
+    hosts: list[str]
     port: int
 
 
-_DEFAULT_MAIN_BIND_ADDRESS = BindAddress(host="127.0.0.1", port=8080)
-_DEFAULT_WEBUI_BIND_ADDRESS = BindAddress(host="127.0.0.1", port=8001)
+_DEFAULT_MAIN_BIND_ADDRESS = BindAddress(hosts=["127.0.0.1"], port=8080)
+_DEFAULT_WEBUI_BIND_ADDRESS = BindAddress(hosts=["127.0.0.1", "::1"], port=8001)
 
 
 def _as_mapping(value: Any) -> Optional[Mapping[str, Any]]:
     return value if isinstance(value, Mapping) else None
 
 
-def _normalize_host(value: Any, default_host: str) -> str:
-    if not isinstance(value, str):
-        return default_host
-
-    normalized_host = value.strip()
-    return normalized_host or default_host
+def _normalize_hosts(value: Any, default_hosts: list[str]) -> list[str]:
+    if isinstance(value, list):
+        hosts = [h.strip() for h in value if isinstance(h, str) and h.strip()]
+        return hosts or default_hosts
+    if isinstance(value, str):
+        h = value.strip()
+        return [h] if h else default_hosts
+    return default_hosts
 
 
 def _normalize_port(value: Any, default_port: int) -> int:
@@ -73,7 +75,7 @@ def _resolve_bind_address_from_section(
     default_address: BindAddress,
 ) -> BindAddress:
     return BindAddress(
-        host=_normalize_host(section.get(host_key), default_address.host),
+        hosts=_normalize_hosts(section.get(host_key), default_address.hosts),
         port=_normalize_port(section.get(port_key), default_address.port),
     )
 
@@ -117,7 +119,7 @@ def resolve_main_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddres
     global_config = _get_loaded_global_config()
     if global_config is not None:
         return BindAddress(
-            host=global_config.maim_message.ws_server_host,
+            hosts=_normalize_hosts(global_config.maim_message.ws_server_host, _DEFAULT_MAIN_BIND_ADDRESS.hosts),
             port=global_config.maim_message.ws_server_port,
         )
     return get_startup_main_bind_address(config_path)
@@ -129,7 +131,7 @@ def resolve_webui_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddre
     global_config = _get_loaded_global_config()
     if global_config is not None:
         return BindAddress(
-            host=global_config.webui.host,
+            hosts=_normalize_hosts(global_config.webui.host, _DEFAULT_WEBUI_BIND_ADDRESS.hosts),
             port=global_config.webui.port,
         )
     return get_startup_webui_bind_address(config_path)

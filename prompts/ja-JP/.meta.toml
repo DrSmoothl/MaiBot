@@ -83,6 +83,11 @@ display_name = "表达风格学习"
 advanced = true
 description = "用于从聊天内容中学习表达风格的模板。"
 
+[learn_jargon]
+display_name = "隠語学習"
+advanced = true
+description = "実際のチャットからグループ固有の隠語候補を抽出し、意味と共起分布を更新するためのテンプレート。"
+
 [learn_behavior]
 display_name = "行動表現学習"
 advanced = true

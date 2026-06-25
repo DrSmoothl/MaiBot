@@ -2,11 +2,9 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
 import asyncio
-import json
 import time
 
 from rich.console import RenderableType
@@ -36,7 +34,7 @@ from src.maisaka.builtin_tool import get_builtin_tools
 from src.maisaka.context.messages import (
     AssistantMessage,
     LLMContextMessage,
-    TIMING_GATE_INVALID_TOOL_HINT_SOURCE,
+    SessionBackedMessage,
     ToolResultMessage,
     build_llm_message_from_context,
 )
@@ -45,10 +43,8 @@ from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.focus import focus_mode_manager
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
-from src.maisaka.visual.mode_utils import resolve_enable_visual_planner, resolve_enable_visual_timing_gate
+from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
-TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
-PLANNER_FILTERED_TIMING_TOOL_NAMES = {"continue", "wait"}
 PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "behavior_scenario_analyzer": "behavior.scenario_analyzer",
@@ -57,14 +53,12 @@ REQUEST_TYPE_BY_REQUEST_KIND = {
     "planner": "maisaka.planner",
     "reply_effect_judge": "reply.effect_judge",
     "sub_agent": "maisaka.sub_agent",
-    "timing_gate": "maisaka.timing_gate",
 }
-MODEL_TASK_NAME_BY_REQUEST_KIND = {
-    "timing_gate": "timing_gate",
+MODEL_TASK_NAME_BY_REQUEST_KIND: dict[str, str] = {
+    "expression_selector": "expression_use",
 }
 PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "planner": "planner",
-    "timing_gate": "timing_gate",
     "reply_effect_judge": "reply_effect_judge",
     "expression_selector": "expression_selector",
     "behavior_scenario_analyzer": "behavior_scenario_analyzer",
@@ -72,7 +66,6 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "sub_agent": "sub_agent",
 }
 CONTEXT_SELECTION_CACHE_STABILITY_RATIO = 2.0
-DEBUG_PLANNER_CACHE_DIR = Path("logs/debug_planner_cache")
 
 
 @dataclass(slots=True)
@@ -93,6 +86,7 @@ class ChatResponse:
     duration_ms: float = 0.0
     prompt_section: Optional[RenderableType] = None
     prompt_html_uri: Optional[str] = None
+    reasoning: str = ""
 
 
 logger = get_logger("maisaka_chat_loop")
@@ -551,79 +545,13 @@ class MaisakaChatLoopService:
         return llm_client
 
     @staticmethod
-    def _build_debug_request_filename(session_id: str, model_name: str, request_kind: str) -> str:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        raw_name = f"{timestamp}_{request_kind or 'planner'}_{session_id or 'unknown'}_{model_name or 'unknown'}.json"
-        return "".join(char if char.isalnum() or char in ("-", "_", ".") else "_" for char in raw_name)
+    def _resolve_planner_response_content(response: str, reasoning: str) -> str:
+        """在模型只把思考放入原生 reasoning 字段时，仍保留可传给工具的 planner 文本。"""
 
-    @staticmethod
-    def _serialize_llm_response_body(
-        *,
-        response: str,
-        reasoning: str,
-        model_name: str,
-        tool_calls: Sequence[ToolCall],
-        prompt_tokens: int,
-        completion_tokens: int,
-        total_tokens: int,
-        prompt_cache_hit_tokens: int,
-        prompt_cache_miss_tokens: int,
-    ) -> dict[str, Any]:
-        return {
-            "response": response,
-            "reasoning": reasoning,
-            "model_name": model_name,
-            "tool_calls": serialize_tool_calls(list(tool_calls)),
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "prompt_cache_hit_tokens": prompt_cache_hit_tokens,
-            "prompt_cache_miss_tokens": prompt_cache_miss_tokens,
-        }
-
-    def _save_debug_planner_request_body(
-        self,
-        *,
-        request_kind: str,
-        model_name: str,
-        messages: Sequence[Message],
-        tool_definitions: Sequence[ToolDefinitionInput],
-        response_format: RespFormat | None,
-        selection_reason: str,
-        selected_history_count: int,
-        response_body: dict[str, Any],
-        final_response_body: dict[str, Any],
-    ) -> None:
-        if request_kind != "planner" or not bool(getattr(global_config.debug, "record_planner_request", False)):
-            return
-
-        try:
-            DEBUG_PLANNER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            request_body = {
-                "model": model_name,
-                "request_type": self._resolve_llm_request_type(request_kind),
-                "request_kind": request_kind,
-                "session_id": self._session_id,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-                "selected_history_count": selected_history_count,
-                "built_message_count": len(messages),
-                "selection_reason": selection_reason,
-                "messages": serialize_prompt_messages(list(messages)),
-                "tool_definitions": serialize_tool_definitions(list(tool_definitions)),
-                "response_format": response_format,
-                "response_body": response_body,
-                "final_response_body": final_response_body,
-            }
-            file_path = DEBUG_PLANNER_CACHE_DIR / self._build_debug_request_filename(
-                self._session_id,
-                model_name,
-                request_kind,
-            )
-            with file_path.open("w", encoding="utf-8") as file:
-                json.dump(request_body, file, ensure_ascii=False, indent=2, default=str)
-            logger.info(f"Planner 请求与回复体已保存: {file_path.resolve()}")
-        except Exception as exc:
-            logger.warning(f"保存 Planner 请求与回复体失败: {exc}")
+        normalized_response = str(response or "").strip()
+        if normalized_response:
+            return response
+        return str(reasoning or "").strip()
 
     @staticmethod
     def _get_runtime_manager() -> Any:
@@ -673,9 +601,9 @@ class MaisakaChatLoopService:
             else 0
         )
         logger.info(
-            "Maisaka KV cache usage - "
-            f"request_kind={request_kind}, "
-            f"hit_tokens={prompt_cache_hit_tokens}, "
+            "Planner缓存："
+            f"{request_kind}, "
+            f"命中={prompt_cache_hit_tokens}, "
             f"miss_tokens={prompt_cache_miss_tokens}, "
             f"hit_rate={prompt_cache_hit_rate:.2f}%, "
             f"prompt_tokens={prompt_tokens}"
@@ -719,7 +647,7 @@ class MaisakaChatLoopService:
     def _get_chat_prompt_name(self) -> str:
         """选择当前聊天使用的 Planner 模板。"""
 
-        if focus_mode_manager.is_enabled_for_chat(is_group_chat=self._is_group_chat):
+        if focus_mode_manager.is_enabled_for_session(self._session_id, is_group_chat=self._is_group_chat):
             return "maisaka_chat_focus"
         return "maisaka_chat"
 
@@ -731,7 +659,8 @@ class MaisakaChatLoopService:
             "file_tools_section": tools_section,
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "identity": self.personality_prompt,
-            "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
+            "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
+            "query_memory_rule": self._build_query_memory_rule(),
         }
 
 
@@ -747,16 +676,47 @@ class MaisakaChatLoopService:
         prompt_lines: List[str] = []
 
         if self._is_group_chat is True:
-            if group_chat_prompt := str(global_config.chat.group_chat_prompt or "").strip():
+            if group_chat_prompt := str(global_config.chat.reply_style.group_chat_prompt or "").strip():
                 prompt_lines.append(f"通用注意事项：\n{group_chat_prompt}")
         elif self._is_group_chat is False:
-            if private_chat_prompt := str(global_config.chat.private_chat_prompts or "").strip():
+            if private_chat_prompt := str(global_config.chat.reply_style.private_chat_prompts or "").strip():
                 prompt_lines.append(f"通用注意事项：\n{private_chat_prompt}")
 
         if not prompt_lines:
             return ""
 
         return "在该聊天中的注意事项：\n" + "\n\n".join(prompt_lines) + "\n"
+
+    @staticmethod
+    def _localized_text(texts: dict[str, str]) -> str:
+        """按当前语言读取文案，默认中文。"""
+
+        return texts.get(get_locale(), texts["zh-CN"])
+
+    def _build_planner_idle_focus_rule(self) -> str:
+        """构造 Focus 模式下空闲等待动作提示。"""
+
+        return self._localized_text({
+            "en-US": "If the current chat has nothing worth acting on, prefer using `switch_chat` to check another chat. Use `wait` only when you need to wait before judging again; otherwise end this thought without calling a tool.",
+            "ja-JP": "現在チャットに行動すべき内容がない場合は、`switch_chat` で別チャットを確認することを優先してください。待ってから再判断すべき場合だけ `wait` を使い、それ以外はツールを呼ばずにこの思考を終了してください。",
+            "zh-CN": "如果当前聊天没有值得行动的内容，应优先考虑使用 `switch_chat` 去其他聊天看看；只有需要等待后重新判断时才使用 `wait`，否则不调用工具结束这轮思考。",
+        })
+
+    def _build_query_memory_rule(self) -> str:
+        """按当前聊天类型构造记忆检索提示。"""
+
+        if self._is_group_chat:
+            return self._localized_text({
+                "en-US": "- query_memory(): Use it only when the reply clearly depends on past group conversation, shared experiences, public agreements, task progress, or recent clues. Do not retrieve memory for greetings, immediate emotional responses, light banter, or content that can be answered from recent messages alone. Do not bring private-chat or personal-privacy memories into a group chat.",
+                "ja-JP": "- query_memory()：返信がグループ内の過去会話、共有した経験、公開された約束、タスクの進捗、最近の手がかりに明確に依存する場合だけ使ってください。挨拶、その場の感情への反応、軽いやり取り、最近のメッセージだけで答えられる内容では検索しないでください。個人チャットや私的な記憶をグループチャットに持ち込まないでください。",
+                "zh-CN": "- query_memory()：只有回复明显依赖群内过去对话、共同经历、公开约定、任务进展或近期线索时使用；不要为了寒暄、即时情绪回应、轻松接话、只看最近消息就能回答的内容而检索。不要把私聊或个人隐私记忆带到群聊里。",
+            })
+
+        return self._localized_text({
+            "en-US": "- query_memory(): Consider retrieval more actively when the other person mentions signals like \"before\", \"last time\", \"recently\", \"do you remember\", \"I like\", or \"I said\", or when the reply depends on long-term preferences, prior promises, shared experiences, or long-term information about a person.",
+            "ja-JP": "- query_memory()：相手が「前に」「この前」「最近」「覚えてる？」「好き」「言った」などの合図を出した場合、または返信が長期的な好み、以前の約束、共有した経験、人物の長期的な情報に依存する場合は、より積極的に検索を検討できます。",
+            "zh-CN": "- query_memory()：当对方提到“之前”“上次”“最近”“还记得吗”“我喜欢”“我说过”等信号，或回复依赖长期偏好、先前承诺、共同经历、人物长期信息时，可以更积极检索。",
+        })
 
     def _build_current_chat_attention_tail_message(self) -> str:
         """构建追加到请求末尾的当前聊天专属注意事项。"""
@@ -767,17 +727,6 @@ class MaisakaChatLoopService:
         if not chat_prompt:
             return ""
         return f"当前聊天额外注意事项：\n{chat_prompt}"
-
-    def _build_timing_gate_wait_rule(self) -> str:
-        """构造 Timing Gate 中 wait 工具的场景说明。"""
-
-        locale = get_locale()
-        if locale == "en-US":
-            return "- wait: wait for a fixed period, then judge again"
-        if locale == "ja-JP":
-            return "- wait：一定時間待ってから再判断する"
-
-        return "- wait：固定再等待一段时间，时间到后再重新判断"
 
     @staticmethod
     def _get_chat_prompt_for_chat(chat_id: str, is_group_chat: Optional[bool]) -> str:
@@ -926,16 +875,20 @@ class MaisakaChatLoopService:
         if tool_definitions is not None:
             all_tools = list(tool_definitions)
         elif self._tool_registry is not None:
-            tool_specs = await self._tool_registry.list_tools(
-                ToolAvailabilityContext(
-                    session_id=self._session_id,
-                    stream_id=self._session_id,
-                    is_group_chat=self._is_group_chat,
-                )
+            availability_context = ToolAvailabilityContext(
+                session_id=self._session_id,
+                stream_id=self._session_id,
+                is_group_chat=self._is_group_chat,
             )
+            tool_specs = await self._tool_registry.list_tools(availability_context)
             all_tools = [tool_spec.to_llm_definition() for tool_spec in tool_specs]
         else:
-            all_tools = [*get_builtin_tools(), *self._extra_tools]
+            availability_context = ToolAvailabilityContext(
+                session_id=self._session_id,
+                stream_id=self._session_id,
+                is_group_chat=self._is_group_chat,
+            )
+            all_tools = [*get_builtin_tools(availability_context), *self._extra_tools]
 
         before_request_result = await self._get_runtime_manager().invoke_hook(
             "maisaka.planner.before_request",
@@ -983,7 +936,8 @@ class MaisakaChatLoopService:
             prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
         )
 
-        final_response = generation_result.response or ""
+        final_reasoning = generation_result.reasoning or ""
+        final_response = self._resolve_planner_response_content(generation_result.response or "", final_reasoning)
         final_tool_calls = list(generation_result.tool_calls or [])
         after_response_result = await self._get_runtime_manager().invoke_hook(
             "maisaka.planner.after_response",
@@ -1012,38 +966,6 @@ class MaisakaChatLoopService:
             generation_result.completion_tokens,
         )
         total_tokens = self._coerce_int(after_response_kwargs.get("total_tokens"), generation_result.total_tokens)
-        self._save_debug_planner_request_body(
-            request_kind=request_kind,
-            model_name=generation_result.model_name or "",
-            messages=built_messages,
-            tool_definitions=all_tools,
-            response_format=response_format,
-            selection_reason=selection_reason,
-            selected_history_count=len(selected_history),
-            response_body=self._serialize_llm_response_body(
-                response=generation_result.response or "",
-                reasoning=generation_result.reasoning or "",
-                model_name=generation_result.model_name or "",
-                tool_calls=generation_result.tool_calls or [],
-                prompt_tokens=generation_result.prompt_tokens,
-                completion_tokens=generation_result.completion_tokens,
-                total_tokens=generation_result.total_tokens,
-                prompt_cache_hit_tokens=getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-            ),
-            final_response_body=self._serialize_llm_response_body(
-                response=final_response,
-                reasoning=generation_result.reasoning or "",
-                model_name=generation_result.model_name or "",
-                tool_calls=final_tool_calls,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                prompt_cache_hit_tokens=getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-            ),
-        )
-
         display_model_name = (generation_result.model_name or "").strip()
         prompt_selection_reason = selection_reason
         if display_model_name:
@@ -1066,7 +988,7 @@ class MaisakaChatLoopService:
                 metadata=prompt_metadata,
             )
             prompt_section = prompt_section_result.panel
-            prompt_html_uri = prompt_section_result.preview_access.viewer_web_uri
+            prompt_html_uri = prompt_section_result.preview_access.preview_web_uri
 
         raw_message = AssistantMessage(
             content=final_response,
@@ -1088,6 +1010,7 @@ class MaisakaChatLoopService:
             duration_ms=llm_duration_ms,
             prompt_section=prompt_section,
             prompt_html_uri=prompt_html_uri,
+            reasoning=final_reasoning,
         )
 
     @staticmethod
@@ -1111,7 +1034,6 @@ class MaisakaChatLoopService:
             int(base_context_size * CONTEXT_SELECTION_CACHE_STABILITY_RATIO),
         )
         selected_indices: List[int] = []
-        pinned_indices: List[int] = []
         counted_message_count = 0
 
         active_enable_visual_message = (
@@ -1119,18 +1041,6 @@ class MaisakaChatLoopService:
             if enable_visual_message is not None
             else MaisakaChatLoopService._resolve_enable_visual_message(request_kind)
         )
-
-        if request_kind in {"planner", "timing_gate", "sub_agent"}:
-            pinned_indices = [
-                index
-                for index, message in enumerate(filtered_history)
-                if is_mid_term_memory_message(message)
-                and build_llm_message_from_context(
-                    message,
-                    enable_visual_message=active_enable_visual_message,
-                )
-                is not None
-            ]
 
         for index in range(len(filtered_history) - 1, -1, -1):
             message = filtered_history[index]
@@ -1149,7 +1059,7 @@ class MaisakaChatLoopService:
                 if counted_message_count >= effective_context_size:
                     break
 
-        selected_indices = sorted(set(selected_indices).union(pinned_indices))
+        selected_indices = sorted(set(selected_indices))
 
         if not selected_indices:
             return [], "实际发送 0 条消息（tool 0 条，普通消息 0 条）"
@@ -1158,14 +1068,11 @@ class MaisakaChatLoopService:
         selected_history, _ = normalize_tool_call_result_pairs(selected_history)
         tool_message_count = sum(1 for message in selected_history if isinstance(message, ToolResultMessage))
         normal_message_count = len(selected_history) - tool_message_count
-        pinned_message_count = sum(1 for message in selected_history if is_mid_term_memory_message(message))
         stability_text = f"|cache_window {base_context_size}->{effective_context_size}"
-        pinned_text = f"|中期摘要 {pinned_message_count} 条" if pinned_message_count else ""
         selection_reason = (
             f"实际发送 {len(selected_history)} 条消息"
             f"|消息 {normal_message_count} 条|tool {tool_message_count} 条"
             f"{stability_text}"
-            f"{pinned_text}"
         )
         return (
             selected_history,
@@ -1180,112 +1087,33 @@ class MaisakaChatLoopService:
     ) -> List[LLMContextMessage]:
         """按请求类型过滤不应暴露的历史工具链。"""
 
-        if request_kind == "timing_gate":
-            allowed_tool_call_ids = {
-                tool_call.call_id
+        if request_kind == "expression_selector":
+            return [
+                message
                 for message in selected_history
-                if isinstance(message, AssistantMessage)
-                for tool_call in message.tool_calls
-                if tool_call.func_name in TIMING_GATE_TOOL_NAMES and tool_call.call_id
-            }
-            filtered_history: List[LLMContextMessage] = []
-            for message in selected_history:
-                if message.source in {PLANNER_TOOL_HINT_SOURCE, "behavior_pattern"}:
-                    continue
+                if isinstance(message, SessionBackedMessage)
+            ]
 
-                if isinstance(message, ToolResultMessage):
-                    if message.tool_name in TIMING_GATE_TOOL_NAMES or message.tool_call_id in allowed_tool_call_ids:
-                        filtered_history.append(message)
-                    continue
-
-                if isinstance(message, AssistantMessage) and message.tool_calls:
-                    kept_tool_calls = [
-                        tool_call
-                        for tool_call in message.tool_calls
-                        if tool_call.func_name in TIMING_GATE_TOOL_NAMES
-                    ]
-                    if not kept_tool_calls:
-                        if message.content.strip():
-                            filtered_history.append(
-                                AssistantMessage(
-                                    content=message.content,
-                                    timestamp=message.timestamp,
-                                    tool_calls=[],
-                                    source_kind=message.source_kind,
-                                )
-                            )
-                        continue
-                    if len(kept_tool_calls) != len(message.tool_calls):
-                        filtered_history.append(
-                            AssistantMessage(
-                                content=message.content,
-                                timestamp=message.timestamp,
-                                tool_calls=kept_tool_calls,
-                                source_kind=message.source_kind,
-                            )
-                        )
-                        continue
-
-                filtered_history.append(message)
-            return filtered_history
-
-        selected_history = [
-            message
-            for message in selected_history
-            if message.source != TIMING_GATE_INVALID_TOOL_HINT_SOURCE
-        ]
+        if request_kind == "planner":
+            return [
+                message
+                for message in selected_history
+                if not is_mid_term_memory_message(message)
+            ]
 
         if request_kind != "planner":
             return [
                 message
                 for message in selected_history
-                if message.source != "behavior_pattern"
+                if message.source != "behavior_pattern" and not is_mid_term_memory_message(message)
             ]
 
-        filtered_history: List[LLMContextMessage] = []
-        for message in selected_history:
-            if isinstance(message, ToolResultMessage) and message.tool_name in PLANNER_FILTERED_TIMING_TOOL_NAMES:
-                continue
-
-            if isinstance(message, AssistantMessage) and message.tool_calls:
-                kept_tool_calls = [
-                    tool_call
-                    for tool_call in message.tool_calls
-                    if tool_call.func_name not in PLANNER_FILTERED_TIMING_TOOL_NAMES
-                ]
-                if not kept_tool_calls:
-                    if message.content.strip():
-                        filtered_history.append(
-                            AssistantMessage(
-                                content=message.content,
-                                timestamp=message.timestamp,
-                                tool_calls=[],
-                                source_kind=message.source_kind,
-                            )
-                        )
-                    continue
-                if len(kept_tool_calls) != len(message.tool_calls):
-                    filtered_history.append(
-                        AssistantMessage(
-                            content=message.content,
-                            timestamp=message.timestamp,
-                            tool_calls=kept_tool_calls,
-                            source_kind=message.source_kind,
-                        )
-                    )
-                    continue
-
-            filtered_history.append(message)
-
-        return filtered_history
+        return selected_history
 
     @staticmethod
     def _resolve_enable_visual_message(request_kind: str) -> bool:
         if request_kind == "planner":
             return resolve_enable_visual_planner()
-        if request_kind == "timing_gate":
-            return resolve_enable_visual_timing_gate()
         if request_kind in {"expression_selector", "reply_effect_judge", "behavior_scenario_analyzer"}:
             return False
         return True
-

@@ -4,21 +4,30 @@ from src.config.config_base import ConfigBase, Field
 from src.webui.config_schema import ConfigSchemaGenerator
 
 
+def _get_reply_timing_schema(config_schema):
+    return config_schema["nested"]["reply_timing"]
+
+
+def _get_talk_value_field(config_schema):
+    reply_timing_schema = _get_reply_timing_schema(config_schema)
+    return next(f for f in reply_timing_schema["fields"] if f["name"] == "talk_value")
+
+
 def test_field_docs_in_schema():
     """Test that field descriptions are correctly extracted from field_docs (docstrings)."""
     schema = ConfigSchemaGenerator.generate_schema(ChatConfig)
-    talk_value = next(f for f in schema["fields"] if f["name"] == "talk_value")
+    talk_value = _get_talk_value_field(schema)
 
     # Verify description field exists
     assert "description" in talk_value
     # Verify description contains expected Chinese text from the docstring
-    assert "聊天频率" in talk_value["description"]
+    assert "频率" in talk_value["description"]
 
 
 def test_json_schema_extra_merged():
     """Test that json_schema_extra fields are correctly merged into output."""
     schema = ConfigSchemaGenerator.generate_schema(ChatConfig)
-    talk_value = next(f for f in schema["fields"] if f["name"] == "talk_value")
+    talk_value = _get_talk_value_field(schema)
 
     # Verify UI metadata fields from json_schema_extra exist
     assert talk_value.get("x-widget") == "slider"
@@ -29,7 +38,7 @@ def test_json_schema_extra_merged():
 def test_pydantic_constraints_mapped():
     """Test that Pydantic constraints (ge/le) are correctly mapped to minValue/maxValue."""
     schema = ConfigSchemaGenerator.generate_schema(ChatConfig)
-    talk_value = next(f for f in schema["fields"] if f["name"] == "talk_value")
+    talk_value = _get_talk_value_field(schema)
 
     # Verify constraints are mapped to frontend naming convention
     assert "minValue" in talk_value
@@ -52,29 +61,51 @@ def test_nested_model_schema():
     assert "fields" in chat_schema
 
     # Verify nested schema fields include description and metadata
-    talk_value = next(f for f in chat_schema["fields"] if f["name"] == "talk_value")
+    talk_value = _get_talk_value_field(chat_schema)
     assert "description" in talk_value
     assert talk_value.get("x-widget") == "slider"
     assert talk_value.get("minValue") == 0
 
 
+def test_config_subtab_metadata_is_exposed():
+    """配置子 Tab 元数据应由 schema 提供，而不是由 WebUI 硬编码。"""
+    schema = ConfigSchemaGenerator.generate_schema(Config)
+
+    chat_schema = schema["nested"]["chat"]
+    expression_schema = schema["nested"]["expression"]
+    jargon_schema = schema["nested"]["jargon"]
+
+    assert chat_schema.get("uiUseSubTabs") is True
+    assert chat_schema.get("uiRootSubLabel") == "基础设置"
+    assert chat_schema["nested"]["reply_timing"].get("uiLabel") == "什么时候发言"
+    assert chat_schema["nested"]["reply_style"].get("uiLabel") == "如何发言"
+
+    assert expression_schema.get("uiUseSubTabs") is True
+    assert expression_schema.get("uiSubLabel") == "表达"
+    assert jargon_schema.get("uiSubLabel") == "黑话"
+
+
 def test_field_without_extra_metadata():
     """Test that fields without json_schema_extra still generate valid schema."""
-    schema = ConfigSchemaGenerator.generate_schema(ChatConfig)
-    inevitable_at_reply = next(f for f in schema["fields"] if f["name"] == "inevitable_at_reply")
+    class PlainExampleConfig(ConfigBase):
+        plain_field: str = Field(default="visible")
+        """普通字段"""
+
+    schema = ConfigSchemaGenerator.generate_schema(PlainExampleConfig)
+    plain_field = next(f for f in schema["fields"] if f["name"] == "plain_field")
 
     # Verify basic fields are generated
-    assert "name" in inevitable_at_reply
-    assert inevitable_at_reply["name"] == "inevitable_at_reply"
-    assert "type" in inevitable_at_reply
-    assert inevitable_at_reply["type"] == "boolean"
-    assert "label" in inevitable_at_reply
-    assert "required" in inevitable_at_reply
+    assert "name" in plain_field
+    assert plain_field["name"] == "plain_field"
+    assert "type" in plain_field
+    assert plain_field["type"] == "string"
+    assert "label" in plain_field
+    assert "required" in plain_field
 
     # Verify no x-widget or x-icon from json_schema_extra (since field has none)
     # These fields should only be present if explicitly defined in json_schema_extra
-    assert not inevitable_at_reply.get("x-widget")
-    assert not inevitable_at_reply.get("x-icon")
+    assert not plain_field.get("x-widget")
+    assert not plain_field.get("x-icon")
 
 
 def test_all_top_level_sections_have_ui_metadata():

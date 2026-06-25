@@ -83,6 +83,11 @@ display_name = "表达风格学习"
 advanced = true
 description = "用于从聊天内容中学习表达风格的模板。"
 
+[learn_jargon]
+display_name = "Jargon Learning"
+advanced = true
+description = "Extracts group-specific jargon candidates from real chat and lets the jargon miner update meanings and co-occurrence profiles."
+
 [learn_behavior]
 display_name = "Behavior Learning"
 advanced = true

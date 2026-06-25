@@ -208,6 +208,7 @@ class MainSystem:
         """调度定时任务"""
         try:
             from src.chat.image_system.image_cache_cleanup import periodic_image_cache_cleanup
+            from src.emoji_system.emoji_cache_cleanup import periodic_emoji_cache_cleanup
             from src.emoji_system.emoji_manager import emoji_manager
             from src.services.image_path_maintenance_service import (
                 run_image_path_maintenance_background,
@@ -220,6 +221,7 @@ class MainSystem:
 
             tasks = [
                 emoji_manager.periodic_emoji_maintenance(),
+                periodic_emoji_cache_cleanup(),
                 periodic_image_cache_cleanup(),
                 self.app.run(),
                 self.server.run(),

@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional
-from sqlmodel import func as fn, select
+from sqlmodel import col, func as fn, select
 
 import json
 
@@ -53,6 +53,8 @@ def search_jargon(
     query = (
         select(Jargon)
         .where(search_condition)
+        .where(col(Jargon.is_jargon).is_(True))
+        .where(fn.LENGTH(fn.TRIM(Jargon.meaning)) > 0)
         .order_by(Jargon.created_by.desc(), Jargon.count.desc())  # type: ignore
         .limit(limit * 2)
     )

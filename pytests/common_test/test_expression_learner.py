@@ -72,13 +72,78 @@ def test_find_similar_expression_uses_read_only_session_and_history_content(
     monkeypatch.setattr(expression_learner_module, "get_db_session", fake_get_db_session)
 
     learner = ExpressionLearner(session_id="session-a")
-    result = learner._find_similar_expression("表达情绪高涨或生理反应", session_id="session-a")
+    result = learner._find_similar_expression("表达情绪高涨或生理反应", "发送💦表情符号", session_id="session-a")
 
     assert result is not None
     expression, similarity = result
     assert expression.item_id is not None
     assert expression.style == "发送💦表情符号"
     assert similarity == pytest.approx(1.0)
+
+    different_style_result = learner._find_similar_expression(
+        "表达情绪高涨或生理反应",
+        "用文字冷静解释情绪",
+        session_id="session-a",
+    )
+    assert different_style_result is None
+
+
+@pytest.mark.asyncio
+async def test_upsert_expression_creates_new_record_when_style_is_different(
+    monkeypatch: pytest.MonkeyPatch,
+    expression_learner_engine,
+) -> None:
+    """情景相似但表达风格不相似时，应保留为新的表达方式。"""
+
+    import src.learners.expression_learner as expression_learner_module
+
+    with Session(expression_learner_engine) as session:
+        session.add(
+            Expression(
+                situation="被朋友开玩笑时",
+                style="撒娇地怼回去",
+                content_list='["对方调侃你"]',
+                count=1,
+                session_id="session-a",
+                checked=False,
+            )
+        )
+        session.commit()
+
+    @contextmanager
+    def fake_get_db_session(auto_commit: bool = True) -> Generator[Session, None, None]:
+        """构造带自动提交语义的测试会话工厂。"""
+
+        session = Session(expression_learner_engine)
+        try:
+            yield session
+            if auto_commit:
+                session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    monkeypatch.setattr(expression_learner_module, "get_db_session", fake_get_db_session)
+
+    learner = ExpressionLearner(session_id="session-a")
+    expression = await learner._upsert_expression_to_db(
+        "对方调侃你",
+        "用冷静短句转移话题",
+        session_id="session-a",
+    )
+
+    assert expression is not None
+    with Session(expression_learner_engine) as session:
+        expressions = session.exec(select(Expression).order_by(Expression.id)).all()
+
+    assert len(expressions) == 2
+    assert expressions[0].style == "撒娇地怼回去"
+    assert expressions[0].count == 1
+    assert expressions[1].situation == "对方调侃你"
+    assert expressions[1].style == "用冷静短句转移话题"
+    assert expressions[1].count == 1
 
 
 def test_get_session_display_name_uses_chat_manager(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,8 +203,8 @@ async def test_ai_self_reflect_expression_stays_unchecked(
             return "prompt"
 
     class FakeLearnModel:
-        async def generate_response_with_messages(self, builder, options):
-            del builder, options
+        async def generate_response_with_messages(self, builder, options, session_id: str):
+            del builder, options, session_id
             return SimpleNamespace(response="response")
 
     class FakeRuntimeManager:
@@ -190,75 +255,3 @@ async def test_ai_self_reflect_expression_stays_unchecked(
     assert expression.checked is False
     assert expression.modified_by == ModifiedBy.AI
 
-
-@pytest.mark.asyncio
-async def test_jargon_learning_runs_when_expression_learning_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """表达学习关闭时，黑话学习仍应处理全部候选。"""
-
-    import src.learners.expression_learner as expression_learner_module
-
-    class FakePromptTemplate:
-        def add_context(self, key: str, value: object) -> None:
-            del key, value
-
-    class FakePromptManager:
-        def get_prompt(self, name: str) -> FakePromptTemplate:
-            del name
-            return FakePromptTemplate()
-
-        async def render_prompt(self, prompt_template: FakePromptTemplate) -> str:
-            del prompt_template
-            return "prompt"
-
-    class FakeLearnModel:
-        async def generate_response_with_messages(self, builder, options):
-            del builder, options
-            return SimpleNamespace(response="response")
-
-    class FakeRuntimeManager:
-        async def invoke_hook(self, *args, **kwargs):
-            del args, kwargs
-            return SimpleNamespace(aborted=False, kwargs={})
-
-    class FakeJargonMiner:
-        session_id = "session-a"
-        session_name = "session-a"
-
-        def get_cached_jargons(self):
-            return []
-
-    captured_jargon_entries = []
-
-    async def fake_build_multi_learning_messages(self, pending_messages, prompt):
-        del self, pending_messages, prompt
-        return []
-
-    async def fake_process_jargon_entries(self, jargon_entries, messages, jargon_miner=None):
-        del self, messages, jargon_miner
-        captured_jargon_entries.extend(jargon_entries)
-        return True
-
-    jargon_entries = [(f"黑话{i}", "1") for i in range(31)]
-    monkeypatch.setattr(expression_learner_module, "prompt_manager", FakePromptManager())
-    monkeypatch.setattr(expression_learner_module, "express_learn_model", FakeLearnModel())
-    monkeypatch.setattr(
-        expression_learner_module,
-        "global_config",
-        SimpleNamespace(bot=SimpleNamespace(nickname="麦麦"), expression=SimpleNamespace(expression_self_reflect=False)),
-    )
-    monkeypatch.setattr(expression_learner_module, "parse_expression_response", lambda response: ([], jargon_entries))
-    monkeypatch.setattr(ExpressionLearner, "_get_runtime_manager", staticmethod(lambda: FakeRuntimeManager()))
-    monkeypatch.setattr(ExpressionLearner, "_build_multi_learning_messages", fake_build_multi_learning_messages)
-    monkeypatch.setattr(ExpressionLearner, "_process_jargon_entries", fake_process_jargon_entries)
-    monkeypatch.setattr(ExpressionLearner, "_log_learning_context_preview", lambda *args, **kwargs: None)
-
-    learner = ExpressionLearner(session_id="session-a")
-    wrote_result = await learner._run_learning_batch(
-        [],
-        learning_session_id="session-a",
-        jargon_miner=FakeJargonMiner(),
-        enable_expression_learning=False,
-    )
-
-    assert wrote_result is True
-    assert captured_jargon_entries == jargon_entries

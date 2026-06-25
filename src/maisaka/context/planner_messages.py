@@ -109,6 +109,7 @@ def extract_quote_ids_from_message_sequence(message_sequence: MessageSequence) -
 def build_planner_user_prefix_from_session_message(
     message: SessionMessage,
     *,
+    include_message_id: bool = True,
     include_chat_id: bool = False,
     is_self_message: bool = False,
 ) -> str:
@@ -116,6 +117,7 @@ def build_planner_user_prefix_from_session_message(
 
     Args:
         message: 原始会话消息。
+        include_message_id: 是否输出 `msg_id` 段。
         include_chat_id: 是否输出 `chat_id` 段。
         is_self_message: 是否显式标注这条消息是 bot 自己发送的。
 
@@ -132,7 +134,7 @@ def build_planner_user_prefix_from_session_message(
         message_id=message.message_id,
         chat_id=message.session_id,
         quote_ids=extract_quote_ids_from_message_sequence(message.raw_message),
-        include_message_id=not message.is_notify and bool(message.message_id),
+        include_message_id=include_message_id and not message.is_notify and bool(message.message_id),
         include_chat_id=include_chat_id,
         is_self_message=is_self_message,
     )

@@ -88,10 +88,10 @@ def append_ai_review_log(
         entry["error"] = str(error)
 
     _append_log_entry(entry)
-    logger.info(
-        "表达方式 AI 审核记录已写入 "
+    logger.debug(
+        "表达方式优化记录已写入 "
         f"{REVIEW_LOG_PATH.as_posix()}: passed={entry['passed']} "
-        f"session_id={entry['session_id']} source={source} reason={entry['reason']}"
+        f"session_id={entry['session_id']} reason={entry['reason']}"
     )
     return entry
 

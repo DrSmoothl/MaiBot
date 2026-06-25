@@ -61,9 +61,9 @@ DATA_URI_LIMIT_PATTERN = re.compile(
 DATA_URI_RETRY_MARGIN_BYTES = 128 * 1024
 MIN_COMPRESSED_IMAGE_TARGET_SIZE_BYTES = 512 * 1024
 EMPTY_TASK_FALLBACKS = {
+    "expression_use": "utils",
     "learner": "utils",
     "mid_memory": "planner",
-    "timing_gate": "planner",
 }
 
 
@@ -86,20 +86,27 @@ class LLMExecutionResult:
 class LLMOrchestrator:
     """LLM 编排调度器。"""
 
-    def __init__(self, task_name: str, request_type: str = "") -> None:
+    def __init__(self, task_name: str, request_type: str = "", session_id: str = "") -> None:
         """初始化 LLM 请求调度器。
 
         Args:
             task_name: 任务配置名称，对应 `model_task_config` 下的字段名。
             request_type: 当前请求的业务类型标识。
+            session_id: 当前请求归属的真实聊天流 ID；非聊天上下文为空。
         """
         self.task_name = task_name.strip()
         self.request_type = request_type
+        self.session_id = str(session_id or "").strip()
         self.model_for_task = self._get_task_config_or_raise()
         self.model_usage: Dict[str, Tuple[int, int, int]] = {
             model: (0, 0, 0) for model in self.model_for_task.model_list
         }
         """模型使用量记录，用于进行负载均衡，对应为(total_tokens, penalty, usage_penalty)，惩罚值是为了能在某个模型请求不给力或正在被使用的时候进行调整"""
+
+    def _resolve_effective_session_id(self, session_id: str = "") -> str:
+        """解析本次请求用于统计归属的聊天流 ID。"""
+
+        return str(session_id or self.session_id or "").strip()
 
     def _get_task_config_or_raise(self) -> TaskConfig:
         """获取当前任务名对应的最新任务配置。
@@ -235,6 +242,7 @@ class LLMOrchestrator:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         interrupt_flag: asyncio.Event | None = None,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """为图像生成响应。
 
@@ -283,8 +291,8 @@ class LLMOrchestrator:
                 model_usage=usage,
                 user_id="system",
                 request_type=self.request_type,
-                endpoint="/chat/completions",
                 task_name=self.task_name,
+                session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time_cost,
             )
         return self._build_generation_result(
@@ -321,6 +329,7 @@ class LLMOrchestrator:
         response_format: RespFormat | None = None,
         raise_when_empty: bool = True,
         interrupt_flag: asyncio.Event | None = None,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """异步生成文本响应。
 
@@ -375,8 +384,8 @@ class LLMOrchestrator:
                 model_usage=usage,
                 user_id="system",
                 request_type=self.request_type,
-                endpoint="/chat/completions",
                 task_name=self.task_name,
+                session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time.time() - start_time,
             )
         return self._build_generation_result(
@@ -397,6 +406,7 @@ class LLMOrchestrator:
         response_format: RespFormat | None = None,
         raise_when_empty: bool = True,
         interrupt_flag: asyncio.Event | None = None,
+        session_id: str = "",
     ) -> LLMResponseResult:
         """基于外部消息工厂异步生成响应。
 
@@ -448,8 +458,8 @@ class LLMOrchestrator:
                 model_usage=usage,
                 user_id="system",
                 request_type=self.request_type,
-                endpoint="/chat/completions",
                 task_name=self.task_name,
+                session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time_cost,
             )
         return self._build_generation_result(
@@ -460,7 +470,7 @@ class LLMOrchestrator:
             response.usage,
         )
 
-    async def get_embedding(self, embedding_input: str) -> LLMEmbeddingResult:
+    async def get_embedding(self, embedding_input: str, *, session_id: str = "") -> LLMEmbeddingResult:
         """获取嵌入向量。
 
         Args:
@@ -484,8 +494,8 @@ class LLMOrchestrator:
                 model_usage=usage,
                 user_id="system",
                 request_type=self.request_type,
-                endpoint="/embeddings",
                 task_name=self.task_name,
+                session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time.time() - start_time,
             )
         if not embedding:

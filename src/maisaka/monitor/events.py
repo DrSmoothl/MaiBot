@@ -9,6 +9,7 @@ import json
 import time
 
 from src.common.logger import get_logger
+from src.maisaka.display.display_utils import format_tool_call_for_display
 
 logger = get_logger("maisaka_monitor")
 
@@ -83,6 +84,7 @@ def _normalize_tool_call_arguments(arguments: Any) -> tuple[Any, Optional[str]]:
 def _serialize_single_tool_call(tool_call: Any) -> Dict[str, Any]:
     """将不同来源的 tool_call 标准化为前端可直接展示的结构。"""
 
+    display_payload = format_tool_call_for_display(tool_call)
     if isinstance(tool_call, dict):
         function_info = tool_call.get("function")
         if isinstance(function_info, dict):
@@ -100,6 +102,9 @@ def _serialize_single_tool_call(tool_call: Any) -> Dict[str, Any]:
         }
         if arguments_raw is not None:
             serialized["arguments_raw"] = arguments_raw
+        for key in ("source", "source_label", "extra_content"):
+            if display_payload.get(key):
+                serialized[key] = display_payload[key]
         return serialized
 
     raw_arguments = getattr(tool_call, "args", None)
@@ -113,6 +118,9 @@ def _serialize_single_tool_call(tool_call: Any) -> Dict[str, Any]:
     }
     if arguments_raw is not None:
         serialized["arguments_raw"] = arguments_raw
+    for key in ("source", "source_label", "extra_content"):
+        if display_payload.get(key):
+            serialized[key] = display_payload[key]
     return serialized
 
 
@@ -202,6 +210,8 @@ def _serialize_tool_results(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "tool_call_id": str(tool.get("tool_call_id", "")),
             "tool_name": str(tool.get("tool_name", "")),
             "tool_args": _normalize_payload_value(tool.get("tool_args", {})),
+            "tool_call_source": str(tool.get("tool_call_source", "")),
+            "tool_call_source_label": str(tool.get("tool_call_source_label", "")),
             "success": bool(tool.get("success", False)),
             "duration_ms": float(tool.get("duration_ms", 0.0) or 0.0),
             "summary": str(tool.get("summary", "")),
@@ -265,56 +275,6 @@ def _serialize_planner_block(
         "total_tokens": int(total_tokens or 0),
         "duration_ms": float(duration_ms or 0.0),
         "prompt_html_uri": str(prompt_html_uri or ""),
-    }
-
-
-def _serialize_timing_gate_block(
-    *,
-    request_messages: Optional[List[Any]],
-    selected_history_count: Optional[int],
-    tool_count: Optional[int],
-    action: Optional[str],
-    content: Optional[str],
-    tool_calls: Optional[List[Any]],
-    tool_results: Optional[List[str]],
-    prompt_tokens: Optional[int],
-    completion_tokens: Optional[int],
-    total_tokens: Optional[int],
-    duration_ms: Optional[float],
-) -> Optional[Dict[str, Any]]:
-    """标准化 Timing Gate 结果区块。"""
-
-    if (
-        request_messages is None
-        and selected_history_count is None
-        and tool_count is None
-        and action is None
-        and content is None
-        and tool_calls is None
-        and tool_results is None
-        and prompt_tokens is None
-        and completion_tokens is None
-        and total_tokens is None
-        and duration_ms is None
-    ):
-        return None
-
-    return {
-        "request": _serialize_request_block(
-            request_messages,
-            selected_history_count,
-            tool_count,
-        ),
-        "result": {
-            "action": action,
-            "content": content,
-            "tool_calls": _serialize_tool_calls_from_objects(list(tool_calls or [])),
-            "tool_results": _normalize_payload_value(list(tool_results or [])),
-            "prompt_tokens": int(prompt_tokens or 0),
-            "completion_tokens": int(completion_tokens or 0),
-            "total_tokens": int(total_tokens or 0),
-            "duration_ms": float(duration_ms or 0.0),
-        },
     }
 
 
@@ -408,6 +368,8 @@ async def emit_message_ingested(
     platform: str = "",
     user_id: str = "",
     group_id: str = "",
+    reply_to: Optional[Dict[str, Any]] = None,
+    media: Optional[list[Dict[str, Any]]] = None,
 ) -> None:
     """广播新消息注入事件。"""
 
@@ -419,6 +381,8 @@ async def emit_message_ingested(
         "platform": platform,
         "user_id": user_id,
         "group_id": group_id,
+        "reply_to": _normalize_payload_value(reply_to) if reply_to else None,
+        "media": _normalize_payload_value(media) if media else [],
         "timestamp": timestamp,
     })
 
@@ -434,6 +398,8 @@ async def emit_message_sent(
     platform: str = "",
     user_id: str = "",
     group_id: str = "",
+    reply_to: Optional[Dict[str, Any]] = None,
+    media: Optional[list[Dict[str, Any]]] = None,
 ) -> None:
     """广播 MaiSaka 自己发送的消息事件。"""
 
@@ -446,6 +412,8 @@ async def emit_message_sent(
         "platform": platform,
         "user_id": user_id,
         "group_id": group_id,
+        "reply_to": _normalize_payload_value(reply_to) if reply_to else None,
+        "media": _normalize_payload_value(media) if media else [],
         "timestamp": timestamp,
     })
 
@@ -461,6 +429,8 @@ async def emit_message_updated(
     platform: str = "",
     user_id: str = "",
     group_id: str = "",
+    reply_to: Optional[Dict[str, Any]] = None,
+    media: Optional[list[Dict[str, Any]]] = None,
 ) -> None:
     """广播已有消息内容更新事件。"""
 
@@ -473,74 +443,9 @@ async def emit_message_updated(
         "platform": platform,
         "user_id": user_id,
         "group_id": group_id,
+        "reply_to": _normalize_payload_value(reply_to) if reply_to else None,
+        "media": _normalize_payload_value(media) if media else [],
         "timestamp": timestamp,
-    })
-
-
-async def emit_cycle_start(
-    session_id: str,
-    cycle_id: int,
-    round_index: int,
-    max_rounds: int,
-    history_count: int,
-) -> None:
-    """广播推理循环开始事件。"""
-
-    await _broadcast("cycle.start", {
-        "session_id": session_id,
-        "cycle_id": cycle_id,
-        "round_index": round_index,
-        "max_rounds": max_rounds,
-        "history_count": history_count,
-        "timestamp": time.time(),
-    })
-
-
-async def emit_cycle_end(
-    session_id: str,
-    cycle_id: int,
-    time_records: Dict[str, float],
-    agent_state: str,
-    end_reason: str,
-    end_detail: str,
-) -> None:
-    """广播单个推理循环结束事件。"""
-
-    await _broadcast("cycle.end", {
-        "session_id": session_id,
-        "cycle_id": cycle_id,
-        "time_records": _normalize_payload_value(time_records),
-        "agent_state": agent_state,
-        "end_reason": end_reason,
-        "end_detail": end_detail,
-        "timestamp": time.time(),
-    })
-
-
-async def emit_timing_gate_result(
-    session_id: str,
-    cycle_id: int,
-    action: str,
-    content: Optional[str],
-    tool_calls: List[Any],
-    messages: List[Any],
-    prompt_tokens: int,
-    selected_history_count: int,
-    duration_ms: float,
-) -> None:
-    """广播 Timing Gate 结果事件。"""
-
-    await _broadcast("timing_gate.result", {
-        "session_id": session_id,
-        "cycle_id": cycle_id,
-        "action": action,
-        "content": content,
-        "tool_calls": _serialize_tool_calls_from_objects(tool_calls),
-        "messages": _serialize_messages(messages),
-        "prompt_tokens": prompt_tokens,
-        "selected_history_count": selected_history_count,
-        "duration_ms": duration_ms,
-        "timestamp": time.time(),
     })
 
 
@@ -548,17 +453,6 @@ async def emit_planner_finalized(
     *,
     session_id: str,
     cycle_id: int,
-    timing_request_messages: Optional[List[Any]],
-    timing_selected_history_count: Optional[int],
-    timing_tool_count: Optional[int],
-    timing_action: Optional[str],
-    timing_content: Optional[str],
-    timing_tool_calls: Optional[List[Any]],
-    timing_tool_results: Optional[List[str]],
-    timing_prompt_tokens: Optional[int],
-    timing_completion_tokens: Optional[int],
-    timing_total_tokens: Optional[int],
-    timing_duration_ms: Optional[float],
     planner_request_messages: Optional[List[Any]],
     planner_selected_history_count: Optional[int],
     planner_tool_count: Optional[int],
@@ -582,19 +476,6 @@ async def emit_planner_finalized(
         "session_id": session_id,
         "cycle_id": cycle_id,
         "timestamp": time.time(),
-        "timing_gate": _serialize_timing_gate_block(
-            request_messages=timing_request_messages,
-            selected_history_count=timing_selected_history_count,
-            tool_count=timing_tool_count,
-            action=timing_action,
-            content=timing_content,
-            tool_calls=timing_tool_calls,
-            tool_results=timing_tool_results,
-            prompt_tokens=timing_prompt_tokens,
-            completion_tokens=timing_completion_tokens,
-            total_tokens=timing_total_tokens,
-            duration_ms=timing_duration_ms,
-        ),
         "request": _serialize_request_block(
             planner_request_messages,
             planner_selected_history_count,

@@ -5,14 +5,20 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 import json
 
 from json_repair import repair_json
+from sqlalchemy import update
 from sqlmodel import select
 
 from src.chat.message_receive.message import SessionMessage
+from src.chat.replyer.expression_vector_index import expression_vector_index
 from src.common.database.database import get_db_session
 from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
-from src.config.config import global_config
+from src.config.config import global_config, model_config
+from src.learners.expression_style_utils import (
+    is_prompt_example_expression_style,
+    normalize_expression_style_for_learning,
+)
 from src.learners.learner_utils_old import weighted_sample
 from src.maisaka.context.messages import LLMContextMessage
 
@@ -32,6 +38,8 @@ class MaisakaExpressionSelectionResult:
 
 class MaisakaExpressionSelector:
     """负责在 replyer 侧完成表达方式筛选与子代理二次选择。"""
+
+    _VECTOR_CLUSTER_POOL_SIZE = 16
 
     @staticmethod
     def _get_runtime_manager() -> Any:
@@ -67,16 +75,15 @@ class MaisakaExpressionSelector:
             for target_item in target_items:
                 platform = target_item.platform.strip()
                 item_id = target_item.item_id.strip()
-                if self._is_global_expression_group_marker(platform, item_id):
-                    contains_global_share_marker = True
-                    continue
                 if not platform or not item_id:
                     continue
 
-                target_session_ids = ChatConfigUtils.get_target_session_ids(target_item)
+                target_session_ids = ChatConfigUtils.get_target_session_ids_with_wildcards(target_item)
                 group_session_ids.update(target_session_ids)
-                if ChatConfigUtils.target_matches_session(target_item, session_id):
+                if ChatConfigUtils.target_matches_session_with_wildcards(target_item, session_id):
                     contains_current_session = True
+                    if self._is_global_expression_group_marker(platform, item_id):
+                        contains_global_share_marker = True
 
             if contains_global_share_marker:
                 has_global_share = True
@@ -85,11 +92,16 @@ class MaisakaExpressionSelector:
 
         return related_session_ids, has_global_share
 
-    def _load_expression_candidates(self, session_id: str) -> List[dict[str, Any]]:
+    def _load_all_expression_candidates(self, session_id: str) -> List[dict[str, Any]]:
         related_session_ids, has_global_share = self._resolve_expression_group_scope(session_id)
 
         with get_db_session(auto_commit=False) as session:
-            base_query = select(Expression)
+            base_query = select(
+                Expression.id,
+                Expression.situation,
+                Expression.style,
+                Expression.count,
+            )
             if has_global_share:
                 scoped_query = base_query
             else:
@@ -101,18 +113,29 @@ class MaisakaExpressionSelector:
                     Expression.checked.is_(True),  # type: ignore[attr-defined]
                     Expression.modified_by == ModifiedBy.USER,
                 )
-            expressions = session.exec(scoped_query).all()
+            rows = session.exec(scoped_query).all()
 
-        all_candidates = [
-            {
-                "id": expression.id,
-                "situation": expression.situation,
-                "style": expression.style,
-                "count": expression.count if expression.count is not None else 1,
-            }
-            for expression in expressions
-            if expression.id is not None and expression.situation and expression.style
-        ]
+        all_candidates: List[dict[str, Any]] = []
+        for expression_id, situation, style, count in rows:
+            normalized_style = normalize_expression_style_for_learning(str(style or ""))
+            if (
+                expression_id is None
+                or not situation
+                or not normalized_style
+                or is_prompt_example_expression_style(normalized_style)
+            ):
+                continue
+            all_candidates.append(
+                {
+                    "id": expression_id,
+                    "situation": situation,
+                    "style": normalized_style,
+                    "count": count if count is not None else 1,
+                }
+            )
+        return all_candidates
+
+    def _sample_legacy_expression_candidates(self, all_candidates: List[dict[str, Any]]) -> List[dict[str, Any]]:
         if len(all_candidates) < 10:
             return []
 
@@ -167,36 +190,98 @@ class MaisakaExpressionSelector:
         timestamp = message.timestamp.strftime("%H:%M:%S") if isinstance(message.timestamp, datetime) else ""
         return f"- {timestamp} {message.role}: {content}".strip()
 
+    @staticmethod
+    def _format_expression_intent(reply_tool_args: Optional[dict[str, Any]]) -> str:
+        """格式化 planner 传入的表达选择意图。"""
+
+        if not isinstance(reply_tool_args, dict):
+            return ""
+
+        lines: List[str] = []
+        raw_intent = reply_tool_args.get("expression_intent")
+        if isinstance(raw_intent, dict):
+            field_labels = {
+                "focus": "贴合对象",
+                "reply_act": "回复动作",
+                "scene": "表达场景",
+                "tone": "期望语气",
+                "prefer": "优先表达",
+                "avoid": "避免表达",
+            }
+            for field_name, label in field_labels.items():
+                field_value = raw_intent.get(field_name)
+                if isinstance(field_value, list):
+                    normalized_value = "、".join(str(item).strip() for item in field_value if str(item).strip())
+                else:
+                    normalized_value = str(field_value or "").strip()
+                if normalized_value:
+                    lines.append(f"- {label}：{normalized_value}")
+        elif raw_intent:
+            normalized_intent = str(raw_intent).strip()
+            if normalized_intent:
+                lines.append(f"- 表达意图：{normalized_intent}")
+
+        if not lines:
+            return ""
+        return "表达选择意图：\n" + "\n".join(lines)
+
+    @staticmethod
+    def _build_expression_query_text(
+        reply_reason: str,
+        reply_tool_args: Optional[dict[str, Any]],
+        *,
+        use_expression_intent: bool,
+    ) -> str:
+        """构建表达检索与精排共用的匹配依据文本。"""
+
+        query_parts: List[str] = []
+        expression_intent_block = (
+            MaisakaExpressionSelector._format_expression_intent(reply_tool_args)
+            if use_expression_intent
+            else ""
+        )
+        if expression_intent_block:
+            query_parts.append(expression_intent_block)
+
+        normalized_reply_reason = str(reply_reason or "").strip()
+        if normalized_reply_reason:
+            query_parts.append(f"Planner 推理：\n{normalized_reply_reason}")
+        elif isinstance(reply_tool_args, dict):
+            reply_guide = str(reply_tool_args.get("reply_guide") or "").strip()
+            if reply_guide:
+                query_parts.append(f"回复指引：\n{reply_guide}")
+
+        return "\n\n".join(query_parts)
+
+    @staticmethod
+    def _use_vector_candidate_pool() -> bool:
+        return global_config.expression.expression_selection_mode in {"vector", "vector_intent"}
+
+    @staticmethod
+    def _has_embedding_model_configured() -> bool:
+        return any(model_name.strip() for model_name in model_config.model_task_config.embedding.model_list)
+
+    @staticmethod
+    def _use_expression_intent() -> bool:
+        return global_config.expression.expression_selection_mode == "vector_intent"
+
     def _build_selector_prompt(
         self,
         *,
-        chat_history: List[LLMContextMessage],
-        reply_message: Optional[SessionMessage],
-        reply_reason: str,
         candidates: List[dict[str, Any]],
     ) -> str:
-        history_lines = [
-            self._normalize_history_line(message)
-            for message in chat_history[-10:]
-            if (message.processed_plain_text or "").strip()
-        ]
-        history_block = "\n".join(history_lines) if history_lines else "- 无可用上下文"
         candidate_lines = [
-            f"{candidate['id']}: 情景={candidate['situation']} | 风格={candidate['style']} | count={candidate['count']}"
+            f"{candidate['id']}: 情景={candidate['situation']} | 风格={candidate['style']}"
             for candidate in candidates
         ]
-        target_text = (reply_message.processed_plain_text or "").strip() if reply_message is not None else ""
 
         return (
             "你是 Maisaka 的表达方式选择子代理。\n"
-            "你只负责根据最近聊天上下文，为这一次可见回复挑选最合适的表达方式。\n"
-            "请只从下面候选中选择 0 到 3 条最适合当前语境的表达方式。\n"
+            "你只负责根据下方真实聊天上下文，为这一次可见回复挑选最合适的表达方式。\n"
+            "请只从下面候选中选择 0 到 5 条最适合当前语境的表达方式。\n"
             "优先考虑自然、贴合上下文、不生硬、不模板化。\n"
             "如果没有明显合适的，就返回空数组。\n"
             '严格只输出 JSON，对象格式为 {"selected_ids":[123,456]}。\n\n'
-            f"最近上下文：\n{history_block}\n\n"
-            f"目标消息：{target_text or '无'}\n"
-            f"回复理由：{reply_reason.strip() or '无'}\n\n"
             f"候选表达方式：\n{chr(10).join(candidate_lines)}"
         )
 
@@ -297,8 +382,8 @@ class MaisakaExpressionSelector:
             if not isinstance(candidate_id, int):
                 continue
             situation = str(raw_candidate.get("situation") or "").strip()
-            style = str(raw_candidate.get("style") or "").strip()
-            if not situation or not style:
+            style = normalize_expression_style_for_learning(str(raw_candidate.get("style") or "").strip())
+            if not situation or not style or is_prompt_example_expression_style(style):
                 continue
             normalized_candidates.append(
                 {
@@ -339,8 +424,8 @@ class MaisakaExpressionSelector:
             if not isinstance(raw_expression, dict):
                 continue
             situation = str(raw_expression.get("situation") or "").strip()
-            style = str(raw_expression.get("style") or "").strip()
-            if not situation or not style:
+            style = normalize_expression_style_for_learning(str(raw_expression.get("style") or "").strip())
+            if not situation or not style or is_prompt_example_expression_style(style):
                 continue
             normalized_expression = {
                 "situation": situation,
@@ -393,39 +478,63 @@ class MaisakaExpressionSelector:
             selected_expressions=list(selected_expressions),
         )
 
+    async def _build_expression_candidate_pool(
+        self,
+        *,
+        session_id: str,
+        reply_reason: str,
+        reply_tool_args: Optional[dict[str, Any]],
+        all_candidates: List[dict[str, Any]],
+    ) -> List[dict[str, Any]]:
+        """按配置构建本次回复的表达候选池。"""
+
+        if self._use_vector_candidate_pool() and self._has_embedding_model_configured():
+            expression_query_text = self._build_expression_query_text(
+                reply_reason,
+                reply_tool_args,
+                use_expression_intent=self._use_expression_intent(),
+            )
+            vector_candidates = await expression_vector_index.select_candidates(
+                index_path=global_config.expression.expression_vector_index_path,
+                session_id=session_id,
+                query_text=expression_query_text,
+                scoped_candidates=all_candidates,
+                candidate_pool_size=global_config.expression.expression_vector_candidate_pool_size,
+                cluster_pool_size=self._VECTOR_CLUSTER_POOL_SIZE,
+            )
+            if vector_candidates:
+                logger.debug(
+                    f"表达方式向量候选池完成：session_id={session_id} "
+                    f"候选数={len(vector_candidates)} 候选预览={self._format_candidate_preview(vector_candidates)}"
+                )
+                return vector_candidates
+            logger.info(f"表达方式向量候选池为空，回退随手候选：session_id={session_id}")
+        elif self._use_vector_candidate_pool():
+            logger.info("表达方式向量候选池需要配置 embedding 模型，已回退随手候选")
+
+        return self._sample_legacy_expression_candidates(all_candidates)
+
     async def _build_default_selection_result(
         self,
         *,
         session_id: str,
-        chat_history: List[LLMContextMessage],
-        reply_message: Optional[SessionMessage],
-        reply_reason: str,
         candidates: List[dict[str, Any]],
         sub_agent_runner: Optional[SubAgentRunner],
     ) -> MaisakaExpressionSelectionResult:
-        if not global_config.expression.enable_precise_expression_selection:
-            return self._build_direct_selection_result(
-                session_id=session_id,
-                candidates=candidates,
-            )
-
         if sub_agent_runner is None:
-            logger.info("精细表达选择已跳过：缺少子代理执行器，回退为直接注入")
+            logger.info("表达方式 LLM 选择已跳过：缺少子代理执行器，回退为直接注入")
             return self._build_direct_selection_result(
                 session_id=session_id,
                 candidates=candidates,
             )
 
         selector_prompt = self._build_selector_prompt(
-            chat_history=chat_history,
-            reply_message=reply_message,
-            reply_reason=reply_reason,
             candidates=candidates,
         )
         try:
             raw_response = await sub_agent_runner(selector_prompt)
         except Exception as exc:
-            logger.warning(f"精细表达选择子代理执行失败，回退为直接注入: {exc}")
+            logger.warning(f"表达方式 LLM 选择子代理执行失败，回退为直接注入: {exc}")
             return self._build_direct_selection_result(
                 session_id=session_id,
                 candidates=candidates,
@@ -433,7 +542,7 @@ class MaisakaExpressionSelector:
 
         selected_ids = self._parse_selected_ids(raw_response, candidates)
         logger.debug(
-            f"精细表达选择完成：session_id={session_id} selected_ids={selected_ids!r} "
+            f"表达方式 LLM 选择完成：session_id={session_id} selected_ids={selected_ids!r} "
             f"候选预览={self._format_candidate_preview(candidates)}"
         )
         return self._build_selection_result_from_ids(
@@ -445,11 +554,12 @@ class MaisakaExpressionSelector:
         if not selected_ids:
             return
         with get_db_session() as session:
-            expressions = session.exec(select(Expression).where(Expression.id.in_(selected_ids))).all()  # type: ignore[attr-defined]
             now = datetime.now()
-            for expression in expressions:
-                expression.last_active_time = now
-                session.add(expression)
+            session.execute(
+                update(Expression)
+                .where(Expression.id.in_(selected_ids))  # type: ignore[attr-defined]
+                .values(last_active_time=now)
+            )
 
     async def select_for_reply(
         self,
@@ -468,7 +578,17 @@ class MaisakaExpressionSelector:
             logger.info(f"表达方式选择已跳过：当前会话未启用表达方式，session_id={session_id}")
             return MaisakaExpressionSelectionResult()
 
-        candidates = self._load_expression_candidates(session_id)
+        all_candidates = self._load_all_expression_candidates(session_id)
+        if len(all_candidates) < 10:
+            logger.info(f"表达方式选择已跳过：本地候选不足，session_id={session_id}")
+            return MaisakaExpressionSelectionResult()
+
+        candidates = await self._build_expression_candidate_pool(
+            session_id=session_id,
+            reply_reason=reply_reason,
+            reply_tool_args=reply_tool_args,
+            all_candidates=all_candidates,
+        )
         if not candidates:
             logger.info(f"表达方式选择已跳过：本地候选不足，session_id={session_id}")
             return MaisakaExpressionSelectionResult()
@@ -508,9 +628,6 @@ class MaisakaExpressionSelector:
 
         selection_result = await self._build_default_selection_result(
             session_id=session_id,
-            chat_history=chat_history,
-            reply_message=reply_message,
-            reply_reason=reply_reason,
             candidates=candidates,
             sub_agent_runner=sub_agent_runner,
         )

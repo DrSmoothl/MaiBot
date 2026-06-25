@@ -13,13 +13,14 @@
 
 # Using your tools
 - {bot_name}が今、正式にユーザーへ可視の返信を送るべきだと判断したときは reply を呼び出してください。呼び出し後、ユーザーに実際に表示される返信が生成されます。特定のユーザーに返信しても、全ユーザーに向けて返信してもかまいません。
-- query_memory()：返信が過去の会話、長期的な好み、共有した経験、人物の長期的な情報、または以前の約束に明確に依存するときに使います。検索に適しているもの：過去の出来事、以前話した内容、長期的な好み、以前の約束、タスクの進捗、最近の手がかり。検索に適していないもの：挨拶、その場の感情への反応、軽いやり取り、最近のメッセージだけで答えられる内容。グループチャットではより控えめにしてください。個人チャットで相手が「前に」「この前」「最近」「覚えてる？」「好き」「言った」などの合図を出した場合は、より積極的に検索を検討できます。
+{query_memory_rule}
 - tool_search()：deferred tools の一覧にあるツールが必要な場合、まずこれを呼び出して該当ツールを検索・発見してください。これは後続のラウンドでツールを利用可能にするだけで、業務処理を直接実行するものではありません。
 - You can call multiple tools in a single response. 複数の情報源を組み合わせ、複数の操作であなたを補助してください。If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
 - ツール実行に問題が発生した場合は、解決を試みるか代替案を使ってください。
 - ある行動の実行や目標の達成を助けるツールが存在する場合は、そのツールを直接使ってタスクを完了してください。
 - `<system-reminder>` に deferred tools が列挙されていて、その中のツールが必要な場合は、まず tool_search() でそのツールを検索し、後続のラウンドで利用可能になってから通常通り呼び出してください。
-- no_action()：今は返信や追加検索をすべきではなく、新しい外部メッセージを待つべき場合に使ってください。これは Planner 内部で待つだけで、連続 Planner は終了しません。
-- finish()：これ以上行う操作がない場合は、finish を使って連続 Planner とこの思考を終了してください。
+- view_forward_message：指定した msg_id の転送メッセージプレビューの全文を表示します。このツールは既定では tool_search から発見します。文脈に転送メッセージのプレビューがあり、さらに詳細が必要な場合にのみ使用してください。
+- wait()：一定時間待ってから再判断する必要がある場合だけ使ってください。
+- これ以上行う操作がない場合は、どのツールも呼ばず、分析テキストだけでこの思考を終了してください。
 
 それでは、{bot_name}がどのように発言すべきかについての分析を出力してください。必ず先にテキストで分析を出力し、その後でツール呼び出しを行ってください：

@@ -52,6 +52,10 @@ class FocusModeManager:
             return False
         return True
 
+    @staticmethod
+    def _get_focus_whitelist_targets() -> Iterable[Any]:
+        return global_config.experimental.focus_chat_whitelist or []
+
     def get_focus_cool_time(self) -> float:
         """Return the focus wake-up cool time in seconds."""
 
@@ -75,7 +79,28 @@ class FocusModeManager:
         is_group_chat: Optional[bool] = None,
     ) -> bool:
         resolved_is_group_chat = self._resolve_is_group_chat(session_id, is_group_chat)
-        return self.is_enabled_for_chat(is_group_chat=resolved_is_group_chat)
+        if not self.is_enabled_for_chat(is_group_chat=resolved_is_group_chat):
+            return False
+
+        whitelist_targets = list(self._get_focus_whitelist_targets())
+        if not whitelist_targets:
+            return True
+        return any(
+            ChatConfigUtils.target_matches_session_with_wildcards(
+                target_item,
+                session_id,
+                resolved_is_group_chat,
+            )
+            for target_item in whitelist_targets
+        )
+
+    def is_enabled_for_session(self, session_id: str, *, is_group_chat: Optional[bool] = None) -> bool:
+        """Return whether focus mode applies to a specific chat session."""
+
+        normalized_session_id = self._normalize_session_id(session_id)
+        if not normalized_session_id:
+            return False
+        return self._is_focus_mode_active_for_session(normalized_session_id, is_group_chat)
 
     @staticmethod
     def _get_focus_group_targets(focus_group: Any) -> Iterable[Any]:
@@ -285,7 +310,7 @@ class FocusModeManager:
         if normalized_to_session_id in focused_session_ids:
             return f"chat_id={normalized_to_session_id} 已经处于关注状态，不能切换到已关注聊天。"
         if normalized_to_session_id == self._next_focus_blocked_session_id_by_scope.get(from_scope_key, ""):
-            return f"chat_id={normalized_to_session_id} 刚因连续 no_action 退出 Focus，本次不能切换回该聊天。"
+            return f"chat_id={normalized_to_session_id} 刚因连续空闲结束退出 Focus，本次不能切换回该聊天。"
         if normalized_from_session_id not in focused_session_ids:
             return f"当前 chat_id={normalized_from_session_id} 不在关注状态，不能发起切换。"
 

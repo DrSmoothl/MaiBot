@@ -1,12 +1,13 @@
 <div align="center">
 
   <!-- Language Switcher -->
-  <a href="README_CN.md">简体中文</a> | <a href="../README.md">English</a>
+  <a href="../README.md">双语 / Bilingual</a> | <a href="README_CN.md">简体中文</a> | <a href="README_EN.md">English</a>
 
   <br>
   <br>
 
   <h1>麦麦 MaiBot <sub><small>MaiSaka</small></sub></h1>
+  <sub><sup>An interactive agent based on large language models.</sup></sub>
 
   <!-- Badges Row -->
   <p>
@@ -16,6 +17,7 @@
     <img src="https://img.shields.io/github/contributors/Mai-with-u/MaiBot.svg?style=flat&label=%E8%B4%A1%E7%8C%AE%E8%80%85" alt="Contributors">
     <img src="https://img.shields.io/github/forks/Mai-with-u/MaiBot.svg?style=flat&label=%E5%88%86%E6%94%AF%E6%95%B0" alt="Forks">
     <img src="https://img.shields.io/github/stars/Mai-with-u/MaiBot?style=flat&label=%E6%98%9F%E6%A0%87%E6%95%B0" alt="Stars">
+    <a href="https://trendshift.io/repositories/20445" target="_blank"><img src="https://trendshift.io/api/badge/repositories/20445" alt="Mai-with-u%2FMaiBot | Trendshift" width="250" height="55"></a>
     <a href="https://deepwiki.com/DrSmoothl/MaiBot"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   </p>
 </div>
@@ -27,20 +29,20 @@
 
 ## 介绍
 
-麦麦MaiSaka 是一个基于大语言模型的可交互智能体
+麦麦 MaiSaka 是一个基于大语言模型的可交互智能体。
 
-MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务的“有帮助的助手”，她还是一个致力于了解你，并以真实人类的风格进行交互的数字生命，她不追求完美，她不追求高效，但追求亲切和真实。
+MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务的“有帮助的助手”，她还是一个致力于了解你，并以真实人类的风格进行交互的数字生命。她不追求完美，不追求高效，但追求亲切和真实。
 
 
-- 💭 **没有人喜欢GPT的语言风格**：麦麦使用了更加自然，贴合人类对话习惯的交互方式，不是长篇大论或者markdown格式的分点，而是或长或短的闲谈。
+- 💭 **没有人喜欢 GPT 的语言风格**：麦麦使用了更加自然、贴合人类对话习惯的交互方式，不是长篇大论或者 markdown 格式的分点，而是或长或短的闲谈。
 
 - 🎭 **不再是傻乎乎的一问一答**：懂得在合适的时间说话，把握聊天中的气氛，在合适的时候开口，在合适的时候闭嘴。
 
 - 🧠 **麦麦·成为人类**：在多人对话中，麦麦会模仿其他人的说话风格，还会自主理解新词或者小圈子里的黑话，不断进化。
 
-- ❤️ **永远都在更加了解你**：基于心理学中人格理论，麦麦会不断积累对于你的了解，不论是你的信息，喜恶或是行为风格，她都记在心里。
+- ❤️ **永远都在更加了解你**：基于心理学中人格理论，麦麦会不断积累对于你的了解，不论是你的信息、喜恶或是行为风格，她都记在心里。
 
-- 🔌 **插件系统**：提供强大的 API 和事件系统，无限扩展可能。
+- 🔌 **插件系统**：提供强大的 API 和事件系统，拥有无限扩展可能。
 
 
 
@@ -71,7 +73,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 ## 🔥 更新和安装
 
-> **最新版本: v1.0.0** ([📄 更新日志](../changelogs/changelog.md))
+> **最新版本: v1.0.7** ([📄 更新日志](../changelogs/changelog.md))
 
 - **下载**: 前往 [Release](https://github.com/MaiM-with-u/MaiBot/releases/) 页面下载最新版本
 - **启动器**: [Mailauncher](https://github.com/MaiM-with-u/mailauncher/releases/) (仅支持 MacOS, 早期开发中)
@@ -82,7 +84,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 | `dev` | 🚧 开发测试版本，包含新功能，可能不稳定 |
 
 ### 📚 部署教程
-👉 **[🚀 最新版本部署教程](https://docs.mai-mai.org/manual/deployment/mmc_deploy_windows.html)**  
+👉 **[🚀 最新版本部署教程](https://docs.mai-mai.org/manual/deployment/)**
 
 ---
 
@@ -92,11 +94,11 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 | 类别 | 群组 | 说明 |
 | :--- | :--- | :--- |
-| **技术交流** | [麦麦脑电图](https://qm.qq.com/q/RzmCiRtHEW) | 技术交流/答疑 |
-| **技术交流** | [麦麦大脑磁共振](https://qm.qq.com/q/VQ3XZrWgMs) | 技术交流/答疑 |
-| **技术交流** | [麦麦要当VTB](https://qm.qq.com/q/wGePTl1UyY) | 技术交流/答疑 |
+| **技术交流** | 麦麦脑电图:571780722 | 技术交流/答疑 |
+| **技术交流** | 麦麦大脑磁共振:766798517 | 技术交流/答疑 |
+| **技术交流** | [麦麦要当 VTB](https://qm.qq.com/q/wGePTl1UyY) | 技术交流/答疑 |
 | **闲聊吹水** | [麦麦之闲聊群](https://qm.qq.com/q/JxvHZnxyec) | 仅限闲聊，不答疑 |
-| **插件开发** | [插件开发群](https://qm.qq.com/q/1036092828) | 进阶开发与测试 |
+| **插件开发** | 插件开发群:1036092828 | 进阶开发与测试 |
 
 ---
 
@@ -109,7 +111,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 ### 🧩 衍生项目
 
-- **[Amaidesu](https://github.com/MaiM-with-u/Amaidesu)**: 让麦麦在B站开播
+- **[Amaidesu](https://github.com/MaiM-with-u/Amaidesu)**: 让麦麦在 B 站开播。
 - **[MoFox_Bot](https://github.com/MoFox-Studio/MoFox-Core)**: 基于 MaiCore 0.10.0 的增强型 Fork，更稳定更有趣。
 - **[MaiCraft](https://github.com/MaiM-with-u/Maicraft)**: 让麦麦陪你玩 Minecraft (暂时停止维护中)。
 
@@ -122,7 +124,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 > - 程序的功能设计理念基于一个核心的原则："最像而不是好"。
 > - 如果人类真的需要一个 AI 来陪伴自己，并不是所有人都需要一个完美的，能解决所有问题的"helpful assistant"，而是一个会犯错的，拥有自己感知和想法的"生命形式"。
 
-> **xxxxx说：**
+> **xxxxx 说：**
 > *Code is open, but the soul is yours.*
 
 ---
@@ -137,17 +139,21 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
   <img alt="contributors" src="https://contrib.rocks/image?repo=MaiM-with-u/MaiBot" />
 </a>
 
+### 🤝 开源项目友链
+
+- **[AstrBot](https://github.com/AstrBotDevs/AstrBot)**: 优秀的 LLM Agent 项目
+
 ### ❤️ 特别致谢
 
 - **[萨卡班甲鱼](https://en.wikipedia.org/wiki/Sacabambaspis)**: 千石可乐很喜欢的生物。
-- **[略nd](https://space.bilibili.com/1344099355)**: 🎨 为麦麦绘制早期的精美人设。
-- **[NapCat](https://github.com/NapNeko/NapCatQQ)**: 🚀 现代化的基于 NTQQ 的 Bot 协议实现。
+- **[略nd](https://space.bilibili.com/1344099355)**: 为麦麦绘制早期的精美人设。
+- **[NapCat](https://github.com/NapNeko/NapCatQQ)**: 现代化的基于 NTQQ 的 Bot 协议实现。
 
 ---
 
 ## 📊 仓库状态
 
-![Alt](https://repobeats.axiom.co/api/embed/9faca9fccfc467931b87dd357b60c6362b5cfae0.svg "麦麦仓库状态")
+![Alt](../depends-data/repository-metrics.svg "麦麦仓库状态")
 
 ### Star 趋势
 [![Star 趋势](https://starchart.cc/MaiM-with-u/MaiBot.svg?variant=adaptive)](https://starchart.cc/MaiM-with-u/MaiBot)

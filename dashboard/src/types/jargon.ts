@@ -10,7 +10,6 @@ export type JargonCreatedBy = 'AI' | 'MANUAL'
 export interface Jargon {
   id: number
   content: string
-  raw_content: string | null
   meaning: string | null
   session_id: string
   session_ids: string[]
@@ -18,7 +17,8 @@ export interface Jargon {
   chat_names: string[]
   is_global: boolean
   count: number
-  is_jargon: boolean | null  // null 表示未判定
+  is_jargon: boolean
+  is_legacy_empty_meaning: boolean
   is_complete: boolean
   created_by: JargonCreatedBy
   created_timestamp: string
@@ -67,7 +67,6 @@ export interface JargonDetailResponse {
  */
 export interface JargonCreateRequest {
   content: string
-  raw_content?: string
   meaning?: string
   session_id?: string
   session_ids?: string[]
@@ -79,12 +78,11 @@ export interface JargonCreateRequest {
  */
 export interface JargonUpdateRequest {
   content?: string
-  raw_content?: string
   meaning?: string
   session_id?: string
   session_ids?: string[]
   is_global?: boolean
-  is_jargon?: boolean | null
+  is_jargon?: boolean
 }
 
 /**
@@ -121,7 +119,8 @@ export interface JargonStats {
   total: number
   confirmed_jargon: number
   confirmed_not_jargon: number
-  pending: number
+  manual_jargon: number
+  pending?: number
   global_count: number
   complete_count: number
   chat_count: number

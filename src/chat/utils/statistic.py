@@ -124,6 +124,7 @@ class StatPeriodData(TypedDict):
     costs_by_user: defaultdict[str, float]
     costs_by_model: defaultdict[str, float]
     costs_by_module: defaultdict[str, float]
+    costs_by_chat: defaultdict[str, float]
     cache_hit_tokens: int
     cache_miss_tokens: int
     cache_hit_tokens_by_type: defaultdict[str, int]
@@ -177,6 +178,8 @@ COST_BY_TYPE = "costs_by_type"
 COST_BY_USER = "costs_by_user"
 COST_BY_MODEL = "costs_by_model"
 COST_BY_MODULE = "costs_by_module"
+COST_BY_CHAT = "costs_by_chat"
+GLOBAL_COST_SESSION_KEY = "__global__"
 CACHE_HIT_TOK = "cache_hit_tokens"
 CACHE_MISS_TOK = "cache_miss_tokens"
 CACHE_HIT_TOK_BY_TYPE = "cache_hit_tokens_by_type"
@@ -360,6 +363,28 @@ def _json_for_html_script(value: object) -> str:
         .replace("\u2028", "\\u2028")
         .replace("\u2029", "\\u2029")
     )
+
+
+def _build_llm_owner_costs(costs_by_type: defaultdict[str, float]) -> dict[str, float]:
+    """按 LLM 调用来源聚合花费，区分本体与各插件。"""
+
+    owner_costs: defaultdict[str, float] = defaultdict(float)
+    for request_type, cost in costs_by_type.items():
+        normalized_request_type = str(request_type or "").strip()
+        if normalized_request_type.startswith("plugin."):
+            plugin_id = normalized_request_type.removeprefix("plugin.").strip()
+            if plugin_id.endswith(".asr"):
+                plugin_id = plugin_id.removesuffix(".asr").strip()
+            owner_label = f"插件 {plugin_id}" if plugin_id else "插件（未知）"
+        else:
+            owner_label = "本体"
+        owner_costs[owner_label] += float(cost or 0.0)
+
+    return {
+        owner_label: owner_costs[owner_label]
+        for owner_label in sorted(owner_costs.keys(), key=lambda label: (label != "本体", label))
+        if owner_costs[owner_label] > 0
+    }
 
 
 class StatisticOutputTask(AsyncTask):
@@ -568,6 +593,7 @@ class StatisticOutputTask(AsyncTask):
             COST_BY_USER: defaultdict(float),
             COST_BY_MODEL: defaultdict(float),
             COST_BY_MODULE: defaultdict(float),
+            COST_BY_CHAT: defaultdict(float),
             CACHE_HIT_TOK: 0,
             CACHE_MISS_TOK: 0,
             CACHE_HIT_TOK_BY_TYPE: defaultdict(int),
@@ -651,6 +677,8 @@ class StatisticOutputTask(AsyncTask):
                         user_id = cast(str | None, record["model_api_provider_name"]) or "unknown"
                         model_assign_name = cast(str | None, record["model_assign_name"])
                         model_name = model_assign_name or cast(str | None, record["model_name"]) or "unknown"
+                        session_id = str(record.get("session_id") or "").strip()
+                        chat_cost_key = session_id if session_id else GLOBAL_COST_SESSION_KEY
 
                         # 提取模块名：如果请求类型包含"."，取第一个"."之前的部分
                         module_name = request_type.split(".")[0] if "." in request_type else request_type
@@ -745,6 +773,7 @@ class StatisticOutputTask(AsyncTask):
                         StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_USER, user_id, cost)
                         StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_MODEL, model_name, cost)
                         StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_MODULE, module_name, cost)
+                        StatisticOutputTask._add_defaultdict_float(stats[period_key], COST_BY_CHAT, chat_cost_key, cost)
 
                         # 收集time_cost数据
                         time_cost = cast(float | None, record["time_cost"]) or 0.0
@@ -1435,6 +1464,23 @@ class StatisticOutputTask(AsyncTask):
             chat_counts = [stat_data[MSG_CNT_BY_CHAT][chat_id] for chat_id in sorted_chat_ids]
             chat_labels_json = _json_for_html_script(chat_labels)
             chat_counts_json = _json_for_html_script(chat_counts)
+
+            sorted_chat_cost_ids = sorted(stat_data[COST_BY_CHAT].keys())
+            chat_cost_labels = [
+                "全局"
+                if chat_id == GLOBAL_COST_SESSION_KEY
+                else str(self.name_mapping.get(chat_id, (self._get_chat_display_name_from_id(chat_id), 0))[0])
+                for chat_id in sorted_chat_cost_ids
+            ]
+            chat_costs = [stat_data[COST_BY_CHAT][chat_id] for chat_id in sorted_chat_cost_ids]
+            chat_cost_labels_json = _json_for_html_script(chat_cost_labels)
+            chat_costs_json = _json_for_html_script(chat_costs)
+
+            owner_costs_by_label = _build_llm_owner_costs(stat_data[COST_BY_TYPE])
+            owner_cost_labels = list(owner_costs_by_label.keys())
+            owner_costs = [owner_costs_by_label[label] for label in owner_cost_labels]
+            owner_cost_labels_json = _json_for_html_script(owner_cost_labels)
+            owner_costs_json = _json_for_html_script(owner_costs)
             # 生成HTML
             return f"""
             <div id=\"{div_id}\" class=\"tab-content\">
@@ -1544,22 +1590,48 @@ class StatisticOutputTask(AsyncTask):
                 </div>
                 
                 <h2>数据分布图表</h2>
-                <div style="display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px;">
-                    <div style="flex: 1; min-width: 300px;">
+                <div class="pie-chart-grid">
+                    <div class="pie-chart-card">
+                        <h3>调用来源花费分布</h3>
+                        <div class="pie-chart-canvas-wrap">
+                            <canvas id="ownerPieChart_{div_id}"></canvas>
+                        </div>
+                        <div id="ownerPieLegend_{div_id}" class="pie-chart-legend"></div>
+                    </div>
+                    <div class="pie-chart-card">
                         <h3>模型花费分布</h3>
-                        <canvas id="modelPieChart_{div_id}" width="300" height="300"></canvas>
+                        <div class="pie-chart-canvas-wrap">
+                            <canvas id="modelPieChart_{div_id}"></canvas>
+                        </div>
+                        <div id="modelPieLegend_{div_id}" class="pie-chart-legend"></div>
                     </div>
-                    <div style="flex: 1; min-width: 300px;">
+                    <div class="pie-chart-card">
                         <h3>模块花费分布</h3>
-                        <canvas id="modulePieChart_{div_id}" width="300" height="300"></canvas>
+                        <div class="pie-chart-canvas-wrap">
+                            <canvas id="modulePieChart_{div_id}"></canvas>
+                        </div>
+                        <div id="modulePieLegend_{div_id}" class="pie-chart-legend"></div>
                     </div>
-                    <div style="flex: 1; min-width: 300px;">
+                    <div class="pie-chart-card">
                         <h3>请求类型花费分布</h3>
-                        <canvas id="typePieChart_{div_id}" width="300" height="300"></canvas>
+                        <div class="pie-chart-canvas-wrap">
+                            <canvas id="typePieChart_{div_id}"></canvas>
+                        </div>
+                        <div id="typePieLegend_{div_id}" class="pie-chart-legend"></div>
                     </div>
-                    <div style="flex: 1; min-width: 300px;">
+                    <div class="pie-chart-card">
                         <h3>聊天消息分布</h3>
-                        <canvas id="chatPieChart_{div_id}" width="300" height="300"></canvas>
+                        <div class="pie-chart-canvas-wrap">
+                            <canvas id="chatPieChart_{div_id}"></canvas>
+                        </div>
+                        <div id="chatPieLegend_{div_id}" class="pie-chart-legend"></div>
+                    </div>
+                    <div class="pie-chart-card">
+                        <h3>聊天流花费分布</h3>
+                        <div class="pie-chart-canvas-wrap">
+                            <canvas id="chatCostPieChart_{div_id}"></canvas>
+                        </div>
+                        <div id="chatCostPieLegend_{div_id}" class="pie-chart-legend"></div>
                     </div>
                 </div>
                 
@@ -1571,7 +1643,88 @@ class StatisticOutputTask(AsyncTask):
                     
                     function createPieCharts_{div_id}() {{
                         const colors = ['#b35b34', '#0d4b50', '#cfa54b', '#6f665b', '#dfc79a', '#8f4b38', '#74825a', '#854f46', '#2f5f62', '#b98556'];
-                        
+
+                        function getPieColors(labelCount) {{
+                            return Array.from({{ length: labelCount }}, (_, index) => colors[index % colors.length]);
+                        }}
+
+                        function renderPieLegend_{div_id}(chart, legendId) {{
+                            const legendContainer = document.getElementById(legendId);
+                            if (!legendContainer) return;
+
+                            legendContainer.innerHTML = '';
+                            const items = chart.options.plugins.legend.labels.generateLabels(chart);
+                            items.forEach((item) => {{
+                                const legendItem = document.createElement('button');
+                                legendItem.type = 'button';
+                                legendItem.className = 'pie-chart-legend-item' + (item.hidden ? ' is-hidden' : '');
+                                legendItem.onclick = () => {{
+                                    chart.toggleDataVisibility(item.index);
+                                    chart.update();
+                                    renderPieLegend_{div_id}(chart, legendId);
+                                }};
+
+                                const colorBox = document.createElement('span');
+                                colorBox.className = 'pie-chart-legend-color';
+                                colorBox.style.backgroundColor = item.fillStyle;
+
+                                const labelText = document.createElement('span');
+                                labelText.className = 'pie-chart-legend-label';
+                                labelText.textContent = item.text;
+
+                                legendItem.appendChild(colorBox);
+                                legendItem.appendChild(labelText);
+                                legendContainer.appendChild(legendItem);
+                            }});
+                        }}
+
+                        function createPieChart_{div_id}(canvasId, legendId, chartData, labelFormatter) {{
+                            const chart = new Chart(document.getElementById(canvasId), {{
+                                type: 'pie',
+                                data: chartData,
+                                options: {{
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    plugins: {{
+                                        legend: {{
+                                            display: false
+                                        }},
+                                        tooltip: {{
+                                            callbacks: {{
+                                                label: labelFormatter
+                                            }}
+                                        }}
+                                    }}
+                                }}
+                            }});
+                            renderPieLegend_{div_id}(chart, legendId);
+                            return chart;
+                        }}
+
+                        // 调用来源花费分布饼图
+                        const ownerLabels = {owner_cost_labels_json};
+                        if (ownerLabels.length > 0) {{
+                            const ownerData = {{
+                                labels: ownerLabels,
+                                datasets: [{{
+                                    data: {owner_costs_json},
+                                    backgroundColor: getPieColors(ownerLabels.length),
+                                    borderColor: getPieColors(ownerLabels.length),
+                                    borderWidth: 2
+                                }}]
+                            }};
+
+                            createPieChart_{div_id}('ownerPieChart_{div_id}', 'ownerPieLegend_{div_id}', ownerData, function(context) {{
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
+                            }});
+                        }} else {{
+                            document.getElementById('ownerPieChart_{div_id}').style.display = 'none';
+                            document.getElementById('ownerPieLegend_{div_id}').style.display = 'none';
+                            document.querySelector('#ownerPieChart_{div_id}').closest('.pie-chart-card').querySelector('h3').textContent = '调用来源花费分布 (无数据)';
+                        }}
+
                         // 模型花费分布饼图
                         const modelLabels = {list(sorted(stat_data[COST_BY_MODEL].keys())) if stat_data[COST_BY_MODEL] else []};
                         if (modelLabels.length > 0) {{
@@ -1579,36 +1732,21 @@ class StatisticOutputTask(AsyncTask):
                                 labels: modelLabels,
                                 datasets: [{{
                                     data: {[stat_data[COST_BY_MODEL][model_name] for model_name in sorted(stat_data[COST_BY_MODEL].keys())] if stat_data[COST_BY_MODEL] else []},
-                                    backgroundColor: colors.slice(0, {len(stat_data[COST_BY_MODEL]) if stat_data[COST_BY_MODEL] else 0}),
-                                    borderColor: colors.slice(0, {len(stat_data[COST_BY_MODEL]) if stat_data[COST_BY_MODEL] else 0}),
+                                    backgroundColor: getPieColors(modelLabels.length),
+                                    borderColor: getPieColors(modelLabels.length),
                                     borderWidth: 2
                                 }}]
                             }};
-                            
-                            new Chart(document.getElementById('modelPieChart_{div_id}'), {{
-                                type: 'pie',
-                                data: modelData,
-                                options: {{
-                                    responsive: true,
-                                    plugins: {{
-                                        legend: {{
-                                            position: 'bottom'
-                                        }},
-                                        tooltip: {{
-                                            callbacks: {{
-                                                label: function(context) {{
-                                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                                    const percentage = ((context.parsed / total) * 100).toFixed(1);
-                                                    return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                }}
+
+                            createPieChart_{div_id}('modelPieChart_{div_id}', 'modelPieLegend_{div_id}', modelData, function(context) {{
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
                             }});
                         }} else {{
                             document.getElementById('modelPieChart_{div_id}').style.display = 'none';
-                            document.querySelector('#modelPieChart_{div_id}').parentElement.querySelector('h3').textContent = '模型花费分布 (无数据)';
+                            document.getElementById('modelPieLegend_{div_id}').style.display = 'none';
+                            document.querySelector('#modelPieChart_{div_id}').closest('.pie-chart-card').querySelector('h3').textContent = '模型花费分布 (无数据)';
                         }}
                         
                         // 模块花费分布饼图
@@ -1618,36 +1756,21 @@ class StatisticOutputTask(AsyncTask):
                                 labels: moduleLabels,
                                 datasets: [{{
                                     data: {[stat_data[COST_BY_MODULE][module_name] for module_name in sorted(stat_data[COST_BY_MODULE].keys())] if stat_data[COST_BY_MODULE] else []},
-                                    backgroundColor: colors.slice(0, {len(stat_data[COST_BY_MODULE]) if stat_data[COST_BY_MODULE] else 0}),
-                                    borderColor: colors.slice(0, {len(stat_data[COST_BY_MODULE]) if stat_data[COST_BY_MODULE] else 0}),
+                                    backgroundColor: getPieColors(moduleLabels.length),
+                                    borderColor: getPieColors(moduleLabels.length),
                                     borderWidth: 2
                                 }}]
                             }};
                             
-                            new Chart(document.getElementById('modulePieChart_{div_id}'), {{
-                                type: 'pie',
-                                data: moduleData,
-                                options: {{
-                                    responsive: true,
-                                    plugins: {{
-                                        legend: {{
-                                            position: 'bottom'
-                                        }},
-                                        tooltip: {{
-                                            callbacks: {{
-                                                label: function(context) {{
-                                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                                    const percentage = ((context.parsed / total) * 100).toFixed(1);
-                                                    return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                }}
+                            createPieChart_{div_id}('modulePieChart_{div_id}', 'modulePieLegend_{div_id}', moduleData, function(context) {{
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
                             }});
                         }} else {{
                             document.getElementById('modulePieChart_{div_id}').style.display = 'none';
-                            document.querySelector('#modulePieChart_{div_id}').parentElement.querySelector('h3').textContent = '模块花费分布 (无数据)';
+                            document.getElementById('modulePieLegend_{div_id}').style.display = 'none';
+                            document.querySelector('#modulePieChart_{div_id}').closest('.pie-chart-card').querySelector('h3').textContent = '模块花费分布 (无数据)';
                         }}
                         
                         // 请求类型花费分布饼图
@@ -1657,36 +1780,21 @@ class StatisticOutputTask(AsyncTask):
                                 labels: typeLabels,
                                 datasets: [{{
                                     data: {[stat_data[COST_BY_TYPE][req_type] for req_type in sorted(stat_data[COST_BY_TYPE].keys())] if stat_data[COST_BY_TYPE] else []},
-                                    backgroundColor: colors.slice(0, {len(stat_data[COST_BY_TYPE]) if stat_data[COST_BY_TYPE] else 0}),
-                                    borderColor: colors.slice(0, {len(stat_data[COST_BY_TYPE]) if stat_data[COST_BY_TYPE] else 0}),
+                                    backgroundColor: getPieColors(typeLabels.length),
+                                    borderColor: getPieColors(typeLabels.length),
                                     borderWidth: 2
                                 }}]
                             }};
                             
-                            new Chart(document.getElementById('typePieChart_{div_id}'), {{
-                                type: 'pie',
-                                data: typeData,
-                                options: {{
-                                    responsive: true,
-                                    plugins: {{
-                                        legend: {{
-                                            position: 'bottom'
-                                        }},
-                                        tooltip: {{
-                                            callbacks: {{
-                                                label: function(context) {{
-                                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                                    const percentage = ((context.parsed / total) * 100).toFixed(1);
-                                                    return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                }}
+                            createPieChart_{div_id}('typePieChart_{div_id}', 'typePieLegend_{div_id}', typeData, function(context) {{
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
                             }});
                         }} else {{
                             document.getElementById('typePieChart_{div_id}').style.display = 'none';
-                            document.querySelector('#typePieChart_{div_id}').parentElement.querySelector('h3').textContent = '请求类型花费分布 (无数据)';
+                            document.getElementById('typePieLegend_{div_id}').style.display = 'none';
+                            document.querySelector('#typePieChart_{div_id}').closest('.pie-chart-card').querySelector('h3').textContent = '请求类型花费分布 (无数据)';
                         }}
                         
                         // 聊天消息分布饼图
@@ -1696,36 +1804,45 @@ class StatisticOutputTask(AsyncTask):
                                 labels: chatLabels,
                                 datasets: [{{
                                     data: {chat_counts_json},
-                                    backgroundColor: colors.slice(0, {len(stat_data[MSG_CNT_BY_CHAT]) if stat_data[MSG_CNT_BY_CHAT] else 0}),
-                                    borderColor: colors.slice(0, {len(stat_data[MSG_CNT_BY_CHAT]) if stat_data[MSG_CNT_BY_CHAT] else 0}),
+                                    backgroundColor: getPieColors(chatLabels.length),
+                                    borderColor: getPieColors(chatLabels.length),
                                     borderWidth: 2
                                 }}]
                             }};
                             
-                            new Chart(document.getElementById('chatPieChart_{div_id}'), {{
-                                type: 'pie',
-                                data: chatData,
-                                options: {{
-                                    responsive: true,
-                                    plugins: {{
-                                        legend: {{
-                                            position: 'bottom'
-                                        }},
-                                        tooltip: {{
-                                            callbacks: {{
-                                                label: function(context) {{
-                                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                                    const percentage = ((context.parsed / total) * 100).toFixed(1);
-                                                    return context.label + ': ' + context.parsed + ' (' + percentage + '%)';
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                }}
+                            createPieChart_{div_id}('chatPieChart_{div_id}', 'chatPieLegend_{div_id}', chatData, function(context) {{
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ' + context.parsed + ' (' + percentage + '%)';
                             }});
                         }} else {{
                             document.getElementById('chatPieChart_{div_id}').style.display = 'none';
-                            document.querySelector('#chatPieChart_{div_id}').parentElement.querySelector('h3').textContent = '聊天消息分布 (无数据)';
+                            document.getElementById('chatPieLegend_{div_id}').style.display = 'none';
+                            document.querySelector('#chatPieChart_{div_id}').closest('.pie-chart-card').querySelector('h3').textContent = '聊天消息分布 (无数据)';
+                        }}
+
+                        // 聊天流花费分布饼图
+                        const chatCostLabels = {chat_cost_labels_json};
+                        if (chatCostLabels.length > 0) {{
+                            const chatCostData = {{
+                                labels: chatCostLabels,
+                                datasets: [{{
+                                    data: {chat_costs_json},
+                                    backgroundColor: getPieColors(chatCostLabels.length),
+                                    borderColor: getPieColors(chatCostLabels.length),
+                                    borderWidth: 2
+                                }}]
+                            }};
+
+                            createPieChart_{div_id}('chatCostPieChart_{div_id}', 'chatCostPieLegend_{div_id}', chatCostData, function(context) {{
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ¥' + context.parsed.toFixed(2) + ' (' + percentage + '%)';
+                            }});
+                        }} else {{
+                            document.getElementById('chatCostPieChart_{div_id}').style.display = 'none';
+                            document.getElementById('chatCostPieLegend_{div_id}').style.display = 'none';
+                            document.querySelector('#chatCostPieChart_{div_id}').closest('.pie-chart-card').querySelector('h3').textContent = '聊天流花费分布 (无数据)';
                         }}
                     }}
                 </script>
@@ -1932,6 +2049,89 @@ class StatisticOutputTask(AsyncTask):
         }
         canvas {
             max-width: 100%;
+        }
+        .pie-chart-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+            align-items: stretch;
+        }
+        .pie-chart-card {
+            display: flex;
+            min-width: 0;
+            flex-direction: column;
+            gap: 12px;
+            padding: 14px;
+            border: 1px solid var(--statistics-border);
+            border-radius: 4px;
+            background: hsl(36 66% 89.6% / 0.55);
+        }
+        .pie-chart-card h3 {
+            margin: 0;
+            min-height: 1.6em;
+            color: var(--statistics-foreground);
+            font-size: 1.1em;
+        }
+        .pie-chart-canvas-wrap {
+            width: 100%;
+            height: 450px;
+            min-height: 450px;
+        }
+        .pie-chart-canvas-wrap canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        .pie-chart-legend {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px 10px;
+            max-height: 128px;
+            min-height: 44px;
+            overflow-y: auto;
+            padding: 8px;
+            border: 1px solid hsl(188.1 74% 19.6% / 0.35);
+            border-radius: 3px;
+            background: hsl(34.9 48.3% 82.5% / 0.5);
+        }
+        .pie-chart-legend-item {
+            display: grid;
+            grid-template-columns: 12px minmax(0, 1fr);
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            padding: 3px 4px;
+            border: 0;
+            background: transparent;
+            color: var(--statistics-foreground);
+            cursor: pointer;
+            font: inherit;
+            line-height: 1.25;
+            text-align: left;
+        }
+        .pie-chart-legend-item.is-hidden {
+            opacity: 0.45;
+            text-decoration: line-through;
+        }
+        .pie-chart-legend-color {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            border: 1px solid hsl(188.1 74% 19.6% / 0.25);
+        }
+        .pie-chart-legend-label {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        @media (max-width: 760px) {
+            .pie-chart-grid {
+                grid-template-columns: 1fr;
+            }
+            .pie-chart-legend {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
