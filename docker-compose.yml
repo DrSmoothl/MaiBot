@@ -13,13 +13,14 @@ services:
       - PRIVACY_AGREE=91e5db7659c560bc3545e63859b6ebc0
       - MAIBOT_LEGACY_0X_UPGRADE_CONFIRMED=1 # Docker 无法交互确认旧版升级迁移，默认跳过确认提示
       - MAIBOT_STATISTICS_REPORT_PATH=/MaiMBot/data/maibot_statistics.html # 统计数据输出到共享目录，首次运行可自动创建文件
+      - WEBUI_HOST=0.0.0.0 # Docker 中需要监听全部容器网卡，宿主机才能通过端口映射访问 WebUI
 #      - EULA_AGREE=8e6e7d647f7f82d6ea98456b73908656 # 同意EULA
 #      - PRIVACY_AGREE=91e5db7659c560bc3545e63859b6ebc0 # 同意隐私条款
     ports:
       - "18001:8001" # webui端口
 #      - "8000:8000"
     volumes:
-      # 监听地址和端口已迁移到 ./docker-config/mmc/bot_config.toml 的 maim_message 与 webui 配置段
+      # 监听地址和端口会用于生成或迁移 ./docker-config/mmc/bot_config.toml 的 maim_message 与 webui 配置段
       - ./docker-config/mmc:/MaiMBot/config # 持久化bot配置文件
       - ./data/MaiMBot:/MaiMBot/data # 共享目录
       - ./data/MaiMBot/emoji:/data/emoji # 持久化表情包
