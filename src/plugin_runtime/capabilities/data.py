@@ -1,7 +1,10 @@
+from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import random
+import re
 import time
 
 from src.common.logger import get_logger
@@ -844,6 +847,493 @@ class RuntimeDataCapabilityMixin:
             }
         except Exception as e:
             logger.error(f"[cap.tool.get_definitions] 执行失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def _normalize_statistics_days(args: Dict[str, Any], default: int = 7) -> int:
+        raw_days = args.get("days", default)
+        try:
+            days = int(raw_days)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("days 必须为正整数") from exc
+        if days <= 0:
+            raise ValueError("days 必须为正整数")
+        return min(days, 365)
+
+    @staticmethod
+    def _normalize_statistics_limit(args: Dict[str, Any], key: str, default: int, maximum: int = 50) -> int:
+        raw_limit = args.get(key, default)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} 必须为正整数") from exc
+        if limit <= 0:
+            raise ValueError(f"{key} 必须为正整数")
+        return min(limit, maximum)
+
+    @staticmethod
+    def _normalize_statistics_bucket(args: Dict[str, Any]) -> str:
+        bucket = str(args.get("bucket") or "day").strip().lower()
+        if bucket in {"h", "hour", "hours", "1h", "小时", "按小时"}:
+            return "hour"
+        if bucket in {"d", "day", "days", "1d", "天", "按天"}:
+            return "day"
+        raise ValueError("bucket 只支持 hour 或 day")
+
+    @staticmethod
+    def _statistics_bucket_sql(column_name: str, bucket: str) -> str:
+        if bucket == "hour":
+            return f"strftime('%Y-%m-%d %H:00:00', {column_name})"
+        return f"strftime('%Y-%m-%d 00:00:00', {column_name})"
+
+    @staticmethod
+    def _statistics_start_time_text(days: int) -> str:
+        return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _statistics_exec_mappings(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        from src.common.database.database import engine
+
+        with engine.connect() as connection:
+            return [dict(row) for row in connection.exec_driver_sql(sql, params).mappings().all()]
+
+    @staticmethod
+    def _statistics_label_key(label: str, used_keys: set[str]) -> str:
+        normalized = re.sub(r"[^0-9a-zA-Z_\u4e00-\u9fff]+", "_", str(label).strip()).strip("_")
+        key = normalized or "unknown"
+        candidate = key
+        index = 2
+        while candidate in used_keys:
+            candidate = f"{key}_{index}"
+            index += 1
+        used_keys.add(candidate)
+        return candidate
+
+    @classmethod
+    def _statistics_build_time_series(
+        cls,
+        *,
+        rows: list[dict[str, Any]],
+        label_column: str,
+        value_column: str,
+        ordered_labels: list[str],
+    ) -> dict[str, Any]:
+        bucket_values: dict[str, dict[str, float]] = {}
+        for row in rows:
+            bucket_label = str(row.get("bucket_label") or "")
+            if not bucket_label:
+                continue
+            label = str(row.get(label_column) or "Unknown")
+            bucket_values.setdefault(bucket_label, {})[label] = float(row.get(value_column) or 0)
+
+        timestamps = sorted(bucket_values)
+        used_keys: set[str] = set()
+        key_by_label = {label: cls._statistics_label_key(label, used_keys) for label in ordered_labels}
+        values_by_key = {
+            key_by_label[label]: [bucket_values[timestamp].get(label, 0.0) for timestamp in timestamps]
+            for label in ordered_labels
+        }
+        labels_by_key = {key_by_label[label]: label for label in ordered_labels}
+        return {
+            "timestamps": timestamps,
+            "values_by_key": values_by_key,
+            "labels_by_key": labels_by_key,
+            "total": sum(sum(values) for values in values_by_key.values()),
+            "source_count": len(rows),
+        }
+
+    @staticmethod
+    def _statistics_pie_items(counter: Counter[str], *, limit: int) -> list[dict[str, int | str]]:
+        sorted_items = sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+        items = [{"name": label, "value": int(value)} for label, value in sorted_items[:limit] if value > 0]
+        others = sum(value for _label, value in sorted_items[limit:] if value > 0)
+        if others > 0:
+            items.append({"name": "其他", "value": int(others)})
+        return items
+
+    @staticmethod
+    def _statistics_model_metric_sql(metric: str) -> tuple[str, str, str]:
+        normalized = str(metric or "").strip().lower()
+        if normalized in {"request", "requests", "count", "次数"}:
+            return "SUM(request_count)", "metric_value", "SUM(request_count)"
+        if normalized in {"cost", "费用", "花费"}:
+            return "SUM(cost)", "metric_value", "SUM(cost)"
+        if normalized in {"latency", "time", "耗时", "延迟"}:
+            return "SUM(time_cost_sum) / NULLIF(SUM(request_count), 0)", "metric_value", "SUM(request_count)"
+        return "SUM(total_tokens)", "metric_value", "SUM(total_tokens)"
+
+    @staticmethod
+    def _statistics_token_group_column(group_by: str) -> tuple[str, str]:
+        normalized = str(group_by or "model").strip().lower()
+        group_columns = {
+            "model": ("model_name", "模型"),
+            "module": ("module_name", "模块"),
+            "provider": ("provider_name", "服务商"),
+            "type": ("request_type", "请求类型"),
+        }
+        if normalized not in group_columns:
+            raise ValueError("group_by 只支持 model、module、provider 或 type")
+        return group_columns[normalized]
+
+    async def _cap_statistics_local_models(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """获取本机模型维度汇总统计。"""
+
+        del plugin_id, capability
+        try:
+            days = self._normalize_statistics_days(args)
+            limit = self._normalize_statistics_limit(args, "limit", 10)
+            rows = self._statistics_exec_mappings(
+                """
+                SELECT COALESCE(NULLIF(model_name, ''), 'Unknown') AS model_name,
+                       SUM(request_count) AS request_count,
+                       SUM(cost) AS total_cost,
+                       SUM(total_tokens) AS total_tokens,
+                       SUM(time_cost_sum) / NULLIF(SUM(request_count), 0) AS avg_response_time
+                FROM statistics_model_hourly
+                WHERE bucket_time >= ?
+                GROUP BY COALESCE(NULLIF(model_name, ''), 'Unknown')
+                ORDER BY request_count DESC, model_name ASC
+                LIMIT ?
+                """,
+                (self._statistics_start_time_text(days), limit),
+            )
+            return {
+                "success": True,
+                "models": [
+                    {
+                        "model_name": str(row["model_name"]),
+                        "request_count": int(row["request_count"] or 0),
+                        "total_cost": float(row["total_cost"] or 0.0),
+                        "total_tokens": int(row["total_tokens"] or 0),
+                        "avg_response_time": float(row["avg_response_time"] or 0.0),
+                    }
+                    for row in rows
+                ],
+            }
+        except Exception as e:
+            logger.error("[cap.statistics.local.models] 执行失败: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _cap_statistics_local_model_trend(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """获取本机模型调用趋势。"""
+
+        del plugin_id, capability
+        try:
+            days = self._normalize_statistics_days(args)
+            bucket = self._normalize_statistics_bucket(args)
+            top_models = self._normalize_statistics_limit(args, "top_models", 10)
+            metric_sql, value_column, top_metric_sql = self._statistics_model_metric_sql(str(args.get("metric") or "token"))
+            module_name = str(args.get("module_name") or "").strip()
+            start_time_text = self._statistics_start_time_text(days)
+            where_sql = "WHERE bucket_time >= ?"
+            params: list[Any] = [start_time_text]
+            if module_name:
+                where_sql += " AND module_name = ?"
+                params.append(module_name)
+
+            top_rows = self._statistics_exec_mappings(
+                f"""
+                SELECT COALESCE(NULLIF(model_name, ''), 'Unknown') AS model_label,
+                       {top_metric_sql} AS total_value
+                FROM statistics_model_hourly
+                {where_sql}
+                GROUP BY COALESCE(NULLIF(model_name, ''), 'Unknown')
+                ORDER BY total_value DESC, model_label ASC
+                LIMIT ?
+                """,
+                (*params, top_models),
+            )
+            labels = [str(row["model_label"]) for row in top_rows]
+            if not labels:
+                return {"success": True, "series": self._statistics_build_time_series(rows=[], label_column="model_label", value_column=value_column, ordered_labels=[])}
+
+            rows = self._statistics_exec_mappings(
+                f"""
+                SELECT {self._statistics_bucket_sql("bucket_time", bucket)} AS bucket_label,
+                       COALESCE(NULLIF(model_name, ''), 'Unknown') AS model_label,
+                       {metric_sql} AS {value_column}
+                FROM statistics_model_hourly
+                {where_sql}
+                  AND COALESCE(NULLIF(model_name, ''), 'Unknown') IN ({",".join("?" for _ in labels)})
+                GROUP BY bucket_label, model_label
+                ORDER BY bucket_label ASC
+                """,
+                (*params, *labels),
+            )
+            return {
+                "success": True,
+                "series": self._statistics_build_time_series(
+                    rows=rows,
+                    label_column="model_label",
+                    value_column=value_column,
+                    ordered_labels=labels,
+                ),
+            }
+        except Exception as e:
+            logger.error("[cap.statistics.local.model_trend] 执行失败: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _cap_statistics_local_token_trend(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """获取本机 token 使用趋势。"""
+
+        del plugin_id, capability
+        try:
+            days = self._normalize_statistics_days(args)
+            bucket = self._normalize_statistics_bucket(args)
+            start_time_text = self._statistics_start_time_text(days)
+            bucket_sql = self._statistics_bucket_sql("bucket_time", bucket)
+            group_by = args.get("group_by")
+            if group_by is None or str(group_by).strip() == "":
+                rows = self._statistics_exec_mappings(
+                    f"""
+                    SELECT {bucket_sql} AS bucket_label,
+                           SUM(prompt_tokens) AS prompt_tokens,
+                           SUM(completion_tokens) AS completion_tokens,
+                           SUM(total_tokens) AS total_tokens,
+                           SUM(request_count) AS request_count
+                    FROM statistics_model_hourly
+                    WHERE bucket_time >= ?
+                    GROUP BY bucket_label
+                    ORDER BY bucket_label ASC
+                    """,
+                    (start_time_text,),
+                )
+                timestamps = [str(row["bucket_label"]) for row in rows]
+                keys = ["total_tokens", "prompt_tokens", "completion_tokens", "request_count"]
+                values_by_key = {key: [float(row[key] or 0) for row in rows] for key in keys}
+                return {
+                    "success": True,
+                    "series": {
+                        "timestamps": timestamps,
+                        "values_by_key": values_by_key,
+                        "labels_by_key": {
+                            "total_tokens": "总 token",
+                            "prompt_tokens": "输入 token",
+                            "completion_tokens": "输出 token",
+                            "request_count": "请求次数",
+                        },
+                        "total": sum(values_by_key["total_tokens"]),
+                        "source_count": len(rows),
+                    },
+                }
+
+            top_items = self._normalize_statistics_limit(args, "top_items", 10)
+            group_column, _group_label = self._statistics_token_group_column(str(group_by))
+            top_rows = self._statistics_exec_mappings(
+                f"""
+                SELECT COALESCE(NULLIF({group_column}, ''), 'Unknown') AS group_label,
+                       SUM(total_tokens) AS total_tokens
+                FROM statistics_model_hourly
+                WHERE bucket_time >= ?
+                GROUP BY COALESCE(NULLIF({group_column}, ''), 'Unknown')
+                ORDER BY total_tokens DESC, group_label ASC
+                LIMIT ?
+                """,
+                (start_time_text, top_items),
+            )
+            labels = [str(row["group_label"]) for row in top_rows]
+            if not labels:
+                return {"success": True, "series": self._statistics_build_time_series(rows=[], label_column="group_label", value_column="total_tokens", ordered_labels=[])}
+
+            rows = self._statistics_exec_mappings(
+                f"""
+                SELECT {bucket_sql} AS bucket_label,
+                       COALESCE(NULLIF({group_column}, ''), 'Unknown') AS group_label,
+                       SUM(total_tokens) AS total_tokens
+                FROM statistics_model_hourly
+                WHERE bucket_time >= ?
+                  AND COALESCE(NULLIF({group_column}, ''), 'Unknown') IN ({",".join("?" for _ in labels)})
+                GROUP BY bucket_label, group_label
+                ORDER BY bucket_label ASC
+                """,
+                (start_time_text, *labels),
+            )
+            return {
+                "success": True,
+                "series": self._statistics_build_time_series(
+                    rows=rows,
+                    label_column="group_label",
+                    value_column="total_tokens",
+                    ordered_labels=labels,
+                ),
+            }
+        except Exception as e:
+            logger.error("[cap.statistics.local.token_trend] 执行失败: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _cap_statistics_local_token_distribution(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """获取本机 token 使用分布。"""
+
+        del plugin_id, capability
+        try:
+            days = self._normalize_statistics_days(args)
+            top_items = self._normalize_statistics_limit(args, "top_items", 10)
+            group_column, group_label_name = self._statistics_token_group_column(str(args.get("group_by") or "model"))
+            rows = self._statistics_exec_mappings(
+                f"""
+                SELECT COALESCE(NULLIF({group_column}, ''), 'Unknown') AS group_label,
+                       SUM(total_tokens) AS total_tokens,
+                       SUM(request_count) AS request_count
+                FROM statistics_model_hourly
+                WHERE bucket_time >= ?
+                GROUP BY COALESCE(NULLIF({group_column}, ''), 'Unknown')
+                ORDER BY total_tokens DESC, group_label ASC
+                """,
+                (self._statistics_start_time_text(days),),
+            )
+            token_counts = Counter({str(row["group_label"]): int(row["total_tokens"] or 0) for row in rows})
+            request_counts = Counter({str(row["group_label"]): int(row["request_count"] or 0) for row in rows})
+            return {
+                "success": True,
+                "distribution": {
+                    "pies": [
+                        {"title": f"Token 按{group_label_name}分布", "data": self._statistics_pie_items(token_counts, limit=top_items)},
+                        {"title": f"请求次数按{group_label_name}分布", "data": self._statistics_pie_items(request_counts, limit=top_items)},
+                    ],
+                    "total": sum(token_counts.values()),
+                    "source_count": len(rows),
+                },
+            }
+        except Exception as e:
+            logger.error("[cap.statistics.local.token_distribution] 执行失败: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _cap_statistics_local_message_trend(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """获取本机聊天流消息量趋势。"""
+
+        del plugin_id, capability
+        try:
+            days = self._normalize_statistics_days(args)
+            bucket = self._normalize_statistics_bucket(args)
+            top_chats = self._normalize_statistics_limit(args, "top_chats", 10)
+            start_time_text = self._statistics_start_time_text(days)
+            top_rows = self._statistics_exec_mappings(
+                """
+                SELECT chat_id,
+                       COALESCE(NULLIF(chat_name, ''), chat_id, 'Unknown') AS chat_label,
+                       SUM(message_count) AS total_count
+                FROM statistics_message_hourly
+                WHERE bucket_time >= ?
+                GROUP BY chat_id, chat_label
+                ORDER BY total_count DESC, chat_label ASC
+                LIMIT ?
+                """,
+                (start_time_text, top_chats),
+            )
+            chat_ids = [str(row["chat_id"]) for row in top_rows]
+            labels = [str(row["chat_label"]) for row in top_rows]
+            if not chat_ids:
+                return {"success": True, "series": self._statistics_build_time_series(rows=[], label_column="chat_label", value_column="total_count", ordered_labels=[])}
+
+            rows = self._statistics_exec_mappings(
+                f"""
+                SELECT {self._statistics_bucket_sql("bucket_time", bucket)} AS bucket_label,
+                       chat_id,
+                       COALESCE(NULLIF(chat_name, ''), chat_id, 'Unknown') AS chat_label,
+                       SUM(message_count) AS total_count
+                FROM statistics_message_hourly
+                WHERE bucket_time >= ?
+                  AND chat_id IN ({",".join("?" for _ in chat_ids)})
+                GROUP BY bucket_label, chat_id, chat_label
+                ORDER BY bucket_label ASC
+                """,
+                (start_time_text, *chat_ids),
+            )
+            return {
+                "success": True,
+                "series": self._statistics_build_time_series(
+                    rows=rows,
+                    label_column="chat_label",
+                    value_column="total_count",
+                    ordered_labels=labels,
+                ),
+            }
+        except Exception as e:
+            logger.error("[cap.statistics.local.message_trend] 执行失败: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _cap_statistics_local_tool_trend(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """获取本机工具调用趋势。"""
+
+        del plugin_id, capability
+        try:
+            days = self._normalize_statistics_days(args)
+            bucket = self._normalize_statistics_bucket(args)
+            top_tools = self._normalize_statistics_limit(args, "top_tools", 10)
+            start_time_text = self._statistics_start_time_text(days)
+            top_rows = self._statistics_exec_mappings(
+                """
+                SELECT COALESCE(NULLIF(tool_name, ''), 'Unknown') AS tool_label,
+                       SUM(call_count) AS total_count
+                FROM statistics_tool_hourly
+                WHERE bucket_time >= ?
+                GROUP BY COALESCE(NULLIF(tool_name, ''), 'Unknown')
+                ORDER BY total_count DESC, tool_label ASC
+                LIMIT ?
+                """,
+                (start_time_text, top_tools),
+            )
+            labels = [str(row["tool_label"]) for row in top_rows]
+            if not labels:
+                return {"success": True, "series": self._statistics_build_time_series(rows=[], label_column="tool_label", value_column="total_count", ordered_labels=[])}
+            rows = self._statistics_exec_mappings(
+                f"""
+                SELECT {self._statistics_bucket_sql("bucket_time", bucket)} AS bucket_label,
+                       COALESCE(NULLIF(tool_name, ''), 'Unknown') AS tool_label,
+                       SUM(call_count) AS total_count
+                FROM statistics_tool_hourly
+                WHERE bucket_time >= ?
+                  AND COALESCE(NULLIF(tool_name, ''), 'Unknown') IN ({",".join("?" for _ in labels)})
+                GROUP BY bucket_label, tool_label
+                ORDER BY bucket_label ASC
+                """,
+                (start_time_text, *labels),
+            )
+            return {
+                "success": True,
+                "series": self._statistics_build_time_series(
+                    rows=rows,
+                    label_column="tool_label",
+                    value_column="total_count",
+                    ordered_labels=labels,
+                ),
+            }
+        except Exception as e:
+            logger.error("[cap.statistics.local.tool_trend] 执行失败: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _cap_statistics_local_online_time_trend(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """获取本机在线时长趋势。"""
+
+        del plugin_id, capability
+        try:
+            days = self._normalize_statistics_days(args)
+            bucket = self._normalize_statistics_bucket(args)
+            rows = self._statistics_exec_mappings(
+                f"""
+                SELECT {self._statistics_bucket_sql("COALESCE(start_timestamp, timestamp)", bucket)} AS bucket_label,
+                       SUM(duration_minutes) / 60.0 AS online_hours
+                FROM online_time
+                WHERE COALESCE(start_timestamp, timestamp) >= ?
+                GROUP BY bucket_label
+                ORDER BY bucket_label ASC
+                """,
+                (self._statistics_start_time_text(days),),
+            )
+            timestamps = [str(row["bucket_label"]) for row in rows]
+            values = [float(row["online_hours"] or 0) for row in rows]
+            return {
+                "success": True,
+                "series": {
+                    "timestamps": timestamps,
+                    "values_by_key": {"online_hours": values},
+                    "labels_by_key": {"online_hours": "在线时长(小时)"},
+                    "total": sum(values),
+                    "source_count": len(rows),
+                },
+            }
+        except Exception as e:
+            logger.error("[cap.statistics.local.online_time_trend] 执行失败: %s", e, exc_info=True)
             return {"success": False, "error": str(e)}
 
     async def _cap_knowledge_search(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
