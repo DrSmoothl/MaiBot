@@ -63,7 +63,6 @@ MIN_COMPRESSED_IMAGE_TARGET_SIZE_BYTES = 512 * 1024
 EMPTY_TASK_FALLBACKS = {
     "learner": "utils",
     "mid_memory": "planner",
-    "timing_gate": "planner",
 }
 
 

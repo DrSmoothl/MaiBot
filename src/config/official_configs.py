@@ -19,6 +19,11 @@ OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
     "discard": "丢弃超过最大大小的图片组件",
 }
 
+REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS = {
+    "frequency": "按回复频率折算消息阈值，消息不足时使用空窗补偿",
+    "reply_necessity": "用本地启发式回复必要性评分决定是否进入 Planner",
+}
+
 """
 须知：
 1. 本文件中记录了所有的配置项
@@ -596,25 +601,25 @@ class ChatConfig(ConfigBase):
         default=True,
         json_schema_extra={
             "label": {
-                "zh_CN": "中期聊天摘要",
-                "en_US": "Mid-term chat summaries",
-                "ja_JP": "中期チャット要約",
+                "zh_CN": "聊天回想",
+                "en_US": "Chat recall",
+                "ja_JP": "チャット回想",
             },
             "x-widget": "switch",
             "x-icon": "archive",
             "x-row": "context-sizes",
         },
     )
-    """长对话被截断时，自动把旧内容概括成摘要继续参考。"""
+    """打开后会主动召回最近聊天发生的事情。"""
 
     mid_term_memory_lenth: int = Field(
         default=10,
         ge=0,
         json_schema_extra={
             "label": {
-                "zh_CN": "中期摘要保留数",
-                "en_US": "Mid-term summary limit",
-                "ja_JP": "中期要約保持数",
+                "zh_CN": "聊天回想保留数",
+                "en_US": "Chat recall limit",
+                "ja_JP": "チャット回想保持数",
             },
             "x-widget": "input",
             "x-icon": "archive",
@@ -623,77 +628,25 @@ class ChatConfig(ConfigBase):
             "x-row": "context-sizes",
         },
     )
-    """最多保留多少条中期摘要；设为 0 表示不保留。"""
+    """最多保留多少条聊天回想；设为 0 表示不保留。"""
 
-    mid_term_memory_recall_enabled: bool = Field(
-        default=True,
+    reply_trigger_mode: Literal["frequency", "reply_necessity"] = Field(
+        default="frequency",
         json_schema_extra={
             "label": {
-                "zh_CN": "中期摘要召回",
-                "en_US": "Recall mid-term summaries",
-                "ja_JP": "中期要約の想起",
+                "zh_CN": "回复触发模式",
+                "en_US": "Reply trigger mode",
+                "ja_JP": "返信トリガーモード",
             },
-            "x-widget": "switch",
-            "x-icon": "search",
-            "x-row": "context-sizes",
-            "advanced": True,
-        },
-    )
-    """进入 Planner 前，是否用当前上下文 embedding 匹配并注入一条相关中期摘要。"""
-
-    mid_term_memory_recall_threshold: float = Field(
-        default=0.8,
-        ge=0.0,
-        le=1.0,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "中期召回阈值",
-                "en_US": "Mid-term recall threshold",
-                "ja_JP": "中期想起しきい値",
-            },
-            "x-widget": "input",
-            "x-icon": "search",
-            "x-layout": "inline-right",
-            "x-input-width": "6.5rem",
-            "x-row": "context-sizes",
-            "advanced": True,
-        },
-    )
-    """当前上下文与中期摘要匹配段的 embedding 相似度必须大于该阈值，才会注入参考。"""
-
-    mid_term_memory_recall_context_length: int = Field(
-        default=2400,
-        ge=200,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "中期召回上下文长度",
-                "en_US": "Mid-term recall context length",
-                "ja_JP": "中期想起コンテキスト長",
-            },
-            "x-widget": "input",
-            "x-icon": "text",
-            "x-layout": "inline-right",
-            "x-input-width": "6.5rem",
-            "x-row": "context-sizes",
-            "advanced": True,
-        },
-    )
-    """生成中期摘要召回 query embedding 时，最多编织多少字符的当前 Planner 上下文。"""
-
-    enable_reply_necessity_trigger: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "启用回复必要性触发",
-                "en_US": "Enable reply necessity trigger",
-                "ja_JP": "返信必要度トリガーを有効化",
-            },
-            "x-widget": "switch",
+            "x-widget": "select",
             "x-icon": "activity",
+            "x-layout": "inline-right",
+            "x-input-width": "12rem",
+            "x-option-descriptions": REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS,
             "advanced": True,
         },
     )
-    """按回复必要性评分决定是否进入 Planner；关闭时仍按消息数和空窗补偿触发。"""
+    """控制新消息何时进入 Planner。"""
 
     enable_reply_quote: bool = Field(
         default=True,
@@ -709,25 +662,6 @@ class ChatConfig(ConfigBase):
         },
     )
     """回复时是否可以引用上一条或相关消息。"""
-
-    typing_speed: float = Field(
-        default=1.0,
-        ge=0,
-        le=2,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "聊天速度",
-                "en_US": "Typing speed",
-                "ja_JP": "チャット速度",
-            },
-            "x-widget": "slider",
-            "x-icon": "keyboard",
-            "x-row": "reply-speed",
-            "step": 0.1,
-            "advanced": True,
-        },
-    )
-    """模拟打字等待时间；0 最快，1 默认，2 更慢。"""
 
     planner_interrupt_max_consecutive_count: int = Field(
         default=0,
@@ -3248,41 +3182,31 @@ class ExpressionConfig(ConfigBase):
     )
     """写入表达方式前先让 AI 检查，减少学到奇怪内容。"""
 
-    enable_precise_expression_selection: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "启用精细表达选择",
-                "en_US": "Enable precise expression selection",
-                "ja_JP": "精密な表現選択を有効化",
-            },
-            "x-widget": "switch",
-            "x-icon": "target",
-            "advanced": False,
-        },
-    )
-    """回复前更精细地挑选表达方式，可能更贴切但会增加模型调用。"""
-
     expression_selection_mode: Literal["legacy", "vector", "vector_intent"] = Field(
         default="legacy",
         json_schema_extra={
             "label": {
-                "zh_CN": "表达候选选择模式",
-                "en_US": "Expression candidate mode",
-                "ja_JP": "表現候補の選択モード",
+                "zh_CN": "表达使用方式",
+                "en_US": "Expression usage mode",
+                "ja_JP": "表現の使用方法",
             },
             "x-widget": "select",
             "x-icon": "route",
-            "advanced": True,
+            "advanced": False,
             "options": ["legacy", "vector", "vector_intent"],
+            "x-option-labels": {
+                "legacy": "随手",
+                "vector": "精细",
+                "vector_intent": "超级精细",
+            },
             "x-option-descriptions": {
-                "legacy": "传统随机候选",
-                "vector": "向量召回候选，不使用表达选择意图",
-                "vector_intent": "向量召回候选，使用表达选择意图",
+                "legacy": "使用 LLM 进行选择，效果一般",
+                "vector": "使用嵌入模型进行选择，效果较好（需要配置嵌入模型）",
+                "vector_intent": "使用特殊构建的回复方式加上嵌入模型进行选择，效果非常好（需要配置嵌入模型）",
             },
         },
     )
-    """表达候选池来源；vector 不使用表达选择意图，vector_intent 会把表达选择意图纳入召回和精排。"""
+    """表达方式的使用策略：legacy 使用 LLM 选择，vector 使用嵌入召回，vector_intent 会额外使用表达选择意图。"""
 
     expression_vector_index_path: str = Field(
         default="data/expression_selection/expression_vector_index.json",
@@ -3314,7 +3238,7 @@ class ExpressionConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """向量召回后最多交给精细表达选择的候选数；硬上限为 50。"""
+    """向量召回后最多交给表达方式 LLM 选择的候选数；硬上限为 50。"""
 
     max_expression_learner: int = Field(
         default=3,
@@ -3704,6 +3628,25 @@ class ResponsePostProcessConfig(ConfigBase):
         },
     )
     """开启后会对回复做错别字、分段等后处理。"""
+
+    typing_speed: float = Field(
+        default=1.0,
+        ge=0,
+        le=2,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "打字速度",
+                "en_US": "Typing speed",
+                "ja_JP": "タイピング速度",
+            },
+            "x-widget": "slider",
+            "x-icon": "keyboard",
+            "x-row": "reply-speed",
+            "step": 0.1,
+            "advanced": True,
+        },
+    )
+    """模拟打字等待时间；0 最快，1 默认，2 更慢。"""
 
 
 class ChineseTypoConfig(ConfigBase):

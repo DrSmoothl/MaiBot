@@ -471,7 +471,7 @@ class ModelTaskConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """中期聊天摘要模型配置；留空时自动继用 planner 模型"""
+    """聊天回想模型配置；留空时自动继用 planner 模型"""
 
     utils: TaskConfig = Field(
         default_factory=TaskConfig,

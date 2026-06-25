@@ -610,7 +610,7 @@ def calculate_typing_time(
     if is_emoji:
         total_time = 1
 
-    typing_speed = global_config.chat.typing_speed
+    typing_speed = global_config.response_post_process.typing_speed
     if typing_speed <= 0:
         return 0
     total_time *= typing_speed

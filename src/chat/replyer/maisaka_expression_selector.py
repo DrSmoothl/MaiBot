@@ -14,7 +14,7 @@ from src.common.database.database import get_db_session
 from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
-from src.config.config import global_config
+from src.config.config import global_config, model_config
 from src.learners.expression_style_utils import (
     is_prompt_example_expression_style,
     normalize_expression_style_for_learning,
@@ -258,6 +258,10 @@ class MaisakaExpressionSelector:
         return global_config.expression.expression_selection_mode in {"vector", "vector_intent"}
 
     @staticmethod
+    def _has_embedding_model_configured() -> bool:
+        return any(model_name.strip() for model_name in model_config.model_task_config.embedding.model_list)
+
+    @staticmethod
     def _use_expression_intent() -> bool:
         return global_config.expression.expression_selection_mode == "vector_intent"
 
@@ -484,7 +488,7 @@ class MaisakaExpressionSelector:
     ) -> List[dict[str, Any]]:
         """按配置构建本次回复的表达候选池。"""
 
-        if self._use_vector_candidate_pool() and global_config.expression.enable_precise_expression_selection:
+        if self._use_vector_candidate_pool() and self._has_embedding_model_configured():
             expression_query_text = self._build_expression_query_text(
                 reply_reason,
                 reply_tool_args,
@@ -504,9 +508,9 @@ class MaisakaExpressionSelector:
                     f"候选数={len(vector_candidates)} 候选预览={self._format_candidate_preview(vector_candidates)}"
                 )
                 return vector_candidates
-            logger.info(f"表达方式向量候选池为空，回退 legacy 候选：session_id={session_id}")
+            logger.info(f"表达方式向量候选池为空，回退随手候选：session_id={session_id}")
         elif self._use_vector_candidate_pool():
-            logger.info("表达方式向量候选池需要启用精细表达选择，已回退 legacy 候选")
+            logger.info("表达方式向量候选池需要配置 embedding 模型，已回退随手候选")
 
         return self._sample_legacy_expression_candidates(all_candidates)
 
@@ -517,14 +521,8 @@ class MaisakaExpressionSelector:
         candidates: List[dict[str, Any]],
         sub_agent_runner: Optional[SubAgentRunner],
     ) -> MaisakaExpressionSelectionResult:
-        if not global_config.expression.enable_precise_expression_selection:
-            return self._build_direct_selection_result(
-                session_id=session_id,
-                candidates=candidates,
-            )
-
         if sub_agent_runner is None:
-            logger.info("精细表达选择已跳过：缺少子代理执行器，回退为直接注入")
+            logger.info("表达方式 LLM 选择已跳过：缺少子代理执行器，回退为直接注入")
             return self._build_direct_selection_result(
                 session_id=session_id,
                 candidates=candidates,
@@ -536,7 +534,7 @@ class MaisakaExpressionSelector:
         try:
             raw_response = await sub_agent_runner(selector_prompt)
         except Exception as exc:
-            logger.warning(f"精细表达选择子代理执行失败，回退为直接注入: {exc}")
+            logger.warning(f"表达方式 LLM 选择子代理执行失败，回退为直接注入: {exc}")
             return self._build_direct_selection_result(
                 session_id=session_id,
                 candidates=candidates,
@@ -544,7 +542,7 @@ class MaisakaExpressionSelector:
 
         selected_ids = self._parse_selected_ids(raw_response, candidates)
         logger.debug(
-            f"精细表达选择完成：session_id={session_id} selected_ids={selected_ids!r} "
+            f"表达方式 LLM 选择完成：session_id={session_id} selected_ids={selected_ids!r} "
             f"候选预览={self._format_candidate_preview(candidates)}"
         )
         return self._build_selection_result_from_ids(

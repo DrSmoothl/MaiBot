@@ -1,4 +1,4 @@
-Compress the following chat messages, which are about to be trimmed out of short-term context, into a mid-term memory summary.
+Compress the following chat messages, which are about to be trimmed out of short-term context, into chat recall.
 Requirements:
 1. Summarize only from the following messages. Do not invent information that does not appear.
 2. summary is the complete summary. Preserve the topic flow, participants' positions, conclusions reached, pending tasks, and important details so the context can be restored later.

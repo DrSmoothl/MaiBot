@@ -684,7 +684,7 @@ class BaseMaisakaReplyGenerator:
 
     @classmethod
     def _should_keep_replyer_history_message(cls, message: LLMContextMessage) -> bool:
-        """replyer 只接收真实聊天上下文，不接收参考、工具结果、工具媒体和中期摘要。"""
+        """replyer 只接收真实聊天上下文，不接收参考、工具结果、工具媒体和聊天回想。"""
 
         return not cls._is_replyer_filtered_history_message(message)
 

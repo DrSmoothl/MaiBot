@@ -529,7 +529,7 @@ class MaisakaReasoningEngine:
         return reference_message
 
     async def _refresh_mid_term_memory_reference_message(self) -> Optional[ReferenceMessage]:
-        """基于当前 planner 上下文刷新中期记忆参考消息。"""
+        """基于当前 planner 上下文刷新聊天回想参考消息。"""
 
         if not bool(global_config.chat.mid_term_memory):
             return None
@@ -556,7 +556,7 @@ class MaisakaReasoningEngine:
         return reference_message
 
     def _has_mid_term_memory_reference_message(self, reference_message: ReferenceMessage) -> bool:
-        """判断历史中是否已经存在相同的中期记忆参考。"""
+        """判断历史中是否已经存在相同的聊天回想参考。"""
 
         normalized_content = " ".join(reference_message.content.split()).strip()
         if not normalized_content:
@@ -718,15 +718,15 @@ class MaisakaReasoningEngine:
         state.planner_duration_ms = (time.time() - planner_started_at) * 1000
 
     async def _refresh_mid_term_memory_reference_for_continuation(self, cycle_detail: CycleDetail) -> None:
-        """在一次连续 Planner 循环开始前刷新一次中期记忆参考。"""
+        """在一次连续 Planner 循环开始前刷新一次聊天回想参考。"""
 
         started_at = time.time()
         try:
             mid_term_reference_message = await self._refresh_mid_term_memory_reference_message()
             if mid_term_reference_message is not None:
-                logger.debug(f"{self._runtime.log_prefix} 已刷新中期记忆参考消息")
+                logger.debug(f"{self._runtime.log_prefix} 已刷新聊天回想参考消息")
         except Exception as exc:
-            logger.debug(f"{self._runtime.log_prefix} 中期记忆参考刷新失败，已跳过: {exc}", exc_info=True)
+            logger.debug(f"{self._runtime.log_prefix} 聊天回想参考刷新失败，已跳过: {exc}", exc_info=True)
         finally:
             cycle_detail.time_records["mid_term_memory_recall"] = time.time() - started_at
 
@@ -1348,7 +1348,7 @@ class MaisakaReasoningEngine:
             and bool(global_config.chat.mid_term_memory)
         ):
             logger.info(
-                f"{self._runtime.log_prefix} 开始生成中期聊天记录摘要: "
+                f"{self._runtime.log_prefix} 开始生成聊天回想: "
                 f"裁切上下文消息数量={len(process_result.removed_messages)} "
                 f"保留上限={global_config.chat.mid_term_memory_lenth}"
             )
@@ -1360,7 +1360,7 @@ class MaisakaReasoningEngine:
                     log_prefix=self._runtime.log_prefix,
                 )
             except Exception:
-                logger.exception(f"{self._runtime.log_prefix} 生成中期聊天记录摘要失败，已跳过本次摘要插入")
+                logger.exception(f"{self._runtime.log_prefix} 生成聊天回想失败，已跳过本次插入")
                 summary_result = None
 
             cycle_detail.time_records["mid_term_memory"] = time.time() - summary_started_at
@@ -1371,15 +1371,15 @@ class MaisakaReasoningEngine:
                     max_summary_count=max(0, int(global_config.chat.mid_term_memory_lenth)),
                 )
                 logger.info(
-                    f"{self._runtime.log_prefix} 已生成中期聊天记录摘要: "
+                    f"{self._runtime.log_prefix} 已生成聊天回想: "
                     f"msg_id={summary_result.message.message_id} "
                     f"模型={summary_result.model_name or 'unknown'} "
                     f"token={summary_result.total_tokens}"
                 )
             else:
-                logger.debug(f"{self._runtime.log_prefix} 中期聊天记录摘要未产生可插入内容，已跳过")
+                logger.debug(f"{self._runtime.log_prefix} 聊天回想未产生可插入内容，已跳过")
         elif process_result.removed_messages:
-            logger.debug(f"{self._runtime.log_prefix} 中期聊天记录摘要未启用，跳过摘要生成")
+            logger.debug(f"{self._runtime.log_prefix} 聊天回想未启用，跳过生成")
 
         removed_behavior_reference_messages: list[ReferenceMessage] = []
         if process_result.removed_messages:

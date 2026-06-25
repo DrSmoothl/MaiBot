@@ -316,6 +316,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
   }
 
   const optionDescriptions = schema['x-option-descriptions'] ?? {}
+  const optionLabels = schema['x-option-labels'] ?? {}
   const hasOptionDescriptions = Object.keys(optionDescriptions).length > 0
   const descriptionDisplay = schema['x-description-display'] ?? 'label-hover'
   const fieldDescription = schema.description
@@ -699,6 +700,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
   const renderSelect = () => {
     const strValue = typeof value === 'string' ? value : (schema.default as string ?? '')
     const options = schema.options ?? []
+    const renderOptionLabel = (option: string) => optionLabels[option] ?? option
 
     if (options.length === 0) {
       return (
@@ -725,7 +727,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
                   <Tooltip key={option}>
                     <TooltipTrigger asChild>
                       <SelectItem value={option} title={description}>
-                        {option}
+                        {renderOptionLabel(option)}
                       </SelectItem>
                     </TooltipTrigger>
                     <TooltipContent
@@ -738,7 +740,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
                   </Tooltip>
                 ) : (
                   <SelectItem key={option} value={option}>
-                    {option}
+                    {renderOptionLabel(option)}
                   </SelectItem>
                 )
               })}
@@ -746,7 +748,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           ) : (
             options.map((option) => (
               <SelectItem key={option} value={option}>
-                {option}
+                {renderOptionLabel(option)}
               </SelectItem>
             ))
           )}
