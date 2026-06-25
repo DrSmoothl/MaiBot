@@ -691,12 +691,6 @@ class MaisakaReasoningEngine:
                 logger.debug(f"{self._runtime.log_prefix} 已刷新黑话参考消息")
         except Exception as exc:
             logger.debug(f"{self._runtime.log_prefix} 黑话参考消息刷新失败，已跳过: {exc}")
-        try:
-            mid_term_reference_message = await self._refresh_mid_term_memory_reference_message()
-            if mid_term_reference_message is not None:
-                logger.debug(f"{self._runtime.log_prefix} 已刷新中期记忆参考消息")
-        except Exception as exc:
-            logger.debug(f"{self._runtime.log_prefix} 中期记忆参考刷新失败，已跳过: {exc}", exc_info=True)
         injected_user_messages = await self._build_planner_injected_user_messages(
             profile_message=trigger_message,
             source_messages=source_messages,
@@ -722,6 +716,19 @@ class MaisakaReasoningEngine:
         )
         state.response = response
         state.planner_duration_ms = (time.time() - planner_started_at) * 1000
+
+    async def _refresh_mid_term_memory_reference_for_continuation(self, cycle_detail: CycleDetail) -> None:
+        """在一次连续 Planner 循环开始前刷新一次中期记忆参考。"""
+
+        started_at = time.time()
+        try:
+            mid_term_reference_message = await self._refresh_mid_term_memory_reference_message()
+            if mid_term_reference_message is not None:
+                logger.debug(f"{self._runtime.log_prefix} 已刷新中期记忆参考消息")
+        except Exception as exc:
+            logger.debug(f"{self._runtime.log_prefix} 中期记忆参考刷新失败，已跳过: {exc}", exc_info=True)
+        finally:
+            cycle_detail.time_records["mid_term_memory_recall"] = time.time() - started_at
 
     async def _handle_planner_interrupt(
         self,
@@ -996,6 +1003,7 @@ class MaisakaReasoningEngine:
                     if force_continue_reason := self._runtime._consume_forced_turn_reason():
                         logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
                     planner_no_tool_count = 0
+                    mid_term_reference_refreshed = False
                     round_index = 0
                     while round_index < self._runtime._max_internal_rounds:
                         pending_round_messages = await self._collect_pending_messages_before_next_round(round_index)
@@ -1007,6 +1015,9 @@ class MaisakaReasoningEngine:
                         state = CycleRuntimeState()
                         try:
                             await self._refresh_visual_placeholders_for_cycle(cycle_detail)
+                            if not mid_term_reference_refreshed:
+                                await self._refresh_mid_term_memory_reference_for_continuation(cycle_detail)
+                                mid_term_reference_refreshed = True
 
                             self._runtime._start_planner_continuation()
                             await self._run_planner_request(
