@@ -394,3 +394,75 @@ async def test_feedback_task_rollback_restores_snapshots_and_requeues_followups(
         "rollback_enqueue_episode_rebuild",
         "rollback_enqueue_profile_refresh",
     }
+
+
+def test_fuzzy_modify_candidate_filter_blocks_protected_relation() -> None:
+    kernel = SDKMemoryKernel(plugin_root=Path("."), config={})
+    kernel.metadata_store = SimpleNamespace(
+        get_relation=lambda hash_value, include_inactive=True: {"hash": hash_value},
+        get_relation_status_batch=lambda hashes: {
+            hashes[0]: {
+                "is_inactive": False,
+                "is_pinned": True,
+                "protected_until": 0.0,
+            }
+        },
+    )
+
+    candidate = {"target_type": "relation", "hash": "relation-1"}
+    assert kernel._is_fuzzy_modify_candidate_mutable(candidate, {"deletable": True}) is False
+
+
+def test_fuzzy_modify_plan_logs_candidate_miss(caplog: pytest.LogCaptureFixture) -> None:
+    kernel = SDKMemoryKernel(plugin_root=Path("."), config={})
+
+    with caplog.at_level("WARNING"):
+        plan = kernel._normalize_fuzzy_modify_plan(
+            {
+                "confidence": 0.9,
+                "operations": [
+                    {
+                        "action": "mark_superseded",
+                        "candidate_id": "paragraph:missing",
+                        "hash": "missing",
+                    }
+                ],
+            },
+            request_text="修正记忆",
+            scope="person_profile",
+            person_id="person-1",
+            chat_id="",
+            candidates=[{"candidate_id": "paragraph:known", "target_type": "paragraph", "hash": "known"}],
+        )
+
+    assert plan["operations"] == []
+    assert "候选集外" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_modify_rollback_reports_delete_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    plan_updates: list[dict[str, Any]] = []
+    kernel = SDKMemoryKernel(plugin_root=Path("."), config={})
+    kernel.metadata_store = SimpleNamespace(
+        get_fuzzy_modify_plan=lambda plan_id: {
+            "plan_id": plan_id,
+            "status": "executed",
+            "execution": {"stored_ids": ["paragraph-1"]},
+        },
+        get_paragraph=lambda hash_value: {"hash": hash_value},
+        get_relation=lambda hash_value: None,
+        update_fuzzy_modify_plan=lambda plan_id, **kwargs: plan_updates.append({"plan_id": plan_id, **kwargs})
+        or {"plan_id": plan_id, **kwargs},
+    )
+
+    async def fake_execute_delete_action(**kwargs):
+        return {"success": False, "error": "delete failed"}
+
+    monkeypatch.setattr(kernel, "_execute_delete_action", fake_execute_delete_action)
+
+    result = await kernel._rollback_fuzzy_modify_action(plan_id="fuzzy-1", requested_by="pytest")
+
+    assert result["success"] is False
+    assert result["rollback"]["success"] is False
+    assert result["error"] == "delete failed"
+    assert plan_updates[-1]["status"] == "rollback_failed"

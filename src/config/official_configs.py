@@ -1386,6 +1386,73 @@ class AMemorixIntegrationConfig(ConfigBase):
     )
     """自动写回聊天摘要时，从聊天流中回看的消息条数"""
 
+    fuzzy_modify_enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "wand-sparkles",
+            "advanced": True,
+        },
+    )
+    """是否启用自然语言模糊修改记忆的后台接口"""
+
+    fuzzy_modify_auto_execute_enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "badge-check",
+            "advanced": True,
+        },
+    )
+    """是否允许高置信模糊修改跳过人工确认自动执行"""
+
+    fuzzy_modify_confirm_threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={
+            "x-widget": "slider",
+            "x-icon": "gauge",
+            "step": 0.01,
+            "advanced": True,
+        },
+    )
+    """模糊修改建议进入自动确认判定时使用的置信度阈值"""
+
+    fuzzy_modify_candidate_limit: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "list-filter",
+            "advanced": True,
+        },
+    )
+    """每次模糊修改交给 LLM 的候选记忆上限"""
+
+    fuzzy_modify_max_targets: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "crosshair",
+            "advanced": True,
+        },
+    )
+    """单个模糊修改计划允许标记失效的旧记忆上限"""
+
+    fuzzy_modify_allow_global_scope: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "globe-2",
+            "advanced": True,
+        },
+    )
+    """未指定聊天流时，是否允许在全局记忆范围内做模糊修改候选检索"""
+
     feedback_correction_enabled: bool = Field(
         default=False,
         json_schema_extra={
@@ -1550,6 +1617,20 @@ class AMemorixIntegrationConfig(ConfigBase):
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证配置值"""
+        if not 0 <= self.fuzzy_modify_confirm_threshold <= 1:
+            raise ValueError(
+                "fuzzy_modify_confirm_threshold 必须在 [0, 1] 之间，"
+                f"当前值: {self.fuzzy_modify_confirm_threshold}"
+            )
+        if self.fuzzy_modify_candidate_limit < 1:
+            raise ValueError(
+                "fuzzy_modify_candidate_limit 必须至少为1，"
+                f"当前值: {self.fuzzy_modify_candidate_limit}"
+            )
+        if self.fuzzy_modify_max_targets < 1:
+            raise ValueError(
+                f"fuzzy_modify_max_targets 必须至少为1，当前值: {self.fuzzy_modify_max_targets}"
+            )
         if self.feedback_correction_window_hours <= 0:
             raise ValueError(
                 f"feedback_correction_window_hours 必须大于0，当前值: {self.feedback_correction_window_hours}"

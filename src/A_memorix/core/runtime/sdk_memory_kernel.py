@@ -14,6 +14,7 @@ import time
 
 from src.chat.message_receive.chat_manager import chat_manager
 from src.common.logger import get_logger
+from src.common.prompt_i18n import load_prompt
 from src.config.config import global_config
 from src.services import message_service as message_api
 from src.services.llm_service import LLMServiceClient
@@ -193,6 +194,7 @@ class SDKMemoryKernel:
             "last_check": None,
         }
         self._feedback_classifier: Optional[LLMServiceClient] = None
+        self._fuzzy_modify_planner: Optional[LLMServiceClient] = None
 
     def _cfg(self, key: str, default: Any = None) -> Any:
         current: Any = self.config
@@ -2559,6 +2561,51 @@ class SDKMemoryKernel:
             )
         return {"success": False, "error": f"不支持的 delete action: {act}"}
 
+    async def memory_fuzzy_modify_admin(self, *, action: str, **kwargs) -> Dict[str, Any]:
+        await self.initialize()
+        assert self.metadata_store is not None
+
+        act = str(action or "").strip().lower()
+        if act in {"preview", "plan"}:
+            return await self._preview_fuzzy_modify_action(
+                request_text=str(kwargs.get("request_text", "") or kwargs.get("text", "") or "").strip(),
+                scope=str(kwargs.get("scope", "") or "person_profile").strip(),
+                person_id=str(kwargs.get("person_id", "") or "").strip(),
+                person_keyword=str(kwargs.get("person_keyword", "") or kwargs.get("keyword", "") or "").strip(),
+                chat_id=str(kwargs.get("chat_id", "") or "").strip(),
+                limit=max(1, int(kwargs.get("limit", self._fuzzy_modify_cfg_candidate_limit()) or self._fuzzy_modify_cfg_candidate_limit())),
+                requested_by=str(kwargs.get("requested_by", "") or "webui").strip(),
+                reason=str(kwargs.get("reason", "") or "").strip(),
+            )
+        if act == "execute":
+            return await self._execute_fuzzy_modify_action(
+                plan_id=str(kwargs.get("plan_id", "") or "").strip(),
+                confirmed=bool(kwargs.get("confirmed", False)),
+                requested_by=str(kwargs.get("requested_by", "") or "webui").strip(),
+                reason=str(kwargs.get("reason", "") or "").strip(),
+            )
+        if act == "get":
+            plan = self.metadata_store.get_fuzzy_modify_plan(str(kwargs.get("plan_id", "") or "").strip())
+            return {"success": plan is not None, "plan": plan, "error": "" if plan is not None else "修改计划不存在"}
+        if act == "list":
+            raw_statuses = kwargs.get("statuses")
+            if raw_statuses is None:
+                raw_statuses = kwargs.get("status")
+            statuses = self._tokens([raw_statuses] if isinstance(raw_statuses, str) else raw_statuses)
+            items = self.metadata_store.list_fuzzy_modify_plans(
+                limit=max(1, int(kwargs.get("limit", 50) or 50)),
+                statuses=statuses,
+                scope=str(kwargs.get("scope", "") or "").strip(),
+            )
+            return {"success": True, "items": items, "count": len(items)}
+        if act == "rollback":
+            return await self._rollback_fuzzy_modify_action(
+                plan_id=str(kwargs.get("plan_id", "") or "").strip(),
+                requested_by=str(kwargs.get("requested_by", "") or "webui").strip(),
+                reason=str(kwargs.get("reason", "") or "").strip(),
+            )
+        return {"success": False, "error": f"不支持的 fuzzy modify action: {act}"}
+
     def get_import_task_manager(self) -> Optional[ImportTaskManager]:
         return self.import_task_manager
 
@@ -2849,7 +2896,31 @@ class SDKMemoryKernel:
         return filtered
 
     def _filter_user_visible_hits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return self._filter_active_relation_hits(self._filter_episode_hits(hits))
+        return self._filter_current_effective_hits(self._filter_active_relation_hits(self._filter_episode_hits(hits)))
+
+    def _filter_current_effective_hits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        now = time.time()
+        filtered: List[Dict[str, Any]] = []
+        for item in hits:
+            metadata = coerce_metadata_dict(item.get("metadata"))
+            item_type = str(item.get("type", "") or "").strip()
+            hash_value = str(item.get("hash", "") or "").strip()
+            if self.metadata_store is not None and hash_value:
+                stored: Optional[Dict[str, Any]] = None
+                if item_type == "paragraph":
+                    stored = self.metadata_store.get_paragraph(hash_value)
+                elif item_type == "relation":
+                    stored = self.metadata_store.get_relation(hash_value)
+                if isinstance(stored, dict):
+                    metadata = coerce_metadata_dict(stored.get("metadata"))
+            memory_change = metadata.get("memory_change") if isinstance(metadata.get("memory_change"), dict) else {}
+            valid_to = self._optional_float(memory_change.get("valid_to"))
+            if valid_to is not None and valid_to <= now:
+                continue
+            next_item = dict(item)
+            next_item["metadata"] = metadata
+            filtered.append(next_item)
+        return filtered
 
     def _resolve_feedback_related_person_ids(
         self,
@@ -5521,6 +5592,24 @@ class SDKMemoryKernel:
                 merged.append(item)
         return merged
 
+    @classmethod
+    def _argument_tokens(cls, value: Any) -> List[str]:
+        if isinstance(value, str):
+            return cls._tokens([value])
+        return cls._tokens(value)
+
+    @classmethod
+    def _merge_argument_tokens(cls, *groups: Any) -> List[str]:
+        merged: List[str] = []
+        seen = set()
+        for group in groups:
+            for item in cls._argument_tokens(group):
+                if item in seen:
+                    continue
+                seen.add(item)
+                merged.append(item)
+        return merged
+
     @staticmethod
     def _build_source(source_type: str, chat_id: str, person_ids: Sequence[str]) -> str:
         clean_type = str(source_type or "").strip() or "memory"
@@ -6255,6 +6344,695 @@ class SDKMemoryKernel:
         payload["count"] = len(payload["items"])
         payload["target"] = token
         return payload
+
+    async def _preview_fuzzy_modify_action(
+        self,
+        *,
+        request_text: str,
+        scope: str,
+        person_id: str = "",
+        person_keyword: str = "",
+        chat_id: str = "",
+        limit: int = 20,
+        requested_by: str = "webui",
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        assert self.metadata_store is not None
+        if not self._fuzzy_modify_cfg_enabled():
+            return {"success": False, "error": "模糊修改功能未启用"}
+        text = str(request_text or "").strip()
+        if not text:
+            return {"success": False, "error": "修改描述不能为空"}
+
+        scope_token = self._normalize_fuzzy_modify_scope(scope)
+        pid = str(person_id or "").strip()
+        keyword = str(person_keyword or "").strip()
+        if scope_token == "person_profile":
+            if not pid and keyword and self.person_profile_service is not None:
+                pid = self.person_profile_service.resolve_person_id(keyword)
+            if not pid:
+                return {"success": False, "error": "人物画像修改需要提供 person_id 或 person_keyword"}
+        elif not chat_id and not self._fuzzy_modify_cfg_allow_global_scope():
+            return {"success": False, "error": "非人物画像修改需要提供 chat_id，或开启全局模糊修改范围"}
+
+        candidate_limit = min(max(1, int(limit or 20)), self._fuzzy_modify_cfg_candidate_limit())
+        candidates = await self._collect_fuzzy_modify_candidates(
+            request_text=text,
+            scope=scope_token,
+            person_id=pid,
+            person_keyword=keyword,
+            chat_id=str(chat_id or "").strip(),
+            limit=candidate_limit,
+        )
+        if not candidates:
+            return {"success": False, "error": "未找到可修改的候选记忆", "candidates": []}
+
+        plan_payload = await self._build_fuzzy_modify_llm_plan(
+            request_text=text,
+            scope=scope_token,
+            person_id=pid,
+            person_keyword=keyword,
+            chat_id=str(chat_id or "").strip(),
+            candidates=candidates,
+        )
+        plan = self._normalize_fuzzy_modify_plan(
+            plan_payload,
+            request_text=text,
+            scope=scope_token,
+            person_id=pid,
+            chat_id=str(chat_id or "").strip(),
+            candidates=candidates,
+        )
+        if not plan.get("operations"):
+            return {
+                "success": False,
+                "error": str(plan.get("reason", "") or "LLM 未生成可执行修改计划"),
+                "raw_plan": plan_payload,
+                "candidates": candidates,
+            }
+
+        confidence = float(plan.get("confidence", 0.0) or 0.0)
+        preview = {
+            "request_text": text,
+            "scope": scope_token,
+            "person_id": pid,
+            "person_keyword": keyword,
+            "chat_id": str(chat_id or "").strip(),
+            "candidates": candidates,
+            "operations": plan.get("operations", []),
+            "requires_confirmation": True,
+            "confirm_threshold": self._fuzzy_modify_cfg_confirm_threshold(),
+            "reason": str(plan.get("reason", "") or ""),
+        }
+        record = self.metadata_store.create_fuzzy_modify_plan(
+            request_text=text,
+            scope=scope_token,
+            target_person_id=pid,
+            target_chat_id=str(chat_id or "").strip(),
+            plan=plan,
+            preview=preview,
+            status="awaiting_confirmation",
+            confidence=confidence,
+            requested_by=requested_by,
+            reason=reason,
+        )
+        return {
+            "success": True,
+            "plan_id": str(record.get("plan_id", "") or ""),
+            "plan": record,
+            "preview": preview,
+            "requires_confirmation": True,
+        }
+
+    async def _execute_fuzzy_modify_action(
+        self,
+        *,
+        plan_id: str,
+        confirmed: bool,
+        requested_by: str = "webui",
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        assert self.metadata_store is not None
+        token = str(plan_id or "").strip()
+        if not token:
+            return {"success": False, "error": "plan_id 不能为空"}
+        plan_record = self.metadata_store.get_fuzzy_modify_plan(token)
+        if plan_record is None:
+            return {"success": False, "error": "修改计划不存在"}
+        status = str(plan_record.get("status", "") or "").strip()
+        if status not in {"awaiting_confirmation", "failed"}:
+            return {"success": False, "error": f"当前计划状态不可执行: {status}"}
+        if not confirmed:
+            confidence = self._optional_float(plan_record.get("confidence")) or 0.0
+            if not self._fuzzy_modify_cfg_auto_execute_enabled() or confidence < self._fuzzy_modify_cfg_confirm_threshold():
+                return {"success": False, "error": "需要用户确认后才能执行", "requires_confirmation": True}
+
+        self.metadata_store.update_fuzzy_modify_plan(token, status="executing")
+        try:
+            execution = await self._apply_fuzzy_modify_plan(
+                plan_record=plan_record,
+                requested_by=requested_by,
+                reason=reason,
+            )
+            updated = self.metadata_store.update_fuzzy_modify_plan(
+                token,
+                status="executed" if bool(execution.get("success")) else "failed",
+                execution=execution,
+                executed_at=time.time() if bool(execution.get("success")) else None,
+                reason=reason if reason else None,
+            )
+            return {"success": bool(execution.get("success")), "plan": updated, "execution": execution}
+        except Exception as exc:
+            execution = {"success": False, "error": str(exc)}
+            updated = self.metadata_store.update_fuzzy_modify_plan(
+                token,
+                status="failed",
+                execution=execution,
+                reason=reason if reason else None,
+            )
+            logger.warning(f"模糊修改执行失败: {exc}")
+            return {"success": False, "plan": updated, "execution": execution, "error": str(exc)}
+
+    async def _rollback_fuzzy_modify_action(
+        self,
+        *,
+        plan_id: str,
+        requested_by: str = "webui",
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        assert self.metadata_store is not None
+        token = str(plan_id or "").strip()
+        if not token:
+            return {"success": False, "error": "plan_id 不能为空"}
+        plan_record = self.metadata_store.get_fuzzy_modify_plan(token)
+        if plan_record is None:
+            return {"success": False, "error": "修改计划不存在"}
+        if str(plan_record.get("status", "") or "") != "executed":
+            return {"success": False, "error": "只有已执行的修改计划可以回滚"}
+
+        execution = plan_record.get("execution") if isinstance(plan_record.get("execution"), dict) else {}
+        stored_ids = self._tokens(execution.get("stored_ids"))
+        paragraph_hashes = [hash_value for hash_value in stored_ids if self.metadata_store.get_paragraph(hash_value)]
+        relation_hashes = [hash_value for hash_value in stored_ids if self.metadata_store.get_relation(hash_value)]
+        rollback_items: List[Dict[str, Any]] = []
+        if paragraph_hashes:
+            delete_result = await self._execute_delete_action(
+                mode="paragraph",
+                selector={"hashes": paragraph_hashes},
+                requested_by=requested_by,
+                reason=reason or "fuzzy_modify_rollback",
+            )
+            rollback_items.append({"type": "delete_new_paragraphs", "result": delete_result})
+            if not bool(delete_result.get("success", False)):
+                rollback_result = {
+                    "success": False,
+                    "error": str(delete_result.get("error", "") or "回滚删除新增记忆失败"),
+                    "stored_ids_delete_requested": paragraph_hashes,
+                    "new_relations_deactivated": [],
+                    "restored_targets": [],
+                    "items": rollback_items,
+                    "requested_by": requested_by,
+                    "reason": reason,
+                }
+                updated = self.metadata_store.update_fuzzy_modify_plan(
+                    token,
+                    status="rollback_failed",
+                    execution={**execution, "rollback": rollback_result},
+                    reason=reason if reason else None,
+                )
+                return {"success": False, "plan": updated, "rollback": rollback_result, "error": rollback_result["error"]}
+
+        restored_targets: List[Dict[str, Any]] = []
+        restore_failures: List[Dict[str, str]] = []
+        for item in execution.get("superseded_targets") or []:
+            if not isinstance(item, dict):
+                continue
+            target_type = str(item.get("target_type", "") or "").strip()
+            hash_value = str(item.get("hash", "") or "").strip()
+            previous_metadata = item.get("previous_metadata") if isinstance(item.get("previous_metadata"), dict) else {}
+            if target_type == "paragraph" and hash_value:
+                updated = self.metadata_store.update_paragraph_metadata(hash_value, previous_metadata, merge=False)
+                if updated is not None:
+                    restored_targets.append({"target_type": target_type, "hash": hash_value})
+                else:
+                    restore_failures.append({"target_type": target_type, "hash": hash_value, "error": "目标段落不存在或已删除"})
+                continue
+            if target_type == "relation" and hash_value:
+                updated = self.metadata_store.update_relation_metadata(hash_value, previous_metadata, merge=False)
+                if updated is not None:
+                    if bool(item.get("previous_is_inactive", False)):
+                        self.metadata_store.mark_relations_inactive(
+                            [hash_value],
+                            inactive_since=self._optional_float(item.get("previous_inactive_since")),
+                        )
+                    else:
+                        self.metadata_store.mark_relations_active([hash_value])
+                    restored_targets.append({"target_type": target_type, "hash": hash_value})
+                else:
+                    restore_failures.append({"target_type": target_type, "hash": hash_value, "error": "目标关系不存在"})
+
+        if relation_hashes:
+            self.metadata_store.mark_relations_inactive(relation_hashes, inactive_since=time.time())
+        if restored_targets:
+            self._rebuild_graph_from_metadata()
+            self._persist()
+        rollback_success = not restore_failures
+        rollback_result = {
+            "success": rollback_success,
+            "stored_ids_deleted": paragraph_hashes,
+            "new_relations_deactivated": relation_hashes,
+            "restored_targets": restored_targets,
+            "restore_failures": restore_failures,
+            "items": rollback_items,
+            "requested_by": requested_by,
+            "reason": reason,
+        }
+        updated = self.metadata_store.update_fuzzy_modify_plan(
+            token,
+            status="rolled_back" if rollback_success else "rollback_failed",
+            execution={**execution, "rollback": rollback_result},
+            reason=reason if reason else None,
+        )
+        return {"success": rollback_success, "plan": updated, "rollback": rollback_result}
+
+    async def _collect_fuzzy_modify_candidates(
+        self,
+        *,
+        request_text: str,
+        scope: str,
+        person_id: str = "",
+        person_keyword: str = "",
+        chat_id: str = "",
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        candidates: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def append_candidate(item: Dict[str, Any]) -> None:
+            candidate = self._normalize_fuzzy_modify_candidate(item)
+            candidate_type = str(candidate.get("target_type", "") or "").strip()
+            hash_value = str(candidate.get("hash", "") or "").strip()
+            key = (candidate_type, hash_value)
+            if not candidate_type or not hash_value or key in seen:
+                return
+            if not self._is_fuzzy_modify_candidate_mutable(candidate, item):
+                return
+            seen.add(key)
+            candidates.append(candidate)
+
+        if scope == "person_profile":
+            evidence = await self._profile_evidence_admin(
+                person_id=person_id,
+                person_keyword=person_keyword,
+                limit=max(limit, 12),
+                force_refresh=False,
+            )
+            for item in evidence.get("evidence") or []:
+                if isinstance(item, dict):
+                    append_candidate(item)
+
+        search_result = await self.search_memory(
+            KernelSearchRequest(
+                query=request_text,
+                limit=limit,
+                mode="aggregate",
+                chat_id=chat_id,
+                person_id=person_id,
+                respect_filter=True,
+            )
+        )
+        for item in search_result.get("hits") or []:
+            if isinstance(item, dict):
+                append_candidate(item)
+        return candidates[:limit]
+
+    def _is_fuzzy_modify_candidate_mutable(self, candidate: Dict[str, Any], raw_item: Dict[str, Any]) -> bool:
+        assert self.metadata_store is not None
+        if raw_item.get("deletable") is False:
+            return False
+        target_type = str(candidate.get("target_type", "") or "").strip()
+        hash_value = str(candidate.get("hash", "") or "").strip()
+        if not target_type or not hash_value:
+            return False
+        if target_type == "paragraph":
+            paragraph = self.metadata_store.get_paragraph(hash_value)
+            return isinstance(paragraph, dict) and not bool(paragraph.get("is_deleted", 0))
+        if target_type == "relation":
+            relation = self.metadata_store.get_relation(hash_value, include_inactive=False)
+            if relation is None:
+                return False
+            status = self.metadata_store.get_relation_status_batch([hash_value]).get(hash_value, {})
+            if bool(status.get("is_inactive", False)) or bool(status.get("is_pinned", False)):
+                return False
+            protected_until = self._optional_float(status.get("protected_until")) or 0.0
+            return protected_until <= time.time()
+        return False
+
+    async def _build_fuzzy_modify_llm_plan(
+        self,
+        *,
+        request_text: str,
+        scope: str,
+        person_id: str = "",
+        person_keyword: str = "",
+        chat_id: str = "",
+        candidates: Sequence[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        payload = {
+            "request_text": request_text,
+            "scope": scope,
+            "person_id": person_id,
+            "person_keyword": person_keyword,
+            "chat_id": chat_id,
+            "max_targets": self._fuzzy_modify_cfg_max_targets(),
+            "candidates": [
+                {
+                    "candidate_id": str(item.get("candidate_id", "") or ""),
+                    "target_type": str(item.get("target_type", "") or ""),
+                    "evidence_type": str(item.get("evidence_type", "") or ""),
+                    "hash": str(item.get("hash", "") or ""),
+                    "content": str(item.get("content", "") or ""),
+                    "source": str(item.get("source", "") or ""),
+                    "metadata": item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
+                }
+                for item in candidates
+            ],
+        }
+        prompt = load_prompt(
+            "memory_fuzzy_modify_plan",
+            request_payload=json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+        if self._fuzzy_modify_planner is None:
+            self._fuzzy_modify_planner = LLMServiceClient(
+                task_name="utils",
+                request_type="A_Memorix.fuzzy_modify_plan",
+            )
+        response = await self._fuzzy_modify_planner.generate_response(prompt)
+        return self._safe_json_loads(getattr(response, "response", ""))
+
+    def _normalize_fuzzy_modify_plan(
+        self,
+        payload: Dict[str, Any],
+        *,
+        request_text: str,
+        scope: str,
+        person_id: str,
+        chat_id: str,
+        candidates: Sequence[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        candidate_map = {
+            str(item.get("candidate_id", "") or "").strip(): item
+            for item in candidates
+            if str(item.get("candidate_id", "") or "").strip()
+        }
+        hash_to_candidate = {
+            str(item.get("hash", "") or "").strip(): item
+            for item in candidates
+            if str(item.get("hash", "") or "").strip()
+        }
+        confidence = min(1.0, max(0.0, float(payload.get("confidence", 0.0) or 0.0)))
+        max_targets = self._fuzzy_modify_cfg_max_targets()
+        operations: List[Dict[str, Any]] = []
+        for raw in payload.get("operations") or []:
+            if not isinstance(raw, dict):
+                continue
+            action = str(raw.get("action", "") or raw.get("op", "") or "").strip().lower()
+            if action == "mark_superseded":
+                candidate = candidate_map.get(str(raw.get("candidate_id", "") or "").strip())
+                if candidate is None:
+                    candidate = hash_to_candidate.get(str(raw.get("hash", "") or "").strip())
+                if candidate is None:
+                    candidate_id = str(raw.get("candidate_id", "") or "").strip()
+                    raw_hash = str(raw.get("hash", "") or "").strip()
+                    logger.warning(
+                        f"模糊修改计划引用了候选集外的目标: action={action} candidate_id={candidate_id} hash={raw_hash}"
+                    )
+                    continue
+                operations.append(
+                    {
+                        "action": "mark_superseded",
+                        "candidate_id": str(candidate.get("candidate_id", "") or ""),
+                        "target_type": str(candidate.get("target_type", "") or ""),
+                        "hash": str(candidate.get("hash", "") or ""),
+                        "reason": str(raw.get("reason", "") or payload.get("reason", "") or request_text).strip(),
+                        "valid_to": self._optional_float(raw.get("valid_to")),
+                    }
+                )
+                continue
+            if action == "ingest_text":
+                text = str(raw.get("text", "") or "").strip()
+                if not text:
+                    continue
+                operation: Dict[str, Any] = {
+                    "action": "ingest_text",
+                    "text": text,
+                    "source_type": str(raw.get("source_type", "") or ("person_fact" if person_id else "memory")).strip(),
+                    "chat_id": str(raw.get("chat_id", "") or chat_id).strip(),
+                    "person_ids": self._merge_argument_tokens(raw.get("person_ids"), [person_id]),
+                    "participants": self._argument_tokens(raw.get("participants")),
+                    "tags": self._merge_argument_tokens(raw.get("tags"), ["fuzzy_modify"]),
+                    "relations": self._normalize_fuzzy_modify_relations(raw.get("relations")),
+                    "valid_from": self._optional_float(raw.get("valid_from")),
+                    "reason": str(raw.get("reason", "") or payload.get("reason", "") or request_text).strip(),
+                }
+                operations.append(operation)
+                continue
+            if action == "refresh_person_profile":
+                target_person_id = str(raw.get("person_id", "") or person_id).strip()
+                if target_person_id:
+                    operations.append({"action": "refresh_person_profile", "person_id": target_person_id})
+        operations = operations[: max(1, max_targets * 2)]
+        target_count = sum(1 for item in operations if item.get("action") == "mark_superseded")
+        if target_count > max_targets:
+            kept = 0
+            limited: List[Dict[str, Any]] = []
+            for item in operations:
+                if item.get("action") != "mark_superseded":
+                    limited.append(item)
+                    continue
+                kept += 1
+                if kept <= max_targets:
+                    limited.append(item)
+            operations = limited
+        if operations and not any(item.get("action") == "refresh_person_profile" for item in operations) and person_id:
+            operations.append({"action": "refresh_person_profile", "person_id": person_id})
+        return {
+            "scope": scope,
+            "request_text": request_text,
+            "person_id": person_id,
+            "chat_id": chat_id,
+            "confidence": confidence,
+            "risk_level": str(payload.get("risk_level", "medium") or "medium").strip(),
+            "reason": str(payload.get("reason", "") or "").strip(),
+            "operations": operations,
+        }
+
+    def _normalize_fuzzy_modify_candidate(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        evidence_type = str(item.get("evidence_type", "") or item.get("type", "") or "").strip()
+        target_type = "relation" if evidence_type == "relation" else "paragraph"
+        hash_value = str(item.get("hash", "") or "").strip()
+        metadata = coerce_metadata_dict(item.get("metadata"))
+        return {
+            "candidate_id": f"{target_type}:{hash_value}",
+            "target_type": target_type,
+            "evidence_type": evidence_type,
+            "hash": hash_value,
+            "content": self._trim_text(str(item.get("content", "") or item.get("title", "") or ""), 420),
+            "source": str(item.get("source", "") or metadata.get("source", "") or "").strip(),
+            "metadata": metadata,
+            "score": item.get("score"),
+        }
+
+    @staticmethod
+    def _normalize_fuzzy_modify_relations(value: Any) -> List[Dict[str, Any]]:
+        relations: List[Dict[str, Any]] = []
+        for row in value or []:
+            if not isinstance(row, dict):
+                continue
+            subject = str(row.get("subject", "") or "").strip()
+            predicate = str(row.get("predicate", "") or "").strip()
+            obj = str(row.get("object", "") or "").strip()
+            if not (subject and predicate and obj):
+                continue
+            relations.append(
+                {
+                    "subject": subject,
+                    "predicate": predicate,
+                    "object": obj,
+                    "confidence": min(1.0, max(0.0, float(row.get("confidence", 1.0) or 1.0))),
+                    "metadata": row.get("metadata") if isinstance(row.get("metadata"), dict) else {},
+                }
+            )
+        return relations
+
+    async def _apply_fuzzy_modify_plan(
+        self,
+        *,
+        plan_record: Dict[str, Any],
+        requested_by: str = "webui",
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        assert self.metadata_store is not None
+        plan = plan_record.get("plan") if isinstance(plan_record.get("plan"), dict) else {}
+        operations = [dict(item) for item in plan.get("operations") or [] if isinstance(item, dict)]
+        change_id = str(plan_record.get("plan_id", "") or f"fuzzy_{int(time.time())}")
+        changed_at = time.time()
+        stored_ids: List[str] = []
+        ingest_results: List[Dict[str, Any]] = []
+        superseded_targets: List[Dict[str, Any]] = []
+
+        supersede_hashes = [
+            str(item.get("hash", "") or "").strip()
+            for item in operations
+            if item.get("action") == "mark_superseded" and str(item.get("hash", "") or "").strip()
+        ]
+        for index, operation in enumerate([item for item in operations if item.get("action") == "ingest_text"], start=1):
+            op_reason = str(operation.get("reason", "") or reason or plan.get("request_text", "") or "").strip()
+            metadata = {
+                "memory_change": {
+                    "change_id": change_id,
+                    "change_type": "replacement",
+                    "changed_at": changed_at,
+                    "changed_by": requested_by,
+                    "reason": op_reason,
+                    "supersedes_hashes": supersede_hashes,
+                    "valid_from": operation.get("valid_from") or changed_at,
+                },
+                "source_request": str(plan.get("request_text", "") or plan_record.get("request_text", "") or ""),
+            }
+            result = await self.ingest_text(
+                external_id=f"{change_id}:ingest:{index}",
+                source_type=str(operation.get("source_type", "") or "memory"),
+                text=str(operation.get("text", "") or ""),
+                chat_id=str(operation.get("chat_id", "") or plan.get("chat_id", "") or ""),
+                person_ids=self._argument_tokens(operation.get("person_ids")),
+                participants=self._argument_tokens(operation.get("participants")),
+                timestamp=self._optional_float(operation.get("valid_from")) or changed_at,
+                tags=self._argument_tokens(operation.get("tags")),
+                metadata=metadata,
+                relations=operation.get("relations") if isinstance(operation.get("relations"), list) else [],
+                respect_filter=False,
+            )
+            result_ids = self._tokens(result.get("stored_ids"))
+            stored_ids.extend(result_ids)
+            ingest_results.append({"operation": operation, "result": result})
+
+        replacement_hashes = list(stored_ids)
+        for operation in [item for item in operations if item.get("action") == "mark_superseded"]:
+            marked = self._mark_fuzzy_modify_target_superseded(
+                operation=operation,
+                change_id=change_id,
+                changed_at=changed_at,
+                changed_by=requested_by,
+                replacement_hashes=replacement_hashes,
+                default_reason=reason or str(plan.get("request_text", "") or ""),
+            )
+            if marked:
+                superseded_targets.append(marked)
+
+        refreshed_profiles: List[Dict[str, Any]] = []
+        for operation in [item for item in operations if item.get("action") == "refresh_person_profile"]:
+            person_id = str(operation.get("person_id", "") or "").strip()
+            if not person_id:
+                continue
+            refreshed_profiles.append(await self.refresh_person_profile(person_id))
+
+        if superseded_targets:
+            self._rebuild_graph_from_metadata()
+            self._persist()
+
+        return {
+            "success": bool(stored_ids or superseded_targets or refreshed_profiles),
+            "stored_ids": stored_ids,
+            "ingest_results": ingest_results,
+            "superseded_targets": superseded_targets,
+            "refreshed_profiles": refreshed_profiles,
+            "changed_at": changed_at,
+            "changed_by": requested_by,
+            "reason": reason,
+        }
+
+    def _mark_fuzzy_modify_target_superseded(
+        self,
+        *,
+        operation: Dict[str, Any],
+        change_id: str,
+        changed_at: float,
+        changed_by: str,
+        replacement_hashes: Sequence[str],
+        default_reason: str = "",
+    ) -> Dict[str, Any]:
+        assert self.metadata_store is not None
+        target_type = str(operation.get("target_type", "") or "").strip()
+        hash_value = str(operation.get("hash", "") or "").strip()
+        if target_type not in {"paragraph", "relation"} or not hash_value:
+            return {}
+        valid_to = self._optional_float(operation.get("valid_to")) or changed_at
+        reason = str(operation.get("reason", "") or default_reason or "").strip()
+        patch = {
+            "memory_change": {
+                "change_id": change_id,
+                "change_type": "superseded",
+                "changed_at": changed_at,
+                "changed_by": changed_by,
+                "reason": reason,
+                "valid_to": valid_to,
+                "superseded_by_hashes": [str(item or "").strip() for item in replacement_hashes if str(item or "").strip()],
+            }
+        }
+        if target_type == "paragraph":
+            previous = self.metadata_store.get_paragraph(hash_value)
+            if previous is None:
+                return {}
+            previous_metadata = coerce_metadata_dict(previous.get("metadata"))
+            updated = self.metadata_store.update_paragraph_metadata(hash_value, patch, merge=True)
+            if updated is None:
+                return {}
+            return {
+                "target_type": target_type,
+                "hash": hash_value,
+                "previous_metadata": previous_metadata,
+                "updated_metadata": updated,
+            }
+        previous = self.metadata_store.get_relation(hash_value)
+        if previous is None:
+            return {}
+        previous_metadata = coerce_metadata_dict(previous.get("metadata"))
+        updated = self.metadata_store.update_relation_metadata(hash_value, patch, merge=True)
+        if updated is None:
+            return {}
+        self.metadata_store.mark_relations_inactive([hash_value], inactive_since=valid_to)
+        return {
+            "target_type": target_type,
+            "hash": hash_value,
+            "previous_metadata": previous_metadata,
+            "updated_metadata": updated,
+            "previous_is_inactive": bool(previous.get("is_inactive", False)),
+            "previous_inactive_since": previous.get("inactive_since"),
+        }
+
+    @staticmethod
+    def _normalize_fuzzy_modify_scope(scope: str) -> str:
+        token = str(scope or "").strip().lower()
+        aliases = {
+            "profile": "person_profile",
+            "person": "person_profile",
+            "person_fact": "person_profile",
+            "memory": "memory",
+            "general": "memory",
+            "chat": "memory",
+        }
+        return aliases.get(token, token or "person_profile")
+
+    @staticmethod
+    def _fuzzy_modify_cfg_enabled() -> bool:
+        memory_cfg = global_config.a_memorix.integration
+        return bool(getattr(memory_cfg, "fuzzy_modify_enabled", True))
+
+    @staticmethod
+    def _fuzzy_modify_cfg_auto_execute_enabled() -> bool:
+        memory_cfg = global_config.a_memorix.integration
+        return bool(getattr(memory_cfg, "fuzzy_modify_auto_execute_enabled", False))
+
+    @staticmethod
+    def _fuzzy_modify_cfg_confirm_threshold() -> float:
+        memory_cfg = global_config.a_memorix.integration
+        return float(getattr(memory_cfg, "fuzzy_modify_confirm_threshold", 0.85) or 0.85)
+
+    @staticmethod
+    def _fuzzy_modify_cfg_candidate_limit() -> int:
+        memory_cfg = global_config.a_memorix.integration
+        return max(1, int(getattr(memory_cfg, "fuzzy_modify_candidate_limit", 20) or 20))
+
+    @staticmethod
+    def _fuzzy_modify_cfg_max_targets() -> int:
+        memory_cfg = global_config.a_memorix.integration
+        return max(1, int(getattr(memory_cfg, "fuzzy_modify_max_targets", 5) or 5))
+
+    @staticmethod
+    def _fuzzy_modify_cfg_allow_global_scope() -> bool:
+        memory_cfg = global_config.a_memorix.integration
+        return bool(getattr(memory_cfg, "fuzzy_modify_allow_global_scope", False))
 
     def _adjust_relation_confidence(self, hashes: List[str], *, delta: float) -> Dict[str, float]:
         assert self.metadata_store
