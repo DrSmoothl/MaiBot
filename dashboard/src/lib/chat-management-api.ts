@@ -32,6 +32,7 @@ export interface ChatConfigRule {
   use?: boolean
   learn?: boolean
   is_default?: boolean
+  is_platform_default?: boolean
   is_wildcard?: boolean
 }
 
@@ -106,6 +107,26 @@ interface ChatStreamDetailResponse {
   detail?: ChatStreamDetail
 }
 
+interface ChatTargetResolveResponse {
+  success: boolean
+  found: boolean
+  session?: ChatStream | null
+}
+
+export interface ChatTargetResolveRequest {
+  platform: string
+  item_id: string
+  rule_type: ChatStreamType | string
+}
+
+interface ChatTargetsResolveResponse {
+  success: boolean
+  results: Array<{
+    found: boolean
+    session?: ChatStream | null
+  }>
+}
+
 export interface ChatStreamDeleteItem {
   key: string
   label: string
@@ -145,6 +166,31 @@ export async function getChatStreams(limit = 1000): Promise<ChatStream[]> {
     query: { limit },
   })
   return result.sessions ?? []
+}
+
+export async function resolveChatTarget(
+  platform: string,
+  itemId: string,
+  ruleType: ChatStreamType | string
+): Promise<ChatTargetResolveResponse> {
+  const [result] = await resolveChatTargets([
+    {
+      platform,
+      item_id: itemId,
+      rule_type: ruleType,
+    },
+  ])
+  return { success: true, found: Boolean(result?.found), session: result?.session ?? null }
+}
+
+export async function resolveChatTargets(
+  targets: ChatTargetResolveRequest[]
+): Promise<ChatTargetsResolveResponse['results']> {
+  const result = await backendApi.post<ChatTargetsResolveResponse>('/api/chat/resolve-targets', {
+    body: { targets },
+    errorMessage: '解析聊天流失败',
+  })
+  return result.results ?? []
 }
 
 export async function getChatStreamDetail(sessionId: string): Promise<ChatStreamDetail> {

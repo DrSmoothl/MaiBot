@@ -72,6 +72,20 @@ class ChatPromptUpdateRequest(BaseModel):
     prompt: str = Field(default="")
 
 
+class ChatTargetResolveItem(BaseModel):
+    """配置目标解析请求项。"""
+
+    platform: str = Field(default="")
+    item_id: str = Field(default="")
+    rule_type: str = Field(default="group")
+
+
+class ChatTargetResolveBatchRequest(BaseModel):
+    """批量解析配置目标请求。"""
+
+    targets: List[ChatTargetResolveItem] = Field(default_factory=list)
+
+
 def _datetime_to_timestamp(value: Optional[datetime]) -> Optional[float]:
     """将数据库时间转换为前端更易处理的秒级时间戳。"""
 
@@ -277,6 +291,80 @@ def _chat_session_to_response(
     }
 
 
+def _resolve_chat_targets(targets: List[ChatTargetResolveItem]) -> List[Dict[str, Any]]:
+    """批量解析配置目标到真实聊天流。"""
+
+    normalized_targets: List[tuple[str, str, str]] = []
+    for target in targets:
+        platform = str(target.platform or "").strip()
+        item_id = str(target.item_id or "").strip()
+        rule_type = "private" if str(target.rule_type or "").strip() == "private" else "group"
+        normalized_targets.append((platform, item_id, rule_type))
+
+    resolved_by_key: Dict[tuple[str, str, str], ChatSession] = {}
+    query_keys = {
+        (platform, item_id, rule_type)
+        for platform, item_id, rule_type in normalized_targets
+        if platform and item_id
+    }
+
+    with get_db_session() as session:
+        for rule_type, target_attr in (("group", "group_id"), ("private", "user_id")):
+            scoped_keys = [(platform, item_id) for platform, item_id, key_rule_type in query_keys if key_rule_type == rule_type]
+            if not scoped_keys:
+                continue
+
+            platform_values = {platform for platform, _ in scoped_keys}
+            item_values = {item_id for _, item_id in scoped_keys}
+            statement = (
+                select(ChatSession)
+                .where(
+                    col(ChatSession.platform).in_(platform_values),
+                    col(getattr(ChatSession, target_attr)).in_(item_values),
+                )
+                .order_by(
+                    case((col(ChatSession.last_active_timestamp).is_(None), 1), else_=0),
+                    col(ChatSession.last_active_timestamp).desc(),
+                    col(ChatSession.created_timestamp).desc(),
+                )
+            )
+            for chat_session in session.exec(statement).all():
+                platform = str(chat_session.platform or "").strip()
+                item_id = str(getattr(chat_session, target_attr) or "").strip()
+                key = (platform, item_id, rule_type)
+                if key in query_keys and key not in resolved_by_key:
+                    resolved_by_key[key] = chat_session
+
+    fallback_session_ids = [
+        chat_session.session_id
+        for chat_session in resolved_by_key.values()
+        if chat_session.session_id and _needs_latest_message_for_display_name(chat_session)
+    ]
+    latest_messages = _get_latest_messages_by_session(fallback_session_ids)
+
+    results: List[Dict[str, Any]] = []
+    for key in normalized_targets:
+        chat_session = resolved_by_key.get(key)
+        if chat_session is None:
+            results.append({"found": False, "session": None})
+            continue
+
+        results.append(
+            {
+                "found": True,
+                "session": _chat_session_to_response(
+                    chat_session=chat_session,
+                    latest_message=latest_messages.get(chat_session.session_id),
+                    message_count=0,
+                    expression_count=0,
+                    jargon_count=0,
+                ),
+            }
+        )
+
+    return results
+
+
 def _target_config_to_dict(config_item: Any) -> Optional[Dict[str, Any]]:
     """序列化学习配置项，方便前端展示命中的规则来源。"""
 
@@ -291,6 +379,7 @@ def _target_config_to_dict(config_item: Any) -> Optional[Dict[str, Any]]:
         "use": bool(getattr(config_item, "use", True)),
         "learn": bool(getattr(config_item, "learn", True)),
         "is_default": ChatConfigUtils.is_default_target(config_item),
+        "is_platform_default": ChatConfigUtils.is_platform_default_target(config_item),
         "is_wildcard": ChatConfigUtils.is_wildcard_target(config_item),
     }
 
@@ -1058,6 +1147,27 @@ async def get_chat_sessions(
         for chat_session in chat_sessions
     ]
     return {"success": True, "sessions": items, "total": len(items)}
+
+
+@router.get("/resolve-target")
+async def resolve_chat_target(
+    platform: str = Query(..., description="平台名称"),
+    item_id: str = Query(..., description="群号或用户 ID"),
+    rule_type: str = Query(default="group", description="聊天类型：group/private"),
+) -> Dict[str, object]:
+    """按配置目标解析真实聊天流，用于配置页即时校验。"""
+
+    result = _resolve_chat_targets(
+        [ChatTargetResolveItem(platform=platform, item_id=item_id, rule_type=rule_type)]
+    )[0]
+    return {"success": True, **result}
+
+
+@router.post("/resolve-targets")
+async def resolve_chat_targets(request: ChatTargetResolveBatchRequest) -> Dict[str, object]:
+    """批量按配置目标解析真实聊天流，用于配置页即时校验。"""
+
+    return {"success": True, "results": _resolve_chat_targets(request.targets[:200])}
 
 
 @router.get("/sessions/{session_id}")
