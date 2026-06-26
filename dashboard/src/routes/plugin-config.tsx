@@ -60,6 +60,7 @@ import {
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { getPluginRuntimeComponents } from '@/lib/plugin-api'
+import { MarkdownRenderer } from '@/components/markdown-renderer'
 import { PluginStats } from '@/components/plugin-stats'
 import type {
   InstalledPlugin,
@@ -443,6 +444,7 @@ interface PluginDetailsPanelProps {
   repositoryUrl?: string
   documentationUrl?: string
   issuesUrl?: string
+  changelog?: string | null
 }
 
 type ComponentDisplayGroup = 'tool' | 'command'
@@ -498,6 +500,7 @@ function PluginDetailsPanel({
   repositoryUrl,
   documentationUrl,
   issuesUrl,
+  changelog,
 }: PluginDetailsPanelProps) {
   const [components, setComponents] = useState<PluginRuntimeComponent[]>([])
   const [componentsLoading, setComponentsLoading] = useState(true)
@@ -596,6 +599,24 @@ function PluginDetailsPanel({
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>更新日志</CardTitle>
+          <CardDescription>插件作者提供的版本变更记录。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {changelog ? (
+            <ScrollArea className="h-[min(36vh,420px)] pr-4">
+              <MarkdownRenderer content={changelog} />
+            </ScrollArea>
+          ) : (
+            <div className="text-muted-foreground rounded-md border border-dashed px-4 py-8 text-center text-sm">
+              暂无更新日志
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -994,6 +1015,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
             repositoryUrl={pluginRepositoryUrl}
             documentationUrl={manifestUrls?.documentation}
             issuesUrl={manifestUrls?.issues}
+            changelog={plugin.changelog}
           />
         </TabsContent>
       </Tabs>

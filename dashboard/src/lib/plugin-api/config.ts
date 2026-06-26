@@ -7,10 +7,36 @@
  */
 import { ApiError, backendApi, requireSuccess } from '@/lib/http'
 
-import type { PluginConfigSchema, PluginRuntimeComponent } from './types'
+import type { PluginConfigBundle, PluginConfigSchema, PluginRuntimeComponent } from './types'
 
 const API_BASE = '/api/webui/plugins/config'
 const RUNTIME_API_BASE = '/api/webui/plugins/runtime'
+
+/**
+ * 获取插件配置页初始化数据
+ */
+export async function getPluginConfigBundle(pluginId: string): Promise<PluginConfigBundle> {
+  const data = await backendApi.get<{
+    success: boolean
+    schema?: PluginConfigSchema
+    config?: Record<string, unknown>
+    raw_config?: string
+    message?: string
+  }>(
+    `${API_BASE}/${pluginId}/bundle`,
+    { errorMessage: '获取插件配置初始化数据失败' }
+  )
+  const checked = requireSuccess(data, '获取插件配置初始化数据失败')
+  if (!checked.schema || checked.config === undefined || checked.config === null || typeof checked.raw_config !== 'string') {
+    throw new ApiError(checked.message || '获取插件配置初始化数据失败', { detail: checked })
+  }
+  return {
+    schema: checked.schema,
+    config: checked.config,
+    rawConfig: checked.raw_config,
+    message: checked.message,
+  }
+}
 
 /**
  * 获取插件配置 Schema

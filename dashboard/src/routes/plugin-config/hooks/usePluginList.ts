@@ -12,7 +12,7 @@
  * config / sourceCode 等可编辑草稿不在此 hook —— 编辑器草稿见 usePluginConfigEditor；
  * 更新/卸载破坏性流程见 usePluginLifecycle（本 hook 仅提供 getPluginRepositoryUrl / loadPlugins 供其注入）。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   fetchPluginList,
@@ -74,6 +74,7 @@ export function usePluginList() {
   const [actingPluginId, setActingPluginId] = useState<string | null>(null)
   const [marketPluginsById, setMarketPluginsById] = useState<Record<string, PluginInfo>>({})
   const [checkingUpdates, setCheckingUpdates] = useState(false)
+  const updateCheckStartedRef = useRef(false)
 
   const openPluginConfig = (plugin: InstalledPlugin, tabId?: string | null) => {
     setSelectedPlugin(plugin)
@@ -89,6 +90,32 @@ export function usePluginList() {
     setSelectedPlugin(null)
     setSelectedPluginTab(undefined)
     window.history.replaceState(null, '', '/plugin-config')
+    void checkPluginUpdates()
+  }
+
+  const checkPluginUpdates = async () => {
+    if (updateCheckStartedRef.current) {
+      return
+    }
+    updateCheckStartedRef.current = true
+    setCheckingUpdates(true)
+    try {
+      const marketPlugins = await fetchPluginList()
+      const nextMarketPluginsById: Record<string, PluginInfo> = {}
+      for (const marketPlugin of marketPlugins) {
+        nextMarketPluginsById[marketPlugin.id] = marketPlugin
+        if (marketPlugin.manifest.id) {
+          nextMarketPluginsById[marketPlugin.manifest.id] = marketPlugin
+        }
+      }
+      setMarketPluginsById(nextMarketPluginsById)
+    } catch (error) {
+      updateCheckStartedRef.current = false
+      console.warn('加载插件市场版本信息失败:', error)
+      setMarketPluginsById({})
+    } finally {
+      setCheckingUpdates(false)
+    }
   }
 
   // 加载插件列表（含深链接自动选中）
@@ -114,36 +141,20 @@ export function usePluginList() {
     }
   }
 
-  const checkPluginUpdates = async () => {
-    setCheckingUpdates(true)
-    try {
-      const marketPlugins = await fetchPluginList()
-      const nextMarketPluginsById: Record<string, PluginInfo> = {}
-      for (const marketPlugin of marketPlugins) {
-        nextMarketPluginsById[marketPlugin.id] = marketPlugin
-        if (marketPlugin.manifest.id) {
-          nextMarketPluginsById[marketPlugin.manifest.id] = marketPlugin
-        }
-      }
-      setMarketPluginsById(nextMarketPluginsById)
-    } catch (error) {
-      console.warn('加载插件市场版本信息失败:', error)
-      setMarketPluginsById({})
-    } finally {
-      setCheckingUpdates(false)
-    }
-  }
-
   useEffect(() => {
     loadPlugins()
+    if (!initialTarget.pluginId) {
+      void checkPluginUpdates()
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    if (!loading) {
+  const handleShowUpdateOnlyChange = (enabled: boolean) => {
+    setShowUpdateOnly(enabled)
+    if (enabled && !checkingUpdates && Object.keys(marketPluginsById).length === 0) {
       void checkPluginUpdates()
     }
-  }, [loading])
+  }
 
   // 过滤插件
   const filteredPlugins = plugins.filter(plugin => {
@@ -345,7 +356,7 @@ export function usePluginList() {
     searchQuery,
     setSearchQuery,
     showUpdateOnly,
-    setShowUpdateOnly,
+    setShowUpdateOnly: handleShowUpdateOnlyChange,
     visiblePlugins,
     // 启停
     actingPluginId,

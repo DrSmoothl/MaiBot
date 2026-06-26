@@ -21,6 +21,7 @@ from .support import (
     iter_plugin_directories,
     load_manifest_json,
     parse_repository_url,
+    read_plugin_changelog,
     remove_tree,
     require_plugin_token,
     resolve_installed_plugin_path,
@@ -692,6 +693,7 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
                 if enabled and load_status == "unknown" and runtime_loading:
                     load_status = "loading"
                 circuit_status = circuit_statuses.get(plugin_id)
+                changelog = read_plugin_changelog(plugin_path)
                 installed_plugins.append(
                     {
                         "id": plugin_id,
@@ -702,6 +704,7 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
                         "loaded": load_status == "success",
                         "load_status": "disabled" if not enabled else load_status,
                         "circuit_status": circuit_status,
+                        "changelog": changelog,
                     }
                 )
             except json.JSONDecodeError as e:
@@ -756,4 +759,24 @@ async def get_local_plugin_readme(plugin_id: str, maibot_session: Optional[str] 
         return {"success": False, "error": "本地未找到 README 文件"}
     except Exception as e:
         logger.error(f"获取本地 README 失败: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/local-changelog/{plugin_id}")
+async def get_local_plugin_changelog(plugin_id: str, maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
+    require_plugin_token(maibot_session)
+    logger.info(f"获取本地插件更新日志: {plugin_id}")
+
+    try:
+        plugin_path = find_plugin_path_by_id(plugin_id)
+        if plugin_path is None:
+            return {"success": False, "error": "插件未安装"}
+
+        changelog = read_plugin_changelog(plugin_path)
+        if changelog:
+            return {"success": True, "data": changelog}
+
+        return {"success": False, "error": "本地未找到 CHANGELOG.md 文件"}
+    except Exception as e:
+        logger.error(f"获取本地插件更新日志失败: {e}", exc_info=True)
         return {"success": False, "error": str(e)}

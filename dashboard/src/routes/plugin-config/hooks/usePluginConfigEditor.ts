@@ -15,9 +15,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { parse as parseToml } from 'smol-toml'
 
 import {
-  getPluginConfig,
-  getPluginConfigRaw,
-  getPluginConfigSchema,
+  getPluginConfigBundle,
   resetPluginConfig,
   togglePlugin,
   updatePluginConfig,
@@ -70,17 +68,13 @@ export function usePluginConfigEditor(options: UsePluginConfigEditorOptions) {
   const loadConfig = useCallback(async () => {
     setLoading(true)
     try {
-      const [schemaData, configData, rawData] = await Promise.all([
-        getPluginConfigSchema(plugin.id),
-        getPluginConfig(plugin.id),
-        getPluginConfigRaw(plugin.id)
-      ])
+      const { schema: schemaData, config: configData, rawConfig } = await getPluginConfigBundle(plugin.id)
 
       setSchema(schemaData)
       setConfig(configData)
       setOriginalConfig(JSON.parse(JSON.stringify(configData)))
-      setSourceCode(rawData)
-      setOriginalSourceCode(rawData)
+      setSourceCode(rawConfig)
+      setOriginalSourceCode(rawConfig)
     } catch (error) {
       toast({
         title: '加载配置失败',

@@ -876,8 +876,8 @@ requires-dist = [
     { name = "httpx", extras = ["socks"] },
     { name = "jieba", specifier = ">=0.42.1" },
     { name = "json-repair", specifier = ">=0.47.6" },
-    { name = "maibot-dashboard", specifier = ">=1.5.1" },
-    { name = "maibot-plugin-sdk", specifier = ">=2.5.4" },
+    { name = "maibot-dashboard", specifier = ">=1.5.1.dev20260625276" },
+    { name = "maibot-plugin-sdk", specifier = ">=2.6.0" },
     { name = "maim-message", specifier = "==0.6.8" },
     { name = "mcp" },
     { name = "msgpack", specifier = ">=1.1.2" },
@@ -921,15 +921,15 @@ wheels = [
 
 [[package]]
 name = "maibot-plugin-sdk"
-version = "2.5.4"
+version = "2.6.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "msgpack" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/70/e1/56a213db818b0d1a08f13647f2a2469eb2e5c620e562cd341798afebd3cf/maibot_plugin_sdk-2.5.4.tar.gz", hash = "sha256:43f953c5510755839dd95e2811a9dbcf6825b9e342f113f860c06d8dea88549a", size = 85683, upload-time = "2026-06-08T10:58:41.532Z" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/78/58/afee139c487f3dc3224fce59dba094409c00b49d373241d4841992e883ac/maibot_plugin_sdk-2.6.0.tar.gz", hash = "sha256:0a453124a7e4401b39fb69e8e1317b97e7f667f8803da6c57369993a006b4637", size = 88359, upload-time = "2026-06-25T16:20:51.567Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c2/26/84546aef9f9f30c46d6d75d02c66a8dd551f4cb703fa625b4dcb093b7213/maibot_plugin_sdk-2.5.4-py3-none-any.whl", hash = "sha256:715565ace6f9a634920d44c5eff29044b5a79e794582de3ddc84aeb6e78c4ee0", size = 105019, upload-time = "2026-06-08T10:58:40.034Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/29/5e/ccabd103c87883093ed6fe73d68caa5397db969864437a345d175f193af5/maibot_plugin_sdk-2.6.0-py3-none-any.whl", hash = "sha256:43e0caa21c5e46fe27e474a0696f3757f49e2ebffd12bc8e7821e49ab880d5a7", size = 106756, upload-time = "2026-06-25T16:20:49.995Z" },
 ]
 
 [[package]]

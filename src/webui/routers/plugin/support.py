@@ -16,6 +16,9 @@ from src.webui.core import get_token_manager
 
 logger = get_logger("webui.plugin_routes")
 
+PLUGIN_CHANGELOG_FILENAMES = ("CHANGELOG.md", "Changelog.md", "changelog.md", "CHANGELOG.MD")
+MAX_PLUGIN_CHANGELOG_CHARS = 500000
+
 
 def require_plugin_token(maibot_session: Optional[str]) -> str:
     token_manager = get_token_manager()
@@ -260,6 +263,25 @@ def load_manifest_json(manifest_path: Path) -> Optional[Dict[str, Any]]:
             return cast(dict[str, Any], json.load(file_obj))
     except Exception:
         return None
+
+
+def read_plugin_changelog(plugin_path: Path) -> Optional[str]:
+    """读取插件根目录中的更新日志；缺失或不可读时返回 None，不影响插件加载。"""
+    for changelog_name in PLUGIN_CHANGELOG_FILENAMES:
+        changelog_path = resolve_plugin_file_path(plugin_path, changelog_name)
+        if not changelog_path.exists():
+            continue
+        if not changelog_path.is_file():
+            continue
+
+        try:
+            with open(changelog_path, "r", encoding="utf-8") as file_obj:
+                return file_obj.read(MAX_PLUGIN_CHANGELOG_CHARS + 1)[:MAX_PLUGIN_CHANGELOG_CHARS]
+        except Exception as exc:
+            logger.warning(f"读取插件更新日志失败: {changelog_path} ({exc})")
+            return None
+
+    return None
 
 
 def iter_plugin_directories() -> List[Path]:
