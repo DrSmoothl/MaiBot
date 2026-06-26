@@ -103,6 +103,7 @@ class _FakeMemoryMetadataStore:
         ]
         self.delete_item_rows = [
             {
+                "operation_id": "op-1",
                 "item_type": "paragraph",
                 "item_hash": "p-source",
                 "item_key": "chat_summary:chat-1",
@@ -645,7 +646,20 @@ def test_webui_memory_timeline_returns_chat_scoped_events(client: TestClient, mo
     assert "delete_restored" in event_types
     assert any(item["key_id"] == "p-meta" and item["attribution"] == "metadata.chat_id" for item in payload["items"])
     assert any(item["key_id"] == "p-source" and item["attribution"] == "source" for item in payload["items"])
-    assert all(item["jump_target"]["tab"] in {"delete", "episodes", "feedback", "profiles"} for item in payload["items"])
+    paragraph_created = next(
+        item for item in payload["items"]
+        if item["event_type"] == "paragraph_created" and item["key_id"] == "p-meta"
+    )
+    assert paragraph_created["jump_target"] == {
+        "tab": "graph",
+        "params": {"paragraph_hash": "p-meta"},
+    }
+    delete_executed = next(item for item in payload["items"] if item["event_type"] == "delete_executed")
+    assert delete_executed["jump_target"] == {
+        "tab": "delete",
+        "params": {"operation_id": "op-1"},
+    }
+    assert all(item["jump_target"]["tab"] in {"graph", "delete", "episodes", "feedback", "profiles"} for item in payload["items"])
     assert payload["range"]["min_time"] == 100.0
     assert payload["range"]["max_time"] == 170.0
 
@@ -677,6 +691,60 @@ def test_webui_memory_timeline_filters_types_and_limit(client: TestClient, monke
     assert len(payload["items"]) == 1
     assert payload["items"][0]["category"] == "episode"
     assert payload["items"][0]["jump_target"]["params"]["episode_id"] == "ep-1"
+
+
+def test_webui_memory_timeline_deleted_paragraph_prefers_delete_operation(client: TestClient, monkeypatch):
+    store = _FakeMemoryMetadataStore()
+    store.paragraph_rows = [
+        {
+            "hash": "p-deleted",
+            "content": "已经删除的段落",
+            "created_at": 80.0,
+            "updated_at": 80.0,
+            "metadata": {"chat_id": "chat-1"},
+            "source": "external",
+            "is_deleted": 1,
+            "deleted_at": 165.0,
+        }
+    ]
+    store.delete_rows = []
+    store.delete_item_rows = [
+        {
+            "operation_id": "op-paragraph-delete",
+            "item_type": "paragraph",
+            "item_hash": "p-deleted",
+            "item_key": "p-deleted",
+            "payload_json": '{"paragraph_hash":"p-deleted"}',
+            "created_at": 165.0,
+        }
+    ]
+    monkeypatch.setattr(
+        memory_router_module,
+        "_find_real_chat_session",
+        lambda chat_id: SimpleNamespace(
+            session_id=chat_id,
+            platform="qq",
+            group_id="100",
+            user_id=None,
+            group_name="测试群",
+            user_cardname=None,
+            user_nickname=None,
+        ),
+    )
+    monkeypatch.setattr(memory_router_module, "_get_memory_metadata_store", lambda: store)
+    monkeypatch.setattr(memory_router_module, "_prefetch_latest_messages_by_session", lambda db_session, session_ids: {})
+
+    response = client.get(
+        "/api/webui/memory/timeline",
+        params={"chat_id": "chat-1", "time_start": 90, "time_end": 180, "limit": 20},
+    )
+
+    assert response.status_code == 200
+    paragraph_deleted = next(item for item in response.json()["items"] if item["event_type"] == "paragraph_deleted")
+    assert paragraph_deleted["jump_target"] == {
+        "tab": "delete",
+        "params": {"operation_id": "op-paragraph-delete"},
+    }
 
 
 def test_webui_memory_timeline_uses_latest_message_snapshot(client: TestClient, monkeypatch):

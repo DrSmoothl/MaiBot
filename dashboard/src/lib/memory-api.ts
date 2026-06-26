@@ -169,6 +169,12 @@ export interface MemoryGraphEdgeDetailPayload {
   evidence_graph: MemoryEvidenceGraphPayload
 }
 
+export interface MemoryGraphParagraphDetailResponsePayload {
+  success: boolean
+  paragraph: MemoryGraphParagraphDetailPayload
+  evidence_graph: MemoryEvidenceGraphPayload
+}
+
 export interface MemoryRuntimeConfigPayload {
   success: boolean
   config: Record<string, unknown>
@@ -867,6 +873,19 @@ export async function getMemoryGraphEdgeDetail(
     evidence_node_limit: String(options?.evidenceNodeLimit ?? 80),
   })
   return requestJson<MemoryGraphEdgeDetailPayload>(`/graph/edge-detail?${params.toString()}`)
+}
+
+export async function getMemoryGraphParagraphDetail(
+  paragraphHash: string,
+  options?: {
+    evidenceNodeLimit?: number
+  },
+): Promise<MemoryGraphParagraphDetailResponsePayload> {
+  const params = new URLSearchParams({
+    paragraph_hash: paragraphHash,
+    evidence_node_limit: String(options?.evidenceNodeLimit ?? 80),
+  })
+  return requestJson<MemoryGraphParagraphDetailResponsePayload>(`/graph/paragraph-detail?${params.toString()}`)
 }
 
 export async function previewMemoryDelete(

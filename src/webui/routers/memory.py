@@ -509,6 +509,37 @@ def _timeline_event(
     )
 
 
+def _paragraph_jump_target(paragraph_hash: str) -> dict[str, Any]:
+    token = str(paragraph_hash or "").strip()
+    return {"tab": "graph", "params": {"paragraph_hash": token}}
+
+
+def _delete_jump_target_for_paragraph(paragraph_hash: str, source: str = "") -> dict[str, Any]:
+    token = str(paragraph_hash or "").strip()
+    if token:
+        rows = _query_memory_rows(
+            """
+            SELECT operation_id
+            FROM delete_operation_items
+            WHERE item_hash = ?
+               OR item_key = ?
+               OR payload_json LIKE ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (token, token, f"%{token}%"),
+        )
+        operation_id = str((rows[0] if rows else {}).get("operation_id") or "").strip()
+        if operation_id:
+            return {"tab": "delete", "params": {"operation_id": operation_id}}
+
+    params = {"paragraph_hash": token}
+    clean_source = str(source or "").strip()
+    if clean_source:
+        params["source"] = clean_source
+    return {"tab": "delete", "params": params}
+
+
 def _get_memory_metadata_store() -> Any:
     kernel = get_runtime_kernel()
     return getattr(kernel, "metadata_store", None) if kernel is not None else None
@@ -582,7 +613,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                    jump_target=_paragraph_jump_target(paragraph_hash),
                 )
             )
         if (
@@ -603,7 +634,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                    jump_target=_paragraph_jump_target(paragraph_hash),
                 )
             )
         if is_deleted and deleted_at is not None and _event_in_range(deleted_at, time_start, time_end):
@@ -619,7 +650,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                    jump_target=_delete_jump_target_for_paragraph(paragraph_hash, source),
                 )
             )
     return [event for event in events if _types_match(event, accepted_types)]
@@ -1284,6 +1315,162 @@ async def _graph_get_edge_detail(
     if not bool(payload.get("success", False)):
         raise HTTPException(status_code=404, detail=str(payload.get("error", "未找到边详情")))
     return payload
+
+
+def _trim_memory_text(value: Any, limit: int = 160) -> str:
+    text = str(value or "").strip()
+    return text[:limit] + ("..." if len(text) > limit else "")
+
+
+def _format_memory_relation(subject: Any, predicate: Any, obj: Any) -> str:
+    return " ".join(str(item or "").strip() for item in (subject, predicate, obj) if str(item or "").strip())
+
+
+def _format_graph_paragraph(row: dict[str, Any], entities: list[str], relations: list[dict[str, Any]]) -> dict[str, Any]:
+    content = str(row.get("content") or "").strip()
+    return {
+        "hash": str(row.get("hash") or "").strip(),
+        "content": content,
+        "preview": _trim_memory_text(content),
+        "source": str(row.get("source") or "").strip(),
+        "created_at": _safe_float(row.get("created_at")),
+        "updated_at": _safe_float(row.get("updated_at")),
+        "entity_count": len(entities),
+        "relation_count": len(relations),
+        "entities": entities,
+        "relations": [_format_memory_relation(item.get("subject"), item.get("predicate"), item.get("object")) for item in relations],
+    }
+
+
+async def _graph_get_paragraph_detail(paragraph_hash: str, evidence_node_limit: int) -> dict:
+    token = str(paragraph_hash or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="paragraph_hash 不能为空")
+    rows = _query_memory_rows(
+        """
+        SELECT hash, content, source, created_at, updated_at, metadata, is_deleted, deleted_at
+        FROM paragraphs
+        WHERE hash = ?
+        LIMIT 1
+        """,
+        (token,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"未找到段落: {token}")
+
+    paragraph_row = dict(rows[0])
+    if bool(int(paragraph_row.get("is_deleted") or 0)) or paragraph_row.get("deleted_at") is not None:
+        raise HTTPException(status_code=404, detail=f"段落已删除: {token}")
+
+    entity_rows = [
+        dict(row)
+        for row in _query_memory_rows(
+            """
+            SELECT e.hash, e.name, pe.mention_count
+            FROM paragraph_entities pe
+            LEFT JOIN entities e ON e.hash = pe.entity_hash
+            WHERE pe.paragraph_hash = ?
+            ORDER BY COALESCE(pe.mention_count, 1) DESC, e.name ASC
+            """,
+            (token,),
+        )
+    ]
+    relation_rows = [
+        dict(row)
+        for row in _query_memory_rows(
+            """
+            SELECT r.hash, r.subject, r.predicate, r.object, r.confidence
+            FROM paragraph_relations pr
+            JOIN relations r ON r.hash = pr.relation_hash
+            WHERE pr.paragraph_hash = ?
+              AND (r.is_inactive IS NULL OR r.is_inactive = 0)
+            ORDER BY r.confidence DESC, r.created_at DESC
+            """,
+            (token,),
+        )
+    ]
+    entities = [str(row.get("name") or row.get("hash") or "").strip() for row in entity_rows]
+    entities = [name for name in entities if name]
+    paragraph = _format_graph_paragraph(paragraph_row, entities, relation_rows)
+
+    nodes: list[dict[str, Any]] = [
+        {
+            "id": f"paragraph:{token}",
+            "type": "paragraph",
+            "content": str(paragraph_row.get("content") or ""),
+            "metadata": {
+                "hash": token,
+                "source": paragraph.get("source"),
+                "updated_at": paragraph.get("updated_at"),
+                "entity_count": len(entities),
+                "relation_count": len(relation_rows),
+                "preview": paragraph.get("preview"),
+            },
+        }
+    ]
+    edges: list[dict[str, Any]] = []
+    node_ids = {f"paragraph:{token}"}
+
+    for row in entity_rows:
+        entity_name = str(row.get("name") or row.get("hash") or "").strip()
+        if not entity_name:
+            continue
+        node_id = f"entity:{entity_name}"
+        if node_id not in node_ids:
+            node_ids.add(node_id)
+            nodes.append({"id": node_id, "type": "entity", "content": entity_name, "metadata": {"entity_name": entity_name}})
+        mention_count = int(row.get("mention_count") or 1)
+        edges.append(
+            {
+                "source": f"paragraph:{token}",
+                "target": node_id,
+                "kind": "mentions",
+                "label": f"提及 ×{mention_count}" if mention_count > 1 else "提及",
+                "weight": float(max(1, mention_count)),
+            }
+        )
+
+    for row in relation_rows:
+        relation_hash = str(row.get("hash") or "").strip()
+        if not relation_hash:
+            continue
+        relation_node_id = f"relation:{relation_hash}"
+        relation_text = _format_memory_relation(row.get("subject"), row.get("predicate"), row.get("object"))
+        if relation_node_id not in node_ids:
+            node_ids.add(relation_node_id)
+            nodes.append(
+                {
+                    "id": relation_node_id,
+                    "type": "relation",
+                    "content": relation_text,
+                    "metadata": {
+                        "hash": relation_hash,
+                        "subject": str(row.get("subject") or "").strip(),
+                        "predicate": str(row.get("predicate") or "").strip(),
+                        "object": str(row.get("object") or "").strip(),
+                        "confidence": float(row.get("confidence") or 0.0),
+                        "paragraph_count": 1,
+                        "paragraph_hashes": [token],
+                        "text": relation_text,
+                    },
+                }
+            )
+        edges.append({"source": f"paragraph:{token}", "target": relation_node_id, "kind": "supports", "label": "支撑", "weight": 1.0})
+
+    if len(nodes) > evidence_node_limit:
+        kept_ids = {node["id"] for node in nodes[:evidence_node_limit]}
+        nodes = [node for node in nodes if node["id"] in kept_ids]
+        edges = [edge for edge in edges if edge["source"] in kept_ids and edge["target"] in kept_ids]
+
+    return {
+        "success": True,
+        "paragraph": paragraph,
+        "evidence_graph": {
+            "nodes": nodes,
+            "edges": edges,
+            "focus_entities": entities,
+        },
+    }
 
 
 async def _graph_create_node(payload: NodeRequest) -> dict:
@@ -1979,6 +2166,14 @@ async def get_memory_graph_edge_detail(
         paragraph_limit=paragraph_limit,
         evidence_node_limit=evidence_node_limit,
     )
+
+
+@router.get("/graph/paragraph-detail")
+async def get_memory_graph_paragraph_detail(
+    paragraph_hash: str = Query(..., min_length=1),
+    evidence_node_limit: int = Query(80, ge=12, le=200),
+):
+    return await _graph_get_paragraph_detail(paragraph_hash, evidence_node_limit)
 
 
 @router.post("/graph/node")

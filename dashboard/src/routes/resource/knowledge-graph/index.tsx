@@ -22,6 +22,7 @@ import {
   getMemoryGraph,
   getMemoryGraphEdgeDetail,
   getMemoryGraphNodeDetail,
+  getMemoryGraphParagraphDetail,
   getMemoryGraphSearch,
   previewMemoryDelete,
   restoreMemoryDelete,
@@ -49,10 +50,17 @@ import type { GraphData, GraphNode, SelectedEdgeData } from './types'
 
 type GraphViewMode = 'entity' | 'evidence'
 
+type GraphRestoreTarget =
+  | { type: 'entity'; nodeId: string; viewMode: GraphViewMode }
+  | { type: 'edge'; source: string; target: string; viewMode: GraphViewMode }
+  | { type: 'paragraph'; paragraphHash: string; viewMode: GraphViewMode }
+  | { type: 'view'; viewMode: GraphViewMode }
+
 type DeleteDraft = {
   title: string
   description: string
   request: MemoryDeleteRequestPayload
+  restoreTarget: GraphRestoreTarget
 }
 
 function toEntityGraphData(payload: MemoryGraphPayload): GraphData {
@@ -208,10 +216,11 @@ function buildParagraphFromMetadata(
 
 interface KnowledgeGraphPageProps {
   embedded?: boolean
+  initialParagraphHash?: string
   onOpenConsole?: () => void
 }
 
-export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: KnowledgeGraphPageProps = {}) {
+export function KnowledgeGraphPage({ embedded = false, initialParagraphHash = '', onOpenConsole }: KnowledgeGraphPageProps = {}) {
   const navigate = useNavigate()
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
@@ -242,6 +251,7 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
   const [deleteExecuting, setDeleteExecuting] = useState(false)
   const [deleteRestoring, setDeleteRestoring] = useState(false)
   const [deletePreview, setDeletePreview] = useState<Awaited<ReturnType<typeof previewMemoryDelete>> | null>(null)
+  const [appliedInitialParagraphHash, setAppliedInitialParagraphHash] = useState('')
 
   const allRelationDetails = useMemo(
     () => mergeUniqueRelations(nodeDetail, edgeDetail),
@@ -263,7 +273,7 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
     setSelectedParagraphMetadata(null)
   }, [])
 
-  const loadGraph = useCallback(async (options?: { silent?: boolean }) => {
+  const loadGraph = useCallback(async (options?: { silent?: boolean; keepSelection?: boolean }) => {
     try {
       setLoading(true)
       const payload = await getMemoryGraph(Number(nodeLimit))
@@ -274,8 +284,10 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
       setGraphMeta(payload)
       setFullGraph(nextGraph)
       setGraphData(visibleGraph)
-      setEvidenceGraph({ nodes: [], edges: [] })
-      resetDetailSelections()
+      if (!options?.keepSelection) {
+        setEvidenceGraph({ nodes: [], edges: [] })
+        resetDetailSelections()
+      }
       if (!options?.silent) {
         toast({
           title: '图谱已更新',
@@ -386,63 +398,6 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
     }
   }, [])
 
-  const executeCurrentDelete = useCallback(async () => {
-    if (!deleteDraft) {
-      return
-    }
-    try {
-      setDeleteExecuting(true)
-      const result = await executeMemoryDelete(deleteDraft.request)
-      setDeleteResult(result)
-      toast({
-        title: result.success ? '删除成功' : '删除失败',
-        description: result.success
-          ? `操作 ${result.operation_id} 已完成`
-          : result.error || '未能执行删除',
-        variant: result.success ? 'default' : 'destructive',
-      })
-      if (result.success) {
-        await loadGraph({ silent: true })
-      }
-    } catch (error) {
-      setDeletePreviewError(error instanceof Error ? error.message : '删除失败')
-      toast({
-        title: '删除失败',
-        description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive',
-      })
-    } finally {
-      setDeleteExecuting(false)
-    }
-  }, [deleteDraft, loadGraph, toast])
-
-  const restoreCurrentDelete = useCallback(async () => {
-    if (!deleteResult?.operation_id) {
-      return
-    }
-    try {
-      setDeleteRestoring(true)
-      await restoreMemoryDelete({
-        operation_id: deleteResult.operation_id,
-        requested_by: 'knowledge_graph',
-      })
-      toast({
-        title: '恢复成功',
-        description: `删除操作 ${deleteResult.operation_id} 已恢复`,
-      })
-      closeDeleteDialog(false)
-      await loadGraph({ silent: true })
-    } catch (error) {
-      toast({
-        title: '恢复失败',
-        description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive',
-      })
-    } finally {
-      setDeleteRestoring(false)
-    }
-  }, [closeDeleteDialog, deleteResult?.operation_id, loadGraph, toast])
-
   const openNodeDetail = useCallback(async (
     nodeId: string,
     options?: { locateInEvidence?: boolean },
@@ -465,6 +420,7 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
       )
     }
     setSelectedEdgeData(null)
+    setNodeDetail(null)
     setEdgeDetail(null)
     setSelectedRelationDetail(null)
     setSelectedRelationMetadata(null)
@@ -479,6 +435,10 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
         setViewMode('evidence')
       }
     } catch (error) {
+      setSelectedNodeData(null)
+      setNodeDetail(null)
+      setEvidenceGraph({ nodes: [], edges: [] })
+      setViewMode('entity')
       toast({
         title: '加载节点详情失败',
         description: error instanceof Error ? error.message : '未知错误',
@@ -501,6 +461,7 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
     }
     setSelectedNodeData(null)
     setNodeDetail(null)
+    setEdgeDetail(null)
     setSelectedRelationDetail(null)
     setSelectedRelationMetadata(null)
     setSelectedParagraphDetail(null)
@@ -546,6 +507,10 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
         setViewMode('evidence')
       }
     } catch (error) {
+      setSelectedEdgeData(null)
+      setEdgeDetail(null)
+      setEvidenceGraph({ nodes: [], edges: [] })
+      setViewMode('entity')
       toast({
         title: '加载关系详情失败',
         description: error instanceof Error ? error.message : '未知错误',
@@ -555,6 +520,169 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
       setDetailLoading(false)
     }
   }, [graphData.edges, graphData.nodes, toast])
+
+  const openParagraphDetail = useCallback(async (
+    paragraphHash: string,
+    options?: { silent?: boolean },
+  ): Promise<boolean> => {
+    const cleanHash = String(paragraphHash || '').trim()
+    if (!cleanHash) {
+      return false
+    }
+    setSelectedNodeData(null)
+    setSelectedEdgeData(null)
+    setNodeDetail(null)
+    setEdgeDetail(null)
+    setSelectedRelationDetail(null)
+    setSelectedRelationMetadata(null)
+    try {
+      setDetailLoading(true)
+      const detail = await getMemoryGraphParagraphDetail(cleanHash)
+      setEvidenceGraph(toEvidenceGraphData(detail.evidence_graph))
+      setSelectedParagraphDetail(detail.paragraph)
+      setSelectedParagraphMetadata({
+        hash: detail.paragraph.hash,
+        source: detail.paragraph.source,
+        updated_at: detail.paragraph.updated_at,
+        entity_count: detail.paragraph.entity_count,
+        relation_count: detail.paragraph.relation_count,
+        preview: detail.paragraph.preview,
+      })
+      setViewMode('evidence')
+      return true
+    } catch (error) {
+      setEvidenceGraph({ nodes: [], edges: [] })
+      setSelectedParagraphDetail(null)
+      setSelectedParagraphMetadata(null)
+      setViewMode('entity')
+      if (!options?.silent) {
+        toast({
+          title: '定位段落失败',
+          description: error instanceof Error ? error.message : '未能找到这段记忆',
+          variant: 'destructive',
+        })
+      }
+      return false
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [toast])
+
+  const restoreGraphTarget = useCallback(async (target: GraphRestoreTarget) => {
+    if (target.type === 'entity') {
+      await openNodeDetail(target.nodeId, { locateInEvidence: target.viewMode === 'evidence' })
+      if (target.viewMode === 'entity') {
+        setViewMode('entity')
+      }
+      return
+    }
+    if (target.type === 'edge') {
+      await openEdgeDetail(target.source, target.target, { locateInEvidence: target.viewMode === 'evidence' })
+      if (target.viewMode === 'entity') {
+        setViewMode('entity')
+      }
+      return
+    }
+    if (target.type === 'paragraph') {
+      const restored = await openParagraphDetail(target.paragraphHash, { silent: true })
+      if (!restored) {
+        toast({
+          title: '已刷新图谱',
+          description: '原段落已被删除，当前返回实体关系图。',
+        })
+      }
+      return
+    }
+    setViewMode(target.viewMode)
+  }, [openEdgeDetail, openNodeDetail, openParagraphDetail, toast])
+
+  const getCurrentRestoreTarget = useCallback((fallback?: GraphRestoreTarget): GraphRestoreTarget => {
+    if (nodeDetail?.node.id) {
+      return { type: 'entity', nodeId: nodeDetail.node.id, viewMode }
+    }
+    if (edgeDetail?.edge.source && edgeDetail.edge.target) {
+      return { type: 'edge', source: edgeDetail.edge.source, target: edgeDetail.edge.target, viewMode }
+    }
+    if (selectedNodeData?.id) {
+      return { type: 'entity', nodeId: selectedNodeData.id, viewMode }
+    }
+    if (selectedEdgeData?.source.id && selectedEdgeData.target.id) {
+      return { type: 'edge', source: selectedEdgeData.source.id, target: selectedEdgeData.target.id, viewMode }
+    }
+    if (selectedParagraphDetail?.hash) {
+      return { type: 'paragraph', paragraphHash: selectedParagraphDetail.hash, viewMode }
+    }
+    return fallback ?? { type: 'view', viewMode }
+  }, [edgeDetail?.edge.source, edgeDetail?.edge.target, nodeDetail?.node.id, selectedEdgeData, selectedNodeData, selectedParagraphDetail?.hash, viewMode])
+
+  useEffect(() => {
+    const cleanHash = initialParagraphHash.trim()
+    if (!cleanHash || cleanHash === appliedInitialParagraphHash) {
+      return
+    }
+    setAppliedInitialParagraphHash(cleanHash)
+    void openParagraphDetail(cleanHash)
+  }, [appliedInitialParagraphHash, initialParagraphHash, openParagraphDetail])
+
+  const executeCurrentDelete = useCallback(async () => {
+    if (!deleteDraft) {
+      return
+    }
+    try {
+      setDeleteExecuting(true)
+      const result = await executeMemoryDelete(deleteDraft.request)
+      setDeleteResult(result)
+      toast({
+        title: result.success ? '删除成功' : '删除失败',
+        description: result.success
+          ? `操作 ${result.operation_id} 已完成`
+          : result.error || '未能执行删除',
+        variant: result.success ? 'default' : 'destructive',
+      })
+      if (result.success) {
+        await loadGraph({ silent: true, keepSelection: true })
+        await restoreGraphTarget(deleteDraft.restoreTarget)
+      }
+    } catch (error) {
+      setDeletePreviewError(error instanceof Error ? error.message : '删除失败')
+      toast({
+        title: '删除失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeleteExecuting(false)
+    }
+  }, [deleteDraft, loadGraph, restoreGraphTarget, toast])
+
+  const restoreCurrentDelete = useCallback(async () => {
+    if (!deleteResult?.operation_id) {
+      return
+    }
+    try {
+      setDeleteRestoring(true)
+      await restoreMemoryDelete({
+        operation_id: deleteResult.operation_id,
+        requested_by: 'knowledge_graph',
+      })
+      toast({
+        title: '恢复成功',
+        description: `删除操作 ${deleteResult.operation_id} 已恢复`,
+      })
+      const restoreTarget = deleteDraft?.restoreTarget ?? getCurrentRestoreTarget()
+      closeDeleteDialog(false)
+      await loadGraph({ silent: true, keepSelection: true })
+      await restoreGraphTarget(restoreTarget)
+    } catch (error) {
+      toast({
+        title: '恢复失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeleteRestoring(false)
+    }
+  }, [closeDeleteDialog, deleteDraft?.restoreTarget, deleteResult?.operation_id, getCurrentRestoreTarget, loadGraph, restoreGraphTarget, toast])
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     void openNodeDetail(node.id)
@@ -663,6 +791,11 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
     void openDeleteDialog({
       title: '删除实体',
       description: '将删除该实体，并自动包含与该实体关联的关系。可按需额外删除支撑段落。',
+      restoreTarget: getCurrentRestoreTarget({
+        type: 'entity',
+        nodeId: String(nodeDetail?.node.id ?? nodeDetail?.node.content ?? ''),
+        viewMode,
+      }),
       request: {
         mode: 'mixed',
         selector: {
@@ -673,7 +806,7 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
         requested_by: 'knowledge_graph',
       },
     })
-  }, [nodeDetail, openDeleteDialog, toast])
+  }, [getCurrentRestoreTarget, nodeDetail, openDeleteDialog, toast, viewMode])
 
   const requestDeleteEdgeGroup = useCallback(({ includeParagraphs }: { includeParagraphs: boolean }) => {
     const relationHashes = edgeDetail?.edge.relation_hashes ?? []
@@ -688,6 +821,12 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
     void openDeleteDialog({
       title: '删除关系组',
       description: '将删除这条聚合边对应的全部关系。可按需额外删除支撑段落。',
+      restoreTarget: getCurrentRestoreTarget({
+        type: 'edge',
+        source: String(edgeDetail?.edge.source ?? ''),
+        target: String(edgeDetail?.edge.target ?? ''),
+        viewMode,
+      }),
       request: {
         mode: 'mixed',
         selector: {
@@ -698,13 +837,14 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
         requested_by: 'knowledge_graph',
       },
     })
-  }, [edgeDetail, openDeleteDialog, toast])
+  }, [edgeDetail, getCurrentRestoreTarget, openDeleteDialog, toast, viewMode])
 
   const requestDeleteRelation = useCallback(
     (relation: MemoryGraphRelationDetailPayload, includeParagraphs = false) => {
       void openDeleteDialog({
         title: '删除关系',
         description: includeParagraphs ? '将删除这条关系及其支撑段落。' : '将只删除这条关系，保留段落证据。',
+        restoreTarget: getCurrentRestoreTarget({ type: 'view', viewMode }),
         request: {
           mode: 'mixed',
           selector: {
@@ -716,13 +856,18 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
         },
       })
     },
-    [openDeleteDialog],
+    [getCurrentRestoreTarget, openDeleteDialog, viewMode],
   )
 
   const requestDeleteParagraph = useCallback((paragraph: MemoryGraphParagraphDetailPayload) => {
     void openDeleteDialog({
       title: '删除段落证据',
       description: '将删除这段证据，并自动删除失去全部证据的关系。',
+      restoreTarget: getCurrentRestoreTarget({
+        type: 'paragraph',
+        paragraphHash: paragraph.hash,
+        viewMode,
+      }),
       request: {
         mode: 'mixed',
         selector: {
@@ -732,7 +877,7 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
         requested_by: 'knowledge_graph',
       },
     })
-  }, [openDeleteDialog])
+  }, [getCurrentRestoreTarget, openDeleteDialog, viewMode])
 
   const activeGraph = viewMode === 'entity' ? graphData : evidenceGraph
   const canShowEvidence = Boolean(selectedNodeData || selectedEdgeData || nodeDetail || edgeDetail)

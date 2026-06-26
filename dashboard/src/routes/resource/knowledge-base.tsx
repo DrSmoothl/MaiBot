@@ -90,6 +90,7 @@ interface KnowledgeBaseDeepLinkState {
   timeStart?: number
   timeEnd?: number
   episodeId?: string
+  paragraphHash?: string
   source?: string
   personId?: string
   taskId?: number
@@ -119,6 +120,7 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
     timeStart: parseOptionalTimestampQuery(params.get('from') ?? params.get('time_start')),
     timeEnd: parseOptionalTimestampQuery(params.get('to') ?? params.get('time_end')),
     episodeId: params.get('episode_id') || undefined,
+    paragraphHash: params.get('paragraph_hash') || undefined,
     source: params.get('source') || undefined,
     personId: params.get('person_id') || undefined,
     taskId: taskId ? Math.floor(taskId) : undefined,
@@ -182,6 +184,9 @@ export function KnowledgeBasePage() {
     timeStart: deepLinkRef.current.timeStart,
     timeEnd: deepLinkRef.current.timeEnd,
   })
+  const [graphInitialParagraphHash, setGraphInitialParagraphHash] = useState(
+    deepLinkRef.current.paragraphHash ?? ''
+  )
   const [profileInitialPersonId, setProfileInitialPersonId] = useState(
     deepLinkRef.current.personId ?? ''
   )
@@ -208,9 +213,10 @@ export function KnowledgeBasePage() {
   // 删除领域：来源/操作列表懒加载、操作详情、源选择、删除预览-执行（usePendingOperation）、恢复
   const memoryDelete = useMemoryDelete({
     active: activeTab === 'delete',
-    initialSourceSearch: deepLinkRef.current.source ?? '',
-    initialOperationSearch: deepLinkRef.current.operationId ?? '',
+    initialSourceSearch: deepLinkRef.current.paragraphHash ?? deepLinkRef.current.source ?? '',
+    initialOperationSearch: deepLinkRef.current.operationId ?? deepLinkRef.current.paragraphHash ?? '',
     initialOperationId: deepLinkRef.current.operationId ?? '',
+    initialItemSearch: deepLinkRef.current.paragraphHash ?? '',
   })
 
   // 纠错领域：纠错历史懒加载、任务详情、行为日志分页、回退；回退后刷新来源与运行时配置
@@ -310,6 +316,17 @@ export function KnowledgeBasePage() {
         return
       }
 
+      if (tab === 'graph') {
+        const paragraphHash = readJumpParam(target, 'paragraph_hash')
+        if (paragraphHash) {
+          setGraphInitialParagraphHash(paragraphHash)
+          switchMemoryTab('graph', { paragraph_hash: paragraphHash })
+          return
+        }
+        switchMemoryTab('graph')
+        return
+      }
+
       if (tab === 'profiles') {
         const personId = readJumpParam(target, 'person_id')
         setProfileInitialPersonId(personId)
@@ -338,9 +355,14 @@ export function KnowledgeBasePage() {
           memoryDelete.setOperationSearch(operationId)
           switchMemoryTab('delete', { operation_id: operationId })
         } else {
-          memoryDelete.setSourceSearch(source || paragraphHash)
-          memoryDelete.setOperationSearch(source || paragraphHash)
-          switchMemoryTab('delete', { source: source || undefined })
+          const searchToken = paragraphHash || source
+          memoryDelete.setSourceSearch(searchToken)
+          memoryDelete.setOperationSearch(searchToken)
+          memoryDelete.setSelectedOperationItemSearch(searchToken)
+          switchMemoryTab('delete', {
+            paragraph_hash: paragraphHash || undefined,
+            source: source || undefined,
+          })
         }
         // 删除数据由 useMemoryDelete 自管加载（enabled:active），切到该 tab 即触发拉取
         return
@@ -715,7 +737,11 @@ export function KnowledgeBasePage() {
               value="graph"
               className="border-border/60 bg-background h-[calc(100vh-132px)] min-h-[820px] overflow-hidden rounded-2xl border shadow-sm"
             >
-              <KnowledgeGraphPage embedded onOpenConsole={() => switchMemoryTab('import')} />
+              <KnowledgeGraphPage
+                embedded
+                initialParagraphHash={graphInitialParagraphHash}
+                onOpenConsole={() => switchMemoryTab('import')}
+              />
             </TabsContent>
 
             {shouldRenderMemoryTab('timeline') &&

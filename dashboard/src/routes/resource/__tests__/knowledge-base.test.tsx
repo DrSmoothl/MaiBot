@@ -119,6 +119,11 @@ vi.mock('@/lib/memory-api', () => ({
   protectMemory: vi.fn(),
   getMemoryProfileEvidence: vi.fn(),
   correctMemoryProfileEvidence: vi.fn(),
+  getMemoryGraph: vi.fn(),
+  getMemoryGraphSearch: vi.fn(),
+  getMemoryGraphNodeDetail: vi.fn(),
+  getMemoryGraphEdgeDetail: vi.fn(),
+  getMemoryGraphParagraphDetail: vi.fn(),
   previewMemoryDelete: vi.fn(),
   executeMemoryDelete: vi.fn(),
   restoreMemoryDelete: vi.fn(),
@@ -308,6 +313,62 @@ describe('KnowledgeBasePage import workflow', () => {
       paragraph_vector_backfill_running: 0,
       paragraph_vector_backfill_failed: 1,
       paragraph_vector_backfill_done: 3,
+    })
+    vi.mocked(memoryApi.getMemoryGraph).mockResolvedValue({
+      success: true,
+      nodes: [{ id: 'alpha', name: 'Alpha' }],
+      edges: [],
+      total_nodes: 1,
+      total_edges: 0,
+    })
+    vi.mocked(memoryApi.getMemoryGraphSearch).mockResolvedValue({
+      success: true,
+      query: '',
+      limit: 50,
+      count: 0,
+      items: [],
+    })
+    vi.mocked(memoryApi.getMemoryGraphNodeDetail).mockResolvedValue({
+      success: true,
+      node: { id: 'alpha', type: 'entity', content: 'Alpha', hash: 'entity-1', appearance_count: 1 },
+      relations: [],
+      paragraphs: [],
+      evidence_graph: { nodes: [], edges: [], focus_entities: [] },
+    })
+    vi.mocked(memoryApi.getMemoryGraphEdgeDetail).mockResolvedValue({
+      success: true,
+      edge: {
+        source: 'alpha',
+        target: 'beta',
+        weight: 1,
+        predicates: [],
+        relation_count: 0,
+        evidence_count: 0,
+        relation_hashes: [],
+      },
+      relations: [],
+      paragraphs: [],
+      evidence_graph: { nodes: [], edges: [], focus_entities: [] },
+    })
+    vi.mocked(memoryApi.getMemoryGraphParagraphDetail).mockResolvedValue({
+      success: true,
+      paragraph: {
+        hash: 'paragraph-jump',
+        content: '跳转段落内容',
+        preview: '跳转段落内容',
+        source: 'chat_summary:chat-1',
+        entity_count: 1,
+        relation_count: 0,
+        entities: ['Alpha'],
+        relations: [],
+      },
+      evidence_graph: {
+        nodes: [
+          { id: 'paragraph:paragraph-jump', type: 'paragraph', content: '跳转段落内容', metadata: { hash: 'paragraph-jump' } },
+        ],
+        edges: [],
+        focus_entities: ['Alpha'],
+      },
     })
 
     vi.mocked(memoryApi.getMemoryImportGuide).mockResolvedValue({
@@ -1115,6 +1176,129 @@ describe('KnowledgeBasePage import workflow', () => {
       })),
     )
     await waitFor(() => expect(memoryApi.getMemoryEpisode).toHaveBeenCalledWith('ep-1'))
+  }, 20_000)
+
+  it('jumps from paragraph timeline event to graph paragraph detail', async () => {
+    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
+      success: true,
+      chat: {
+        chat_id: 'chat-1',
+        chat_name: '测试群',
+        platform: 'qq',
+        group_id: '10001',
+        user_id: null,
+        is_group: true,
+      },
+      range: {
+        time_start: 1_710_000_000,
+        time_end: 1_710_003_600,
+        min_time: 1_710_000_000,
+        max_time: 1_710_003_600,
+      },
+      summary: {
+        total: 1,
+        by_type: { paragraph: 1, paragraph_created: 1 },
+      },
+      items: [
+        {
+          event_id: 'paragraph_created:paragraph-jump:1710000100',
+          event_type: 'paragraph_created',
+          category: 'paragraph',
+          occurred_at: 1_710_000_100,
+          chat_id: 'chat-1',
+          chat_name: '测试群',
+          title: '段落新增：跳转段落',
+          summary: '跳转段落摘要',
+          object_count: 1,
+          key_id: 'paragraph-jump',
+          source: 'chat_summary:chat-1',
+          attribution: 'source',
+          metadata: { paragraph_hash: 'paragraph-jump' },
+          jump_target: {
+            tab: 'graph',
+            params: { paragraph_hash: 'paragraph-jump' },
+          },
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
+    expect(await screen.findByText('段落新增：跳转段落')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '跳转' }))
+
+    await waitFor(() => {
+      expect(memoryApi.getMemoryGraphParagraphDetail).toHaveBeenCalledWith('paragraph-jump')
+    })
+    expect(window.location.search).toContain('tab=graph')
+    expect(window.location.search).toContain('paragraph_hash=paragraph-jump')
+  }, 20_000)
+
+  it('jumps from deleted paragraph timeline event to delete search when operation is missing', async () => {
+    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
+      success: true,
+      chat: {
+        chat_id: 'chat-1',
+        chat_name: '测试群',
+        platform: 'qq',
+        group_id: '10001',
+        user_id: null,
+        is_group: true,
+      },
+      range: {
+        time_start: 1_710_000_000,
+        time_end: 1_710_003_600,
+        min_time: 1_710_000_000,
+        max_time: 1_710_003_600,
+      },
+      summary: {
+        total: 1,
+        by_type: { paragraph: 1, paragraph_deleted: 1 },
+      },
+      items: [
+        {
+          event_id: 'paragraph_deleted:paragraph-missing-op:1710000200',
+          event_type: 'paragraph_deleted',
+          category: 'paragraph',
+          occurred_at: 1_710_000_200,
+          chat_id: 'chat-1',
+          chat_name: '测试群',
+          title: '段落删除：缺少操作',
+          summary: '删除段落摘要',
+          object_count: 1,
+          key_id: 'paragraph-missing-op',
+          source: 'chat_summary:chat-1',
+          attribution: 'source',
+          metadata: { paragraph_hash: 'paragraph-missing-op' },
+          jump_target: {
+            tab: 'delete',
+            params: {
+              paragraph_hash: 'paragraph-missing-op',
+              source: 'chat_summary:chat-1',
+            },
+          },
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
+    expect(await screen.findByText('段落删除：缺少操作')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '跳转' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '删除' })).toHaveAttribute('data-state', 'active')
+    })
+    expect(screen.getByPlaceholderText('搜索 operation / reason / requested_by / source')).toHaveValue('paragraph-missing-op')
+    expect(screen.getByPlaceholderText('搜索 source 名称')).toHaveValue('paragraph-missing-op')
+    expect(window.location.search).toContain('tab=delete')
+    expect(window.location.search).toContain('paragraph_hash=paragraph-missing-op')
   }, 20_000)
 
   it('paginates audit timeline events and supports page size presets', async () => {
