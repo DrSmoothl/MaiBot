@@ -279,6 +279,7 @@ class AMemorixHostService:
             "memory_tuning_admin": kernel.memory_tuning_admin,
             "memory_v5_admin": kernel.memory_v5_admin,
             "memory_delete_admin": kernel.memory_delete_admin,
+            "memory_fuzzy_modify_admin": kernel.memory_fuzzy_modify_admin,
         }
         if component_name in admin_actions:
             kwargs = dict(payload)

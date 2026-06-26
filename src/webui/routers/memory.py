@@ -212,6 +212,29 @@ class DeletePurgeRequest(BaseModel):
     limit: int = Field(1000, ge=1, le=5000)
 
 
+class FuzzyModifyPreviewRequest(BaseModel):
+    request_text: str = Field(..., min_length=1)
+    scope: str = "person_profile"
+    person_id: str = ""
+    person_keyword: str = ""
+    chat_id: str = ""
+    limit: int = Field(20, ge=1, le=100)
+    requested_by: str = "webui"
+    reason: str = ""
+
+
+class FuzzyModifyExecuteRequest(BaseModel):
+    plan_id: str = Field(..., min_length=1)
+    confirmed: bool = True
+    requested_by: str = "webui"
+    reason: str = ""
+
+
+class FuzzyModifyRollbackRequest(BaseModel):
+    requested_by: str = "webui"
+    reason: str = ""
+
+
 class FeedbackRollbackRequest(BaseModel):
     requested_by: str = "webui"
     reason: str = ""
@@ -1968,6 +1991,39 @@ async def _delete_purge(payload: DeletePurgeRequest) -> dict:
     )
 
 
+async def _fuzzy_modify_preview(payload: FuzzyModifyPreviewRequest) -> dict:
+    return await memory_service.fuzzy_modify_admin(
+        action="preview",
+        request_text=payload.request_text,
+        scope=payload.scope,
+        person_id=payload.person_id,
+        person_keyword=payload.person_keyword,
+        chat_id=payload.chat_id,
+        limit=payload.limit,
+        requested_by=payload.requested_by,
+        reason=payload.reason,
+    )
+
+
+async def _fuzzy_modify_execute(payload: FuzzyModifyExecuteRequest) -> dict:
+    return await memory_service.fuzzy_modify_admin(
+        action="execute",
+        plan_id=payload.plan_id,
+        confirmed=payload.confirmed,
+        requested_by=payload.requested_by,
+        reason=payload.reason,
+    )
+
+
+async def _fuzzy_modify_rollback(plan_id: str, payload: FuzzyModifyRollbackRequest) -> dict:
+    return await memory_service.fuzzy_modify_admin(
+        action="rollback",
+        plan_id=plan_id,
+        requested_by=payload.requested_by,
+        reason=payload.reason,
+    )
+
+
 async def _import_settings() -> dict:
     return await memory_service.import_admin(action="get_settings")
 
@@ -2539,6 +2595,40 @@ async def get_memory_delete_operation(operation_id: str):
 @router.post("/delete/purge")
 async def purge_memory_delete(payload: DeletePurgeRequest):
     return await _delete_purge(payload)
+
+
+@router.post("/fuzzy-modify/preview")
+async def preview_memory_fuzzy_modify(payload: FuzzyModifyPreviewRequest):
+    return await _fuzzy_modify_preview(payload)
+
+
+@router.post("/fuzzy-modify/execute")
+async def execute_memory_fuzzy_modify(payload: FuzzyModifyExecuteRequest):
+    return await _fuzzy_modify_execute(payload)
+
+
+@router.get("/fuzzy-modify/plans")
+async def list_memory_fuzzy_modify_plans(
+    limit: int = Query(50, ge=1, le=200),
+    status: str = Query(""),
+    scope: str = Query(""),
+):
+    return await memory_service.fuzzy_modify_admin(
+        action="list",
+        limit=limit,
+        status=status,
+        scope=scope,
+    )
+
+
+@router.get("/fuzzy-modify/plans/{plan_id}")
+async def get_memory_fuzzy_modify_plan(plan_id: str):
+    return await memory_service.fuzzy_modify_admin(action="get", plan_id=plan_id)
+
+
+@router.post("/fuzzy-modify/plans/{plan_id}/rollback")
+async def rollback_memory_fuzzy_modify_plan(plan_id: str, payload: FuzzyModifyRollbackRequest):
+    return await _fuzzy_modify_rollback(plan_id, payload)
 
 
 @router.get("/import/settings")

@@ -454,6 +454,13 @@ class MemoryService:
             logger.warning(f"删除管理调用失败: {exc}")
             return {"success": False, "error": str(exc)}
 
+    async def fuzzy_modify_admin(self, *, action: str, timeout_ms: int = 120000, **kwargs) -> Dict[str, Any]:
+        try:
+            return await self._invoke_admin("memory_fuzzy_modify_admin", action=action, timeout_ms=timeout_ms, **kwargs)
+        except Exception as exc:
+            logger.warning(f"模糊修改管理调用失败: {exc}")
+            return {"success": False, "error": str(exc)}
+
     async def get_recycle_bin(self, *, limit: int = 50) -> Dict[str, Any]:
         try:
             payload = await self._invoke("maintain_memory", {"action": "recycle_bin", "limit": max(1, int(limit or 50))})
