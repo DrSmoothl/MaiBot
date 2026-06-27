@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -60,6 +62,8 @@ class EmbeddingAPIAdapter:
         self._total_encoded = 0
         self._total_errors = 0
         self._total_time = 0.0
+        self._last_success_model_name = ""
+        self._last_success_provider_name = ""
 
         logger.info(
             "Embedding 初始化: "
@@ -95,6 +99,58 @@ class EmbeddingAPIAdapter:
         if self.model_name and self.model_name != "auto":
             return [self.model_name, *[name for name in configured if name != self.model_name]]
         return configured
+
+    @staticmethod
+    def _fingerprint_hash(payload: Dict[str, Any]) -> str:
+        normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        return f"sha256:{digest}"
+
+    def _resolve_model_provider_name(self, model_name: str) -> str:
+        token = str(model_name or "").strip()
+        if not token:
+            return ""
+        try:
+            return str(self._find_model_info(token).api_provider or "").strip()
+        except Exception:
+            return ""
+
+    def get_embedding_fingerprint(self, *, dimension: Optional[int] = None) -> Dict[str, Any]:
+        """Return a compact fingerprint for the vector space used by this adapter."""
+        effective_dimension = max(1, int(dimension or self.get_embedding_dimension()))
+        model_token = str(self._last_success_model_name or "").strip()
+        provider_token = str(self._last_success_provider_name or "").strip()
+        source = "observed" if model_token else "configured"
+        if not model_token:
+            model_token = str(self.model_name or "auto").strip() or "auto"
+            if model_token != "auto":
+                provider_token = self._resolve_model_provider_name(model_token)
+        candidate_names = [
+            str(item or "").strip()
+            for item in self._resolve_candidate_model_names()
+            if str(item or "").strip()
+        ]
+        if model_token == "auto":
+            provider_token = ""
+
+        compare_payload: Dict[str, Any] = {
+            "model": model_token,
+            "provider": provider_token,
+            "dimension": effective_dimension,
+            "dimension_request_mode": self.dimension_request_mode,
+        }
+        if model_token == "auto":
+            compare_payload["candidate_models"] = candidate_names
+
+        return {
+            "version": 1,
+            "hash": self._fingerprint_hash(compare_payload),
+            "model": model_token,
+            "provider": provider_token,
+            "dimension": effective_dimension,
+            "dimension_request_mode": self.dimension_request_mode,
+            "source": source,
+        }
 
     def get_requested_dimension(self) -> int:
         if self._dimension is not None:
@@ -255,6 +311,8 @@ class EmbeddingAPIAdapter:
                     embedding,
                     source=f"embedding 模型 {candidate_name}",
                 )
+                self._last_success_model_name = str(candidate_name or "").strip()
+                self._last_success_provider_name = str(model_info.api_provider or "").strip()
                 return vector.tolist()
             except Exception as exc:
                 last_exc = exc

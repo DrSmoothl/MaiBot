@@ -180,6 +180,9 @@ export interface MemoryRuntimeConfigPayload {
   config: Record<string, unknown>
   data_dir: string
   embedding_dimension: number
+  embedding_fingerprint?: Record<string, unknown>
+  stored_embedding_fingerprint?: Record<string, unknown>
+  embedding_fingerprint_status?: string
   fuzzy_modify_candidate_limit?: number
   stored_vector_dimension?: number
   vector_rebuild_required?: boolean
@@ -214,6 +217,9 @@ export interface MemoryVectorRebuildPayload {
   errors?: string[]
   elapsed_ms?: number
   embedding_degraded?: boolean
+  embedding_fingerprint?: Record<string, unknown>
+  stored_embedding_fingerprint?: Record<string, unknown>
+  embedding_fingerprint_status?: string
   stored_vector_dimension?: number
   embedding_dimension?: number
   vector_rebuild_required?: boolean

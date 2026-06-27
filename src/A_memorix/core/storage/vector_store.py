@@ -670,7 +670,12 @@ class VectorStore:
 
         logger.info("Compaction Complete.")
 
-    def save(self, data_dir: Optional[Union[str, Path]] = None) -> None:
+    def save(
+        self,
+        data_dir: Optional[Union[str, Path]] = None,
+        *,
+        embedding_fingerprint: Optional[Dict[str, Any]] = None,
+    ) -> None:
         with self._lock:
             if not data_dir:
                 data_dir = self.data_dir
@@ -695,6 +700,8 @@ class VectorStore:
                 "deleted_ids": list(self._deleted_ids),
                 "known_hashes": list(self._known_hashes),
             }
+            if isinstance(embedding_fingerprint, dict) and embedding_fingerprint:
+                meta["embedding_fingerprint"] = dict(embedding_fingerprint)
 
             with atomic_write(data_dir / "vectors_metadata.pkl", "wb") as f:
                 pickle.dump(meta, f)

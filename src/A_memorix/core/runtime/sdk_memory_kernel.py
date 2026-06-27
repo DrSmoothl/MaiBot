@@ -347,8 +347,12 @@ class SDKMemoryKernel:
             return False
         return not self.is_chat_enabled(stream_token, group_token, user_token)
 
-    def _stored_vector_dimension(self) -> Optional[int]:
-        ready_manifest = self._read_dual_vector_ready_manifest() if self._dual_vector_pools_config_enabled() else None
+    def _stored_vector_dimension(self, store: Optional[VectorStore] = None) -> Optional[int]:
+        ready_manifest = (
+            self._read_dual_vector_ready_manifest()
+            if store is None and self._dual_vector_pools_config_enabled()
+            else None
+        )
         if ready_manifest is not None:
             try:
                 manifest_dimension = int(ready_manifest.get("dimension") or 0)
@@ -356,7 +360,8 @@ class SDKMemoryKernel:
                 manifest_dimension = 0
             if manifest_dimension > 0:
                 return manifest_dimension
-        meta_path = self.data_dir / "vectors" / "vectors_metadata.pkl"
+        vector_dir = Path(store.data_dir) if store is not None and store.data_dir is not None else self._vectors_root()
+        meta_path = vector_dir / "vectors_metadata.pkl"
         if not meta_path.exists():
             return None
         try:
@@ -371,6 +376,77 @@ class SDKMemoryKernel:
             return None
         return value if value > 0 else None
 
+    @staticmethod
+    def _normalize_embedding_fingerprint(value: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(value, dict):
+            return None
+        hash_value = str(value.get("hash", "") or "").strip()
+        if not hash_value:
+            return None
+        payload = dict(value)
+        payload["hash"] = hash_value
+        return payload
+
+    def _current_embedding_fingerprint(self) -> Optional[Dict[str, Any]]:
+        manager = self.embedding_manager
+        getter = getattr(manager, "get_embedding_fingerprint", None)
+        if not callable(getter):
+            return None
+        try:
+            return self._normalize_embedding_fingerprint(getter(dimension=int(self.embedding_dimension)))
+        except Exception as exc:
+            logger.warning(f"生成 embedding 指纹失败: {exc}")
+            return None
+
+    def _stored_embedding_fingerprint(self, store: Optional[VectorStore] = None) -> Optional[Dict[str, Any]]:
+        ready_manifest = (
+            self._read_dual_vector_ready_manifest()
+            if store is None and self._dual_vector_pools_config_enabled()
+            else None
+        )
+        if ready_manifest is not None:
+            manifest_fingerprint = self._normalize_embedding_fingerprint(
+                ready_manifest.get("embedding_fingerprint")
+            )
+            if manifest_fingerprint is not None:
+                return manifest_fingerprint
+
+        vector_dir = Path(store.data_dir) if store is not None and store.data_dir is not None else self._vectors_root()
+        meta_path = vector_dir / "vectors_metadata.pkl"
+        if not meta_path.exists():
+            return None
+        try:
+            with open(meta_path, "rb") as handle:
+                meta = pickle.load(handle)
+        except Exception as exc:
+            logger.warning(f"读取向量指纹元数据失败: {exc}")
+            return None
+        if not isinstance(meta, dict):
+            return None
+        return self._normalize_embedding_fingerprint(meta.get("embedding_fingerprint"))
+
+    @staticmethod
+    def _embedding_fingerprint_status(
+        current: Optional[Dict[str, Any]],
+        stored: Optional[Dict[str, Any]],
+        *,
+        has_stored_vectors: bool,
+    ) -> str:
+        if not has_stored_vectors:
+            return "none"
+        if current is None:
+            return "unknown"
+        if stored is None:
+            return "missing"
+        return "matched" if str(current.get("hash", "")) == str(stored.get("hash", "")) else "mismatched"
+
+    def _stored_vectors_compatible_with_current_embedding(self, store: Optional[VectorStore] = None) -> bool:
+        current = self._current_embedding_fingerprint()
+        stored = self._stored_embedding_fingerprint(store)
+        if current is None or stored is None:
+            return False
+        return str(current.get("hash", "") or "") == str(stored.get("hash", "") or "")
+
     def _vector_mismatch_error(self, *, stored_dimension: int, detected_dimension: int) -> str:
         return (
             "检测到现有向量库与当前 embedding 输出维度不一致："
@@ -384,17 +460,37 @@ class SDKMemoryKernel:
         if self._vector_persist_blocked_until_rebuild and self._vector_rebuild_source_dimension is not None:
             stored_dimension = int(self._vector_rebuild_source_dimension)
         current_dimension = int(self.embedding_dimension)
-        rebuild_required = stored_dimension is not None and stored_dimension != current_dimension
+        dimension_rebuild_required = stored_dimension is not None and stored_dimension != current_dimension
+        current_fingerprint = self._current_embedding_fingerprint()
+        stored_fingerprint = self._stored_embedding_fingerprint()
+        fingerprint_status = self._embedding_fingerprint_status(
+            current_fingerprint,
+            stored_fingerprint,
+            has_stored_vectors=stored_dimension is not None,
+        )
+        fingerprint_rebuild_required = fingerprint_status in {"missing", "mismatched"}
+        rebuild_required = dimension_rebuild_required or fingerprint_rebuild_required
+        if dimension_rebuild_required:
+            message = self._vector_mismatch_error(
+                stored_dimension=int(stored_dimension or 0),
+                detected_dimension=current_dimension,
+            )
+        elif fingerprint_status == "mismatched":
+            message = "检测到 embedding 模型指纹与现有向量库不一致，请重建向量。"
+        elif fingerprint_status == "missing":
+            message = "现有向量库缺少 embedding 模型指纹，无法确认模型一致性，建议重建向量。"
+        elif fingerprint_status == "unknown":
+            message = "当前 embedding 模型指纹不可用，无法确认向量库模型一致性。"
+        else:
+            message = ""
         return {
             "stored_vector_dimension": int(stored_dimension or 0),
             "embedding_dimension": current_dimension,
             "vector_rebuild_required": bool(rebuild_required),
-            "message": self._vector_mismatch_error(
-                stored_dimension=int(stored_dimension or 0),
-                detected_dimension=current_dimension,
-            )
-            if rebuild_required
-            else "",
+            "message": message,
+            "embedding_fingerprint": current_fingerprint or {},
+            "stored_embedding_fingerprint": stored_fingerprint or {},
+            "embedding_fingerprint_status": fingerprint_status,
         }
 
     def _embedding_fallback_enabled(self) -> bool:
@@ -475,6 +571,7 @@ class SDKMemoryKernel:
         stats: Dict[str, Dict[str, int]],
         migration_stats: Dict[str, Dict[str, int]],
     ) -> None:
+        embedding_fingerprint = self._current_embedding_fingerprint()
         payload = {
             "status": "ready",
             "version": 1,
@@ -487,6 +584,8 @@ class SDKMemoryKernel:
             "stats": stats,
             "migration": migration_stats,
         }
+        if embedding_fingerprint is not None:
+            payload["embedding_fingerprint"] = embedding_fingerprint
         path = self._dual_vector_ready_manifest_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(".json.tmp")
@@ -567,6 +666,11 @@ class SDKMemoryKernel:
             quantization_type=QuantizationType.INT8,
             data_dir=data_dir,
         )
+
+    def _save_vector_store(self, store: Optional[VectorStore]) -> None:
+        if store is None:
+            return
+        store.save(embedding_fingerprint=self._current_embedding_fingerprint())
 
     def _reload_dual_vector_stores_from_disk(self) -> bool:
         if not self._dual_vector_ready(expected_dimension=self.embedding_dimension):
@@ -1198,7 +1302,6 @@ class SDKMemoryKernel:
         target_id_prefix: str = "",
         source_store: Optional[VectorStore] = None,
     ) -> tuple[int, int, str, List[str], List[str], Dict[str, int]]:
-        source = source_store or self.vector_store
         id_pairs = [
             (
                 str(item_id or "").strip(),
@@ -1208,7 +1311,7 @@ class SDKMemoryKernel:
             if str(item_id or "").strip()
         ]
         copied, copied_source_ids, missing_pairs = self._copy_rebuild_vectors_from_store(
-            source_store=source,
+            source_store=source_store,
             target_store=target_store,
             id_pairs=id_pairs,
             batch_size=batch_size,
@@ -1306,6 +1409,10 @@ class SDKMemoryKernel:
 
         dual_mode = self._dual_vector_pools_config_enabled()
         legacy_source_store = self.vector_store if dual_mode else None
+        if legacy_source_store is not None and not self._stored_vectors_compatible_with_current_embedding(
+            legacy_source_store
+        ):
+            legacy_source_store = None
         dual_build_root: Optional[Path] = None
         build_paragraph_vector_store: Optional[VectorStore] = None
         build_graph_vector_store: Optional[VectorStore] = None
@@ -1501,10 +1608,10 @@ class SDKMemoryKernel:
                 try:
                     if build_paragraph_vector_store is not None:
                         build_paragraph_vector_store.warmup_index(force_train=True)
-                        build_paragraph_vector_store.save()
+                        self._save_vector_store(build_paragraph_vector_store)
                     if build_graph_vector_store is not None:
                         build_graph_vector_store.warmup_index(force_train=True)
-                        build_graph_vector_store.save()
+                        self._save_vector_store(build_graph_vector_store)
                     self._activate_dual_vector_build_dirs(dual_build_root)
                     self._write_dual_vector_ready_manifest(stats=stats, migration_stats=migration_stats)
                     activation_ok = self._reload_dual_vector_stores_from_disk()
@@ -1563,7 +1670,7 @@ class SDKMemoryKernel:
         if rebuild_success:
             self._vector_persist_blocked_until_rebuild = False
             self._vector_rebuild_source_dimension = None
-        self._persist()
+        self._persist(force_vectors=rebuild_success)
         return {
             "success": rebuild_success,
             "dry_run": False,
@@ -2817,6 +2924,9 @@ class SDKMemoryKernel:
                 "stored_vector_dimension": int(rebuild_status["stored_vector_dimension"]),
                 "vector_rebuild_required": bool(rebuild_status["vector_rebuild_required"]),
                 "vector_rebuild_message": str(rebuild_status["message"]),
+                "embedding_fingerprint": rebuild_status.get("embedding_fingerprint") or {},
+                "stored_embedding_fingerprint": rebuild_status.get("stored_embedding_fingerprint") or {},
+                "embedding_fingerprint_status": str(rebuild_status.get("embedding_fingerprint_status") or "unknown"),
                 "auto_save": bool(self._cfg("advanced.enable_auto_save", True)),
                 "relation_vectors_enabled": bool(self.relation_vectors_enabled),
                 "runtime_ready": self.is_runtime_ready(),
@@ -3228,17 +3338,20 @@ class SDKMemoryKernel:
         hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)
         return {"success": True, "results": hits, "count": len(hits), "query_type": "episode"}
 
-    def _persist(self) -> None:
+    def _persist(self, *, force_vectors: bool = False) -> None:
+        rebuild_required = False if force_vectors else bool(
+            self._vector_rebuild_status().get("vector_rebuild_required", False)
+        )
         if self.vector_store is not None and not self._dual_vector_pools_enabled():
-            if self._vector_persist_blocked_until_rebuild:
-                logger.debug("检测到向量维度不匹配且尚未重建，跳过向量库持久化以保留重建提示")
+            if rebuild_required:
+                logger.debug("检测到向量库需要重建，跳过向量库持久化以保留重建提示")
             else:
-                self.vector_store.save()
-        if self._dual_vector_pools_enabled() and not self._vector_persist_blocked_until_rebuild:
+                self._save_vector_store(self.vector_store)
+        if self._dual_vector_pools_enabled() and not rebuild_required:
             if self.paragraph_vector_store is not None:
-                self.paragraph_vector_store.save()
+                self._save_vector_store(self.paragraph_vector_store)
             if self.graph_vector_store is not None:
-                self.graph_vector_store.save()
+                self._save_vector_store(self.graph_vector_store)
         if self.graph_store is not None:
             self.graph_store.save()
         if self.sparse_index is not None and getattr(self.sparse_index.config, "enabled", False):
