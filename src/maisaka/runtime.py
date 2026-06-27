@@ -390,6 +390,11 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             await self._reply_effect_tracker.finalize_all("runtime_stop")
         focus_mode_manager.release_focus(self.session_id)
         await self._tool_registry.close()
+        if self._mcp_manager is not None:
+            try:
+                await self._mcp_manager.close()
+            except Exception as exc:
+                logger.warning(f"{self.log_prefix} 关闭 MCP 连接失败: {exc}")
         self._mcp_manager = None
         self._mcp_host_bridge = None
         remove_stage_status(self.session_id)
