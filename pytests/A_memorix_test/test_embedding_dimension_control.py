@@ -65,10 +65,13 @@ def test_auto_embedding_fingerprint_uses_resolved_candidate_model(monkeypatch):
     adapter = EmbeddingAPIAdapter(default_dimension=8, model_name="auto")
     adapter._dimension = 8
     adapter._dimension_detected = True
-    model_info = SimpleNamespace(name="embedding-model", api_provider="provider-1")
+    model_info_by_name = {
+        "embedding-model": SimpleNamespace(name="embedding-model", api_provider="provider-1"),
+        "fallback-model": SimpleNamespace(name="fallback-model", api_provider="provider-2"),
+    }
 
     monkeypatch.setattr(adapter, "_resolve_candidate_model_names", lambda: ["embedding-model", "fallback-model"])
-    monkeypatch.setattr(adapter, "_find_model_info", lambda model_name: model_info)
+    monkeypatch.setattr(adapter, "_find_model_info", lambda model_name: model_info_by_name[model_name])
 
     cold_fingerprint = adapter.get_embedding_fingerprint(dimension=8)
     adapter._last_success_model_name = "embedding-model"
@@ -79,6 +82,8 @@ def test_auto_embedding_fingerprint_uses_resolved_candidate_model(monkeypatch):
     assert cold_fingerprint["provider"] == "provider-1"
     assert cold_fingerprint["source"] == "configured"
     assert observed_fingerprint["source"] == "observed"
+    assert observed_fingerprint["model"] == "embedding-model"
+    assert observed_fingerprint["provider"] == "provider-1"
     assert cold_fingerprint["hash"] == observed_fingerprint["hash"]
 
 

@@ -10,7 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import asyncio
 import hashlib
 import json
@@ -52,6 +52,7 @@ from ..utils.model_routing import (
     pick_text_generation_task,
     resolve_text_generation_model_selector,
 )
+from ..utils.relation_write_service import RelationWriteService
 from ..utils.runtime_self_check import ensure_runtime_self_check
 from ..utils.time_parser import normalize_time_meta
 
@@ -478,7 +479,7 @@ class ImportTaskManager:
         return f"{target_type}:{token}"
 
     def _vector_stores_for_persistence(self) -> List[Any]:
-        stores = [getattr(self.plugin, "vector_store", None)]
+        stores: List[Any] = []
         if self._dual_vector_pools_enabled():
             stores.extend(
                 [
@@ -486,8 +487,10 @@ class ImportTaskManager:
                     getattr(self.plugin, "graph_vector_store", None),
                 ]
             )
+        else:
+            stores.append(getattr(self.plugin, "vector_store", None))
 
-        seen: set[int] = set()
+        seen: Set[int] = set()
         unique_stores: List[Any] = []
         for store in stores:
             if store is None:
@@ -3662,11 +3665,11 @@ class ImportTaskManager:
         try:
             if target_store is None:
                 raise RuntimeError("graph_vector_store_missing")
-            relation_service = getattr(self.plugin, "relation_write_service", None)
-            if relation_service is not None:
-                vector_text = relation_service.build_relation_vector_text(subject_token, predicate_token, object_token)
-            else:
-                vector_text = f"{subject_token} {predicate_token} {object_token}\n{subject_token}和{object_token}的关系是{predicate_token}"
+            vector_text = RelationWriteService.build_relation_vector_text(
+                subject_token,
+                predicate_token,
+                object_token,
+            )
             emb = await self.plugin.embedding_manager.encode(vector_text)
             if vector_id in target_store:
                 await self._set_relation_vector_state_locked(rel_hash, "ready")

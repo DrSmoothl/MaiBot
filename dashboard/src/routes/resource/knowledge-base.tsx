@@ -169,7 +169,7 @@ function readJumpNumber(target: MemoryTimelineJumpTargetPayload, key: string): n
 
 function normalizeVectorPoolMode(value: unknown, fallback: 'single' | 'dual' = 'single'): 'single' | 'dual' {
   const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  return mode === 'dual' ? 'dual' : fallback
+  return mode === 'dual' || mode === 'single' ? mode : fallback
 }
 
 function formatVectorCount(value?: number): string {

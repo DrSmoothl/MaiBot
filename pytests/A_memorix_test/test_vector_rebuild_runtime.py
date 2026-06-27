@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
 import asyncio
 import hashlib
@@ -46,7 +46,7 @@ class _FakeEmbeddingManager:
     async def encode_batch(self, texts: Any, **kwargs: Any) -> np.ndarray:
         return await self.encode(texts, **kwargs)
 
-    def get_embedding_fingerprint(self, *, dimension: int | None = None) -> dict[str, Any]:
+    def get_embedding_fingerprint(self, *, dimension: int | None = None) -> Dict[str, Any]:
         effective_dimension = int(dimension or self.default_dimension)
         raw = f"{self.model_name}|fake-provider|{effective_dimension}|explicit"
         return {
@@ -828,29 +828,30 @@ async def test_plain_vector_store_save_preserves_existing_embedding_fingerprint(
         config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
     )
     await kernel.initialize()
-    assert kernel.vector_store is not None
-    kernel.vector_store.add(
-        np.ones((1, fake_embedding_manager.default_dimension), dtype=np.float32),
-        ["fingerprint-preserved"],
-    )
-    kernel._save_vector_store(kernel.vector_store)
+    try:
+        assert kernel.vector_store is not None
+        kernel.vector_store.add(
+            np.ones((1, fake_embedding_manager.default_dimension), dtype=np.float32),
+            ["fingerprint-preserved"],
+        )
+        kernel._save_vector_store(kernel.vector_store)
 
-    meta_path = data_dir / "vectors" / "vectors_metadata.pkl"
-    with open(meta_path, "rb") as handle:
-        first_meta = pickle.load(handle)
-    first_fingerprint = dict(first_meta["embedding_fingerprint"])
+        meta_path = data_dir / "vectors" / "vectors_metadata.pkl"
+        with open(meta_path, "rb") as handle:
+            first_meta = pickle.load(handle)
+        first_fingerprint = dict(first_meta["embedding_fingerprint"])
 
-    kernel.vector_store.save()
+        kernel.vector_store.save()
 
-    with open(meta_path, "rb") as handle:
-        second_meta = pickle.load(handle)
-    assert second_meta["embedding_fingerprint"] == first_fingerprint
+        with open(meta_path, "rb") as handle:
+            second_meta = pickle.load(handle)
+        assert second_meta["embedding_fingerprint"] == first_fingerprint
 
-    config = await kernel.memory_runtime_admin(action="get_config")
-    assert config["embedding_fingerprint_status"] == "matched"
-    assert config["vector_rebuild_required"] is False
-
-    await kernel.shutdown()
+        config = await kernel.memory_runtime_admin(action="get_config")
+        assert config["embedding_fingerprint_status"] == "matched"
+        assert config["vector_rebuild_required"] is False
+    finally:
+        await kernel.shutdown()
 
 
 @pytest.mark.asyncio
@@ -868,13 +869,19 @@ async def test_dual_ready_manifest_rejects_mismatched_embedding_fingerprint(
         config=_dual_kernel_config(data_dir, first_embedding_manager.default_dimension),
     )
     await first_kernel.initialize()
-    assert first_kernel.metadata_store is not None
-    first_kernel.metadata_store.add_paragraph("双池旧指纹段落", source="test")
-    first_kernel.metadata_store.add_entity("双池旧指纹实体")
-    result = await first_kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2, include_relations=False)
-    assert result["success"] is True
-    assert first_kernel._dual_vector_pools_enabled() is True
-    await first_kernel.shutdown()
+    try:
+        assert first_kernel.metadata_store is not None
+        first_kernel.metadata_store.add_paragraph("双池旧指纹段落", source="test")
+        first_kernel.metadata_store.add_entity("双池旧指纹实体")
+        result = await first_kernel.memory_runtime_admin(
+            action="rebuild_all_vectors",
+            batch_size=2,
+            include_relations=False,
+        )
+        assert result["success"] is True
+        assert first_kernel._dual_vector_pools_enabled() is True
+    finally:
+        await first_kernel.shutdown()
 
     second_embedding_manager = _FakeEmbeddingManager(dimension=8, model_name="fake-embedding-b")
     monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: second_embedding_manager)

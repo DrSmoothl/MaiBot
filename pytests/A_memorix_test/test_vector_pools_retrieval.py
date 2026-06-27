@@ -1,7 +1,7 @@
 """双向量池检索功能测试。"""
 
-from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Dict, List, Optional, Tuple
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -254,7 +254,7 @@ def _make_fake_meta():
     meta.get_relations_by_hashes = MagicMock(return_value={})
     meta.get_paragraphs_by_relation_hashes = MagicMock(return_value={})
     getter = MagicMock(return_value={})
-    setattr(meta, "get_paragraphs_by_entity_hashes", getter)
+    meta.get_paragraphs_by_entity_hashes = getter
     meta.get_entity_paragraphs = MagicMock(return_value={})
     meta.get_relation_paragraphs = MagicMock(return_value={})
     return meta
@@ -275,20 +275,22 @@ def _make_fake_graph_vector_store(
 
 
 class TestCollectDualGraphEvidence:
-    def test_empty_graph_store_returns_empty(self):
+    @pytest.mark.asyncio
+    async def test_empty_graph_store_returns_empty(self):
         cfg = VectorPoolsConfig(mode="dual")
         retriever = _make_retriever(cfg)
         retriever.graph_vector_store = _make_fake_graph_vector_store([])
         retriever.metadata_store = _make_fake_meta()
 
-        result = retriever._collect_dual_graph_evidence(
+        result = await retriever._collect_dual_graph_evidence(
             query_emb=None,
             top_k=40,
             temporal=None,
         )
         assert result == {}
 
-    def test_entity_vector_maps_to_entity_paragraphs(self):
+    @pytest.mark.asyncio
+    async def test_entity_vector_maps_to_entity_paragraphs(self):
         """图谱向量池中 entity:xxx ID 应展开为关联段落并以加权证据分计入。"""
         cfg = VectorPoolsConfig(entity_expand_per_hit=2)
         retriever = _make_retriever(cfg)
@@ -309,11 +311,11 @@ class TestCollectDualGraphEvidence:
                 "e2": [{"hash": "p2", "content": "小红喜欢茶", "word_count": 4}],
             }
         )
-        setattr(meta, "get_paragraphs_by_entity_hashes", meta.get_entity_paragraphs_getter)
+        meta.get_paragraphs_by_entity_hashes = meta.get_entity_paragraphs_getter
         meta.get_entity_paragraphs.return_value = {}
         retriever.metadata_store = meta
 
-        result = retriever._collect_dual_graph_evidence(
+        result = await retriever._collect_dual_graph_evidence(
             query_emb=None,
             top_k=40,
             temporal=None,
@@ -326,7 +328,8 @@ class TestCollectDualGraphEvidence:
         assert p1_evidence[0][0]["name"] == "小明"
         assert p1_evidence[0][1] == pytest.approx(1.0 * 0.55)  # normalized_score * entity_evidence_weight
 
-    def test_relation_vector_maps_to_relation_paragraphs(self):
+    @pytest.mark.asyncio
+    async def test_relation_vector_maps_to_relation_paragraphs(self):
         """图谱向量池中 relation:xxx ID 应展开并加权。"""
         cfg = VectorPoolsConfig(relation_expand_per_hit=3)
         retriever = _make_retriever(cfg)
@@ -350,7 +353,7 @@ class TestCollectDualGraphEvidence:
         }
         retriever.metadata_store = meta
 
-        result = retriever._collect_dual_graph_evidence(
+        result = await retriever._collect_dual_graph_evidence(
             query_emb=None,
             top_k=40,
             temporal=None,
@@ -361,7 +364,8 @@ class TestCollectDualGraphEvidence:
         assert p3_evidence[0][0]["type"] == "relation"
         assert p3_evidence[0][0]["subject"] == "小明"
 
-    def test_unknown_ids_skipped(self):
+    @pytest.mark.asyncio
+    async def test_unknown_ids_skipped(self):
         retriever = _make_retriever()
         retriever.graph_vector_store = _make_fake_graph_vector_store(
             [("entity:ghost", 0.99), ("relation:phantom", 0.5)]
@@ -371,14 +375,15 @@ class TestCollectDualGraphEvidence:
         meta.get_relations_by_hashes = MagicMock(return_value={})
         retriever.metadata_store = meta
 
-        result = retriever._collect_dual_graph_evidence(
+        result = await retriever._collect_dual_graph_evidence(
             query_emb=None,
             top_k=40,
             temporal=None,
         )
         assert result == {}
 
-    def test_respects_expand_limits(self):
+    @pytest.mark.asyncio
+    async def test_respects_expand_limits(self):
         cfg = VectorPoolsConfig(
             relation_expand_per_hit=1,
             entity_expand_per_hit=1,
@@ -403,11 +408,11 @@ class TestCollectDualGraphEvidence:
                 "e3": [{"hash": f"r{i}", "content": f"c{i}", "word_count": 1} for i in range(5)],
             }
         )
-        setattr(meta, "get_paragraphs_by_entity_hashes", meta.get_entity_paragraphs_getter)
+        meta.get_paragraphs_by_entity_hashes = meta.get_entity_paragraphs_getter
         meta.get_entity_paragraphs.return_value = {}
         retriever.metadata_store = meta
 
-        result = retriever._collect_dual_graph_evidence(
+        result = await retriever._collect_dual_graph_evidence(
             query_emb=None,
             top_k=40,
             temporal=None,

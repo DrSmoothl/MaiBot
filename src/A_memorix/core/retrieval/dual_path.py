@@ -1603,7 +1603,7 @@ class DualPathRetriever:
             normalized_items.append((item_type, hash_value, float(raw_score), float(normalized_score)))
         return normalized_items
 
-    def _collect_dual_graph_evidence(
+    async def _collect_dual_graph_evidence(
         self,
         *,
         query_emb: np.ndarray,
@@ -1612,7 +1612,7 @@ class DualPathRetriever:
     ) -> Dict[str, Dict[str, Any]]:
         cfg = self.config.vector_pools
         graph_store = self.graph_vector_store
-        graph_ids, graph_scores = graph_store.search(query_emb, k=top_k)
+        graph_ids, graph_scores = await asyncio.to_thread(graph_store.search, query_emb, k=top_k)
         parsed_items: List[Tuple[str, str, float]] = []
         relation_hashes: List[str] = []
         entity_hashes: List[str] = []
@@ -1725,7 +1725,11 @@ class DualPathRetriever:
         candidates: Dict[str, RetrievalResult] = {}
         if embedding_ok and query_emb is not None:
             paragraph_top_k = max(top_k, int(self.config.vector_pools.paragraph_top_k))
-            para_ids, para_scores = self.paragraph_vector_store.search(query_emb, k=paragraph_top_k)
+            para_ids, para_scores = await asyncio.to_thread(
+                self.paragraph_vector_store.search,
+                query_emb,
+                k=paragraph_top_k,
+            )
             paragraph_map = self.metadata_store.get_paragraphs_by_hashes(para_ids)
             for hash_value, score in zip(para_ids, para_scores, strict=False):
                 paragraph = paragraph_map.get(hash_value)
@@ -1742,7 +1746,7 @@ class DualPathRetriever:
                     temporal=temporal,
                 )
 
-            graph_evidence = self._collect_dual_graph_evidence(
+            graph_evidence = await self._collect_dual_graph_evidence(
                 query_emb=query_emb,
                 top_k=graph_top_k,
                 temporal=temporal,

@@ -187,7 +187,7 @@ default_sample_size = 24
 - `retrieval.relation_vectorization.enabled` (默认 `false`)
 - `retrieval.relation_vectorization.backfill_enabled` (默认 `false`)
 - `retrieval.relation_vectorization.write_on_import` (默认 `true`)
-- `retrieval.vector_pools.mode` (默认 `"single"`)
+- `retrieval.vector_pools.mode` (默认 `"dual"`)
 - `retrieval.vector_pools.graph_top_k` (默认 `40`)
 - `retrieval.vector_pools.graph_weight` (默认 `0.15`)
 
@@ -197,11 +197,11 @@ default_sample_size = 24
 
 ### `retrieval.vector_pools` (`VectorPoolsConfig`)
 
-双向量池检索默认使用 `single`，保持当前单向量池行为。切换为 `dual` 后，段落向量池只召回段落，图谱向量池召回 `entity:<hash>` 和 `relation:<hash>`，再映射回支撑段落并作为 evidence 参与排序。
+双向量池检索默认使用 `dual`：段落向量池只召回段落，图谱向量池召回 `entity:<hash>` 和 `relation:<hash>`，再映射回支撑段落并作为 evidence 参与排序。切换为 `single` 可保持单向量池行为。
 
 常用键（默认值）：
 
-- `mode = "single"` (`single`/`dual`)
+- `mode = "dual"` (`single`/`dual`)
 - `paragraph_top_k = 20`
 - `graph_top_k = 40`
 - `graph_expand_paragraph_k = 80`

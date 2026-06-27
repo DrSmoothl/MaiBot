@@ -1873,7 +1873,8 @@
           "order": 2,
           "hint": "dual 模式下从段落向量池召回的候选数量。",
           "choices": null,
-          "min_value": 1
+          "min": 1,
+          "max": 1000
         },
         "graph_top_k": {
           "name": "graph_top_k",
@@ -1888,7 +1889,8 @@
           "order": 3,
           "hint": "dual 模式下从关系和实体图谱池召回的候选数量。",
           "choices": null,
-          "min_value": 1
+          "min": 1,
+          "max": 1000
         },
         "graph_expand_paragraph_k": {
           "name": "graph_expand_paragraph_k",
@@ -1903,7 +1905,8 @@
           "order": 4,
           "hint": "限制关系和实体命中映射回段落后的总展开规模。",
           "choices": null,
-          "min_value": 1
+          "min": 1,
+          "max": 10000
         },
         "relation_expand_per_hit": {
           "name": "relation_expand_per_hit",
@@ -1918,7 +1921,8 @@
           "order": 5,
           "hint": "防止单个关系展开过多支撑段落。",
           "choices": null,
-          "min_value": 1
+          "min": 1,
+          "max": 1000
         },
         "entity_expand_per_hit": {
           "name": "entity_expand_per_hit",
@@ -1933,7 +1937,8 @@
           "order": 6,
           "hint": "防止热门实体召回过多弱相关段落。",
           "choices": null,
-          "min_value": 1
+          "min": 1,
+          "max": 1000
         },
         "relation_evidence_weight": {
           "name": "relation_evidence_weight",
@@ -1948,7 +1953,8 @@
           "order": 7,
           "hint": "关系命中映射为段落证据时的基础权重。",
           "choices": null,
-          "min_value": 0
+          "min": 0,
+          "max": 10
         },
         "entity_evidence_weight": {
           "name": "entity_evidence_weight",
@@ -1963,7 +1969,8 @@
           "order": 8,
           "hint": "实体命中映射为段落证据时的基础权重。",
           "choices": null,
-          "min_value": 0
+          "min": 0,
+          "max": 10
         },
         "semantic_weight": {
           "name": "semantic_weight",
@@ -1978,7 +1985,8 @@
           "order": 9,
           "hint": "dual 模式普通查询下段落向量分的最终权重。",
           "choices": null,
-          "min_value": 0
+          "min": 0,
+          "max": 1
         },
         "sparse_weight": {
           "name": "sparse_weight",
@@ -1993,7 +2001,8 @@
           "order": 10,
           "hint": "dual 模式普通查询下 BM25 段落分的最终权重。",
           "choices": null,
-          "min_value": 0
+          "min": 0,
+          "max": 1
         },
         "graph_weight": {
           "name": "graph_weight",
@@ -2008,7 +2017,8 @@
           "order": 11,
           "hint": "dual 模式普通查询下关系和实体证据分的最终权重。",
           "choices": null,
-          "min_value": 0
+          "min": 0,
+          "max": 1
         },
         "relation_intent.graph_top_k": {
           "name": "relation_intent.graph_top_k",
@@ -2023,7 +2033,8 @@
           "order": 12,
           "hint": "查询被判断为关系意图时使用。",
           "choices": null,
-          "min_value": 1
+          "min": 1,
+          "max": 1000
         },
         "relation_intent.semantic_weight": {
           "name": "relation_intent.semantic_weight",
@@ -2038,7 +2049,8 @@
           "order": 13,
           "hint": "查询被判断为关系意图时使用。",
           "choices": null,
-          "min_value": 0
+          "min": 0,
+          "max": 1
         },
         "relation_intent.sparse_weight": {
           "name": "relation_intent.sparse_weight",
@@ -2053,7 +2065,8 @@
           "order": 14,
           "hint": "查询被判断为关系意图时使用。",
           "choices": null,
-          "min_value": 0
+          "min": 0,
+          "max": 1
         },
         "relation_intent.graph_weight": {
           "name": "relation_intent.graph_weight",
@@ -2068,7 +2081,8 @@
           "order": 15,
           "hint": "查询被判断为关系意图时使用。",
           "choices": null,
-          "min_value": 0
+          "min": 0,
+          "max": 1
         },
         "relation_intent.return_relation_items": {
           "name": "relation_intent.return_relation_items",

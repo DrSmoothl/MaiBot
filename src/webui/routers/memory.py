@@ -757,6 +757,11 @@ def _timeline_paragraph_events(
         updated_at = _safe_float(row.get("updated_at"))
         deleted_at = _safe_float(row.get("deleted_at"))
         is_deleted = bool(int(row.get("is_deleted") or 0))
+        paragraph_jump_target = (
+            _delete_jump_target_for_paragraph(paragraph_hash, source)
+            if is_deleted
+            else _paragraph_jump_target(paragraph_hash)
+        )
         if created_at is not None and _event_in_range(created_at, time_start, time_end):
             events.append(
                 _timeline_event(
@@ -770,7 +775,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target=_paragraph_jump_target(paragraph_hash),
+                    jump_target=paragraph_jump_target,
                 )
             )
         if (
@@ -791,7 +796,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target=_paragraph_jump_target(paragraph_hash),
+                    jump_target=paragraph_jump_target,
                 )
             )
         if is_deleted and deleted_at is not None and _event_in_range(deleted_at, time_start, time_end):

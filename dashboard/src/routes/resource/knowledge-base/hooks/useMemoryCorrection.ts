@@ -339,6 +339,14 @@ export function useMemoryCorrection({
     await plansQuery.refetch()
   }, [plansQuery])
 
+  const warnSyncFailure = useCallback((title: string, error?: unknown) => {
+    toast({
+      title,
+      description: error instanceof Error ? error.message : '请手动刷新后确认最新状态',
+      variant: 'destructive',
+    })
+  }, [toast])
+
   const submitPreview = useCallback(async () => {
     const trimmedRequest = requestText.trim()
     if (!trimmedRequest) {
@@ -383,10 +391,14 @@ export function useMemoryCorrection({
         title: '已生成记忆修正预览',
         description: planId ? `计划 ${planId} 等待确认` : '请检查预览结果后再确认执行',
       })
-      await plansQuery.refetch()
-      if (planId) {
-        const detailPayload = await getMemoryCorrectionPlan(planId)
-        setSelectedPlanDetail(detailPayload.plan ?? null)
+      try {
+        await plansQuery.refetch()
+        if (planId) {
+          const detailPayload = await getMemoryCorrectionPlan(planId)
+          setSelectedPlanDetail(detailPayload.plan ?? null)
+        }
+      } catch (syncError) {
+        warnSyncFailure('预览已生成，但界面同步失败', syncError)
       }
     } catch (error) {
       toast({
@@ -408,6 +420,7 @@ export function useMemoryCorrection({
     requestText,
     scope,
     toast,
+    warnSyncFailure,
   ])
 
   const executePlan = useCallback(async (planId = selectedPlan?.plan_id || '') => {
@@ -433,11 +446,22 @@ export function useMemoryCorrection({
       if (payload.plan) {
         setSelectedPlanDetail(payload.plan)
       } else {
-        const detailPayload = await getMemoryCorrectionPlan(targetPlanId)
-        setSelectedPlanDetail(detailPayload.plan ?? null)
+        try {
+          const detailPayload = await getMemoryCorrectionPlan(targetPlanId)
+          setSelectedPlanDetail(detailPayload.plan ?? null)
+        } catch (syncError) {
+          warnSyncFailure('执行已完成，但详情同步失败', syncError)
+        }
       }
-      await plansQuery.refetch()
-      await Promise.all([onSourcesChanged?.(), onRuntimeChanged?.()])
+      const syncResults = await Promise.allSettled([
+        plansQuery.refetch(),
+        onSourcesChanged?.(),
+        onRuntimeChanged?.(),
+      ])
+      const failedSync = syncResults.find((result) => result.status === 'rejected')
+      if (failedSync?.status === 'rejected') {
+        warnSyncFailure('执行已完成，但界面同步未完全成功', failedSync.reason)
+      }
     } catch (error) {
       toast({
         title: '执行记忆修正失败',
@@ -447,7 +471,7 @@ export function useMemoryCorrection({
     } finally {
       setExecutingPlanId('')
     }
-  }, [correctionReason, onRuntimeChanged, onSourcesChanged, plansQuery, selectedPlan?.plan_id, toast])
+  }, [correctionReason, onRuntimeChanged, onSourcesChanged, plansQuery, selectedPlan?.plan_id, toast, warnSyncFailure])
 
   const rollbackPlan = useCallback(async (planId = selectedPlan?.plan_id || '') => {
     const targetPlanId = planId.trim()
@@ -470,11 +494,22 @@ export function useMemoryCorrection({
       if (payload.plan) {
         setSelectedPlanDetail(payload.plan)
       } else {
-        const detailPayload = await getMemoryCorrectionPlan(targetPlanId)
-        setSelectedPlanDetail(detailPayload.plan ?? null)
+        try {
+          const detailPayload = await getMemoryCorrectionPlan(targetPlanId)
+          setSelectedPlanDetail(detailPayload.plan ?? null)
+        } catch (syncError) {
+          warnSyncFailure('回滚已完成，但详情同步失败', syncError)
+        }
       }
-      await plansQuery.refetch()
-      await Promise.all([onSourcesChanged?.(), onRuntimeChanged?.()])
+      const syncResults = await Promise.allSettled([
+        plansQuery.refetch(),
+        onSourcesChanged?.(),
+        onRuntimeChanged?.(),
+      ])
+      const failedSync = syncResults.find((result) => result.status === 'rejected')
+      if (failedSync?.status === 'rejected') {
+        warnSyncFailure('回滚已完成，但界面同步未完全成功', failedSync.reason)
+      }
     } catch (error) {
       toast({
         title: '回滚记忆修正失败',
@@ -484,7 +519,7 @@ export function useMemoryCorrection({
     } finally {
       setRollingBackPlanId('')
     }
-  }, [correctionReason, onRuntimeChanged, onSourcesChanged, plansQuery, selectedPlan?.plan_id, toast])
+  }, [correctionReason, onRuntimeChanged, onSourcesChanged, plansQuery, selectedPlan?.plan_id, toast, warnSyncFailure])
 
   return {
     requestText,

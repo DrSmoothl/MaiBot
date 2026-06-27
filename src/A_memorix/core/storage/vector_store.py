@@ -393,11 +393,59 @@ class VectorStore:
 
         safe_batch_size = max(1, int(batch_size or 1024))
         unique_ids = list(dict.fromkeys(requested_ids))
-        for start in range(0, len(unique_ids), safe_batch_size):
-            chunk_ids = unique_ids[start : start + safe_batch_size]
-            result = self._get_vectors_chunk(chunk_ids)
-            if result:
-                yield result
+        with self._lock:
+            self._flush_write_buffer_unlocked()
+            known_hashes = set(self._known_hashes)
+            deleted_ids = set(self._deleted_ids)
+            bin_path = self._bin_path
+            ids_bin_path = self._ids_bin_path
+            dimension = int(self.dimension)
+
+        int_to_str: Dict[int, str] = {}
+        for str_id in unique_ids:
+            if str_id not in known_hashes:
+                continue
+            int_id = self._generate_id(str_id)
+            if int_id in deleted_ids:
+                continue
+            int_to_str[int_id] = str_id
+
+        if not int_to_str or not bin_path.exists() or not ids_bin_path.exists():
+            return
+
+        result: Dict[str, np.ndarray] = {}
+        vec_item_size = dimension * 2
+        id_item_size = 8
+        chunk_size = 10000
+
+        with open(bin_path, "rb") as f_vec, open(ids_bin_path, "rb") as f_id:
+            while True:
+                vec_data = f_vec.read(chunk_size * vec_item_size)
+                id_data = f_id.read(chunk_size * id_item_size)
+                if not vec_data:
+                    break
+
+                batch_fp16 = np.frombuffer(vec_data, dtype=np.float16).reshape(-1, dimension)
+                batch_fp32 = batch_fp16.astype(np.float32)
+                faiss.normalize_L2(batch_fp32)
+                batch_ids = np.frombuffer(id_data, dtype=">i8").astype(np.int64)
+
+                for index, int_id in enumerate(batch_ids):
+                    int_key = int(int_id)
+                    key = int_to_str.pop(int_key, None)
+                    if key is None or int_key in deleted_ids:
+                        continue
+                    result[key] = np.array(batch_fp32[index], dtype=np.float32, copy=True)
+                    if len(result) >= safe_batch_size:
+                        yield result
+                        result = {}
+                    if not int_to_str:
+                        break
+                if not int_to_str:
+                    break
+
+        if result:
+            yield result
 
     def _get_vectors_chunk(self, requested_ids: Sequence[str]) -> Dict[str, np.ndarray]:
         """读取一批向量，调用方负责控制 batch 大小。"""
@@ -433,7 +481,7 @@ class VectorStore:
                     batch_fp16 = np.frombuffer(vec_data, dtype=np.float16).reshape(-1, self.dimension)
                     batch_fp32 = batch_fp16.astype(np.float32)
                     faiss.normalize_L2(batch_fp32)
-                    batch_ids = np.frombuffer(id_data, dtype='>i8').astype(np.int64)
+                    batch_ids = np.frombuffer(id_data, dtype=">i8").astype(np.int64)
 
                     for index, int_id in enumerate(batch_ids):
                         key = int_to_str.get(int(int_id))
@@ -690,12 +738,16 @@ class VectorStore:
             previous_embedding_fingerprint: Optional[Dict[str, Any]] = None
             meta_path = data_dir / "vectors_metadata.pkl"
             if embedding_fingerprint is None and meta_path.exists():
-                with open(meta_path, "rb") as f:
-                    previous_meta = pickle.load(f)
-                if isinstance(previous_meta, dict):
-                    previous_raw = previous_meta.get("embedding_fingerprint")
-                    if isinstance(previous_raw, dict) and previous_raw:
-                        previous_embedding_fingerprint = dict(previous_raw)
+                try:
+                    with open(meta_path, "rb") as f:
+                        previous_meta = pickle.load(f)
+                except Exception as exc:
+                    logger.warning(f"读取旧向量元数据失败，跳过 embedding 指纹继承: {exc}")
+                else:
+                    if isinstance(previous_meta, dict):
+                        previous_raw = previous_meta.get("embedding_fingerprint")
+                        if isinstance(previous_raw, dict) and previous_raw:
+                            previous_embedding_fingerprint = dict(previous_raw)
 
             if self._is_trained:
                 index_path = data_dir / "vectors.index"

@@ -306,8 +306,8 @@ export function KnowledgeGraphPage({ embedded = false, initialParagraphHash = ''
   }, [appliedSearchQuery, nodeLimit, resetDetailSelections, searchFallbackMode, toast])
 
   useEffect(() => {
-    void loadGraph({ silent: true })
-  }, [loadGraph])
+    void loadGraph({ silent: true, keepSelection: Boolean(initialParagraphHash.trim()) })
+  }, [initialParagraphHash, loadGraph])
 
   const handleSearch = useCallback(async () => {
     const nextQuery = searchInput.trim()

@@ -131,7 +131,8 @@ class PersonProfileService:
                 vector_pools_ready = bool(runtime_cfg.get("vector_pools_ready", False))
             else:
                 vector_pools_ready = self.paragraph_vector_store is not None and self.graph_vector_store is not None
-            if str(vector_pools_cfg_raw.get("mode", "dual") or "dual").strip().lower() == "dual" and not vector_pools_ready:
+            configured_mode = str(vector_pools_cfg_raw.get("mode", "dual") or "dual").strip().lower()
+            if configured_mode == "dual" and not vector_pools_ready:
                 vector_pools_cfg_raw = dict(vector_pools_cfg_raw)
                 vector_pools_cfg_raw["mode"] = "single"
 
