@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils'
 import {
   getMemoryImportChatTargets,
   type MemoryImportChatTargetPayload,
+  type MemoryRuntimeConfigPayload,
   type MemoryTimelineJumpTargetPayload,
 } from '@/lib/memory-api'
 
@@ -164,6 +165,54 @@ function readJumpParam(target: MemoryTimelineJumpTargetPayload, key: string): st
 function readJumpNumber(target: MemoryTimelineJumpTargetPayload, key: string): number | undefined {
   const value = Number(readJumpParam(target, key))
   return Number.isFinite(value) ? value : undefined
+}
+
+function normalizeVectorPoolMode(value: unknown, fallback: 'single' | 'dual' = 'single'): 'single' | 'dual' {
+  const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return mode === 'dual' ? 'dual' : fallback
+}
+
+function formatVectorCount(value?: number): string {
+  const count = Number(value ?? 0)
+  return Number.isFinite(count) ? String(Math.max(0, count)) : '0'
+}
+
+function resolveVectorPoolsBadge(runtimeConfig: MemoryRuntimeConfigPayload) {
+  const vectorPools = runtimeConfig.vector_pools
+  const configuredMode = normalizeVectorPoolMode(vectorPools?.configured_mode)
+  const effectiveMode = normalizeVectorPoolMode(
+    runtimeConfig.vector_pools_effective_mode ?? vectorPools?.effective_mode,
+    configuredMode
+  )
+  const ready = Boolean(runtimeConfig.vector_pools_ready ?? vectorPools?.ready)
+  const paragraphCount = formatVectorCount(vectorPools?.paragraph_pool?.num_vectors)
+  const graphCount = formatVectorCount(vectorPools?.graph_pool?.num_vectors)
+  const singleCount = formatVectorCount(vectorPools?.single_pool?.num_vectors)
+
+  if (effectiveMode === 'dual' && ready) {
+    return {
+      value: '双池',
+      description: `段落 ${paragraphCount} · 图谱 ${graphCount}`,
+      className: 'border-cyan-500/25',
+      iconClassName: 'text-cyan-500',
+    }
+  }
+
+  if (configuredMode === 'dual') {
+    return {
+      value: '双池未就绪',
+      description: `段落 ${paragraphCount} · 图谱 ${graphCount}`,
+      className: 'border-amber-500/25',
+      iconClassName: 'text-amber-500',
+    }
+  }
+
+  return {
+    value: '单池',
+    description: `单池向量 ${singleCount}`,
+    className: 'border-cyan-500/25',
+    iconClassName: 'text-cyan-500',
+  }
 }
 
 export function KnowledgeBasePage() {
@@ -435,6 +484,7 @@ export function KnowledgeBasePage() {
     if (!runtimeConfig) {
       return []
     }
+    const vectorPoolsBadge = resolveVectorPoolsBadge(runtimeConfig)
     return [
       {
         label: '运行状态',
@@ -451,6 +501,14 @@ export function KnowledgeBasePage() {
         icon: HardDrive,
         className: 'border-sky-500/25',
         iconClassName: 'text-sky-500',
+      },
+      {
+        label: '向量池',
+        value: vectorPoolsBadge.value,
+        description: vectorPoolsBadge.description,
+        icon: Database,
+        className: vectorPoolsBadge.className,
+        iconClassName: vectorPoolsBadge.iconClassName,
       },
       {
         label: '数据目录',
@@ -543,7 +601,7 @@ export function KnowledgeBasePage() {
                   自检
                 </Button>
               </div>
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+              <div className="grid grid-cols-2 gap-1.5 sm:gap-2 lg:grid-cols-4">
                 {runtimeBadges.map((item) => (
                   <div
                     key={item.label}

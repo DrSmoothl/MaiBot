@@ -308,6 +308,16 @@ describe('KnowledgeBasePage import workflow', () => {
       fuzzy_modify_candidate_limit: 12,
       auto_save: true,
       relation_vectors_enabled: false,
+      vector_pools: {
+        configured_mode: 'dual',
+        effective_mode: 'dual',
+        ready: true,
+        single_pool: { available: true, dimension: 1024, num_vectors: 4, has_data: true },
+        paragraph_pool: { available: true, dimension: 1024, num_vectors: 7, has_data: true },
+        graph_pool: { available: true, dimension: 1024, num_vectors: 5, has_data: true },
+      },
+      vector_pools_ready: true,
+      vector_pools_effective_mode: 'dual',
       runtime_ready: true,
       embedding_degraded: false,
       embedding_degraded_reason: '',
@@ -973,6 +983,9 @@ describe('KnowledgeBasePage import workflow', () => {
     await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
 
+    expect(screen.getByText('向量池')).toBeInTheDocument()
+    expect(screen.getByText('双池')).toBeInTheDocument()
+    expect(screen.getByText('段落 7 · 图谱 5')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: '创建导入任务' })).toBeInTheDocument()
     expect((await screen.findAllByText('import-run-1')).length).toBeGreaterThan(0)
     expect(memoryApi.getMemoryImportSettings).toHaveBeenCalled()

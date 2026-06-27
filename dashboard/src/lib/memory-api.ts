@@ -175,6 +175,23 @@ export interface MemoryGraphParagraphDetailResponsePayload {
   evidence_graph: MemoryEvidenceGraphPayload
 }
 
+export interface MemoryVectorStoreSnapshot {
+  available: boolean
+  dimension: number
+  num_vectors: number
+  has_data: boolean
+}
+
+export interface MemoryVectorPoolsStatus {
+  configured_mode?: string
+  effective_mode?: string
+  ready?: boolean
+  single_pool?: MemoryVectorStoreSnapshot
+  paragraph_pool?: MemoryVectorStoreSnapshot
+  graph_pool?: MemoryVectorStoreSnapshot
+  ready_manifest?: string
+}
+
 export interface MemoryRuntimeConfigPayload {
   success: boolean
   config: Record<string, unknown>
@@ -189,6 +206,9 @@ export interface MemoryRuntimeConfigPayload {
   vector_rebuild_message?: string
   auto_save: boolean
   relation_vectors_enabled: boolean
+  vector_pools?: MemoryVectorPoolsStatus
+  vector_pools_ready?: boolean
+  vector_pools_effective_mode?: string
   runtime_ready: boolean
   embedding_degraded: boolean
   embedding_degraded_reason: string
