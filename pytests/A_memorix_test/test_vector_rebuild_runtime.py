@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import asyncio
 import hashlib
+import json
 import numpy as np
 import pytest
 
@@ -70,11 +70,18 @@ def _kernel_config(data_dir: Path, dimension: int) -> dict[str, Any]:
         },
         "retrieval": {
             "relation_vectorization": {"enabled": True},
+            "vector_pools": {"mode": "single"},
             "sparse": {"enabled": False},
             "enable_ppr": False,
             "enable_parallel": False,
         },
     }
+
+
+def _default_dual_kernel_config(data_dir: Path, dimension: int) -> dict[str, Any]:
+    config = _kernel_config(data_dir, dimension)
+    config["retrieval"].pop("vector_pools", None)
+    return config
 
 
 def _dual_kernel_config(data_dir: Path, dimension: int) -> dict[str, Any]:
@@ -99,6 +106,13 @@ async def _fake_runtime_self_check(**kwargs: Any) -> dict[str, Any]:
         "sample_text": "test",
         "checked_at": 1_777_000_000.0,
     }
+
+
+async def _wait_background_task(kernel: SDKMemoryKernel, name: str) -> None:
+    task = kernel._background_tasks.get(name)
+    if task is None:
+        return
+    await asyncio.wait_for(task, timeout=2.0)
 
 
 @pytest.mark.asyncio
@@ -335,6 +349,70 @@ async def test_dual_rebuild_encodes_only_missing_single_pool_vectors(
 
 
 @pytest.mark.asyncio
+async def test_dual_rebuild_backfills_writes_created_during_pool_activation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: fake_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.metadata_store is not None
+    assert kernel.vector_store is not None
+
+    original_paragraph_hash = kernel.metadata_store.add_paragraph("迁移开始前的段落", source="test")
+    original_entity_hash = kernel.metadata_store.add_entity("迁移开始前的实体")
+    original_relation_hash = kernel.metadata_store.add_relation("用户", "喜欢", "迁移开始前的实体")
+    kernel.vector_store.add(
+        np.eye(3, fake_embedding_manager.default_dimension, dtype=np.float32),
+        [original_paragraph_hash, original_entity_hash, original_relation_hash],
+    )
+    kernel._save_vector_store(kernel.vector_store)
+
+    original_activate = kernel._activate_dual_vector_build_dirs
+    late_hashes: dict[str, str] = {}
+
+    def _activate_with_late_write(build_root: Path) -> None:
+        paragraph_hash = kernel.metadata_store.add_paragraph("迁移期间新增的段落", source="test")
+        entity_hash = kernel.metadata_store.add_entity("迁移期间新增的实体")
+        relation_hash = kernel.metadata_store.add_relation("用户", "提到", "迁移期间新增的实体")
+        kernel.vector_store.add(
+            np.eye(3, fake_embedding_manager.default_dimension, dtype=np.float32),
+            [paragraph_hash, entity_hash, relation_hash],
+        )
+        kernel._save_vector_store(kernel.vector_store)
+        late_hashes.update(
+            {
+                "paragraph": paragraph_hash,
+                "entity": entity_hash,
+                "relation": relation_hash,
+            }
+        )
+        original_activate(build_root)
+
+    monkeypatch.setattr(kernel, "_activate_dual_vector_build_dirs", _activate_with_late_write)
+
+    result = await kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2)
+
+    assert result["success"] is True
+    assert kernel._dual_vector_pools_enabled() is True
+    assert late_hashes["paragraph"] in kernel.paragraph_vector_store
+    assert f"entity:{late_hashes['entity']}" in kernel.graph_vector_store
+    assert f"relation:{late_hashes['relation']}" in kernel.graph_vector_store
+    config = await kernel.memory_runtime_admin(action="get_config")
+    assert config["vector_pools"]["paragraph_pool"]["num_vectors"] == 2
+    assert config["vector_pools"]["graph_pool"]["num_vectors"] == 4
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_dual_initialize_without_ready_manifest_falls_back_to_single_pool(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -379,6 +457,173 @@ async def test_dual_initialize_without_ready_manifest_falls_back_to_single_pool(
     assert not stale_build_dir.exists()
 
     await dual_kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_default_dual_mode_starts_auto_migration_without_blocking_initialize(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    release = asyncio.Event()
+    rebuild_started = asyncio.Event()
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: fake_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+    monkeypatch.setattr(kernel_module, "DUAL_VECTOR_AUTO_MIGRATION_INITIAL_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(kernel_module, "DUAL_VECTOR_AUTO_MIGRATION_LOCK_RETRY_DELAYS_SECONDS", ())
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_default_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    original_rebuild = kernel._rebuild_all_vectors
+
+    async def _blocked_rebuild(**kwargs: Any) -> dict[str, Any]:
+        rebuild_started.set()
+        await release.wait()
+        return await original_rebuild(**kwargs)
+
+    monkeypatch.setattr(kernel, "_rebuild_all_vectors", _blocked_rebuild)
+    await kernel.initialize()
+    try:
+        assert kernel.retriever.config.vector_pools.mode == "single"
+        assert kernel._dual_vector_pools_enabled() is False
+        await asyncio.wait_for(rebuild_started.wait(), timeout=1.0)
+        config = await kernel.memory_runtime_admin(action="get_config")
+        assert config["vector_pools"]["configured_mode"] == "dual"
+        assert config["vector_pools_effective_mode"] == "single"
+        assert config["vector_pools"]["auto_migration"]["running"] is True
+    finally:
+        release.set()
+        await _wait_background_task(kernel, "dual_vector_auto_migration")
+        await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dual_auto_migration_switches_to_dual_when_rebuild_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: fake_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+    monkeypatch.setattr(kernel_module, "DUAL_VECTOR_AUTO_MIGRATION_INITIAL_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(kernel_module, "DUAL_VECTOR_AUTO_MIGRATION_LOCK_RETRY_DELAYS_SECONDS", ())
+
+    single_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_single",
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await single_kernel.initialize()
+    assert single_kernel.metadata_store is not None
+    paragraph_hash = single_kernel.metadata_store.add_paragraph("自动迁移段落", source="test")
+    entity_hash = single_kernel.metadata_store.add_entity("自动迁移实体")
+    rebuild = await single_kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2, include_relations=False)
+    assert rebuild["success"] is True
+    await single_kernel.shutdown()
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    await _wait_background_task(kernel, "dual_vector_auto_migration")
+
+    assert kernel._dual_vector_pools_enabled() is True
+    assert kernel.retriever.config.vector_pools.mode == "dual"
+    assert (data_dir / "vectors" / "dual_ready.json").exists()
+    assert paragraph_hash in kernel.paragraph_vector_store
+    assert f"entity:{entity_hash}" in kernel.graph_vector_store
+    config = await kernel.memory_runtime_admin(action="get_config")
+    assert config["vector_pools"]["auto_migration"]["success"] is True
+    assert config["vector_pools_effective_mode"] == "dual"
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dual_auto_migration_failure_keeps_single_pool(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: fake_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+    monkeypatch.setattr(kernel_module, "DUAL_VECTOR_AUTO_MIGRATION_INITIAL_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(kernel_module, "DUAL_VECTOR_AUTO_MIGRATION_LOCK_RETRY_DELAYS_SECONDS", ())
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+
+    async def _failed_rebuild(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        return {"success": False, "error": "embedding_down", "detail": "embedding_down"}
+
+    monkeypatch.setattr(kernel, "_rebuild_all_vectors", _failed_rebuild)
+    await kernel.initialize()
+    await _wait_background_task(kernel, "dual_vector_auto_migration")
+
+    assert kernel._dual_vector_pools_enabled() is False
+    assert kernel.retriever.config.vector_pools.mode == "single"
+    assert not (data_dir / "vectors" / "dual_ready.json").exists()
+    config = await kernel.memory_runtime_admin(action="get_config")
+    assert config["vector_pools"]["auto_migration"]["success"] is False
+    assert config["vector_pools"]["auto_migration"]["last_error"] == "embedding_down"
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dual_auto_migration_waits_for_manual_rebuild_lock_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    sleep_calls: list[float] = []
+    rebuild_calls = 0
+    release_lock = asyncio.Event()
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: fake_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+    monkeypatch.setattr(kernel_module, "DUAL_VECTOR_AUTO_MIGRATION_INITIAL_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(kernel_module, "DUAL_VECTOR_AUTO_MIGRATION_LOCK_RETRY_DELAYS_SECONDS", (0.01,))
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+
+    async def _fast_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        if seconds > 0:
+            release_lock.set()
+            await asyncio.sleep(0)
+
+    async def _fake_rebuild(**kwargs: Any) -> dict[str, Any]:
+        nonlocal rebuild_calls
+        del kwargs
+        rebuild_calls += 1
+        kernel._dual_vector_pools_ready = True
+        return {"success": True}
+
+    monkeypatch.setattr(kernel, "_sleep_background", _fast_sleep)
+    monkeypatch.setattr(kernel, "_rebuild_all_vectors", _fake_rebuild)
+
+    async with kernel._vector_rebuild_lock:
+        await kernel.initialize()
+        await asyncio.wait_for(release_lock.wait(), timeout=1.0)
+    await _wait_background_task(kernel, "dual_vector_auto_migration")
+
+    assert rebuild_calls == 1
+    assert 0.01 in sleep_calls
+    assert kernel._dual_vector_pools_enabled() is True
+
+    await kernel.shutdown()
 
 
 @pytest.mark.asyncio

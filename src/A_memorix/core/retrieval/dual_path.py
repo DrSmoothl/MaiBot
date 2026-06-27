@@ -184,7 +184,7 @@ class RelationIntentConfig:
 class VectorPoolsConfig:
     """双向量池检索配置。"""
 
-    mode: str = "single"
+    mode: str = "dual"
     paragraph_top_k: int = 20
     graph_top_k: int = 40
     graph_expand_paragraph_k: int = 80

@@ -225,7 +225,7 @@ async def initialize_storage_async(plugin: Any) -> None:
     plugin.graph_vector_store.min_train_threshold = plugin.get_config("embedding.min_train_threshold", 40)
     vector_pools_cfg = plugin.get_config("retrieval.vector_pools", {}) or {}
     vector_pool_mode = (
-        str(vector_pools_cfg.get("mode", "single") if isinstance(vector_pools_cfg, dict) else "single")
+        str(vector_pools_cfg.get("mode", "dual") if isinstance(vector_pools_cfg, dict) else "dual")
         .strip()
         .lower()
     )

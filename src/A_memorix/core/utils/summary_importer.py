@@ -213,9 +213,9 @@ class SummaryImporter:
             retrieval_cfg = self.plugin_config.get("retrieval", {}) or {}
             vector_pools_cfg = retrieval_cfg.get("vector_pools", {}) if isinstance(retrieval_cfg, dict) else {}
             configured_mode = (
-                str(vector_pools_cfg.get("mode", "single") or "single").strip().lower()
+                str(vector_pools_cfg.get("mode", "dual") or "dual").strip().lower()
                 if isinstance(vector_pools_cfg, dict)
-                else "single"
+                else "dual"
             )
             runtime_cfg = self.plugin_config.get("runtime", {}) or {}
             if isinstance(runtime_cfg, dict) and "vector_pools_ready" in runtime_cfg:

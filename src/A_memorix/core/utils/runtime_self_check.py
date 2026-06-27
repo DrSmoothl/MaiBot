@@ -98,7 +98,7 @@ def _build_vector_pools_snapshot(
     paragraph_vector_store: Optional[Any],
     graph_vector_store: Optional[Any],
 ) -> Dict[str, Any]:
-    configured = str(_get_config_value(config, "retrieval.vector_pools.mode", "single") or "single").strip().lower()
+    configured = str(_get_config_value(config, "retrieval.vector_pools.mode", "dual") or "dual").strip().lower()
     runtime_ready = bool(_get_config_value(config, "runtime.vector_pools_ready", False))
     effective = "dual" if configured == "dual" and runtime_ready else "single"
     return {

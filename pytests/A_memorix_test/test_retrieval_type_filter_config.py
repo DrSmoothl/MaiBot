@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from src.config.config_base import AttributeData
 from src.config.official_configs import AMemorixConfig, AMemorixFilterConfig, AMemorixRetrievalConfig
 from src.webui.config_schema import ConfigSchemaGenerator
@@ -92,3 +95,23 @@ def test_vector_pools_config_is_loaded_and_exposed() -> None:
     assert vector_pools_field["type"] == "object"
     assert vector_pools_schema["className"] == "AMemorixVectorPoolsConfig"
     assert "relation_intent" in vector_pools_schema["nested"]
+
+
+def test_vector_pools_default_mode_is_dual_and_schema_matches() -> None:
+    config = AMemorixRetrievalConfig()
+    schema = ConfigSchemaGenerator.generate_schema(AMemorixRetrievalConfig)
+    vector_pools_schema = schema["nested"]["vector_pools"]
+    mode_field = next(field for field in vector_pools_schema["fields"] if field["name"] == "mode")
+    schema_path = Path("src/A_memorix/config_schema.json")
+    persisted_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    assert config.vector_pools.mode == "dual"
+    assert mode_field["default"] == "dual"
+    assert persisted_schema["sections"]["retrieval.vector_pools"]["fields"]["mode"]["default"] == "dual"
+
+
+def test_explicit_single_vector_pool_mode_is_preserved() -> None:
+    attribute_data = AttributeData()
+    config = AMemorixRetrievalConfig.from_dict(attribute_data, {"vector_pools": {"mode": "single"}})
+
+    assert config.vector_pools.mode == "single"

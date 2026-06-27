@@ -1846,7 +1846,7 @@
         "mode": {
           "name": "mode",
           "type": "string",
-          "default": "single",
+          "default": "dual",
           "description": "向量池模式",
           "label": "向量池模式",
           "ui_type": "select",

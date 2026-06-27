@@ -452,7 +452,7 @@ class ImportTaskManager:
         return self.plugin.get_config(key, default)
 
     def _vector_pool_mode(self) -> str:
-        mode = str(self._cfg("retrieval.vector_pools.mode", "single") or "single").strip().lower()
+        mode = str(self._cfg("retrieval.vector_pools.mode", "dual") or "dual").strip().lower()
         return mode if mode in {"single", "dual"} else "single"
 
     def _dual_vector_pools_enabled(self) -> bool:

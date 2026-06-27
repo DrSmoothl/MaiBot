@@ -2100,7 +2100,7 @@ class AMemorixVectorPoolsConfig(ConfigBase):
     """A_Memorix 双向量池检索配置"""
 
     mode: Literal["single", "dual"] = Field(
-        default="single",
+        default="dual",
         json_schema_extra={
             "label": {
                 "zh_CN": "向量池模式",

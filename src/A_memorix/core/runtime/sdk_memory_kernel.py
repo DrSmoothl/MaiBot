@@ -42,6 +42,9 @@ from .search_runtime_initializer import SearchRuntimeBundle, build_search_runtim
 
 logger = get_logger("A_Memorix.SDKMemoryKernel")
 
+DUAL_VECTOR_AUTO_MIGRATION_INITIAL_DELAY_SECONDS = 5.0
+DUAL_VECTOR_AUTO_MIGRATION_LOCK_RETRY_DELAYS_SECONDS = (2.0, 5.0, 10.0)
+
 
 @dataclass
 class KernelSearchRequest:
@@ -198,6 +201,15 @@ class SDKMemoryKernel:
         self._vector_persist_blocked_until_rebuild = False
         self._vector_rebuild_source_dimension: Optional[int] = None
         self._dual_vector_pools_ready = False
+        self._dual_vector_auto_migration_attempted = False
+        self._dual_vector_auto_migration_status: Dict[str, Any] = {
+            "running": False,
+            "attempted": False,
+            "success": False,
+            "last_error": "",
+            "started_at": None,
+            "finished_at": None,
+        }
         self._background_tasks: Dict[str, asyncio.Task] = {}
         self._background_lock = asyncio.Lock()
         self._background_stopping = False
@@ -515,7 +527,7 @@ class SDKMemoryKernel:
         return max(1, int(self._cfg("embedding.paragraph_vector_backfill.max_retry", 5) or 5))
 
     def _vector_pool_mode(self) -> str:
-        mode = str(self._cfg("retrieval.vector_pools.mode", "single") or "single").strip().lower()
+        mode = str(self._cfg("retrieval.vector_pools.mode", "dual") or "dual").strip().lower()
         return mode if mode in {"single", "dual"} else "single"
 
     def _dual_vector_pools_config_enabled(self) -> bool:
@@ -597,6 +609,30 @@ class SDKMemoryKernel:
             self._dual_vector_ready_manifest_path().unlink(missing_ok=True)
         except Exception as exc:
             logger.warning(f"删除双池 ready manifest 失败: {exc}")
+
+    def _refresh_dual_vector_ready_manifest_from_stores(self) -> None:
+        paragraph_count = int(getattr(self.paragraph_vector_store, "num_vectors", 0) or 0)
+        graph_count = int(getattr(self.graph_vector_store, "num_vectors", 0) or 0)
+        entity_count = graph_count
+        relation_count = 0
+        if self.metadata_store is not None:
+            try:
+                target_counts = self._count_vector_rebuild_targets()
+                entity_count = min(graph_count, int(target_counts.get("entities", 0) or 0))
+                relation_count = max(0, graph_count - entity_count)
+            except Exception as exc:
+                logger.warning(f"刷新双池 ready manifest 统计失败，使用向量池计数: {exc}")
+        stats = {
+            "paragraphs": {"done": paragraph_count, "failed": 0},
+            "entities": {"done": entity_count, "failed": 0},
+            "relations": {"done": relation_count, "failed": 0},
+        }
+        migration_stats = {
+            "paragraphs": {"copied": 0, "encoded": 0, "missing": 0},
+            "entities": {"copied": 0, "encoded": 0, "missing": 0},
+            "relations": {"copied": 0, "encoded": 0, "missing": 0},
+        }
+        self._write_dual_vector_ready_manifest(stats=stats, migration_stats=migration_stats)
 
     def _clear_legacy_single_vector_files_after_dual_ready(self) -> None:
         root = self._vectors_root()
@@ -1150,6 +1186,191 @@ class SDKMemoryKernel:
             return "is_inactive IS NULL OR is_inactive = 0"
         return "is_deleted IS NULL OR is_deleted = 0" if self._table_has_column(table, "is_deleted") else "1 = 1"
 
+    async def _backfill_missing_dual_vector_pool_entries(self, *, batch_size: int) -> Dict[str, Any]:
+        if (
+            self.metadata_store is None
+            or self.vector_store is None
+            or self.paragraph_vector_store is None
+            or self.graph_vector_store is None
+            or not self._dual_vector_pools_enabled()
+        ):
+            return {"success": False, "error": "dual_pool_not_ready"}
+
+        safe_batch_size = max(1, int(batch_size or self._cfg("embedding.batch_size", 32) or 32))
+        stats = {
+            "paragraphs": {"done": 0, "failed": 0},
+            "entities": {"done": 0, "failed": 0},
+            "relations": {"done": 0, "failed": 0},
+        }
+        migration_stats = {
+            "paragraphs": {"copied": 0, "encoded": 0, "missing": 0},
+            "entities": {"copied": 0, "encoded": 0, "missing": 0},
+            "relations": {"copied": 0, "encoded": 0, "missing": 0},
+        }
+        errors: List[str] = []
+        source_store = self.vector_store
+        if source_store is not None and not self._stored_vectors_compatible_with_current_embedding(source_store):
+            source_store = None
+        if source_store is not None and source_store.has_data():
+            try:
+                source_store.load()
+                source_store.warmup_index(force_train=False)
+            except Exception as exc:
+                logger.warning(f"加载旧单池向量用于双池增量补齐失败，将回退 embedding 重建: {exc}")
+
+        paragraph_where = self._active_row_filter_sql("paragraphs")
+        paragraph_rows = self.metadata_store.query(
+            f"""
+            SELECT hash, content
+            FROM paragraphs
+            WHERE {paragraph_where}
+            ORDER BY created_at ASC
+            """
+        )
+        paragraph_items = [
+            (str(row.get("hash", "") or ""), str(row.get("content", "") or "").strip())
+            for row in paragraph_rows
+            if str(row.get("hash", "") or "").strip()
+            and str(row.get("content", "") or "").strip()
+            and str(row.get("hash", "") or "").strip() not in self.paragraph_vector_store
+        ]
+        done, failed, error, _done_ids, _failed_ids, copy_stats = await self._copy_or_encode_dual_rebuild_vectors(
+            items=paragraph_items,
+            batch_size=safe_batch_size,
+            target_store=self.paragraph_vector_store,
+            source_store=source_store,
+        )
+        stats["paragraphs"] = {"done": done, "failed": failed}
+        migration_stats["paragraphs"] = copy_stats
+        if error:
+            errors.append(f"paragraph_pool_backfill:{error}")
+
+        entity_where = self._active_row_filter_sql("entities")
+        entity_rows = self.metadata_store.query(
+            f"""
+            SELECT hash, name
+            FROM entities
+            WHERE {entity_where}
+            ORDER BY created_at ASC
+            """
+        )
+        entity_items = []
+        for row in entity_rows:
+            hash_value = str(row.get("hash", "") or "").strip()
+            name = str(row.get("name", "") or "").strip()
+            if not hash_value or not name:
+                continue
+            if self._graph_vector_id("entity", hash_value) in self.graph_vector_store:
+                continue
+            entity_items.append((hash_value, name))
+        done, failed, error, _done_ids, _failed_ids, copy_stats = await self._copy_or_encode_dual_rebuild_vectors(
+            items=entity_items,
+            batch_size=safe_batch_size,
+            target_store=self.graph_vector_store,
+            target_id_prefix="entity",
+            source_store=source_store,
+        )
+        stats["entities"] = {"done": done, "failed": failed}
+        migration_stats["entities"] = copy_stats
+        if error:
+            errors.append(f"entity_graph_pool_backfill:{error}")
+
+        if self.relation_vectors_enabled:
+            relation_where = self._active_row_filter_sql("relations")
+            relation_rows = self.metadata_store.query(
+                f"""
+                SELECT hash, subject, predicate, object
+                FROM relations
+                WHERE {relation_where}
+                ORDER BY created_at ASC
+                """
+            )
+            relation_items = []
+            for row in relation_rows:
+                hash_value = str(row.get("hash", "") or "").strip()
+                if not hash_value:
+                    continue
+                if self._graph_vector_id("relation", hash_value) in self.graph_vector_store:
+                    continue
+                relation_items.append(
+                    (
+                        hash_value,
+                        RelationWriteService.build_relation_vector_text(
+                            str(row.get("subject", "") or ""),
+                            str(row.get("predicate", "") or ""),
+                            str(row.get("object", "") or ""),
+                        ),
+                    )
+                )
+            done, failed, error, done_ids, failed_ids, copy_stats = await self._copy_or_encode_dual_rebuild_vectors(
+                items=relation_items,
+                batch_size=safe_batch_size,
+                target_store=self.graph_vector_store,
+                target_id_prefix="relation",
+                source_store=source_store,
+            )
+            stats["relations"] = {"done": done, "failed": failed}
+            migration_stats["relations"] = copy_stats
+            if error:
+                errors.append(f"relation_graph_pool_backfill:{error}")
+
+            if done_ids or failed_ids:
+                conn = self.metadata_store.get_connection()
+                cursor = conn.cursor()
+                now_ts = time.time()
+                for start in range(0, len(done_ids), 500):
+                    batch_ids = done_ids[start : start + 500]
+                    if not batch_ids:
+                        continue
+                    placeholders = ",".join("?" for _ in batch_ids)
+                    cursor.execute(
+                        f"""
+                        UPDATE relations
+                        SET vector_state = 'ready',
+                            vector_updated_at = ?,
+                            vector_error = NULL
+                        WHERE hash IN ({placeholders})
+                        """,
+                        (now_ts, *batch_ids),
+                    )
+                for start in range(0, len(failed_ids), 500):
+                    batch_ids = failed_ids[start : start + 500]
+                    if not batch_ids:
+                        continue
+                    placeholders = ",".join("?" for _ in batch_ids)
+                    cursor.execute(
+                        f"""
+                        UPDATE relations
+                        SET vector_state = 'failed',
+                            vector_updated_at = ?,
+                            vector_error = ?,
+                            vector_retry_count = COALESCE(vector_retry_count, 0) + 1
+                        WHERE hash IN ({placeholders})
+                        """,
+                        (now_ts, (error or "dual_pool_backfill_failed")[:500], *batch_ids),
+                    )
+                conn.commit()
+
+        failed_total = sum(int(item["failed"]) for item in stats.values())
+        if failed_total:
+            self._set_embedding_degraded(
+                active=True,
+                reason="; ".join(errors)[:500] or "dual_pool_backfill_failed",
+                checked_at=time.time(),
+            )
+        if self.paragraph_vector_store is not None:
+            self._save_vector_store(self.paragraph_vector_store)
+        if self.graph_vector_store is not None:
+            self._save_vector_store(self.graph_vector_store)
+        self._refresh_dual_vector_ready_manifest_from_stores()
+        return {
+            "success": failed_total == 0,
+            "stats": stats,
+            "migration": migration_stats,
+            "failed": int(failed_total),
+            "errors": errors[:5],
+        }
+
     def _refresh_runtime_dependents(self, *, preserve_managers: bool = True) -> None:
         if (
             self.metadata_store is None
@@ -1619,6 +1840,12 @@ class SDKMemoryKernel:
                     if not activation_ok:
                         errors.append("dual_pool_activation:ready_manifest_unusable")
                     else:
+                        backfill_result = await self._backfill_missing_dual_vector_pool_entries(
+                            batch_size=safe_batch_size,
+                        )
+                        if not bool(backfill_result.get("success", False)):
+                            for item in backfill_result.get("errors", []) or []:
+                                errors.append(str(item))
                         self._clear_legacy_single_vector_files_after_dual_ready()
                 except Exception as exc:
                     activation_ok = False
@@ -2556,7 +2783,16 @@ class SDKMemoryKernel:
             "paragraph_pool": self._vector_store_snapshot(self.paragraph_vector_store),
             "graph_pool": self._vector_store_snapshot(self.graph_vector_store),
             "ready_manifest": str(self._dual_vector_ready_manifest_path()),
+            "auto_migration": dict(self._dual_vector_auto_migration_status),
         }
+
+    def _should_start_dual_vector_auto_migration(self) -> bool:
+        return (
+            self._dual_vector_pools_config_enabled()
+            and not self._dual_vector_pools_enabled()
+            and not self._dual_vector_auto_migration_attempted
+            and not self._background_stopping
+        )
 
     async def memory_graph_admin(self, *, action: str, **kwargs) -> Dict[str, Any]:
         await self.initialize()
@@ -3407,6 +3643,8 @@ class SDKMemoryKernel:
             self._ensure_background_task("person_profile_refresh", self._person_profile_refresh_loop)
             self._ensure_background_task("feedback_correction", self._feedback_correction_loop)
             self._ensure_background_task("feedback_correction_reconcile", self._feedback_correction_reconcile_loop)
+            if self._should_start_dual_vector_auto_migration():
+                self._ensure_background_task("dual_vector_auto_migration", self._dual_vector_auto_migration_loop)
 
     def _ensure_background_task(
         self,
@@ -3417,6 +3655,99 @@ class SDKMemoryKernel:
         if task is not None and not task.done():
             return
         self._background_tasks[name] = asyncio.create_task(factory(), name=f"A_Memorix.{name}")
+
+    async def _sleep_background(self, seconds: float) -> None:
+        await asyncio.sleep(max(0.0, float(seconds or 0.0)))
+
+    async def _dual_vector_auto_migration_loop(self) -> None:
+        if not self._should_start_dual_vector_auto_migration():
+            return
+
+        self._dual_vector_auto_migration_attempted = True
+        started_at = time.time()
+        self._dual_vector_auto_migration_status.update(
+            {
+                "running": True,
+                "attempted": True,
+                "success": False,
+                "last_error": "",
+                "started_at": started_at,
+                "finished_at": None,
+            }
+        )
+        try:
+            await self._sleep_background(DUAL_VECTOR_AUTO_MIGRATION_INITIAL_DELAY_SECONDS)
+            if self._background_stopping or self._dual_vector_pools_enabled():
+                self._dual_vector_auto_migration_status.update(
+                    {
+                        "running": False,
+                        "success": self._dual_vector_pools_enabled(),
+                        "finished_at": time.time(),
+                    }
+                )
+                return
+
+            retry_delays = [0.0, *DUAL_VECTOR_AUTO_MIGRATION_LOCK_RETRY_DELAYS_SECONDS]
+            result: Dict[str, Any] = {}
+            for index, delay in enumerate(retry_delays):
+                if self._background_stopping or self._dual_vector_pools_enabled():
+                    break
+                if delay > 0:
+                    await self._sleep_background(delay)
+                if self._vector_rebuild_lock.locked():
+                    if index == len(retry_delays) - 1:
+                        result = {
+                            "success": False,
+                            "error": "vector_rebuild_running",
+                            "detail": "已有向量重建任务正在运行",
+                        }
+                    continue
+                result = await self._rebuild_all_vectors()
+                if str(result.get("error", "") or "") != "vector_rebuild_running":
+                    break
+
+            success = bool(result.get("success", False)) or self._dual_vector_pools_enabled()
+            last_error = ""
+            if not success:
+                errors = result.get("errors") if isinstance(result, dict) else None
+                if isinstance(errors, list) and errors:
+                    last_error = "; ".join(str(item) for item in errors[:5])
+                else:
+                    last_error = str(
+                        result.get("detail")
+                        or result.get("error")
+                        or "dual_vector_auto_migration_failed"
+                    )
+                logger.warning(f"双池后台自动迁移未完成，继续使用单池: {last_error}")
+            else:
+                logger.info("双池后台自动迁移完成，已切换到双池检索")
+            self._dual_vector_auto_migration_status.update(
+                {
+                    "running": False,
+                    "success": success,
+                    "last_error": last_error[:500],
+                    "finished_at": time.time(),
+                }
+            )
+        except asyncio.CancelledError:
+            self._dual_vector_auto_migration_status.update(
+                {
+                    "running": False,
+                    "last_error": "cancelled",
+                    "finished_at": time.time(),
+                }
+            )
+            raise
+        except Exception as exc:
+            logger.warning(f"双池后台自动迁移异常，继续使用单池: {exc}")
+            self._dual_vector_auto_migration_status.update(
+                {
+                    "running": False,
+                    "success": False,
+                    "last_error": str(exc)[:500],
+                    "finished_at": time.time(),
+                }
+            )
 
     async def _stop_background_tasks(self) -> None:
         async with self._background_lock:

@@ -187,7 +187,7 @@ def build_search_runtime(
         _get_config_value(plugin_config, "retrieval.vector_pools", {}) or {}
     )
     vector_pools_ready = _resolve_vector_pools_ready(plugin_config)
-    if str(vector_pools_cfg_raw.get("mode", "single") or "single").strip().lower() == "dual" and not vector_pools_ready:
+    if str(vector_pools_cfg_raw.get("mode", "dual") or "dual").strip().lower() == "dual" and not vector_pools_ready:
         vector_pools_cfg_raw = dict(vector_pools_cfg_raw)
         vector_pools_cfg_raw["mode"] = "single"
         log.warning(f"{prefix_text}[{owner}] 双池向量尚未 ready，当前按单池检索运行")

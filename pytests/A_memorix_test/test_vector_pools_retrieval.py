@@ -19,7 +19,7 @@ from src.A_memorix.core.retrieval.dual_path import (
 class TestVectorPoolsConfig:
     def test_default_values(self):
         cfg = VectorPoolsConfig()
-        assert cfg.mode == "single"
+        assert cfg.mode == "dual"
         assert cfg.paragraph_top_k == 20
         assert cfg.graph_top_k == 40
         assert cfg.graph_expand_paragraph_k == 80
@@ -121,7 +121,7 @@ class TestDualPathRetrieverConfigVectorPools:
     def test_default_config_includes_vector_pools(self):
         cfg = DualPathRetrieverConfig()
         assert isinstance(cfg.vector_pools, VectorPoolsConfig)
-        assert cfg.vector_pools.mode == "single"
+        assert cfg.vector_pools.mode == "dual"
 
     def test_dict_vector_pools_deserializes(self):
         cfg = DualPathRetrieverConfig(
