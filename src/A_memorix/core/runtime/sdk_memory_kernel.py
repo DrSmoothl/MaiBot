@@ -1167,6 +1167,8 @@ class SDKMemoryKernel:
             metadata_store=self.metadata_store,
             graph_store=self.graph_store,
             vector_store=self.vector_store,
+            paragraph_vector_store=self.paragraph_vector_store or self.vector_store,
+            graph_vector_store=self.graph_vector_store or self.vector_store,
             embedding_manager=self.embedding_manager,
             sparse_index=self.sparse_index,
             plugin_config=runtime_config,
@@ -1316,7 +1318,6 @@ class SDKMemoryKernel:
             id_pairs=id_pairs,
             batch_size=batch_size,
         )
-        copied_set = set(copied_source_ids)
         missing_source_ids = {source_id for source_id, _target_id in missing_pairs}
         text_by_id = {str(item_id or "").strip(): text for item_id, text in items}
         encode_items = [
@@ -2523,6 +2524,40 @@ class SDKMemoryKernel:
             "last_maintenance_at": self._last_maintenance_at,
         }
 
+    @staticmethod
+    def _vector_store_snapshot(store: Optional[VectorStore]) -> Dict[str, Any]:
+        if store is None:
+            return {
+                "available": False,
+                "dimension": 0,
+                "num_vectors": 0,
+                "has_data": False,
+            }
+        has_data = False
+        try:
+            has_data = bool(store.has_data())
+        except Exception:
+            has_data = False
+        return {
+            "available": True,
+            "dimension": int(getattr(store, "dimension", 0) or 0),
+            "num_vectors": int(getattr(store, "num_vectors", 0) or 0),
+            "has_data": has_data,
+        }
+
+    def _vector_pools_status(self) -> Dict[str, Any]:
+        configured_mode = self._vector_pool_mode()
+        ready = self._dual_vector_pools_enabled()
+        return {
+            "configured_mode": configured_mode,
+            "effective_mode": "dual" if configured_mode == "dual" and ready else "single",
+            "ready": ready,
+            "single_pool": self._vector_store_snapshot(self.vector_store),
+            "paragraph_pool": self._vector_store_snapshot(self.paragraph_vector_store),
+            "graph_pool": self._vector_store_snapshot(self.graph_vector_store),
+            "ready_manifest": str(self._dual_vector_ready_manifest_path()),
+        }
+
     async def memory_graph_admin(self, *, action: str, **kwargs) -> Dict[str, Any]:
         await self.initialize()
         assert self.metadata_store is not None
@@ -2916,6 +2951,7 @@ class SDKMemoryKernel:
             degraded = self._embedding_degraded_snapshot()
             backfill_counts = self._paragraph_vector_backfill_counts()
             rebuild_status = self._vector_rebuild_status()
+            vector_pools_status = self._vector_pools_status()
             return {
                 "success": True,
                 "config": self.config,
@@ -2929,6 +2965,9 @@ class SDKMemoryKernel:
                 "embedding_fingerprint_status": str(rebuild_status.get("embedding_fingerprint_status") or "unknown"),
                 "auto_save": bool(self._cfg("advanced.enable_auto_save", True)),
                 "relation_vectors_enabled": bool(self.relation_vectors_enabled),
+                "vector_pools": vector_pools_status,
+                "vector_pools_ready": bool(vector_pools_status.get("ready", False)),
+                "vector_pools_effective_mode": str(vector_pools_status.get("effective_mode", "single")),
                 "runtime_ready": self.is_runtime_ready(),
                 "embedding_degraded": bool(degraded.get("active", False)),
                 "embedding_degraded_reason": str(degraded.get("reason", "") or ""),

@@ -22,11 +22,13 @@ from src.services import llm_service as llm_api
 from ..embedding import EmbeddingAPIAdapter
 from ..retrieval import (
     DualPathRetriever,
-    RetrievalStrategy,
     DualPathRetrieverConfig,
-    SparseBM25Config,
     FusionConfig,
     GraphRelationRecallConfig,
+    PosteriorGraphConfig,
+    RetrievalStrategy,
+    SparseBM25Config,
+    VectorPoolsConfig,
 )
 from ..storage import MetadataStore, GraphStore, VectorStore
 from .metadata import coerce_metadata_dict
@@ -51,6 +53,8 @@ class PersonProfileService:
         metadata_store: MetadataStore,
         graph_store: Optional[GraphStore] = None,
         vector_store: Optional[VectorStore] = None,
+        paragraph_vector_store: Optional[VectorStore] = None,
+        graph_vector_store: Optional[VectorStore] = None,
         embedding_manager: Optional[EmbeddingAPIAdapter] = None,
         sparse_index: Any = None,
         plugin_config: Optional[dict] = None,
@@ -59,6 +63,8 @@ class PersonProfileService:
         self.metadata_store = metadata_store
         self.graph_store = graph_store
         self.vector_store = vector_store
+        self.paragraph_vector_store = paragraph_vector_store
+        self.graph_vector_store = graph_vector_store
         self.embedding_manager = embedding_manager
         self.sparse_index = sparse_index
         self.plugin_config = plugin_config or {}
@@ -107,16 +113,33 @@ class PersonProfileService:
             sparse_cfg_raw = self._cfg("retrieval.sparse", {}) or {}
             fusion_cfg_raw = self._cfg("retrieval.fusion", {}) or {}
             graph_recall_cfg_raw = self._cfg("retrieval.search.graph_recall", {}) or {}
+            posterior_graph_cfg_raw = self._cfg("retrieval.search.posterior_graph", {}) or {}
+            vector_pools_cfg_raw = self._cfg("retrieval.vector_pools", {}) or {}
             if not isinstance(sparse_cfg_raw, dict):
                 sparse_cfg_raw = {}
             if not isinstance(fusion_cfg_raw, dict):
                 fusion_cfg_raw = {}
             if not isinstance(graph_recall_cfg_raw, dict):
                 graph_recall_cfg_raw = {}
+            if not isinstance(posterior_graph_cfg_raw, dict):
+                posterior_graph_cfg_raw = {}
+            if not isinstance(vector_pools_cfg_raw, dict):
+                vector_pools_cfg_raw = {}
+
+            runtime_cfg = self._cfg("runtime", {}) or {}
+            if isinstance(runtime_cfg, dict) and "vector_pools_ready" in runtime_cfg:
+                vector_pools_ready = bool(runtime_cfg.get("vector_pools_ready", False))
+            else:
+                vector_pools_ready = self.paragraph_vector_store is not None and self.graph_vector_store is not None
+            if str(vector_pools_cfg_raw.get("mode", "single") or "single").strip().lower() == "dual" and not vector_pools_ready:
+                vector_pools_cfg_raw = dict(vector_pools_cfg_raw)
+                vector_pools_cfg_raw["mode"] = "single"
 
             sparse_cfg = SparseBM25Config(**sparse_cfg_raw)
             fusion_cfg = FusionConfig(**fusion_cfg_raw)
             graph_recall_cfg = GraphRelationRecallConfig(**graph_recall_cfg_raw)
+            posterior_graph_cfg = PosteriorGraphConfig(**posterior_graph_cfg_raw)
+            vector_pools_cfg = VectorPoolsConfig(**vector_pools_cfg_raw)
             config = DualPathRetrieverConfig(
                 top_k_paragraphs=int(self._cfg("retrieval.top_k_paragraphs", 20)),
                 top_k_relations=int(self._cfg("retrieval.top_k_relations", 10)),
@@ -131,9 +154,13 @@ class PersonProfileService:
                 sparse=sparse_cfg,
                 fusion=fusion_cfg,
                 graph_recall=graph_recall_cfg,
+                posterior_graph=posterior_graph_cfg,
+                vector_pools=vector_pools_cfg,
             )
             return DualPathRetriever(
                 vector_store=self.vector_store,
+                paragraph_vector_store=self.paragraph_vector_store or self.vector_store,
+                graph_vector_store=self.graph_vector_store or self.vector_store,
                 graph_store=self.graph_store,
                 metadata_store=self.metadata_store,
                 embedding_manager=self.embedding_manager,

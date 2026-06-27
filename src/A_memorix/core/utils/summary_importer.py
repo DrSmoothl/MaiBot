@@ -189,8 +189,11 @@ class SummaryImporter:
             plugin_config.get("relation_write_service") if isinstance(plugin_config, dict) else None
         )
 
+    def _plugin_instance(self) -> Any:
+        return self.plugin_config.get("plugin_instance") if isinstance(self.plugin_config, dict) else None
+
     def _allow_metadata_only_write(self) -> bool:
-        plugin_instance = self.plugin_config.get("plugin_instance") if isinstance(self.plugin_config, dict) else None
+        plugin_instance = self._plugin_instance()
         getter = getattr(plugin_instance, "get_config", None)
         if callable(getter):
             return bool(getter("embedding.fallback.allow_metadata_only_write", True))
@@ -200,6 +203,56 @@ class SummaryImporter:
             if isinstance(fallback_cfg, dict):
                 return bool(fallback_cfg.get("allow_metadata_only_write", True))
         return True
+
+    def _dual_vector_pools_enabled(self) -> bool:
+        plugin_instance = self._plugin_instance()
+        checker = getattr(plugin_instance, "_dual_vector_pools_enabled", None)
+        if callable(checker):
+            return bool(checker())
+        if isinstance(self.plugin_config, dict):
+            retrieval_cfg = self.plugin_config.get("retrieval", {}) or {}
+            vector_pools_cfg = retrieval_cfg.get("vector_pools", {}) if isinstance(retrieval_cfg, dict) else {}
+            configured_mode = (
+                str(vector_pools_cfg.get("mode", "single") or "single").strip().lower()
+                if isinstance(vector_pools_cfg, dict)
+                else "single"
+            )
+            runtime_cfg = self.plugin_config.get("runtime", {}) or {}
+            if isinstance(runtime_cfg, dict) and "vector_pools_ready" in runtime_cfg:
+                return configured_mode == "dual" and bool(runtime_cfg.get("vector_pools_ready"))
+            return configured_mode == "dual"
+        return False
+
+    def _graph_vector_store(self) -> VectorStore:
+        if self._dual_vector_pools_enabled() and isinstance(self.plugin_config, dict):
+            store = self.plugin_config.get("graph_vector_store")
+            if store is not None:
+                return store
+        return self.vector_store
+
+    @staticmethod
+    def _graph_vector_id(item_type: str, hash_value: str) -> str:
+        return f"{str(item_type or '').strip()}:{str(hash_value or '').strip()}"
+
+    async def _ensure_entity_vector(self, *, entity_hash: str, name: str) -> None:
+        token = str(entity_hash or "").strip()
+        text = str(name or "").strip()
+        if not token or not text or not self._dual_vector_pools_enabled():
+            return
+
+        target_store = self._graph_vector_store()
+        vector_id = self._graph_vector_id("entity", token)
+        if target_store is None or vector_id in target_store:
+            return
+        try:
+            embedding = await self.embedding_manager.encode(text)
+            if getattr(embedding, "ndim", 1) == 1:
+                embedding = embedding.reshape(1, -1)
+            target_store.add(vectors=embedding, ids=[vector_id])
+        except Exception as exc:
+            if not self._allow_metadata_only_write():
+                raise
+            logger.warning(f"总结导入实体向量写入失败，保留 metadata/graph: entity={text} error={exc}")
 
     def _normalize_summary_model_selectors(self, raw_value: Any) -> List[str]:
         """标准化 summarization.model_name 配置。"""
@@ -633,7 +686,7 @@ class SummaryImporter:
             time_meta=time_meta,
         )
 
-        plugin_instance = self.plugin_config.get("plugin_instance") if isinstance(self.plugin_config, dict) else None
+        plugin_instance = self._plugin_instance()
         vector_writer = getattr(plugin_instance, "write_paragraph_vector_or_enqueue", None)
         if callable(vector_writer):
             result = await vector_writer(
@@ -654,8 +707,12 @@ class SummaryImporter:
                 self.metadata_store.enqueue_paragraph_vector_backfill(hash_value, error=str(exc))
 
         # 导入实体
-        if entities:
-            self.graph_store.add_nodes(entities)
+        normalized_entities = _normalize_entity_items(entities)
+        if normalized_entities:
+            self.graph_store.add_nodes(normalized_entities)
+            for name in normalized_entities:
+                entity_hash = self.metadata_store.add_entity(name=name, source_paragraph=hash_value)
+                await self._ensure_entity_vector(entity_hash=entity_hash, name=name)
 
         # 导入关系
         rv_cfg = self.plugin_config.get("retrieval", {}).get("relation_vectorization", {})
