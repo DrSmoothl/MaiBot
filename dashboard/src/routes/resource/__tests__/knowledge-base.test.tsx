@@ -99,6 +99,11 @@ vi.mock('@/lib/memory-api', () => ({
   getMemorySources: vi.fn(),
   getMemoryDeleteOperations: vi.fn(),
   getMemoryDeleteOperation: vi.fn(),
+  previewMemoryCorrection: vi.fn(),
+  executeMemoryCorrection: vi.fn(),
+  getMemoryCorrectionPlans: vi.fn(),
+  getMemoryCorrectionPlan: vi.fn(),
+  rollbackMemoryCorrectionPlan: vi.fn(),
   getMemoryFeedbackCorrections: vi.fn(),
   getMemoryFeedbackCorrection: vi.fn(),
   getMemoryTimeline: vi.fn(),
@@ -297,9 +302,10 @@ describe('KnowledgeBasePage import workflow', () => {
     })
     vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValue({
       success: true,
-      config: { plugin: { enabled: true } },
+      config: { plugin: { enabled: true }, integration: { fuzzy_modify_candidate_limit: 12 } },
       data_dir: 'data/plugins/a-dawn.a-memorix',
       embedding_dimension: 1024,
+      fuzzy_modify_candidate_limit: 12,
       auto_save: true,
       relation_vectors_enabled: false,
       runtime_ready: true,
@@ -528,6 +534,182 @@ describe('KnowledgeBasePage import workflow', () => {
         selector: { sources: ['demo-1'] },
         summary: { counts: { paragraphs: 2, relations: 1, sources: 1 }, sources: ['demo-1'] },
         items: [],
+      },
+    })
+    vi.mocked(memoryApi.getMemoryCorrectionPlans).mockResolvedValue({
+      success: true,
+      items: [
+        {
+          plan_id: 'correction-plan-1',
+          request_text: '把测试用户的常住城市改为杭州',
+          scope: 'person_profile',
+          target_person_id: 'person-1',
+          target_chat_id: 'chat-1',
+          status: 'awaiting_confirmation',
+          confidence: 0.91,
+          plan: {
+            scope: 'person_profile',
+            request_text: '把测试用户的常住城市改为杭州',
+            person_id: 'person-1',
+            chat_id: 'chat-1',
+            confidence: 0.91,
+            risk_level: 'medium',
+            reason: '用户明确修正',
+            operations: [
+              {
+                action: 'mark_superseded',
+                candidate_id: 'paragraph:p-old',
+                target_type: 'paragraph',
+                hash: 'p-old',
+                reason: '旧城市已过期',
+              },
+            ],
+          },
+          preview: {
+            request_text: '把测试用户的常住城市改为杭州',
+            scope: 'person_profile',
+            person_id: 'person-1',
+            person_keyword: '测试用户',
+            chat_id: 'chat-1',
+            candidates: [
+              {
+                candidate_id: 'paragraph:p-old',
+                target_type: 'paragraph',
+                evidence_type: 'person_fact',
+                hash: 'p-old',
+                content: '测试用户常住城市是上海',
+                source: 'chat_summary:chat-1',
+                metadata: {},
+                score: 0.87,
+              },
+            ],
+            operations: [
+              {
+                action: 'mark_superseded',
+                candidate_id: 'paragraph:p-old',
+                target_type: 'paragraph',
+                hash: 'p-old',
+                reason: '旧城市已过期',
+              },
+            ],
+            requires_confirmation: true,
+            confirm_threshold: 0.75,
+            reason: '用户明确修正',
+          },
+          execution: {},
+          created_at: 1_710_000_020,
+          updated_at: 1_710_000_021,
+          executed_at: null,
+          requested_by: 'knowledge_base',
+          reason: '用户明确修正',
+        },
+      ],
+      count: 1,
+    })
+    vi.mocked(memoryApi.getMemoryCorrectionPlan).mockResolvedValue({
+      success: true,
+      plan: {
+        plan_id: 'correction-plan-1',
+        request_text: '把测试用户的常住城市改为杭州',
+        scope: 'person_profile',
+        target_person_id: 'person-1',
+        target_chat_id: 'chat-1',
+        status: 'awaiting_confirmation',
+        confidence: 0.91,
+        plan: {
+          scope: 'person_profile',
+          request_text: '把测试用户的常住城市改为杭州',
+          person_id: 'person-1',
+          chat_id: 'chat-1',
+          confidence: 0.91,
+          risk_level: 'medium',
+          reason: '用户明确修正',
+          operations: [
+            {
+              action: 'mark_superseded',
+              candidate_id: 'paragraph:p-old',
+              target_type: 'paragraph',
+              hash: 'p-old',
+              reason: '旧城市已过期',
+            },
+          ],
+        },
+        preview: {
+          request_text: '把测试用户的常住城市改为杭州',
+          scope: 'person_profile',
+          person_id: 'person-1',
+          person_keyword: '测试用户',
+          chat_id: 'chat-1',
+          candidates: [
+            {
+              candidate_id: 'paragraph:p-old',
+              target_type: 'paragraph',
+              evidence_type: 'person_fact',
+              hash: 'p-old',
+              content: '测试用户常住城市是上海',
+              source: 'chat_summary:chat-1',
+              metadata: {},
+              score: 0.87,
+            },
+          ],
+          operations: [
+            {
+              action: 'mark_superseded',
+              candidate_id: 'paragraph:p-old',
+              target_type: 'paragraph',
+              hash: 'p-old',
+              reason: '旧城市已过期',
+            },
+          ],
+          requires_confirmation: true,
+          confirm_threshold: 0.75,
+          reason: '用户明确修正',
+        },
+        execution: {},
+        created_at: 1_710_000_020,
+        updated_at: 1_710_000_021,
+        executed_at: null,
+        requested_by: 'knowledge_base',
+        reason: '用户明确修正',
+      },
+    })
+    vi.mocked(memoryApi.previewMemoryCorrection).mockResolvedValue({
+      success: true,
+      plan_id: 'correction-plan-2',
+      requires_confirmation: true,
+      preview: {
+        request_text: '把测试用户的常住城市改为杭州',
+        scope: 'person_profile',
+        person_id: 'person-1',
+        person_keyword: '测试用户',
+        chat_id: 'chat-1',
+        candidates: [],
+        operations: [
+          {
+            action: 'refresh_person_profile',
+            person_id: 'person-1',
+          },
+        ],
+        requires_confirmation: true,
+        confirm_threshold: 0.75,
+        reason: '用户明确修正',
+      },
+    })
+    vi.mocked(memoryApi.executeMemoryCorrection).mockResolvedValue({
+      success: true,
+      plan: null,
+      execution: { success: true },
+    })
+    vi.mocked(memoryApi.rollbackMemoryCorrectionPlan).mockResolvedValue({
+      success: true,
+      plan: null,
+      rollback: {
+        success: true,
+        new_relations_deactivated: [],
+        restored_targets: [],
+        items: [],
+        requested_by: 'knowledge_base',
+        reason: '测试回滚',
       },
     })
     vi.mocked(memoryApi.getMemoryFeedbackCorrections).mockResolvedValue({
@@ -1152,6 +1334,81 @@ describe('KnowledgeBasePage import workflow', () => {
       expect(memoryApi.rollbackMemoryFeedbackCorrection).toHaveBeenCalledWith(11, {
         requested_by: 'knowledge_base',
         reason: '人工确认回退',
+      }),
+    )
+  }, 20_000)
+
+  it('shows memory correction entry and submits preview', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await screen.findByLabelText('修正内容')
+    await screen.findByText('correction-plan-1')
+    await waitFor(() => expect(memoryApi.getMemoryCorrectionPlan).toHaveBeenCalledWith('correction-plan-1'))
+
+    await user.type(screen.getByLabelText('修正内容'), '把测试用户的常住城市改为杭州')
+    await user.type(screen.getByLabelText('人物 ID'), 'person-1')
+    await user.click(screen.getByRole('button', { name: '生成预览' }))
+
+    await waitFor(() =>
+      expect(memoryApi.previewMemoryCorrection).toHaveBeenCalledWith(expect.objectContaining({
+        request_text: '把测试用户的常住城市改为杭州',
+        scope: 'person_profile',
+        person_id: 'person-1',
+        limit: 12,
+        requested_by: 'knowledge_base',
+      })),
+    )
+  }, 20_000)
+
+  it('selects a chat target before submitting memory correction preview', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await screen.findByLabelText('修正内容')
+
+    await user.type(screen.getByLabelText('修正内容'), '把测试用户的常住城市改为杭州')
+    await user.type(screen.getByLabelText('人物 ID'), 'person-1')
+    const chatInput = screen.getByLabelText('聊天流 ID / 名称')
+    await user.type(chatInput, '测试')
+    await user.click(screen.getByRole('button', { name: /测试群/ }))
+
+    expect(chatInput).toHaveValue('chat-1')
+    await user.click(screen.getByRole('button', { name: '生成预览' }))
+
+    await waitFor(() =>
+      expect(memoryApi.previewMemoryCorrection).toHaveBeenCalledWith(expect.objectContaining({
+        chat_id: 'chat-1',
+      })),
+    )
+  }, 20_000)
+
+  it('asks for confirmation before executing memory correction plan', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await screen.findByText('correction-plan-1')
+    await waitFor(() => expect(memoryApi.getMemoryCorrectionPlan).toHaveBeenCalledWith('correction-plan-1'))
+
+    await user.click(screen.getByRole('button', { name: '确认执行' }))
+    expect(memoryApi.executeMemoryCorrection).not.toHaveBeenCalled()
+
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('确认执行记忆修正')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '确认执行' }))
+
+    await waitFor(() =>
+      expect(memoryApi.executeMemoryCorrection).toHaveBeenCalledWith({
+        plan_id: 'correction-plan-1',
+        confirmed: true,
+        requested_by: 'knowledge_base',
+        reason: '',
       }),
     )
   }, 20_000)

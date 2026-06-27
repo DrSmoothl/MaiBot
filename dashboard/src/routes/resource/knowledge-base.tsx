@@ -46,10 +46,12 @@ import {
 
 import { useImportForm } from './knowledge-base/hooks/useImportForm'
 import { useImportQueue } from './knowledge-base/hooks/useImportQueue'
+import { useMemoryCorrection } from './knowledge-base/hooks/useMemoryCorrection'
 import { useMemoryDelete } from './knowledge-base/hooks/useMemoryDelete'
 import { useMemoryFeedback } from './knowledge-base/hooks/useMemoryFeedback'
 import { useMemoryRuntimeConfig } from './knowledge-base/hooks/useMemoryRuntimeConfig'
 import { useMemoryTuning } from './knowledge-base/hooks/useMemoryTuning'
+import { CorrectionTab } from './knowledge-base/tabs/CorrectionTab'
 import { DeleteTab } from './knowledge-base/tabs/DeleteTab'
 import { FeedbackTab } from './knowledge-base/tabs/FeedbackTab'
 import { ImportTab } from './knowledge-base/tabs/ImportTab'
@@ -65,6 +67,7 @@ type MemoryConsoleTab =
   | 'episodes'
   | 'profiles'
   | 'maintenance'
+  | 'correction'
   | 'delete'
   | 'feedback'
 type LoadableMemoryTab = Extract<
@@ -80,6 +83,7 @@ const MEMORY_CONSOLE_TABS: MemoryConsoleTab[] = [
   'episodes',
   'profiles',
   'maintenance',
+  'correction',
   'delete',
   'feedback',
 ]
@@ -95,6 +99,7 @@ interface KnowledgeBaseDeepLinkState {
   personId?: string
   taskId?: number
   operationId?: string
+  correctionPlanId?: string
   maintenanceTarget?: string
 }
 
@@ -125,6 +130,7 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
     personId: params.get('person_id') || undefined,
     taskId: taskId ? Math.floor(taskId) : undefined,
     operationId: params.get('operation_id') || undefined,
+    correctionPlanId: params.get('plan_id') || undefined,
     maintenanceTarget: params.get('target') || undefined,
   }
 }
@@ -224,6 +230,16 @@ export function KnowledgeBasePage() {
     active: activeTab === 'feedback',
     initialSearch: deepLinkRef.current.taskId ? String(deepLinkRef.current.taskId) : '',
     initialTaskId: deepLinkRef.current.taskId ?? 0,
+    onRuntimeChanged: () => memoryRuntime.refreshRuntimeConfig(),
+    onSourcesChanged: () => memoryDelete.refreshSources(),
+  })
+
+  const memoryCorrection = useMemoryCorrection({
+    active: activeTab === 'correction',
+    runtimeConfig,
+    initialPlanId: deepLinkRef.current.correctionPlanId ?? '',
+    initialPersonId: deepLinkRef.current.personId ?? '',
+    initialChatId: deepLinkRef.current.chatId ?? '',
     onRuntimeChanged: () => memoryRuntime.refreshRuntimeConfig(),
     onSourcesChanged: () => memoryDelete.refreshSources(),
   })
@@ -346,6 +362,16 @@ export function KnowledgeBasePage() {
         return
       }
 
+      if (tab === 'correction') {
+        const planId = readJumpParam(target, 'plan_id')
+        if (planId) {
+          memoryCorrection.setSelectedPlanId(planId)
+          memoryCorrection.setPlanSearch(planId)
+        }
+        switchMemoryTab('correction', { plan_id: planId || undefined })
+        return
+      }
+
       if (tab === 'delete') {
         const operationId = readJumpParam(target, 'operation_id')
         const source = readJumpParam(target, 'source')
@@ -377,7 +403,7 @@ export function KnowledgeBasePage() {
 
       switchMemoryTab(tab)
     },
-    [memoryDelete, memoryFeedback, switchMemoryTab]
+    [memoryCorrection, memoryDelete, memoryFeedback, switchMemoryTab]
   )
 
   const loadPage = useCallback(async () => {
@@ -717,6 +743,7 @@ export function KnowledgeBasePage() {
                   {[
                     { value: 'import', label: '导入', description: '创建并管理导入任务' },
                     { value: 'maintenance', label: '维护', description: '回收站与记忆状态维护' },
+                    { value: 'correction', label: '记忆修正', description: '预览并确认自然语言记忆修正' },
                     { value: 'delete', label: '删除', description: '批量删除与历史回溯' },
                     { value: 'feedback', label: '纠错历史', description: '查看反馈与回滚' },
                   ].map((item) => (
@@ -765,6 +792,9 @@ export function KnowledgeBasePage() {
 
             {/* 调优面板数据由 useMemoryTuning 自管加载（enabled:active），不再走懒加载占位门控 */}
             {shouldRenderMemoryTab('tuning') && <TuningTab tuning={memoryTuning} />}
+
+            {/* 记忆修正面板数据由 useMemoryCorrection 自管加载（enabled:active） */}
+            {shouldRenderMemoryTab('correction') && <CorrectionTab correction={memoryCorrection} />}
 
             <TabsContent value="episodes" className="space-y-4">
               {shouldRenderMemoryTab('episodes') ? (
