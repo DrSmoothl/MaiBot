@@ -6,6 +6,7 @@ from typing import Any
 import asyncio
 import hashlib
 import json
+import pickle
 import numpy as np
 import pytest
 
@@ -806,6 +807,92 @@ async def test_initialize_dimension_mismatch_keeps_vector_store_empty_until_rebu
     assert config["stored_vector_dimension"] == second_embedding_manager.default_dimension
 
     await fourth_kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_plain_vector_store_save_preserves_existing_embedding_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.vector_store is not None
+    kernel.vector_store.add(
+        np.ones((1, fake_embedding_manager.default_dimension), dtype=np.float32),
+        ["fingerprint-preserved"],
+    )
+    kernel._save_vector_store(kernel.vector_store)
+
+    meta_path = data_dir / "vectors" / "vectors_metadata.pkl"
+    with open(meta_path, "rb") as handle:
+        first_meta = pickle.load(handle)
+    first_fingerprint = dict(first_meta["embedding_fingerprint"])
+
+    kernel.vector_store.save()
+
+    with open(meta_path, "rb") as handle:
+        second_meta = pickle.load(handle)
+    assert second_meta["embedding_fingerprint"] == first_fingerprint
+
+    config = await kernel.memory_runtime_admin(action="get_config")
+    assert config["embedding_fingerprint_status"] == "matched"
+    assert config["vector_rebuild_required"] is False
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dual_ready_manifest_rejects_mismatched_embedding_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    first_embedding_manager = _FakeEmbeddingManager(dimension=8, model_name="fake-embedding-a")
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: first_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    first_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_first",
+        config=_dual_kernel_config(data_dir, first_embedding_manager.default_dimension),
+    )
+    await first_kernel.initialize()
+    assert first_kernel.metadata_store is not None
+    first_kernel.metadata_store.add_paragraph("双池旧指纹段落", source="test")
+    first_kernel.metadata_store.add_entity("双池旧指纹实体")
+    result = await first_kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2, include_relations=False)
+    assert result["success"] is True
+    assert first_kernel._dual_vector_pools_enabled() is True
+    await first_kernel.shutdown()
+
+    second_embedding_manager = _FakeEmbeddingManager(dimension=8, model_name="fake-embedding-b")
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: second_embedding_manager)
+    second_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_second",
+        config=_dual_kernel_config(data_dir, second_embedding_manager.default_dimension),
+    )
+    await second_kernel.initialize()
+    try:
+        assert second_kernel._dual_vector_pools_enabled() is False
+        assert second_kernel.retriever.config.vector_pools.mode == "single"
+        config = await second_kernel.memory_runtime_admin(action="get_config")
+        assert config["vector_pools"]["configured_mode"] == "dual"
+        assert config["vector_pools_effective_mode"] == "single"
+        assert config["embedding_fingerprint_status"] == "mismatched"
+        assert config["vector_rebuild_required"] is True
+    finally:
+        await second_kernel.shutdown()
 
 
 @pytest.mark.asyncio

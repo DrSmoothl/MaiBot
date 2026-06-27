@@ -687,6 +687,16 @@ class VectorStore:
 
             self._flush_write_buffer_unlocked()
 
+            previous_embedding_fingerprint: Optional[Dict[str, Any]] = None
+            meta_path = data_dir / "vectors_metadata.pkl"
+            if embedding_fingerprint is None and meta_path.exists():
+                with open(meta_path, "rb") as f:
+                    previous_meta = pickle.load(f)
+                if isinstance(previous_meta, dict):
+                    previous_raw = previous_meta.get("embedding_fingerprint")
+                    if isinstance(previous_raw, dict) and previous_raw:
+                        previous_embedding_fingerprint = dict(previous_raw)
+
             if self._is_trained:
                 index_path = data_dir / "vectors.index"
                 with atomic_save_path(index_path) as tmp:
@@ -702,8 +712,10 @@ class VectorStore:
             }
             if isinstance(embedding_fingerprint, dict) and embedding_fingerprint:
                 meta["embedding_fingerprint"] = dict(embedding_fingerprint)
+            elif previous_embedding_fingerprint is not None:
+                meta["embedding_fingerprint"] = previous_embedding_fingerprint
 
-            with atomic_write(data_dir / "vectors_metadata.pkl", "wb") as f:
+            with atomic_write(meta_path, "wb") as f:
                 pickle.dump(meta, f)
 
             logger.debug("VectorStore saved.")

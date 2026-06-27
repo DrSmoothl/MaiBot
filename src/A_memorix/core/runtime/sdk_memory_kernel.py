@@ -575,6 +575,18 @@ class SDKMemoryKernel:
         graph_count = int(manifest.get("graph_vectors", 0) or 0)
         if paragraph_count < 0 or graph_count < 0:
             return False
+        current_fingerprint = self._current_embedding_fingerprint()
+        manifest_fingerprint = self._normalize_embedding_fingerprint(manifest.get("embedding_fingerprint"))
+        if current_fingerprint is None or manifest_fingerprint is None:
+            logger.warning("双池 ready manifest 缺少可校验 embedding 指纹，保持单池降级")
+            return False
+        if str(current_fingerprint.get("hash", "") or "") != str(manifest_fingerprint.get("hash", "") or ""):
+            logger.warning(
+                "双池 ready manifest embedding 指纹不匹配，保持单池降级: "
+                f"manifest={manifest_fingerprint.get('hash', '')}, "
+                f"current={current_fingerprint.get('hash', '')}"
+            )
+            return False
         return self._paragraph_vector_dir().exists() and self._graph_vector_dir().exists()
 
     def _write_dual_vector_ready_manifest(
@@ -754,6 +766,13 @@ class SDKMemoryKernel:
                 graph_store.load()
         except Exception as exc:
             logger.warning(f"双池 ready manifest 自愈失败，加载向量池异常: {exc}")
+            return False
+
+        if (
+            not self._stored_vectors_compatible_with_current_embedding(paragraph_store)
+            or not self._stored_vectors_compatible_with_current_embedding(graph_store)
+        ):
+            logger.warning("双池 ready manifest 缺失且向量池指纹无法确认或不匹配，保持单池降级")
             return False
 
         counts = self._count_vector_rebuild_targets()

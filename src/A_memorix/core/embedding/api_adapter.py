@@ -121,15 +121,17 @@ class EmbeddingAPIAdapter:
         model_token = str(self._last_success_model_name or "").strip()
         provider_token = str(self._last_success_provider_name or "").strip()
         source = "observed" if model_token else "configured"
-        if not model_token:
-            model_token = str(self.model_name or "auto").strip() or "auto"
-            if model_token != "auto":
-                provider_token = self._resolve_model_provider_name(model_token)
         candidate_names = [
             str(item or "").strip()
             for item in self._resolve_candidate_model_names()
             if str(item or "").strip()
         ]
+        if not model_token:
+            model_token = str(self.model_name or "auto").strip() or "auto"
+            if model_token == "auto" and candidate_names:
+                model_token = candidate_names[0]
+            if model_token != "auto":
+                provider_token = self._resolve_model_provider_name(model_token)
         if model_token == "auto":
             provider_token = ""
 
