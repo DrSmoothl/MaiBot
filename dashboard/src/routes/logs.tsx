@@ -1,7 +1,7 @@
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { BrainCircuit, Calendar as CalendarIcon, ChevronDown, ChevronUp, Download, Filter, Pause, Play, Search, Terminal, Trash2, Type, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
 
@@ -139,7 +139,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
     const savedLevelFilter = getSetting('logLevelFilter')
     return isLogLevelFilter(savedLevelFilter) ? savedLevelFilter : 'INFO'
   })
-  const [moduleFilter, setModuleFilter] = useState<string>('all')
+  const [moduleFilter, setModuleFilter] = useState<string>(() => getSetting('logModuleFilter'))
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined)
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined)
   const [autoScroll, setAutoScroll] = useState(() => getSetting('logAutoScroll'))
@@ -154,7 +154,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
   const [columnWidthExtra, setColumnWidthExtra] = useState(() =>
     clampNumber(getSetting('logColumnWidthExtra'), COLUMN_WIDTH_EXTRA_MIN, COLUMN_WIDTH_EXTRA_MAX)
   )
-  const [filtersOpen, setFiltersOpen] = useState(false) // 控制折叠面板，默认折叠
+  const [filtersOpen, setFiltersOpen] = useState(() => getSetting('logFiltersOpen'))
   const [toolbarRoot, setToolbarRoot] = useState<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement>(null)
 
@@ -239,10 +239,20 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
     setSetting('logAutoScroll', nextAutoScroll)
   }
 
-  const handleLevelFilterChange = (level: LogLevelFilter) => {
+  const handleLevelFilterChange = useCallback((level: LogLevelFilter) => {
     setLevelFilter(level)
     setSetting('logLevelFilter', level)
-  }
+  }, [])
+
+  const handleModuleFilterChange = useCallback((module: string) => {
+    setModuleFilter(module)
+    setSetting('logModuleFilter', module)
+  }, [])
+
+  const handleFiltersOpenChange = useCallback((open: boolean) => {
+    setFiltersOpen(open)
+    setSetting('logFiltersOpen', open)
+  }, [])
 
   const handleFontSizeChange = (size: FontSize) => {
     setFontSize(size)
@@ -261,10 +271,28 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
     setSetting('logColumnWidthExtra', nextValue)
   }
 
+  const effectiveModuleFilter =
+    moduleFilter === 'all' || uniqueModules.includes(moduleFilter) ? moduleFilter : 'all'
+
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape' && searchQuery) {
+      event.preventDefault()
+      setSearchQuery('')
+    }
+  }
+
   // 清除时间筛选
   const clearDateFilter = () => {
     setDateFrom(undefined)
     setDateTo(undefined)
+  }
+
+  const resetFilters = () => {
+    setSearchQuery('')
+    setDateFrom(undefined)
+    setDateTo(undefined)
+    handleLevelFilterChange('INFO')
+    handleModuleFilterChange('all')
   }
 
   // 过滤日志
@@ -282,7 +310,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
         levelPriority[log.level] >= levelPriority[levelFilter]
       
       // 模块过滤
-      const matchesModule = moduleFilter === 'all' || log.module === moduleFilter
+      const matchesModule = effectiveModuleFilter === 'all' || log.module === effectiveModuleFilter
       
       // 时间过滤
       let matchesDate = true
@@ -302,7 +330,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
       
       return matchesSearch && matchesLevel && matchesModule && matchesDate
     })
-  }, [logs, searchQuery, levelFilter, moduleFilter, dateFrom, dateTo])
+  }, [logs, searchQuery, levelFilter, effectiveModuleFilter, dateFrom, dateTo])
 
   // 虚拟滚动配置 - 根据字号和行间距动态计算行高
   const estimatedRowHeight = fontSizeConfig[fontSize].rowHeight + lineSpacing
@@ -371,7 +399,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
   }, [filteredLogs.length, autoScroll, rowVirtualizer])
 
   const toolbarContent = (
-    <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+    <Collapsible open={filtersOpen} onOpenChange={handleFiltersOpenChange}>
       <div className="flex w-full flex-col gap-2 lg:items-end">
         <div className="flex w-full flex-wrap items-center gap-1.5 lg:justify-end">
           <div className="relative min-w-[180px] flex-1 lg:max-w-64">
@@ -380,8 +408,22 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
               placeholder="搜索日志..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-8 pl-8 text-xs sm:text-sm"
+              onKeyDown={handleSearchKeyDown}
+              className="h-8 pl-8 pr-8 text-xs sm:text-sm"
             />
+            {searchQuery && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-0.5 top-1/2 h-7 w-7 -translate-y-1/2"
+                title="清空搜索"
+                aria-label="清空搜索"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </div>
 
           <Button
@@ -402,6 +444,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
             variant="outline"
             size="sm"
             onClick={handleClear}
+            disabled={logs.length === 0}
             className="h-8 px-2"
             title="清空日志"
           >
@@ -412,6 +455,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
             variant="outline"
             size="sm"
             onClick={handleExport}
+            disabled={filteredLogs.length === 0}
             className="h-8 px-2"
             title="导出日志"
           >
@@ -471,7 +515,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                     </SelectContent>
                   </Select>
 
-                  <Select value={moduleFilter} onValueChange={setModuleFilter}>
+                  <Select value={effectiveModuleFilter} onValueChange={handleModuleFilterChange}>
                     <SelectTrigger className="w-full sm:flex-1 h-8 text-xs">
                       <Filter className="h-3.5 w-3.5 mr-1.5" />
                       <SelectValue placeholder="模块" />
@@ -485,6 +529,16 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={resetFilters}
+                    className="h-8 w-full sm:w-auto"
+                    title="重置筛选"
+                  >
+                    <X className="h-3.5 w-3.5 sm:mr-1" />
+                    <span className="text-xs">重置</span>
+                  </Button>
                 </div>
 
                 {/* 时间筛选 */}

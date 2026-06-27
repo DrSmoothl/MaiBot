@@ -1,7 +1,8 @@
-import { useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
 
-import { ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react'
 
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,8 +23,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { fieldTitleClassName } from '@/components/dynamic-form/fieldStyle'
+import { resolveChatTargets, type ChatStream, type ChatTargetResolveRequest } from '@/lib/chat-management-api'
+import { getBotConfigCached } from '@/lib/config-api'
+import { useResolvedAvatarUrl } from '@/lib/avatar-url'
 import type { FieldHookComponent } from '@/lib/field-hooks'
 import type { ConfigSchema } from '@/types/config-schema'
 
@@ -46,6 +51,23 @@ interface PlatformAccountRow {
   platform: string
   account: string
 }
+
+interface LearningRuleEditorProps {
+  emptyText: string
+  items: Record<string, unknown>[]
+  onAddItem: (item?: Record<string, unknown>) => void
+  onItemFieldChange: (index: number, fieldName: string, fieldValue: unknown) => void
+  onRemoveItem: (index: number) => void
+  usePlatformSelect?: boolean
+}
+
+interface PlatformSelectOption {
+  label: string
+  value: string
+}
+
+type LearningScopeKind = 'chat' | 'default' | 'global' | 'platform' | 'platformDefault' | 'target'
+type GroupScopeKind = 'chat' | 'global' | 'platform' | 'target'
 
 const PLATFORM_ACCOUNT_ROW_GRID_CLASS =
   'grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,5.5rem)_minmax(0,8.5rem)_2.5rem] md:grid-cols-[minmax(0,6rem)_minmax(0,9.5rem)_2.5rem]'
@@ -181,6 +203,13 @@ const ruleTypeLabel = (rule: unknown) => {
   return rule ? String(rule) : '未指定'
 }
 
+const learningFlagLabel = (item: Record<string, unknown>) => {
+  const flags: string[] = []
+  if (item.use) flags.push('使用')
+  if (item.learn) flags.push('学习')
+  return flags.length ? flags.join(' / ') : '使用和学习均关闭'
+}
+
 const platformLabel = (item: Record<string, unknown>) => {
   const platform = typeof item.platform === 'string' ? item.platform.trim() : ''
   const itemId = typeof item.item_id === 'string' ? item.item_id.trim() : ''
@@ -211,8 +240,1009 @@ const talkRuleGroupKey = (item: Record<string, unknown>) => {
   return `${platform}\u0000${itemId}\u0000${ruleType}`
 }
 
+const learningScopeLabel = (item: Record<string, unknown>) => {
+  const platform = typeof item.platform === 'string' ? item.platform.trim() : ''
+  const itemId = typeof item.item_id === 'string' ? item.item_id.trim() : ''
+  if (!platform && !itemId) return '全局默认'
+  if (platform === '*' && itemId === '*') return '全部聊天'
+  if (platform === '*') return `任意平台:${itemId || '留空'}`
+  if (itemId === '*') return `${platform || '留空'}:全部目标`
+  if (platform && !itemId) return `${platform}:平台兜底`
+  if (!platform || !itemId) return `${platform || '留空'}:${itemId || '留空'}`
+  return `${platform}:${itemId}`
+}
+
 const talkRuleGroupLabel = (item: Record<string, unknown>) => {
   return `${platformLabel(item)} · ${ruleTypeLabel(talkRuleTargetValues(item).ruleType)}`
+}
+
+const normalizeSpecialTextValue = (value: unknown) => {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+const parsePlatformName = (value: unknown) => {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text) return ''
+  const separatorIndex = text.indexOf(':')
+  return separatorIndex >= 0 ? text.slice(0, separatorIndex).trim() : text
+}
+
+const buildDefinedPlatformOptions = (config: Record<string, unknown>): PlatformSelectOption[] => {
+  const botConfig =
+    config.bot && typeof config.bot === 'object' && !Array.isArray(config.bot)
+      ? (config.bot as Record<string, unknown>)
+      : {}
+  const options: PlatformSelectOption[] = []
+  const knownValues = new Set<string>()
+  const addPlatform = (value: unknown) => {
+    const platform = parsePlatformName(value)
+    if (!platform || knownValues.has(platform)) {
+      return
+    }
+    knownValues.add(platform)
+    options.push({ label: platform, value: platform })
+  }
+
+  addPlatform(botConfig.platform)
+  if (Array.isArray(botConfig.platforms)) {
+    botConfig.platforms.forEach((platform) => addPlatform(platform))
+  }
+
+  return options
+}
+
+const withCurrentPlatformOption = (
+  options: PlatformSelectOption[],
+  currentPlatform: string,
+): PlatformSelectOption[] => {
+  const normalizedPlatform = currentPlatform.trim()
+  if (!normalizedPlatform || options.some((option) => option.value === normalizedPlatform)) {
+    return options
+  }
+
+  return [
+    ...options,
+    {
+      label: `${normalizedPlatform}（当前值）`,
+      value: normalizedPlatform,
+    },
+  ]
+}
+
+const LEARNING_SCOPE_OPTIONS: Array<{
+  description: string
+  kind: LearningScopeKind
+  title: string
+}> = [
+  {
+    kind: 'default',
+    title: '默认兜底',
+    description: '没有更具体规则命中时使用',
+  },
+  {
+    kind: 'global',
+    title: '全局通配',
+    description: '所有平台和聊天流都会命中',
+  },
+  {
+    kind: 'platform',
+    title: '平台通配',
+    description: '某个平台下的全部聊天流都会命中',
+  },
+  {
+    kind: 'platformDefault',
+    title: '平台兜底',
+    description: '该平台没有更具体规则时使用',
+  },
+  {
+    kind: 'chat',
+    title: '指定聊天流',
+    description: '指定平台里的一个具体聊天',
+  },
+]
+
+const GROUP_SCOPE_OPTIONS: Array<{
+  description: string
+  kind: GroupScopeKind
+  title: string
+}> = [
+  {
+    kind: 'global',
+    title: '全局通配',
+    description: '当前聊天类型下全部聊天流都加入同组',
+  },
+  {
+    kind: 'platform',
+    title: '指定平台',
+    description: '某个平台下的全部聊天流',
+  },
+  {
+    kind: 'chat',
+    title: '指定聊天流',
+    description: '指定平台里的一个具体聊天',
+  },
+]
+
+const EXACT_GROUP_SCOPE_OPTIONS: Array<{
+  description: string
+  kind: GroupScopeKind
+  title: string
+}> = [
+  {
+    kind: 'chat',
+    title: '指定聊天流',
+    description: '精确选择一个平台里的具体聊天',
+  },
+]
+
+const resolveLearningScopeKind = (item: Record<string, unknown>): LearningScopeKind => {
+  const platform = normalizeSpecialTextValue(item.platform)
+  const itemId = normalizeSpecialTextValue(item.item_id)
+  if (!platform && !itemId) return 'default'
+  if (platform === '*' && itemId === '*') return 'global'
+  if (platform === '*' && itemId && itemId !== '*') return 'target'
+  if (platform && platform !== '*' && !itemId) return 'platformDefault'
+  if (platform && platform !== '*' && itemId === '*') return 'platform'
+  return 'chat'
+}
+
+const resolveLearningPlatformValue = (
+  item: Record<string, unknown>,
+  platformOptions: PlatformSelectOption[],
+) => {
+  const platform = normalizeSpecialTextValue(item.platform)
+  if (platform && platform !== '*') {
+    return platform
+  }
+  return platformOptions[0]?.value ?? ''
+}
+
+const buildLearningRulePatch = (
+  scopeKind: LearningScopeKind,
+  item: Record<string, unknown>,
+  platformOptions: PlatformSelectOption[],
+) => {
+  const platform = resolveLearningPlatformValue(item, platformOptions)
+  const itemId = normalizeSpecialTextValue(item.item_id)
+
+  switch (scopeKind) {
+    case 'default':
+      return { platform: '', item_id: '' }
+    case 'global':
+      return { platform: '*', item_id: '*' }
+    case 'platform':
+      return { platform, item_id: '*' }
+    case 'platformDefault':
+      return { platform, item_id: '' }
+    case 'target':
+      return {
+        platform: '*',
+        item_id: itemId && itemId !== '*' ? itemId : '',
+      }
+    case 'chat':
+      return {
+        platform,
+        item_id: itemId && itemId !== '*' ? itemId : '',
+      }
+  }
+}
+
+const resolveGroupScopeKind = (target: ExpressionGroupTarget): GroupScopeKind => {
+  const platform = normalizeSpecialTextValue(target.platform)
+  const itemId = normalizeSpecialTextValue(target.item_id)
+  if (platform === '*' && itemId === '*') return 'global'
+  if (platform === '*' && itemId && itemId !== '*') return 'target'
+  if (platform && platform !== '*' && itemId === '*') return 'platform'
+  return 'chat'
+}
+
+const groupScopeLabel = (target: ExpressionGroupTarget) => {
+  const platform = normalizeSpecialTextValue(target.platform)
+  const itemId = normalizeSpecialTextValue(target.item_id)
+  if (platform === '*' && itemId === '*') return '全部聊天流'
+  if (platform === '*') return `任意平台:${itemId || '未填写'}`
+  if (itemId === '*') return `${platform || '未填写'}:全部目标`
+  if (!platform || !itemId) return `${platform || '未填写'}:${itemId || '未填写'}`
+  return `${platform}:${itemId}`
+}
+
+const resolveGroupPlatformValue = (
+  target: ExpressionGroupTarget,
+  platformOptions: PlatformSelectOption[],
+) => {
+  const platform = normalizeSpecialTextValue(target.platform)
+  if (platform && platform !== '*') {
+    return platform
+  }
+  return platformOptions[0]?.value ?? 'qq'
+}
+
+const buildGroupTargetPatch = (
+  scopeKind: GroupScopeKind,
+  target: ExpressionGroupTarget,
+  platformOptions: PlatformSelectOption[],
+) => {
+  const platform = resolveGroupPlatformValue(target, platformOptions)
+  const itemId = normalizeSpecialTextValue(target.item_id)
+
+  switch (scopeKind) {
+    case 'global':
+      return { platform: '*', item_id: '*' }
+    case 'platform':
+      return { platform, item_id: '*' }
+    case 'target':
+      return {
+        platform: '*',
+        item_id: itemId && itemId !== '*' ? itemId : '',
+      }
+    case 'chat':
+      return {
+        platform,
+        item_id: itemId && itemId !== '*' ? itemId : '',
+      }
+  }
+}
+
+function LearningPlatformControl({
+  invalid = false,
+  onChange,
+  platformOptions,
+  usePlatformSelect,
+  value,
+}: {
+  invalid?: boolean
+  onChange: (value: string) => void
+  platformOptions: PlatformSelectOption[]
+  usePlatformSelect: boolean
+  value: string
+}) {
+  const choices = withCurrentPlatformOption(platformOptions, value)
+
+  if (usePlatformSelect) {
+    return (
+      <Select
+        disabled={choices.length === 0}
+        value={value}
+        onValueChange={onChange}
+      >
+        <SelectTrigger className={`h-8 min-w-0 ${invalid ? 'border-destructive focus:ring-destructive' : ''}`}>
+          <SelectValue placeholder={choices.length > 0 ? '选择平台' : '未定义平台'} />
+        </SelectTrigger>
+        <SelectContent>
+          {choices.map((choice) => (
+            <SelectItem key={choice.value} value={choice.value}>
+              {choice.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    )
+  }
+
+  return (
+    <Input
+      className={`h-8 min-w-0 ${invalid ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+      value={value}
+      placeholder="qq"
+      onChange={(event) => onChange(event.target.value)}
+    />
+  )
+}
+
+type ChatTargetResolutionState =
+  | { status: 'idle' | 'loading' | 'missing' | 'error'; session?: undefined }
+  | { status: 'found'; session: ChatStream }
+
+const CHAT_TARGET_RESOLUTION_CACHE = new Map<string, ChatTargetResolutionState>()
+let chatTargetResolutionQueue: Array<{
+  key: string
+  request: ChatTargetResolveRequest
+  reject: (error: unknown) => void
+  resolve: (state: ChatTargetResolutionState) => void
+}> = []
+let chatTargetResolutionTimer: number | null = null
+
+const chatTargetResolutionKey = (platform: string, itemId: string, ruleType: ExpressionRuleType) => {
+  return `${platform}\u0000${itemId}\u0000${ruleType}`
+}
+
+function enqueueChatTargetResolution(
+  request: ChatTargetResolveRequest,
+): Promise<ChatTargetResolutionState> {
+  const key = chatTargetResolutionKey(request.platform, request.item_id, request.rule_type as ExpressionRuleType)
+  const cachedState = CHAT_TARGET_RESOLUTION_CACHE.get(key)
+  if (cachedState) {
+    return Promise.resolve(cachedState)
+  }
+
+  return new Promise((resolve, reject) => {
+    chatTargetResolutionQueue.push({ key, request, resolve, reject })
+    if (chatTargetResolutionTimer !== null) {
+      return
+    }
+
+    chatTargetResolutionTimer = window.setTimeout(() => {
+      const pendingQueue = chatTargetResolutionQueue
+      chatTargetResolutionQueue = []
+      chatTargetResolutionTimer = null
+
+      const uniqueRequests: ChatTargetResolveRequest[] = []
+      const uniqueKeyIndex = new Map<string, number>()
+      pendingQueue.forEach((entry) => {
+        if (uniqueKeyIndex.has(entry.key)) {
+          return
+        }
+        uniqueKeyIndex.set(entry.key, uniqueRequests.length)
+        uniqueRequests.push(entry.request)
+      })
+
+      resolveChatTargets(uniqueRequests)
+        .then((results) => {
+          pendingQueue.forEach((entry) => {
+            const result = results[uniqueKeyIndex.get(entry.key) ?? -1]
+            const state: ChatTargetResolutionState =
+              result?.found && result.session
+                ? { status: 'found', session: result.session }
+                : { status: 'missing' }
+            CHAT_TARGET_RESOLUTION_CACHE.set(entry.key, state)
+            entry.resolve(state)
+          })
+        })
+        .catch((error: unknown) => {
+          pendingQueue.forEach((entry) => entry.reject(error))
+        })
+    }, 40)
+  })
+}
+
+function useExactChatTargetResolution(
+  platform: string,
+  itemId: string,
+  ruleType: ExpressionRuleType,
+  enabled: boolean,
+): ChatTargetResolutionState {
+  const [state, setState] = useState<ChatTargetResolutionState>({ status: 'idle' })
+
+  useEffect(() => {
+    let ignored = false
+    const normalizedPlatform = platform.trim()
+    const normalizedItemId = itemId.trim()
+    if (!enabled || !normalizedPlatform || !normalizedItemId) {
+      window.setTimeout(() => {
+        if (!ignored) setState({ status: 'idle' })
+      }, 0)
+      return () => {
+        ignored = true
+      }
+    }
+
+    const timer = window.setTimeout(() => {
+      setState({ status: 'loading' })
+      enqueueChatTargetResolution({
+        platform: normalizedPlatform,
+        item_id: normalizedItemId,
+        rule_type: ruleType,
+      })
+        .then((resultState) => {
+          if (ignored) return
+          setState(resultState)
+        })
+        .catch(() => {
+          if (!ignored) setState({ status: 'error' })
+        })
+    }, 250)
+
+    return () => {
+      ignored = true
+      window.clearTimeout(timer)
+    }
+  }, [enabled, itemId, platform, ruleType])
+
+  return state
+}
+
+function ChatTargetResolutionPreview({
+  state,
+}: {
+  state: ChatTargetResolutionState
+}) {
+  if (state.status === 'idle') {
+    return null
+  }
+
+  if (state.status === 'loading') {
+    return <div className="text-xs text-muted-foreground">正在验证聊天流...</div>
+  }
+
+  if (state.status === 'missing') {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-destructive">
+        <AlertCircle className="h-3.5 w-3.5" />
+        无效的聊天流
+      </div>
+    )
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-destructive">
+        <AlertCircle className="h-3.5 w-3.5" />
+        聊天流验证失败
+      </div>
+    )
+  }
+
+  if (state.status === 'found') {
+    return <ResolvedChatTargetInfo chat={state.session} />
+  }
+
+  return null
+}
+
+function ResolvedChatTargetInfo({ chat }: { chat: ChatStream }) {
+  const targetId = chat.chat_type === 'group' ? chat.group_id || chat.target_id : chat.user_id || chat.target_id
+  const avatarUrl = useResolvedAvatarUrl(chat.platform, targetId, chat.chat_type === 'group' ? 'group' : 'user')
+  const fallbackText = (chat.display_name || targetId || chat.platform || '?').slice(0, 1)
+
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <Avatar className="h-5 w-5">
+        {avatarUrl && <AvatarImage src={avatarUrl} alt={`${chat.display_name} 的头像`} />}
+        <AvatarFallback className="text-[10px]">{fallbackText}</AvatarFallback>
+      </Avatar>
+      <span className="min-w-0 truncate text-foreground">{chat.display_name}</span>
+      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+        {chat.platform}:{chat.target_id}
+      </span>
+    </div>
+  )
+}
+
+function LearningScopeFields({
+  chatTargetState,
+  item,
+  onFieldChange,
+  platformOptions,
+  scopeKind,
+  usePlatformSelect,
+}: {
+  chatTargetState: ChatTargetResolutionState
+  item: Record<string, unknown>
+  onFieldChange: (fieldName: string, fieldValue: unknown) => void
+  platformOptions: PlatformSelectOption[]
+  scopeKind: LearningScopeKind
+  usePlatformSelect: boolean
+}) {
+  const platform = normalizeSpecialTextValue(item.platform)
+  const itemId = normalizeSpecialTextValue(item.item_id)
+  const platformValue = platform && platform !== '*' ? platform : platformOptions[0]?.value ?? ''
+  const invalidChatTarget = chatTargetState.status === 'missing' || chatTargetState.status === 'error'
+
+  if (scopeKind === 'default' || scopeKind === 'global') {
+    return null
+  }
+
+  if (scopeKind === 'target') {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <Label className="shrink-0 whitespace-nowrap text-[11px] leading-none text-muted-foreground">聊天流 ID</Label>
+        <Input
+          className="h-8 w-40 min-w-0 font-mono"
+          value={itemId === '*' ? '' : itemId}
+          placeholder="群号或用户 ID"
+          onChange={(event) => onFieldChange('item_id', event.target.value)}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Label className="shrink-0 whitespace-nowrap text-[11px] leading-none text-muted-foreground">平台</Label>
+          <div className="w-28 min-w-0">
+            <LearningPlatformControl
+              invalid={invalidChatTarget}
+              value={platformValue}
+              platformOptions={platformOptions}
+              usePlatformSelect={usePlatformSelect}
+              onChange={(nextPlatform) => onFieldChange('platform', nextPlatform)}
+            />
+          </div>
+        </div>
+        {scopeKind === 'chat' && (
+          <div className="flex min-w-0 items-center gap-2">
+            <Label className="shrink-0 whitespace-nowrap text-[11px] leading-none text-muted-foreground">聊天流 ID</Label>
+            <Input
+              className={`h-8 w-40 min-w-0 font-mono ${invalidChatTarget ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+              value={itemId === '*' ? '' : itemId}
+              placeholder="群号或用户 ID"
+              onChange={(event) => onFieldChange('item_id', event.target.value)}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function GroupScopeFields({
+  chatTargetState,
+  onFieldChange,
+  platformOptions,
+  scopeKind,
+  target,
+  usePlatformSelect,
+}: {
+  chatTargetState: ChatTargetResolutionState
+  onFieldChange: (patch: Partial<ExpressionGroupTarget>) => void
+  platformOptions: PlatformSelectOption[]
+  scopeKind: GroupScopeKind
+  target: ExpressionGroupTarget
+  usePlatformSelect: boolean
+}) {
+  const platform = normalizeSpecialTextValue(target.platform)
+  const itemId = normalizeSpecialTextValue(target.item_id)
+  const platformValue = platform && platform !== '*' ? platform : platformOptions[0]?.value ?? 'qq'
+  const invalidChatTarget = chatTargetState.status === 'missing' || chatTargetState.status === 'error'
+
+  if (scopeKind === 'global') {
+    return null
+  }
+
+  if (scopeKind === 'target') {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <Label className="shrink-0 whitespace-nowrap text-[11px] leading-none text-muted-foreground">聊天流 ID</Label>
+        <Input
+          className="h-8 w-40 min-w-0 font-mono"
+          value={itemId === '*' ? '' : itemId}
+          placeholder="群号或用户 ID"
+          onChange={(event) => onFieldChange({ item_id: event.target.value })}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Label className="shrink-0 whitespace-nowrap text-[11px] leading-none text-muted-foreground">平台</Label>
+          <div className="w-28 min-w-0">
+            <LearningPlatformControl
+              invalid={invalidChatTarget}
+              value={platformValue}
+              platformOptions={platformOptions}
+              usePlatformSelect={usePlatformSelect}
+              onChange={(nextPlatform) => onFieldChange({ platform: nextPlatform })}
+            />
+          </div>
+        </div>
+        {scopeKind === 'chat' && (
+          <div className="flex min-w-0 items-center gap-2">
+            <Label className="shrink-0 whitespace-nowrap text-[11px] leading-none text-muted-foreground">聊天流 ID</Label>
+            <Input
+              className={`h-8 w-40 min-w-0 font-mono ${invalidChatTarget ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+              value={itemId === '*' ? '' : itemId}
+              placeholder="群号或用户 ID"
+              onChange={(event) => onFieldChange({ item_id: event.target.value })}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AddGroupTargetDialog({
+  open,
+  onAdd,
+  onOpenChange,
+  scopeOptions,
+  title,
+}: {
+  open: boolean
+  onAdd: (scopeKind: GroupScopeKind, ruleType: ExpressionRuleType) => void
+  onOpenChange: (open: boolean) => void
+  scopeOptions: Array<{
+    description: string
+    kind: GroupScopeKind
+    title: string
+  }>
+  title: string
+}) {
+  const [selectedScope, setSelectedScope] = useState<GroupScopeKind>('chat')
+  const [ruleType, setRuleType] = useState<ExpressionRuleType>('group')
+  const fallbackScope = scopeOptions.find((option) => option.kind === 'chat')?.kind ?? scopeOptions[0]?.kind ?? 'chat'
+  const activeScope = scopeOptions.some((option) => option.kind === selectedScope) ? selectedScope : fallbackScope
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent style={{ '--dialog-width': '44rem' } as CSSProperties}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>选择成员范围和聊天类型。添加后范围与类型不可直接修改，需要删除后重新添加。</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid gap-2 md:grid-cols-2">
+            {scopeOptions.map((option) => (
+              <button
+                key={option.kind}
+                type="button"
+                className={`rounded-md border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  activeScope === option.kind
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'bg-muted/20 hover:bg-muted/40'
+                }`}
+                onClick={() => setSelectedScope(option.kind)}
+              >
+                <span className="block text-sm font-semibold">{option.title}</span>
+                <span className="mt-1 block text-xs leading-5 opacity-75">{option.description}</span>
+              </button>
+            ))}
+          </div>
+          <div className="max-w-40 space-y-1">
+            <Label className="text-[11px] leading-none text-muted-foreground">聊天类型</Label>
+            <Select value={ruleType} onValueChange={(nextRuleType) => setRuleType(normalizeExpressionRuleType(nextRuleType))}>
+              <SelectTrigger className="h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="group">群聊</SelectItem>
+                <SelectItem value="private">私聊</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button type="button" onClick={() => onAdd(activeScope, ruleType)}>
+            添加
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function AddLearningRuleDialog({
+  open,
+  onAdd,
+  onOpenChange,
+}: {
+  open: boolean
+  onAdd: (scopeKind: LearningScopeKind, ruleType: ExpressionRuleType) => void
+  onOpenChange: (open: boolean) => void
+}) {
+  const [selectedScope, setSelectedScope] = useState<LearningScopeKind>('chat')
+  const [ruleType, setRuleType] = useState<ExpressionRuleType>('group')
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent style={{ '--dialog-width': '48rem' } as CSSProperties}>
+        <DialogHeader>
+          <DialogTitle>添加学习规则</DialogTitle>
+          <DialogDescription>选择规则作用范围和聊天类型。添加后范围与类型不可直接修改，需要删除后重新添加。</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {LEARNING_SCOPE_OPTIONS.map((option) => (
+              <button
+                key={option.kind}
+                type="button"
+                className={`rounded-md border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  selectedScope === option.kind
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'bg-muted/20 hover:bg-muted/40'
+                }`}
+                onClick={() => setSelectedScope(option.kind)}
+              >
+                <span className="block text-sm font-semibold">{option.title}</span>
+                <span className="mt-1 block text-xs leading-5 opacity-75">{option.description}</span>
+              </button>
+            ))}
+          </div>
+          <div className="max-w-40 space-y-1">
+            <Label className="text-[11px] leading-none text-muted-foreground">聊天类型</Label>
+            <Select value={ruleType} onValueChange={(nextRuleType) => setRuleType(normalizeExpressionRuleType(nextRuleType))}>
+              <SelectTrigger className="h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="group">群聊</SelectItem>
+                <SelectItem value="private">私聊</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button type="button" onClick={() => onAdd(selectedScope, ruleType)}>
+            添加
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function LearningRuleItem({
+  index,
+  item,
+  onItemFieldChange,
+  onRemoveItem,
+  platformOptions,
+  usePlatformSelect,
+}: {
+  index: number
+  item: Record<string, unknown>
+  onItemFieldChange: (index: number, fieldName: string, fieldValue: unknown) => void
+  onRemoveItem: (index: number) => void
+  platformOptions: PlatformSelectOption[]
+  usePlatformSelect: boolean
+}) {
+  const scopeLabel = learningScopeLabel(item)
+  const ruleType = normalizeExpressionRuleType(item.type)
+  const scopeKind = resolveLearningScopeKind(item)
+  const platform = normalizeSpecialTextValue(item.platform)
+  const itemId = normalizeSpecialTextValue(item.item_id)
+  const platformValue = platform && platform !== '*' ? platform : platformOptions[0]?.value ?? ''
+  const chatTargetState = useExactChatTargetResolution(platformValue, itemId, ruleType, scopeKind === 'chat')
+  const updateScopeField = (fieldName: string, fieldValue: unknown) => {
+    onItemFieldChange(index, fieldName, fieldValue)
+    if (fieldName === 'platform' && scopeKind === 'platform') {
+      onItemFieldChange(index, 'item_id', '*')
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className="truncate text-sm font-semibold">
+            {scopeLabel}
+          </span>
+          <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">
+            {ruleTypeLabel(ruleType)}
+          </Badge>
+          {scopeKind === 'chat' && <ChatTargetResolutionPreview state={chatTargetState} />}
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7 text-destructive hover:text-destructive"
+          aria-label={`删除学习规则 ${index + 1}`}
+          title="删除"
+          onClick={() => onRemoveItem(index)}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        <div className="grid min-w-0 items-center gap-2 lg:grid-cols-[max-content_minmax(13rem,14rem)]">
+          <div className="min-w-0">
+            {scopeKind === 'default' || scopeKind === 'global' ? (
+              <div className="rounded-md border bg-background/70 px-2.5 py-2 text-xs text-muted-foreground">
+                当前范围不需要填写平台或聊天流 ID。
+              </div>
+            ) : (
+              <LearningScopeFields
+                chatTargetState={chatTargetState}
+                item={item}
+                onFieldChange={updateScopeField}
+                platformOptions={platformOptions}
+                scopeKind={scopeKind}
+                usePlatformSelect={usePlatformSelect}
+              />
+            )}
+          </div>
+          <div className="grid min-w-0 grid-cols-2 gap-1.5">
+            <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border bg-background/70 px-2 py-1.5">
+              <Label className="whitespace-nowrap text-xs">使用</Label>
+              <Switch
+                className="shrink-0"
+                checked={Boolean(item.use)}
+                onCheckedChange={(checked) => onItemFieldChange(index, 'use', checked)}
+              />
+            </div>
+            <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border bg-background/70 px-2 py-1.5">
+              <Label className="whitespace-nowrap text-xs">学习</Label>
+              <Switch
+                className="shrink-0"
+                checked={Boolean(item.learn)}
+                onCheckedChange={(checked) => onItemFieldChange(index, 'learn', checked)}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LearningRuleEditor({
+  emptyText,
+  items,
+  onAddItem,
+  onItemFieldChange,
+  onRemoveItem,
+  usePlatformSelect = false,
+}: LearningRuleEditorProps) {
+  const [definedPlatformOptions, setDefinedPlatformOptions] = useState<PlatformSelectOption[]>([])
+  const [showAddDialog, setShowAddDialog] = useState(false)
+
+  useEffect(() => {
+    if (!usePlatformSelect) {
+      return
+    }
+
+    let disposed = false
+    getBotConfigCached()
+      .then((config) => {
+        if (!disposed) {
+          setDefinedPlatformOptions(buildDefinedPlatformOptions(config))
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('加载黑话学习配置平台列表失败:', error)
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [usePlatformSelect])
+
+  const getPlatformOptions = (platform: unknown) =>
+    withCurrentPlatformOption(
+      definedPlatformOptions,
+      typeof platform === 'string' ? platform : '',
+    )
+  const createLearningRule = (scopeKind: LearningScopeKind, ruleType: ExpressionRuleType) => {
+    const baseRule = {
+      type: ruleType,
+      use: true,
+      learn: true,
+    }
+    return {
+      ...baseRule,
+      ...buildLearningRulePatch(scopeKind, baseRule, definedPlatformOptions),
+    }
+  }
+
+  const addRule = (scopeKind: LearningScopeKind, ruleType: ExpressionRuleType) => {
+    onAddItem(createLearningRule(scopeKind, ruleType))
+    setShowAddDialog(false)
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.length === 0 ? (
+        <div className="rounded-md border border-dashed bg-muted/30 px-4 py-5 text-center text-sm text-muted-foreground">
+          {emptyText}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item, index) => (
+            <LearningRuleItem
+              key={index}
+              index={index}
+              item={item}
+              onItemFieldChange={onItemFieldChange}
+              onRemoveItem={onRemoveItem}
+              platformOptions={getPlatformOptions(item.platform)}
+              usePlatformSelect={usePlatformSelect}
+            />
+          ))}
+        </div>
+      )}
+
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-8 w-full"
+        onClick={() => setShowAddDialog(true)}
+      >
+        <Plus className="mr-1 h-4 w-4" />
+        添加学习规则
+      </Button>
+      <AddLearningRuleDialog
+        open={showAddDialog}
+        onAdd={addRule}
+        onOpenChange={setShowAddDialog}
+      />
+    </div>
+  )
+}
+
+function ExpressionGroupMemberItem({
+  groupIndex,
+  groupLabel,
+  member,
+  memberIndex,
+  onRemoveMember,
+  onUpdateMember,
+  platformOptions,
+  scopeKind,
+  usePlatformSelect,
+}: {
+  groupIndex: number
+  groupLabel: string
+  member: ExpressionGroupTarget
+  memberIndex: number
+  onRemoveMember: (groupIndex: number, memberIndex: number) => void
+  onUpdateMember: (groupIndex: number, memberIndex: number, patch: Partial<ExpressionGroupTarget>) => void
+  platformOptions: PlatformSelectOption[]
+  scopeKind: GroupScopeKind
+  usePlatformSelect: boolean
+}) {
+  const platform = normalizeSpecialTextValue(member.platform)
+  const itemId = normalizeSpecialTextValue(member.item_id)
+  const platformValue = platform && platform !== '*' ? platform : platformOptions[0]?.value ?? 'qq'
+  const chatTargetState = useExactChatTargetResolution(platformValue, itemId, member.rule_type, scopeKind === 'chat')
+  const updateScopeField = (patch: Partial<ExpressionGroupTarget>) => {
+    onUpdateMember(groupIndex, memberIndex, {
+      ...patch,
+      ...(patch.platform !== undefined && scopeKind === 'platform'
+        ? { item_id: '*' }
+        : {}),
+      ...(patch.item_id !== undefined &&
+      scopeKind === 'chat' &&
+      (!normalizeSpecialTextValue(member.platform) || member.platform === '*')
+        ? { platform: resolveGroupPlatformValue(member, platformOptions) }
+        : {}),
+    })
+  }
+
+  return (
+    <div className="space-y-2 rounded-md bg-background/80 px-2.5 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className="truncate text-sm font-semibold">
+            {groupScopeLabel(member)}
+          </span>
+          <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">
+            {ruleTypeLabel(member.rule_type)}
+          </Badge>
+          {scopeKind === 'chat' && <ChatTargetResolutionPreview state={chatTargetState} />}
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7 text-destructive hover:text-destructive"
+          aria-label={`删除${groupLabel} ${groupIndex + 1} 的成员 ${memberIndex + 1}`}
+          title="删除成员"
+          onClick={() => onRemoveMember(groupIndex, memberIndex)}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {scopeKind === 'global' ? (
+        <div className="rounded-md border bg-background/70 px-2.5 py-2 text-xs text-muted-foreground">
+          当前范围不需要填写平台或聊天流 ID。
+        </div>
+      ) : (
+        <GroupScopeFields
+          chatTargetState={chatTargetState}
+          target={member}
+          onFieldChange={updateScopeField}
+          platformOptions={platformOptions}
+          scopeKind={scopeKind}
+          usePlatformSelect={usePlatformSelect}
+        />
+      )}
+    </div>
+  )
 }
 
 const parseTimelineMinute = (value: string) => {
@@ -1205,19 +2235,20 @@ const normalizeExpressionGroups = (value: unknown): ExpressionGroupValue[] => {
   })
 }
 
-const createExpressionTarget = (): ExpressionGroupTarget => ({
-  platform: 'qq',
-  item_id: '',
-  rule_type: 'group',
-})
-
-const formatExpressionTarget = (target: ExpressionGroupTarget): string => {
-  const platform = target.platform.trim()
-  const itemId = target.item_id.trim()
-  const rule = ruleTypeLabel(target.rule_type)
-  if (!platform && !itemId) return `全局 · ${rule}`
-  if (!itemId) return `${platform} · ${rule}`
-  return `${platform}:${itemId} · ${rule}`
+const createExpressionTarget = (
+  scopeKind: GroupScopeKind,
+  platformOptions: PlatformSelectOption[],
+  ruleType: ExpressionRuleType = 'group',
+): ExpressionGroupTarget => {
+  const baseTarget: ExpressionGroupTarget = {
+    platform: platformOptions[0]?.value ?? 'qq',
+    item_id: '',
+    rule_type: ruleType,
+  }
+  return {
+    ...baseTarget,
+    ...buildGroupTargetPatch(scopeKind, baseTarget, platformOptions),
+  }
 }
 
 const normalizePlatformAccounts = (value: unknown): string[] => {
@@ -1414,39 +2445,80 @@ export const ChatPromptsHook = createListItemEditorHook({
 
 export const ExpressionLearningListHook = createListItemEditorHook({
   addLabel: '添加学习规则',
-  infoText: '可以单独为每个聊天开启学习和使用，留空作为兜底，*作为全部覆盖',
+  addButtonPlacement: 'none',
+  infoText: '可以单独为每个聊天开启学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台兜底，* 表示通配。',
   emptyText: '尚未配置任何学习规则。',
   fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
-  fieldRows: [
-    ['platform', 'item_id', 'type'],
-    ['use', 'learn'],
-  ],
+  renderItems: ({
+    emptyText,
+    items,
+    onAddItem,
+    onItemFieldChange,
+    onRemoveItem,
+  }) => (
+    <LearningRuleEditor
+      emptyText={emptyText}
+      items={items}
+      onAddItem={onAddItem}
+      onItemFieldChange={onItemFieldChange}
+      onRemoveItem={onRemoveItem}
+    />
+  ),
   itemTitle: (item) => {
-    const flags: string[] = []
-    if (item.use) flags.push('使用')
-    if (item.learn) flags.push('学习')
-    const flagText = flags.length ? flags.join(' / ') : '使用和学习均关闭'
-    return `${platformLabel(item)} · ${ruleTypeLabel(item.type)} · ${flagText}`
+    return `${learningScopeLabel(item)} · ${ruleTypeLabel(item.type)} · ${learningFlagLabel(item)}`
   },
 })
 
-export const JargonLearningListHook = ExpressionLearningListHook
+export const JargonLearningListHook = createListItemEditorHook({
+  addLabel: '添加黑话学习规则',
+  addButtonPlacement: 'none',
+  infoText: '可以单独为每个聊天开启黑话学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台兜底，* 表示通配。平台下拉来自基础设置中已定义的平台。',
+  emptyText: '尚未配置任何黑话学习规则。',
+  fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
+  renderItems: ({
+    emptyText,
+    items,
+    onAddItem,
+    onItemFieldChange,
+    onRemoveItem,
+  }) => (
+    <LearningRuleEditor
+      emptyText={emptyText}
+      items={items}
+      onAddItem={onAddItem}
+      onItemFieldChange={onItemFieldChange}
+      onRemoveItem={onRemoveItem}
+      usePlatformSelect
+    />
+  ),
+  itemTitle: (item) => {
+    return `${learningScopeLabel(item)} · ${ruleTypeLabel(item.type)} · ${learningFlagLabel(item)}`
+  },
+})
 
 export const BehaviorLearningListHook = createListItemEditorHook({
   addLabel: '添加行为学习规则',
-  infoText: '可以单独为每个聊天开启行为经验的学习和使用，留空作为兜底，* 作为全部覆盖。',
+  addButtonPlacement: 'none',
+  infoText: '可以单独为每个聊天开启行为经验的学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台兜底，* 表示通配。',
   emptyText: '尚未配置任何行为学习规则。',
   fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
-  fieldRows: [
-    ['platform', 'item_id', 'type'],
-    ['use', 'learn'],
-  ],
+  renderItems: ({
+    emptyText,
+    items,
+    onAddItem,
+    onItemFieldChange,
+    onRemoveItem,
+  }) => (
+    <LearningRuleEditor
+      emptyText={emptyText}
+      items={items}
+      onAddItem={onAddItem}
+      onItemFieldChange={onItemFieldChange}
+      onRemoveItem={onRemoveItem}
+    />
+  ),
   itemTitle: (item) => {
-    const flags: string[] = []
-    if (item.use) flags.push('使用')
-    if (item.learn) flags.push('学习')
-    const flagText = flags.length ? flags.join(' / ') : '使用和学习均关闭'
-    return `${platformLabel(item)} · ${ruleTypeLabel(item.type)} · ${flagText}`
+    return `${learningScopeLabel(item)} · ${ruleTypeLabel(item.type)} · ${learningFlagLabel(item)}`
   },
 })
 
@@ -1638,12 +2710,38 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
           ? '黑话互通组'
           : '表达互通组'
   const learnedContentLabel = isBehaviorGroup ? '行为经验' : isJargonGroup ? '黑话' : '表达方式'
+  const supportsWildcardTargets = !isSharedMemoryGroup
+  const groupScopeOptions = supportsWildcardTargets ? GROUP_SCOPE_OPTIONS : EXACT_GROUP_SCOPE_OPTIONS
   const helperText = isSharedMemoryGroup
     ? '把几个群聊或私聊放进同一组后，麦麦在其中任意一个聊天里回忆长期记忆时，会一起参考同组聊天的记忆；新产生的内容仍记在原来的聊天里。'
     : isFocusGroup
       ? '配置后只有同组聊天流共享 Focus，不同组可以分别进入 Focus。'
     : `每个互通组内的聊天流会共享已学习的${learnedContentLabel}。`
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(() => new Set())
+  const [definedPlatformOptions, setDefinedPlatformOptions] = useState<PlatformSelectOption[]>([])
+  const [showAddGroupPanel, setShowAddGroupPanel] = useState(false)
+  const [addingMemberGroupIndex, setAddingMemberGroupIndex] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!isJargonGroup) {
+      return
+    }
+
+    let disposed = false
+    getBotConfigCached()
+      .then((config) => {
+        if (!disposed) {
+          setDefinedPlatformOptions(buildDefinedPlatformOptions(config))
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('加载黑话互通组平台列表失败:', error)
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [isJargonGroup])
 
   const updateGroups = (nextGroups: ExpressionGroupValue[]) => {
     onChange?.(
@@ -1657,8 +2755,9 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
     )
   }
 
-  const addGroup = () => {
-    updateGroups([...groups, { targets: [createExpressionTarget()] }])
+  const addGroup = (scopeKind: GroupScopeKind, ruleType: ExpressionRuleType) => {
+    updateGroups([...groups, { targets: [createExpressionTarget(scopeKind, definedPlatformOptions, ruleType)] }])
+    setShowAddGroupPanel(false)
   }
 
   const toggleGroupCollapsed = (groupIndex: number) => {
@@ -1677,19 +2776,20 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
     updateGroups(groups.filter((_, index) => index !== groupIndex))
   }
 
-  const addMember = (groupIndex: number) => {
+  const addMember = (groupIndex: number, scopeKind: GroupScopeKind, ruleType: ExpressionRuleType) => {
     updateGroups(
       groups.map((group, index) =>
         index === groupIndex
           ? {
               targets: [
                 ...group.targets,
-                createExpressionTarget(),
+                createExpressionTarget(scopeKind, definedPlatformOptions, ruleType),
               ],
             }
           : group
       )
     )
+    setAddingMemberGroupIndex(null)
   }
 
   const removeMember = (groupIndex: number, memberIndex: number) => {
@@ -1727,6 +2827,9 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
     )
   }
 
+  const getPlatformOptions = (platform: string) =>
+    withCurrentPlatformOption(definedPlatformOptions, platform)
+
   return (
     <div className={displaysAsSection ? 'space-y-3' : 'space-y-3 rounded-lg border bg-card p-4 sm:p-5'}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1742,15 +2845,23 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
           variant="outline"
           aria-label={`添加${groupLabel}`}
           title={`添加${groupLabel}`}
-          onClick={addGroup}
+          onClick={() => setShowAddGroupPanel(true)}
         >
           <Plus className="h-4 w-4" />
         </Button>
       </div>
 
+      <AddGroupTargetDialog
+        open={showAddGroupPanel}
+        title={`选择${groupLabel}的第一个成员`}
+        onAdd={addGroup}
+        onOpenChange={setShowAddGroupPanel}
+        scopeOptions={groupScopeOptions}
+      />
+
       {groups.length === 0 ? (
         <div className="rounded-md border border-dashed bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
-          暂无{groupLabel}，点击上方按钮开始配置。
+          暂无{groupLabel}，点击上方按钮选择第一个成员。
         </div>
       ) : (
         <div className="space-y-2">
@@ -1779,7 +2890,11 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
                       className="h-8 w-8"
                       aria-label={`添加${groupLabel} ${groupIndex + 1} 的成员`}
                       title="添加成员"
-                      onClick={() => addMember(groupIndex)}
+                      onClick={() =>
+                        setAddingMemberGroupIndex((currentGroupIndex) =>
+                          currentGroupIndex === groupIndex ? null : groupIndex,
+                        )
+                      }
                     >
                       <Plus className="h-4 w-4" />
                     </Button>
@@ -1818,73 +2933,25 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    {group.targets.map((member, memberIndex) => (
-                      <div
-                        key={`${groupIndex}-${memberIndex}`}
-                        className="grid min-w-0 items-end gap-2 rounded-md bg-background/80 px-2.5 py-2 md:grid-cols-[minmax(0,5.5rem)_minmax(0,8rem)_minmax(0,6.5rem)_2.25rem] lg:grid-cols-[minmax(0,6rem)_minmax(0,9rem)_minmax(0,7rem)_2.25rem]"
-                      >
-                        <div className="min-w-0 space-y-0.5">
-                          <Label className="text-[11px] leading-none text-muted-foreground">平台</Label>
-                          <Input
-                            className="h-8 min-w-0"
-                            value={member.platform}
-                            placeholder="qq"
-                            onChange={(event) =>
-                              updateMember(groupIndex, memberIndex, {
-                                platform: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="min-w-0 space-y-0.5">
-                          <Label className="text-[11px] leading-none text-muted-foreground">账号 / 群号</Label>
-                          <Input
-                            className="h-8 min-w-0 font-mono"
-                            value={member.item_id}
-                            placeholder="123456"
-                            onChange={(event) =>
-                              updateMember(groupIndex, memberIndex, {
-                                item_id: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="min-w-0 space-y-0.5">
-                          <Label className="text-[11px] leading-none text-muted-foreground">类型</Label>
-                          <Select
-                            value={member.rule_type}
-                            onValueChange={(nextRuleType) =>
-                              updateMember(groupIndex, memberIndex, {
-                                rule_type: normalizeExpressionRuleType(nextRuleType),
-                              })
-                            }
-                          >
-                            <SelectTrigger className="h-8 min-w-0">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="group">群聊</SelectItem>
-                              <SelectItem value="private">私聊</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex items-end justify-between gap-2 md:justify-end">
-                          <span className="min-w-0 truncate text-xs text-muted-foreground md:hidden">
-                            {formatExpressionTarget(member)}
-                          </span>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            aria-label={`删除${groupLabel} ${groupIndex + 1} 的成员 ${memberIndex + 1}`}
-                            onClick={() => removeMember(groupIndex, memberIndex)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
+                    {group.targets.map((member, memberIndex) => {
+                      const scopeKind = supportsWildcardTargets ? resolveGroupScopeKind(member) : 'chat'
+                      const platformOptions = getPlatformOptions(member.platform)
+
+                      return (
+                        <ExpressionGroupMemberItem
+                          key={`${groupIndex}-${memberIndex}`}
+                          groupIndex={groupIndex}
+                          groupLabel={groupLabel}
+                          member={member}
+                          memberIndex={memberIndex}
+                          onRemoveMember={removeMember}
+                          onUpdateMember={updateMember}
+                          platformOptions={platformOptions}
+                          scopeKind={scopeKind}
+                          usePlatformSelect={isJargonGroup}
+                        />
+                      )
+                    })}
                   </div>
                 ))}
               </div>
@@ -1892,6 +2959,20 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
           })}
         </div>
       )}
+      <AddGroupTargetDialog
+        open={addingMemberGroupIndex !== null}
+        title={`选择${groupLabel} ${
+          addingMemberGroupIndex === null ? '' : addingMemberGroupIndex + 1
+        } 的新成员`}
+        onAdd={(scopeKind, ruleType) => {
+          if (addingMemberGroupIndex === null) return
+          addMember(addingMemberGroupIndex, scopeKind, ruleType)
+        }}
+        onOpenChange={(open) => {
+          if (!open) setAddingMemberGroupIndex(null)
+        }}
+        scopeOptions={groupScopeOptions}
+      />
     </div>
   )
 }

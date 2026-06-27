@@ -1067,7 +1067,7 @@ class TargetItem(ConfigBase):
             "x-icon": "wifi",
         },
     )
-    """要单独配置的平台；和聊天流 ID 都留空表示默认规则。"""
+    """要单独配置的平台；和聊天流 ID 都留空表示全局默认，仅平台有值且聊天流 ID 留空表示平台兜底。"""
 
     item_id: str = Field(
         default="",
@@ -1081,7 +1081,7 @@ class TargetItem(ConfigBase):
             "x-icon": "hash",
         },
     )
-    """用户/群ID，与平台一起留空表示全局"""
+    """用户/群 ID；留空时和平台字段共同决定全局默认或平台兜底，* 表示任意聊天流。"""
 
     rule_type: Literal["group", "private"] = Field(
         default="group",

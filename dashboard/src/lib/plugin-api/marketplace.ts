@@ -69,11 +69,16 @@ interface PluginApiResponse {
     keywords: string[]
     plugin_type?: string
     display?: PluginInfo['manifest']['display']
+    changelog?: string
     default_locale: string
     locales_path?: string
   }
   // 可能还有其他字段,但我们不关心
   [key: string]: unknown
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
 function uniqueNonEmptyValues(values: Array<string | undefined>): string[] {
@@ -112,6 +117,7 @@ function normalizePluginManifest(manifest: PluginApiResponse['manifest']): Plugi
     keywords: manifest.keywords || [],
     plugin_type: normalizePluginType(manifest.plugin_type),
     display: manifest.display,
+    changelog: normalizeOptionalString(manifest.changelog),
     default_locale: manifest.default_locale || 'zh-CN',
     locales_path: manifest.locales_path,
   }
@@ -274,6 +280,7 @@ async function fetchPluginListUncached(): Promise<PluginInfo[]> {
           review_count: 0,
           installed: false,
           source: 'market' as const,
+          changelog: normalizeOptionalString(item.changelog),
           published_at: normalizeDateString(item.published_at ?? item.created_at ?? item.added_at),
           updated_at: normalizeDateString(item.updated_at ?? item.modified_at),
         }

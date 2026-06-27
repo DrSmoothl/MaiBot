@@ -21,6 +21,7 @@ import {
   Tag,
   GitBranch,
   Info,
+  FileText,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { backendApi } from '@/lib/http'
@@ -36,6 +37,7 @@ import {
   fetchPluginList,
   getInstalledPluginVersion,
   getInstalledPlugins,
+  type InstalledPlugin,
   type GitStatus,
   type MaimaiVersion,
 } from '@/lib/plugin-api'
@@ -55,6 +57,42 @@ function isAbortError(error: unknown): boolean {
     error.name === 'AbortError'
     || (cause instanceof Error && cause.name === 'AbortError')
   )
+}
+
+function buildLocalPluginInfo(installedPlugin: InstalledPlugin): PluginInfo {
+  const urls = installedPlugin.manifest.urls as PluginInfo['manifest']['urls'] | undefined
+
+  return {
+    id: installedPlugin.id,
+    manifest: {
+      manifest_version: installedPlugin.manifest.manifest_version || 1,
+      id: installedPlugin.manifest.id || installedPlugin.id,
+      name: installedPlugin.manifest.name,
+      version: installedPlugin.manifest.version,
+      description: installedPlugin.manifest.description || '',
+      author: installedPlugin.manifest.author,
+      license: installedPlugin.manifest.license || 'Unknown',
+      host_application: installedPlugin.manifest.host_application,
+      homepage_url: installedPlugin.manifest.homepage_url || urls?.homepage,
+      repository_url: installedPlugin.manifest.repository_url || urls?.repository,
+      urls,
+      keywords: installedPlugin.manifest.keywords || [],
+      plugin_type: installedPlugin.manifest.plugin_type || 'extension',
+      display: installedPlugin.manifest.display,
+      changelog: installedPlugin.manifest.changelog,
+      default_locale: (installedPlugin.manifest.default_locale as string) || 'zh-CN',
+      locales_path: installedPlugin.manifest.locales_path as string | undefined,
+    },
+    downloads: 0,
+    rating: 0,
+    review_count: 0,
+    installed: true,
+    installed_version: installedPlugin.manifest.version,
+    published_at: '',
+    updated_at: '',
+    changelog: installedPlugin.changelog ?? undefined,
+    source: 'local',
+  }
 }
 
 async function loadPluginReadme(
@@ -116,6 +154,127 @@ async function loadPluginReadme(
   return '该插件暂无 README 文档'
 }
 
+function getInlineChangelog(changelog: string | undefined): string | null {
+  if (!changelog?.trim()) {
+    return null
+  }
+
+  const normalizedChangelog = changelog.trim()
+  if (
+    normalizedChangelog.includes('\n')
+    || normalizedChangelog.startsWith('#')
+    || normalizedChangelog.startsWith('- ')
+  ) {
+    return normalizedChangelog
+  }
+
+  return null
+}
+
+async function fetchUndeclaredRepositoryChangelog(
+  owner: string,
+  repo: string,
+  signal: AbortSignal
+): Promise<string> {
+  const response = await fetch(
+    `https://raw.githubusercontent.com/${owner}/${repo}/main/CHANGELOG.md`,
+    { signal }
+  )
+
+  if (!response.ok) {
+    return ''
+  }
+
+  return response.text()
+}
+
+async function loadPluginChangelog(
+  plugin: PluginInfo,
+  isInstalled: boolean,
+  signal: AbortSignal
+): Promise<string> {
+  const inlineChangelog = getInlineChangelog(plugin.changelog)
+  if (inlineChangelog) {
+    return inlineChangelog
+  }
+
+  if (isInstalled) {
+    try {
+      const localResult = await backendApi.get<{ success: boolean; data?: string }>(
+        `/api/webui/plugins/local-changelog/${plugin.id}`,
+        { signal }
+      )
+
+      if (localResult.success && localResult.data) {
+        return localResult.data
+      }
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error
+      }
+    }
+  }
+
+  const manifestChangelog = plugin.manifest.changelog?.trim() || plugin.changelog?.trim()
+  if (manifestChangelog && /^https?:\/\//.test(manifestChangelog)) {
+    const result = await backendApi.post<{ success: boolean; data?: string }>(
+      '/api/webui/plugins/fetch-raw',
+      {
+        body: {
+          owner: 'custom',
+          repo: 'custom',
+          branch: 'main',
+          file_path: 'CHANGELOG.md',
+          custom_url: manifestChangelog,
+        },
+        errorMessage: '获取更新日志失败',
+        signal,
+      }
+    )
+
+    return result.success && result.data ? result.data : ''
+  }
+
+  const repositoryUrl = plugin.manifest.repository_url
+  if (!repositoryUrl || !manifestChangelog) {
+    return ''
+  }
+
+  const match = repositoryUrl.match(/github\.com\/([^/]+)\/([^/\s]+)/)
+  if (!match) {
+    return ''
+  }
+
+  const [, owner, repo] = match
+  const cleanRepo = repo.replace(/\.git$/, '')
+  if (!manifestChangelog) {
+    try {
+      return await fetchUndeclaredRepositoryChangelog(owner, cleanRepo, signal)
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error
+      }
+      return ''
+    }
+  }
+
+  const result = await backendApi.post<{ success: boolean; data?: string }>(
+    '/api/webui/plugins/fetch-raw',
+    {
+      body: {
+        owner,
+        repo: cleanRepo,
+        branch: 'main',
+        file_path: manifestChangelog,
+      },
+      errorMessage: '获取更新日志失败',
+      signal,
+    }
+  )
+
+  return result.success && result.data ? result.data : ''
+}
+
 interface PluginDetailPageProps {
   embedded?: boolean
   mode?: 'page' | 'dialog'
@@ -158,10 +317,17 @@ export function PluginDetailPage({
     queryFn: async () => {
       const list = await fetchPluginList()
       const foundPlugin = list.find((p) => p.id === pluginId || p.marketplace_id === pluginId)
-      if (!foundPlugin) {
-        throw new Error('未找到该插件')
+      if (foundPlugin) {
+        return foundPlugin
       }
-      return foundPlugin
+
+      const installed = await getInstalledPlugins()
+      const installedPlugin = installed.find((p) => p.id === pluginId || p.manifest?.id === pluginId)
+      if (installedPlugin) {
+        return buildLocalPluginInfo(installedPlugin)
+      }
+
+      throw new Error('未找到该插件')
     },
   })
   const plugin = pluginQuery.data ?? null
@@ -208,6 +374,15 @@ export function PluginDetailPage({
   })
   const readme = readmeQuery.isError ? '加载 README 失败' : (readmeQuery.data ?? '')
   const readmeLoading = readmeQuery.isPending
+
+  const changelogQuery = useQuery({
+    queryKey: ['plugin-changelog', plugin?.id, isInstalled, plugin?.manifest.changelog, plugin?.changelog],
+    enabled: !!plugin && !installedPluginsQuery.isPending,
+    staleTime: 5 * 60 * 1000,
+    queryFn: ({ signal }) => loadPluginChangelog(plugin!, isInstalled, signal),
+  })
+  const changelog = changelogQuery.isError ? '加载更新日志失败' : (changelogQuery.data ?? '')
+  const changelogLoading = changelogQuery.isPending
 
   // 任一写操作成功后，重新拉取已安装列表（前缀失效）
   const invalidateInstalledPlugins = () =>
@@ -660,6 +835,30 @@ export function PluginDetailPage({
                   ) : (
                     <div className="text-center text-muted-foreground py-12">
                       暂无说明文档
+                    </div>
+                  )}
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  更新日志
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[min(36vh,420px)] pr-4">
+                  {changelogLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <ThinkingIllustration />
+                    </div>
+                  ) : changelog ? (
+                    <MarkdownRenderer content={changelog} />
+                  ) : (
+                    <div className="text-center text-muted-foreground py-12">
+                      暂无更新日志
                     </div>
                   )}
                 </ScrollArea>

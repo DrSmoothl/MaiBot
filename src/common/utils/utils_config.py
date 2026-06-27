@@ -22,9 +22,19 @@ class ExpressionConfigUtils:
                     return config_item
 
             for config_item in global_config.expression.learning_list:
-                if ChatConfigUtils.is_default_target(config_item) or ChatConfigUtils.is_wildcard_target(config_item):
+                if (
+                    ChatConfigUtils.is_default_target(config_item)
+                    or ChatConfigUtils.is_wildcard_target(config_item)
+                    or ChatConfigUtils.is_platform_default_target(config_item)
+                ):
                     continue
                 if ChatConfigUtils.target_matches_session(config_item, session_id):
+                    return config_item
+
+            for config_item in global_config.expression.learning_list:
+                if not ChatConfigUtils.is_platform_default_target(config_item):
+                    continue
+                if ChatConfigUtils.platform_default_matches_session(config_item, session_id):
                     return config_item
 
         for config_item in global_config.expression.learning_list:
@@ -83,9 +93,19 @@ class BehaviorConfigUtils:
                     continue
 
             for config_item in global_config.experimental.behavior_learning_list:
-                if ChatConfigUtils.is_default_target(config_item) or ChatConfigUtils.is_wildcard_target(config_item):
+                if (
+                    ChatConfigUtils.is_default_target(config_item)
+                    or ChatConfigUtils.is_wildcard_target(config_item)
+                    or ChatConfigUtils.is_platform_default_target(config_item)
+                ):
                     continue
                 if ChatConfigUtils.target_matches_session(config_item, session_id, is_group_chat):
+                    return config_item
+
+            for config_item in global_config.experimental.behavior_learning_list:
+                if not ChatConfigUtils.is_platform_default_target(config_item):
+                    continue
+                if ChatConfigUtils.platform_default_matches_session(config_item, session_id, is_group_chat):
                     return config_item
 
         for config_item in global_config.experimental.behavior_learning_list:
@@ -178,7 +198,15 @@ class JargonConfigUtils:
                     continue
                 if JargonConfigUtils._is_wildcard_item(config_item):
                     continue
+                if ChatConfigUtils.is_platform_default_target(config_item):
+                    continue
                 if ChatConfigUtils.target_matches_session(config_item, session_id):
+                    return config_item
+
+            for config_item in global_config.jargon.learning_list:
+                if not ChatConfigUtils.is_platform_default_target(config_item):
+                    continue
+                if ChatConfigUtils.platform_default_matches_session(config_item, session_id, is_group_chat):
                     return config_item
 
         for config_item in global_config.jargon.learning_list:
@@ -320,6 +348,12 @@ class ChatConfigUtils:
         return not platform and not item_id
 
     @staticmethod
+    def is_platform_default_target(target_item) -> bool:
+        """判断配置目标是否是 learning_list 的平台兜底项。"""
+        platform, item_id, _ = ChatConfigUtils._target_values(target_item)
+        return bool(platform and platform != "*" and not item_id)
+
+    @staticmethod
     def is_wildcard_target(target_item) -> bool:
         """判断配置目标是否包含 platform/item_id 通配符。"""
         platform, item_id, _ = ChatConfigUtils._target_values(target_item)
@@ -448,6 +482,54 @@ class ChatConfigUtils:
             return chat_stream_platform == platform and chat_stream_target_id == item_id
 
         return session_id in ChatConfigUtils.resolve_existing_session_ids(platform, item_id, rule_type)
+
+    @staticmethod
+    def platform_default_matches_session(
+        target_item,
+        session_id: str,
+        is_group_chat: Optional[bool] = None,
+    ) -> bool:
+        """判断平台兜底配置是否命中当前聊天流。"""
+        if not session_id:
+            return False
+
+        platform, item_id, rule_type = ChatConfigUtils._target_values(target_item)
+        if not platform or platform == "*" or item_id:
+            return False
+
+        if rule_type == "group":
+            config_is_group = True
+        elif rule_type == "private":
+            config_is_group = False
+        else:
+            return False
+
+        if is_group_chat is not None and config_is_group != is_group_chat:
+            return False
+
+        chat_stream = ChatConfigUtils._get_chat_stream(session_id)
+        if chat_stream is not None:
+            chat_stream_platform = str(chat_stream.platform or "").strip()
+            return chat_stream_platform == platform and bool(chat_stream.is_group_session) == config_is_group
+
+        try:
+            from sqlmodel import select
+
+            from src.common.database.database import get_db_session
+            from src.common.database.database_model import ChatSession
+
+            with get_db_session() as session:
+                statement = select(ChatSession).where(
+                    ChatSession.session_id == session_id,
+                    ChatSession.platform == platform,
+                )
+                chat_session = session.exec(statement).first()
+                if chat_session is None:
+                    return False
+                return bool(str(chat_session.group_id or "").strip()) == config_is_group
+        except Exception as e:
+            logger.debug(f"解析平台兜底配置失败: platform={platform} session_id={session_id} error={e}")
+            return False
 
     @staticmethod
     def target_matches_session_with_wildcards(

@@ -9,11 +9,21 @@ import { Button } from '@/components/ui/button'
 const HIDDEN_TRANSLATE_X = 128
 const DRAG_THRESHOLD = 4
 const VIEWPORT_MARGIN = 16
+const BACK_TO_TOP_OFFSET_STORAGE_KEY = 'maibot-back-to-top-offset-y'
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
+function loadStoredDragOffsetY(): number {
+  if (typeof window === 'undefined') {
+    return 0
+  }
+
+  const stored = Number(localStorage.getItem(BACK_TO_TOP_OFFSET_STORAGE_KEY))
+  return Number.isFinite(stored) ? stored : 0
+}
+
 export function BackToTop() {
-  const [dragOffsetY, setDragOffsetY] = useState(0)
+  const [dragOffsetY, setDragOffsetY] = useState(loadStoredDragOffsetY)
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState(0)
   const [visible, setVisible] = useState(false)
@@ -70,6 +80,10 @@ export function BackToTop() {
 
     return () => window.cancelAnimationFrame(frameId)
   }, [locationKey])
+
+  useEffect(() => {
+    localStorage.setItem(BACK_TO_TOP_OFFSET_STORAGE_KEY, String(dragOffsetY))
+  }, [dragOffsetY])
 
   const scrollToTop = () => {
     scrollerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })

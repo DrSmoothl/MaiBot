@@ -22,6 +22,20 @@ import { Sidebar } from './Sidebar'
 import type { LayoutProps, WorkspaceMode } from './types'
 import { useMenuSections } from './use-menu-sections'
 
+const SIDEBAR_OPEN_STORAGE_KEY = 'maibot-layout-sidebar-open'
+const TOPBAR_COLLAPSED_STORAGE_KEY = 'maibot-layout-topbar-collapsed'
+
+function loadStoredBoolean(key: string, fallback: boolean): boolean {
+  if (typeof window === 'undefined') {
+    return fallback
+  }
+
+  const stored = localStorage.getItem(key)
+  if (stored === 'true') return true
+  if (stored === 'false') return false
+  return fallback
+}
+
 export function Layout({ children }: LayoutProps) {
   const { t } = useTranslation()
   const { checking } = useAuthGuard() // 检查认证状态
@@ -34,10 +48,10 @@ export function Layout({ children }: LayoutProps) {
   const isChatWorkspace = workspaceMode === 'chat'
   const showBackToTop = isSettingsWorkspace && pathname !== '/planner-monitor'
 
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(() => loadStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true))
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [topbarCollapsed, setTopbarCollapsed] = useState(false)
+  const [topbarCollapsed, setTopbarCollapsed] = useState(() => loadStoredBoolean(TOPBAR_COLLAPSED_STORAGE_KEY, false))
   const [visibleWorkspaceMode, setVisibleWorkspaceMode] = useState<WorkspaceMode>(workspaceMode)
   const [visibleChildren, setVisibleChildren] = useState<LayoutProps['children']>(children)
   const [pendingWorkspace, setPendingWorkspace] = useState<{
@@ -46,6 +60,14 @@ export function Layout({ children }: LayoutProps) {
   } | null>(null)
   const { theme, setTheme } = useTheme()
   const menuSections = useMenuSections()
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(sidebarOpen))
+  }, [sidebarOpen])
+
+  useEffect(() => {
+    localStorage.setItem(TOPBAR_COLLAPSED_STORAGE_KEY, String(topbarCollapsed))
+  }, [topbarCollapsed])
 
   // 搜索快捷键监听（Cmd/Ctrl + K）
   useEffect(() => {

@@ -628,6 +628,7 @@ class PluginManifest(_StrictManifestModel):
     id: str = Field(description="稳定插件 ID")
     plugin_type: str = Field(default="extension", description="插件类型")
     display: Optional[ManifestDisplay] = Field(default=None, description="插件展示元信息")
+    changelog: Optional[str] = Field(default=None, description="更新日志地址或插件内相对路径")
 
     @field_validator("version")
     @classmethod
@@ -690,6 +691,28 @@ class PluginManifest(_StrictManifestModel):
             if normalized_capability not in normalized_capabilities:
                 normalized_capabilities.append(normalized_capability)
         return normalized_capabilities
+
+    @field_validator("changelog")
+    @classmethod
+    def _validate_changelog(cls, value: Optional[str]) -> Optional[str]:
+        """校验可选更新日志声明。"""
+        if value is None:
+            return None
+
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("不能为空字符串")
+        if _HTTP_URL_PATTERN.fullmatch(normalized_value):
+            return normalized_value
+
+        changelog_path = Path(normalized_value)
+        if changelog_path.is_absolute() or any(part == ".." for part in changelog_path.parts):
+            raise ValueError("必须为插件目录内的相对路径或 http(s) URL")
+        if "\x00" in normalized_value or normalized_value.startswith(("/", "\\")):
+            raise ValueError("路径包含非法字符")
+        if changelog_path.suffix.lower() != ".md":
+            raise ValueError("插件内更新日志路径必须指向 Markdown 文件")
+        return normalized_value
 
     @model_validator(mode="after")
     def _validate_dependencies(self) -> "PluginManifest":
