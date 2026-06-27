@@ -212,6 +212,34 @@ class DeletePurgeRequest(BaseModel):
     limit: int = Field(1000, ge=1, le=5000)
 
 
+class MemoryCorrectionPreviewRequest(BaseModel):
+    request_text: str = Field(..., min_length=1)
+    scope: str = "person_profile"
+    person_id: str = ""
+    person_keyword: str = ""
+    chat_id: str = ""
+    limit: Optional[int] = Field(default=None, ge=1)
+    requested_by: str = "webui"
+    reason: str = ""
+
+
+class MemoryCorrectionExecuteRequest(BaseModel):
+    plan_id: str = Field(..., min_length=1)
+    confirmed: bool = True
+    requested_by: str = "webui"
+    reason: str = ""
+
+
+class MemoryCorrectionRollbackRequest(BaseModel):
+    requested_by: str = "webui"
+    reason: str = ""
+
+
+FuzzyModifyPreviewRequest = MemoryCorrectionPreviewRequest
+FuzzyModifyExecuteRequest = MemoryCorrectionExecuteRequest
+FuzzyModifyRollbackRequest = MemoryCorrectionRollbackRequest
+
+
 class FeedbackRollbackRequest(BaseModel):
     requested_by: str = "webui"
     reason: str = ""
@@ -345,6 +373,135 @@ def _find_real_chat_session(chat_id: str) -> Optional[ChatSession]:
         pass
     with get_db_session() as session:
         return session.exec(select(ChatSession).where(col(ChatSession.session_id) == token)).first()
+
+
+def _normalize_chat_lookup_token(value: Any) -> str:
+    return "".join(str(value or "").strip().lower().split())
+
+
+def _compact_chat_lookup_tokens(parts: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    tokens: list[str] = []
+    for part in parts:
+        token = str(part or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        tokens.append(token)
+    return tokens
+
+
+def _get_chat_session_lookup_tokens(
+    chat_session: ChatSession,
+    latest_messages: dict[str, dict[str, Any]],
+) -> list[str]:
+    chat_id = str(chat_session.session_id or "").strip()
+    latest_message = latest_messages.get(chat_id) or {}
+    group_id = str(chat_session.group_id or latest_message.get("group_id") or "").strip()
+    user_id = str(chat_session.user_id or latest_message.get("user_id") or "").strip()
+    group_name = str(chat_session.group_name or latest_message.get("group_name") or "").strip()
+    private_name = str(
+        chat_session.user_cardname
+        or chat_session.user_nickname
+        or latest_message.get("user_cardname")
+        or latest_message.get("user_nickname")
+        or ""
+    ).strip()
+    chat_name = _get_chat_name(chat_session, latest_messages)
+
+    return _compact_chat_lookup_tokens(
+        [
+            chat_id,
+            chat_name,
+            chat_session.platform,
+            chat_session.account_id,
+            chat_session.scope,
+            group_id,
+            group_name,
+            f"群聊{group_id}" if group_id else "",
+            user_id,
+            private_name,
+            f"用户{user_id}" if user_id else "",
+            f"{private_name}的私聊" if private_name else "",
+        ]
+    )
+
+
+def _score_chat_session_lookup(query_token: str, tokens: list[str]) -> int:
+    normalized_tokens = [_normalize_chat_lookup_token(token) for token in tokens]
+    normalized_tokens = [token for token in normalized_tokens if token]
+    if not query_token or not normalized_tokens:
+        return 0
+    if query_token in normalized_tokens:
+        return 100
+    if any(token.startswith(query_token) for token in normalized_tokens):
+        return 85
+    if any(len(token) >= 4 and query_token.startswith(token) for token in normalized_tokens):
+        return 75
+    if any(query_token in token for token in normalized_tokens):
+        return 65
+    if any(len(token) >= 4 and token in query_token for token in normalized_tokens):
+        return 55
+    return 0
+
+
+def _format_chat_session_lookup_label(chat_session: ChatSession, latest_messages: dict[str, dict[str, Any]]) -> str:
+    chat_id = str(chat_session.session_id or "").strip()
+    chat_name = _get_chat_name(chat_session, latest_messages)
+    group_id = str(chat_session.group_id or "").strip()
+    user_id = str(chat_session.user_id or "").strip()
+    identifier = group_id or user_id or chat_id
+    return f"{chat_name}({identifier})" if identifier and identifier != chat_name else chat_name
+
+
+def _resolve_memory_correction_chat_id(chat_id: str) -> str:
+    raw_chat_id = str(chat_id or "").strip()
+    if not raw_chat_id:
+        return ""
+    real_chat_session = _find_real_chat_session(raw_chat_id)
+    if real_chat_session is not None:
+        return str(real_chat_session.session_id or raw_chat_id).strip()
+
+    query_token = _normalize_chat_lookup_token(raw_chat_id)
+    if not query_token:
+        return raw_chat_id
+
+    with get_db_session() as session:
+        rows = list(
+            session.exec(
+                select(ChatSession).order_by(
+                    col(ChatSession.last_active_timestamp).desc(),
+                    col(ChatSession.created_timestamp).desc(),
+                )
+            ).all()
+        )
+        session_ids = [str(chat_session.session_id or "").strip() for chat_session in rows]
+        latest_messages = _prefetch_latest_messages_by_session(session, [item for item in session_ids if item])
+
+    scored_rows: list[tuple[int, ChatSession]] = []
+    for chat_session in rows:
+        session_id = str(chat_session.session_id or "").strip()
+        if not session_id:
+            continue
+        tokens = _get_chat_session_lookup_tokens(chat_session, latest_messages)
+        score = _score_chat_session_lookup(query_token, tokens)
+        if score > 0:
+            scored_rows.append((score, chat_session))
+
+    if not scored_rows:
+        return raw_chat_id
+
+    scored_rows.sort(key=lambda item: item[0], reverse=True)
+    best_score = scored_rows[0][0]
+    best_rows = [chat_session for score, chat_session in scored_rows if score == best_score]
+    if len(best_rows) > 1:
+        candidates = "、".join(_format_chat_session_lookup_label(item, latest_messages) for item in best_rows[:5])
+        raise HTTPException(
+            status_code=400,
+            detail=f"聊天流匹配不唯一: {raw_chat_id}，请填写更完整的名称、群号、用户 ID 或 session_id。候选：{candidates}",
+        )
+
+    return str(best_rows[0].session_id or raw_chat_id).strip()
 
 
 def _timeline_chat_from_session(chat_session: ChatSession) -> MemoryTimelineChat:
@@ -509,6 +666,37 @@ def _timeline_event(
     )
 
 
+def _paragraph_jump_target(paragraph_hash: str) -> dict[str, Any]:
+    token = str(paragraph_hash or "").strip()
+    return {"tab": "graph", "params": {"paragraph_hash": token}}
+
+
+def _delete_jump_target_for_paragraph(paragraph_hash: str, source: str = "") -> dict[str, Any]:
+    token = str(paragraph_hash or "").strip()
+    if token:
+        rows = _query_memory_rows(
+            """
+            SELECT operation_id
+            FROM delete_operation_items
+            WHERE item_hash = ?
+               OR item_key = ?
+               OR payload_json LIKE ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (token, token, f"%{token}%"),
+        )
+        operation_id = str((rows[0] if rows else {}).get("operation_id") or "").strip()
+        if operation_id:
+            return {"tab": "delete", "params": {"operation_id": operation_id}}
+
+    params = {"paragraph_hash": token}
+    clean_source = str(source or "").strip()
+    if clean_source:
+        params["source"] = clean_source
+    return {"tab": "delete", "params": params}
+
+
 def _get_memory_metadata_store() -> Any:
     kernel = get_runtime_kernel()
     return getattr(kernel, "metadata_store", None) if kernel is not None else None
@@ -569,6 +757,11 @@ def _timeline_paragraph_events(
         updated_at = _safe_float(row.get("updated_at"))
         deleted_at = _safe_float(row.get("deleted_at"))
         is_deleted = bool(int(row.get("is_deleted") or 0))
+        paragraph_jump_target = (
+            _delete_jump_target_for_paragraph(paragraph_hash, source)
+            if is_deleted
+            else _paragraph_jump_target(paragraph_hash)
+        )
         if created_at is not None and _event_in_range(created_at, time_start, time_end):
             events.append(
                 _timeline_event(
@@ -582,7 +775,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                    jump_target=paragraph_jump_target,
                 )
             )
         if (
@@ -603,7 +796,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                    jump_target=paragraph_jump_target,
                 )
             )
         if is_deleted and deleted_at is not None and _event_in_range(deleted_at, time_start, time_end):
@@ -619,7 +812,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target={"tab": "delete", "params": {"source": source, "paragraph_hash": paragraph_hash}},
+                    jump_target=_delete_jump_target_for_paragraph(paragraph_hash, source),
                 )
             )
     return [event for event in events if _types_match(event, accepted_types)]
@@ -1286,6 +1479,162 @@ async def _graph_get_edge_detail(
     return payload
 
 
+def _trim_memory_text(value: Any, limit: int = 160) -> str:
+    text = str(value or "").strip()
+    return text[:limit] + ("..." if len(text) > limit else "")
+
+
+def _format_memory_relation(subject: Any, predicate: Any, obj: Any) -> str:
+    return " ".join(str(item or "").strip() for item in (subject, predicate, obj) if str(item or "").strip())
+
+
+def _format_graph_paragraph(row: dict[str, Any], entities: list[str], relations: list[dict[str, Any]]) -> dict[str, Any]:
+    content = str(row.get("content") or "").strip()
+    return {
+        "hash": str(row.get("hash") or "").strip(),
+        "content": content,
+        "preview": _trim_memory_text(content),
+        "source": str(row.get("source") or "").strip(),
+        "created_at": _safe_float(row.get("created_at")),
+        "updated_at": _safe_float(row.get("updated_at")),
+        "entity_count": len(entities),
+        "relation_count": len(relations),
+        "entities": entities,
+        "relations": [_format_memory_relation(item.get("subject"), item.get("predicate"), item.get("object")) for item in relations],
+    }
+
+
+async def _graph_get_paragraph_detail(paragraph_hash: str, evidence_node_limit: int) -> dict:
+    token = str(paragraph_hash or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="paragraph_hash 不能为空")
+    rows = _query_memory_rows(
+        """
+        SELECT hash, content, source, created_at, updated_at, metadata, is_deleted, deleted_at
+        FROM paragraphs
+        WHERE hash = ?
+        LIMIT 1
+        """,
+        (token,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"未找到段落: {token}")
+
+    paragraph_row = dict(rows[0])
+    if bool(int(paragraph_row.get("is_deleted") or 0)) or paragraph_row.get("deleted_at") is not None:
+        raise HTTPException(status_code=404, detail=f"段落已删除: {token}")
+
+    entity_rows = [
+        dict(row)
+        for row in _query_memory_rows(
+            """
+            SELECT e.hash, e.name, pe.mention_count
+            FROM paragraph_entities pe
+            LEFT JOIN entities e ON e.hash = pe.entity_hash
+            WHERE pe.paragraph_hash = ?
+            ORDER BY COALESCE(pe.mention_count, 1) DESC, e.name ASC
+            """,
+            (token,),
+        )
+    ]
+    relation_rows = [
+        dict(row)
+        for row in _query_memory_rows(
+            """
+            SELECT r.hash, r.subject, r.predicate, r.object, r.confidence
+            FROM paragraph_relations pr
+            JOIN relations r ON r.hash = pr.relation_hash
+            WHERE pr.paragraph_hash = ?
+              AND (r.is_inactive IS NULL OR r.is_inactive = 0)
+            ORDER BY r.confidence DESC, r.created_at DESC
+            """,
+            (token,),
+        )
+    ]
+    entities = [str(row.get("name") or row.get("hash") or "").strip() for row in entity_rows]
+    entities = [name for name in entities if name]
+    paragraph = _format_graph_paragraph(paragraph_row, entities, relation_rows)
+
+    nodes: list[dict[str, Any]] = [
+        {
+            "id": f"paragraph:{token}",
+            "type": "paragraph",
+            "content": str(paragraph_row.get("content") or ""),
+            "metadata": {
+                "hash": token,
+                "source": paragraph.get("source"),
+                "updated_at": paragraph.get("updated_at"),
+                "entity_count": len(entities),
+                "relation_count": len(relation_rows),
+                "preview": paragraph.get("preview"),
+            },
+        }
+    ]
+    edges: list[dict[str, Any]] = []
+    node_ids = {f"paragraph:{token}"}
+
+    for row in entity_rows:
+        entity_name = str(row.get("name") or row.get("hash") or "").strip()
+        if not entity_name:
+            continue
+        node_id = f"entity:{entity_name}"
+        if node_id not in node_ids:
+            node_ids.add(node_id)
+            nodes.append({"id": node_id, "type": "entity", "content": entity_name, "metadata": {"entity_name": entity_name}})
+        mention_count = int(row.get("mention_count") or 1)
+        edges.append(
+            {
+                "source": f"paragraph:{token}",
+                "target": node_id,
+                "kind": "mentions",
+                "label": f"提及 ×{mention_count}" if mention_count > 1 else "提及",
+                "weight": float(max(1, mention_count)),
+            }
+        )
+
+    for row in relation_rows:
+        relation_hash = str(row.get("hash") or "").strip()
+        if not relation_hash:
+            continue
+        relation_node_id = f"relation:{relation_hash}"
+        relation_text = _format_memory_relation(row.get("subject"), row.get("predicate"), row.get("object"))
+        if relation_node_id not in node_ids:
+            node_ids.add(relation_node_id)
+            nodes.append(
+                {
+                    "id": relation_node_id,
+                    "type": "relation",
+                    "content": relation_text,
+                    "metadata": {
+                        "hash": relation_hash,
+                        "subject": str(row.get("subject") or "").strip(),
+                        "predicate": str(row.get("predicate") or "").strip(),
+                        "object": str(row.get("object") or "").strip(),
+                        "confidence": float(row.get("confidence") or 0.0),
+                        "paragraph_count": 1,
+                        "paragraph_hashes": [token],
+                        "text": relation_text,
+                    },
+                }
+            )
+        edges.append({"source": f"paragraph:{token}", "target": relation_node_id, "kind": "supports", "label": "支撑", "weight": 1.0})
+
+    if len(nodes) > evidence_node_limit:
+        kept_ids = {node["id"] for node in nodes[:evidence_node_limit]}
+        nodes = [node for node in nodes if node["id"] in kept_ids]
+        edges = [edge for edge in edges if edge["source"] in kept_ids and edge["target"] in kept_ids]
+
+    return {
+        "success": True,
+        "paragraph": paragraph,
+        "evidence_graph": {
+            "nodes": nodes,
+            "edges": edges,
+            "focus_entities": entities,
+        },
+    }
+
+
 async def _graph_create_node(payload: NodeRequest) -> dict:
     return await memory_service.graph_admin(action="create_node", name=payload.name)
 
@@ -1638,7 +1987,13 @@ async def _runtime_save() -> dict:
 
 
 async def _runtime_config() -> dict:
-    return await memory_service.runtime_admin(action="get_config")
+    payload = await memory_service.runtime_admin(action="get_config")
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    integration = config.get("integration") if isinstance(config.get("integration"), dict) else {}
+    candidate_limit = integration.get("fuzzy_modify_candidate_limit")
+    if candidate_limit is not None:
+        payload["fuzzy_modify_candidate_limit"] = candidate_limit
+    return payload
 
 
 async def _runtime_self_check(refresh: bool) -> dict:
@@ -1779,6 +2134,52 @@ async def _delete_purge(payload: DeletePurgeRequest) -> dict:
         grace_hours=payload.grace_hours,
         limit=payload.limit,
     )
+
+
+async def _memory_correction_preview(payload: MemoryCorrectionPreviewRequest) -> dict:
+    resolved_chat_id = _resolve_memory_correction_chat_id(payload.chat_id)
+    return await memory_service.memory_correction_admin(
+        action="preview",
+        request_text=payload.request_text,
+        scope=payload.scope,
+        person_id=payload.person_id,
+        person_keyword=payload.person_keyword,
+        chat_id=resolved_chat_id,
+        limit=payload.limit,
+        requested_by=payload.requested_by,
+        reason=payload.reason,
+    )
+
+
+async def _memory_correction_execute(payload: MemoryCorrectionExecuteRequest) -> dict:
+    return await memory_service.memory_correction_admin(
+        action="execute",
+        plan_id=payload.plan_id,
+        confirmed=payload.confirmed,
+        requested_by=payload.requested_by,
+        reason=payload.reason,
+    )
+
+
+async def _memory_correction_rollback(plan_id: str, payload: MemoryCorrectionRollbackRequest) -> dict:
+    return await memory_service.memory_correction_admin(
+        action="rollback",
+        plan_id=plan_id,
+        requested_by=payload.requested_by,
+        reason=payload.reason,
+    )
+
+
+async def _fuzzy_modify_preview(payload: FuzzyModifyPreviewRequest) -> dict:
+    return await _memory_correction_preview(payload)
+
+
+async def _fuzzy_modify_execute(payload: FuzzyModifyExecuteRequest) -> dict:
+    return await _memory_correction_execute(payload)
+
+
+async def _fuzzy_modify_rollback(plan_id: str, payload: FuzzyModifyRollbackRequest) -> dict:
+    return await _memory_correction_rollback(plan_id, payload)
 
 
 async def _import_settings() -> dict:
@@ -1979,6 +2380,14 @@ async def get_memory_graph_edge_detail(
         paragraph_limit=paragraph_limit,
         evidence_node_limit=evidence_node_limit,
     )
+
+
+@router.get("/graph/paragraph-detail")
+async def get_memory_graph_paragraph_detail(
+    paragraph_hash: str = Query(..., min_length=1),
+    evidence_node_limit: int = Query(80, ge=12, le=200),
+):
+    return await _graph_get_paragraph_detail(paragraph_hash, evidence_node_limit)
 
 
 @router.post("/graph/node")
@@ -2344,6 +2753,74 @@ async def get_memory_delete_operation(operation_id: str):
 @router.post("/delete/purge")
 async def purge_memory_delete(payload: DeletePurgeRequest):
     return await _delete_purge(payload)
+
+
+@router.post("/fuzzy-modify/preview")
+async def preview_memory_fuzzy_modify(payload: FuzzyModifyPreviewRequest):
+    return await _fuzzy_modify_preview(payload)
+
+
+@router.post("/corrections/preview")
+async def preview_memory_correction(payload: MemoryCorrectionPreviewRequest):
+    return await _memory_correction_preview(payload)
+
+
+@router.post("/fuzzy-modify/execute")
+async def execute_memory_fuzzy_modify(payload: FuzzyModifyExecuteRequest):
+    return await _fuzzy_modify_execute(payload)
+
+
+@router.post("/corrections/execute")
+async def execute_memory_correction(payload: MemoryCorrectionExecuteRequest):
+    return await _memory_correction_execute(payload)
+
+
+@router.get("/fuzzy-modify/plans")
+async def list_memory_fuzzy_modify_plans(
+    limit: int = Query(50, ge=1, le=200),
+    status: str = Query(""),
+    scope: str = Query(""),
+):
+    return await memory_service.memory_correction_admin(
+        action="list",
+        limit=limit,
+        status=status,
+        scope=scope,
+    )
+
+
+@router.get("/corrections/plans")
+async def list_memory_correction_plans(
+    limit: int = Query(50, ge=1, le=200),
+    status: str = Query(""),
+    scope: str = Query(""),
+):
+    return await memory_service.memory_correction_admin(
+        action="list",
+        limit=limit,
+        status=status,
+        scope=scope,
+    )
+
+
+@router.get("/fuzzy-modify/plans/{plan_id}")
+async def get_memory_fuzzy_modify_plan(plan_id: str):
+    return await memory_service.memory_correction_admin(action="get", plan_id=plan_id)
+
+
+@router.get("/corrections/plans/{plan_id}")
+async def get_memory_correction_plan(plan_id: str):
+    return await memory_service.memory_correction_admin(action="get", plan_id=plan_id)
+
+
+@router.post("/fuzzy-modify/plans/{plan_id}/rollback")
+async def rollback_memory_fuzzy_modify_plan(plan_id: str, payload: FuzzyModifyRollbackRequest):
+    return await _fuzzy_modify_rollback(plan_id, payload)
+
+
+@router.post("/corrections/plans/{plan_id}/rollback")
+async def rollback_memory_correction_plan(plan_id: str, payload: MemoryCorrectionRollbackRequest):
+    return await _memory_correction_rollback(plan_id, payload)
 
 
 @router.get("/import/settings")

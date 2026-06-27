@@ -99,6 +99,11 @@ vi.mock('@/lib/memory-api', () => ({
   getMemorySources: vi.fn(),
   getMemoryDeleteOperations: vi.fn(),
   getMemoryDeleteOperation: vi.fn(),
+  previewMemoryCorrection: vi.fn(),
+  executeMemoryCorrection: vi.fn(),
+  getMemoryCorrectionPlans: vi.fn(),
+  getMemoryCorrectionPlan: vi.fn(),
+  rollbackMemoryCorrectionPlan: vi.fn(),
   getMemoryFeedbackCorrections: vi.fn(),
   getMemoryFeedbackCorrection: vi.fn(),
   getMemoryTimeline: vi.fn(),
@@ -119,6 +124,11 @@ vi.mock('@/lib/memory-api', () => ({
   protectMemory: vi.fn(),
   getMemoryProfileEvidence: vi.fn(),
   correctMemoryProfileEvidence: vi.fn(),
+  getMemoryGraph: vi.fn(),
+  getMemoryGraphSearch: vi.fn(),
+  getMemoryGraphNodeDetail: vi.fn(),
+  getMemoryGraphEdgeDetail: vi.fn(),
+  getMemoryGraphParagraphDetail: vi.fn(),
   previewMemoryDelete: vi.fn(),
   executeMemoryDelete: vi.fn(),
   restoreMemoryDelete: vi.fn(),
@@ -292,11 +302,22 @@ describe('KnowledgeBasePage import workflow', () => {
     })
     vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValue({
       success: true,
-      config: { plugin: { enabled: true } },
+      config: { plugin: { enabled: true }, integration: { fuzzy_modify_candidate_limit: 12 } },
       data_dir: 'data/plugins/a-dawn.a-memorix',
       embedding_dimension: 1024,
+      fuzzy_modify_candidate_limit: 12,
       auto_save: true,
       relation_vectors_enabled: false,
+      vector_pools: {
+        configured_mode: 'dual',
+        effective_mode: 'dual',
+        ready: true,
+        single_pool: { available: true, dimension: 1024, num_vectors: 4, has_data: true },
+        paragraph_pool: { available: true, dimension: 1024, num_vectors: 7, has_data: true },
+        graph_pool: { available: true, dimension: 1024, num_vectors: 5, has_data: true },
+      },
+      vector_pools_ready: true,
+      vector_pools_effective_mode: 'dual',
       runtime_ready: true,
       embedding_degraded: false,
       embedding_degraded_reason: '',
@@ -308,6 +329,62 @@ describe('KnowledgeBasePage import workflow', () => {
       paragraph_vector_backfill_running: 0,
       paragraph_vector_backfill_failed: 1,
       paragraph_vector_backfill_done: 3,
+    })
+    vi.mocked(memoryApi.getMemoryGraph).mockResolvedValue({
+      success: true,
+      nodes: [{ id: 'alpha', name: 'Alpha' }],
+      edges: [],
+      total_nodes: 1,
+      total_edges: 0,
+    })
+    vi.mocked(memoryApi.getMemoryGraphSearch).mockResolvedValue({
+      success: true,
+      query: '',
+      limit: 50,
+      count: 0,
+      items: [],
+    })
+    vi.mocked(memoryApi.getMemoryGraphNodeDetail).mockResolvedValue({
+      success: true,
+      node: { id: 'alpha', type: 'entity', content: 'Alpha', hash: 'entity-1', appearance_count: 1 },
+      relations: [],
+      paragraphs: [],
+      evidence_graph: { nodes: [], edges: [], focus_entities: [] },
+    })
+    vi.mocked(memoryApi.getMemoryGraphEdgeDetail).mockResolvedValue({
+      success: true,
+      edge: {
+        source: 'alpha',
+        target: 'beta',
+        weight: 1,
+        predicates: [],
+        relation_count: 0,
+        evidence_count: 0,
+        relation_hashes: [],
+      },
+      relations: [],
+      paragraphs: [],
+      evidence_graph: { nodes: [], edges: [], focus_entities: [] },
+    })
+    vi.mocked(memoryApi.getMemoryGraphParagraphDetail).mockResolvedValue({
+      success: true,
+      paragraph: {
+        hash: 'paragraph-jump',
+        content: '跳转段落内容',
+        preview: '跳转段落内容',
+        source: 'chat_summary:chat-1',
+        entity_count: 1,
+        relation_count: 0,
+        entities: ['Alpha'],
+        relations: [],
+      },
+      evidence_graph: {
+        nodes: [
+          { id: 'paragraph:paragraph-jump', type: 'paragraph', content: '跳转段落内容', metadata: { hash: 'paragraph-jump' } },
+        ],
+        edges: [],
+        focus_entities: ['Alpha'],
+      },
     })
 
     vi.mocked(memoryApi.getMemoryImportGuide).mockResolvedValue({
@@ -467,6 +544,182 @@ describe('KnowledgeBasePage import workflow', () => {
         selector: { sources: ['demo-1'] },
         summary: { counts: { paragraphs: 2, relations: 1, sources: 1 }, sources: ['demo-1'] },
         items: [],
+      },
+    })
+    vi.mocked(memoryApi.getMemoryCorrectionPlans).mockResolvedValue({
+      success: true,
+      items: [
+        {
+          plan_id: 'correction-plan-1',
+          request_text: '把测试用户的常住城市改为杭州',
+          scope: 'person_profile',
+          target_person_id: 'person-1',
+          target_chat_id: 'chat-1',
+          status: 'awaiting_confirmation',
+          confidence: 0.91,
+          plan: {
+            scope: 'person_profile',
+            request_text: '把测试用户的常住城市改为杭州',
+            person_id: 'person-1',
+            chat_id: 'chat-1',
+            confidence: 0.91,
+            risk_level: 'medium',
+            reason: '用户明确修正',
+            operations: [
+              {
+                action: 'mark_superseded',
+                candidate_id: 'paragraph:p-old',
+                target_type: 'paragraph',
+                hash: 'p-old',
+                reason: '旧城市已过期',
+              },
+            ],
+          },
+          preview: {
+            request_text: '把测试用户的常住城市改为杭州',
+            scope: 'person_profile',
+            person_id: 'person-1',
+            person_keyword: '测试用户',
+            chat_id: 'chat-1',
+            candidates: [
+              {
+                candidate_id: 'paragraph:p-old',
+                target_type: 'paragraph',
+                evidence_type: 'person_fact',
+                hash: 'p-old',
+                content: '测试用户常住城市是上海',
+                source: 'chat_summary:chat-1',
+                metadata: {},
+                score: 0.87,
+              },
+            ],
+            operations: [
+              {
+                action: 'mark_superseded',
+                candidate_id: 'paragraph:p-old',
+                target_type: 'paragraph',
+                hash: 'p-old',
+                reason: '旧城市已过期',
+              },
+            ],
+            requires_confirmation: true,
+            confirm_threshold: 0.75,
+            reason: '用户明确修正',
+          },
+          execution: {},
+          created_at: 1_710_000_020,
+          updated_at: 1_710_000_021,
+          executed_at: null,
+          requested_by: 'knowledge_base',
+          reason: '用户明确修正',
+        },
+      ],
+      count: 1,
+    })
+    vi.mocked(memoryApi.getMemoryCorrectionPlan).mockResolvedValue({
+      success: true,
+      plan: {
+        plan_id: 'correction-plan-1',
+        request_text: '把测试用户的常住城市改为杭州',
+        scope: 'person_profile',
+        target_person_id: 'person-1',
+        target_chat_id: 'chat-1',
+        status: 'awaiting_confirmation',
+        confidence: 0.91,
+        plan: {
+          scope: 'person_profile',
+          request_text: '把测试用户的常住城市改为杭州',
+          person_id: 'person-1',
+          chat_id: 'chat-1',
+          confidence: 0.91,
+          risk_level: 'medium',
+          reason: '用户明确修正',
+          operations: [
+            {
+              action: 'mark_superseded',
+              candidate_id: 'paragraph:p-old',
+              target_type: 'paragraph',
+              hash: 'p-old',
+              reason: '旧城市已过期',
+            },
+          ],
+        },
+        preview: {
+          request_text: '把测试用户的常住城市改为杭州',
+          scope: 'person_profile',
+          person_id: 'person-1',
+          person_keyword: '测试用户',
+          chat_id: 'chat-1',
+          candidates: [
+            {
+              candidate_id: 'paragraph:p-old',
+              target_type: 'paragraph',
+              evidence_type: 'person_fact',
+              hash: 'p-old',
+              content: '测试用户常住城市是上海',
+              source: 'chat_summary:chat-1',
+              metadata: {},
+              score: 0.87,
+            },
+          ],
+          operations: [
+            {
+              action: 'mark_superseded',
+              candidate_id: 'paragraph:p-old',
+              target_type: 'paragraph',
+              hash: 'p-old',
+              reason: '旧城市已过期',
+            },
+          ],
+          requires_confirmation: true,
+          confirm_threshold: 0.75,
+          reason: '用户明确修正',
+        },
+        execution: {},
+        created_at: 1_710_000_020,
+        updated_at: 1_710_000_021,
+        executed_at: null,
+        requested_by: 'knowledge_base',
+        reason: '用户明确修正',
+      },
+    })
+    vi.mocked(memoryApi.previewMemoryCorrection).mockResolvedValue({
+      success: true,
+      plan_id: 'correction-plan-2',
+      requires_confirmation: true,
+      preview: {
+        request_text: '把测试用户的常住城市改为杭州',
+        scope: 'person_profile',
+        person_id: 'person-1',
+        person_keyword: '测试用户',
+        chat_id: 'chat-1',
+        candidates: [],
+        operations: [
+          {
+            action: 'refresh_person_profile',
+            person_id: 'person-1',
+          },
+        ],
+        requires_confirmation: true,
+        confirm_threshold: 0.75,
+        reason: '用户明确修正',
+      },
+    })
+    vi.mocked(memoryApi.executeMemoryCorrection).mockResolvedValue({
+      success: true,
+      plan: null,
+      execution: { success: true },
+    })
+    vi.mocked(memoryApi.rollbackMemoryCorrectionPlan).mockResolvedValue({
+      success: true,
+      plan: null,
+      rollback: {
+        success: true,
+        new_relations_deactivated: [],
+        restored_targets: [],
+        items: [],
+        requested_by: 'knowledge_base',
+        reason: '测试回滚',
       },
     })
     vi.mocked(memoryApi.getMemoryFeedbackCorrections).mockResolvedValue({
@@ -730,6 +983,9 @@ describe('KnowledgeBasePage import workflow', () => {
     await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入' }))
 
+    expect(screen.getByText('向量池')).toBeInTheDocument()
+    expect(screen.getByText('双池')).toBeInTheDocument()
+    expect(screen.getByText('段落 7 · 图谱 5')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: '创建导入任务' })).toBeInTheDocument()
     expect((await screen.findAllByText('import-run-1')).length).toBeGreaterThan(0)
     expect(memoryApi.getMemoryImportSettings).toHaveBeenCalled()
@@ -1095,6 +1351,81 @@ describe('KnowledgeBasePage import workflow', () => {
     )
   }, 20_000)
 
+  it('shows memory correction entry and submits preview', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await screen.findByLabelText('修正内容')
+    await screen.findByText('correction-plan-1')
+    await waitFor(() => expect(memoryApi.getMemoryCorrectionPlan).toHaveBeenCalledWith('correction-plan-1'))
+
+    await user.type(screen.getByLabelText('修正内容'), '把测试用户的常住城市改为杭州')
+    await user.type(screen.getByLabelText('人物 ID'), 'person-1')
+    await user.click(screen.getByRole('button', { name: '生成预览' }))
+
+    await waitFor(() =>
+      expect(memoryApi.previewMemoryCorrection).toHaveBeenCalledWith(expect.objectContaining({
+        request_text: '把测试用户的常住城市改为杭州',
+        scope: 'person_profile',
+        person_id: 'person-1',
+        limit: 12,
+        requested_by: 'knowledge_base',
+      })),
+    )
+  }, 20_000)
+
+  it('selects a chat target before submitting memory correction preview', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await screen.findByLabelText('修正内容')
+
+    await user.type(screen.getByLabelText('修正内容'), '把测试用户的常住城市改为杭州')
+    await user.type(screen.getByLabelText('人物 ID'), 'person-1')
+    const chatInput = screen.getByLabelText('聊天流 ID / 名称')
+    await user.type(chatInput, '测试')
+    await user.click(screen.getByRole('button', { name: /测试群/ }))
+
+    expect(chatInput).toHaveValue('chat-1')
+    await user.click(screen.getByRole('button', { name: '生成预览' }))
+
+    await waitFor(() =>
+      expect(memoryApi.previewMemoryCorrection).toHaveBeenCalledWith(expect.objectContaining({
+        chat_id: 'chat-1',
+      })),
+    )
+  }, 20_000)
+
+  it('asks for confirmation before executing memory correction plan', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await screen.findByText('correction-plan-1')
+    await waitFor(() => expect(memoryApi.getMemoryCorrectionPlan).toHaveBeenCalledWith('correction-plan-1'))
+
+    await user.click(screen.getByRole('button', { name: '确认执行' }))
+    expect(memoryApi.executeMemoryCorrection).not.toHaveBeenCalled()
+
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('确认执行记忆修正')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '确认执行' }))
+
+    await waitFor(() =>
+      expect(memoryApi.executeMemoryCorrection).toHaveBeenCalledWith({
+        plan_id: 'correction-plan-1',
+        confirmed: true,
+        requested_by: 'knowledge_base',
+        reason: '',
+      }),
+    )
+  }, 20_000)
+
   it('renders audit timeline and jumps to an episode target', async () => {
     const user = userEvent.setup()
     renderPage()
@@ -1115,6 +1446,129 @@ describe('KnowledgeBasePage import workflow', () => {
       })),
     )
     await waitFor(() => expect(memoryApi.getMemoryEpisode).toHaveBeenCalledWith('ep-1'))
+  }, 20_000)
+
+  it('jumps from paragraph timeline event to graph paragraph detail', async () => {
+    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
+      success: true,
+      chat: {
+        chat_id: 'chat-1',
+        chat_name: '测试群',
+        platform: 'qq',
+        group_id: '10001',
+        user_id: null,
+        is_group: true,
+      },
+      range: {
+        time_start: 1_710_000_000,
+        time_end: 1_710_003_600,
+        min_time: 1_710_000_000,
+        max_time: 1_710_003_600,
+      },
+      summary: {
+        total: 1,
+        by_type: { paragraph: 1, paragraph_created: 1 },
+      },
+      items: [
+        {
+          event_id: 'paragraph_created:paragraph-jump:1710000100',
+          event_type: 'paragraph_created',
+          category: 'paragraph',
+          occurred_at: 1_710_000_100,
+          chat_id: 'chat-1',
+          chat_name: '测试群',
+          title: '段落新增：跳转段落',
+          summary: '跳转段落摘要',
+          object_count: 1,
+          key_id: 'paragraph-jump',
+          source: 'chat_summary:chat-1',
+          attribution: 'source',
+          metadata: { paragraph_hash: 'paragraph-jump' },
+          jump_target: {
+            tab: 'graph',
+            params: { paragraph_hash: 'paragraph-jump' },
+          },
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
+    expect(await screen.findByText('段落新增：跳转段落')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '跳转' }))
+
+    await waitFor(() => {
+      expect(memoryApi.getMemoryGraphParagraphDetail).toHaveBeenCalledWith('paragraph-jump')
+    })
+    expect(window.location.search).toContain('tab=graph')
+    expect(window.location.search).toContain('paragraph_hash=paragraph-jump')
+  }, 20_000)
+
+  it('jumps from deleted paragraph timeline event to delete search when operation is missing', async () => {
+    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
+      success: true,
+      chat: {
+        chat_id: 'chat-1',
+        chat_name: '测试群',
+        platform: 'qq',
+        group_id: '10001',
+        user_id: null,
+        is_group: true,
+      },
+      range: {
+        time_start: 1_710_000_000,
+        time_end: 1_710_003_600,
+        min_time: 1_710_000_000,
+        max_time: 1_710_003_600,
+      },
+      summary: {
+        total: 1,
+        by_type: { paragraph: 1, paragraph_deleted: 1 },
+      },
+      items: [
+        {
+          event_id: 'paragraph_deleted:paragraph-missing-op:1710000200',
+          event_type: 'paragraph_deleted',
+          category: 'paragraph',
+          occurred_at: 1_710_000_200,
+          chat_id: 'chat-1',
+          chat_name: '测试群',
+          title: '段落删除：缺少操作',
+          summary: '删除段落摘要',
+          object_count: 1,
+          key_id: 'paragraph-missing-op',
+          source: 'chat_summary:chat-1',
+          attribution: 'source',
+          metadata: { paragraph_hash: 'paragraph-missing-op' },
+          jump_target: {
+            tab: 'delete',
+            params: {
+              paragraph_hash: 'paragraph-missing-op',
+              source: 'chat_summary:chat-1',
+            },
+          },
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
+    expect(await screen.findByText('段落删除：缺少操作')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '跳转' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '删除' })).toHaveAttribute('data-state', 'active')
+    })
+    expect(screen.getByPlaceholderText('搜索 operation / reason / requested_by / source')).toHaveValue('paragraph-missing-op')
+    expect(screen.getByPlaceholderText('搜索 source 名称')).toHaveValue('paragraph-missing-op')
+    expect(window.location.search).toContain('tab=delete')
+    expect(window.location.search).toContain('paragraph_hash=paragraph-missing-op')
   }, 20_000)
 
   it('paginates audit timeline events and supports page size presets', async () => {

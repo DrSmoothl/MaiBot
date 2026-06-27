@@ -279,3 +279,33 @@ async def test_tuning_admin_uses_long_timeout(monkeypatch):
             {"timeout_ms": 120000},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_admin_uses_new_component_and_keeps_legacy_alias(monkeypatch):
+    service = MemoryService()
+    calls = []
+
+    async def fake_invoke(component_name, args=None, **kwargs):
+        calls.append((component_name, args, kwargs))
+        return {"success": True, "plan_id": args["plan_id"]}
+
+    monkeypatch.setattr(service, "_invoke", fake_invoke)
+
+    result = await service.memory_correction_admin(action="get", plan_id="corr-1")
+    legacy_result = await service.fuzzy_modify_admin(action="get", plan_id="corr-2")
+
+    assert result == {"success": True, "plan_id": "corr-1"}
+    assert legacy_result == {"success": True, "plan_id": "corr-2"}
+    assert calls == [
+        (
+            "memory_correction_admin",
+            {"action": "get", "plan_id": "corr-1"},
+            {"timeout_ms": 120000},
+        ),
+        (
+            "memory_correction_admin",
+            {"action": "get", "plan_id": "corr-2"},
+            {"timeout_ms": 120000},
+        ),
+    ]

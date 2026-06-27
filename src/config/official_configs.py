@@ -1386,6 +1386,73 @@ class AMemorixIntegrationConfig(ConfigBase):
     )
     """自动写回聊天摘要时，从聊天流中回看的消息条数"""
 
+    fuzzy_modify_enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "wand-sparkles",
+            "advanced": True,
+        },
+    )
+    """是否启用自然语言记忆修正的后台接口"""
+
+    fuzzy_modify_auto_execute_enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "badge-check",
+            "advanced": True,
+        },
+    )
+    """是否允许高置信记忆修正跳过人工确认自动执行"""
+
+    fuzzy_modify_confirm_threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={
+            "x-widget": "slider",
+            "x-icon": "gauge",
+            "step": 0.01,
+            "advanced": True,
+        },
+    )
+    """记忆修正建议进入自动确认判定时使用的置信度阈值"""
+
+    fuzzy_modify_candidate_limit: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "list-filter",
+            "advanced": True,
+        },
+    )
+    """每次记忆修正交给 LLM 的候选记忆上限"""
+
+    fuzzy_modify_max_targets: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "crosshair",
+            "advanced": True,
+        },
+    )
+    """单个记忆修正计划允许标记失效的旧记忆上限"""
+
+    fuzzy_modify_allow_global_scope: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "globe-2",
+            "advanced": True,
+        },
+    )
+    """未指定聊天流时，是否允许在全局记忆范围内做记忆修正候选检索"""
+
     feedback_correction_enabled: bool = Field(
         default=False,
         json_schema_extra={
@@ -1550,6 +1617,20 @@ class AMemorixIntegrationConfig(ConfigBase):
 
     def model_post_init(self, context: Optional[dict] = None) -> None:
         """验证配置值"""
+        if not 0 <= self.fuzzy_modify_confirm_threshold <= 1:
+            raise ValueError(
+                "fuzzy_modify_confirm_threshold 必须在 [0, 1] 之间，"
+                f"当前值: {self.fuzzy_modify_confirm_threshold}"
+            )
+        if self.fuzzy_modify_candidate_limit < 1:
+            raise ValueError(
+                "fuzzy_modify_candidate_limit 必须至少为1，"
+                f"当前值: {self.fuzzy_modify_candidate_limit}"
+            )
+        if self.fuzzy_modify_max_targets < 1:
+            raise ValueError(
+                f"fuzzy_modify_max_targets 必须至少为1，当前值: {self.fuzzy_modify_max_targets}"
+            )
         if self.feedback_correction_window_hours <= 0:
             raise ValueError(
                 f"feedback_correction_window_hours 必须大于0，当前值: {self.feedback_correction_window_hours}"
@@ -1907,6 +1988,272 @@ class AMemorixSparseRetrievalConfig(ConfigBase):
     """关系候选数"""
 
 
+class AMemorixRelationVectorizationConfig(ConfigBase):
+    """A_Memorix 关系向量化配置"""
+
+    enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用关系向量",
+                "en_US": "Enable relation vectors",
+                "ja_JP": "関係ベクトルを有効化",
+            },
+        },
+    )
+    """是否启用关系向量化"""
+
+    backfill_enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用关系向量回填",
+                "en_US": "Enable relation vector backfill",
+                "ja_JP": "関係ベクトルバックフィルを有効化",
+            },
+        },
+    )
+    """是否启用关系向量回填"""
+
+    write_on_import: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "导入时写入关系向量",
+                "en_US": "Write relation vectors on import",
+                "ja_JP": "インポート時に関係ベクトルを書き込む",
+            },
+        },
+    )
+    """导入时是否写入关系向量"""
+
+
+class AMemorixRelationIntentVectorPoolConfig(ConfigBase):
+    """A_Memorix 关系意图下的双向量池配置"""
+
+    graph_top_k: int = Field(
+        default=80,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "关系意图图谱候选数",
+                "en_US": "Relation-intent graph candidates",
+                "ja_JP": "関係意図グラフ候補数",
+            },
+        },
+    )
+    """关系意图命中时的图谱池候选数"""
+
+    semantic_weight: float = Field(
+        default=0.45,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "关系意图语义权重",
+                "en_US": "Relation-intent semantic weight",
+                "ja_JP": "関係意図セマンティック重み",
+            },
+        },
+    )
+    """关系意图命中时的段落语义权重"""
+
+    sparse_weight: float = Field(
+        default=0.15,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "关系意图稀疏权重",
+                "en_US": "Relation-intent sparse weight",
+                "ja_JP": "関係意図疎検索重み",
+            },
+        },
+    )
+    """关系意图命中时的稀疏检索权重"""
+
+    graph_weight: float = Field(
+        default=0.40,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "关系意图图谱权重",
+                "en_US": "Relation-intent graph weight",
+                "ja_JP": "関係意図グラフ重み",
+            },
+        },
+    )
+    """关系意图命中时的图谱证据权重"""
+
+    return_relation_items: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "返回独立关系项",
+                "en_US": "Return relation items",
+                "ja_JP": "独立した関係項目を返す",
+            },
+        },
+    )
+    """关系意图命中时是否返回独立关系结果"""
+
+
+class AMemorixVectorPoolsConfig(ConfigBase):
+    """A_Memorix 双向量池检索配置"""
+
+    mode: Literal["single", "dual"] = Field(
+        default="dual",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "向量池模式",
+                "en_US": "Vector pool mode",
+                "ja_JP": "ベクトルプールモード",
+            },
+        },
+    )
+    """向量池模式"""
+
+    paragraph_top_k: int = Field(
+        default=20,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "段落池候选数",
+                "en_US": "Paragraph pool candidates",
+                "ja_JP": "段落プール候補数",
+            },
+        },
+    )
+    """段落向量池候选数"""
+
+    graph_top_k: int = Field(
+        default=40,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "图谱池候选数",
+                "en_US": "Graph pool candidates",
+                "ja_JP": "グラフプール候補数",
+            },
+        },
+    )
+    """图谱向量池候选数"""
+
+    graph_expand_paragraph_k: int = Field(
+        default=80,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "图谱展开段落上限",
+                "en_US": "Graph expanded paragraph limit",
+                "ja_JP": "グラフ展開段落上限",
+            },
+        },
+    )
+    """图谱证据展开段落上限"""
+
+    relation_expand_per_hit: int = Field(
+        default=5,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "每个关系展开段落数",
+                "en_US": "Paragraphs per relation hit",
+                "ja_JP": "関係ヒットごとの段落数",
+            },
+        },
+    )
+    """每个关系命中最多展开的段落数"""
+
+    entity_expand_per_hit: int = Field(
+        default=8,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "每个实体展开段落数",
+                "en_US": "Paragraphs per entity hit",
+                "ja_JP": "エンティティヒットごとの段落数",
+            },
+        },
+    )
+    """每个实体命中最多展开的段落数"""
+
+    relation_evidence_weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "关系证据权重",
+                "en_US": "Relation evidence weight",
+                "ja_JP": "関係証拠重み",
+            },
+        },
+    )
+    """关系证据分权重"""
+
+    entity_evidence_weight: float = Field(
+        default=0.55,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "实体证据权重",
+                "en_US": "Entity evidence weight",
+                "ja_JP": "エンティティ証拠重み",
+            },
+        },
+    )
+    """实体证据分权重"""
+
+    semantic_weight: float = Field(
+        default=0.65,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "段落语义权重",
+                "en_US": "Paragraph semantic weight",
+                "ja_JP": "段落セマンティック重み",
+            },
+        },
+    )
+    """段落语义分权重"""
+
+    sparse_weight: float = Field(
+        default=0.20,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "稀疏检索权重",
+                "en_US": "Sparse retrieval weight",
+                "ja_JP": "疎検索重み",
+            },
+        },
+    )
+    """稀疏检索分权重"""
+
+    graph_weight: float = Field(
+        default=0.15,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "图谱证据权重",
+                "en_US": "Graph evidence weight",
+                "ja_JP": "グラフ証拠重み",
+            },
+        },
+    )
+    """图谱证据分权重"""
+
+    relation_intent: AMemorixRelationIntentVectorPoolConfig = Field(
+        default_factory=AMemorixRelationIntentVectorPoolConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "关系意图权重",
+                "en_US": "Relation intent weights",
+                "ja_JP": "関係意図重み",
+            },
+        },
+    )
+    """关系意图命中时的双向量池配置"""
+
+
 class AMemorixRetrievalConfig(ConfigBase):
     """A_Memorix 检索配置"""
 
@@ -2026,6 +2373,30 @@ class AMemorixRetrievalConfig(ConfigBase):
         },
     )
     """是否启用并行检索"""
+
+    relation_vectorization: AMemorixRelationVectorizationConfig = Field(
+        default_factory=AMemorixRelationVectorizationConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "关系向量化",
+                "en_US": "Relation vectorization",
+                "ja_JP": "関係ベクトル化",
+            },
+        },
+    )
+    """关系向量化配置"""
+
+    vector_pools: AMemorixVectorPoolsConfig = Field(
+        default_factory=AMemorixVectorPoolsConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "向量池检索",
+                "en_US": "Vector pool retrieval",
+                "ja_JP": "ベクトルプール検索",
+            },
+        },
+    )
+    """双向量池检索配置"""
 
     sparse: AMemorixSparseRetrievalConfig = Field(
         default_factory=AMemorixSparseRetrievalConfig,

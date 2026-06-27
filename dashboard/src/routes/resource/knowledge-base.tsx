@@ -41,15 +41,18 @@ import { cn } from '@/lib/utils'
 import {
   getMemoryImportChatTargets,
   type MemoryImportChatTargetPayload,
+  type MemoryRuntimeConfigPayload,
   type MemoryTimelineJumpTargetPayload,
 } from '@/lib/memory-api'
 
 import { useImportForm } from './knowledge-base/hooks/useImportForm'
 import { useImportQueue } from './knowledge-base/hooks/useImportQueue'
+import { useMemoryCorrection } from './knowledge-base/hooks/useMemoryCorrection'
 import { useMemoryDelete } from './knowledge-base/hooks/useMemoryDelete'
 import { useMemoryFeedback } from './knowledge-base/hooks/useMemoryFeedback'
 import { useMemoryRuntimeConfig } from './knowledge-base/hooks/useMemoryRuntimeConfig'
 import { useMemoryTuning } from './knowledge-base/hooks/useMemoryTuning'
+import { CorrectionTab } from './knowledge-base/tabs/CorrectionTab'
 import { DeleteTab } from './knowledge-base/tabs/DeleteTab'
 import { FeedbackTab } from './knowledge-base/tabs/FeedbackTab'
 import { ImportTab } from './knowledge-base/tabs/ImportTab'
@@ -65,6 +68,7 @@ type MemoryConsoleTab =
   | 'episodes'
   | 'profiles'
   | 'maintenance'
+  | 'correction'
   | 'delete'
   | 'feedback'
 type LoadableMemoryTab = Extract<
@@ -80,6 +84,7 @@ const MEMORY_CONSOLE_TABS: MemoryConsoleTab[] = [
   'episodes',
   'profiles',
   'maintenance',
+  'correction',
   'delete',
   'feedback',
 ]
@@ -90,10 +95,12 @@ interface KnowledgeBaseDeepLinkState {
   timeStart?: number
   timeEnd?: number
   episodeId?: string
+  paragraphHash?: string
   source?: string
   personId?: string
   taskId?: number
   operationId?: string
+  correctionPlanId?: string
   maintenanceTarget?: string
 }
 
@@ -119,10 +126,12 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
     timeStart: parseOptionalTimestampQuery(params.get('from') ?? params.get('time_start')),
     timeEnd: parseOptionalTimestampQuery(params.get('to') ?? params.get('time_end')),
     episodeId: params.get('episode_id') || undefined,
+    paragraphHash: params.get('paragraph_hash') || undefined,
     source: params.get('source') || undefined,
     personId: params.get('person_id') || undefined,
     taskId: taskId ? Math.floor(taskId) : undefined,
     operationId: params.get('operation_id') || undefined,
+    correctionPlanId: params.get('plan_id') || undefined,
     maintenanceTarget: params.get('target') || undefined,
   }
 }
@@ -158,6 +167,54 @@ function readJumpNumber(target: MemoryTimelineJumpTargetPayload, key: string): n
   return Number.isFinite(value) ? value : undefined
 }
 
+function normalizeVectorPoolMode(value: unknown, fallback: 'single' | 'dual' = 'single'): 'single' | 'dual' {
+  const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return mode === 'dual' || mode === 'single' ? mode : fallback
+}
+
+function formatVectorCount(value?: number): string {
+  const count = Number(value ?? 0)
+  return Number.isFinite(count) ? String(Math.max(0, count)) : '0'
+}
+
+function resolveVectorPoolsBadge(runtimeConfig: MemoryRuntimeConfigPayload) {
+  const vectorPools = runtimeConfig.vector_pools
+  const configuredMode = normalizeVectorPoolMode(vectorPools?.configured_mode)
+  const effectiveMode = normalizeVectorPoolMode(
+    runtimeConfig.vector_pools_effective_mode ?? vectorPools?.effective_mode,
+    configuredMode
+  )
+  const ready = Boolean(runtimeConfig.vector_pools_ready ?? vectorPools?.ready)
+  const paragraphCount = formatVectorCount(vectorPools?.paragraph_pool?.num_vectors)
+  const graphCount = formatVectorCount(vectorPools?.graph_pool?.num_vectors)
+  const singleCount = formatVectorCount(vectorPools?.single_pool?.num_vectors)
+
+  if (effectiveMode === 'dual' && ready) {
+    return {
+      value: '双池',
+      description: `段落 ${paragraphCount} · 图谱 ${graphCount}`,
+      className: 'border-cyan-500/25',
+      iconClassName: 'text-cyan-500',
+    }
+  }
+
+  if (configuredMode === 'dual') {
+    return {
+      value: '双池未就绪',
+      description: `段落 ${paragraphCount} · 图谱 ${graphCount}`,
+      className: 'border-amber-500/25',
+      iconClassName: 'text-amber-500',
+    }
+  }
+
+  return {
+    value: '单池',
+    description: `单池向量 ${singleCount}`,
+    className: 'border-cyan-500/25',
+    iconClassName: 'text-cyan-500',
+  }
+}
+
 export function KnowledgeBasePage() {
   const { toast } = useToast()
   const deepLinkRef = useRef<KnowledgeBaseDeepLinkState>(readKnowledgeBaseDeepLink())
@@ -182,6 +239,9 @@ export function KnowledgeBasePage() {
     timeStart: deepLinkRef.current.timeStart,
     timeEnd: deepLinkRef.current.timeEnd,
   })
+  const [graphInitialParagraphHash, setGraphInitialParagraphHash] = useState(
+    deepLinkRef.current.paragraphHash ?? ''
+  )
   const [profileInitialPersonId, setProfileInitialPersonId] = useState(
     deepLinkRef.current.personId ?? ''
   )
@@ -208,9 +268,10 @@ export function KnowledgeBasePage() {
   // 删除领域：来源/操作列表懒加载、操作详情、源选择、删除预览-执行（usePendingOperation）、恢复
   const memoryDelete = useMemoryDelete({
     active: activeTab === 'delete',
-    initialSourceSearch: deepLinkRef.current.source ?? '',
-    initialOperationSearch: deepLinkRef.current.operationId ?? '',
+    initialSourceSearch: deepLinkRef.current.paragraphHash ?? deepLinkRef.current.source ?? '',
+    initialOperationSearch: deepLinkRef.current.operationId ?? deepLinkRef.current.paragraphHash ?? '',
     initialOperationId: deepLinkRef.current.operationId ?? '',
+    initialItemSearch: deepLinkRef.current.paragraphHash ?? '',
   })
 
   // 纠错领域：纠错历史懒加载、任务详情、行为日志分页、回退；回退后刷新来源与运行时配置
@@ -218,6 +279,16 @@ export function KnowledgeBasePage() {
     active: activeTab === 'feedback',
     initialSearch: deepLinkRef.current.taskId ? String(deepLinkRef.current.taskId) : '',
     initialTaskId: deepLinkRef.current.taskId ?? 0,
+    onRuntimeChanged: () => memoryRuntime.refreshRuntimeConfig(),
+    onSourcesChanged: () => memoryDelete.refreshSources(),
+  })
+
+  const memoryCorrection = useMemoryCorrection({
+    active: activeTab === 'correction',
+    runtimeConfig,
+    initialPlanId: deepLinkRef.current.correctionPlanId ?? '',
+    initialPersonId: deepLinkRef.current.personId ?? '',
+    initialChatId: deepLinkRef.current.chatId ?? '',
     onRuntimeChanged: () => memoryRuntime.refreshRuntimeConfig(),
     onSourcesChanged: () => memoryDelete.refreshSources(),
   })
@@ -310,6 +381,17 @@ export function KnowledgeBasePage() {
         return
       }
 
+      if (tab === 'graph') {
+        const paragraphHash = readJumpParam(target, 'paragraph_hash')
+        if (paragraphHash) {
+          setGraphInitialParagraphHash(paragraphHash)
+          switchMemoryTab('graph', { paragraph_hash: paragraphHash })
+          return
+        }
+        switchMemoryTab('graph')
+        return
+      }
+
       if (tab === 'profiles') {
         const personId = readJumpParam(target, 'person_id')
         setProfileInitialPersonId(personId)
@@ -329,6 +411,16 @@ export function KnowledgeBasePage() {
         return
       }
 
+      if (tab === 'correction') {
+        const planId = readJumpParam(target, 'plan_id')
+        if (planId) {
+          memoryCorrection.setSelectedPlanId(planId)
+          memoryCorrection.setPlanSearch(planId)
+        }
+        switchMemoryTab('correction', { plan_id: planId || undefined })
+        return
+      }
+
       if (tab === 'delete') {
         const operationId = readJumpParam(target, 'operation_id')
         const source = readJumpParam(target, 'source')
@@ -338,9 +430,14 @@ export function KnowledgeBasePage() {
           memoryDelete.setOperationSearch(operationId)
           switchMemoryTab('delete', { operation_id: operationId })
         } else {
-          memoryDelete.setSourceSearch(source || paragraphHash)
-          memoryDelete.setOperationSearch(source || paragraphHash)
-          switchMemoryTab('delete', { source: source || undefined })
+          const searchToken = paragraphHash || source
+          memoryDelete.setSourceSearch(searchToken)
+          memoryDelete.setOperationSearch(searchToken)
+          memoryDelete.setSelectedOperationItemSearch(searchToken)
+          switchMemoryTab('delete', {
+            paragraph_hash: paragraphHash || undefined,
+            source: source || undefined,
+          })
         }
         // 删除数据由 useMemoryDelete 自管加载（enabled:active），切到该 tab 即触发拉取
         return
@@ -355,7 +452,7 @@ export function KnowledgeBasePage() {
 
       switchMemoryTab(tab)
     },
-    [memoryDelete, memoryFeedback, switchMemoryTab]
+    [memoryCorrection, memoryDelete, memoryFeedback, switchMemoryTab]
   )
 
   const loadPage = useCallback(async () => {
@@ -387,6 +484,7 @@ export function KnowledgeBasePage() {
     if (!runtimeConfig) {
       return []
     }
+    const vectorPoolsBadge = resolveVectorPoolsBadge(runtimeConfig)
     return [
       {
         label: '运行状态',
@@ -403,6 +501,14 @@ export function KnowledgeBasePage() {
         icon: HardDrive,
         className: 'border-sky-500/25',
         iconClassName: 'text-sky-500',
+      },
+      {
+        label: '向量池',
+        value: vectorPoolsBadge.value,
+        description: vectorPoolsBadge.description,
+        icon: Database,
+        className: vectorPoolsBadge.className,
+        iconClassName: vectorPoolsBadge.iconClassName,
       },
       {
         label: '数据目录',
@@ -495,7 +601,7 @@ export function KnowledgeBasePage() {
                   自检
                 </Button>
               </div>
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+              <div className="grid grid-cols-2 gap-1.5 sm:gap-2 lg:grid-cols-4">
                 {runtimeBadges.map((item) => (
                   <div
                     key={item.label}
@@ -695,6 +801,7 @@ export function KnowledgeBasePage() {
                   {[
                     { value: 'import', label: '导入', description: '创建并管理导入任务' },
                     { value: 'maintenance', label: '维护', description: '回收站与记忆状态维护' },
+                    { value: 'correction', label: '记忆修正', description: '预览并确认自然语言记忆修正' },
                     { value: 'delete', label: '删除', description: '批量删除与历史回溯' },
                     { value: 'feedback', label: '纠错历史', description: '查看反馈与回滚' },
                   ].map((item) => (
@@ -715,7 +822,11 @@ export function KnowledgeBasePage() {
               value="graph"
               className="border-border/60 bg-background h-[calc(100vh-132px)] min-h-[820px] overflow-hidden rounded-2xl border shadow-sm"
             >
-              <KnowledgeGraphPage embedded onOpenConsole={() => switchMemoryTab('import')} />
+              <KnowledgeGraphPage
+                embedded
+                initialParagraphHash={graphInitialParagraphHash}
+                onOpenConsole={() => switchMemoryTab('import')}
+              />
             </TabsContent>
 
             {shouldRenderMemoryTab('timeline') &&
@@ -739,6 +850,9 @@ export function KnowledgeBasePage() {
 
             {/* 调优面板数据由 useMemoryTuning 自管加载（enabled:active），不再走懒加载占位门控 */}
             {shouldRenderMemoryTab('tuning') && <TuningTab tuning={memoryTuning} />}
+
+            {/* 记忆修正面板数据由 useMemoryCorrection 自管加载（enabled:active） */}
+            {shouldRenderMemoryTab('correction') && <CorrectionTab correction={memoryCorrection} />}
 
             <TabsContent value="episodes" className="space-y-4">
               {shouldRenderMemoryTab('episodes') ? (
