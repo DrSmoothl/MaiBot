@@ -212,27 +212,32 @@ class DeletePurgeRequest(BaseModel):
     limit: int = Field(1000, ge=1, le=5000)
 
 
-class FuzzyModifyPreviewRequest(BaseModel):
+class MemoryCorrectionPreviewRequest(BaseModel):
     request_text: str = Field(..., min_length=1)
     scope: str = "person_profile"
     person_id: str = ""
     person_keyword: str = ""
     chat_id: str = ""
-    limit: int = Field(20, ge=1, le=100)
+    limit: Optional[int] = Field(default=None, ge=1)
     requested_by: str = "webui"
     reason: str = ""
 
 
-class FuzzyModifyExecuteRequest(BaseModel):
+class MemoryCorrectionExecuteRequest(BaseModel):
     plan_id: str = Field(..., min_length=1)
     confirmed: bool = True
     requested_by: str = "webui"
     reason: str = ""
 
 
-class FuzzyModifyRollbackRequest(BaseModel):
+class MemoryCorrectionRollbackRequest(BaseModel):
     requested_by: str = "webui"
     reason: str = ""
+
+
+FuzzyModifyPreviewRequest = MemoryCorrectionPreviewRequest
+FuzzyModifyExecuteRequest = MemoryCorrectionExecuteRequest
+FuzzyModifyRollbackRequest = MemoryCorrectionRollbackRequest
 
 
 class FeedbackRollbackRequest(BaseModel):
@@ -368,6 +373,135 @@ def _find_real_chat_session(chat_id: str) -> Optional[ChatSession]:
         pass
     with get_db_session() as session:
         return session.exec(select(ChatSession).where(col(ChatSession.session_id) == token)).first()
+
+
+def _normalize_chat_lookup_token(value: Any) -> str:
+    return "".join(str(value or "").strip().lower().split())
+
+
+def _compact_chat_lookup_tokens(parts: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    tokens: list[str] = []
+    for part in parts:
+        token = str(part or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        tokens.append(token)
+    return tokens
+
+
+def _get_chat_session_lookup_tokens(
+    chat_session: ChatSession,
+    latest_messages: dict[str, dict[str, Any]],
+) -> list[str]:
+    chat_id = str(chat_session.session_id or "").strip()
+    latest_message = latest_messages.get(chat_id) or {}
+    group_id = str(chat_session.group_id or latest_message.get("group_id") or "").strip()
+    user_id = str(chat_session.user_id or latest_message.get("user_id") or "").strip()
+    group_name = str(chat_session.group_name or latest_message.get("group_name") or "").strip()
+    private_name = str(
+        chat_session.user_cardname
+        or chat_session.user_nickname
+        or latest_message.get("user_cardname")
+        or latest_message.get("user_nickname")
+        or ""
+    ).strip()
+    chat_name = _get_chat_name(chat_session, latest_messages)
+
+    return _compact_chat_lookup_tokens(
+        [
+            chat_id,
+            chat_name,
+            chat_session.platform,
+            chat_session.account_id,
+            chat_session.scope,
+            group_id,
+            group_name,
+            f"群聊{group_id}" if group_id else "",
+            user_id,
+            private_name,
+            f"用户{user_id}" if user_id else "",
+            f"{private_name}的私聊" if private_name else "",
+        ]
+    )
+
+
+def _score_chat_session_lookup(query_token: str, tokens: list[str]) -> int:
+    normalized_tokens = [_normalize_chat_lookup_token(token) for token in tokens]
+    normalized_tokens = [token for token in normalized_tokens if token]
+    if not query_token or not normalized_tokens:
+        return 0
+    if query_token in normalized_tokens:
+        return 100
+    if any(token.startswith(query_token) for token in normalized_tokens):
+        return 85
+    if any(len(token) >= 4 and query_token.startswith(token) for token in normalized_tokens):
+        return 75
+    if any(query_token in token for token in normalized_tokens):
+        return 65
+    if any(len(token) >= 4 and token in query_token for token in normalized_tokens):
+        return 55
+    return 0
+
+
+def _format_chat_session_lookup_label(chat_session: ChatSession, latest_messages: dict[str, dict[str, Any]]) -> str:
+    chat_id = str(chat_session.session_id or "").strip()
+    chat_name = _get_chat_name(chat_session, latest_messages)
+    group_id = str(chat_session.group_id or "").strip()
+    user_id = str(chat_session.user_id or "").strip()
+    identifier = group_id or user_id or chat_id
+    return f"{chat_name}({identifier})" if identifier and identifier != chat_name else chat_name
+
+
+def _resolve_memory_correction_chat_id(chat_id: str) -> str:
+    raw_chat_id = str(chat_id or "").strip()
+    if not raw_chat_id:
+        return ""
+    real_chat_session = _find_real_chat_session(raw_chat_id)
+    if real_chat_session is not None:
+        return str(real_chat_session.session_id or raw_chat_id).strip()
+
+    query_token = _normalize_chat_lookup_token(raw_chat_id)
+    if not query_token:
+        return raw_chat_id
+
+    with get_db_session() as session:
+        rows = list(
+            session.exec(
+                select(ChatSession).order_by(
+                    col(ChatSession.last_active_timestamp).desc(),
+                    col(ChatSession.created_timestamp).desc(),
+                )
+            ).all()
+        )
+        session_ids = [str(chat_session.session_id or "").strip() for chat_session in rows]
+        latest_messages = _prefetch_latest_messages_by_session(session, [item for item in session_ids if item])
+
+    scored_rows: list[tuple[int, ChatSession]] = []
+    for chat_session in rows:
+        session_id = str(chat_session.session_id or "").strip()
+        if not session_id:
+            continue
+        tokens = _get_chat_session_lookup_tokens(chat_session, latest_messages)
+        score = _score_chat_session_lookup(query_token, tokens)
+        if score > 0:
+            scored_rows.append((score, chat_session))
+
+    if not scored_rows:
+        return raw_chat_id
+
+    scored_rows.sort(key=lambda item: item[0], reverse=True)
+    best_score = scored_rows[0][0]
+    best_rows = [chat_session for score, chat_session in scored_rows if score == best_score]
+    if len(best_rows) > 1:
+        candidates = "、".join(_format_chat_session_lookup_label(item, latest_messages) for item in best_rows[:5])
+        raise HTTPException(
+            status_code=400,
+            detail=f"聊天流匹配不唯一: {raw_chat_id}，请填写更完整的名称、群号、用户 ID 或 session_id。候选：{candidates}",
+        )
+
+    return str(best_rows[0].session_id or raw_chat_id).strip()
 
 
 def _timeline_chat_from_session(chat_session: ChatSession) -> MemoryTimelineChat:
@@ -1848,7 +1982,13 @@ async def _runtime_save() -> dict:
 
 
 async def _runtime_config() -> dict:
-    return await memory_service.runtime_admin(action="get_config")
+    payload = await memory_service.runtime_admin(action="get_config")
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    integration = config.get("integration") if isinstance(config.get("integration"), dict) else {}
+    candidate_limit = integration.get("fuzzy_modify_candidate_limit")
+    if candidate_limit is not None:
+        payload["fuzzy_modify_candidate_limit"] = candidate_limit
+    return payload
 
 
 async def _runtime_self_check(refresh: bool) -> dict:
@@ -1991,22 +2131,23 @@ async def _delete_purge(payload: DeletePurgeRequest) -> dict:
     )
 
 
-async def _fuzzy_modify_preview(payload: FuzzyModifyPreviewRequest) -> dict:
-    return await memory_service.fuzzy_modify_admin(
+async def _memory_correction_preview(payload: MemoryCorrectionPreviewRequest) -> dict:
+    resolved_chat_id = _resolve_memory_correction_chat_id(payload.chat_id)
+    return await memory_service.memory_correction_admin(
         action="preview",
         request_text=payload.request_text,
         scope=payload.scope,
         person_id=payload.person_id,
         person_keyword=payload.person_keyword,
-        chat_id=payload.chat_id,
+        chat_id=resolved_chat_id,
         limit=payload.limit,
         requested_by=payload.requested_by,
         reason=payload.reason,
     )
 
 
-async def _fuzzy_modify_execute(payload: FuzzyModifyExecuteRequest) -> dict:
-    return await memory_service.fuzzy_modify_admin(
+async def _memory_correction_execute(payload: MemoryCorrectionExecuteRequest) -> dict:
+    return await memory_service.memory_correction_admin(
         action="execute",
         plan_id=payload.plan_id,
         confirmed=payload.confirmed,
@@ -2015,13 +2156,25 @@ async def _fuzzy_modify_execute(payload: FuzzyModifyExecuteRequest) -> dict:
     )
 
 
-async def _fuzzy_modify_rollback(plan_id: str, payload: FuzzyModifyRollbackRequest) -> dict:
-    return await memory_service.fuzzy_modify_admin(
+async def _memory_correction_rollback(plan_id: str, payload: MemoryCorrectionRollbackRequest) -> dict:
+    return await memory_service.memory_correction_admin(
         action="rollback",
         plan_id=plan_id,
         requested_by=payload.requested_by,
         reason=payload.reason,
     )
+
+
+async def _fuzzy_modify_preview(payload: FuzzyModifyPreviewRequest) -> dict:
+    return await _memory_correction_preview(payload)
+
+
+async def _fuzzy_modify_execute(payload: FuzzyModifyExecuteRequest) -> dict:
+    return await _memory_correction_execute(payload)
+
+
+async def _fuzzy_modify_rollback(plan_id: str, payload: FuzzyModifyRollbackRequest) -> dict:
+    return await _memory_correction_rollback(plan_id, payload)
 
 
 async def _import_settings() -> dict:
@@ -2602,9 +2755,19 @@ async def preview_memory_fuzzy_modify(payload: FuzzyModifyPreviewRequest):
     return await _fuzzy_modify_preview(payload)
 
 
+@router.post("/corrections/preview")
+async def preview_memory_correction(payload: MemoryCorrectionPreviewRequest):
+    return await _memory_correction_preview(payload)
+
+
 @router.post("/fuzzy-modify/execute")
 async def execute_memory_fuzzy_modify(payload: FuzzyModifyExecuteRequest):
     return await _fuzzy_modify_execute(payload)
+
+
+@router.post("/corrections/execute")
+async def execute_memory_correction(payload: MemoryCorrectionExecuteRequest):
+    return await _memory_correction_execute(payload)
 
 
 @router.get("/fuzzy-modify/plans")
@@ -2613,7 +2776,21 @@ async def list_memory_fuzzy_modify_plans(
     status: str = Query(""),
     scope: str = Query(""),
 ):
-    return await memory_service.fuzzy_modify_admin(
+    return await memory_service.memory_correction_admin(
+        action="list",
+        limit=limit,
+        status=status,
+        scope=scope,
+    )
+
+
+@router.get("/corrections/plans")
+async def list_memory_correction_plans(
+    limit: int = Query(50, ge=1, le=200),
+    status: str = Query(""),
+    scope: str = Query(""),
+):
+    return await memory_service.memory_correction_admin(
         action="list",
         limit=limit,
         status=status,
@@ -2623,12 +2800,22 @@ async def list_memory_fuzzy_modify_plans(
 
 @router.get("/fuzzy-modify/plans/{plan_id}")
 async def get_memory_fuzzy_modify_plan(plan_id: str):
-    return await memory_service.fuzzy_modify_admin(action="get", plan_id=plan_id)
+    return await memory_service.memory_correction_admin(action="get", plan_id=plan_id)
+
+
+@router.get("/corrections/plans/{plan_id}")
+async def get_memory_correction_plan(plan_id: str):
+    return await memory_service.memory_correction_admin(action="get", plan_id=plan_id)
 
 
 @router.post("/fuzzy-modify/plans/{plan_id}/rollback")
 async def rollback_memory_fuzzy_modify_plan(plan_id: str, payload: FuzzyModifyRollbackRequest):
     return await _fuzzy_modify_rollback(plan_id, payload)
+
+
+@router.post("/corrections/plans/{plan_id}/rollback")
+async def rollback_memory_correction_plan(plan_id: str, payload: MemoryCorrectionRollbackRequest):
+    return await _memory_correction_rollback(plan_id, payload)
 
 
 @router.get("/import/settings")

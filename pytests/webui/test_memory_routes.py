@@ -855,7 +855,11 @@ def test_compat_aggregate_route(client: TestClient, monkeypatch):
 def test_auto_save_routes(client: TestClient, monkeypatch):
     async def fake_runtime_admin(*, action: str, **kwargs):
         if action == "get_config":
-            return {"success": True, "auto_save": True}
+            return {
+                "success": True,
+                "auto_save": True,
+                "config": {"integration": {"fuzzy_modify_candidate_limit": 33}},
+            }
         if action == "set_auto_save":
             return {"success": True, "auto_save": kwargs["enabled"]}
         raise AssertionError(action)
@@ -864,11 +868,14 @@ def test_auto_save_routes(client: TestClient, monkeypatch):
 
     get_response = client.get("/api/config/auto_save")
     post_response = client.post("/api/config/auto_save", json={"enabled": False})
+    runtime_response = client.get("/api/webui/memory/runtime/config")
 
     assert get_response.status_code == 200
     assert get_response.json() == {"success": True, "auto_save": True}
     assert post_response.status_code == 200
     assert post_response.json() == {"success": True, "auto_save": False}
+    assert runtime_response.status_code == 200
+    assert runtime_response.json()["fuzzy_modify_candidate_limit"] == 33
 
 
 def test_memory_config_routes(client: TestClient, monkeypatch):
@@ -1343,6 +1350,214 @@ def test_delete_operation_routes(client: TestClient, monkeypatch):
     assert list_response.json()["count"] == 1
     assert get_response.status_code == 200
     assert get_response.json()["operation"]["operation_id"] == "del-1"
+
+
+def test_memory_correction_routes(client: TestClient, monkeypatch):
+    calls = []
+
+    async def fake_memory_correction_admin(*, action: str, **kwargs):
+        calls.append((action, kwargs))
+        if action == "preview":
+            assert kwargs == {
+                "request_text": "把小明喜欢蓝色修正为喜欢绿色",
+                "scope": "person_profile",
+                "person_id": "person-1",
+                "person_keyword": "",
+                "chat_id": "",
+                "limit": 5,
+                "requested_by": "tester",
+                "reason": "manual correction",
+            }
+            return {"success": True, "plan": {"plan_id": "corr-1", "status": "pending"}}
+        if action == "execute":
+            assert kwargs == {
+                "plan_id": "corr-1",
+                "confirmed": True,
+                "requested_by": "tester",
+                "reason": "confirmed",
+            }
+            return {"success": True, "plan": {"plan_id": "corr-1", "status": "executed"}}
+        if action == "list":
+            assert kwargs == {"limit": 7, "status": "pending", "scope": "person_profile"}
+            return {"success": True, "items": [{"plan_id": "corr-1"}], "count": 1}
+        if action == "get":
+            assert kwargs == {"plan_id": "corr-1"}
+            return {"success": True, "plan": {"plan_id": "corr-1"}}
+        if action == "rollback":
+            assert kwargs == {"plan_id": "corr-1", "requested_by": "tester", "reason": "undo"}
+            return {"success": True, "rollback_result": {"restored": 1}}
+        raise AssertionError(action)
+
+    monkeypatch.setattr(memory_router_module.memory_service, "memory_correction_admin", fake_memory_correction_admin)
+
+    preview_response = client.post(
+        "/api/webui/memory/corrections/preview",
+        json={
+            "request_text": "把小明喜欢蓝色修正为喜欢绿色",
+            "scope": "person_profile",
+            "person_id": "person-1",
+            "limit": 5,
+            "requested_by": "tester",
+            "reason": "manual correction",
+        },
+    )
+    execute_response = client.post(
+        "/api/webui/memory/corrections/execute",
+        json={"plan_id": "corr-1", "confirmed": True, "requested_by": "tester", "reason": "confirmed"},
+    )
+    list_response = client.get(
+        "/api/webui/memory/corrections/plans",
+        params={"limit": 7, "status": "pending", "scope": "person_profile"},
+    )
+    get_response = client.get("/api/webui/memory/corrections/plans/corr-1")
+    rollback_response = client.post(
+        "/api/webui/memory/corrections/plans/corr-1/rollback",
+        json={"requested_by": "tester", "reason": "undo"},
+    )
+
+    assert preview_response.status_code == 200
+    assert preview_response.json()["plan"]["status"] == "pending"
+    assert execute_response.status_code == 200
+    assert execute_response.json()["plan"]["status"] == "executed"
+    assert list_response.status_code == 200
+    assert list_response.json()["count"] == 1
+    assert get_response.status_code == 200
+    assert get_response.json()["plan"]["plan_id"] == "corr-1"
+    assert rollback_response.status_code == 200
+    assert rollback_response.json()["rollback_result"]["restored"] == 1
+    assert [action for action, _ in calls] == ["preview", "execute", "list", "get", "rollback"]
+
+
+def test_memory_correction_preview_resolves_fuzzy_chat_id(client: TestClient, monkeypatch):
+    chat_session = SimpleNamespace(
+        session_id="session-1",
+        platform="qq",
+        group_id="10001",
+        group_name="测试群",
+        user_id=None,
+        user_cardname=None,
+        user_nickname=None,
+        account_id="bot-1",
+        scope="group",
+        last_active_timestamp=None,
+        created_timestamp=None,
+    )
+    message = SimpleNamespace(
+        session_id="session-1",
+        group_id="10001",
+        group_name="测试群",
+        user_id=None,
+        user_cardname=None,
+        user_nickname=None,
+    )
+    class _FakeExecResult:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def all(self):
+            return self.rows
+
+        def first(self):
+            return None
+
+    class _FakeSession:
+        def __init__(self):
+            self.exec_count = 0
+
+        def exec(self, statement):
+            self.exec_count += 1
+            if self.exec_count == 1:
+                return _FakeExecResult([chat_session])
+            return _FakeExecResult([message])
+
+    async def fake_memory_correction_admin(*, action: str, **kwargs):
+        assert action == "preview"
+        assert kwargs["chat_id"] == "session-1"
+        return {"success": True, "plan": {"plan_id": "corr-1"}}
+
+    monkeypatch.setattr(memory_router_module, "_find_real_chat_session", lambda chat_id: None)
+    monkeypatch.setattr(memory_router_module._chat_manager, "get_session_name", lambda chat_id: "测试群")
+    monkeypatch.setattr(memory_router_module, "get_db_session", lambda: _FakeDbContext(_FakeSession()))
+    monkeypatch.setattr(memory_router_module.memory_service, "memory_correction_admin", fake_memory_correction_admin)
+
+    response = client.post(
+        "/api/webui/memory/corrections/preview",
+        json={
+            "request_text": "只检索测试群里的旧记忆",
+            "scope": "memory",
+            "chat_id": "测试群",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["plan"]["plan_id"] == "corr-1"
+
+
+def test_fuzzy_modify_routes_keep_memory_correction_compatibility(client: TestClient, monkeypatch):
+    calls = []
+
+    async def fake_memory_correction_admin(*, action: str, **kwargs):
+        calls.append((action, kwargs))
+        return {"success": True, "action": action}
+
+    monkeypatch.setattr(memory_router_module.memory_service, "memory_correction_admin", fake_memory_correction_admin)
+
+    response = client.post(
+        "/api/webui/memory/fuzzy-modify/preview",
+        json={"request_text": "旧接口兼容测试", "scope": "person_profile", "person_id": "person-1"},
+    )
+    execute_response = client.post(
+        "/api/webui/memory/fuzzy-modify/execute",
+        json={"plan_id": "corr-1", "confirmed": True},
+    )
+    list_response = client.get("/api/webui/memory/fuzzy-modify/plans", params={"limit": 3, "status": "pending"})
+    get_response = client.get("/api/webui/memory/fuzzy-modify/plans/corr-1")
+    rollback_response = client.post("/api/webui/memory/fuzzy-modify/plans/corr-1/rollback", json={})
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "preview"
+    assert execute_response.status_code == 200
+    assert list_response.status_code == 200
+    assert get_response.status_code == 200
+    assert rollback_response.status_code == 200
+    assert [action for action, _ in calls] == ["preview", "execute", "list", "get", "rollback"]
+    assert calls[0][1]["request_text"] == "旧接口兼容测试"
+    assert calls[1][1]["plan_id"] == "corr-1"
+    assert calls[2][1]["limit"] == 3
+    assert calls[3][1]["plan_id"] == "corr-1"
+    assert calls[4][1]["plan_id"] == "corr-1"
+
+
+def test_memory_correction_preview_allows_configured_default_limit(client: TestClient, monkeypatch):
+    calls = []
+
+    async def fake_memory_correction_admin(*, action: str, **kwargs):
+        calls.append((action, kwargs))
+        return {"success": True, "action": action}
+
+    monkeypatch.setattr(memory_router_module.memory_service, "memory_correction_admin", fake_memory_correction_admin)
+
+    response = client.post(
+        "/api/webui/memory/corrections/preview",
+        json={"request_text": "按配置默认候选上限", "scope": "person_profile", "person_id": "person-1"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [
+        (
+            "preview",
+            {
+                "request_text": "按配置默认候选上限",
+                "scope": "person_profile",
+                "person_id": "person-1",
+                "person_keyword": "",
+                "chat_id": "",
+                "limit": None,
+                "requested_by": "webui",
+                "reason": "",
+            },
+        )
+    ]
 
 
 def test_feedback_correction_routes(client: TestClient, monkeypatch):
