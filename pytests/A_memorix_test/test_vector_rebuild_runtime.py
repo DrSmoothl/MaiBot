@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,12 @@ def _kernel_config(data_dir: Path, dimension: int) -> dict[str, Any]:
             "enable_parallel": False,
         },
     }
+
+
+def _dual_kernel_config(data_dir: Path, dimension: int) -> dict[str, Any]:
+    config = _kernel_config(data_dir, dimension)
+    config["retrieval"]["vector_pools"] = {"mode": "dual"}
+    return config
 
 
 async def _fake_runtime_self_check(**kwargs: Any) -> dict[str, Any]:
@@ -139,6 +146,217 @@ async def test_runtime_admin_rebuild_all_vectors_replaces_existing_store(
     config = await kernel.memory_runtime_admin(action="get_config")
     assert config["vector_rebuild_required"] is False
     assert config["stored_vector_dimension"] == fake_embedding_manager.default_dimension
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dual_rebuild_copies_existing_single_pool_vectors_without_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.metadata_store is not None
+    assert kernel.vector_store is not None
+    assert kernel.paragraph_vector_store is not None
+    assert kernel.graph_vector_store is not None
+
+    paragraph_hash = kernel.metadata_store.add_paragraph("用户喜欢蓝色围巾", source="test")
+    entity_hash = kernel.metadata_store.add_entity("蓝色围巾")
+    relation_hash = kernel.metadata_store.add_relation("用户", "喜欢", "蓝色围巾")
+
+    legacy_vectors = np.eye(3, fake_embedding_manager.default_dimension, dtype=np.float32)
+    kernel.vector_store.add(legacy_vectors, [paragraph_hash, entity_hash, relation_hash])
+    kernel.vector_store.save()
+    fake_embedding_manager.encode_calls.clear()
+
+    result = await kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2)
+
+    assert result["success"] is True
+    assert result["migration"]["paragraphs"] == {"copied": 1, "encoded": 0, "missing": 0}
+    assert result["migration"]["entities"] == {"copied": 1, "encoded": 0, "missing": 0}
+    assert result["migration"]["relations"] == {"copied": 1, "encoded": 0, "missing": 0}
+    assert fake_embedding_manager.encode_calls == []
+    assert paragraph_hash not in kernel.vector_store
+    assert entity_hash not in kernel.vector_store
+    assert relation_hash not in kernel.vector_store
+    assert paragraph_hash in kernel.paragraph_vector_store
+    assert f"entity:{entity_hash}" in kernel.graph_vector_store
+    assert f"relation:{relation_hash}" in kernel.graph_vector_store
+    assert kernel._dual_vector_pools_enabled() is True
+    manifest_path = data_dir / "vectors" / "dual_ready.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "ready"
+    assert manifest["paragraph_vectors"] == 1
+    assert manifest["graph_vectors"] == 2
+    assert not list((data_dir / "vectors").glob("dual_build_*"))
+    assert kernel.retriever.config.vector_pools.mode == "dual"
+
+    await kernel.shutdown()
+
+    reloaded_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_reloaded",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await reloaded_kernel.initialize()
+    assert reloaded_kernel._dual_vector_pools_enabled() is True
+    assert reloaded_kernel.retriever.config.vector_pools.mode == "dual"
+    assert reloaded_kernel.paragraph_vector_store is not None
+    assert reloaded_kernel.graph_vector_store is not None
+    assert paragraph_hash in reloaded_kernel.paragraph_vector_store
+    assert f"entity:{entity_hash}" in reloaded_kernel.graph_vector_store
+
+    await reloaded_kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dual_rebuild_encodes_only_missing_single_pool_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.metadata_store is not None
+    assert kernel.vector_store is not None
+    assert kernel.paragraph_vector_store is not None
+    assert kernel.graph_vector_store is not None
+
+    copied_paragraph_hash = kernel.metadata_store.add_paragraph("已有旧向量段落", source="test")
+    missing_paragraph_hash = kernel.metadata_store.add_paragraph("缺失旧向量段落", source="test")
+    copied_entity_hash = kernel.metadata_store.add_entity("已有旧向量实体")
+    missing_entity_hash = kernel.metadata_store.add_entity("缺失旧向量实体")
+
+    kernel.vector_store.add(
+        np.eye(2, fake_embedding_manager.default_dimension, dtype=np.float32),
+        [copied_paragraph_hash, copied_entity_hash],
+    )
+    kernel.vector_store.save()
+    fake_embedding_manager.encode_calls.clear()
+
+    result = await kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=8, include_relations=False)
+
+    assert result["success"] is True
+    assert result["migration"]["paragraphs"] == {"copied": 1, "encoded": 1, "missing": 1}
+    assert result["migration"]["entities"] == {"copied": 1, "encoded": 1, "missing": 1}
+    assert fake_embedding_manager.encode_calls == [["缺失旧向量段落"], ["缺失旧向量实体"]]
+    assert copied_paragraph_hash in kernel.paragraph_vector_store
+    assert missing_paragraph_hash in kernel.paragraph_vector_store
+    assert f"entity:{copied_entity_hash}" in kernel.graph_vector_store
+    assert f"entity:{missing_entity_hash}" in kernel.graph_vector_store
+    manifest_path = data_dir / "vectors" / "dual_ready.json"
+    assert manifest_path.exists()
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dual_initialize_without_ready_manifest_falls_back_to_single_pool(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.vector_store is not None
+    kernel.vector_store.add(
+        np.ones((1, fake_embedding_manager.default_dimension), dtype=np.float32),
+        ["legacy-paragraph"],
+    )
+    kernel.vector_store.save()
+    await kernel.shutdown()
+
+    paragraph_dir = data_dir / "vectors" / "paragraph"
+    graph_dir = data_dir / "vectors" / "graph"
+    paragraph_dir.mkdir(parents=True, exist_ok=True)
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    stale_build_dir = data_dir / "vectors" / "dual_build_stale"
+    stale_build_dir.mkdir(parents=True, exist_ok=True)
+
+    dual_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_dual",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await dual_kernel.initialize()
+
+    assert dual_kernel._dual_vector_pools_enabled() is False
+    assert dual_kernel.retriever.config.vector_pools.mode == "single"
+    assert not stale_build_dir.exists()
+
+    await dual_kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_failed_dual_rebuild_keeps_single_pool_and_drops_temp_dirs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.metadata_store is not None
+    kernel.metadata_store.add_paragraph("无法编码的段落", source="test")
+
+    async def _failing_encode(**kwargs: Any):
+        ids = [item_id for item_id, _text in kwargs["items"]]
+        return 0, len(ids), "embedding_down", [], ids
+
+    monkeypatch.setattr(kernel, "_encode_and_add_rebuild_vectors", _failing_encode)
+    result = await kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=1, include_relations=False)
+
+    assert result["success"] is False
+    assert result["failed"] == 1
+    assert not (data_dir / "vectors" / "dual_ready.json").exists()
+    assert not list((data_dir / "vectors").glob("dual_build_*"))
+    assert kernel._dual_vector_pools_enabled() is False
+    assert kernel.retriever.config.vector_pools.mode == "single"
 
     await kernel.shutdown()
 
@@ -374,3 +592,226 @@ async def test_deferred_self_check_marks_dimension_mismatch(
         assert config["embedding_degraded"] is True
     finally:
         await kernel.shutdown()
+
+
+# ── 风险验证测试 ──
+
+
+@pytest.mark.asyncio
+async def test_dual_migration_cleans_legacy_single_pool_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """双池迁移完成后清理旧单池文件，避免三池长期冗余。"""
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: fake_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.metadata_store is not None
+
+    ph = kernel.metadata_store.add_paragraph("旧池向量段落", source="test")
+    eh = kernel.metadata_store.add_entity("旧池实体")
+    rh = kernel.metadata_store.add_relation("用户", "喜欢", "旧池关系")
+
+    kernel.vector_store.add(
+        np.eye(3, fake_embedding_manager.default_dimension, dtype=np.float32), [ph, eh, rh]
+    )
+    kernel.vector_store.save()
+
+    result = await kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2)
+    assert result["success"] is True
+
+    assert not kernel.vector_store.has_data()
+    assert kernel.paragraph_vector_store.has_data()
+    assert kernel.graph_vector_store.has_data()
+    assert not (data_dir / "vectors" / "vectors.bin").exists()
+    assert not (data_dir / "vectors" / "vectors_ids.bin").exists()
+    assert not (data_dir / "vectors" / "vectors_metadata.pkl").exists()
+    assert (data_dir / "vectors" / "dual_ready.json").exists()
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dual_ready_manifest_recovers_when_deleted(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: fake_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.metadata_store is not None
+    kernel.metadata_store.add_paragraph("manifest 自愈段落", source="test")
+    kernel.metadata_store.add_entity("manifest 自愈实体")
+    result = await kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2, include_relations=False)
+    assert result["success"] is True
+    await kernel.shutdown()
+
+    manifest_path = data_dir / "vectors" / "dual_ready.json"
+    manifest_path.unlink()
+
+    reloaded = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_reloaded",
+        config=_dual_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await reloaded.initialize()
+    assert reloaded._dual_vector_pools_enabled() is True
+    assert reloaded.retriever.config.vector_pools.mode == "dual"
+    assert manifest_path.exists()
+
+    await reloaded.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_get_vectors_returns_correct_subset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """验证风险 #3：get_vectors 正确性和边界行为。"""
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kw: fake_embedding_manager)
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    assert kernel.vector_store is not None
+
+    vectors = np.eye(4, fake_embedding_manager.default_dimension, dtype=np.float32)
+    kernel.vector_store.add(vectors, ["a", "b", "c", "d"])
+    kernel.vector_store.save()
+
+    result = kernel.vector_store.get_vectors(["a", "c", "x"])
+    assert len(result) == 2
+    assert "a" in result
+    assert "c" in result
+    assert "x" not in result
+    assert result["a"].dtype == np.float32
+
+    assert kernel.vector_store.get_vectors([]) == {}
+    assert kernel.vector_store.get_vectors(["z", "y"]) == {}
+    batches = list(kernel.vector_store.iter_vectors_by_ids(["a", "b", "c"], batch_size=1))
+    assert [list(batch.keys()) for batch in batches] == [["a"], ["b"], ["c"]]
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_filter_current_effective_hits_expired_paragraph(tmp_path: Path) -> None:
+    """验证风险 #2：_filter_current_effective_hits 对过期段落生效，无配置开关控制。"""
+    from src.A_memorix.core.runtime import sdk_memory_kernel
+
+    kernel = sdk_memory_kernel.SDKMemoryKernel.__new__(sdk_memory_kernel.SDKMemoryKernel)
+    kernel.metadata_store = None
+
+    hits = [
+        {"hash": "p-active", "type": "paragraph", "content": "", "metadata": {}},
+        {"hash": "p-expired", "type": "paragraph", "content": "",
+         "metadata": {"memory_change": {"valid_to": 1.0, "change_type": "superseded"}}},
+    ]
+    filtered = kernel._filter_current_effective_hits(hits)
+    assert len(filtered) == 1
+    assert filtered[0]["hash"] == "p-active"
+
+
+@pytest.mark.asyncio
+async def test_filter_current_effective_hits_all_expired(tmp_path: Path) -> None:
+    """验证过期的 paragraph + relation 全部被过滤。"""
+    from src.A_memorix.core.runtime import sdk_memory_kernel
+
+    kernel = sdk_memory_kernel.SDKMemoryKernel.__new__(sdk_memory_kernel.SDKMemoryKernel)
+    kernel.metadata_store = None
+    hits = [
+        {"hash": "p1", "type": "paragraph", "content": "", "metadata": {"memory_change": {"valid_to": 1.0}}},
+        {"hash": "r1", "type": "relation", "content": "", "metadata": {"memory_change": {"valid_to": 1.0}}},
+    ]
+    assert kernel._filter_current_effective_hits(hits) == []
+
+
+@pytest.mark.asyncio
+async def test_filter_current_effective_hits_keeps_valid_to_null_or_future(tmp_path: Path) -> None:
+    """验证 valid_to=None 或未来时间正确保留。"""
+    from src.A_memorix.core.runtime import sdk_memory_kernel
+    import time
+
+    kernel = sdk_memory_kernel.SDKMemoryKernel.__new__(sdk_memory_kernel.SDKMemoryKernel)
+    kernel.metadata_store = None
+    future = time.time() + 86400
+    hits = [
+        {"hash": "p1", "type": "paragraph", "content": "", "metadata": {}},
+        {"hash": "p2", "type": "paragraph", "content": "", "metadata": {"memory_change": {"valid_to": None}}},
+        {"hash": "p3", "type": "paragraph", "content": "", "metadata": {"memory_change": {"valid_to": future}}},
+    ]
+    assert len(kernel._filter_current_effective_hits(hits)) == 3
+
+
+@pytest.mark.asyncio
+async def test_filter_current_effective_hits_skips_store_when_no_fuzzy_changes(tmp_path: Path) -> None:
+    """未执行过模糊修改时，常规检索不回表查询当前有效性。"""
+    from unittest.mock import MagicMock
+
+    from src.A_memorix.core.runtime import sdk_memory_kernel
+
+    kernel = sdk_memory_kernel.SDKMemoryKernel.__new__(sdk_memory_kernel.SDKMemoryKernel)
+    fake_store = MagicMock()
+    fake_store.list_fuzzy_modify_plans.return_value = []
+    kernel.metadata_store = fake_store
+    kernel._current_effective_filter_cache = {"checked_at": 0.0, "needed": False}
+
+    hits = [
+        {"hash": "p-stored", "type": "paragraph", "content": "", "metadata": {}},
+        {"hash": "r-stored", "type": "relation", "content": "", "metadata": {}},
+    ]
+    filtered = kernel._filter_current_effective_hits(hits)
+    assert [item["hash"] for item in filtered] == ["p-stored", "r-stored"]
+    fake_store.get_paragraphs_by_hashes.assert_not_called()
+    fake_store.get_relations_by_hashes.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_filter_current_effective_hits_uses_stored_metadata_after_fuzzy_change(tmp_path: Path) -> None:
+    """执行过模糊修改后，从库中批量读取最新 metadata。"""
+    from unittest.mock import MagicMock
+
+    from src.A_memorix.core.runtime import sdk_memory_kernel
+
+    kernel = sdk_memory_kernel.SDKMemoryKernel.__new__(sdk_memory_kernel.SDKMemoryKernel)
+    fake_store = MagicMock()
+    fake_store.list_fuzzy_modify_plans.return_value = [{"plan_id": "fuzzy-1"}]
+    fake_store.get_paragraphs_by_hashes.return_value = {
+        "p-stored": {
+            "hash": "p-stored",
+            "content": "",
+            "metadata": {"memory_change": {"valid_to": 1.0}},
+        }
+    }
+    fake_store.get_relations_by_hashes.return_value = {
+        "r-stored": {
+            "hash": "r-stored",
+            "metadata": {"memory_change": {"valid_to": 1.0}},
+        }
+    }
+    kernel.metadata_store = fake_store
+    kernel._current_effective_filter_cache = {"checked_at": 0.0, "needed": False}
+
+    hits = [
+        {"hash": "p-stored", "type": "paragraph", "content": "", "metadata": {}},
+        {"hash": "r-stored", "type": "relation", "content": "", "metadata": {}},
+    ]
+    assert kernel._filter_current_effective_hits(hits) == []

@@ -77,6 +77,8 @@ class _DummyVectorStore:
         self.dimension = 4
         self.ids: list[str] = []
         self.add_count = 0
+        self.save_count = 0
+        self.load_count = 0
 
     def __contains__(self, item: str) -> bool:
         return item in self.ids
@@ -92,6 +94,15 @@ class _DummyVectorStore:
             added += 1
         self.add_count += added
         return added
+
+    def save(self) -> None:
+        self.save_count += 1
+
+    def load(self) -> None:
+        self.load_count += 1
+
+    def has_data(self) -> bool:
+        return bool(self.ids)
 
 
 class _DummyEmbeddingManager:
@@ -121,18 +132,26 @@ def _build_manager(
     *,
     embedding_manager: _DummyEmbeddingManager | None = None,
     relation_vectorization_enabled: bool = False,
+    vector_pool_mode: str = "single",
 ) -> tuple[ImportTaskManager, _DummyMetadataStore]:
     metadata_store = _DummyMetadataStore()
     config = {
         "retrieval.relation_vectorization": {
             "enabled": relation_vectorization_enabled,
             "write_on_import": relation_vectorization_enabled,
-        }
+        },
+        "retrieval.vector_pools.mode": vector_pool_mode,
     }
+    graph_store = _DummyGraphStore()
+    legacy_vector_store = _DummyVectorStore()
+    paragraph_vector_store = _DummyVectorStore()
+    graph_vector_store = _DummyVectorStore()
     plugin = SimpleNamespace(
         metadata_store=metadata_store,
-        graph_store=_DummyGraphStore(),
-        vector_store=_DummyVectorStore(),
+        graph_store=graph_store,
+        vector_store=legacy_vector_store,
+        paragraph_vector_store=paragraph_vector_store,
+        graph_vector_store=graph_vector_store,
         embedding_manager=embedding_manager or _DummyEmbeddingManager(),
         relation_write_service=None,
         get_config=lambda key, default=None: config.get(key, default),
@@ -456,6 +475,22 @@ async def test_paragraph_vector_write_is_idempotent_after_concurrent_encode() ->
 
 
 @pytest.mark.asyncio
+async def test_dual_pool_paragraph_vector_write_uses_paragraph_store() -> None:
+    manager, _ = _build_manager(vector_pool_mode="dual")
+
+    result = await manager._write_paragraph_vector_or_enqueue(
+        paragraph_hash="paragraph-dual",
+        content="双池段落内容",
+        context="pytest",
+    )
+
+    assert result["vector_written"] is True
+    assert manager.plugin.paragraph_vector_store.ids == ["paragraph-dual"]
+    assert manager.plugin.vector_store.ids == []
+    assert manager.plugin.graph_vector_store.ids == []
+
+
+@pytest.mark.asyncio
 async def test_relation_vector_failure_keeps_metadata_and_marks_failed() -> None:
     manager, metadata_store = _build_manager(
         embedding_manager=_DummyEmbeddingManager(fail_for="关系是持有"),
@@ -485,6 +520,39 @@ async def test_relation_vector_value_error_marks_failed_when_vector_missing() ->
     assert metadata_store.relation_vector_states[-1][1] == "failed"
     assert metadata_store.relation_vector_states[-1][3] is True
     assert "Dimension mismatch" in str(metadata_store.relation_vector_states[-1][2])
+
+
+@pytest.mark.asyncio
+async def test_dual_pool_import_writes_graph_vectors_to_graph_store() -> None:
+    manager, metadata_store = _build_manager(
+        relation_vectorization_enabled=True,
+        vector_pool_mode="dual",
+    )
+    file_record = SimpleNamespace(source_path="", source_kind="paste", name="demo.txt")
+
+    await manager._persist_processed_chunk(
+        file_record,
+        ProcessedChunk(
+            type=KnowledgeType.FACTUAL,
+            source=SourceInfo(file="demo.txt", offset_start=0, offset_end=4),
+            chunk=ChunkContext(chunk_id="chunk-1", index=0, text="Alice 持有地图"),
+            data={
+                "triples": [{"subject": "Alice", "predicate": "持有", "object": "地图"}],
+                "entities": ["线索"],
+            },
+        ),
+    )
+
+    assert metadata_store.paragraphs[0]["content"] == "Alice 持有地图"
+    assert manager.plugin.vector_store.ids == []
+    assert manager.plugin.paragraph_vector_store.ids == ["paragraph-1"]
+    assert set(manager.plugin.graph_vector_store.ids) == {
+        "entity:entity-Alice",
+        "entity:entity-地图",
+        "entity:entity-线索",
+        "relation:relation-1",
+    }
+    assert metadata_store.relation_vector_states[-1] == ("relation-1", "ready", None, False)
 
 
 @pytest.mark.asyncio

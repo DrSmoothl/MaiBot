@@ -41,9 +41,11 @@ async def test_kernel_enqueue_feedback_task_delegates_to_metadata_store(monkeypa
         kernel_module,
         "global_config",
         SimpleNamespace(
-            memory=SimpleNamespace(
-                feedback_correction_enabled=True,
-                feedback_correction_window_hours=12.0,
+            a_memorix=SimpleNamespace(
+                integration=SimpleNamespace(
+                    feedback_correction_enabled=True,
+                    feedback_correction_window_hours=12.0,
+                )
             )
         ),
     )
@@ -73,7 +75,11 @@ async def test_kernel_enqueue_feedback_task_skipped_when_disabled(monkeypatch: p
     monkeypatch.setattr(
         kernel_module,
         "global_config",
-        SimpleNamespace(memory=SimpleNamespace(feedback_correction_enabled=False)),
+        SimpleNamespace(
+            a_memorix=SimpleNamespace(
+                integration=SimpleNamespace(feedback_correction_enabled=False),
+            )
+        ),
     )
 
     kernel = SDKMemoryKernel(plugin_root=Path("."), config={})
@@ -358,7 +364,14 @@ async def test_feedback_task_rollback_restores_snapshots_and_requeues_followups(
             )
             for hash_value in hashes
         ],
-        delete_paragraph_stale_relation_marks=lambda marks: deleted_marks.extend(list(marks)) or len(list(marks)),
+        rollback_paragraph_stale_relation_mark=lambda **kwargs: deleted_marks.append(
+            (kwargs["paragraph_hash"], kwargs["relation_hash"])
+        ) or {
+            "success": True,
+            "action": "deleted",
+            "paragraph_hash": kwargs["paragraph_hash"],
+            "relation_hash": kwargs["relation_hash"],
+        },
         enqueue_episode_source_rebuild=lambda source, reason='': queued_sources.append(source) or True,
         enqueue_person_profile_refresh=lambda **kwargs: queued_profiles.append(kwargs["person_id"]) or kwargs,
         list_feedback_action_logs=lambda task_id: action_logs if int(task_id) == 1 else [],
@@ -437,6 +450,60 @@ def test_fuzzy_modify_plan_logs_candidate_miss(caplog: pytest.LogCaptureFixture)
 
     assert plan["operations"] == []
     assert "候选集外" in caplog.text
+
+
+def test_fuzzy_modify_superseded_change_type_matches_operation() -> None:
+    previous_metadata = {"source_type": "person_fact"}
+    updated_metadata: dict[str, Any] = {}
+    kernel = SDKMemoryKernel(plugin_root=Path("."), config={})
+    kernel.metadata_store = SimpleNamespace(
+        get_paragraph=lambda hash_value: {"hash": hash_value, "metadata": previous_metadata},
+        update_paragraph_metadata=lambda hash_value, patch, merge=True: updated_metadata.update(patch)
+        or {**previous_metadata, **updated_metadata},
+        get_paragraph_relations=lambda paragraph_hash: [],
+        get_paragraph_entities=lambda paragraph_hash: [],
+        get_relation_status_batch=lambda hashes: {},
+    )
+
+    result = kernel._mark_fuzzy_modify_target_superseded(
+        operation={"target_type": "paragraph", "hash": "paragraph-1"},
+        change_id="fuzzy-1",
+        changed_at=1000.0,
+        changed_by="pytest",
+        replacement_hashes=["new-paragraph"],
+        plan_id="fuzzy-1",
+    )
+
+    assert result["updated_metadata"]["memory_change"]["change_type"] == "mark_superseded"
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_modify_execute_recovers_stale_executing_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    plan_updates: list[dict[str, Any]] = []
+    kernel = SDKMemoryKernel(plugin_root=Path("."), config={})
+    kernel.metadata_store = SimpleNamespace(
+        get_fuzzy_modify_plan=lambda plan_id: {
+            "plan_id": plan_id,
+            "status": "executing",
+            "confidence": 1.0,
+            "execution": {"attempt": {"status": "executing", "started_at": 1.0}},
+            "plan": {"operations": []},
+        },
+        update_fuzzy_modify_plan=lambda plan_id, **kwargs: plan_updates.append({"plan_id": plan_id, **kwargs})
+        or {"plan_id": plan_id, **kwargs},
+    )
+
+    async def fake_apply(**kwargs: Any) -> dict[str, Any]:
+        return {"success": True, "stored_ids": ["new-hash"]}
+
+    monkeypatch.setattr(kernel, "_apply_fuzzy_modify_plan", fake_apply)
+    result = await kernel._execute_fuzzy_modify_action(plan_id="fuzzy-1", confirmed=True, requested_by="pytest")
+
+    assert result["success"] is True
+    assert plan_updates[0]["status"] == "executing"
+    assert plan_updates[0]["execution"]["attempt"]["recovered_from_stale_executing"] is True
+    assert plan_updates[-1]["status"] == "executed"
+    assert plan_updates[-1]["execution"]["attempt"]["status"] == "finished"
 
 
 @pytest.mark.asyncio

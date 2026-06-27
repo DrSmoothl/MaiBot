@@ -10,6 +10,7 @@ import asyncio
 import json
 import numpy as np
 import pickle
+import shutil
 import time
 
 from src.chat.message_receive.chat_manager import chat_manager
@@ -102,6 +103,14 @@ class _KernelRuntimeFacade:
         return self._kernel.vector_store
 
     @property
+    def paragraph_vector_store(self) -> Optional[VectorStore]:
+        return self._kernel.paragraph_vector_store
+
+    @property
+    def graph_vector_store(self) -> Optional[VectorStore]:
+        return self._kernel.graph_vector_store
+
+    @property
     def graph_store(self) -> Optional[GraphStore]:
         return self._kernel.graph_store
 
@@ -123,6 +132,9 @@ class _KernelRuntimeFacade:
 
     def is_embedding_degraded(self) -> bool:
         return self._kernel._is_embedding_degraded()
+
+    def _dual_vector_pools_enabled(self) -> bool:
+        return self._kernel._dual_vector_pools_enabled()
 
     def allow_metadata_only_write(self) -> bool:
         return self._kernel._allow_metadata_only_write()
@@ -161,6 +173,8 @@ class SDKMemoryKernel:
 
         self.embedding_manager = None
         self.vector_store: Optional[VectorStore] = None
+        self.paragraph_vector_store: Optional[VectorStore] = None
+        self.graph_vector_store: Optional[VectorStore] = None
         self.graph_store: Optional[GraphStore] = None
         self.metadata_store: Optional[MetadataStore] = None
         self.relation_write_service: Optional[RelationWriteService] = None
@@ -183,6 +197,7 @@ class SDKMemoryKernel:
         self._vector_rebuild_lock = asyncio.Lock()
         self._vector_persist_blocked_until_rebuild = False
         self._vector_rebuild_source_dimension: Optional[int] = None
+        self._dual_vector_pools_ready = False
         self._background_tasks: Dict[str, asyncio.Task] = {}
         self._background_lock = asyncio.Lock()
         self._background_stopping = False
@@ -193,6 +208,7 @@ class SDKMemoryKernel:
             "since": None,
             "last_check": None,
         }
+        self._current_effective_filter_cache: Dict[str, Any] = {"checked_at": 0.0, "needed": False}
         self._feedback_classifier: Optional[LLMServiceClient] = None
         self._fuzzy_modify_planner: Optional[LLMServiceClient] = None
 
@@ -222,9 +238,14 @@ class SDKMemoryKernel:
 
     def _build_runtime_config(self) -> Dict[str, Any]:
         runtime_config = dict(self.config)
+        runtime_cfg = runtime_config.get("runtime")
+        runtime_config["runtime"] = dict(runtime_cfg) if isinstance(runtime_cfg, dict) else {}
+        runtime_config["runtime"]["vector_pools_ready"] = self._dual_vector_pools_enabled()
         runtime_config.update(
             {
                 "vector_store": self.vector_store,
+                "paragraph_vector_store": self.paragraph_vector_store or self.vector_store,
+                "graph_vector_store": self.graph_vector_store or self.vector_store,
                 "graph_store": self.graph_store,
                 "metadata_store": self.metadata_store,
                 "embedding_manager": self.embedding_manager,
@@ -327,6 +348,14 @@ class SDKMemoryKernel:
         return not self.is_chat_enabled(stream_token, group_token, user_token)
 
     def _stored_vector_dimension(self) -> Optional[int]:
+        ready_manifest = self._read_dual_vector_ready_manifest() if self._dual_vector_pools_config_enabled() else None
+        if ready_manifest is not None:
+            try:
+                manifest_dimension = int(ready_manifest.get("dimension") or 0)
+            except Exception:
+                manifest_dimension = 0
+            if manifest_dimension > 0:
+                return manifest_dimension
         meta_path = self.data_dir / "vectors" / "vectors_metadata.pkl"
         if not meta_path.exists():
             return None
@@ -388,6 +417,299 @@ class SDKMemoryKernel:
 
     def _paragraph_vector_backfill_max_retry(self) -> int:
         return max(1, int(self._cfg("embedding.paragraph_vector_backfill.max_retry", 5) or 5))
+
+    def _vector_pool_mode(self) -> str:
+        mode = str(self._cfg("retrieval.vector_pools.mode", "single") or "single").strip().lower()
+        return mode if mode in {"single", "dual"} else "single"
+
+    def _dual_vector_pools_config_enabled(self) -> bool:
+        return self._vector_pool_mode() == "dual"
+
+    def _dual_vector_pools_enabled(self) -> bool:
+        return self._dual_vector_pools_config_enabled() and self._dual_vector_pools_ready
+
+    def _vectors_root(self) -> Path:
+        return self.data_dir / "vectors"
+
+    def _paragraph_vector_dir(self) -> Path:
+        return self._vectors_root() / "paragraph"
+
+    def _graph_vector_dir(self) -> Path:
+        return self._vectors_root() / "graph"
+
+    def _dual_vector_ready_manifest_path(self) -> Path:
+        return self._vectors_root() / "dual_ready.json"
+
+    def _read_dual_vector_ready_manifest(self) -> Optional[Dict[str, Any]]:
+        path = self._dual_vector_ready_manifest_path()
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(f"读取双池 ready manifest 失败: {exc}")
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _dual_vector_ready(self, *, expected_dimension: Optional[int] = None) -> bool:
+        manifest = self._read_dual_vector_ready_manifest()
+        if not manifest or manifest.get("status") != "ready":
+            return False
+        dimension = int(expected_dimension or self.embedding_dimension or 0)
+        manifest_dimension = int(manifest.get("dimension", 0) or 0)
+        if dimension > 0 and manifest_dimension not in {0, dimension}:
+            logger.warning(
+                "双池 ready manifest 维度不匹配: "
+                f"manifest={manifest_dimension}, expected={dimension}"
+            )
+            return False
+        paragraph_count = int(manifest.get("paragraph_vectors", 0) or 0)
+        graph_count = int(manifest.get("graph_vectors", 0) or 0)
+        if paragraph_count < 0 or graph_count < 0:
+            return False
+        return self._paragraph_vector_dir().exists() and self._graph_vector_dir().exists()
+
+    def _write_dual_vector_ready_manifest(
+        self,
+        *,
+        stats: Dict[str, Dict[str, int]],
+        migration_stats: Dict[str, Dict[str, int]],
+    ) -> None:
+        payload = {
+            "status": "ready",
+            "version": 1,
+            "mode": "dual",
+            "dimension": int(self.embedding_dimension),
+            "created_at": time.time(),
+            "paragraph_vectors": int(stats.get("paragraphs", {}).get("done", 0) or 0),
+            "graph_vectors": int(stats.get("entities", {}).get("done", 0) or 0)
+            + int(stats.get("relations", {}).get("done", 0) or 0),
+            "stats": stats,
+            "migration": migration_stats,
+        }
+        path = self._dual_vector_ready_manifest_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
+
+    def _remove_dual_vector_ready_manifest(self) -> None:
+        try:
+            self._dual_vector_ready_manifest_path().unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning(f"删除双池 ready manifest 失败: {exc}")
+
+    def _clear_legacy_single_vector_files_after_dual_ready(self) -> None:
+        root = self._vectors_root()
+        for filename in ("vectors.bin", "vectors_ids.bin", "vectors.index", "vectors_metadata.pkl"):
+            try:
+                (root / filename).unlink(missing_ok=True)
+            except Exception as exc:
+                logger.warning(f"清理旧单池向量文件失败: file={filename}, error={exc}")
+        if self.vector_store is not None:
+            self.vector_store = self._make_vector_store(root)
+
+    def _prepare_dual_vector_build_dirs(self) -> tuple[Path, Path, Path]:
+        build_root = self._vectors_root() / f"dual_build_{int(time.time() * 1000)}"
+        if build_root.exists():
+            shutil.rmtree(build_root, ignore_errors=True)
+        paragraph_dir = build_root / "paragraph"
+        graph_dir = build_root / "graph"
+        paragraph_dir.mkdir(parents=True, exist_ok=True)
+        graph_dir.mkdir(parents=True, exist_ok=True)
+        return build_root, paragraph_dir, graph_dir
+
+    def _activate_dual_vector_build_dirs(self, build_root: Path) -> None:
+        paragraph_src = build_root / "paragraph"
+        graph_src = build_root / "graph"
+        if not paragraph_src.exists() or not graph_src.exists():
+            raise RuntimeError("dual vector build dirs missing")
+
+        backup_root = self._vectors_root() / f"dual_backup_{int(time.time() * 1000)}"
+        backup_paragraph = backup_root / "paragraph"
+        backup_graph = backup_root / "graph"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        paragraph_dst = self._paragraph_vector_dir()
+        graph_dst = self._graph_vector_dir()
+        try:
+            if paragraph_dst.exists():
+                shutil.move(str(paragraph_dst), str(backup_paragraph))
+            if graph_dst.exists():
+                shutil.move(str(graph_dst), str(backup_graph))
+            shutil.move(str(paragraph_src), str(paragraph_dst))
+            shutil.move(str(graph_src), str(graph_dst))
+            shutil.rmtree(build_root, ignore_errors=True)
+            shutil.rmtree(backup_root, ignore_errors=True)
+        except Exception:
+            if paragraph_dst.exists():
+                shutil.rmtree(paragraph_dst, ignore_errors=True)
+            if graph_dst.exists():
+                shutil.rmtree(graph_dst, ignore_errors=True)
+            if backup_paragraph.exists():
+                shutil.move(str(backup_paragraph), str(paragraph_dst))
+            if backup_graph.exists():
+                shutil.move(str(backup_graph), str(graph_dst))
+            raise
+
+    def _cleanup_stale_dual_vector_build_dirs(self) -> None:
+        vectors_root = self._vectors_root()
+        if not vectors_root.exists():
+            return
+        for child in vectors_root.iterdir():
+            if child.is_dir() and child.name.startswith("dual_build_"):
+                shutil.rmtree(child, ignore_errors=True)
+            elif child.is_dir() and child.name.startswith("dual_backup_"):
+                shutil.rmtree(child, ignore_errors=True)
+
+    def _make_vector_store(self, data_dir: Path, *, dimension: Optional[int] = None) -> VectorStore:
+        return VectorStore(
+            dimension=max(1, int(dimension or self.embedding_dimension)),
+            quantization_type=QuantizationType.INT8,
+            data_dir=data_dir,
+        )
+
+    def _reload_dual_vector_stores_from_disk(self) -> bool:
+        if not self._dual_vector_ready(expected_dimension=self.embedding_dimension):
+            self._try_recover_dual_ready_manifest()
+        if not self._dual_vector_ready(expected_dimension=self.embedding_dimension):
+            self.paragraph_vector_store = self._make_vector_store(self._paragraph_vector_dir())
+            self.graph_vector_store = self._make_vector_store(self._graph_vector_dir())
+            self._dual_vector_pools_ready = False
+            return False
+        try:
+            paragraph_store = self._make_vector_store(self._paragraph_vector_dir())
+            graph_store = self._make_vector_store(self._graph_vector_dir())
+            if paragraph_store.has_data():
+                paragraph_store.load()
+                paragraph_store.warmup_index(force_train=True)
+            if graph_store.has_data():
+                graph_store.load()
+                graph_store.warmup_index(force_train=True)
+        except Exception as exc:
+            logger.warning(f"加载双池向量失败，将暂时回退单池: {exc}")
+            self._dual_vector_pools_ready = False
+            return False
+        self.paragraph_vector_store = paragraph_store
+        self.graph_vector_store = graph_store
+        self._dual_vector_pools_ready = True
+        return True
+
+    def _try_recover_dual_ready_manifest(self) -> bool:
+        if not self._dual_vector_pools_config_enabled() or self.metadata_store is None:
+            return False
+        if self._dual_vector_ready_manifest_path().exists():
+            return False
+        paragraph_dir = self._paragraph_vector_dir()
+        graph_dir = self._graph_vector_dir()
+        if not paragraph_dir.exists() or not graph_dir.exists():
+            return False
+        paragraph_store = self._make_vector_store(paragraph_dir)
+        graph_store = self._make_vector_store(graph_dir)
+        if not paragraph_store.has_data() or not graph_store.has_data():
+            return False
+        try:
+            if paragraph_store.has_data():
+                paragraph_store.load()
+            if graph_store.has_data():
+                graph_store.load()
+        except Exception as exc:
+            logger.warning(f"双池 ready manifest 自愈失败，加载向量池异常: {exc}")
+            return False
+
+        counts = self._count_vector_rebuild_targets()
+        expected_paragraphs = int(counts.get("paragraphs", 0) or 0)
+        expected_graph = int(counts.get("entities", 0) or 0)
+        if bool(self.relation_vectors_enabled):
+            expected_graph += int(counts.get("relations", 0) or 0)
+        if paragraph_store.num_vectors != expected_paragraphs or graph_store.num_vectors != expected_graph:
+            logger.warning(
+                "双池 ready manifest 缺失且向量数量不匹配，保持单池降级: "
+                f"paragraph={paragraph_store.num_vectors}/{expected_paragraphs}, "
+                f"graph={graph_store.num_vectors}/{expected_graph}"
+            )
+            return False
+
+        stats = {
+            "paragraphs": {"done": expected_paragraphs, "failed": 0},
+            "entities": {"done": int(counts.get("entities", 0) or 0), "failed": 0},
+            "relations": {"done": int(counts.get("relations", 0) or 0) if bool(self.relation_vectors_enabled) else 0, "failed": 0},
+        }
+        migration_stats = {
+            "paragraphs": {"copied": 0, "encoded": 0, "missing": 0},
+            "entities": {"copied": 0, "encoded": 0, "missing": 0},
+            "relations": {"copied": 0, "encoded": 0, "missing": 0},
+        }
+        self._write_dual_vector_ready_manifest(stats=stats, migration_stats=migration_stats)
+        logger.warning("检测到双池目录完整但 ready manifest 缺失，已自动重建 manifest")
+        return True
+
+    def _drop_dual_build_root(self, build_root: Optional[Path]) -> None:
+        if build_root is None:
+            return
+        try:
+            shutil.rmtree(build_root, ignore_errors=True)
+        except Exception as exc:
+            logger.warning(f"清理双池临时构建目录失败: {exc}")
+
+    def _refresh_relation_write_service(self) -> None:
+        if (
+            self.metadata_store is None
+            or self.graph_store is None
+            or self.vector_store is None
+            or self.embedding_manager is None
+        ):
+            self.relation_write_service = None
+            return
+        self.relation_write_service = RelationWriteService(
+            metadata_store=self.metadata_store,
+            graph_store=self.graph_store,
+            vector_store=self.vector_store,
+            graph_vector_store=self._graph_vector_store(),
+            embedding_manager=self.embedding_manager,
+            use_typed_relation_ids=self._dual_vector_pools_enabled(),
+        )
+
+    @staticmethod
+    def _graph_vector_id(item_type: str, hash_value: str) -> str:
+        return f"{str(item_type or '').strip()}:{str(hash_value or '').strip()}"
+
+    def _paragraph_store(self) -> Optional[VectorStore]:
+        if self._dual_vector_pools_enabled():
+            return self.paragraph_vector_store or self.vector_store
+        return self.vector_store
+
+    def _graph_vector_store(self) -> Optional[VectorStore]:
+        if self._dual_vector_pools_enabled():
+            return self.graph_vector_store or self.vector_store
+        return self.vector_store
+
+    def _delete_vectors_by_type(
+        self,
+        *,
+        paragraph_hashes: Sequence[str] = (),
+        entity_hashes: Sequence[str] = (),
+        relation_hashes: Sequence[str] = (),
+    ) -> int:
+        deleted = 0
+        legacy_ids = self._merge_tokens(paragraph_hashes, entity_hashes, relation_hashes)
+        if self.vector_store is not None and legacy_ids:
+            deleted += int(self.vector_store.delete(legacy_ids) or 0)
+        if not self._dual_vector_pools_enabled():
+            return deleted
+        paragraph_ids = self._merge_tokens(paragraph_hashes)
+        if self.paragraph_vector_store is not None and paragraph_ids:
+            deleted += int(self.paragraph_vector_store.delete(paragraph_ids) or 0)
+        graph_ids = [
+            self._graph_vector_id("entity", hash_value)
+            for hash_value in self._merge_tokens(entity_hashes)
+        ]
+        graph_ids.extend(
+            self._graph_vector_id("relation", hash_value)
+            for hash_value in self._merge_tokens(relation_hashes)
+        )
+        if self.graph_vector_store is not None and graph_ids:
+            deleted += int(self.graph_vector_store.delete(graph_ids) or 0)
+        return deleted
 
     def _is_embedding_degraded(self) -> bool:
         return bool(self._embedding_degraded.get("active", False))
@@ -543,7 +865,8 @@ class SDKMemoryKernel:
 
         allow_metadata_only = self._allow_metadata_only_write()
 
-        if self.vector_store is None or self.embedding_manager is None:
+        target_store = self._paragraph_store()
+        if target_store is None or self.embedding_manager is None:
             if not allow_metadata_only:
                 raise RuntimeError("向量写入依赖未初始化")
             self._enqueue_paragraph_vector_backfill(token, error="vector_runtime_components_missing")
@@ -567,7 +890,7 @@ class SDKMemoryKernel:
                 "detail": "embedding_degraded",
             }
 
-        if token in self.vector_store:
+        if token in target_store:
             return {
                 "success": True,
                 "vector_written": True,
@@ -580,7 +903,7 @@ class SDKMemoryKernel:
             embedding = await self.embedding_manager.encode(text)
             if getattr(embedding, "ndim", 1) == 1:
                 embedding = embedding.reshape(1, -1)
-            self.vector_store.add(vectors=embedding, ids=[token])
+            target_store.add(vectors=embedding, ids=[token])
             return {
                 "success": True,
                 "vector_written": True,
@@ -619,7 +942,8 @@ class SDKMemoryKernel:
         max_retry: Optional[int] = None,
         trigger: str = "manual",
     ) -> Dict[str, Any]:
-        if self.metadata_store is None or self.vector_store is None or self.embedding_manager is None:
+        target_store = self._paragraph_store()
+        if self.metadata_store is None or target_store is None or self.embedding_manager is None:
             return {"success": False, "processed": 0, "done": 0, "failed": 0, "trigger": trigger}
         if self._is_embedding_degraded():
             return {
@@ -649,7 +973,7 @@ class SDKMemoryKernel:
         encode_items: List[tuple[str, str]] = []
         paragraph_map = self.metadata_store.get_paragraphs_by_hashes(pending_hashes)
         for paragraph_hash in pending_hashes:
-            if paragraph_hash in self.vector_store:
+            if paragraph_hash in target_store:
                 done_hashes.append(paragraph_hash)
                 continue
             paragraph = paragraph_map.get(paragraph_hash)
@@ -665,6 +989,7 @@ class SDKMemoryKernel:
         done_count, failed_count, last_error, encoded_done_hashes, failed_hashes = await self._encode_and_add_rebuild_vectors(
             items=encode_items,
             batch_size=safe_limit,
+            vector_store=target_store,
         )
         del done_count
         done_hashes.extend(encoded_done_hashes)
@@ -768,8 +1093,10 @@ class SDKMemoryKernel:
         *,
         items: Sequence[tuple[str, str]],
         batch_size: int,
+        vector_store: Optional[VectorStore] = None,
     ) -> tuple[int, int, str, List[str], List[str]]:
-        if self.vector_store is None or self.embedding_manager is None:
+        target_store = vector_store or self.vector_store
+        if target_store is None or self.embedding_manager is None:
             failed_ids = [item_id for item_id, _ in items]
             return 0, len(items), "vector_runtime_components_missing", [], failed_ids
 
@@ -794,7 +1121,7 @@ class SDKMemoryKernel:
                     embedding_array = embedding_array.reshape(1, -1)
                 if embedding_array.shape[0] != len(ids):
                     raise ValueError(f"embedding 返回数量异常: expected={len(ids)}, got={embedding_array.shape[0]}")
-                self.vector_store.add(vectors=embedding_array, ids=ids)
+                target_store.add(vectors=embedding_array, ids=ids)
                 done += len(ids)
                 done_ids.extend(ids)
             except Exception as exc:
@@ -803,6 +1130,127 @@ class SDKMemoryKernel:
                 failed_ids.extend(ids)
                 logger.warning(f"重建向量批次失败: start={start}, count={len(ids)}, error={last_error}")
         return done, failed, last_error, done_ids, failed_ids
+
+    def _copy_rebuild_vectors_from_store(
+        self,
+        *,
+        source_store: Optional[VectorStore],
+        target_store: Optional[VectorStore],
+        id_pairs: Sequence[tuple[str, str]],
+        batch_size: int = 1024,
+    ) -> tuple[int, List[str], List[tuple[str, str]]]:
+        if source_store is None or target_store is None or not id_pairs:
+            return 0, [], list(id_pairs)
+
+        pair_by_source = {source_id: target_id for source_id, target_id in id_pairs}
+        source_ids = list(pair_by_source.keys())
+        iterator = getattr(source_store, "iter_vectors_by_ids", None)
+        getter = getattr(source_store, "get_vectors", None)
+        if not callable(iterator) and not callable(getter):
+            return 0, [], list(id_pairs)
+
+        try:
+            if callable(iterator):
+                vector_batches = iterator(source_ids, batch_size=max(1, int(batch_size or 1024)))
+            else:
+                vector_batches = [getter(source_ids)]
+        except Exception as exc:
+            logger.warning(f"读取旧向量失败，将回退 embedding 重建: {exc}")
+            return 0, [], list(id_pairs)
+
+        copied_source_ids: List[str] = []
+        copied_set: set[str] = set()
+        try:
+            for source_vectors in vector_batches:
+                if not isinstance(source_vectors, dict) or not source_vectors:
+                    continue
+                target_ids: List[str] = []
+                vectors: List[np.ndarray] = []
+                for source_id, vector in source_vectors.items():
+                    target_id = pair_by_source.get(source_id)
+                    if target_id is None or source_id in copied_set:
+                        continue
+                    target_ids.append(target_id)
+                    vectors.append(np.asarray(vector, dtype=np.float32))
+                    copied_source_ids.append(source_id)
+                    copied_set.add(source_id)
+                if not target_ids:
+                    continue
+                vector_array = np.asarray(vectors, dtype=np.float32)
+                if vector_array.ndim == 1:
+                    vector_array = vector_array.reshape(1, -1)
+                added = int(target_store.add(vectors=vector_array, ids=target_ids) or 0)
+                if added < len(target_ids):
+                    logger.debug(f"复制旧向量到新池时存在已写入项: requested={len(target_ids)} added={added}")
+        except Exception as exc:
+            logger.warning(f"复制旧向量到新池失败，将回退 embedding 重建: {exc}")
+            return 0, [], list(id_pairs)
+
+        missing_pairs = [(source_id, target_id) for source_id, target_id in id_pairs if source_id not in copied_set]
+        return len(copied_source_ids), copied_source_ids, missing_pairs
+
+    async def _copy_or_encode_dual_rebuild_vectors(
+        self,
+        *,
+        items: Sequence[tuple[str, str]],
+        batch_size: int,
+        target_store: Optional[VectorStore],
+        target_id_prefix: str = "",
+        source_store: Optional[VectorStore] = None,
+    ) -> tuple[int, int, str, List[str], List[str], Dict[str, int]]:
+        source = source_store or self.vector_store
+        id_pairs = [
+            (
+                str(item_id or "").strip(),
+                f"{target_id_prefix}:{str(item_id or '').strip()}" if target_id_prefix else str(item_id or "").strip(),
+            )
+            for item_id, _text in items
+            if str(item_id or "").strip()
+        ]
+        copied, copied_source_ids, missing_pairs = self._copy_rebuild_vectors_from_store(
+            source_store=source,
+            target_store=target_store,
+            id_pairs=id_pairs,
+            batch_size=batch_size,
+        )
+        copied_set = set(copied_source_ids)
+        missing_source_ids = {source_id for source_id, _target_id in missing_pairs}
+        text_by_id = {str(item_id or "").strip(): text for item_id, text in items}
+        encode_items = [
+            (
+                target_id,
+                text_by_id.get(source_id, ""),
+            )
+            for source_id, target_id in missing_pairs
+            if str(text_by_id.get(source_id, "") or "").strip()
+        ]
+        done, failed, error, encoded_done_ids, encoded_failed_ids = await self._encode_and_add_rebuild_vectors(
+            items=encode_items,
+            batch_size=batch_size,
+            vector_store=target_store,
+        )
+
+        def _source_id(target_id: str) -> str:
+            if target_id_prefix and target_id.startswith(f"{target_id_prefix}:"):
+                return target_id.split(":", 1)[1]
+            return target_id
+
+        done_source_ids = copied_source_ids + [_source_id(item_id) for item_id in encoded_done_ids]
+        failed_source_ids = [_source_id(item_id) for item_id in encoded_failed_ids]
+        skipped_missing = len(missing_source_ids) - len(encode_items)
+        failed += max(0, skipped_missing)
+        return (
+            copied + done,
+            failed,
+            error,
+            done_source_ids,
+            failed_source_ids,
+            {
+                "copied": copied,
+                "encoded": done,
+                "missing": len(missing_pairs),
+            },
+        )
 
     async def _rebuild_all_vectors(
         self,
@@ -856,23 +1304,38 @@ class SDKMemoryKernel:
             checked_at=started,
         )
 
-        self.vector_store = VectorStore(
-            dimension=max(1, int(self.embedding_dimension)),
-            quantization_type=QuantizationType.INT8,
-            data_dir=self.data_dir / "vectors",
-        )
-        self.vector_store.clear()
-        self.relation_write_service = RelationWriteService(
-            metadata_store=self.metadata_store,
-            graph_store=self.graph_store,
-            vector_store=self.vector_store,
-            embedding_manager=self.embedding_manager,
-        )
-
+        dual_mode = self._dual_vector_pools_config_enabled()
+        legacy_source_store = self.vector_store if dual_mode else None
+        dual_build_root: Optional[Path] = None
+        build_paragraph_vector_store: Optional[VectorStore] = None
+        build_graph_vector_store: Optional[VectorStore] = None
+        if dual_mode and legacy_source_store is not None and legacy_source_store.has_data():
+            try:
+                legacy_source_store.load()
+                legacy_source_store.warmup_index(force_train=False)
+            except Exception as exc:
+                logger.warning(f"加载旧单池向量用于双池迁移失败，将回退 embedding 重建: {exc}")
+        if not dual_mode:
+            self._dual_vector_pools_ready = False
+            self._remove_dual_vector_ready_manifest()
+            self.vector_store = self._make_vector_store(self._vectors_root())
+            self.vector_store.clear()
+            self.paragraph_vector_store = self._make_vector_store(self._paragraph_vector_dir())
+            self.graph_vector_store = self._make_vector_store(self._graph_vector_dir())
+            self._refresh_relation_write_service()
+        else:
+            dual_build_root, paragraph_data_dir, graph_data_dir = self._prepare_dual_vector_build_dirs()
+            build_paragraph_vector_store = self._make_vector_store(paragraph_data_dir)
+            build_graph_vector_store = self._make_vector_store(graph_data_dir)
         stats = {
             "paragraphs": {"done": 0, "failed": 0},
             "entities": {"done": 0, "failed": 0},
             "relations": {"done": 0, "failed": 0},
+        }
+        migration_stats = {
+            "paragraphs": {"copied": 0, "encoded": 0, "missing": 0},
+            "entities": {"copied": 0, "encoded": 0, "missing": 0},
+            "relations": {"copied": 0, "encoded": 0, "missing": 0},
         }
         errors: List[str] = []
         paragraph_where = self._active_row_filter_sql("paragraphs")
@@ -892,13 +1355,24 @@ class SDKMemoryKernel:
             for row in paragraph_rows
             if str(row.get("hash", "") or "").strip() and str(row.get("content", "") or "").strip()
         ]
-        done, failed, error, _done_ids, _failed_ids = await self._encode_and_add_rebuild_vectors(
-            items=paragraph_items,
-            batch_size=safe_batch_size,
-        )
+        if dual_mode:
+            done, failed, error, _done_ids, _failed_ids, copy_stats = await self._copy_or_encode_dual_rebuild_vectors(
+                items=paragraph_items,
+                batch_size=safe_batch_size,
+                target_store=build_paragraph_vector_store,
+                source_store=legacy_source_store,
+            )
+            migration_stats["paragraphs"] = copy_stats
+            if error:
+                errors.append(f"paragraph_pool:{error}")
+        else:
+            done, failed, error, _done_ids, _failed_ids = await self._encode_and_add_rebuild_vectors(
+                items=paragraph_items,
+                batch_size=safe_batch_size,
+            )
+            if error:
+                errors.append(error)
         stats["paragraphs"] = {"done": done, "failed": failed}
-        if error:
-            errors.append(error)
 
         entity_rows = self.metadata_store.query(
             f"""
@@ -913,13 +1387,25 @@ class SDKMemoryKernel:
             for row in entity_rows
             if str(row.get("hash", "") or "").strip() and str(row.get("name", "") or "").strip()
         ]
-        done, failed, error, _done_ids, _failed_ids = await self._encode_and_add_rebuild_vectors(
-            items=entity_items,
-            batch_size=safe_batch_size,
-        )
+        if dual_mode:
+            done, failed, error, _done_ids, _failed_ids, copy_stats = await self._copy_or_encode_dual_rebuild_vectors(
+                items=entity_items,
+                batch_size=safe_batch_size,
+                target_store=build_graph_vector_store,
+                target_id_prefix="entity",
+                source_store=legacy_source_store,
+            )
+            migration_stats["entities"] = copy_stats
+            if error:
+                errors.append(f"entity_graph_pool:{error}")
+        else:
+            done, failed, error, _done_ids, _failed_ids = await self._encode_and_add_rebuild_vectors(
+                items=entity_items,
+                batch_size=safe_batch_size,
+            )
+            if error:
+                errors.append(error)
         stats["entities"] = {"done": done, "failed": failed}
-        if error:
-            errors.append(error)
 
         if relation_enabled:
             relation_rows = self.metadata_store.query(
@@ -942,13 +1428,25 @@ class SDKMemoryKernel:
                 for row in relation_rows
                 if str(row.get("hash", "") or "").strip()
             ]
-            done, failed, error, done_ids, failed_ids = await self._encode_and_add_rebuild_vectors(
-                items=relation_items,
-                batch_size=safe_batch_size,
-            )
+            if dual_mode:
+                done, failed, error, done_ids, failed_ids, copy_stats = await self._copy_or_encode_dual_rebuild_vectors(
+                    items=relation_items,
+                    batch_size=safe_batch_size,
+                    target_store=build_graph_vector_store,
+                    target_id_prefix="relation",
+                    source_store=legacy_source_store,
+                )
+                migration_stats["relations"] = copy_stats
+                if error:
+                    errors.append(f"relation_graph_pool:{error}")
+            else:
+                done, failed, error, done_ids, failed_ids = await self._encode_and_add_rebuild_vectors(
+                    items=relation_items,
+                    batch_size=safe_batch_size,
+                )
+                if error:
+                    errors.append(error)
             stats["relations"] = {"done": done, "failed": failed}
-            if error:
-                errors.append(error)
 
             conn = self.metadata_store.get_connection()
             cursor = conn.cursor()
@@ -985,7 +1483,58 @@ class SDKMemoryKernel:
                 )
             conn.commit()
 
-        self.vector_store.warmup_index(force_train=True)
+        done_total = sum(int(item["done"]) for item in stats.values())
+        failed_total = sum(int(item["failed"]) for item in stats.values())
+        activation_ok = True
+        if dual_mode:
+            expected_paragraph_vectors = int(stats["paragraphs"]["done"])
+            expected_graph_vectors = int(stats["entities"]["done"]) + int(stats["relations"]["done"])
+            actual_paragraph_vectors = (
+                int(build_paragraph_vector_store.num_vectors) if build_paragraph_vector_store else 0
+            )
+            actual_graph_vectors = int(build_graph_vector_store.num_vectors) if build_graph_vector_store else 0
+            if (
+                failed_total == 0
+                and actual_paragraph_vectors == expected_paragraph_vectors
+                and actual_graph_vectors == expected_graph_vectors
+            ):
+                try:
+                    if build_paragraph_vector_store is not None:
+                        build_paragraph_vector_store.warmup_index(force_train=True)
+                        build_paragraph_vector_store.save()
+                    if build_graph_vector_store is not None:
+                        build_graph_vector_store.warmup_index(force_train=True)
+                        build_graph_vector_store.save()
+                    self._activate_dual_vector_build_dirs(dual_build_root)
+                    self._write_dual_vector_ready_manifest(stats=stats, migration_stats=migration_stats)
+                    activation_ok = self._reload_dual_vector_stores_from_disk()
+                    if not activation_ok:
+                        errors.append("dual_pool_activation:ready_manifest_unusable")
+                    else:
+                        self._clear_legacy_single_vector_files_after_dual_ready()
+                except Exception as exc:
+                    activation_ok = False
+                    self._dual_vector_pools_ready = False
+                    errors.append(f"dual_pool_activation:{str(exc)[:500]}")
+                    logger.warning(f"双池临时构建目录切换失败，保留原有向量池: {exc}")
+                    self._drop_dual_build_root(dual_build_root)
+                    self._reload_dual_vector_stores_from_disk()
+            else:
+                activation_ok = False
+                if failed_total == 0:
+                    errors.append(
+                        "dual_pool_activation:vector_count_mismatch "
+                        f"paragraph={actual_paragraph_vectors}/{expected_paragraph_vectors}, "
+                        f"graph={actual_graph_vectors}/{expected_graph_vectors}"
+                    )
+                self._drop_dual_build_root(dual_build_root)
+                self._reload_dual_vector_stores_from_disk()
+            self._refresh_relation_write_service()
+        else:
+            self.vector_store.warmup_index(force_train=True)
+            self.paragraph_vector_store = self._make_vector_store(self._paragraph_vector_dir())
+            self.graph_vector_store = self._make_vector_store(self._graph_vector_dir())
+            self._refresh_relation_write_service()
         self._runtime_bundle = build_search_runtime(
             plugin_config=self._build_runtime_config(),
             logger_obj=logger,
@@ -1010,9 +1559,7 @@ class SDKMemoryKernel:
             )
 
         elapsed_ms = (time.time() - started) * 1000.0
-        done_total = sum(int(item["done"]) for item in stats.values())
-        failed_total = sum(int(item["failed"]) for item in stats.values())
-        rebuild_success = failed_total == 0 and bool(report.get("ok", False))
+        rebuild_success = failed_total == 0 and bool(report.get("ok", False)) and (not dual_mode or activation_ok)
         if rebuild_success:
             self._vector_persist_blocked_until_rebuild = False
             self._vector_rebuild_source_dimension = None
@@ -1022,6 +1569,7 @@ class SDKMemoryKernel:
             "dry_run": False,
             "counts": target_counts,
             "stats": stats,
+            "migration": migration_stats,
             "total": int(total),
             "done": int(done_total),
             "failed": int(failed_total),
@@ -1100,10 +1648,14 @@ class SDKMemoryKernel:
         matrix_format = str(self._cfg("graph.sparse_matrix_format", "csr") or "csr").strip().lower()
         graph_format = SparseMatrixFormat.CSC if matrix_format == "csc" else SparseMatrixFormat.CSR
 
-        self.vector_store = VectorStore(
+        self.vector_store = self._make_vector_store(self._vectors_root(), dimension=provisional_dimension)
+        self.paragraph_vector_store = self._make_vector_store(
+            self._paragraph_vector_dir(),
             dimension=provisional_dimension,
-            quantization_type=QuantizationType.INT8,
-            data_dir=self.data_dir / "vectors",
+        )
+        self.graph_vector_store = self._make_vector_store(
+            self._graph_vector_dir(),
+            dimension=provisional_dimension,
         )
         self.graph_store = GraphStore(matrix_format=graph_format, data_dir=self.data_dir / "graph")
         self.metadata_store = MetadataStore(data_dir=self.data_dir / "metadata")
@@ -1138,13 +1690,13 @@ class SDKMemoryKernel:
         if not skip_vector_load and self.vector_store.has_data():
             self.vector_store.load()
             self.vector_store.warmup_index(force_train=True)
+        self._dual_vector_pools_ready = False
+        if self._dual_vector_pools_config_enabled():
+            self._cleanup_stale_dual_vector_build_dirs()
+            if not self._reload_dual_vector_stores_from_disk():
+                logger.warning("双池配置已开启，但 ready manifest 不可用，当前按单池检索与写入运行")
 
-        self.relation_write_service = RelationWriteService(
-            metadata_store=self.metadata_store,
-            graph_store=self.graph_store,
-            vector_store=self.vector_store,
-            embedding_manager=self.embedding_manager,
-        )
+        self._refresh_relation_write_service()
 
         runtime_config = self._build_runtime_config()
         self._runtime_bundle = build_search_runtime(
@@ -1419,7 +1971,8 @@ class SDKMemoryKernel:
             warnings.append(warning)
 
         for name in entity_tokens:
-            self.metadata_store.add_entity(name=name, source_paragraph=paragraph_hash)
+            entity_hash = self.metadata_store.add_entity(name=name, source_paragraph=paragraph_hash)
+            await self._ensure_entity_vector({"hash": entity_hash, "name": name})
 
         stored_relations: List[str] = []
         for row in [dict(item) for item in (relations or []) if isinstance(item, dict)]:
@@ -2561,7 +3114,7 @@ class SDKMemoryKernel:
             )
         return {"success": False, "error": f"不支持的 delete action: {act}"}
 
-    async def memory_fuzzy_modify_admin(self, *, action: str, **kwargs) -> Dict[str, Any]:
+    async def memory_correction_admin(self, *, action: str, **kwargs) -> Dict[str, Any]:
         await self.initialize()
         assert self.metadata_store is not None
 
@@ -2604,7 +3157,10 @@ class SDKMemoryKernel:
                 requested_by=str(kwargs.get("requested_by", "") or "webui").strip(),
                 reason=str(kwargs.get("reason", "") or "").strip(),
             )
-        return {"success": False, "error": f"不支持的 fuzzy modify action: {act}"}
+        return {"success": False, "error": f"不支持的记忆修正操作: {act}"}
+
+    async def memory_fuzzy_modify_admin(self, *, action: str, **kwargs) -> Dict[str, Any]:
+        return await self.memory_correction_admin(action=action, **kwargs)
 
     def get_import_task_manager(self) -> Optional[ImportTaskManager]:
         return self.import_task_manager
@@ -2673,11 +3229,16 @@ class SDKMemoryKernel:
         return {"success": True, "results": hits, "count": len(hits), "query_type": "episode"}
 
     def _persist(self) -> None:
-        if self.vector_store is not None:
+        if self.vector_store is not None and not self._dual_vector_pools_enabled():
             if self._vector_persist_blocked_until_rebuild:
                 logger.debug("检测到向量维度不匹配且尚未重建，跳过向量库持久化以保留重建提示")
             else:
                 self.vector_store.save()
+        if self._dual_vector_pools_enabled() and not self._vector_persist_blocked_until_rebuild:
+            if self.paragraph_vector_store is not None:
+                self.paragraph_vector_store.save()
+            if self.graph_vector_store is not None:
+                self.graph_vector_store.save()
         if self.graph_store is not None:
             self.graph_store.save()
         if self.sparse_index is not None and getattr(self.sparse_index.config, "enabled", False):
@@ -2899,20 +3460,73 @@ class SDKMemoryKernel:
         return self._filter_current_effective_hits(self._filter_active_relation_hits(self._filter_episode_hits(hits)))
 
     def _filter_current_effective_hits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if self.metadata_store is None:
+            return self._filter_hits_by_memory_change_metadata(hits)
+
+        if not self._current_effective_filter_store_check_needed(hits):
+            return self._filter_hits_by_memory_change_metadata(hits)
+
         now = time.time()
+        paragraph_hashes: List[str] = []
+        relation_hashes: List[str] = []
+        for item in hits:
+            item_type = str(item.get("type", "") or "").strip()
+            hash_value = str(item.get("hash", "") or "").strip()
+            if item_type == "paragraph" and hash_value:
+                paragraph_hashes.append(hash_value)
+            elif item_type == "relation" and hash_value:
+                relation_hashes.append(hash_value)
+
+        paragraph_map = self.metadata_store.get_paragraphs_by_hashes(paragraph_hashes) if paragraph_hashes else {}
+        relation_map = self.metadata_store.get_relations_by_hashes(relation_hashes) if relation_hashes else {}
         filtered: List[Dict[str, Any]] = []
         for item in hits:
             metadata = coerce_metadata_dict(item.get("metadata"))
             item_type = str(item.get("type", "") or "").strip()
             hash_value = str(item.get("hash", "") or "").strip()
-            if self.metadata_store is not None and hash_value:
+            if hash_value:
                 stored: Optional[Dict[str, Any]] = None
                 if item_type == "paragraph":
-                    stored = self.metadata_store.get_paragraph(hash_value)
+                    stored = paragraph_map.get(hash_value)
                 elif item_type == "relation":
-                    stored = self.metadata_store.get_relation(hash_value)
-                if isinstance(stored, dict):
+                    stored = relation_map.get(hash_value)
+                if stored is not None:
                     metadata = coerce_metadata_dict(stored.get("metadata"))
+            memory_change = metadata.get("memory_change") if isinstance(metadata.get("memory_change"), dict) else {}
+            valid_to = self._optional_float(memory_change.get("valid_to"))
+            if valid_to is not None and valid_to <= now:
+                continue
+            next_item = dict(item)
+            next_item["metadata"] = metadata
+            filtered.append(next_item)
+        return filtered
+
+    def _current_effective_filter_store_check_needed(self, hits: List[Dict[str, Any]]) -> bool:
+        if any(isinstance(coerce_metadata_dict(item.get("metadata")).get("memory_change"), dict) for item in hits):
+            return True
+        cache = self._current_effective_filter_cache
+        now = time.time()
+        if now - float(cache.get("checked_at", 0.0) or 0.0) < 60.0:
+            return bool(cache.get("needed", False))
+        needed = False
+        try:
+            plans = self.metadata_store.list_fuzzy_modify_plans(
+                limit=1,
+                statuses=["executing", "executed", "rolled_back", "rollback_failed"],
+            )
+            needed = bool(plans)
+        except Exception as exc:
+            logger.warning(f"检查当前有效记忆过滤状态失败，将保守启用回表过滤: {exc}")
+            needed = True
+        cache["checked_at"] = now
+        cache["needed"] = needed
+        return needed
+
+    def _filter_hits_by_memory_change_metadata(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        now = time.time()
+        filtered: List[Dict[str, Any]] = []
+        for item in hits:
+            metadata = coerce_metadata_dict(item.get("metadata"))
             memory_change = metadata.get("memory_change") if isinstance(metadata.get("memory_change"), dict) else {}
             valid_to = self._optional_float(memory_change.get("valid_to"))
             if valid_to is not None and valid_to <= now:
@@ -2965,6 +3579,9 @@ class SDKMemoryKernel:
                     query_tool_id=query_tool_id,
                     task_id=task_id,
                     reason=reason,
+                    source_type="feedback_correction",
+                    source_id=str(task_id),
+                    source_operation_id=f"feedback_correction:{task_id}:{paragraph_hash}:{relation_hash}",
                 )
         return paragraph_map
 
@@ -3300,7 +3917,7 @@ class SDKMemoryKernel:
                 )
 
             stale_marks_raw = rollback_plan.get("stale_marks") if isinstance(rollback_plan.get("stale_marks"), list) else []
-            stale_marks: List[tuple[str, str]] = []
+            stale_mark_rollbacks: List[Dict[str, Any]] = []
             for item in stale_marks_raw:
                 if not isinstance(item, dict):
                     continue
@@ -3308,15 +3925,36 @@ class SDKMemoryKernel:
                 relation_hash = str(item.get("relation_hash", "") or "").strip()
                 if not paragraph_hash or not relation_hash:
                     continue
-                stale_marks.append((paragraph_hash, relation_hash))
-            result["cleared_stale_mark_count"] = self.metadata_store.delete_paragraph_stale_relation_marks(stale_marks)
-            for paragraph_hash, relation_hash in stale_marks:
+                source_operation_id = str(
+                    item.get("source_operation_id", "")
+                    or f"feedback_correction:{task_id}:{paragraph_hash}:{relation_hash}"
+                ).strip()
+                rollback_mark = self.metadata_store.rollback_paragraph_stale_relation_mark(
+                    paragraph_hash=paragraph_hash,
+                    relation_hash=relation_hash,
+                    expected_source_type=str(item.get("source_type", "") or "feedback_correction"),
+                    expected_source_id=str(item.get("source_id", "") or task_id),
+                    expected_source_operation_id=source_operation_id,
+                    previous_mark=(
+                        item.get("previous_mark")
+                        if isinstance(item.get("previous_mark"), dict)
+                        else None
+                    ),
+                )
+                stale_mark_rollbacks.append(rollback_mark)
+            result["cleared_stale_mark_count"] = sum(
+                1 for item in stale_mark_rollbacks if item.get("action") == "deleted"
+            )
+            result["stale_mark_rollbacks"] = stale_mark_rollbacks
+            for rollback_mark in stale_mark_rollbacks:
+                paragraph_hash = str(rollback_mark.get("paragraph_hash", "") or "").strip()
+                relation_hash = str(rollback_mark.get("relation_hash", "") or "").strip()
                 self.metadata_store.append_feedback_action_log(
                     task_id=task_id,
                     query_tool_id=query_tool_id,
                     action_type="rollback_clear_stale_mark",
                     target_hash=paragraph_hash,
-                    after_payload={"relation_hash": relation_hash},
+                    after_payload={"relation_hash": relation_hash, "rollback": rollback_mark},
                     reason=reason,
                 )
 
@@ -4257,7 +4895,13 @@ class SDKMemoryKernel:
                 "forgotten_relations": forgotten_relations,
                 "corrected_write": corrected_write,
                 "stale_marks": [
-                    {"paragraph_hash": paragraph_hash, "relation_hash": relation_hash}
+                    {
+                        "paragraph_hash": paragraph_hash,
+                        "relation_hash": relation_hash,
+                        "source_type": "feedback_correction",
+                        "source_id": str(task_id),
+                        "source_operation_id": f"feedback_correction:{task_id}:{paragraph_hash}:{relation_hash}",
+                    }
                     for relation_hash, paragraph_hashes in stale_paragraph_map.items()
                     for paragraph_hash in (paragraph_hashes or [])
                     if str(paragraph_hash or "").strip()
@@ -4532,8 +5176,7 @@ class SDKMemoryKernel:
         deleted_hashes = [hash_value for hash_value in expired_hashes if hash_value in relation_info]
         if deleted_hashes:
             self.metadata_store.backup_and_delete_relations(deleted_hashes)
-            if self.vector_store is not None:
-                self.vector_store.delete(deleted_hashes)
+            self._delete_vectors_by_type(relation_hashes=deleted_hashes)
 
     async def _orphan_gc_phase(self) -> None:
         assert self.metadata_store is not None
@@ -4560,8 +5203,7 @@ class SDKMemoryKernel:
             hashes = [str(item[0] or "").strip() for item in dead_paragraphs if item and str(item[0] or "").strip()]
             if hashes:
                 self.metadata_store.physically_delete_paragraphs(hashes)
-                if self.vector_store is not None:
-                    self.vector_store.delete(hashes)
+                self._delete_vectors_by_type(paragraph_hashes=hashes)
 
         dead_entities = self.metadata_store.sweep_deleted_items("entity", grace_period)
         if dead_entities:
@@ -4571,8 +5213,7 @@ class SDKMemoryKernel:
                 self.graph_store.delete_nodes(entity_names)
             if entity_hashes:
                 self.metadata_store.physically_delete_entities(entity_hashes)
-                if self.vector_store is not None:
-                    self.vector_store.delete(entity_hashes)
+                self._delete_vectors_by_type(entity_hashes=entity_hashes)
 
     def _mark_person_active(self, person_id: str) -> None:
         token = str(person_id or "").strip()
@@ -5357,17 +5998,16 @@ class SDKMemoryKernel:
     def _apply_cleanup_plan(self, cleanup: Dict[str, Any]) -> None:
         if not isinstance(cleanup, dict):
             return
-        if self.vector_store is not None:
-            vector_ids: List[str] = []
-            paragraph_hash = str(cleanup.get("vector_id_to_remove", "") or "").strip()
-            if paragraph_hash:
-                vector_ids.append(paragraph_hash)
-            for _, _, relation_hash in cleanup.get("relation_prune_ops", []) or []:
-                token = str(relation_hash or "").strip()
-                if token:
-                    vector_ids.append(token)
-            if vector_ids:
-                self.vector_store.delete(list(dict.fromkeys(vector_ids)))
+        paragraph_hash = str(cleanup.get("vector_id_to_remove", "") or "").strip()
+        relation_hashes = [
+            str(relation_hash or "").strip()
+            for _, _, relation_hash in cleanup.get("relation_prune_ops", []) or []
+            if str(relation_hash or "").strip()
+        ]
+        self._delete_vectors_by_type(
+            paragraph_hashes=[paragraph_hash] if paragraph_hash else [],
+            relation_hashes=relation_hashes,
+        )
 
     def _rebuild_graph_from_metadata(self) -> Dict[str, int]:
         assert self.metadata_store is not None
@@ -6359,7 +6999,7 @@ class SDKMemoryKernel:
     ) -> Dict[str, Any]:
         assert self.metadata_store is not None
         if not self._fuzzy_modify_cfg_enabled():
-            return {"success": False, "error": "模糊修改功能未启用"}
+            return {"success": False, "error": "记忆修正功能未启用"}
         text = str(request_text or "").strip()
         if not text:
             return {"success": False, "error": "修改描述不能为空"}
@@ -6373,7 +7013,7 @@ class SDKMemoryKernel:
             if not pid:
                 return {"success": False, "error": "人物画像修改需要提供 person_id 或 person_keyword"}
         elif not chat_id and not self._fuzzy_modify_cfg_allow_global_scope():
-            return {"success": False, "error": "非人物画像修改需要提供 chat_id，或开启全局模糊修改范围"}
+            return {"success": False, "error": "非人物画像修正需要提供 chat_id，或开启全局记忆修正范围"}
 
         candidate_limit = min(max(1, int(limit or 20)), self._fuzzy_modify_cfg_candidate_limit())
         candidates = await self._collect_fuzzy_modify_candidates(
@@ -6412,6 +7052,9 @@ class SDKMemoryKernel:
             }
 
         confidence = float(plan.get("confidence", 0.0) or 0.0)
+        cascade_preview = self._build_fuzzy_modify_cascade_preview(
+            operations=plan.get("operations", []),
+        )
         preview = {
             "request_text": text,
             "scope": scope_token,
@@ -6420,6 +7063,7 @@ class SDKMemoryKernel:
             "chat_id": str(chat_id or "").strip(),
             "candidates": candidates,
             "operations": plan.get("operations", []),
+            "cascade_preview": cascade_preview,
             "requires_confirmation": True,
             "confirm_threshold": self._fuzzy_modify_cfg_confirm_threshold(),
             "reason": str(plan.get("reason", "") or ""),
@@ -6460,20 +7104,40 @@ class SDKMemoryKernel:
         if plan_record is None:
             return {"success": False, "error": "修改计划不存在"}
         status = str(plan_record.get("status", "") or "").strip()
-        if status not in {"awaiting_confirmation", "failed"}:
+        if status not in {"awaiting_confirmation", "failed", "executing"}:
             return {"success": False, "error": f"当前计划状态不可执行: {status}"}
         if not confirmed:
             confidence = self._optional_float(plan_record.get("confidence")) or 0.0
             if not self._fuzzy_modify_cfg_auto_execute_enabled() or confidence < self._fuzzy_modify_cfg_confirm_threshold():
                 return {"success": False, "error": "需要用户确认后才能执行", "requires_confirmation": True}
 
-        self.metadata_store.update_fuzzy_modify_plan(token, status="executing")
+        previous_execution = plan_record.get("execution") if isinstance(plan_record.get("execution"), dict) else {}
+        attempt_started_at = time.time()
+        executing_payload = {
+            **previous_execution,
+            "attempt": {
+                "status": "executing",
+                "started_at": attempt_started_at,
+                "requested_by": requested_by,
+                "reason": reason,
+                "recovered_from_stale_executing": status == "executing",
+            },
+        }
+        self.metadata_store.update_fuzzy_modify_plan(token, status="executing", execution=executing_payload)
         try:
             execution = await self._apply_fuzzy_modify_plan(
                 plan_record=plan_record,
                 requested_by=requested_by,
                 reason=reason,
             )
+            execution = {
+                **execution,
+                "attempt": {
+                    **executing_payload["attempt"],
+                    "status": "finished",
+                    "finished_at": time.time(),
+                },
+            }
             updated = self.metadata_store.update_fuzzy_modify_plan(
                 token,
                 status="executed" if bool(execution.get("success")) else "failed",
@@ -6483,14 +7147,23 @@ class SDKMemoryKernel:
             )
             return {"success": bool(execution.get("success")), "plan": updated, "execution": execution}
         except Exception as exc:
-            execution = {"success": False, "error": str(exc)}
+            execution = {
+                **executing_payload,
+                "success": False,
+                "error": str(exc),
+                "attempt": {
+                    **executing_payload["attempt"],
+                    "status": "failed",
+                    "finished_at": time.time(),
+                },
+            }
             updated = self.metadata_store.update_fuzzy_modify_plan(
                 token,
                 status="failed",
                 execution=execution,
                 reason=reason if reason else None,
             )
-            logger.warning(f"模糊修改执行失败: {exc}")
+            logger.warning(f"记忆修正执行失败: {exc}")
             return {"success": False, "plan": updated, "execution": execution, "error": str(exc)}
 
     async def _rollback_fuzzy_modify_action(
@@ -6544,6 +7217,9 @@ class SDKMemoryKernel:
 
         restored_targets: List[Dict[str, Any]] = []
         restore_failures: List[Dict[str, str]] = []
+        stale_marks_deleted: List[Dict[str, Any]] = []
+        stale_marks_restored: List[Dict[str, Any]] = []
+        stale_marks_skipped: List[Dict[str, Any]] = []
         for item in execution.get("superseded_targets") or []:
             if not isinstance(item, dict):
                 continue
@@ -6551,6 +7227,76 @@ class SDKMemoryKernel:
             hash_value = str(item.get("hash", "") or "").strip()
             previous_metadata = item.get("previous_metadata") if isinstance(item.get("previous_metadata"), dict) else {}
             if target_type == "paragraph" and hash_value:
+                cascade = item.get("cascade") if isinstance(item.get("cascade"), dict) else {}
+                for relation_item in cascade.get("relations_marked_inactive") or []:
+                    if not isinstance(relation_item, dict):
+                        continue
+                    relation_hash = str(relation_item.get("relation_hash", "") or "").strip()
+                    if not relation_hash:
+                        continue
+                    previous_relation_metadata = (
+                        relation_item.get("previous_metadata")
+                        if isinstance(relation_item.get("previous_metadata"), dict)
+                        else {}
+                    )
+                    updated_relation = self.metadata_store.update_relation_metadata(
+                        relation_hash,
+                        previous_relation_metadata,
+                        merge=False,
+                    )
+                    if updated_relation is None:
+                        restore_failures.append(
+                            {"target_type": "relation", "hash": relation_hash, "error": "级联关系不存在"}
+                        )
+                        continue
+                    if bool(relation_item.get("previous_is_inactive", False)):
+                        self.metadata_store.mark_relations_inactive(
+                            [relation_hash],
+                            inactive_since=self._optional_float(relation_item.get("previous_inactive_since")),
+                        )
+                    else:
+                        self.metadata_store.mark_relations_active([relation_hash])
+                    restored_targets.append(
+                        {"target_type": "relation", "hash": relation_hash, "cascade_from": hash_value}
+                    )
+
+                for snapshot in cascade.get("stale_mark_snapshots") or []:
+                    if not isinstance(snapshot, dict):
+                        continue
+                    paragraph_hash = str(snapshot.get("paragraph_hash", "") or hash_value).strip()
+                    relation_hash = str(snapshot.get("relation_hash", "") or "").strip()
+                    if not paragraph_hash or not relation_hash:
+                        continue
+                    rollback_mark = self.metadata_store.rollback_paragraph_stale_relation_mark(
+                        paragraph_hash=paragraph_hash,
+                        relation_hash=relation_hash,
+                        expected_source_type=str(snapshot.get("source_type", "") or "memory_correction"),
+                        expected_source_id=str(snapshot.get("source_id", "") or token),
+                        expected_source_operation_id=str(snapshot.get("source_operation_id", "") or ""),
+                        previous_mark=(
+                            snapshot.get("previous_mark")
+                            if isinstance(snapshot.get("previous_mark"), dict)
+                            else None
+                        ),
+                    )
+                    action = str(rollback_mark.get("action", "") or "").strip()
+                    if action == "deleted":
+                        stale_marks_deleted.append(rollback_mark)
+                    elif action == "restored":
+                        stale_marks_restored.append(rollback_mark)
+                    elif action in {"skipped_due_to_source_mismatch", "restore_failed", "invalid_target"}:
+                        stale_marks_skipped.append(rollback_mark)
+                        if action in {"restore_failed", "invalid_target"}:
+                            restore_failures.append(
+                                {
+                                    "target_type": "stale_mark",
+                                    "hash": f"{paragraph_hash}:{relation_hash}",
+                                    "error": action,
+                                }
+                            )
+                    else:
+                        stale_marks_skipped.append(rollback_mark)
+
                 updated = self.metadata_store.update_paragraph_metadata(hash_value, previous_metadata, merge=False)
                 if updated is not None:
                     restored_targets.append({"target_type": target_type, "hash": hash_value})
@@ -6583,6 +7329,9 @@ class SDKMemoryKernel:
             "new_relations_deactivated": relation_hashes,
             "restored_targets": restored_targets,
             "restore_failures": restore_failures,
+            "stale_marks_deleted": stale_marks_deleted,
+            "stale_marks_restored": stale_marks_restored,
+            "stale_marks_skipped": stale_marks_skipped,
             "items": rollback_items,
             "requested_by": requested_by,
             "reason": reason,
@@ -6745,7 +7494,7 @@ class SDKMemoryKernel:
                     candidate_id = str(raw.get("candidate_id", "") or "").strip()
                     raw_hash = str(raw.get("hash", "") or "").strip()
                     logger.warning(
-                        f"模糊修改计划引用了候选集外的目标: action={action} candidate_id={candidate_id} hash={raw_hash}"
+                        f"记忆修正计划引用了候选集外的目标: action={action} candidate_id={candidate_id} hash={raw_hash}"
                     )
                     continue
                 operations.append(
@@ -6845,6 +7594,242 @@ class SDKMemoryKernel:
             )
         return relations
 
+    def _build_fuzzy_modify_cascade_preview(self, *, operations: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+        relations: List[Dict[str, Any]] = []
+        entities: List[Dict[str, Any]] = []
+        seen_relations: set[tuple[str, str]] = set()
+        seen_entities: set[tuple[str, str]] = set()
+        for operation in operations or []:
+            if not isinstance(operation, dict):
+                continue
+            if operation.get("action") != "mark_superseded":
+                continue
+            if str(operation.get("target_type", "") or "").strip() != "paragraph":
+                continue
+            paragraph_hash = str(operation.get("hash", "") or "").strip()
+            if not paragraph_hash:
+                continue
+            cascade = self._build_fuzzy_modify_paragraph_cascade(
+                paragraph_hash=paragraph_hash,
+                reason=str(operation.get("reason", "") or "").strip(),
+                preview_only=True,
+                plan_id="",
+            )
+            for item in cascade.get("relations", []):
+                if not isinstance(item, dict):
+                    continue
+                relation_hash = str(item.get("relation_hash", "") or "").strip()
+                key = (paragraph_hash, relation_hash)
+                if not relation_hash or key in seen_relations:
+                    continue
+                seen_relations.add(key)
+                relations.append(item)
+            for item in cascade.get("entities", []):
+                if not isinstance(item, dict):
+                    continue
+                entity_hash = str(item.get("entity_hash", "") or "").strip()
+                key = (paragraph_hash, entity_hash)
+                if not entity_hash or key in seen_entities:
+                    continue
+                seen_entities.add(key)
+                entities.append(item)
+        counts = {
+            "relations": len(relations),
+            "relations_mark_inactive": sum(1 for item in relations if item.get("action") == "mark_inactive"),
+            "relations_mark_stale_evidence": sum(1 for item in relations if item.get("action") == "mark_stale_evidence"),
+            "relations_skipped_protected": sum(1 for item in relations if item.get("action") == "skipped_protected"),
+            "entities": len(entities),
+        }
+        return {"relations": relations, "entities": entities, "counts": counts}
+
+    def _build_fuzzy_modify_paragraph_cascade(
+        self,
+        *,
+        paragraph_hash: str,
+        reason: str,
+        preview_only: bool,
+        plan_id: str,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        assert self.metadata_store is not None
+        paragraph_token = str(paragraph_hash or "").strip()
+        if not paragraph_token:
+            return {"relations": [], "entities": []}
+
+        relations: List[Dict[str, Any]] = []
+        raw_relations = self.metadata_store.get_paragraph_relations(paragraph_token)
+        relation_hashes = [
+            str(item.get("hash", "") or "").strip()
+            for item in raw_relations
+            if isinstance(item, dict) and str(item.get("hash", "") or "").strip()
+        ]
+        statuses = self.metadata_store.get_relation_status_batch(relation_hashes) if relation_hashes else {}
+        now = time.time()
+        for relation in raw_relations:
+            if not isinstance(relation, dict):
+                continue
+            relation_hash = str(relation.get("hash", "") or "").strip()
+            if not relation_hash:
+                continue
+            status = statuses.get(relation_hash, {})
+            protected_until = self._optional_float(status.get("protected_until")) or 0.0
+            is_pinned = bool(status.get("is_pinned", False))
+            protected = is_pinned or protected_until > now
+            if protected:
+                action = "skipped_protected"
+                action_reason = "relation_is_pinned" if is_pinned else "relation_is_temporarily_protected"
+            elif self._relation_has_remaining_paragraphs(relation_hash, [paragraph_token]):
+                action = "mark_stale_evidence"
+                action_reason = "relation_has_other_active_paragraphs"
+            else:
+                action = "mark_inactive"
+                action_reason = "only_supported_by_superseded_paragraph"
+            relations.append(
+                {
+                    "paragraph_hash": paragraph_token,
+                    "relation_hash": relation_hash,
+                    "action": action,
+                    "reason": action_reason,
+                    "source_reason": reason,
+                    "subject": str(relation.get("subject", "") or ""),
+                    "predicate": str(relation.get("predicate", "") or ""),
+                    "object": str(relation.get("object", "") or ""),
+                    "is_pinned": is_pinned,
+                    "protected_until": protected_until or None,
+                    "is_inactive": bool(status.get("is_inactive", False)),
+                    "inactive_since": status.get("inactive_since"),
+                    "preview_only": preview_only,
+                    "source_operation_id": (
+                        self._fuzzy_modify_stale_source_operation_id(
+                            plan_id=plan_id,
+                            paragraph_hash=paragraph_token,
+                            relation_hash=relation_hash,
+                        )
+                        if plan_id
+                        else ""
+                    ),
+                }
+            )
+
+        entities: List[Dict[str, Any]] = []
+        for entity in self.metadata_store.get_paragraph_entities(paragraph_token):
+            if not isinstance(entity, dict):
+                continue
+            entity_hash = str(entity.get("hash", "") or "").strip()
+            if not entity_hash:
+                continue
+            entities.append(
+                {
+                    "paragraph_hash": paragraph_token,
+                    "entity_hash": entity_hash,
+                    "action": "record_impact_only",
+                    "reason": "entity_state_has_no_superseded_semantics",
+                    "name": str(entity.get("name", "") or entity.get("entity", "") or ""),
+                    "type": str(entity.get("type", "") or entity.get("entity_type", "") or ""),
+                    "preview_only": preview_only,
+                }
+            )
+        return {"relations": relations, "entities": entities}
+
+    @staticmethod
+    def _fuzzy_modify_stale_source_operation_id(
+        *,
+        plan_id: str,
+        paragraph_hash: str,
+        relation_hash: str,
+    ) -> str:
+        return f"{str(plan_id or '').strip()}:{str(paragraph_hash or '').strip()}:{str(relation_hash or '').strip()}"
+
+    def _execute_fuzzy_modify_paragraph_cascade(
+        self,
+        *,
+        paragraph_hash: str,
+        plan_id: str,
+        changed_at: float,
+        reason: str,
+    ) -> Dict[str, Any]:
+        assert self.metadata_store is not None
+        paragraph_token = str(paragraph_hash or "").strip()
+        plan_token = str(plan_id or "").strip()
+        cascade = self._build_fuzzy_modify_paragraph_cascade(
+            paragraph_hash=paragraph_token,
+            reason=reason,
+            preview_only=False,
+            plan_id=plan_token,
+        )
+        result = {
+            "relations_marked_inactive": [],
+            "relations_marked_stale": [],
+            "relations_skipped": [],
+            "impacted_entities": cascade.get("entities", []),
+            "stale_mark_snapshots": [],
+        }
+
+        for relation in cascade.get("relations", []):
+            if not isinstance(relation, dict):
+                continue
+            relation_hash = str(relation.get("relation_hash", "") or "").strip()
+            if not relation_hash:
+                continue
+            action = str(relation.get("action", "") or "").strip()
+            if action == "skipped_protected":
+                result["relations_skipped"].append(relation)
+                continue
+            if action == "mark_inactive":
+                previous = self.metadata_store.get_relation(relation_hash)
+                previous_metadata = coerce_metadata_dict((previous or {}).get("metadata"))
+                patch = {
+                    "memory_change": {
+                        "change_id": plan_token,
+                        "change_type": "paragraph_cascade_inactive",
+                        "changed_at": changed_at,
+                        "changed_by": "memory_correction",
+                        "reason": reason,
+                        "source_paragraph_hash": paragraph_token,
+                    }
+                }
+                updated_metadata = self.metadata_store.update_relation_metadata(relation_hash, patch, merge=True)
+                self.metadata_store.mark_relations_inactive([relation_hash], inactive_since=changed_at)
+                result["relations_marked_inactive"].append(
+                    {
+                        **relation,
+                        "previous_metadata": previous_metadata,
+                        "updated_metadata": updated_metadata if isinstance(updated_metadata, dict) else {},
+                        "previous_is_inactive": bool((previous or {}).get("is_inactive", False)),
+                        "previous_inactive_since": (previous or {}).get("inactive_since"),
+                    }
+                )
+                continue
+            if action == "mark_stale_evidence":
+                source_operation_id = self._fuzzy_modify_stale_source_operation_id(
+                    plan_id=plan_token,
+                    paragraph_hash=paragraph_token,
+                    relation_hash=relation_hash,
+                )
+                previous_mark = self.metadata_store.get_paragraph_stale_relation_mark(
+                    paragraph_hash=paragraph_token,
+                    relation_hash=relation_hash,
+                )
+                written = self.metadata_store.upsert_paragraph_stale_relation_mark(
+                    paragraph_hash=paragraph_token,
+                    relation_hash=relation_hash,
+                    reason=reason or "memory_correction_paragraph_superseded",
+                    source_type="memory_correction",
+                    source_id=plan_token,
+                    source_operation_id=source_operation_id,
+                )
+                snapshot = {
+                    "paragraph_hash": paragraph_token,
+                    "relation_hash": relation_hash,
+                    "source_type": "memory_correction",
+                    "source_id": plan_token,
+                    "source_operation_id": source_operation_id,
+                    "previous_mark": previous_mark if isinstance(previous_mark, dict) else None,
+                    "written_mark": written if isinstance(written, dict) else {},
+                }
+                result["stale_mark_snapshots"].append(snapshot)
+                result["relations_marked_stale"].append({**relation, "written_mark": written or {}})
+        return result
+
     async def _apply_fuzzy_modify_plan(
         self,
         *,
@@ -6871,7 +7856,7 @@ class SDKMemoryKernel:
             metadata = {
                 "memory_change": {
                     "change_id": change_id,
-                    "change_type": "replacement",
+                    "change_type": "ingest_text",
                     "changed_at": changed_at,
                     "changed_by": requested_by,
                     "reason": op_reason,
@@ -6905,6 +7890,7 @@ class SDKMemoryKernel:
                 changed_at=changed_at,
                 changed_by=requested_by,
                 replacement_hashes=replacement_hashes,
+                plan_id=change_id,
                 default_reason=reason or str(plan.get("request_text", "") or ""),
             )
             if marked:
@@ -6918,6 +7904,7 @@ class SDKMemoryKernel:
             refreshed_profiles.append(await self.refresh_person_profile(person_id))
 
         if superseded_targets:
+            self._current_effective_filter_cache = {"checked_at": 0.0, "needed": True}
             self._rebuild_graph_from_metadata()
             self._persist()
 
@@ -6940,6 +7927,7 @@ class SDKMemoryKernel:
         changed_at: float,
         changed_by: str,
         replacement_hashes: Sequence[str],
+        plan_id: str,
         default_reason: str = "",
     ) -> Dict[str, Any]:
         assert self.metadata_store is not None
@@ -6950,9 +7938,9 @@ class SDKMemoryKernel:
         valid_to = self._optional_float(operation.get("valid_to")) or changed_at
         reason = str(operation.get("reason", "") or default_reason or "").strip()
         patch = {
-            "memory_change": {
-                "change_id": change_id,
-                "change_type": "superseded",
+                "memory_change": {
+                    "change_id": change_id,
+                    "change_type": "mark_superseded",
                 "changed_at": changed_at,
                 "changed_by": changed_by,
                 "reason": reason,
@@ -6968,11 +7956,18 @@ class SDKMemoryKernel:
             updated = self.metadata_store.update_paragraph_metadata(hash_value, patch, merge=True)
             if updated is None:
                 return {}
+            cascade = self._execute_fuzzy_modify_paragraph_cascade(
+                paragraph_hash=hash_value,
+                plan_id=plan_id,
+                changed_at=changed_at,
+                reason=reason,
+            )
             return {
                 "target_type": target_type,
                 "hash": hash_value,
                 "previous_metadata": previous_metadata,
                 "updated_metadata": updated,
+                "cascade": cascade,
             }
         previous = self.metadata_store.get_relation(hash_value)
         if previous is None:
@@ -7112,8 +8107,15 @@ class SDKMemoryKernel:
             "statuses": statuses,
         }
 
-    async def _ensure_vector_for_text(self, *, item_hash: str, text: str) -> bool:
-        if self.vector_store is None or self.embedding_manager is None:
+    async def _ensure_vector_for_text(
+        self,
+        *,
+        item_hash: str,
+        text: str,
+        vector_store: Optional[VectorStore] = None,
+    ) -> bool:
+        target_store = vector_store or self.vector_store
+        if target_store is None or self.embedding_manager is None:
             return False
         token = str(item_hash or "").strip()
         content = str(text or "").strip()
@@ -7125,7 +8127,7 @@ class SDKMemoryKernel:
         if getattr(embedding, "size", 0) <= 0:
             return False
         try:
-            self.vector_store.add(embedding, [token])
+            target_store.add(embedding, [token])
             return True
         except Exception as exc:
             logger.warning(f"重建向量失败: {exc}")
@@ -7134,24 +8136,39 @@ class SDKMemoryKernel:
     async def _ensure_relation_vector(self, relation: Dict[str, Any]) -> bool:
         if not bool(self.relation_vectors_enabled):
             return False
+        relation_service = self.relation_write_service
+        if relation_service is not None:
+            result = await relation_service.ensure_relation_vector(
+                hash_value=str(relation.get("hash", "") or ""),
+                subject=str(relation.get("subject", "") or "").strip(),
+                predicate=str(relation.get("predicate", "") or "").strip(),
+                obj=str(relation.get("object", "") or "").strip(),
+                typed_id=self._dual_vector_pools_enabled(),
+            )
+            return bool(result.vector_written or result.vector_already_exists)
         return await self._ensure_vector_for_text(
             item_hash=str(relation.get("hash", "") or ""),
-            text=" ".join(
-                [
-                    str(relation.get("subject", "") or "").strip(),
-                    str(relation.get("predicate", "") or "").strip(),
-                    str(relation.get("object", "") or "").strip(),
-                ]
-            ).strip(),
+            text=RelationWriteService.build_relation_vector_text(
+                str(relation.get("subject", "") or "").strip(),
+                str(relation.get("predicate", "") or "").strip(),
+                str(relation.get("object", "") or "").strip(),
+            ),
         )
 
     async def _ensure_paragraph_vector(self, paragraph: Dict[str, Any]) -> bool:
         return await self._ensure_vector_for_text(
             item_hash=str(paragraph.get("hash", "") or ""),
             text=str(paragraph.get("content", "") or ""),
+            vector_store=self._paragraph_store(),
         )
 
     async def _ensure_entity_vector(self, entity: Dict[str, Any]) -> bool:
+        if self._dual_vector_pools_enabled():
+            return await self._ensure_vector_for_text(
+                item_hash=self._graph_vector_id("entity", str(entity.get("hash", "") or "")),
+                text=str(entity.get("name", "") or ""),
+                vector_store=self._graph_vector_store(),
+            )
         return await self._ensure_vector_for_text(
             item_hash=str(entity.get("hash", "") or ""),
             text=str(entity.get("name", "") or ""),
@@ -7638,29 +8655,35 @@ class SDKMemoryKernel:
             placeholders = ",".join(["?"] * len(excluded))
             cursor.execute(
                 f"""
-                SELECT 1
+                SELECT p.hash, p.metadata
                 FROM paragraph_relations pr
                 JOIN paragraphs p ON p.hash = pr.paragraph_hash
                 WHERE pr.relation_hash = ?
                   AND pr.paragraph_hash NOT IN ({placeholders})
                   AND (p.is_deleted IS NULL OR p.is_deleted = 0)
-                LIMIT 1
                 """,
                 tuple([relation_hash] + excluded),
             )
         else:
             cursor.execute(
                 """
-                SELECT 1
+                SELECT p.hash, p.metadata
                 FROM paragraph_relations pr
                 JOIN paragraphs p ON p.hash = pr.paragraph_hash
                 WHERE pr.relation_hash = ?
                   AND (p.is_deleted IS NULL OR p.is_deleted = 0)
-                LIMIT 1
                 """,
                 (relation_hash,),
             )
-        return cursor.fetchone() is not None
+        now = time.time()
+        for row in cursor.fetchall():
+            paragraph = self.metadata_store._row_to_dict(row, "paragraph")
+            metadata = coerce_metadata_dict(paragraph.get("metadata"))
+            memory_change = metadata.get("memory_change") if isinstance(metadata.get("memory_change"), dict) else {}
+            valid_to = self._optional_float(memory_change.get("valid_to"))
+            if valid_to is None or valid_to > now:
+                return True
+        return False
 
     def _build_delete_preview_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         item_type = str(item.get("item_type", "") or "").strip()
@@ -8023,9 +9046,11 @@ class SDKMemoryKernel:
             conn.commit()
 
             deleted_relations = self.metadata_store.backup_and_delete_relations(relation_hashes)
-            deleted_vectors = 0
-            if self.vector_store is not None and plan.get("vector_ids"):
-                deleted_vectors = self.vector_store.delete(list(plan.get("vector_ids") or []))
+            deleted_vectors = self._delete_vectors_by_type(
+                paragraph_hashes=paragraph_hashes,
+                entity_hashes=entity_hashes,
+                relation_hashes=relation_hashes,
+            )
 
             operation = self.metadata_store.create_delete_operation(
                 mode=act_mode,
@@ -8239,10 +9264,11 @@ class SDKMemoryKernel:
             self.metadata_store.physically_delete_entities(entity_hashes)
         if entity_names:
             self.graph_store.delete_nodes(entity_names)
-        if self.vector_store is not None:
-            vector_ids = self._merge_tokens(paragraph_hashes, entity_hashes, deleted_relation_hashes)
-            if vector_ids:
-                self.vector_store.delete(vector_ids)
+        self._delete_vectors_by_type(
+            paragraph_hashes=paragraph_hashes,
+            entity_hashes=entity_hashes,
+            relation_hashes=deleted_relation_hashes,
+        )
         self._rebuild_graph_from_metadata()
         self._persist()
         return {

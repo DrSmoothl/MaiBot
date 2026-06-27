@@ -268,23 +268,24 @@ class AMemorixHostService:
         if component_name == "memory_stats":
             return kernel.memory_stats()
 
-        admin_actions = {
-            "memory_graph_admin": kernel.memory_graph_admin,
-            "memory_source_admin": kernel.memory_source_admin,
-            "memory_episode_admin": kernel.memory_episode_admin,
-            "memory_profile_admin": kernel.memory_profile_admin,
-            "memory_feedback_admin": kernel.memory_feedback_admin,
-            "memory_runtime_admin": kernel.memory_runtime_admin,
-            "memory_import_admin": kernel.memory_import_admin,
-            "memory_tuning_admin": kernel.memory_tuning_admin,
-            "memory_v5_admin": kernel.memory_v5_admin,
-            "memory_delete_admin": kernel.memory_delete_admin,
-            "memory_fuzzy_modify_admin": kernel.memory_fuzzy_modify_admin,
+        admin_action_names = {
+            "memory_graph_admin",
+            "memory_source_admin",
+            "memory_episode_admin",
+            "memory_profile_admin",
+            "memory_feedback_admin",
+            "memory_runtime_admin",
+            "memory_import_admin",
+            "memory_tuning_admin",
+            "memory_v5_admin",
+            "memory_delete_admin",
+            "memory_correction_admin",
+            "memory_fuzzy_modify_admin",
         }
-        if component_name in admin_actions:
+        if component_name in admin_action_names:
             kwargs = dict(payload)
             action = str(kwargs.pop("action", "") or "")
-            return await admin_actions[component_name](action=action, **kwargs)
+            return await getattr(kernel, component_name)(action=action, **kwargs)
 
         raise RuntimeError(f"不支持的 A_Memorix 调用: {component_name}")
 
