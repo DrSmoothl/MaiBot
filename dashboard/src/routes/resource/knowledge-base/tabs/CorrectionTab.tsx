@@ -127,13 +127,22 @@ function getOperationLabel(operation: MemoryCorrectionOperationPayload): string 
 function getOperationSummary(operation: MemoryCorrectionOperationPayload): string {
   switch (operation.action) {
     case 'mark_superseded':
-      return `${operation.target_type}:${operation.hash}`
+      if ('target_type' in operation && 'hash' in operation) {
+        return `${operation.target_type}:${operation.hash}`
+      }
+      return 'reason' in operation ? operation.reason ?? '' : ''
     case 'ingest_text':
-      return operation.text
+      if ('text' in operation) {
+        return operation.text
+      }
+      return 'reason' in operation ? operation.reason ?? '' : ''
     case 'refresh_person_profile':
-      return operation.person_id
+      if ('person_id' in operation) {
+        return operation.person_id
+      }
+      return ''
     default:
-      return operation.reason ?? ''
+      return 'reason' in operation ? operation.reason ?? '' : ''
   }
 }
 
