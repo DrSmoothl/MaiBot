@@ -319,7 +319,7 @@ export function useMemoryCorrection({
   }, [active, selectedPlanFromList?.plan_id, selectedPlanId])
 
   const selectedPlan = useMemo<MemoryCorrectionPlanPayload | null>(() => {
-    if (selectedPlanDetail?.plan_id === selectedPlanFromList?.plan_id) {
+    if (selectedPlanDetail && selectedPlanFromList && selectedPlanDetail.plan_id === selectedPlanFromList.plan_id) {
       return {
         ...selectedPlanFromList,
         ...selectedPlanDetail,
