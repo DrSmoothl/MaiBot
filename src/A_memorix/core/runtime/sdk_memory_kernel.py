@@ -437,6 +437,26 @@ class SDKMemoryKernel:
             return None
         return self._normalize_embedding_fingerprint(meta.get("embedding_fingerprint"))
 
+    def _stamp_missing_embedding_fingerprint_if_dimension_matches(self, store: Optional[VectorStore]) -> bool:
+        if store is None:
+            return False
+        stored_dimension = self._stored_vector_dimension(store)
+        if stored_dimension is None or int(stored_dimension) != int(self.embedding_dimension):
+            return False
+        current_fingerprint = self._current_embedding_fingerprint()
+        if current_fingerprint is None:
+            return False
+        stored_fingerprint = self._stored_embedding_fingerprint(store)
+        if stored_fingerprint is not None:
+            return False
+        store.save(embedding_fingerprint=current_fingerprint)
+        logger.warning("旧向量库缺少 embedding 指纹且维度匹配，已写入当前模型指纹以复用旧向量")
+        stamped_fingerprint = self._stored_embedding_fingerprint(store)
+        return (
+            stamped_fingerprint is not None
+            and str(stamped_fingerprint.get("hash", "") or "") == str(current_fingerprint.get("hash", "") or "")
+        )
+
     @staticmethod
     def _embedding_fingerprint_status(
         current: Optional[Dict[str, Any]],
@@ -455,8 +475,15 @@ class SDKMemoryKernel:
     def _stored_vectors_compatible_with_current_embedding(self, store: Optional[VectorStore] = None) -> bool:
         current = self._current_embedding_fingerprint()
         stored = self._stored_embedding_fingerprint(store)
-        if current is None or stored is None:
+        if current is None:
             return False
+        if stored is None:
+            stamped = self._stamp_missing_embedding_fingerprint_if_dimension_matches(store or self.vector_store)
+            if not stamped:
+                return False
+            stored = self._stored_embedding_fingerprint(store)
+            if stored is None:
+                return False
         return str(current.get("hash", "") or "") == str(stored.get("hash", "") or "")
 
     def _vector_mismatch_error(self, *, stored_dimension: int, detected_dimension: int) -> str:
@@ -468,6 +495,8 @@ class SDKMemoryKernel:
         )
 
     def _vector_rebuild_status(self) -> Dict[str, Any]:
+        if self.vector_store is not None and not self._vector_rebuild_lock.locked():
+            self._stamp_missing_embedding_fingerprint_if_dimension_matches(self.vector_store)
         stored_dimension = self._stored_vector_dimension()
         if self._vector_persist_blocked_until_rebuild and self._vector_rebuild_source_dimension is not None:
             stored_dimension = int(self._vector_rebuild_source_dimension)
