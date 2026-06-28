@@ -855,6 +855,94 @@ async def test_plain_vector_store_save_preserves_existing_embedding_fingerprint(
 
 
 @pytest.mark.asyncio
+async def test_runtime_auto_stamps_missing_embedding_fingerprint_when_dimension_matches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    try:
+        assert kernel.vector_store is not None
+        kernel.vector_store.add(
+            np.ones((1, fake_embedding_manager.default_dimension), dtype=np.float32),
+            ["missing-fingerprint"],
+        )
+        kernel.vector_store.save()
+        meta_path = data_dir / "vectors" / "vectors_metadata.pkl"
+        with open(meta_path, "rb") as handle:
+            meta = pickle.load(handle)
+        meta.pop("embedding_fingerprint", None)
+        with open(meta_path, "wb") as handle:
+            pickle.dump(meta, handle)
+
+        assert kernel._stored_vectors_compatible_with_current_embedding(kernel.vector_store) is True
+
+        config = await kernel.memory_runtime_admin(action="get_config")
+        assert config["embedding_fingerprint_status"] == "matched"
+        assert config["stored_embedding_fingerprint"]["hash"] == config["embedding_fingerprint"]["hash"]
+        assert config["vector_rebuild_required"] is False
+    finally:
+        await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_auto_stamp_missing_embedding_fingerprint_when_dimension_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+    await kernel.initialize()
+    try:
+        assert kernel.vector_store is not None
+        kernel.vector_store.add(
+            np.ones((1, fake_embedding_manager.default_dimension), dtype=np.float32),
+            ["dimension-mismatch"],
+        )
+        kernel.vector_store.save()
+        meta_path = data_dir / "vectors" / "vectors_metadata.pkl"
+        with open(meta_path, "rb") as handle:
+            meta = pickle.load(handle)
+        meta.pop("embedding_fingerprint", None)
+        meta["dimension"] = fake_embedding_manager.default_dimension + 1
+        with open(meta_path, "wb") as handle:
+            pickle.dump(meta, handle)
+
+        assert kernel._stored_vectors_compatible_with_current_embedding(kernel.vector_store) is False
+
+        config = await kernel.memory_runtime_admin(action="get_config")
+        assert config["vector_rebuild_required"] is True
+        assert config["embedding_fingerprint_status"] == "missing"
+        assert config["stored_vector_dimension"] == fake_embedding_manager.default_dimension + 1
+        assert config["embedding_dimension"] == fake_embedding_manager.default_dimension
+    finally:
+        await kernel.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_dual_ready_manifest_rejects_mismatched_embedding_fingerprint(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
