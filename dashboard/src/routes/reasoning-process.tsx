@@ -194,6 +194,12 @@ type ToolDefinitionView = {
 
 type ReasoningPromptMessageAvatarMap = Record<string, ReasoningPromptMessageAvatar>
 
+type ReasoningHeaderMeta = {
+  sessionId: string
+  callId: string
+  remainingText: string
+}
+
 function formatStageName(stage: string): string {
   return STAGE_LABELS[stage] ?? stage
 }
@@ -588,10 +594,8 @@ function getSessionSubtitle(sessionInfo?: ReasoningPromptSessionInfo): string {
   if (!sessionInfo) return ''
 
   const parts = []
-  if (sessionInfo.platform && sessionInfo.target_id) {
-    parts.push(
-      `${sessionInfo.platform} · ${formatSessionType(sessionInfo.chat_type)} · ${sessionInfo.target_id}`
-    )
+  if (sessionInfo.platform) {
+    parts.push(`${sessionInfo.platform} · ${formatSessionType(sessionInfo.chat_type)}`)
   }
   if (sessionInfo.resolved_session_id) {
     parts.push(`会话 ${sessionInfo.resolved_session_id.slice(0, 8)}`)
@@ -599,6 +603,36 @@ function getSessionSubtitle(sessionInfo?: ReasoningPromptSessionInfo): string {
     parts.push('未解析到真实会话')
   }
   return parts.join(' · ')
+}
+
+function extractReasoningHeaderMeta(text?: string): ReasoningHeaderMeta {
+  const meta: ReasoningHeaderMeta = {
+    sessionId: '',
+    callId: '',
+    remainingText: '',
+  }
+  if (!text) return meta
+
+  const remainingLines: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const normalizedLine = line.trim()
+    const sessionMatch = normalizedLine.match(/^会话\s*ID[：:]\s*(.+)$/i)
+    if (sessionMatch) {
+      meta.sessionId = sessionMatch[1].trim()
+      continue
+    }
+
+    const callMatch = normalizedLine.match(/^调用\s*ID[：:]\s*(.+)$/i)
+    if (callMatch) {
+      meta.callId = callMatch[1].trim()
+      continue
+    }
+
+    remainingLines.push(line)
+  }
+
+  meta.remainingText = remainingLines.join('\n').trim()
+  return meta
 }
 
 function getReasoningRecordTitle(
@@ -1250,12 +1284,16 @@ interface ReasoningProcessPageProps {
   embedded?: boolean
   toolbarContainerId?: string
   toolbarVisible?: boolean
+  topbarActionsContainerId?: string
+  onToolbarContentVisibleChange?: (visible: boolean) => void
 }
 
 export function ReasoningProcessPage({
   embedded = false,
   toolbarContainerId,
   toolbarVisible = true,
+  topbarActionsContainerId,
+  onToolbarContentVisibleChange,
 }: ReasoningProcessPageProps) {
   const { toast } = useToast()
   const navigate = useNavigate()
@@ -1296,6 +1334,7 @@ export function ReasoningProcessPage({
     () => Boolean(initialSearchParams.get('stage') || initialSearchParams.get('session') || initialTargetStem)
   )
   const [toolbarRoot, setToolbarRoot] = useState<HTMLElement | null>(null)
+  const [topbarActionsRoot, setTopbarActionsRoot] = useState<HTMLElement | null>(null)
   const [replayPanelOpen, setReplayPanelOpen] = useState(false)
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -1309,10 +1348,25 @@ export function ReasoningProcessPage({
   }, [sessionInfos])
   const structuredPrompt = useMemo(() => parseStructuredPrompt(jsonContent), [jsonContent])
   const avatarFetchEnabled = useAvatarFetchEnabled()
+  const hasToolbarContent = Boolean(returnTo)
 
   useEffect(() => {
     setToolbarRoot(toolbarContainerId ? document.getElementById(toolbarContainerId) : null)
   }, [toolbarContainerId])
+
+  useEffect(() => {
+    const frameId = requestAnimationFrame(() => {
+      setTopbarActionsRoot(
+        topbarActionsContainerId ? document.getElementById(topbarActionsContainerId) : null
+      )
+    })
+
+    return () => cancelAnimationFrame(frameId)
+  }, [topbarActionsContainerId, toolbarVisible])
+
+  useEffect(() => {
+    onToolbarContentVisibleChange?.(hasToolbarContent)
+  }, [hasToolbarContent, onToolbarContentVisibleChange])
 
   useEffect(() => {
     if (!browsingStage || !selected) {
@@ -1604,7 +1658,11 @@ export function ReasoningProcessPage({
   const selectedTitle = selected ? getReasoningRecordTitle(selected, selectedSessionInfo) : '未选择记录'
   const botSelfNames = useMemo(() => extractBotSelfNames(structuredPrompt), [structuredPrompt])
   const previewTabMode = selected?.json_path ? 'structured' : selected?.text_path ? 'text' : selected?.html_path ? 'html' : null
-  const renderRefreshButton = () => (
+  const headerMeta = useMemo(
+    () => extractReasoningHeaderMeta(structuredPrompt?.request?.selection_reason),
+    [structuredPrompt]
+  )
+  const renderRefreshButton = (variant: 'default' | 'topbar' | 'toolbar' = 'default') => (
     <Button
       variant="outline"
       size="sm"
@@ -1612,7 +1670,12 @@ export function ReasoningProcessPage({
       title="刷新"
       onClick={() => setRefreshKey((current) => current + 1)}
       disabled={loading}
-      className="h-9 w-9 shrink-0 p-0 sm:h-10 sm:w-10"
+      className={cn(
+        'shrink-0 p-0',
+        variant === 'topbar' && 'h-9 w-9',
+        variant === 'toolbar' && 'h-8 w-8',
+        variant === 'default' && 'h-9 w-9 sm:h-10 sm:w-10'
+      )}
     >
       <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
     </Button>
@@ -1629,40 +1692,62 @@ export function ReasoningProcessPage({
       返回观察
     </Button>
   ) : null
-  const renderBrowsingControls = (inToolbar = false) => (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-9 shrink-0 justify-start sm:h-10"
-        onClick={() => setBrowsingStage(false)}
-      >
-        <ArrowLeft className="h-4 w-4" />
-        类型
-      </Button>
+  const renderTypeButton = (compact = false) => (
+    <Button
+      variant="outline"
+      size="sm"
+      className={cn('shrink-0 justify-start', compact ? 'h-9' : 'h-9 sm:h-10')}
+      onClick={() => setBrowsingStage(false)}
+    >
+      <ArrowLeft className="h-4 w-4" />
+      类型
+    </Button>
+  )
+  const renderSessionSelect = (placement: 'toolbar' | 'sidebar' | 'sidebarRow' = 'toolbar') => {
+    const inToolbar = placement === 'toolbar'
+    const controlClassName = inToolbar ? 'h-8' : 'h-9 sm:h-10'
+    const selectedSessionLabel =
+      session === AUTO_SESSION
+        ? '自动选择最近会话'
+        : session === ALL_GROUP_SESSIONS
+          ? '全部群聊'
+          : getSessionDisplayName(session, sessionInfoByName.get(session))
 
+    return (
       <Select
         value={session}
         onValueChange={(value) => resetToFirstPage(() => setSession(value))}
         disabled={sessions.length === 0 && loading}
       >
-        <SelectTrigger className={cn('h-9 sm:h-10', inToolbar ? 'w-full sm:w-[240px]' : undefined)}>
-          <SelectValue placeholder="会话" />
+        <SelectTrigger
+          className={cn(
+            controlClassName,
+            inToolbar && 'w-full sm:w-[240px]',
+            placement === 'sidebarRow' && 'w-full'
+          )}
+        >
+          <span className="truncate">{selectedSessionLabel || '会话'}</span>
         </SelectTrigger>
         <SelectContent>
           {session === AUTO_SESSION && (
-            <SelectItem value={AUTO_SESSION}>自动选择最近会话</SelectItem>
+            <SelectItem value={AUTO_SESSION} textValue="自动选择最近会话">
+              自动选择最近会话
+            </SelectItem>
           )}
-          <SelectItem value={ALL_GROUP_SESSIONS}>全部群聊</SelectItem>
+          <SelectItem value={ALL_GROUP_SESSIONS} textValue="全部群聊">
+            全部群聊
+          </SelectItem>
           {sessions.map((item) => {
             const sessionInfo = sessionInfoByName.get(item)
+            const sessionSubtitle = getSessionSubtitle(sessionInfo)
+            const sessionDisplayName = getSessionDisplayName(item, sessionInfo)
             return (
-              <SelectItem key={item} value={item}>
+              <SelectItem key={item} value={item} textValue={sessionDisplayName}>
                 <div className="min-w-0">
-                  <div className="truncate">{getSessionDisplayName(item, sessionInfo)}</div>
-                  {sessionInfo && (
+                  <div className="truncate">{sessionDisplayName}</div>
+                  {sessionSubtitle && (
                     <div className="text-muted-foreground truncate text-xs">
-                      {getSessionSubtitle(sessionInfo)}
+                      {sessionSubtitle}
                     </div>
                   )}
                 </div>
@@ -1671,12 +1756,20 @@ export function ReasoningProcessPage({
           })}
         </SelectContent>
       </Select>
+    )
+  }
 
+  const renderBrowsingFilters = (placement: 'toolbar' | 'sidebar' = 'toolbar') => {
+    const inToolbar = placement === 'toolbar'
+    const controlClassName = inToolbar ? 'h-8' : 'h-9 sm:h-10'
+
+    return (
+      <>
       <div className={cn('relative', inToolbar ? 'w-full sm:w-[140px]' : undefined)}>
         <Input
           value={actionFilter}
           onChange={(event) => resetToFirstPage(() => setActionFilter(event.target.value))}
-          className="h-9 sm:h-10"
+          className={controlClassName}
           placeholder="动作过滤"
         />
       </div>
@@ -1691,20 +1784,31 @@ export function ReasoningProcessPage({
         <Input
           value={search}
           onChange={(event) => resetToFirstPage(() => setSearch(event.target.value))}
-          className="h-9 pl-9 sm:h-10"
+          className={cn(controlClassName, 'pl-9')}
           placeholder="搜索会话显示名、真实会话、文件名或 replyer 回复内容"
         />
       </div>
+      </>
+    )
+  }
+  const renderBrowsingControls = (inToolbar = false) => (
+    <>
+      {renderTypeButton(inToolbar)}
+      {renderBrowsingFilters('toolbar')}
     </>
   )
   const toolbarContent = (
-    <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
+    <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-1.5 sm:justify-end">
       {renderReturnButton()}
-      {browsingStage && renderBrowsingControls(true)}
-      {renderRefreshButton()}
+      {!embedded && browsingStage && renderBrowsingControls(true)}
+      {!embedded && renderRefreshButton('default')}
     </div>
   )
   const toolbarPortal = embedded && toolbarVisible && toolbarRoot ? createPortal(toolbarContent, toolbarRoot) : null
+  const topbarActionsPortal =
+    embedded && toolbarVisible && topbarActionsRoot
+      ? createPortal(browsingStage ? renderTypeButton(true) : renderRefreshButton('topbar'), topbarActionsRoot)
+      : null
   const showBrowsingControlsInline = browsingStage && (!embedded || !toolbarVisible || !toolbarRoot)
   const renderStageCard = (item: ReasoningPromptStageInfo) => (
     <div
@@ -1805,6 +1909,7 @@ export function ReasoningProcessPage({
   return (
     <div className={cn('flex h-full min-h-0 flex-col gap-2 overflow-hidden sm:gap-3', embedded ? 'p-0' : 'p-2 lg:p-4')}>
       {toolbarPortal}
+      {topbarActionsPortal}
 
       <AlertDialog
         open={Boolean(pendingClearStage)}
@@ -1893,12 +1998,23 @@ export function ReasoningProcessPage({
                 : 'h-[32vh] min-h-[180px] translate-x-0 opacity-100 lg:h-auto lg:min-h-0'
             )}
           >
-            <div className="text-muted-foreground flex h-10 flex-shrink-0 items-center justify-between border-b px-3 text-sm lg:h-11">
+            <div className="text-muted-foreground flex h-8 flex-shrink-0 items-center justify-between border-b px-2.5 text-xs">
               <span>{total} 条记录</span>
               <span>
                 第 {page} / {totalPages} 页
               </span>
             </div>
+            {embedded && browsingStage && (
+              <div className="flex flex-shrink-0 flex-col gap-2 border-b p-2">
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    {renderSessionSelect('sidebarRow')}
+                  </div>
+                  {renderRefreshButton('toolbar')}
+                </div>
+                {renderBrowsingFilters('sidebar')}
+              </div>
+            )}
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-1 p-1.5 sm:p-2">
                 {items.map((item) => {
@@ -2019,6 +2135,16 @@ export function ReasoningProcessPage({
                         <div className="truncate text-sm font-medium">
                           {selectedTitle}
                         </div>
+                        {(headerMeta.sessionId || headerMeta.callId) && (
+                          <div className="text-muted-foreground mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 text-[11px] leading-4">
+                            {headerMeta.sessionId && (
+                              <span className="min-w-0 truncate">会话ID: {headerMeta.sessionId}</span>
+                            )}
+                            {headerMeta.callId && (
+                              <span className="min-w-0 truncate">调用ID: {headerMeta.callId}</span>
+                            )}
+                          </div>
+                        )}
                         {!selected && (
                           <div className="text-muted-foreground truncate text-xs">
                             从左侧列表选择一条记录
@@ -2101,10 +2227,10 @@ export function ReasoningProcessPage({
                       </div>
                     ) : structuredPrompt ? (
                       <div className="space-y-2 p-2 sm:space-y-3 sm:p-3">
-                        {structuredPrompt.request?.selection_reason && (
+                        {headerMeta.remainingText && (
                           <div className="rounded-md border p-2.5 sm:p-3">
                             <NaturalLanguageText
-                              text={structuredPrompt.request.selection_reason}
+                              text={headerMeta.remainingText}
                               avatarMap={messageAvatarMap}
                             />
                           </div>
@@ -2152,15 +2278,12 @@ export function ReasoningProcessPage({
                                           )}
                                         >
                                           <div className="absolute top-1.5 left-1.5 flex flex-wrap items-center gap-1.5 sm:top-2 sm:left-2">
-                                            <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+                                            <span className="text-muted-foreground px-1 text-[11px] font-semibold">
                                               输入 #{message.index ?? messageIndex + 1}
-                                            </Badge>
-                                            <Badge
-                                              variant="outline"
-                                              className={cn('px-1.5 py-0 text-[11px]', roleStyle.badgeClassName)}
-                                            >
+                                            </span>
+                                            <span className="text-muted-foreground px-1 text-[11px] font-semibold">
                                               {roleStyle.label}
-                                            </Badge>
+                                            </span>
                                             {message.tool_call_id && (
                                               <span className="text-muted-foreground text-xs">
                                                 tool_call_id: {message.tool_call_id}
@@ -2228,15 +2351,12 @@ export function ReasoningProcessPage({
                                 className={cn('relative rounded-md border px-2.5 pt-9 pb-2.5 sm:px-3 sm:pt-10 sm:pb-3', roleStyle.containerClassName)}
                               >
                                 <div className="absolute top-1.5 left-1.5 flex flex-wrap items-center gap-1.5 sm:top-2 sm:left-2">
-                                  <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+                                  <span className="text-muted-foreground px-1 text-[11px] font-semibold">
                                     #{message.index ?? index + 1}
-                                  </Badge>
-                                  <Badge
-                                    variant="outline"
-                                    className={cn('px-1.5 py-0 text-[11px]', roleStyle.badgeClassName)}
-                                  >
+                                  </span>
+                                  <span className="text-muted-foreground px-1 text-[11px] font-semibold">
                                     {roleStyle.label}
-                                  </Badge>
+                                  </span>
                                   {message.tool_call_id && (
                                     <span className="text-muted-foreground text-xs">
                                       tool_call_id: {message.tool_call_id}

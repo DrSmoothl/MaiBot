@@ -1,19 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { VRMHumanBoneName, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import {
-  Coffee,
   Expand,
-  Maximize2,
-  MessageCircle,
   Minimize2,
   Moon,
   Pause,
   Play,
   RotateCcw,
-  Sparkles,
+  Send,
   Sprout,
-  Volume2,
-  VolumeX,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -22,13 +17,10 @@ import * as THREE from 'three'
 import { Button } from '@/components/ui/button'
 import { getChatStreams } from '@/lib/chat-management-api'
 import { chatWsClient } from '@/lib/chat-ws-client'
-import { getPlannerOverview, getReplierOverview } from '@/lib/planner-api'
-import { getMaiBotStatus } from '@/lib/system-api'
 import { cn } from '@/lib/utils'
 
-import type { ChatStream } from '@/lib/chat-management-api'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import type { ChangeEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import type { VRM, VRMPose } from '@pixiv/three-vrm'
 
 const DEFAULT_MODEL_NAME = 'mai_vrc_0.9.vrm'
@@ -44,9 +36,13 @@ type TimerMode = 'focus' | 'short' | 'long'
 type CompanionMood = 'idle' | 'focus' | 'cheer' | 'listening'
 type ModelKind = 'gltf' | 'vrm'
 type ModelLoadState = 'idle' | 'loading' | 'ready' | 'error'
+type SaplingKind = 'amber' | 'moss' | 'paper' | 'citrus'
+type SaplingShape = 'twin' | 'triple' | 'lantern' | 'fruit'
 type FocusCompanionStorage = {
   customFocusMinutes: number
-  saplings: number
+  saplings: SaplingKind[]
+  todayFocusDate: string
+  todayFocusSeconds: number
 }
 
 const TIMER_MODE_SECONDS: Record<TimerMode, number> = {
@@ -68,30 +64,71 @@ const MOOD_LINES: Record<CompanionMood, string> = {
   listening: '我听见了。',
 }
 
-const QUICK_ACTIONS = [
+const SAPLING_KINDS: Record<
+  SaplingKind,
   {
-    icon: Sparkles,
-    label: '鼓励',
-    mood: 'cheer' as const,
-    message: '我准备进入一段专注时间，轻轻鼓励我一下。',
+    label: string
+    description: string
+    shape: SaplingShape
+    stemClass: string
+    leftLeafClass: string
+    rightLeafClass: string
+    accentClass: string
+  }
+> = {
+  amber: {
+    label: '琥珀树苗',
+    description: '像一枚安静发亮的时间切片。',
+    shape: 'twin',
+    stemClass: 'bg-[#c24d24]',
+    leftLeafClass: 'bg-[#c99a3e]',
+    rightLeafClass: 'bg-[#f3e3cc]',
+    accentClass: 'bg-[#c24d24]',
   },
-  {
-    icon: Coffee,
-    label: '休息',
-    mood: 'idle' as const,
-    message: '我想短暂休息一下，陪我放松一分钟。',
+  moss: {
+    label: '苔光树苗',
+    description: '在慢慢呼吸的绿意里扎根。',
+    shape: 'triple',
+    stemClass: 'bg-[#0a4550]',
+    leftLeafClass: 'bg-[#f3e3cc]',
+    rightLeafClass: 'bg-[#8fb28d]',
+    accentClass: 'bg-[#0a4550]',
   },
-  {
-    icon: MessageCircle,
-    label: '回应',
-    mood: 'listening' as const,
-    message: '现在用一句简短的话陪我继续专注。',
+  paper: {
+    label: '纸灯树苗',
+    description: '像桌边亮起的一片小纸灯。',
+    shape: 'lantern',
+    stemClass: 'bg-[#c99a3e]',
+    leftLeafClass: 'bg-[#f3e3cc]',
+    rightLeafClass: 'bg-[#f6d05f]',
+    accentClass: 'bg-[#f6d05f]',
   },
+  citrus: {
+    label: '橙芽树苗',
+    description: '把刚完成的专注收成一点暖橙色。',
+    shape: 'fruit',
+    stemClass: 'bg-[#c24d24]',
+    leftLeafClass: 'bg-[#f6d05f]',
+    rightLeafClass: 'bg-[#c99a3e]',
+    accentClass: 'bg-[#c24d24]',
+  },
+}
+
+const SAPLING_KIND_LIST = Object.keys(SAPLING_KINDS) as SaplingKind[]
+const ENCOURAGEMENT_LINES = [
+  '完成啦，今天的专注已经长出形状了。',
+  '很好，这一段稳稳落地了。',
+  '你刚刚认真守住了一小片时间。',
+  '做得漂亮，给这段专注留一盏暖灯。',
 ]
+const FOCUS_LOCK_CONTROL_SELECTOR = '[data-focus-lock-control="true"]'
 
 const RETRO_ICON_BUTTON_CLASS =
-  'h-10 w-10 rounded-none border-[3px] border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] shadow-none transition hover:bg-[#0a4550] hover:text-[#f3e3cc] focus-visible:ring-2 focus-visible:ring-[#c99a3e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f3e3cc]'
-const RETRO_PANEL_CLASS = 'rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] shadow-none'
+  'focus-local-glass h-10 w-10 rounded-none border-0 text-[#0a4550] transition hover:bg-[#0a4550] hover:text-[#f3e3cc] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-[#0a4550] focus-visible:ring-2 focus-visible:ring-[#c99a3e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f3e3cc]'
+const RETRO_PANEL_CLASS =
+  'rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] shadow-none'
+const RETRO_GLASS_SURFACE_CLASS =
+  'focus-local-glass rounded-none border-0 text-[#0a4550]'
 
 function clampFocusMinutes(minutes: number): number {
   if (!Number.isFinite(minutes)) {
@@ -101,24 +138,65 @@ function clampFocusMinutes(minutes: number): number {
   return Math.min(MAX_FOCUS_MINUTES, Math.max(MIN_FOCUS_MINUTES, Math.round(minutes)))
 }
 
+function normalizeSaplings(value: unknown): SaplingKind[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is SaplingKind => SAPLING_KIND_LIST.includes(item as SaplingKind))
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Array.from({ length: Math.max(0, Math.floor(value)) }, (_, index) => SAPLING_KIND_LIST[index % SAPLING_KIND_LIST.length])
+  }
+
+  return []
+}
+
+function getTodayStorageDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function normalizeTodayFocusSeconds(value: unknown): number {
+  return Math.max(0, Math.floor(Number(value) || 0))
+}
+
+function getRandomSaplingKind(): SaplingKind {
+  return SAPLING_KIND_LIST[Math.floor(Math.random() * SAPLING_KIND_LIST.length)]
+}
+
+function getRandomEncouragement(): string {
+  return ENCOURAGEMENT_LINES[Math.floor(Math.random() * ENCOURAGEMENT_LINES.length)]
+}
+
+function getFullscreenTarget(): HTMLElement {
+  return document.getElementById('main-content') ?? document.documentElement
+}
+
+function isFocusLockControlTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(FOCUS_LOCK_CONTROL_SELECTOR))
+}
+
 function readFocusCompanionStorage(): FocusCompanionStorage {
+  const today = getTodayStorageDate()
   if (typeof window === 'undefined') {
-    return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: 0 }
+    return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: [], todayFocusDate: today, todayFocusSeconds: 0 }
   }
 
   try {
     const raw = window.localStorage.getItem(FOCUS_COMPANION_STORAGE_KEY)
     if (!raw) {
-      return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: 0 }
+      return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: [], todayFocusDate: today, todayFocusSeconds: 0 }
     }
 
     const parsed = JSON.parse(raw) as Partial<FocusCompanionStorage>
+    const storedDate = String(parsed.todayFocusDate ?? today)
+    const isToday = storedDate === today
     return {
       customFocusMinutes: clampFocusMinutes(Number(parsed.customFocusMinutes ?? DEFAULT_FOCUS_MINUTES)),
-      saplings: Math.max(0, Math.floor(Number(parsed.saplings ?? 0))),
+      saplings: normalizeSaplings(parsed.saplings),
+      todayFocusDate: today,
+      todayFocusSeconds: isToday ? normalizeTodayFocusSeconds(parsed.todayFocusSeconds) : 0,
     }
   } catch {
-    return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: 0 }
+    return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: [], todayFocusDate: today, todayFocusSeconds: 0 }
   }
 }
 
@@ -131,7 +209,9 @@ function writeFocusCompanionStorage(nextState: FocusCompanionStorage): void {
     FOCUS_COMPANION_STORAGE_KEY,
     JSON.stringify({
       customFocusMinutes: clampFocusMinutes(nextState.customFocusMinutes),
-      saplings: Math.max(0, Math.floor(nextState.saplings)),
+      saplings: normalizeSaplings(nextState.saplings),
+      todayFocusDate: nextState.todayFocusDate || getTodayStorageDate(),
+      todayFocusSeconds: normalizeTodayFocusSeconds(nextState.todayFocusSeconds),
     })
   )
 }
@@ -142,97 +222,12 @@ function formatSeconds(totalSeconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-function getChatSortTime(chat: ChatStream): number {
-  return chat.latest_message_at ?? chat.last_active_at ?? chat.created_at ?? 0
-}
-
-function getRecentChats(chats: ChatStream[]): ChatStream[] {
-  return [...chats]
-    .filter((chat) => chat.display_name.trim())
-    .sort((left, right) => getChatSortTime(right) - getChatSortTime(left))
-    .slice(0, 4)
-}
-
 function emitImmersiveChange(immersive: boolean): void {
   window.dispatchEvent(
     new CustomEvent(LAYOUT_IMMERSIVE_EVENT, {
       detail: { immersive },
     })
   )
-}
-
-function useAmbientPad() {
-  const audioRef = useRef<{
-    context: AudioContext
-    gain: GainNode
-    oscillators: OscillatorNode[]
-  } | null>(null)
-  const [enabled, setEnabled] = useState(false)
-
-  const stop = useCallback(() => {
-    const current = audioRef.current
-    if (!current) {
-      setEnabled(false)
-      return
-    }
-
-    current.gain.gain.setTargetAtTime(0, current.context.currentTime, 0.08)
-    window.setTimeout(() => {
-      current.oscillators.forEach((oscillator) => oscillator.stop())
-      void current.context.close()
-    }, 180)
-    audioRef.current = null
-    setEnabled(false)
-  }, [])
-
-  const start = useCallback(async () => {
-    if (audioRef.current) {
-      return
-    }
-
-    const audioWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext }
-    const AudioContextClass = window.AudioContext || audioWindow.webkitAudioContext
-    if (!AudioContextClass) {
-      return
-    }
-    const context = new AudioContextClass()
-    const gain = context.createGain()
-    const filter = context.createBiquadFilter()
-    const frequencies = [196, 247, 330]
-    const oscillators = frequencies.map((frequency, index) => {
-      const oscillator = context.createOscillator()
-      oscillator.type = index === 0 ? 'sine' : 'triangle'
-      oscillator.frequency.value = frequency
-      oscillator.detune.value = index * 3
-      oscillator.connect(filter)
-      oscillator.start()
-      return oscillator
-    })
-
-    filter.type = 'lowpass'
-    filter.frequency.value = 760
-    filter.Q.value = 0.6
-    gain.gain.value = 0
-    filter.connect(gain)
-    gain.connect(context.destination)
-    gain.gain.setTargetAtTime(0.035, context.currentTime, 0.18)
-
-    audioRef.current = { context, gain, oscillators }
-    setEnabled(true)
-  }, [])
-
-  useEffect(() => stop, [stop])
-
-  const toggle = useCallback(() => {
-    if (audioRef.current) {
-      stop()
-      return
-    }
-
-    void start()
-  }, [start, stop])
-
-  return { enabled, toggle }
 }
 
 function useFocusCompanionChat() {
@@ -322,20 +317,30 @@ function useFocusCompanionChat() {
   }, [])
 
   const send = useCallback(
-    async (content: string) => {
-      setIsTyping(true)
+    async (content: string, options: { showTyping?: boolean } = {}) => {
+      const showTyping = options.showTyping ?? true
+      if (showTyping) {
+        setIsTyping(true)
+      }
       try {
         await chatWsClient.sendMessage(FOCUS_SESSION_ID, content, '专注中的你')
       } catch (error) {
         console.error('专注陪伴消息发送失败:', error)
-        setIsTyping(false)
-        setLatestLine('发送没有成功，先继续专注。')
+        if (showTyping) {
+          setIsTyping(false)
+          setLatestLine('发送没有成功，先继续专注。')
+        }
       }
     },
     []
   )
 
-  return { botName, connected, isTyping, latestLine, send }
+  const sayLocal = useCallback((content: string) => {
+    setLatestLine(content)
+    setIsTyping(false)
+  }, [])
+
+  return { botName, connected, isTyping, latestLine, sayLocal, send }
 }
 
 interface FocusThreeSceneProps {
@@ -572,6 +577,14 @@ function shouldSkipOutline(signature: string): boolean {
 function getStylizedMaterialColor(source: THREE.Material): THREE.Color {
   const name = source.name.toLowerCase()
 
+  if (/叶|leaf|clover|三叶草|四叶草|草/.test(name)) {
+    return new THREE.Color(0x63b72f)
+  }
+
+  if (/深色毛发|眉|eyebrow|brow/.test(name)) {
+    return new THREE.Color(0x5a3424)
+  }
+
   if (/皮肤/.test(name)) {
     return new THREE.Color(0xffc8b6)
   }
@@ -597,6 +610,14 @@ function getStylizedMaterialColor(source: THREE.Material): THREE.Color {
 
 function shouldUseSoftFaceMaterial(signature: string): boolean {
   return /眼白|eye|highlight|口腔|舌头/.test(signature)
+}
+
+function shouldUseLeafMaterial(material: THREE.Material): boolean {
+  return /叶|leaf|clover|三叶草|四叶草|草/.test(material.name.toLowerCase())
+}
+
+function shouldUseSkinMaterial(material: THREE.Material): boolean {
+  return /皮肤|脸/.test(material.name.toLowerCase())
 }
 
 function createSoftFaceMaterial(source: THREE.Material): THREE.MeshBasicMaterial {
@@ -667,11 +688,21 @@ function applyToonAndOutlineStyle(model: THREE.Object3D): void {
   meshes.forEach((mesh) => {
     const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
     const materialSignature = getMaterialSignature(mesh, sourceMaterials)
-    const nextMaterials = /皮肤|脸/.test(materialSignature)
-      ? sourceMaterials.map((material) => createSkinToonMaterial(material, skinGradientMap))
-      : shouldUseSoftFaceMaterial(materialSignature)
-        ? sourceMaterials.map((material) => createSoftFaceMaterial(material))
-        : sourceMaterials.map((material) => createToonMaterial(material, gradientMap))
+    const nextMaterials = sourceMaterials.map((material) => {
+      if (shouldUseLeafMaterial(material)) {
+        return createToonMaterial(material, gradientMap)
+      }
+
+      if (shouldUseSkinMaterial(material)) {
+        return createSkinToonMaterial(material, skinGradientMap)
+      }
+
+      if (shouldUseSoftFaceMaterial(material.name.toLowerCase())) {
+        return createSoftFaceMaterial(material)
+      }
+
+      return createToonMaterial(material, gradientMap)
+    })
     mesh.material = Array.isArray(mesh.material) ? nextMaterials : nextMaterials[0]
 
     if (shouldSkipOutline(materialSignature)) {
@@ -1193,24 +1224,46 @@ interface TimerRingProps {
 }
 
 function TimerRing({ progress, secondsLeft }: TimerRingProps) {
-  const radius = 92
+  const radius = 98
+  const accentRadius = 114
   const circumference = 2 * Math.PI * radius
   const offset = circumference * (1 - progress)
+  const accentCircumference = 2 * Math.PI * accentRadius
 
   return (
-    <div className="relative grid h-[15.5rem] w-[15.5rem] place-items-center">
-      <svg viewBox="0 0 220 220" className="absolute inset-0 h-full w-full -rotate-90">
+    <div className="relative grid h-[17rem] w-[17rem] place-items-center">
+      <svg viewBox="0 0 244 244" className="absolute inset-0 h-full w-full -rotate-90">
         <circle
-          cx="110"
-          cy="110"
+          cx="122"
+          cy="122"
+          r={accentRadius}
+          fill="none"
+          stroke="#0a4550"
+          strokeWidth="2"
+          strokeOpacity="0.45"
+        />
+        <circle
+          cx="122"
+          cy="122"
+          r={accentRadius}
+          fill="none"
+          stroke="#c24d24"
+          strokeWidth="4"
+          strokeLinecap="butt"
+          strokeDasharray={`8 ${(accentCircumference - 8 * 24) / 24}`}
+          strokeDashoffset="4"
+        />
+        <circle
+          cx="122"
+          cy="122"
           r={radius}
           fill="#f3e3cc"
           stroke="#0a4550"
           strokeWidth="12"
         />
         <circle
-          cx="110"
-          cy="110"
+          cx="122"
+          cy="122"
           r={radius}
           fill="none"
           stroke="url(#focus-ring)"
@@ -1261,51 +1314,160 @@ function MetricPill({ label, value, tone = 'green' }: MetricPillProps) {
 }
 
 interface SaplingGardenProps {
-  count: number
+  saplings: SaplingKind[]
   compact?: boolean
+  showHoverDescription?: boolean
 }
 
-function SaplingGarden({ count, compact = false }: SaplingGardenProps) {
-  const visibleCount = Math.min(count, compact ? 8 : 14)
-  const extraCount = Math.max(0, count - visibleCount)
+interface SaplingIconProps {
+  kind: SaplingKind
+  compact: boolean
+  showHoverDescription?: boolean
+}
+
+function SaplingIcon({ kind, compact, showHoverDescription = false }: SaplingIconProps) {
+  const sapling = SAPLING_KINDS[kind]
+  const stemClass = cn(
+    'absolute bottom-0 left-1/2 block -translate-x-1/2 border-x-2 border-[#0a4550]',
+    sapling.stemClass,
+    compact ? 'h-4 w-2' : 'h-6 w-2.5'
+  )
 
   return (
-    <div className={cn('flex items-end gap-1.5', compact ? 'min-h-8' : 'min-h-11')}>
-      {Array.from({ length: visibleCount }).map((_, index) => (
-        <div
-          key={index}
-          className={cn(
-            'relative shrink-0',
-            compact ? 'h-7 w-5' : 'h-10 w-7'
-          )}
-          aria-hidden="true"
-        >
-          <span
-            className={cn(
-              'absolute bottom-0 left-1/2 block -translate-x-1/2 bg-[#c24d24]',
-              compact ? 'h-4 w-1' : 'h-6 w-1.5'
-            )}
-          />
+    <div
+      className={cn('group relative shrink-0', compact ? 'h-8 w-6' : 'h-12 w-8')}
+      title={`${sapling.label}：${sapling.description}`}
+      aria-label={`${sapling.label}：${sapling.description}`}
+    >
+      <span className={stemClass} />
+      {sapling.shape === 'twin' && (
+        <>
           <span
             className={cn(
               'absolute block -rotate-[28deg] border-2 border-[#0a4550]',
-              index % 2 === 0 ? 'bg-[#c99a3e]' : 'bg-[#f3e3cc]',
-              compact ? 'top-2 left-0 h-2.5 w-3.5' : 'top-2 left-0 h-3.5 w-5'
+              sapling.leftLeafClass,
+              compact ? 'top-2 left-0 h-3 w-4' : 'top-3 left-0 h-4 w-5'
             )}
           />
           <span
             className={cn(
               'absolute block rotate-[28deg] border-2 border-[#0a4550]',
-              index % 2 === 0 ? 'bg-[#f3e3cc]' : 'bg-[#c99a3e]',
-              compact ? 'top-1.5 right-0 h-2.5 w-3.5' : 'top-1 right-0 h-3.5 w-5'
+              sapling.rightLeafClass,
+              compact ? 'top-1.5 right-0 h-3 w-4' : 'top-2 right-0 h-4 w-5'
             )}
           />
+          <span
+            className={cn(
+              'absolute left-1/2 block -translate-x-1/2 border-2 border-[#0a4550]',
+              sapling.accentClass,
+              compact ? 'top-0 h-2 w-2' : 'top-0 h-2.5 w-2.5'
+            )}
+          />
+        </>
+      )}
+      {sapling.shape === 'triple' && (
+        <>
+          <span
+            className={cn(
+              'absolute left-1/2 block -translate-x-1/2 rotate-45 border-2 border-[#0a4550]',
+              sapling.accentClass,
+              compact ? 'top-0 h-3 w-3' : 'top-1 h-4 w-4'
+            )}
+          />
+          <span
+            className={cn(
+              'absolute block -rotate-[42deg] border-2 border-[#0a4550]',
+              sapling.leftLeafClass,
+              compact ? 'top-3 left-0 h-2.5 w-4' : 'top-4 left-0 h-3 w-5'
+            )}
+          />
+          <span
+            className={cn(
+              'absolute block rotate-[42deg] border-2 border-[#0a4550]',
+              sapling.rightLeafClass,
+              compact ? 'top-3 right-0 h-2.5 w-4' : 'top-4 right-0 h-3 w-5'
+            )}
+          />
+        </>
+      )}
+      {sapling.shape === 'lantern' && (
+        <>
+          <span
+            className={cn(
+              'absolute left-1/2 block -translate-x-1/2 border-2 border-[#0a4550]',
+              sapling.accentClass,
+              compact ? 'top-1 h-3 w-5' : 'top-1 h-4 w-7'
+            )}
+          />
+          <span
+            className={cn(
+              'absolute block -rotate-[20deg] border-2 border-[#0a4550]',
+              sapling.leftLeafClass,
+              compact ? 'top-4 left-0 h-2 w-4' : 'top-5 left-0 h-2.5 w-5'
+            )}
+          />
+          <span
+            className={cn(
+              'absolute block rotate-[20deg] border-2 border-[#0a4550]',
+              sapling.rightLeafClass,
+              compact ? 'top-4 right-0 h-2 w-4' : 'top-5 right-0 h-2.5 w-5'
+            )}
+          />
+        </>
+      )}
+      {sapling.shape === 'fruit' && (
+        <>
+          <span
+            className={cn(
+              'absolute left-1/2 block -translate-x-1/2 border-2 border-[#0a4550]',
+              sapling.accentClass,
+              compact ? 'top-0 h-3 w-3' : 'top-0 h-4 w-4'
+            )}
+          />
+          <span
+            className={cn(
+              'absolute block -rotate-[32deg] border-2 border-[#0a4550]',
+              sapling.leftLeafClass,
+              compact ? 'top-3 left-0 h-2.5 w-4' : 'top-4 left-0 h-3 w-5'
+            )}
+          />
+          <span
+            className={cn(
+              'absolute block rotate-[16deg] border-2 border-[#0a4550]',
+              sapling.rightLeafClass,
+              compact ? 'top-2 right-0 h-2.5 w-3.5' : 'top-3 right-0 h-3 w-4'
+            )}
+          />
+        </>
+      )}
+      {showHoverDescription && (
+        <div className="pointer-events-none absolute bottom-[calc(100%+0.5rem)] left-1/2 z-40 hidden w-44 -translate-x-1/2 border-4 border-[#0a4550] bg-[#f3e3cc] px-3 py-2 text-left text-[#0a4550] group-hover:block">
+          <div className="truncate text-sm font-black">{sapling.label}</div>
+          <div className="mt-1 text-xs leading-snug font-bold">{sapling.description}</div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function SaplingGarden({ saplings, compact = false, showHoverDescription = false }: SaplingGardenProps) {
+  const visibleSaplings = saplings.slice(0, compact ? 8 : 14)
+  const extraCount = Math.max(0, saplings.length - visibleSaplings.length)
+
+  return (
+    <div className={cn('flex items-end gap-1.5', compact ? 'min-h-8' : 'min-h-11')}>
+      {visibleSaplings.map((kind, index) => (
+        <SaplingIcon
+          key={`${kind}-${index}`}
+          kind={kind}
+          compact={compact}
+          showHoverDescription={showHoverDescription}
+        />
       ))}
       {extraCount > 0 && (
         <div className="pb-1 text-sm font-black text-[#0a4550] tabular-nums">+{extraCount}</div>
       )}
-      {count === 0 && (
+      {saplings.length === 0 && (
         <div className="h-6 w-16 border-2 border-dashed border-[#0a4550]/60" aria-hidden="true" />
       )}
     </div>
@@ -1320,9 +1482,11 @@ export function FocusCompanionPage() {
   const [running, setRunning] = useState(false)
   const [rounds, setRounds] = useState(0)
   const [saplings, setSaplings] = useState(initialStorage.saplings)
+  const [todayFocusSeconds, setTodayFocusSeconds] = useState(initialStorage.todayFocusSeconds)
+  const [todayFocusDate, setTodayFocusDate] = useState(initialStorage.todayFocusDate)
   const [mood, setMood] = useState<CompanionMood>('idle')
   const [immersive, setImmersive] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [chatDraft, setChatDraft] = useState('')
   const completionHandledRef = useRef(false)
   const activeModel = useMemo<{
     kind: ModelKind
@@ -1330,48 +1494,42 @@ export function FocusCompanionPage() {
     url: string
   }>(() => ({ kind: 'vrm', name: DEFAULT_MODEL_NAME, url: DEFAULT_MODEL_URL }), [])
   const [, setModelLoadState] = useState<ModelLoadState>('idle')
-  const ambient = useAmbientPad()
   const companion = useFocusCompanionChat()
   const sendCompanionMessage = companion.send
+  const sayCompanionLine = companion.sayLocal
+  const isFocusLocked = running && mode === 'focus'
 
-  const statusQuery = useQuery({
-    queryKey: ['focus-maibot-status'],
-    queryFn: getMaiBotStatus,
-    refetchInterval: 15_000,
-  })
   const chatStreamsQuery = useQuery({
     queryKey: ['focus-chat-streams'],
     queryFn: () => getChatStreams(200),
-    refetchInterval: 30_000,
+    refetchInterval: isFocusLocked ? false : 30_000,
   })
-  const plannerQuery = useQuery({
-    queryKey: ['focus-planner-overview'],
-    queryFn: getPlannerOverview,
-    refetchInterval: 45_000,
-  })
-  const replierQuery = useQuery({
-    queryKey: ['focus-replier-overview'],
-    queryFn: getReplierOverview,
-    refetchInterval: 45_000,
-  })
-
   const focusDuration = customFocusMinutes * 60
   const duration = mode === 'focus' ? focusDuration : TIMER_MODE_SECONDS[mode]
   const progress = 1 - secondsLeft / duration
-  const recentChats = useMemo(() => getRecentChats(chatStreamsQuery.data ?? []), [chatStreamsQuery.data])
-  const runtimeValue = statusQuery.data?.running ? 'ON' : statusQuery.isLoading ? '...' : 'OFF'
   const talkCount = chatStreamsQuery.data?.length ?? 0
-  const plannerCount = plannerQuery.data?.total_plans ?? 0
-  const replyCount = replierQuery.data?.total_replies ?? 0
   const companionLine = companion.isTyping ? '麦麦正在想...' : companion.latestLine
+  const saplingCount = saplings.length
+  const latestSapling = saplings.length > 0 ? SAPLING_KINDS[saplings[saplings.length - 1]] : null
+  const todayFocusMinutes = Math.floor(todayFocusSeconds / 60)
 
   useEffect(() => {
     document.title = '专注陪伴 - MaiBot Dashboard'
   }, [])
 
   useEffect(() => {
-    writeFocusCompanionStorage({ customFocusMinutes, saplings })
-  }, [customFocusMinutes, saplings])
+    const today = getTodayStorageDate()
+    if (todayFocusDate === today) {
+      return
+    }
+
+    setTodayFocusDate(today)
+    setTodayFocusSeconds(0)
+  }, [todayFocusDate])
+
+  useEffect(() => {
+    writeFocusCompanionStorage({ customFocusMinutes, saplings, todayFocusDate, todayFocusSeconds })
+  }, [customFocusMinutes, saplings, todayFocusDate, todayFocusSeconds])
 
   useEffect(() => {
     if (!running) {
@@ -1400,17 +1558,27 @@ export function FocusCompanionPage() {
       setRounds((current) => current + 1)
       setMood('cheer')
       if (mode === 'focus') {
-        setSaplings((current) => current + 1)
+        const earnedSapling = getRandomSaplingKind()
+        const earnedSaplingInfo = SAPLING_KINDS[earnedSapling]
+        const encouragement = `${getRandomEncouragement()} 获得 ${earnedSaplingInfo.label}：${earnedSaplingInfo.description}`
+        setSaplings((current) => [...current, earnedSapling])
+        setTodayFocusSeconds((current) => current + customFocusMinutes * 60)
+        sayCompanionLine(encouragement)
+        void sendCompanionMessage(
+          `我完成了一段专注计时，并获得了${earnedSaplingInfo.label}。用一句很短的话鼓励我。`,
+          { showTyping: false }
+        )
+        setSecondsLeft(customFocusMinutes * 60)
+        return
       }
       void sendCompanionMessage(
-        mode === 'focus'
-          ? '我完成了一段专注计时，并获得了一棵树苗。用一句很短的话回应我。'
-          : '我完成了一段休息计时，用一句很短的话回应我。'
+        '我完成了一段休息计时，用一句很短的话回应我。'
       )
+      setSecondsLeft(TIMER_MODE_SECONDS[mode])
     }, 0)
 
     return () => window.clearTimeout(timeout)
-  }, [mode, running, secondsLeft, sendCompanionMessage])
+  }, [customFocusMinutes, mode, running, sayCompanionLine, secondsLeft, sendCompanionMessage])
 
   useEffect(() => {
     emitImmersiveChange(immersive)
@@ -1418,10 +1586,53 @@ export function FocusCompanionPage() {
   }, [immersive])
 
   useEffect(() => {
-    const handleFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement))
-    document.addEventListener('fullscreenchange', handleFullscreenChange)
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
-  }, [])
+    if (!isFocusLocked) {
+      return
+    }
+
+    const blockEvent = (event: Event) => {
+      if (isFocusLockControlTarget(event.target)) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const blockKeyboardEvent = (event: KeyboardEvent) => {
+      if (isFocusLockControlTarget(event.target)) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const lockedEvents = [
+      'click',
+      'contextmenu',
+      'dblclick',
+      'mousedown',
+      'mouseup',
+      'pointerdown',
+      'pointerup',
+      'touchmove',
+      'touchstart',
+      'wheel',
+    ]
+
+    lockedEvents.forEach((eventName) => {
+      document.addEventListener(eventName, blockEvent, { capture: true, passive: false })
+    })
+    document.addEventListener('keydown', blockKeyboardEvent, { capture: true })
+
+    return () => {
+      lockedEvents.forEach((eventName) => {
+        document.removeEventListener(eventName, blockEvent, { capture: true })
+      })
+      document.removeEventListener('keydown', blockKeyboardEvent, { capture: true })
+    }
+  }, [isFocusLocked])
 
   const resetTimer = useCallback(
     (nextMode: TimerMode = mode) => {
@@ -1435,48 +1646,50 @@ export function FocusCompanionPage() {
 
   const handleModeChange = useCallback(
     (nextMode: TimerMode) => {
+      if (isFocusLocked) {
+        return
+      }
+
       resetTimer(nextMode)
     },
-    [resetTimer]
+    [isFocusLocked, resetTimer]
   )
 
   const toggleRunning = useCallback(() => {
     setRunning((current) => {
       const next = !current
+      if (next && mode === 'focus') {
+        setImmersive(true)
+        if (!document.fullscreenElement) {
+          void getFullscreenTarget().requestFullscreen().catch((error) => {
+            console.warn('进入专注全屏失败:', error)
+          })
+        }
+      }
       setMood(next ? 'focus' : 'idle')
       return next
     })
-  }, [])
-
-  const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) {
-      void document.exitFullscreen()
-      return
-    }
-
-    const main = document.getElementById('main-content')
-    void (main ?? document.documentElement).requestFullscreen()
-  }, [])
+  }, [mode])
 
   const handleModelLoadStateChange = useCallback((state: ModelLoadState) => {
     setModelLoadState(state)
   }, [])
 
   const handleCharacterTap = useCallback(() => {
+    if (isFocusLocked) {
+      return
+    }
+
     const nextMood: CompanionMood = mood === 'cheer' ? 'listening' : mood === 'listening' ? 'focus' : 'cheer'
     setMood(nextMood)
-  }, [mood])
-
-  const handleQuickAction = useCallback(
-    (action: (typeof QUICK_ACTIONS)[number]) => {
-      setMood(action.mood)
-      void companion.send(action.message)
-    },
-    [companion]
-  )
+  }, [isFocusLocked, mood])
 
   const handleFocusMinutesChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
+      if (isFocusLocked) {
+        return
+      }
+
       const nextMinutes = clampFocusMinutes(Number(event.target.value))
       setCustomFocusMinutes(nextMinutes)
       if (mode === 'focus') {
@@ -1488,11 +1701,37 @@ export function FocusCompanionPage() {
         })
       }
     },
-    [mode, running]
+    [isFocusLocked, mode, running]
+  )
+
+  const handleChatDraftChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setChatDraft(event.target.value)
+  }, [])
+
+  const handleChatSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (isFocusLocked) {
+        return
+      }
+
+      const content = chatDraft.trim()
+      if (!content) {
+        return
+      }
+
+      setMood('listening')
+      setChatDraft('')
+      void sendCompanionMessage(content)
+    },
+    [chatDraft, isFocusLocked, sendCompanionMessage]
   )
 
   return (
-    <section className="relative h-full min-h-[680px] overflow-hidden bg-[#f3e3cc] bg-[linear-gradient(90deg,rgba(10,69,80,0.075)_2px,transparent_2px),linear-gradient(180deg,rgba(10,69,80,0.055)_2px,transparent_2px)] bg-[size:52px_52px] font-sans text-[#0a4550]">
+    <section
+      data-focus-companion="true"
+      className="relative h-full min-h-[680px] overflow-hidden bg-[#f3e3cc] bg-[linear-gradient(90deg,rgba(10,69,80,0.075)_2px,transparent_2px),linear-gradient(180deg,rgba(10,69,80,0.055)_2px,transparent_2px)] bg-[size:52px_52px] font-sans text-[#0a4550]"
+    >
       <FocusThreeScene mood={mood} progress={progress} running={running} />
 
       <div className="pointer-events-none absolute inset-0 border-[14px] border-[#0a4550]" />
@@ -1506,42 +1745,21 @@ export function FocusCompanionPage() {
               variant="ghost"
               size="icon"
               className={RETRO_ICON_BUTTON_CLASS}
-              title={ambient.enabled ? '关闭环境音' : '开启环境音'}
-              aria-label={ambient.enabled ? '关闭环境音' : '开启环境音'}
-              onClick={ambient.toggle}
-            >
-              {ambient.enabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={RETRO_ICON_BUTTON_CLASS}
               title={immersive ? '退出沉浸' : '隐藏边栏'}
               aria-label={immersive ? '退出沉浸' : '隐藏边栏'}
+              disabled={isFocusLocked}
               onClick={() => setImmersive((current) => !current)}
             >
               {immersive ? <Minimize2 className="h-4 w-4" /> : <Expand className="h-4 w-4" />}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={RETRO_ICON_BUTTON_CLASS}
-              title={isFullscreen ? '退出全屏' : '全屏'}
-              aria-label={isFullscreen ? '退出全屏' : '全屏'}
-              onClick={toggleFullscreen}
-            >
-              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </Button>
           </div>
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-1 items-center gap-4 px-4 py-4 sm:px-7 lg:grid-cols-[minmax(260px,0.7fr)_minmax(520px,1.7fr)_minmax(190px,0.46fr)]">
-          <div className="flex flex-col items-center justify-center gap-5">
+          <div className="flex flex-col items-center justify-center gap-5 lg:-translate-y-10">
             <TimerRing progress={progress} secondsLeft={secondsLeft} />
 
-            <div className="flex items-center gap-2 rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] p-1.5">
+            <div className={cn('flex items-center gap-2 p-1.5', RETRO_GLASS_SURFACE_CLASS)}>
               {MODE_ITEMS.map((item) => {
                 const label = item.mode === 'focus' ? String(customFocusMinutes) : item.label
                 return (
@@ -1552,10 +1770,12 @@ export function FocusCompanionPage() {
                       'h-9 w-12 rounded-none border-2 text-sm font-black tabular-nums transition',
                       mode === item.mode
                         ? 'border-[#0a4550] bg-[#0a4550] text-[#f3e3cc]'
-                        : 'border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] hover:bg-[#0a4550] hover:text-[#f3e3cc]'
+                        : 'border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] hover:bg-[#0a4550] hover:text-[#f3e3cc]',
+                      'disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-[#f3e3cc] disabled:hover:text-[#0a4550]'
                     )}
                     title={`${label} 分钟`}
                     aria-label={`${label} 分钟`}
+                    disabled={isFocusLocked}
                     onClick={() => handleModeChange(item.mode)}
                   >
                     {label}
@@ -1564,7 +1784,7 @@ export function FocusCompanionPage() {
               })}
             </div>
 
-            <label className="flex items-center gap-2 rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] px-3 py-2 text-[#0a4550]">
+            <label className={cn('flex items-center gap-2 px-3 py-2', RETRO_GLASS_SURFACE_CLASS)}>
               <span className="text-[10px] font-black tracking-[0.22em] uppercase">min</span>
               <input
                 type="number"
@@ -1572,8 +1792,9 @@ export function FocusCompanionPage() {
                 max={MAX_FOCUS_MINUTES}
                 step={1}
                 value={customFocusMinutes}
-                className="h-8 w-16 rounded-none border-2 border-[#0a4550] bg-[#f3e3cc] text-center text-base font-black tabular-nums outline-none focus:bg-[#0a4550] focus:text-[#f3e3cc]"
+                className="focus-local-glass-input h-8 w-16 rounded-none border-0 text-center text-base font-black tabular-nums outline-none focus:bg-[#0a4550] focus:text-[#f3e3cc]"
                 aria-label="自定义专注分钟数"
+                disabled={isFocusLocked}
                 onChange={handleFocusMinutesChange}
               />
             </label>
@@ -1582,6 +1803,7 @@ export function FocusCompanionPage() {
               <Button
                 type="button"
                 size="icon"
+                data-focus-lock-control="true"
                 className="h-13 w-13 rounded-none border-4 border-[#0a4550] bg-[#c24d24] text-[#f3e3cc] shadow-none hover:bg-[#0a4550] hover:text-[#f3e3cc]"
                 title={running ? '暂停' : '开始'}
                 aria-label={running ? '暂停' : '开始'}
@@ -1593,6 +1815,7 @@ export function FocusCompanionPage() {
                 type="button"
                 variant="ghost"
                 size="icon"
+                data-focus-lock-control="true"
                 className={cn(RETRO_ICON_BUTTON_CLASS, 'h-11 w-11')}
                 title="重置"
                 aria-label="重置"
@@ -1602,26 +1825,24 @@ export function FocusCompanionPage() {
               </Button>
             </div>
 
-            <div className={cn('w-full max-w-[15.5rem] p-3', RETRO_PANEL_CLASS)}>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-[10px] font-black tracking-[0.24em] uppercase">
-                  <Sprout className="h-4 w-4 text-[#c99a3e]" />
-                  grove
-                </div>
-                <div className="text-lg font-black tabular-nums">{saplings}</div>
-              </div>
-              <SaplingGarden count={saplings} compact />
-            </div>
           </div>
 
           <div className="relative flex h-full min-h-[420px] items-end justify-center overflow-visible">
             <div
-              className="relative flex h-full w-full max-w-none items-end justify-center"
+              className={cn(
+                'relative flex h-full w-full max-w-none items-end justify-center',
+                isFocusLocked && 'pointer-events-none'
+              )}
               onClick={handleCharacterTap}
               role="button"
-              tabIndex={0}
+              tabIndex={isFocusLocked ? -1 : 0}
               aria-label="和麦麦互动"
+              aria-disabled={isFocusLocked}
               onKeyDown={(event) => {
+                if (isFocusLocked) {
+                  return
+                }
+
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault()
                   handleCharacterTap()
@@ -1641,30 +1862,10 @@ export function FocusCompanionPage() {
           </div>
 
           <div className="hidden flex-col gap-3 lg:flex">
-            <MetricPill label="bot" value={runtimeValue} tone={statusQuery.data?.running ? 'green' : 'rose'} />
+            <MetricPill label="today" value={`${todayFocusMinutes}m`} tone="green" />
             <MetricPill label="chat" value={String(talkCount)} tone="gold" />
-            <MetricPill label="plan" value={String(plannerCount)} tone="green" />
-            <MetricPill label="reply" value={String(replyCount)} tone="rose" />
-            <MetricPill label="grove" value={String(saplings)} tone="gold" />
+            <MetricPill label="grove" value={String(saplingCount)} tone="gold" />
 
-            <div className={cn('mt-2 p-3', RETRO_PANEL_CLASS)}>
-              <div className="mb-2 text-[10px] font-black tracking-[0.24em] text-[#c24d24] uppercase">
-                recent
-              </div>
-              <div className="space-y-2">
-                {recentChats.map((chat) => (
-                  <div key={chat.session_id} className="min-w-0">
-                    <div className="truncate text-sm font-black">{chat.display_name}</div>
-                    <div className="truncate text-xs font-bold text-[#0a4550]">
-                      {chat.latest_message || chat.platform}
-                    </div>
-                  </div>
-                ))}
-                {recentChats.length === 0 && (
-                  <div className="text-sm font-bold text-[#0a4550]">暂无聊天流</div>
-                )}
-              </div>
-            </div>
           </div>
         </div>
 
@@ -1684,27 +1885,43 @@ export function FocusCompanionPage() {
               <Sprout className="h-3.5 w-3.5 text-[#c99a3e]" />
               saplings
             </div>
-            <SaplingGarden count={saplings} />
+            <SaplingGarden saplings={saplings} showHoverDescription />
+            <div className="mt-2 min-h-9 max-w-64">
+              {latestSapling ? (
+                <>
+                  <div className="truncate text-sm font-black text-[#0a4550]">{latestSapling.label}</div>
+                  <div className="truncate text-xs font-bold text-[#0a4550]/80">{latestSapling.description}</div>
+                </>
+              ) : (
+                <div className="text-xs font-bold text-[#0a4550]/70">完成一段专注后，会长出第一棵树苗。</div>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] p-2 text-[#0a4550]">
-            {QUICK_ACTIONS.map((action) => {
-              const Icon = action.icon
-              return (
-                <Button
-                  key={action.label}
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className={cn(RETRO_ICON_BUTTON_CLASS, 'h-11 w-11')}
-                  title={action.label}
-                  aria-label={action.label}
-                  onClick={() => handleQuickAction(action)}
-                >
-                  <Icon className="h-4 w-4" />
-                </Button>
-              )
-            })}
+          <form
+            className={cn('flex items-center gap-2 p-2', RETRO_GLASS_SURFACE_CLASS)}
+            onSubmit={handleChatSubmit}
+          >
+            <input
+              type="text"
+              value={chatDraft}
+              className="focus-local-glass-input h-11 w-44 rounded-none border-0 px-3 text-sm font-black outline-none placeholder:text-[#0a4550]/55 focus:bg-[#f3e3cc]"
+              placeholder="和麦麦说"
+              aria-label="和麦麦对话"
+              disabled={isFocusLocked}
+              onChange={handleChatDraftChange}
+            />
+            <Button
+              type="submit"
+              variant="ghost"
+              size="icon"
+              className={cn(RETRO_ICON_BUTTON_CLASS, 'h-11 w-11')}
+              title="发送"
+              aria-label="发送"
+              disabled={isFocusLocked || !chatDraft.trim()}
+            >
+              <Send className="h-4 w-4" />
+            </Button>
             <div className="h-8 w-1 bg-[#c99a3e]" />
             <div className="min-w-11 text-center">
               <div className="text-lg font-black text-[#0a4550] tabular-nums">{rounds}</div>
@@ -1712,7 +1929,7 @@ export function FocusCompanionPage() {
                 done
               </div>
             </div>
-          </div>
+          </form>
         </div>
       </div>
     </section>
