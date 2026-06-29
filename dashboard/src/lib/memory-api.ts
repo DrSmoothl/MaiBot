@@ -182,6 +182,26 @@ export interface MemoryVectorStoreSnapshot {
   has_data: boolean
 }
 
+export interface MemoryVectorMigrationProgress extends Record<string, unknown> {
+  total?: number
+  processed?: number
+  percent?: number
+  elapsed_seconds?: number
+  estimated_remaining_seconds?: number | null
+}
+
+export interface MemoryVectorAutoMigrationStatus {
+  running?: boolean
+  attempted?: boolean
+  success?: boolean
+  stage?: string
+  progress?: MemoryVectorMigrationProgress
+  last_error?: string
+  started_at?: number | null
+  finished_at?: number | null
+  updated_at?: number | null
+}
+
 export interface MemoryVectorPoolsStatus {
   configured_mode?: string
   effective_mode?: string
@@ -190,6 +210,7 @@ export interface MemoryVectorPoolsStatus {
   paragraph_pool?: MemoryVectorStoreSnapshot
   graph_pool?: MemoryVectorStoreSnapshot
   ready_manifest?: string
+  auto_migration?: MemoryVectorAutoMigrationStatus
 }
 
 export interface MemoryRuntimeConfigPayload {

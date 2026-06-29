@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/dialog'
 import { DashboardTabBar, DashboardTabTrigger } from '@/components/ui/dashboard-tabs'
 import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
@@ -177,7 +178,133 @@ function formatVectorCount(value?: number): string {
   return Number.isFinite(count) ? String(Math.max(0, count)) : '0'
 }
 
-function resolveVectorPoolsBadge(runtimeConfig: MemoryRuntimeConfigPayload) {
+function readProgressNumber(progress: Record<string, unknown> | undefined, key: string): number | undefined {
+  const raw = progress?.[key]
+  if (raw === undefined || raw === null || raw === '') {
+    return undefined
+  }
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : undefined
+}
+
+function readProgressRecord(progress: Record<string, unknown> | undefined, key: string): Record<string, unknown> | undefined {
+  const value = progress?.[key]
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function formatMigrationStage(stage?: string): string {
+  const normalized = typeof stage === 'string' ? stage.trim() : ''
+  const labels: Record<string, string> = {
+    initial_delay: '等待启动',
+    retry_delay: '等待重试',
+    waiting_rebuild_lock: '等待重建锁',
+    rebuild_start: '开始重建',
+    prepare_rebuild: '准备迁移',
+    legacy_source_load: '加载旧池',
+    legacy_source_warmup: '预热旧池',
+    legacy_source_ready: '旧池就绪',
+    legacy_source_incompatible: '旧池不兼容',
+    paragraphs_start: '迁移段落',
+    paragraphs_done: '段落完成',
+    entities_start: '迁移实体',
+    entities_done: '实体完成',
+    relations_start: '迁移关系',
+    relations_done: '关系完成',
+    activation_check: '校验双池',
+    paragraph_pool_warmup: '预热段落池',
+    paragraph_pool_save: '保存段落池',
+    graph_pool_warmup: '预热图谱池',
+    graph_pool_save: '保存图谱池',
+    activate_dirs: '切换目录',
+    write_manifest: '写入清单',
+    reload_dual_stores: '加载双池',
+    dual_backfill: '补齐双池',
+    dual_backfill_done: '补齐完成',
+    clear_legacy_single_pool: '清理旧池',
+    runtime_rebuild: '刷新运行时',
+    self_check: '运行自检',
+    persist: '持久化',
+    completed: '迁移完成',
+    failed: '迁移失败',
+    cancelled: '已取消',
+    exception: '迁移异常',
+  }
+  return labels[normalized] ?? (normalized || '迁移中')
+}
+
+function formatMigrationProgress(progress: Record<string, unknown> | undefined): string {
+  const parts: string[] = []
+  const paragraphDone = readProgressNumber(progress, 'paragraph_done')
+  const paragraphFailed = readProgressNumber(progress, 'paragraph_failed')
+  const entityDone = readProgressNumber(progress, 'entity_done')
+  const entityFailed = readProgressNumber(progress, 'entity_failed')
+  const relationDone = readProgressNumber(progress, 'relation_done')
+  const relationFailed = readProgressNumber(progress, 'relation_failed')
+  const paragraphCopied = readProgressNumber(readProgressRecord(progress, 'paragraph_migration'), 'copied')
+  const entityEncoded = readProgressNumber(readProgressRecord(progress, 'entity_migration'), 'encoded')
+
+  if (paragraphDone !== undefined) {
+    parts.push(`段落 ${paragraphDone}${paragraphFailed ? `/${paragraphFailed} 失败` : ''}`)
+  }
+  if (entityDone !== undefined) {
+    parts.push(`实体 ${entityDone}${entityFailed ? `/${entityFailed} 失败` : ''}`)
+  }
+  if (relationDone !== undefined) {
+    parts.push(`关系 ${relationDone}${relationFailed ? `/${relationFailed} 失败` : ''}`)
+  }
+  if (!parts.length && paragraphCopied !== undefined) {
+    parts.push(`已复制 ${paragraphCopied}`)
+  }
+  if (!parts.length && entityEncoded !== undefined) {
+    parts.push(`已编码 ${entityEncoded}`)
+  }
+  return parts.slice(0, 2).join(' · ')
+}
+
+function clampMigrationPercent(value?: number): number | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  return Math.min(100, Math.max(0, value))
+}
+
+function formatMigrationEta(seconds?: number): string {
+  if (seconds === undefined) {
+    return '预计计算中'
+  }
+  const totalSeconds = Math.max(0, Math.ceil(seconds))
+  const minutes = Math.floor(totalSeconds / 60)
+  const restSeconds = totalSeconds % 60
+  if (minutes < 60) {
+    return `预计剩余 ${minutes}分${restSeconds}秒`
+  }
+  const hours = Math.floor(minutes / 60)
+  const restMinutes = minutes % 60
+  return `预计剩余 ${hours}小时${restMinutes}分`
+}
+
+function formatMigrationSummary(progress: Record<string, unknown> | undefined): string {
+  const processed = readProgressNumber(progress, 'processed')
+  const total = readProgressNumber(progress, 'total')
+  if (processed !== undefined && total !== undefined) {
+    const eta = formatMigrationEta(readProgressNumber(progress, 'estimated_remaining_seconds'))
+    return `${Math.max(0, Math.floor(processed))}/${Math.max(0, Math.floor(total))} · ${eta}`
+  }
+  return formatMigrationProgress(progress) || '预计计算中'
+}
+
+interface VectorPoolsBadge {
+  value: string
+  description: string
+  progressValue?: number
+  progressLabel?: string
+  className: string
+  iconClassName: string
+}
+
+function resolveVectorPoolsBadge(runtimeConfig: MemoryRuntimeConfigPayload): VectorPoolsBadge {
   const vectorPools = runtimeConfig.vector_pools
   const configuredMode = normalizeVectorPoolMode(vectorPools?.configured_mode)
   const effectiveMode = normalizeVectorPoolMode(
@@ -188,6 +315,11 @@ function resolveVectorPoolsBadge(runtimeConfig: MemoryRuntimeConfigPayload) {
   const paragraphCount = formatVectorCount(vectorPools?.paragraph_pool?.num_vectors)
   const graphCount = formatVectorCount(vectorPools?.graph_pool?.num_vectors)
   const singleCount = formatVectorCount(vectorPools?.single_pool?.num_vectors)
+  const autoMigration = vectorPools?.auto_migration
+  const migrationRunning = Boolean(autoMigration?.running)
+  const migrationStage = formatMigrationStage(autoMigration?.stage)
+  const migrationSummary = formatMigrationSummary(autoMigration?.progress)
+  const migrationPercent = clampMigrationPercent(readProgressNumber(autoMigration?.progress, 'percent'))
 
   if (effectiveMode === 'dual' && ready) {
     return {
@@ -199,6 +331,17 @@ function resolveVectorPoolsBadge(runtimeConfig: MemoryRuntimeConfigPayload) {
   }
 
   if (configuredMode === 'dual') {
+    if (migrationRunning) {
+      return {
+        value: '双池迁移中',
+        description: `${migrationStage} · ${migrationSummary}`,
+        progressValue: migrationPercent,
+        progressLabel: migrationPercent === undefined ? undefined : `${migrationPercent.toFixed(1)}%`,
+        className: 'border-amber-500/25',
+        iconClassName: 'text-amber-500',
+      }
+    }
+
     return {
       value: '双池未就绪',
       description: `段落 ${paragraphCount} · 图谱 ${graphCount}`,
@@ -490,6 +633,8 @@ export function KnowledgeBasePage() {
         label: '运行状态',
         value: runtimeConfig.runtime_ready ? '就绪' : '未就绪',
         description: runtimeConfig.embedding_degraded ? 'Embedding 降级运行' : '运行时检查通过',
+        progressValue: undefined,
+        progressLabel: undefined,
         icon: runtimeConfig.runtime_ready ? CheckCircle2 : CircleAlert,
         className: runtimeConfig.runtime_ready ? 'border-emerald-500/25' : 'border-amber-500/25',
         iconClassName: runtimeConfig.runtime_ready ? 'text-emerald-500' : 'text-amber-500',
@@ -498,6 +643,8 @@ export function KnowledgeBasePage() {
         label: 'Embedding 维度',
         value: String(runtimeConfig.embedding_dimension),
         description: runtimeConfig.relation_vectors_enabled ? '关系向量已启用' : '关系向量未启用',
+        progressValue: undefined,
+        progressLabel: undefined,
         icon: HardDrive,
         className: 'border-sky-500/25',
         iconClassName: 'text-sky-500',
@@ -506,6 +653,8 @@ export function KnowledgeBasePage() {
         label: '向量池',
         value: vectorPoolsBadge.value,
         description: vectorPoolsBadge.description,
+        progressValue: vectorPoolsBadge.progressValue,
+        progressLabel: vectorPoolsBadge.progressLabel,
         icon: Database,
         className: vectorPoolsBadge.className,
         iconClassName: vectorPoolsBadge.iconClassName,
@@ -514,6 +663,8 @@ export function KnowledgeBasePage() {
         label: '数据目录',
         value: runtimeConfig.data_dir,
         description: '长期记忆存储位置',
+        progressValue: undefined,
+        progressLabel: undefined,
         icon: FolderOpen,
         className: 'border-violet-500/25',
         iconClassName: 'text-violet-500',
@@ -623,9 +774,22 @@ export function KnowledgeBasePage() {
                       >
                         {item.value}
                       </div>
-                      <div className="text-muted-foreground mt-0.5 hidden truncate text-[10px] xl:block">
+                      <div
+                        className={cn(
+                          'text-muted-foreground mt-0.5 truncate text-[10px]',
+                          item.progressValue !== undefined ? 'block' : 'hidden xl:block'
+                        )}
+                      >
                         {item.description}
                       </div>
+                      {item.progressValue !== undefined ? (
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <Progress value={item.progressValue} className="h-1 flex-1" />
+                          <span className="text-muted-foreground text-[10px] leading-none tabular-nums">
+                            {item.progressLabel}
+                          </span>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))}
