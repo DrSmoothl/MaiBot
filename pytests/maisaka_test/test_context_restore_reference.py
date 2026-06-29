@@ -22,6 +22,7 @@ def test_context_restore_reference_marks_short_restart() -> None:
     assert reference.display_prefix == "[上下文恢复]"
     assert "距离上次关机前最后一条可恢复聊天记录已经过去 2 分钟" in reference.content
     assert "短暂重启" in reference.content
+    assert "前面恢复出来的历史消息" in reference.content
     assert "不代表当前用户刚刚发来新消息" in reference.content
 
 

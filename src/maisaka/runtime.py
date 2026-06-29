@@ -343,13 +343,13 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         if not restored_history:
             return
 
+        self._chat_history.extend(restored_history)
         restore_reference_message = self._build_context_restore_reference_message(
             restored_history,
             now=datetime.now(),
         )
         if restore_reference_message is not None:
             self._chat_history.append(restore_reference_message)
-        self._chat_history.extend(restored_history)
         self.message_cache = restored_user_messages[-MAX_RETAINED_MESSAGE_CACHE_SIZE:]
         self._last_processed_index = len(self.message_cache)
         logger.info(
@@ -381,7 +381,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             "这是启动时恢复的历史上下文提醒，不代表当前用户刚刚发来新消息。\n"
             f"距离上次关机前最后一条可恢复聊天记录已经过去 {elapsed_text}。\n"
             f"{wakeup_text}\n"
-            "下面恢复出来的历史消息是你上次关机前记得的聊天内容；"
+            "前面恢复出来的历史消息是你上次关机前记得的聊天内容；"
             "回复时请结合实际间隔，短间隔自然续聊，长间隔可以表现出刚醒来或重新上线后的状态。"
         )
         return ReferenceMessage(

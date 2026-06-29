@@ -83,7 +83,6 @@ const QUICK_ACTIONS = [
 const RETRO_ICON_BUTTON_CLASS =
   'h-10 w-10 rounded-none border-[3px] border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] shadow-none transition hover:bg-[#0a4550] hover:text-[#f3e3cc] focus-visible:ring-2 focus-visible:ring-[#c99a3e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f3e3cc]'
 const RETRO_PANEL_CLASS = 'rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] shadow-none'
-const RETRO_DARK_PANEL_CLASS = 'rounded-none border-4 border-[#f3e3cc] bg-[#0a4550] text-[#f3e3cc] shadow-none'
 
 function formatSeconds(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
@@ -674,19 +673,6 @@ function normalizeModelToStage(model: THREE.Object3D, targetHeight: number): voi
 function getVRMFromGLTF(gltf: GLTF): VRM | null {
   const vrm = gltf.userData.vrm
   return vrm && typeof vrm === 'object' && 'scene' in vrm ? (vrm as VRM) : null
-}
-
-function getModelKind(fileName: string): ModelKind | null {
-  const normalized = fileName.toLowerCase()
-  if (normalized.endsWith('.vrm')) {
-    return 'vrm'
-  }
-
-  if (normalized.endsWith('.glb') || normalized.endsWith('.gltf')) {
-    return 'gltf'
-  }
-
-  return null
 }
 
 function quaternionFromEuler(x: number, y: number, z: number): [number, number, number, number] {
