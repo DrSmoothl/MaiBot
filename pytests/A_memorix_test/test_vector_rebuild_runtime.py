@@ -116,6 +116,150 @@ async def _wait_background_task(kernel: SDKMemoryKernel, name: str) -> None:
     await asyncio.wait_for(task, timeout=2.0)
 
 
+def test_dual_auto_migration_progress_tracks_stable_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    now = 100.0
+    monkeypatch.setattr(kernel_module.time, "time", lambda: now)
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(tmp_path / "a_memorix_data", 8),
+    )
+    kernel._dual_vector_auto_migration_status.update(
+        {
+            "running": True,
+            "started_at": 100.0,
+            "progress": {},
+        }
+    )
+
+    kernel._update_dual_vector_auto_migration_stage(
+        "prepare_rebuild",
+        total=10,
+        counts={"paragraphs": 4, "entities": 3, "relations": 3},
+    )
+    progress = kernel._dual_vector_auto_migration_status["progress"]
+    assert kernel._dual_vector_auto_migration_status["stage"] == "prepare_rebuild"
+    assert progress["total"] == 10
+    assert progress["processed"] == 0
+    assert progress["percent"] == 0.0
+    assert progress["elapsed_seconds"] == 0.0
+    assert progress["estimated_remaining_seconds"] is None
+
+    now = 110.0
+    kernel._update_dual_vector_auto_migration_stage("paragraphs_done", paragraph_done=4)
+    progress = kernel._dual_vector_auto_migration_status["progress"]
+    assert progress["processed"] == 4
+    assert progress["percent"] == 40.0
+    assert progress["elapsed_seconds"] == 10.0
+    assert progress["estimated_remaining_seconds"] == 15
+
+    completed_progress = kernel._normalize_dual_vector_auto_migration_progress(
+        progress,
+        now=120.0,
+        completed=True,
+        success=True,
+    )
+    assert completed_progress["processed"] == 10
+    assert completed_progress["percent"] == 100.0
+    assert completed_progress["estimated_remaining_seconds"] is None
+
+
+def test_dual_auto_migration_progress_has_no_eta_without_total(
+    tmp_path: Path,
+) -> None:
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(tmp_path / "a_memorix_data", 8),
+    )
+    kernel._dual_vector_auto_migration_status.update({"started_at": 100.0})
+
+    progress = kernel._normalize_dual_vector_auto_migration_progress(
+        {"processed": 5},
+        now=110.0,
+        explicit_processed=True,
+    )
+
+    assert progress["total"] == 0
+    assert progress["processed"] == 5
+    assert progress["percent"] == 0.0
+    assert progress["estimated_remaining_seconds"] is None
+
+
+def test_dual_auto_migration_progress_caps_running_percent(
+    tmp_path: Path,
+) -> None:
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(tmp_path / "a_memorix_data", 8),
+    )
+    kernel._dual_vector_auto_migration_status.update({"started_at": 100.0})
+
+    progress = kernel._normalize_dual_vector_auto_migration_progress(
+        {
+            "total": 100,
+            "processed": 100,
+        },
+        now=110.0,
+        explicit_processed=True,
+    )
+
+    assert progress["processed"] == 100
+    assert progress["percent"] == 99.5
+    assert progress["estimated_remaining_seconds"] is None
+
+
+def test_dual_auto_migration_progress_counts_failed_items_as_processed(
+    tmp_path: Path,
+) -> None:
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(tmp_path / "a_memorix_data", 8),
+    )
+    kernel._dual_vector_auto_migration_status.update({"started_at": 100.0})
+
+    progress = kernel._normalize_dual_vector_auto_migration_progress(
+        {
+            "total": 10,
+            "paragraph_done": 3,
+            "paragraph_failed": 1,
+            "entity_done": 2,
+            "entity_failed": 1,
+        },
+        now=110.0,
+    )
+
+    assert progress["processed"] == 7
+    assert progress["percent"] == 70.0
+    assert progress["estimated_remaining_seconds"] == 5
+
+
+def test_dual_auto_migration_progress_coerces_invalid_values(
+    tmp_path: Path,
+) -> None:
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_dual_kernel_config(tmp_path / "a_memorix_data", 8),
+    )
+    kernel._dual_vector_auto_migration_status.update({"started_at": 100.0})
+
+    progress = kernel._normalize_dual_vector_auto_migration_progress(
+        {
+            "total": "bad",
+            "counts": {"paragraphs": 2, "entities": "3", "relations": -10},
+            "processed": "bad",
+        },
+        now=110.0,
+        explicit_processed=True,
+    )
+
+    assert progress["total"] == 5
+    assert progress["processed"] == 0
+    assert progress["percent"] == 0.0
+    assert progress["estimated_remaining_seconds"] is None
+
+
 @pytest.mark.asyncio
 async def test_runtime_admin_rebuild_all_vectors_replaces_existing_store(
     monkeypatch: pytest.MonkeyPatch,

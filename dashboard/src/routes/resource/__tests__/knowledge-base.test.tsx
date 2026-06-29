@@ -993,6 +993,235 @@ describe('KnowledgeBasePage import workflow', () => {
     expect(memoryApi.getMemoryImportTasks).toHaveBeenCalled()
   })
 
+  it('shows vector pool migration progress in runtime badges', async () => {
+    vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce({
+      success: true,
+      config: { plugin: { enabled: true } },
+      data_dir: 'data/plugins/a-dawn.a-memorix',
+      embedding_dimension: 1024,
+      auto_save: true,
+      relation_vectors_enabled: false,
+      vector_pools: {
+        configured_mode: 'dual',
+        effective_mode: 'single',
+        ready: false,
+        single_pool: { available: true, dimension: 1024, num_vectors: 10967, has_data: true },
+        paragraph_pool: { available: true, dimension: 1024, num_vectors: 0, has_data: false },
+        graph_pool: { available: true, dimension: 1024, num_vectors: 0, has_data: false },
+        auto_migration: {
+          running: true,
+          attempted: true,
+          success: false,
+          stage: 'entities_done',
+          progress: {
+            total: 12000,
+            processed: 11183,
+            percent: 93.2,
+            elapsed_seconds: 192,
+            estimated_remaining_seconds: 120,
+            paragraph_done: 10967,
+            paragraph_failed: 0,
+            entity_done: 216,
+            entity_failed: 0,
+          },
+          last_error: '',
+          started_at: 1782662070,
+          finished_at: null,
+          updated_at: 1782662262,
+        },
+      },
+      vector_pools_ready: false,
+      vector_pools_effective_mode: 'single',
+      runtime_ready: true,
+      embedding_degraded: false,
+      embedding_degraded_reason: '',
+      embedding_degraded_since: null,
+      embedding_last_check: null,
+      vector_rebuild_required: false,
+      vector_rebuild_message: '',
+      paragraph_vector_backfill_pending: 0,
+      paragraph_vector_backfill_running: 0,
+      paragraph_vector_backfill_failed: 0,
+      paragraph_vector_backfill_done: 0,
+    })
+
+    renderPage()
+
+    await waitForConsoleReady()
+
+    expect(screen.getByText('双池迁移中')).toBeInTheDocument()
+    expect(screen.getByText('实体完成 · 11183/12000 · 预计剩余 2分0秒')).toBeInTheDocument()
+    expect(screen.getByText('93.2%')).toBeInTheDocument()
+  })
+
+  it('shows pending ETA while vector pool migration rate is unavailable', async () => {
+    vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce({
+      success: true,
+      config: { plugin: { enabled: true } },
+      data_dir: 'data/plugins/a-dawn.a-memorix',
+      embedding_dimension: 1024,
+      auto_save: true,
+      relation_vectors_enabled: false,
+      vector_pools: {
+        configured_mode: 'dual',
+        effective_mode: 'single',
+        ready: false,
+        single_pool: { available: true, dimension: 1024, num_vectors: 10967, has_data: true },
+        paragraph_pool: { available: true, dimension: 1024, num_vectors: 0, has_data: false },
+        graph_pool: { available: true, dimension: 1024, num_vectors: 0, has_data: false },
+        auto_migration: {
+          running: true,
+          attempted: true,
+          success: false,
+          stage: 'prepare_rebuild',
+          progress: {
+            total: 12000,
+            processed: 0,
+            percent: 0,
+            elapsed_seconds: 0,
+            estimated_remaining_seconds: null,
+          },
+          last_error: '',
+          started_at: 1782662070,
+          finished_at: null,
+          updated_at: 1782662070,
+        },
+      },
+      vector_pools_ready: false,
+      vector_pools_effective_mode: 'single',
+      runtime_ready: true,
+      embedding_degraded: false,
+      embedding_degraded_reason: '',
+      embedding_degraded_since: null,
+      embedding_last_check: null,
+      vector_rebuild_required: false,
+      vector_rebuild_message: '',
+      paragraph_vector_backfill_pending: 0,
+      paragraph_vector_backfill_running: 0,
+      paragraph_vector_backfill_failed: 0,
+      paragraph_vector_backfill_done: 0,
+    })
+
+    renderPage()
+
+    await waitForConsoleReady()
+
+    expect(screen.getByText('双池迁移中')).toBeInTheDocument()
+    expect(screen.getByText('准备迁移 · 0/12000 · 预计计算中')).toBeInTheDocument()
+  })
+
+  it('clamps vector pool migration percent inside the progress bar label', async () => {
+    vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce({
+      success: true,
+      config: { plugin: { enabled: true } },
+      data_dir: 'data/plugins/a-dawn.a-memorix',
+      embedding_dimension: 1024,
+      auto_save: true,
+      relation_vectors_enabled: false,
+      vector_pools: {
+        configured_mode: 'dual',
+        effective_mode: 'single',
+        ready: false,
+        single_pool: { available: true, dimension: 1024, num_vectors: 10, has_data: true },
+        paragraph_pool: { available: true, dimension: 1024, num_vectors: 0, has_data: false },
+        graph_pool: { available: true, dimension: 1024, num_vectors: 0, has_data: false },
+        auto_migration: {
+          running: true,
+          attempted: true,
+          success: false,
+          stage: 'paragraphs_done',
+          progress: {
+            total: 10,
+            processed: 10,
+            percent: 150,
+            elapsed_seconds: 10,
+            estimated_remaining_seconds: null,
+          },
+          last_error: '',
+          started_at: 1782662070,
+          finished_at: null,
+          updated_at: 1782662080,
+        },
+      },
+      vector_pools_ready: false,
+      vector_pools_effective_mode: 'single',
+      runtime_ready: true,
+      embedding_degraded: false,
+      embedding_degraded_reason: '',
+      embedding_degraded_since: null,
+      embedding_last_check: null,
+      vector_rebuild_required: false,
+      vector_rebuild_message: '',
+      paragraph_vector_backfill_pending: 0,
+      paragraph_vector_backfill_running: 0,
+      paragraph_vector_backfill_failed: 0,
+      paragraph_vector_backfill_done: 0,
+    })
+
+    renderPage()
+
+    await waitForConsoleReady()
+
+    expect(screen.getByText('段落完成 · 10/10 · 预计计算中')).toBeInTheDocument()
+    expect(screen.getByText('100.0%')).toBeInTheDocument()
+  })
+
+  it('keeps displaying legacy vector pool migration details without stable totals', async () => {
+    vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce({
+      success: true,
+      config: { plugin: { enabled: true } },
+      data_dir: 'data/plugins/a-dawn.a-memorix',
+      embedding_dimension: 1024,
+      auto_save: true,
+      relation_vectors_enabled: false,
+      vector_pools: {
+        configured_mode: 'dual',
+        effective_mode: 'single',
+        ready: false,
+        single_pool: { available: true, dimension: 1024, num_vectors: 10967, has_data: true },
+        paragraph_pool: { available: true, dimension: 1024, num_vectors: 0, has_data: false },
+        graph_pool: { available: true, dimension: 1024, num_vectors: 0, has_data: false },
+        auto_migration: {
+          running: true,
+          attempted: true,
+          success: false,
+          stage: 'entities_done',
+          progress: {
+            paragraph_done: 10967,
+            paragraph_failed: 1,
+            entity_done: 216,
+            entity_failed: 0,
+          },
+          last_error: '',
+          started_at: 1782662070,
+          finished_at: null,
+          updated_at: 1782662262,
+        },
+      },
+      vector_pools_ready: false,
+      vector_pools_effective_mode: 'single',
+      runtime_ready: true,
+      embedding_degraded: false,
+      embedding_degraded_reason: '',
+      embedding_degraded_since: null,
+      embedding_last_check: null,
+      vector_rebuild_required: false,
+      vector_rebuild_message: '',
+      paragraph_vector_backfill_pending: 0,
+      paragraph_vector_backfill_running: 0,
+      paragraph_vector_backfill_failed: 0,
+      paragraph_vector_backfill_done: 0,
+    })
+
+    renderPage()
+
+    await waitForConsoleReady()
+
+    expect(screen.getByText('双池迁移中')).toBeInTheDocument()
+    expect(screen.getByText('实体完成 · 段落 10967/1 失败 · 实体 216')).toBeInTheDocument()
+    expect(screen.queryByText(/%$/)).not.toBeInTheDocument()
+  })
+
   it('rebuilds all vectors from overview controls', async () => {
     const user = userEvent.setup()
     renderPage()
