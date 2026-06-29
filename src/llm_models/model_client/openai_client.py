@@ -5,7 +5,7 @@ import io
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Tuple, cast
+from typing import Any, Callable, Coroutine, Dict, List, Set, Tuple, cast
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -117,7 +117,7 @@ CHAT_COMPLETIONS_RESERVED_EXTRA_BODY_KEYS = {
 }
 """由当前客户端显式承载、不应再落入 `extra_body` 的字段集合。"""
 
-_MODELS_REQUIRING_MAX_COMPLETION_TOKENS: set[tuple[str, str]] = set()
+_MODELS_REQUIRING_MAX_COMPLETION_TOKENS: Set[Tuple[str, str]] = set()
 """记录本进程内已确认「仅支持 max_completion_tokens」的模型，键为 (base_url, model_identifier)。
 命中后直接使用 max_completion_tokens，避免重复触发首次失败重试。"""
 
@@ -920,8 +920,9 @@ def _build_api_status_message(error: APIStatusError) -> str:
 def _is_max_tokens_unsupported_error(error: APIStatusError) -> bool:
     """判断该 400 错误是否为「max_tokens 不被支持、应改用 max_completion_tokens」。
 
-    以错误原文匹配为主判据（OpenAI 的报错即 "Use 'max_completion_tokens' instead."），
-    最稳健、不依赖动态属性。
+    以错误原文匹配为主判据（OpenAI 的报错即 "Use 'max_completion_tokens' instead."）。
+    错误正文可能落在 error.message，也可能仅落在 response.text（如经代理/网关，或 SDK
+    未解析到标准 error 结构时），故复用 _build_api_status_message 同时覆盖两者。
 
     Args:
         error: OpenAI SDK 抛出的状态错误。
@@ -931,7 +932,7 @@ def _is_max_tokens_unsupported_error(error: APIStatusError) -> bool:
     """
     if error.status_code != 400:
         return False
-    return "max_completion_tokens" in (error.message or "").lower()
+    return "max_completion_tokens" in _build_api_status_message(error).lower()
 
 
 @dataclass(slots=True)
@@ -1400,6 +1401,9 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                 # 每次用副本，避免重试两次之间相互污染 extra_body
                 extra_body = dict(request_overrides.extra_body)
                 if use_max_completion_tokens:
+                    # 清除经由 extra_params.body 嵌套传入、未被 reserved_body_keys 过滤的
+                    # 遗留 max_tokens，否则重试仍会同时发送 max_tokens 导致再次 400。
+                    extra_body.pop("max_tokens", None)
                     # 自动改用 max_completion_tokens：用户未显式给值时用任务级 max_tokens 填充
                     if "max_completion_tokens" not in extra_body and request.max_tokens is not None:
                         extra_body["max_completion_tokens"] = request.max_tokens
@@ -1468,10 +1472,17 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
             # 命中「max_tokens 不被支持」的 400 错误时自动改用 max_completion_tokens 重试并记忆。
             cache_key = (self.api_provider.base_url or "", model_info.model_identifier)
             use_mct = cache_key in _MODELS_REQUIRING_MAX_COMPLETION_TOKENS
+            # 仅当本次确实发送了原生 max_tokens（显式参数或 extra_body 嵌套传入）时，才把
+            # 「max_tokens 不被支持」的 400 归因于该模型；否则可能把本就没发 max_tokens 的
+            # 请求误记为「必须使用 max_completion_tokens」。
+            sent_legacy_max_tokens = not use_mct and (
+                "max_tokens" in request_overrides.extra_body
+                or (request.max_tokens is not None and "max_completion_tokens" not in request_overrides.extra_body)
+            )
             try:
                 return await _dispatch(use_mct)
             except APIStatusError as exc:
-                if not use_mct and _is_max_tokens_unsupported_error(exc):
+                if sent_legacy_max_tokens and _is_max_tokens_unsupported_error(exc):
                     _MODELS_REQUIRING_MAX_COMPLETION_TOKENS.add(cache_key)
                     logger.info(
                         f"模型 '{model_info.name}' 不支持 max_tokens，自动改用 "
