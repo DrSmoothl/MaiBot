@@ -147,6 +147,9 @@ function ModelConfigPageContent() {
     testResults,
     handleTestProviderConnection,
     handleTestAllProviderConnections,
+    testingModels,
+    modelTestResults,
+    handleTestModelCapability,
     // 模型批量
     selectedModels,
     setSelectedModels,
@@ -494,7 +497,10 @@ function ModelConfigPageContent() {
             allModels={models}
             onEdit={openEditDialog}
             onDelete={openDeleteDialog}
+            onTest={handleTestModelCapability}
             isModelUsed={isModelUsed}
+            testingModels={testingModels}
+            modelTestResults={modelTestResults}
             searchQuery={searchQuery}
           />
 
@@ -506,9 +512,12 @@ function ModelConfigPageContent() {
             selectedModels={selectedModels}
             onEdit={openEditDialog}
             onDelete={openDeleteDialog}
+            onTest={handleTestModelCapability}
             onToggleSelection={toggleModelSelection}
             onToggleSelectAll={toggleSelectAll}
             isModelUsed={isModelUsed}
+            testingModels={testingModels}
+            modelTestResults={modelTestResults}
             searchQuery={searchQuery}
           />
 

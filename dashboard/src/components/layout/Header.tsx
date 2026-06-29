@@ -14,6 +14,7 @@ import {
   Settings,
   SlidersHorizontal,
   Sun,
+  TimerReset,
 } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
 import { type ComponentType, useEffect, useState } from 'react'
@@ -247,6 +248,18 @@ export function Header({
               asChild
               variant="ghost"
               size="icon"
+              className={cn(pathname === '/focus' && 'bg-accent text-accent-foreground')}
+              title={t('sidebar.menu.focusCompanion')}
+              aria-label={t('sidebar.menu.focusCompanion')}
+            >
+              <Link to="/focus">
+                <TimerReset className="h-4 w-4" />
+              </Link>
+            </Button>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
               className={cn(pathname === '/settings' && 'bg-accent text-accent-foreground')}
               title={t('sidebar.menu.settings')}
               aria-label={t('sidebar.menu.settings')}
@@ -414,6 +427,12 @@ export function Header({
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem asChild className="cursor-pointer gap-2">
+                  <Link to="/focus">
+                    <TimerReset className="h-4 w-4" />
+                    {t('sidebar.menu.focusCompanion')}
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} className="cursor-pointer gap-2">
                   <LogOut className="h-4 w-4" />
                   {t('header.logoutLabel')}

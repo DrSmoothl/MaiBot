@@ -2,9 +2,11 @@
  * 模型列表 - 桌面端表格视图
  */
 import React from 'react'
-import { Pencil, Trash2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2, Pencil, Trash2, Zap } from 'lucide-react'
 
+import type { ModelTestResult } from '@/lib/config-api'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table,
@@ -31,14 +33,61 @@ interface ModelTableProps {
   onEdit: (model: ModelInfo, index: number) => void
   /** 删除模型回调 */
   onDelete: (index: number) => void
+  /** 测试模型回调 */
+  onTest: (modelName: string) => void
   /** 切换选中状态回调 */
   onToggleSelection: (index: number) => void
   /** 切换全选回调 */
   onToggleSelectAll: () => void
   /** 检查模型是否被使用 */
   isModelUsed: (modelName: string) => boolean
+  /** 正在测试的模型名称集合 */
+  testingModels: Set<string>
+  /** 模型测试结果 */
+  modelTestResults: Map<string, ModelTestResult>
   /** 搜索关键词 */
   searchQuery: string
+}
+
+function renderModelTestStatus(result: ModelTestResult | undefined, isTesting: boolean) {
+  if (isTesting) {
+    const description = '正在测试模型能力'
+    return (
+      <Badge variant="secondary" className="h-6 w-6 justify-center p-0" title={description} aria-label={description}>
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      </Badge>
+    )
+  }
+
+  if (!result) {
+    const description = '未测试：尚未执行模型能力测试'
+    return (
+      <Badge
+        variant="outline"
+        className="border-muted-foreground/40 h-6 w-6 justify-center bg-transparent p-0"
+        title={description}
+        aria-label={description}
+      />
+    )
+  }
+
+  if (result.success) {
+    const description = `测试通过：文本${result.visual_tested ? '、视觉' : ''}与工具调用正常${
+      result.latency_ms != null ? `，延迟 ${result.latency_ms}ms` : ''
+    }`
+    return (
+      <Badge className="h-6 w-6 justify-center bg-green-600 p-0 hover:bg-green-700" title={description} aria-label={description}>
+        <CheckCircle2 className="h-3.5 w-3.5" />
+      </Badge>
+    )
+  }
+
+  const description = result.error || '模型能力测试未通过'
+  return (
+    <Badge variant="destructive" className="h-6 w-6 justify-center p-0" title={description} aria-label={description}>
+      <AlertCircle className="h-3.5 w-3.5" />
+    </Badge>
+  )
 }
 
 export const ModelTable = React.memo(function ModelTable({
@@ -48,9 +97,12 @@ export const ModelTable = React.memo(function ModelTable({
   selectedModels,
   onEdit,
   onDelete,
+  onTest,
   onToggleSelection,
   onToggleSelectAll,
   isModelUsed,
+  testingModels,
+  modelTestResults,
   searchQuery,
 }: ModelTableProps) {
   return (
@@ -68,6 +120,7 @@ export const ModelTable = React.memo(function ModelTable({
                 />
               </TableHead>
               <TableHead className="w-14 text-center">使用</TableHead>
+              <TableHead className="w-14 text-center">测试</TableHead>
               <TableHead>模型名称</TableHead>
               <TableHead>模型标识符</TableHead>
               <TableHead>提供商</TableHead>
@@ -81,7 +134,7 @@ export const ModelTable = React.memo(function ModelTable({
           <TableBody>
             {paginatedModels.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-muted-foreground py-8 text-center">
+                <TableCell colSpan={11} className="text-muted-foreground py-8 text-center">
                   {searchQuery ? '未找到匹配的模型' : '暂无模型配置'}
                 </TableCell>
               </TableRow>
@@ -89,6 +142,8 @@ export const ModelTable = React.memo(function ModelTable({
               paginatedModels.map((model, displayIndex) => {
                 const actualIndex = allModels.findIndex((m) => m === model)
                 const used = isModelUsed(model.name)
+                const isTesting = testingModels.has(model.name)
+                const testResult = modelTestResults.get(model.name)
                 return (
                   <TableRow key={displayIndex}>
                     <TableCell>
@@ -107,6 +162,11 @@ export const ModelTable = React.memo(function ModelTable({
                         title={used ? '已使用' : '未使用'}
                         aria-label={used ? '已使用' : '未使用'}
                       />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex justify-center">
+                        {renderModelTestStatus(testResult, isTesting)}
+                      </div>
                     </TableCell>
                     <TableCell className="font-medium">{model.name}</TableCell>
                     <TableCell className="max-w-xs truncate" title={model.model_identifier}>
@@ -135,6 +195,20 @@ export const ModelTable = React.memo(function ModelTable({
                     <TableCell className="text-right">¥{model.price_out}/M</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => onTest(model.name)}
+                          disabled={isTesting}
+                          title="测试模型"
+                          aria-label={`测试模型 ${model.name}`}
+                        >
+                          {isTesting ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Zap className="h-4 w-4" />
+                          )}
+                        </Button>
                         <Button
                           variant="default"
                           size="icon"

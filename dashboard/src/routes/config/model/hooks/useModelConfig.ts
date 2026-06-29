@@ -19,11 +19,12 @@ import {
   getModelConfig,
   getModelConfigCached,
   getModelConfigSchema,
+  testModelCapability,
   testProviderConnection,
   updateModelConfig,
   updateModelConfigSection,
 } from '@/lib/config-api'
-import type { TestConnectionResult } from '@/lib/config-api'
+import type { ModelTestResult, TestConnectionResult } from '@/lib/config-api'
 import { useToast } from '@/hooks/use-toast'
 import type { ConfigSchema } from '@/types/config-schema'
 
@@ -106,6 +107,10 @@ export function useModelConfig() {
   // ---- 提供商连接测试 ----
   const [testingProviders, setTestingProviders] = useState<Set<string>>(new Set())
   const [testResults, setTestResults] = useState<Map<string, TestConnectionResult>>(new Map())
+
+  // ---- 单模型能力测试 ----
+  const [testingModels, setTestingModels] = useState<Set<string>>(new Set())
+  const [modelTestResults, setModelTestResults] = useState<Map<string, ModelTestResult>>(new Map())
 
   // ---- 提供商删除级联确认 ----
   const [deleteConfirmState, setDeleteConfirmState] = useState<DeleteConfirmState>({
@@ -914,6 +919,41 @@ export function useModelConfig() {
     }
   }, [apiProviders, handleTestProviderConnection])
 
+  const handleTestModelCapability = useCallback(
+    async (modelName: string) => {
+      setTestingModels((prev) => new Set(prev).add(modelName))
+      try {
+        const testResult = await testModelCapability(modelName)
+        setModelTestResults((prev) => new Map(prev).set(modelName, testResult))
+        if (testResult.success) {
+          toast({
+            title: '模型测试通过',
+            description: `${modelName} 已完成文本${testResult.visual_tested ? '、视觉' : ''}与工具调用测试 (${testResult.latency_ms}ms)`,
+          })
+        } else {
+          toast({
+            title: testResult.tool_call_ok ? '模型响应异常' : '工具调用未通过',
+            description: testResult.error || `${modelName} 未通过模型能力测试`,
+            variant: 'destructive',
+          })
+        }
+      } catch (error) {
+        toast({
+          title: '模型测试失败',
+          description: (error as Error).message,
+          variant: 'destructive',
+        })
+      } finally {
+        setTestingModels((prev) => {
+          const next = new Set(prev)
+          next.delete(modelName)
+          return next
+        })
+      }
+    },
+    [toast]
+  )
+
   // ---- 模型批量选择 ----
   // 过滤模型列表（搜索）
   const filteredModels = useMemo(
@@ -1099,6 +1139,9 @@ export function useModelConfig() {
     testResults,
     handleTestProviderConnection,
     handleTestAllProviderConnections,
+    testingModels,
+    modelTestResults,
+    handleTestModelCapability,
     // 模型批量
     selectedModels,
     setSelectedModels,

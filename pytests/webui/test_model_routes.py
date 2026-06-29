@@ -6,7 +6,7 @@
 
 import importlib
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -14,8 +14,16 @@ import pytest
 
 def load_model_routes(monkeypatch: pytest.MonkeyPatch):
     """在导入路由前 stub 配置与认证依赖模块，避免测试时触发真实初始化。"""
+    class DummyConfigManager:
+        def get_model_config(self):
+            return SimpleNamespace(api_providers=[])
+
+        def register_reload_callback(self, callback: Any) -> None:
+            return None
+
     config_module = ModuleType("src.config.config")
     config_module.__dict__["CONFIG_DIR"] = "."
+    config_module.__dict__["config_manager"] = DummyConfigManager()
     monkeypatch.setitem(sys.modules, "src.config.config", config_module)
 
     dependencies_module = ModuleType("src.webui.dependencies")
@@ -185,3 +193,61 @@ client_type = "gemini"
         "api_key": "valid-gemini-key",
         "client_type": "gemini",
     }
+
+
+@pytest.mark.asyncio
+async def test_test_model_capability_requires_tool_call_and_keeps_visual_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """模型能力测试应要求测试工具调用，并按模型 visual 配置附带视觉测试标记。"""
+    model_routes = load_model_routes(monkeypatch)
+    config_path = tmp_path / "model_config.toml"
+    config_path.write_text(
+        """
+[[models]]
+name = "vision-model"
+model_identifier = "vision-model-id"
+api_provider = "Fake"
+visual = true
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(model_routes, "CONFIG_DIR", str(tmp_path))
+
+    captured: dict[str, Any] = {}
+
+    class FakeOrchestrator:
+        def __init__(self, model_name: str):
+            captured["model_name"] = model_name
+
+        async def generate_response_with_message_async(self, **kwargs: Any):
+            captured.update(kwargs)
+            return model_routes.LLMResponseResult(
+                response="",
+                model_name="vision-model",
+                tool_calls=[
+                    model_routes.ToolCall(
+                        call_id="call-1",
+                        func_name=model_routes.MODEL_TEST_TOOL_NAME,
+                        args={"status": "ok", "echo": "maibot model test", "saw_image": True},
+                    )
+                ],
+                prompt_tokens=10,
+                completion_tokens=5,
+                total_tokens=15,
+            )
+
+    monkeypatch.setattr(model_routes, "_SingleModelTestOrchestrator", FakeOrchestrator)
+
+    result = await model_routes.test_model_capability(
+        model_routes.ModelTestRequest(model_name="vision-model")
+    )
+
+    assert result.success is True
+    assert result.visual_tested is True
+    assert result.tool_call_ok is True
+    assert result.total_tokens == 15
+    assert captured["model_name"] == "vision-model"
+    assert captured["tools"][0]["name"] == model_routes.MODEL_TEST_TOOL_NAME

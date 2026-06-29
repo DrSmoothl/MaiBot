@@ -28,6 +28,7 @@
     },
     "menu": {
       "home": "Home",
+      "focusCompanion": "Focus Companion",
       "botMainConfig": "Bot Main Config",
       "aiModelProvider": "AI Model Providers",
       "modelManagement": "Model Management",
@@ -789,6 +790,7 @@
     "items": {
       "home": "Home",
       "homeDesc": "View dashboard overview",
+      "focusCompanionDesc": "Open MaiBot immersive focus companion",
       "botConfig": "Bot Main Config",
       "botConfigDesc": "Configure bot core settings",
       "model": "Model Config",

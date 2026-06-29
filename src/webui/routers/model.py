@@ -4,19 +4,25 @@
 提供从各个 AI 厂商 API 获取可用模型列表的代理接口
 """
 
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 import os
-from typing import Dict, List, Optional
+import time
 
 import httpx
 import tomlkit
-from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.common.logger import get_logger
 from src.config.config import CONFIG_DIR
-from src.config.model_configs import APIProvider
+from src.config.model_configs import APIProvider, TaskConfig
 from src.llm_models.model_client import ensure_client_type_loaded
 from src.llm_models.model_client.base_client import client_registry
 from src.llm_models.openai_compat import build_openai_compatible_client_config, normalize_openai_base_url
+from src.llm_models.payload_content.message import Message, MessageBuilder
+from src.llm_models.payload_content.tool_option import ToolCall
+from src.llm_models.utils_model import LLMOrchestrator, LLMResponseResult
 from src.webui.dependencies import require_auth
 from src.webui.utils.network_security import validate_public_url
 
@@ -36,6 +42,65 @@ MODEL_FETCHER_CONFIG = {
         "parser": "gemini",
     },
 }
+
+MODEL_TEST_IMAGE_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAA"
+    "hUlEQVR4nO3QQQ3AIADAQEDpf2amCEuJbMCbuvOQVbYBfG9n"
+    "gAYtWLBgwYIFCxYsWLBgwYIFCxYsWLBgwYIFCxYsWLBgwYIF"
+    "CxYsWLBgwYIFCxYsWLBgwYIFCxYsWLBgwYIFCxYsWLBgwYIF"
+    "CxYsWLBgwYIFCxYsWLBgwYIFCxYsWLBgwYL9fgF7dAFf1B4/"
+    "YwAAAABJRU5ErkJggg=="
+)
+MODEL_TEST_TOOL_NAME = "maibot_model_test_report"
+
+
+class ModelTestRequest(BaseModel):
+    """单个模型测试请求。"""
+
+    model_name: str = Field(..., min_length=1, description="model_config.toml 中定义的模型名称")
+
+
+class ModelTestToolCall(BaseModel):
+    """模型测试返回的工具调用摘要。"""
+
+    id: str
+    name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelTestResponse(BaseModel):
+    """单个模型测试响应。"""
+
+    success: bool
+    model_name: str
+    visual_tested: bool
+    tool_call_ok: bool
+    response: str = ""
+    reasoning: str = ""
+    tool_calls: List[ModelTestToolCall] = Field(default_factory=list)
+    latency_ms: float | None = None
+    error: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class _SingleModelTestOrchestrator(LLMOrchestrator):
+    """复用 LLM 调度器，但将 WebUI 测试请求限制到单个模型。"""
+
+    def __init__(self, model_name: str) -> None:
+        self._model_test_task_config = TaskConfig(
+            model_list=[model_name],
+            max_tokens=512,
+            temperature=0.0,
+            slow_threshold=30.0,
+            selection_strategy="sequential",
+            hard_timeout=90.0,
+        )
+        super().__init__(task_name="webui_model_test", request_type="webui_model_test")
+
+    def _get_task_config_or_raise(self) -> TaskConfig:
+        return self._model_test_task_config
 
 
 @router.get("/client-types")
@@ -62,6 +127,45 @@ async def get_registered_client_types():
         "client_types": client_types,
         "count": len(client_types),
     }
+
+
+@router.post("/test-model", response_model=ModelTestResponse)
+async def test_model_capability(request: ModelTestRequest):
+    """测试单个模型的文本、tool call 与可选视觉能力。"""
+    model_name = request.model_name.strip()
+    model_config = _get_model_config(model_name)
+    if model_config is None:
+        raise HTTPException(status_code=404, detail=f"未找到模型: {model_name}")
+
+    visual_enabled = bool(model_config.get("visual", False))
+    start_time = time.time()
+    try:
+        orchestrator = _SingleModelTestOrchestrator(model_name=model_name)
+        result = await orchestrator.generate_response_with_message_async(
+            message_factory=_build_model_test_message_factory(visual_enabled),
+            temperature=0.0,
+            max_tokens=512,
+            model_name=model_name,
+            tools=_build_model_test_tools(),
+        )
+        latency_ms = round((time.time() - start_time) * 1000, 2)
+        return _build_model_test_response(
+            model_name=model_name,
+            visual_tested=visual_enabled,
+            latency_ms=latency_ms,
+            result=result,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"模型测试失败: model={model_name}, error={e}", exc_info=True)
+        latency_ms = round((time.time() - start_time) * 1000, 2)
+        return _build_model_test_response(
+            model_name=model_name,
+            visual_tested=visual_enabled,
+            latency_ms=latency_ms,
+            error=str(e),
+        )
 
 
 def _normalize_url(url: str) -> str:
@@ -237,6 +341,140 @@ def _get_provider_config(provider_name: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"读取提供商配置失败: {e}")
         return None
+
+
+def _get_model_config(model_name: str) -> Optional[Dict]:
+    """
+    从 model_config.toml 获取指定模型的配置。
+
+    Args:
+        model_name: 模型名称。
+
+    Returns:
+        模型配置，如果未找到则返回 None。
+    """
+    config_path = os.path.join(CONFIG_DIR, "model_config.toml")
+    if not os.path.exists(config_path):
+        return None
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config_data = tomlkit.load(f)
+
+        models = config_data.get("models", [])
+        model = next((model for model in models if model.get("name") == model_name), None)
+        return dict(model) if model is not None else None
+    except Exception as e:
+        logger.error(f"读取模型配置失败: {e}")
+        return None
+
+
+def _build_model_test_prompt(visual_enabled: bool) -> str:
+    """构造单模型测试提示词。"""
+    image_instruction = (
+        "本次消息还附带了一张测试图片，请在工具参数 saw_image 中填 true，并简要描述图片。"
+        if visual_enabled
+        else "本次消息没有附带图片，请在工具参数 saw_image 中填 false。"
+    )
+    return (
+        "你正在执行 MaiBot WebUI 的单模型能力测试。\n"
+        "测试目标：确认模型可以读取普通文本，并可以按工具定义发起 tool call。\n"
+        f"{image_instruction}\n"
+        f"请必须调用工具 {MODEL_TEST_TOOL_NAME}，不要只用普通文本回答。\n"
+        "工具参数要求：status 填 ok，echo 填 maibot model test。"
+    )
+
+
+def _build_model_test_tools() -> List[Dict[str, Any]]:
+    """构造模型测试使用的工具定义。"""
+    return [
+        {
+            "name": MODEL_TEST_TOOL_NAME,
+            "description": "回报 MaiBot WebUI 模型测试结果。",
+            "parameters_schema": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "测试状态，成功时填 ok。",
+                        "enum": ["ok"],
+                    },
+                    "echo": {
+                        "type": "string",
+                        "description": "文本回显，固定填 maibot model test。",
+                    },
+                    "saw_image": {
+                        "type": "boolean",
+                        "description": "本次请求中是否包含并识别了测试图片。",
+                    },
+                    "image_summary": {
+                        "type": "string",
+                        "description": "如果包含图片，简短描述图片内容；未包含图片时留空。",
+                    },
+                },
+                "required": ["status", "echo", "saw_image"],
+            },
+        }
+    ]
+
+
+def _build_model_test_message_factory(visual_enabled: bool):
+    """构造可按客户端图片格式能力生成消息的工厂。"""
+
+    def message_factory(client) -> List[Message]:
+        builder = MessageBuilder().add_text_content(_build_model_test_prompt(visual_enabled))
+        if visual_enabled:
+            builder.add_image_content(
+                image_format="png",
+                image_base64=MODEL_TEST_IMAGE_BASE64,
+                support_formats=client.get_support_image_formats(),
+            )
+        return [builder.build()]
+
+    return message_factory
+
+
+def _serialize_model_test_tool_calls(tool_calls: List[ToolCall] | None) -> List[ModelTestToolCall]:
+    """将内部工具调用对象转换为 WebUI 响应结构。"""
+    return [
+        ModelTestToolCall(
+            id=tool_call.call_id,
+            name=tool_call.func_name,
+            arguments=tool_call.args or {},
+        )
+        for tool_call in (tool_calls or [])
+    ]
+
+
+def _build_model_test_response(
+    *,
+    model_name: str,
+    visual_tested: bool,
+    latency_ms: float | None,
+    result: LLMResponseResult | None = None,
+    error: str | None = None,
+) -> ModelTestResponse:
+    """根据 LLM 调用结果构造模型测试响应。"""
+    tool_calls = _serialize_model_test_tool_calls(result.tool_calls if result is not None else None)
+    tool_call_ok = any(tool_call.name == MODEL_TEST_TOOL_NAME for tool_call in tool_calls)
+    success = result is not None and tool_call_ok and not error
+    if result is not None and not tool_call_ok and not error:
+        error = f"模型未按要求调用测试工具 {MODEL_TEST_TOOL_NAME}"
+
+    return ModelTestResponse(
+        success=success,
+        model_name=result.model_name if result is not None and result.model_name else model_name,
+        visual_tested=visual_tested,
+        tool_call_ok=tool_call_ok,
+        response=result.response if result is not None else "",
+        reasoning=result.reasoning if result is not None else "",
+        tool_calls=tool_calls,
+        latency_ms=latency_ms,
+        error=error,
+        prompt_tokens=result.prompt_tokens if result is not None else 0,
+        completion_tokens=result.completion_tokens if result is not None else 0,
+        total_tokens=result.total_tokens if result is not None else 0,
+    )
 
 
 @router.get("/list")

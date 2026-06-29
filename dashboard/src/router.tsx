@@ -62,6 +62,13 @@ const indexRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/index'), 'IndexPage'),
 })
 
+// 沉浸专注陪伴路由
+const focusCompanionRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/focus',
+  component: lazyRouteComponent(() => import('./routes/focus'), 'FocusCompanionPage'),
+})
+
 // 配置路由 - 麦麦主程序配置
 const botConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -197,6 +204,13 @@ const chatEmbedRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/chat/embed'), 'ChatEmbedPage'),
 })
 
+// 外部程序嵌入用专注陪伴路由，不挂载 dashboard 顶栏和侧边栏
+const focusCompanionEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/focus/embed',
+  component: lazyRouteComponent(() => import('./routes/focus'), 'FocusCompanionPage'),
+})
+
 // 外部程序嵌入用插件市场路由，不挂载 dashboard 顶栏和侧边栏
 const pluginsEmbedRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -317,11 +331,13 @@ const routeTree = rootRoute.addChildren([
   authRoute,
   setupRoute,
   chatEmbedRoute,
+  focusCompanionEmbedRoute,
   pluginsEmbedRoute,
   pluginConfigEmbedRoute,
   pluginMirrorsEmbedRoute,
   protectedRoute.addChildren([
     indexRoute,
+    focusCompanionRoute,
     botConfigRoute,
     modelConfigRoute,
     promptManagementRoute,

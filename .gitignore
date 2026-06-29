@@ -1,4 +1,13 @@
 data/
+# Local roleplay benchmark data
+tools/roleplay_benchmark/
+tools/roleplay_benchmark/data/agent_scores.json
+tools/roleplay_benchmark/data/benchmark_split.json
+tools/roleplay_benchmark/data/discarded_samples.json
+tools/roleplay_benchmark/data/human_scores.json
+tools/roleplay_benchmark/data/sample_cache.json
+tools/roleplay_benchmark/data/agent_prompts/
+tools/roleplay_benchmark/data/server.*.log
 !pytests/A_memorix_test/data/
 !pytests/A_memorix_test/data/benchmarks/
 !pytests/A_memorix_test/data/benchmarks/long_novel_memory_benchmark.json

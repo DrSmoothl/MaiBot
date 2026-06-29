@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRouter, useRouterState } from '@tanstack/react-router'
 import { AnimatePresence, motion } from 'motion/react'
@@ -24,6 +24,7 @@ import { useMenuSections } from './use-menu-sections'
 
 const SIDEBAR_OPEN_STORAGE_KEY = 'maibot-layout-sidebar-open'
 const TOPBAR_COLLAPSED_STORAGE_KEY = 'maibot-layout-topbar-collapsed'
+const LAYOUT_IMMERSIVE_EVENT = 'maibot-layout-immersive-change'
 
 function loadStoredBoolean(key: string, fallback: boolean): boolean {
   if (typeof window === 'undefined') {
@@ -58,8 +59,38 @@ export function Layout({ children }: LayoutProps) {
     children: LayoutProps['children']
     mode: WorkspaceMode
   } | null>(null)
+  const shellStateRef = useRef({ sidebarOpen, topbarCollapsed })
+  const immersiveRestoreRef = useRef<{ sidebarOpen: boolean; topbarCollapsed: boolean } | null>(null)
   const { theme, setTheme } = useTheme()
   const menuSections = useMenuSections()
+
+  useEffect(() => {
+    shellStateRef.current = { sidebarOpen, topbarCollapsed }
+  }, [sidebarOpen, topbarCollapsed])
+
+  useEffect(() => {
+    const handleImmersiveChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ immersive?: boolean }>).detail
+      const immersive = detail?.immersive === true
+
+      if (immersive) {
+        immersiveRestoreRef.current ??= shellStateRef.current
+        setSidebarOpen(false)
+        setTopbarCollapsed(true)
+        setMobileMenuOpen(false)
+        return
+      }
+
+      if (immersiveRestoreRef.current) {
+        setSidebarOpen(immersiveRestoreRef.current.sidebarOpen)
+        setTopbarCollapsed(immersiveRestoreRef.current.topbarCollapsed)
+        immersiveRestoreRef.current = null
+      }
+    }
+
+    window.addEventListener(LAYOUT_IMMERSIVE_EVENT, handleImmersiveChange)
+    return () => window.removeEventListener(LAYOUT_IMMERSIVE_EVENT, handleImmersiveChange)
+  }, [])
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(sidebarOpen))
@@ -101,6 +132,7 @@ export function Layout({ children }: LayoutProps) {
       }
     }
     pathToLabel['/chat'] = t('workspace.chat')
+    pathToLabel['/focus'] = t('sidebar.menu.focusCompanion')
     pathToLabel['/logs'] = t('workspace.logs')
     pathToLabel['/reasoning-process'] = t('sidebar.menu.reasoningProcess')
 
