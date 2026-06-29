@@ -3,7 +3,6 @@ import { VRMHumanBoneName, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import {
   Coffee,
   Expand,
-  Focus,
   Maximize2,
   MessageCircle,
   Minimize2,
@@ -12,6 +11,7 @@ import {
   Play,
   RotateCcw,
   Sparkles,
+  Sprout,
   Volume2,
   VolumeX,
 } from 'lucide-react'
@@ -28,20 +28,29 @@ import { cn } from '@/lib/utils'
 
 import type { ChatStream } from '@/lib/chat-management-api'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import type { ChangeEvent } from 'react'
 import type { VRM, VRMPose } from '@pixiv/three-vrm'
 
 const DEFAULT_MODEL_NAME = 'mai_vrc_0.9.vrm'
 const DEFAULT_MODEL_URL = '/maimai-focus/mai_vrc_0.9.vrm'
 const FOCUS_SESSION_ID = 'webui-focus-companion'
 const LAYOUT_IMMERSIVE_EVENT = 'maibot-layout-immersive-change'
+const FOCUS_COMPANION_STORAGE_KEY = 'maibot-focus-companion-state'
+const DEFAULT_FOCUS_MINUTES = 25
+const MIN_FOCUS_MINUTES = 1
+const MAX_FOCUS_MINUTES = 240
 
 type TimerMode = 'focus' | 'short' | 'long'
 type CompanionMood = 'idle' | 'focus' | 'cheer' | 'listening'
 type ModelKind = 'gltf' | 'vrm'
 type ModelLoadState = 'idle' | 'loading' | 'ready' | 'error'
+type FocusCompanionStorage = {
+  customFocusMinutes: number
+  saplings: number
+}
 
 const TIMER_MODE_SECONDS: Record<TimerMode, number> = {
-  focus: 25 * 60,
+  focus: DEFAULT_FOCUS_MINUTES * 60,
   short: 5 * 60,
   long: 15 * 60,
 }
@@ -83,6 +92,49 @@ const QUICK_ACTIONS = [
 const RETRO_ICON_BUTTON_CLASS =
   'h-10 w-10 rounded-none border-[3px] border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] shadow-none transition hover:bg-[#0a4550] hover:text-[#f3e3cc] focus-visible:ring-2 focus-visible:ring-[#c99a3e] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f3e3cc]'
 const RETRO_PANEL_CLASS = 'rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] shadow-none'
+
+function clampFocusMinutes(minutes: number): number {
+  if (!Number.isFinite(minutes)) {
+    return DEFAULT_FOCUS_MINUTES
+  }
+
+  return Math.min(MAX_FOCUS_MINUTES, Math.max(MIN_FOCUS_MINUTES, Math.round(minutes)))
+}
+
+function readFocusCompanionStorage(): FocusCompanionStorage {
+  if (typeof window === 'undefined') {
+    return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: 0 }
+  }
+
+  try {
+    const raw = window.localStorage.getItem(FOCUS_COMPANION_STORAGE_KEY)
+    if (!raw) {
+      return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: 0 }
+    }
+
+    const parsed = JSON.parse(raw) as Partial<FocusCompanionStorage>
+    return {
+      customFocusMinutes: clampFocusMinutes(Number(parsed.customFocusMinutes ?? DEFAULT_FOCUS_MINUTES)),
+      saplings: Math.max(0, Math.floor(Number(parsed.saplings ?? 0))),
+    }
+  } catch {
+    return { customFocusMinutes: DEFAULT_FOCUS_MINUTES, saplings: 0 }
+  }
+}
+
+function writeFocusCompanionStorage(nextState: FocusCompanionStorage): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(
+    FOCUS_COMPANION_STORAGE_KEY,
+    JSON.stringify({
+      customFocusMinutes: clampFocusMinutes(nextState.customFocusMinutes),
+      saplings: Math.max(0, Math.floor(nextState.saplings)),
+    })
+  )
+}
 
 function formatSeconds(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
@@ -1208,11 +1260,66 @@ function MetricPill({ label, value, tone = 'green' }: MetricPillProps) {
   )
 }
 
+interface SaplingGardenProps {
+  count: number
+  compact?: boolean
+}
+
+function SaplingGarden({ count, compact = false }: SaplingGardenProps) {
+  const visibleCount = Math.min(count, compact ? 8 : 14)
+  const extraCount = Math.max(0, count - visibleCount)
+
+  return (
+    <div className={cn('flex items-end gap-1.5', compact ? 'min-h-8' : 'min-h-11')}>
+      {Array.from({ length: visibleCount }).map((_, index) => (
+        <div
+          key={index}
+          className={cn(
+            'relative shrink-0',
+            compact ? 'h-7 w-5' : 'h-10 w-7'
+          )}
+          aria-hidden="true"
+        >
+          <span
+            className={cn(
+              'absolute bottom-0 left-1/2 block -translate-x-1/2 bg-[#c24d24]',
+              compact ? 'h-4 w-1' : 'h-6 w-1.5'
+            )}
+          />
+          <span
+            className={cn(
+              'absolute block -rotate-[28deg] border-2 border-[#0a4550]',
+              index % 2 === 0 ? 'bg-[#c99a3e]' : 'bg-[#f3e3cc]',
+              compact ? 'top-2 left-0 h-2.5 w-3.5' : 'top-2 left-0 h-3.5 w-5'
+            )}
+          />
+          <span
+            className={cn(
+              'absolute block rotate-[28deg] border-2 border-[#0a4550]',
+              index % 2 === 0 ? 'bg-[#f3e3cc]' : 'bg-[#c99a3e]',
+              compact ? 'top-1.5 right-0 h-2.5 w-3.5' : 'top-1 right-0 h-3.5 w-5'
+            )}
+          />
+        </div>
+      ))}
+      {extraCount > 0 && (
+        <div className="pb-1 text-sm font-black text-[#0a4550] tabular-nums">+{extraCount}</div>
+      )}
+      {count === 0 && (
+        <div className="h-6 w-16 border-2 border-dashed border-[#0a4550]/60" aria-hidden="true" />
+      )}
+    </div>
+  )
+}
+
 export function FocusCompanionPage() {
+  const initialStorage = useMemo(() => readFocusCompanionStorage(), [])
   const [mode, setMode] = useState<TimerMode>('focus')
-  const [secondsLeft, setSecondsLeft] = useState(TIMER_MODE_SECONDS.focus)
+  const [customFocusMinutes, setCustomFocusMinutes] = useState(initialStorage.customFocusMinutes)
+  const [secondsLeft, setSecondsLeft] = useState(initialStorage.customFocusMinutes * 60)
   const [running, setRunning] = useState(false)
   const [rounds, setRounds] = useState(0)
+  const [saplings, setSaplings] = useState(initialStorage.saplings)
   const [mood, setMood] = useState<CompanionMood>('idle')
   const [immersive, setImmersive] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -1248,7 +1355,8 @@ export function FocusCompanionPage() {
     refetchInterval: 45_000,
   })
 
-  const duration = TIMER_MODE_SECONDS[mode]
+  const focusDuration = customFocusMinutes * 60
+  const duration = mode === 'focus' ? focusDuration : TIMER_MODE_SECONDS[mode]
   const progress = 1 - secondsLeft / duration
   const recentChats = useMemo(() => getRecentChats(chatStreamsQuery.data ?? []), [chatStreamsQuery.data])
   const runtimeValue = statusQuery.data?.running ? 'ON' : statusQuery.isLoading ? '...' : 'OFF'
@@ -1260,6 +1368,10 @@ export function FocusCompanionPage() {
   useEffect(() => {
     document.title = '专注陪伴 - MaiBot Dashboard'
   }, [])
+
+  useEffect(() => {
+    writeFocusCompanionStorage({ customFocusMinutes, saplings })
+  }, [customFocusMinutes, saplings])
 
   useEffect(() => {
     if (!running) {
@@ -1287,8 +1399,13 @@ export function FocusCompanionPage() {
       setRunning(false)
       setRounds((current) => current + 1)
       setMood('cheer')
+      if (mode === 'focus') {
+        setSaplings((current) => current + 1)
+      }
       void sendCompanionMessage(
-        `我完成了一段${mode === 'focus' ? '专注' : '休息'}计时，用一句很短的话回应我。`
+        mode === 'focus'
+          ? '我完成了一段专注计时，并获得了一棵树苗。用一句很短的话回应我。'
+          : '我完成了一段休息计时，用一句很短的话回应我。'
       )
     }, 0)
 
@@ -1309,11 +1426,11 @@ export function FocusCompanionPage() {
   const resetTimer = useCallback(
     (nextMode: TimerMode = mode) => {
       setMode(nextMode)
-      setSecondsLeft(TIMER_MODE_SECONDS[nextMode])
+      setSecondsLeft(nextMode === 'focus' ? customFocusMinutes * 60 : TIMER_MODE_SECONDS[nextMode])
       setRunning(false)
       setMood(nextMode === 'focus' ? 'focus' : 'idle')
     },
-    [mode]
+    [customFocusMinutes, mode]
   )
 
   const handleModeChange = useCallback(
@@ -1358,6 +1475,22 @@ export function FocusCompanionPage() {
     [companion]
   )
 
+  const handleFocusMinutesChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const nextMinutes = clampFocusMinutes(Number(event.target.value))
+      setCustomFocusMinutes(nextMinutes)
+      if (mode === 'focus') {
+        setSecondsLeft((current) => {
+          if (running) {
+            return Math.min(current, nextMinutes * 60)
+          }
+          return nextMinutes * 60
+        })
+      }
+    },
+    [mode, running]
+  )
+
   return (
     <section className="relative h-full min-h-[680px] overflow-hidden bg-[#f3e3cc] bg-[linear-gradient(90deg,rgba(10,69,80,0.075)_2px,transparent_2px),linear-gradient(180deg,rgba(10,69,80,0.055)_2px,transparent_2px)] bg-[size:52px_52px] font-sans text-[#0a4550]">
       <FocusThreeScene mood={mood} progress={progress} running={running} />
@@ -1366,16 +1499,7 @@ export function FocusCompanionPage() {
       <div className="pointer-events-none absolute right-7 bottom-5 h-3 w-[42vw] bg-[linear-gradient(to_bottom,#0a4550_0_33.333%,#c99a3e_33.333%_66.666%,#c24d24_66.666%_100%)]" />
 
       <div className="relative z-10 flex h-full min-h-0 flex-col">
-        <div className="flex items-center justify-between px-4 pt-4 sm:px-7">
-          <div className="flex items-center gap-2 rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] px-3 py-2 text-[#0a4550]">
-            <Focus className="h-4 w-4 text-[#c99a3e]" />
-            <span className="text-lg font-black tracking-wide">专注陪伴</span>
-            <span className="h-2 w-5 bg-[#c24d24]" aria-hidden="true" />
-            <span className="max-w-[40vw] truncate text-xs font-black tracking-[0.18em] text-[#0a4550] uppercase">
-              {companion.botName}
-            </span>
-          </div>
-
+        <div className="flex items-center justify-end px-4 pt-4 sm:px-7">
           <div className="flex items-center gap-2">
             <Button
               type="button"
@@ -1418,24 +1542,41 @@ export function FocusCompanionPage() {
             <TimerRing progress={progress} secondsLeft={secondsLeft} />
 
             <div className="flex items-center gap-2 rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] p-1.5">
-              {MODE_ITEMS.map((item) => (
-                <button
-                  key={item.mode}
-                  type="button"
-                  className={cn(
-                    'h-9 w-12 rounded-none border-2 text-sm font-black tabular-nums transition',
-                    mode === item.mode
-                      ? 'border-[#0a4550] bg-[#0a4550] text-[#f3e3cc]'
-                      : 'border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] hover:bg-[#0a4550] hover:text-[#f3e3cc]'
-                  )}
-                  title={`${item.label} 分钟`}
-                  aria-label={`${item.label} 分钟`}
-                  onClick={() => handleModeChange(item.mode)}
-                >
-                  {item.label}
-                </button>
-              ))}
+              {MODE_ITEMS.map((item) => {
+                const label = item.mode === 'focus' ? String(customFocusMinutes) : item.label
+                return (
+                  <button
+                    key={item.mode}
+                    type="button"
+                    className={cn(
+                      'h-9 w-12 rounded-none border-2 text-sm font-black tabular-nums transition',
+                      mode === item.mode
+                        ? 'border-[#0a4550] bg-[#0a4550] text-[#f3e3cc]'
+                        : 'border-[#0a4550] bg-[#f3e3cc] text-[#0a4550] hover:bg-[#0a4550] hover:text-[#f3e3cc]'
+                    )}
+                    title={`${label} 分钟`}
+                    aria-label={`${label} 分钟`}
+                    onClick={() => handleModeChange(item.mode)}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
             </div>
+
+            <label className="flex items-center gap-2 rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] px-3 py-2 text-[#0a4550]">
+              <span className="text-[10px] font-black tracking-[0.22em] uppercase">min</span>
+              <input
+                type="number"
+                min={MIN_FOCUS_MINUTES}
+                max={MAX_FOCUS_MINUTES}
+                step={1}
+                value={customFocusMinutes}
+                className="h-8 w-16 rounded-none border-2 border-[#0a4550] bg-[#f3e3cc] text-center text-base font-black tabular-nums outline-none focus:bg-[#0a4550] focus:text-[#f3e3cc]"
+                aria-label="自定义专注分钟数"
+                onChange={handleFocusMinutesChange}
+              />
+            </label>
 
             <div className="flex items-center gap-3">
               <Button
@@ -1459,6 +1600,17 @@ export function FocusCompanionPage() {
               >
                 <RotateCcw className="h-4 w-4" />
               </Button>
+            </div>
+
+            <div className={cn('w-full max-w-[15.5rem] p-3', RETRO_PANEL_CLASS)}>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-[10px] font-black tracking-[0.24em] uppercase">
+                  <Sprout className="h-4 w-4 text-[#c99a3e]" />
+                  grove
+                </div>
+                <div className="text-lg font-black tabular-nums">{saplings}</div>
+              </div>
+              <SaplingGarden count={saplings} compact />
             </div>
           </div>
 
@@ -1493,6 +1645,7 @@ export function FocusCompanionPage() {
             <MetricPill label="chat" value={String(talkCount)} tone="gold" />
             <MetricPill label="plan" value={String(plannerCount)} tone="green" />
             <MetricPill label="reply" value={String(replyCount)} tone="rose" />
+            <MetricPill label="grove" value={String(saplings)} tone="gold" />
 
             <div className={cn('mt-2 p-3', RETRO_PANEL_CLASS)}>
               <div className="mb-2 text-[10px] font-black tracking-[0.24em] text-[#c24d24] uppercase">
@@ -1521,9 +1674,17 @@ export function FocusCompanionPage() {
               <Moon className="h-3.5 w-3.5" />
               {MOOD_LINES[mood]}
             </div>
-              <div className="mt-1 max-w-[72ch] truncate text-lg font-black text-[#0a4550]">
+            <div className="mt-1 max-w-[72ch] truncate text-lg font-black text-[#0a4550]">
               {companionLine}
             </div>
+          </div>
+
+          <div className={cn('min-w-[15rem] px-4 py-3', RETRO_PANEL_CLASS)}>
+            <div className="mb-2 flex items-center gap-2 text-[10px] font-black tracking-[0.24em] text-[#0a4550] uppercase">
+              <Sprout className="h-3.5 w-3.5 text-[#c99a3e]" />
+              saplings
+            </div>
+            <SaplingGarden count={saplings} />
           </div>
 
           <div className="flex items-center gap-2 rounded-none border-4 border-[#0a4550] bg-[#f3e3cc] p-2 text-[#0a4550]">

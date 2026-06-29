@@ -56,7 +56,7 @@ function renderModelTestStatus(result: ModelTestResult | undefined, isTesting: b
 
   if (result.success) {
     const description = `测试通过：文本${result.visual_tested ? '、视觉' : ''}与工具调用正常${
-      result.latency_ms != null ? `，延迟 ${result.latency_ms}ms` : ''
+      result.latency_ms != null ? `，耗时 ${(result.latency_ms / 1000).toFixed(2)}s` : ''
     }`
     return (
       <Badge className="h-6 w-6 justify-center bg-green-600 p-0 hover:bg-green-700" title={description} aria-label={description}>

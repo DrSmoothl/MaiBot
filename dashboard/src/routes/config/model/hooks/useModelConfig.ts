@@ -13,8 +13,9 @@
  * - embedding 换模型警告单独收进 useEmbeddingWarning（usePendingOperation 包装），
  *   本 hook 通过 applyEmbeddingUpdate / detectChange 与其协调。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { ToastAction, type ToastActionElement } from '@/components/ui/toast'
 import {
   getModelConfig,
   getModelConfigCached,
@@ -111,6 +112,20 @@ export function useModelConfig() {
   // ---- 单模型能力测试 ----
   const [testingModels, setTestingModels] = useState<Set<string>>(new Set())
   const [modelTestResults, setModelTestResults] = useState<Map<string, ModelTestResult>>(new Map())
+  const [selectedModelTestResult, setSelectedModelTestResult] = useState<ModelTestResult | null>(null)
+
+  const buildModelTestDetailAction = useCallback(
+    (testResult: ModelTestResult): ToastActionElement =>
+      createElement(
+        ToastAction,
+        {
+          altText: '查看模型测试详情',
+          onClick: () => setSelectedModelTestResult(testResult),
+        },
+        '详情'
+      ) as unknown as ToastActionElement,
+    []
+  )
 
   // ---- 提供商删除级联确认 ----
   const [deleteConfirmState, setDeleteConfirmState] = useState<DeleteConfirmState>({
@@ -928,13 +943,17 @@ export function useModelConfig() {
         if (testResult.success) {
           toast({
             title: '模型测试通过',
-            description: `${modelName} 已完成文本${testResult.visual_tested ? '、视觉' : ''}与工具调用测试 (${testResult.latency_ms}ms)`,
+            description: `${modelName} 已完成文本${testResult.visual_tested ? '、视觉' : ''}与工具调用测试 (${testResult.latency_ms != null ? `${(testResult.latency_ms / 1000).toFixed(2)}s` : '-'})`,
+            duration: 8000,
+            action: buildModelTestDetailAction(testResult),
           })
         } else {
           toast({
             title: testResult.tool_call_ok ? '模型响应异常' : '工具调用未通过',
             description: testResult.error || `${modelName} 未通过模型能力测试`,
             variant: 'destructive',
+            duration: 10000,
+            action: buildModelTestDetailAction(testResult),
           })
         }
       } catch (error) {
@@ -951,7 +970,7 @@ export function useModelConfig() {
         })
       }
     },
-    [toast]
+    [buildModelTestDetailAction, toast]
   )
 
   // ---- 模型批量选择 ----
@@ -1141,6 +1160,8 @@ export function useModelConfig() {
     handleTestAllProviderConnections,
     testingModels,
     modelTestResults,
+    selectedModelTestResult,
+    setSelectedModelTestResult,
     handleTestModelCapability,
     // 模型批量
     selectedModels,

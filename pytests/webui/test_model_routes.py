@@ -5,7 +5,10 @@
 """
 
 import importlib
+import base64
+import struct
 import sys
+import zlib
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -251,3 +254,25 @@ visual = true
     assert result.total_tokens == 15
     assert captured["model_name"] == "vision-model"
     assert captured["tools"][0]["name"] == model_routes.MODEL_TEST_TOOL_NAME
+
+
+def test_model_test_image_base64_is_valid_png(monkeypatch: pytest.MonkeyPatch) -> None:
+    """内置视觉测试图应是可被服务商正常解析的有效 PNG。"""
+    model_routes = load_model_routes(monkeypatch)
+    image_bytes = base64.b64decode(model_routes.MODEL_TEST_IMAGE_BASE64)
+
+    assert image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+
+    position = 8
+    chunk_types: list[bytes] = []
+    while position < len(image_bytes):
+        chunk_length = struct.unpack(">I", image_bytes[position : position + 4])[0]
+        chunk_type = image_bytes[position + 4 : position + 8]
+        chunk_data = image_bytes[position + 8 : position + 8 + chunk_length]
+        chunk_crc = struct.unpack(">I", image_bytes[position + 8 + chunk_length : position + 12 + chunk_length])[0]
+
+        assert chunk_crc == zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF
+        chunk_types.append(chunk_type)
+        position += 12 + chunk_length
+
+    assert chunk_types == [b"IHDR", b"IDAT", b"IEND"]
