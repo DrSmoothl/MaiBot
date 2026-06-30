@@ -7216,8 +7216,7 @@ class SDKMemoryKernel:
             return True
 
         metadata = coerce_metadata_dict(paragraph.get("metadata"))
-        paragraph_chat_id = str(metadata.get("chat_id", "") or "").strip()
-        if paragraph_chat_id and paragraph_chat_id in allowed_chat_ids:
+        if cls._metadata_chat_scope_ids(metadata) & allowed_chat_ids:
             return True
 
         source = str(paragraph.get("source", "") or metadata.get("source", "") or "").strip()
@@ -7230,9 +7229,9 @@ class SDKMemoryKernel:
 
         metadata = coerce_metadata_dict(hit.get("metadata"))
         hit_type = str(hit.get("type", "") or "").strip()
-        metadata_chat_id = str(metadata.get("chat_id", "") or "").strip()
-        if metadata_chat_id:
-            return metadata_chat_id in allowed_chat_ids
+        metadata_chat_ids = cls._metadata_chat_scope_ids(metadata)
+        if metadata_chat_ids:
+            return bool(metadata_chat_ids & allowed_chat_ids)
 
         source = str(metadata.get("source", "") or hit.get("source", "") or "").strip()
         chat_sources = {str(cls._chat_source(allowed_chat_id) or "") for allowed_chat_id in allowed_chat_ids}
@@ -7241,6 +7240,24 @@ class SDKMemoryKernel:
         if source.startswith("chat_summary:"):
             return source in chat_sources
         return None
+
+    @staticmethod
+    def _extend_chat_scope_ids(tokens: set[str], value: Any) -> None:
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                SDKMemoryKernel._extend_chat_scope_ids(tokens, item)
+            return
+
+        token = str(value or "").strip()
+        if token:
+            tokens.add(token)
+
+    @classmethod
+    def _metadata_chat_scope_ids(cls, metadata: Dict[str, Any]) -> set[str]:
+        tokens: set[str] = set()
+        for key in ("chat_id", "session_id", "stream_id", "chat_ids", "session_ids", "stream_ids"):
+            cls._extend_chat_scope_ids(tokens, metadata.get(key))
+        return tokens
 
     def _filter_hits_by_chat_scope(
         self,

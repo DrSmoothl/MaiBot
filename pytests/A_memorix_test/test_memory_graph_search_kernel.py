@@ -102,6 +102,10 @@ class _ScopedSearchMetadataStore:
     def get_paragraph_stale_relation_marks_batch(self, paragraph_hashes: list[str]) -> dict[str, list[dict[str, Any]]]:
         return {str(paragraph_hash): [] for paragraph_hash in paragraph_hashes}
 
+    def list_fuzzy_modify_plans(self, **kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return []
+
 
 class _RetrievalTypeFilterMetadataStore(_ScopedSearchMetadataStore):
     def __init__(self) -> None:
@@ -422,6 +426,43 @@ def test_retrieval_type_filter_is_disabled_by_default() -> None:
     ]
 
     assert kernel._filter_hits_by_retrieval_type_scope(hits) == hits
+
+
+def test_chat_scope_filter_accepts_chat_ids_metadata() -> None:
+    kernel = _build_retrieval_filter_kernel(config={})
+    hits = [
+        {
+            "type": "paragraph",
+            "hash": "para-rebound",
+            "content": "重复导入后绑定到当前聊天流的段落。",
+            "metadata": {"chat_ids": ["session-current"]},
+        },
+        {
+            "type": "relation",
+            "hash": "rel-rebound",
+            "content": "Alice 持有 地图",
+            "metadata": {},
+        },
+    ]
+    kernel.metadata_store.paragraphs["para-rebound"] = {
+        "hash": "para-rebound",
+        "content": "重复导入后绑定到当前聊天流的段落。",
+        "source": "web_import:demo.txt",
+        "metadata": {"chat_ids": ["session-current"]},
+    }
+    kernel.metadata_store.paragraphs["para-rebound-relation"] = {
+        "hash": "para-rebound-relation",
+        "content": "重复导入后绑定到当前聊天流的关系支撑段落。",
+        "source": "web_import:demo.txt",
+        "metadata": {"chat_ids": ["session-current"]},
+    }
+    kernel.metadata_store.relation_paragraphs["rel-rebound"] = [
+        kernel.metadata_store.paragraphs["para-rebound-relation"]
+    ]
+
+    filtered = kernel._filter_hits_by_chat_scope(hits, chat_id="session-current")
+
+    assert [item["hash"] for item in filtered] == ["para-rebound", "rel-rebound"]
 
 
 def test_retrieval_type_filter_requires_enabled_flag() -> None:

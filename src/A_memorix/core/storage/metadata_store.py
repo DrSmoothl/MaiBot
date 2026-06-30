@@ -2494,6 +2494,8 @@ class MetadataStore:
             return hash_value
         except sqlite3.IntegrityError:
             logger.debug(f"段落已存在: {hash_value[:16]}...")
+            if metadata:
+                self._merge_existing_paragraph_metadata(hash_value, metadata)
             # 尝试复活
             self.revive_if_deleted(paragraph_hashes=[hash_value])
             return hash_value
@@ -3866,6 +3868,91 @@ class MetadataStore:
                 merged[key] = value
         return merged
 
+    @staticmethod
+    def _append_metadata_tokens(tokens: List[str], value: Any) -> None:
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                MetadataStore._append_metadata_tokens(tokens, item)
+            return
+
+        token = str(value or "").strip()
+        if token and token not in tokens:
+            tokens.append(token)
+
+    @classmethod
+    def _merge_metadata_binding_ids(
+        cls,
+        merged: Dict[str, Any],
+        base: Dict[str, Any],
+        patch: Dict[str, Any],
+        scalar_key: str,
+        list_key: str,
+    ) -> None:
+        tokens: List[str] = []
+        for metadata in (base, patch):
+            cls._append_metadata_tokens(tokens, metadata.get(scalar_key))
+            cls._append_metadata_tokens(tokens, metadata.get(list_key))
+
+        if not tokens:
+            return
+
+        preferred_scalar = str(patch.get(scalar_key) or merged.get(scalar_key) or base.get(scalar_key) or tokens[0]).strip()
+        merged[scalar_key] = preferred_scalar
+        merged[list_key] = tokens
+
+    @classmethod
+    def _merge_paragraph_metadata(cls, base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+        merged = cls._deep_merge_dict(base, patch)
+        for scalar_key, list_key in (
+            ("chat_id", "chat_ids"),
+            ("session_id", "session_ids"),
+            ("stream_id", "stream_ids"),
+        ):
+            cls._merge_metadata_binding_ids(merged, base, patch, scalar_key, list_key)
+        return merged
+
+    def _merge_existing_paragraph_metadata(
+        self,
+        paragraph_hash: str,
+        metadata_patch: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(metadata_patch, dict):
+            raise TypeError("metadata_patch 必须是 dict")
+
+        cursor = self._conn.cursor()
+        cursor.execute(
+            """
+            SELECT metadata
+            FROM paragraphs
+            WHERE hash = ?
+            LIMIT 1
+            """,
+            (paragraph_hash,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+
+        metadata = self._decode_metadata(row["metadata"])
+        updated = self._merge_paragraph_metadata(metadata, metadata_patch)
+        if updated == metadata:
+            return metadata
+
+        cursor.execute(
+            """
+            UPDATE paragraphs
+            SET metadata = ?, updated_at = ?
+            WHERE hash = ?
+            """,
+            (pickle.dumps(updated), datetime.now().timestamp(), paragraph_hash),
+        )
+        self._conn.commit()
+        self._enqueue_episode_source_rebuilds(
+            self._get_sources_for_paragraph_hashes([paragraph_hash], include_deleted=True),
+            reason="paragraph_metadata_merged",
+        )
+        return updated
+
     def list_external_memory_refs_by_paragraphs(self, paragraph_hashes: List[str]) -> List[Dict[str, Any]]:
         hashes = [str(item or "").strip() for item in (paragraph_hashes or []) if str(item or "").strip()]
         if not hashes:
@@ -4297,7 +4384,7 @@ class MetadataStore:
             return None
 
         metadata = self._decode_metadata(row["metadata"])
-        updated = self._deep_merge_dict(metadata, patch) if merge else dict(patch)
+        updated = self._merge_paragraph_metadata(metadata, patch) if merge else dict(patch)
         cursor.execute(
             """
             UPDATE paragraphs
