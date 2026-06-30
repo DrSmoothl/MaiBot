@@ -7708,6 +7708,7 @@ class MetadataStore:
                 status = 'pending',
                 reason = excluded.reason,
                 source_query_tool_id = excluded.source_query_tool_id,
+                retry_count = 0,
                 last_error = NULL,
                 requested_at = excluded.requested_at,
                 updated_at = excluded.updated_at
@@ -7728,20 +7729,25 @@ class MetadataStore:
         *,
         limit: int = 20,
         max_retry: int = 3,
+        debounce_seconds: float = 0.0,
+        retry_backoff_seconds: float = 0.0,
     ) -> List[Dict[str, Any]]:
         safe_limit = max(1, int(limit))
         safe_retry = max(0, int(max_retry))
+        now = datetime.now().timestamp()
+        pending_ready_before = now - max(0.0, float(debounce_seconds or 0.0))
+        failed_ready_before = now - max(0.0, float(retry_backoff_seconds or 0.0))
         cursor = self._conn.cursor()
         cursor.execute(
             """
             SELECT person_id, status, reason, source_query_tool_id, retry_count, last_error, requested_at, updated_at
             FROM person_profile_refresh_queue
-            WHERE status = 'pending'
-               OR (status = 'failed' AND retry_count < ?)
+            WHERE (status = 'pending' AND requested_at <= ?)
+               OR (status = 'failed' AND retry_count < ? AND updated_at <= ?)
             ORDER BY requested_at ASC, updated_at ASC
             LIMIT ?
             """,
-            (safe_retry, safe_limit),
+            (pending_ready_before, safe_retry, failed_ready_before, safe_limit),
         )
         return [
             item

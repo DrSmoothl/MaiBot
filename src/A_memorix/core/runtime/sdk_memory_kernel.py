@@ -235,7 +235,22 @@ class SDKMemoryKernel:
 
     def _cfg(self, key: str, default: Any = None) -> Any:
         current: Any = self.config
-        if key in {"storage", "embedding", "retrieval", "graph", "episode", "web", "advanced", "threshold", "summarization"} and isinstance(current, dict):
+        if (
+            key
+            in {
+                "storage",
+                "embedding",
+                "retrieval",
+                "graph",
+                "episode",
+                "web",
+                "advanced",
+                "threshold",
+                "summarization",
+                "person_profile",
+            }
+            and isinstance(current, dict)
+        ):
             return current.get(key, default)
         for part in key.split("."):
             if isinstance(current, dict) and part in current:
@@ -2258,9 +2273,10 @@ class SDKMemoryKernel:
             if not paragraph_hash:
                 raise RuntimeError("聊天摘要导入成功但未返回 paragraph_hash，无法执行 Episode 增量入队")
             assert self.metadata_store is not None
-            self.metadata_store.enqueue_episode_pending(paragraph_hash, source=source)
+            if self._should_auto_enqueue_episode(source_type="chat_summary"):
+                self.metadata_store.enqueue_episode_pending(paragraph_hash, source=source)
+                episode_pending_ids.append(paragraph_hash)
             stored_ids.append(paragraph_hash)
-            episode_pending_ids.append(paragraph_hash)
             self._persist()
         payload = {"success": success, "detail": detail}
         if stored_ids:
@@ -2446,15 +2462,12 @@ class SDKMemoryKernel:
             source_type=source_type,
             metadata={"chat_id": chat_id, "person_ids": person_tokens},
         )
-        self.metadata_store.enqueue_episode_pending(paragraph_hash, source=source)
+        if self._should_auto_enqueue_episode(source_type=source_type):
+            self.metadata_store.enqueue_episode_pending(paragraph_hash, source=source)
         self._persist()
-        await self.process_episode_pending_batch(
-            limit=max(1, int(self._cfg("episode.pending_batch_size", 50))),
-            max_retry=max(1, int(self._cfg("episode.pending_max_retry", 3))),
-        )
         for person_id in person_tokens:
             self._mark_person_active(person_id)
-            await self.refresh_person_profile(person_id)
+            self._enqueue_person_profile_refresh(person_id, reason=str(source_type or "ingest_text"))
         payload = {"stored_ids": [paragraph_hash, *stored_relations], "skipped_ids": []}
         if warnings:
             payload["warnings"] = warnings
@@ -3849,6 +3862,7 @@ class SDKMemoryKernel:
             self._ensure_background_task("paragraph_vector_backfill", self._paragraph_vector_backfill_loop)
             self._ensure_background_task("memory_maintenance", self._memory_maintenance_loop)
             self._ensure_background_task("person_profile_refresh", self._person_profile_refresh_loop)
+            self._ensure_background_task("person_profile_refresh_queue", self._person_profile_refresh_queue_loop)
             self._ensure_background_task("feedback_correction", self._feedback_correction_loop)
             self._ensure_background_task("feedback_correction_reconcile", self._feedback_correction_reconcile_loop)
             if self._should_start_dual_vector_auto_migration():
@@ -4123,6 +4137,8 @@ class SDKMemoryKernel:
                 ][:max_refresh]
                 for person_id in candidates:
                     try:
+                        if self._has_pending_person_profile_refresh(person_id):
+                            continue
                         await self.refresh_person_profile(person_id, limit=max(4, int(self._cfg("person_profile.top_k_evidence", 12) or 12)), mark_active=False)
                     except Exception as exc:
                         logger.warning(f"刷新人物画像失败: {exc}")
@@ -4130,6 +4146,22 @@ class SDKMemoryKernel:
             raise
         except Exception as exc:
             logger.warning(f"person_profile_refresh loop 异常: {exc}")
+
+    async def _person_profile_refresh_queue_loop(self) -> None:
+        try:
+            while not self._background_stopping:
+                await asyncio.sleep(self._person_profile_refresh_queue_interval_seconds())
+                if self._background_stopping:
+                    break
+                if not bool(self._cfg("person_profile.enabled", True)):
+                    continue
+                await self._process_person_profile_refresh_queue_batch(
+                    limit=self._person_profile_refresh_queue_batch_size()
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(f"person_profile_refresh_queue loop 异常: {exc}")
 
     @staticmethod
     def _relation_status_is_inactive(status: Optional[Dict[str, Any]]) -> bool:
@@ -4762,13 +4794,22 @@ class SDKMemoryKernel:
                 "task": self._build_feedback_task_detail(final_task or running_task),
             }
 
-    async def _process_feedback_profile_refresh_batch(self, *, limit: int) -> Dict[str, Any]:
+    async def _process_feedback_profile_refresh_batch(
+        self,
+        *,
+        limit: int,
+        debounce_seconds: float = 0.0,
+        retry_backoff_seconds: float = 0.0,
+        max_retry: Optional[int] = None,
+    ) -> Dict[str, Any]:
         if self.metadata_store is None or self.person_profile_service is None:
             return {"processed": 0, "refreshed": 0, "failed": 0, "items": [], "failures": []}
 
         rows = self.metadata_store.fetch_person_profile_refresh_batch(
             limit=max(1, int(limit or 1)),
-            max_retry=max(1, int(self._cfg("person_profile.max_retry", 3) or 3)),
+            max_retry=self._person_profile_refresh_max_retry() if max_retry is None else max(0, int(max_retry)),
+            debounce_seconds=max(0.0, float(debounce_seconds or 0.0)),
+            retry_backoff_seconds=max(0.0, float(retry_backoff_seconds or 0.0)),
         )
         items: List[Dict[str, Any]] = []
         failures: List[Dict[str, Any]] = []
@@ -4855,7 +4896,7 @@ class SDKMemoryKernel:
                     continue
                 batch_size = self._feedback_cfg_reconcile_batch_size()
                 if self._feedback_cfg_profile_refresh_enabled():
-                    await self._process_feedback_profile_refresh_batch(limit=batch_size)
+                    await self._process_person_profile_refresh_queue_batch(limit=batch_size)
                 if self._feedback_cfg_episode_rebuild_enabled():
                     await self._process_feedback_episode_rebuild_batch(limit=batch_size)
         except asyncio.CancelledError:
@@ -5017,6 +5058,59 @@ class SDKMemoryKernel:
     def _feedback_cfg_reconcile_batch_size() -> int:
         memory_cfg = global_config.a_memorix.integration
         return max(1, int(getattr(memory_cfg, "feedback_correction_reconcile_batch_size", 20) or 20))
+
+    def _should_auto_enqueue_episode(self, *, source_type: str) -> bool:
+        if not bool(self._cfg("episode.enabled", True)):
+            return False
+        if not bool(self._cfg("episode.generation_enabled", True)):
+            return False
+
+        normalized_source_type = str(source_type or "").strip().lower()
+        disabled_types = {
+            str(item or "").strip().lower()
+            for item in self._argument_tokens(self._cfg("episode.disabled_source_types", ["person_fact"]))
+        }
+        return normalized_source_type not in disabled_types
+
+    def _person_profile_refresh_queue_interval_seconds(self) -> float:
+        return max(1.0, float(self._cfg("person_profile.refresh_queue_interval_seconds", 60) or 60))
+
+    def _person_profile_refresh_queue_batch_size(self) -> int:
+        return max(1, int(self._cfg("person_profile.refresh_queue_batch_size", 10) or 10))
+
+    def _person_profile_refresh_debounce_seconds(self) -> float:
+        return max(0.0, float(self._cfg("person_profile.refresh_debounce_seconds", 120) or 0))
+
+    def _person_profile_refresh_retry_backoff_seconds(self) -> float:
+        return max(0.0, float(self._cfg("person_profile.refresh_retry_backoff_seconds", 300) or 0))
+
+    def _person_profile_refresh_max_retry(self) -> int:
+        return max(0, int(self._cfg("person_profile.max_retry", 3) or 0))
+
+    def _enqueue_person_profile_refresh(self, person_id: str, *, reason: str = "") -> bool:
+        if self.metadata_store is None or not bool(self._cfg("person_profile.enabled", True)):
+            return False
+        payload = self.metadata_store.enqueue_person_profile_refresh(
+            person_id=person_id,
+            reason=str(reason or "").strip() or "memory_ingest",
+        )
+        return isinstance(payload, dict)
+
+    def _has_pending_person_profile_refresh(self, person_id: str) -> bool:
+        if self.metadata_store is None:
+            return False
+        request = self.metadata_store.get_person_profile_refresh_request(person_id)
+        if not isinstance(request, dict):
+            return False
+        return str(request.get("status", "") or "").strip().lower() in {"pending", "running", "failed"}
+
+    async def _process_person_profile_refresh_queue_batch(self, *, limit: int) -> Dict[str, Any]:
+        return await self._process_feedback_profile_refresh_batch(
+            limit=limit,
+            debounce_seconds=self._person_profile_refresh_debounce_seconds(),
+            retry_backoff_seconds=self._person_profile_refresh_retry_backoff_seconds(),
+            max_retry=self._person_profile_refresh_max_retry(),
+        )
 
     @classmethod
     def _feedback_cfg_window_label(cls) -> str:
