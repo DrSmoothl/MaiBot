@@ -14,9 +14,10 @@ import {
   Settings,
   SlidersHorizontal,
   Sun,
+  TimerReset,
 } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
-import { type ComponentType, useEffect, useState } from 'react'
+import { type ComponentType, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { BackgroundLayer } from '@/components/background-layer'
@@ -49,6 +50,8 @@ const LANGUAGE_NAMES: Record<(typeof LANGUAGE_CODES)[number], string> = {
   ja: '日本語',
   ko: '한국어',
 }
+const LOG_WORKSPACE_COMPACT_GAP = 12
+const LOG_WORKSPACE_EXPAND_GAP = 96
 
 const WORKSPACE_TABS: Array<{
   value: WorkspaceMode
@@ -95,6 +98,10 @@ export function Header({
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const [backendManagerOpen, setBackendManagerOpen] = useState(false)
   const [activeBackendName, setActiveBackendName] = useState<string>('')
+  const [workspaceTabsCompact, setWorkspaceTabsCompact] = useState(false)
+  const workspaceTabsCompactRef = useRef(false)
+  const workspaceTabsRef = useRef<HTMLDivElement | null>(null)
+  const workspaceTabsMeasureRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!isElectron()) return
@@ -102,6 +109,74 @@ export function Header({
       setActiveBackendName(b?.name ?? t('header.notConnected'))
     })
   }, [t])
+
+  useEffect(() => {
+    workspaceTabsCompactRef.current = workspaceTabsCompact
+  }, [workspaceTabsCompact])
+
+  useEffect(() => {
+    if (workspaceMode !== 'logs') {
+      const resetFrameId = requestAnimationFrame(() => setWorkspaceTabsCompact(false))
+      return () => cancelAnimationFrame(resetFrameId)
+    }
+
+    let frameId = 0
+    const updateCompactState = () => {
+      cancelAnimationFrame(frameId)
+      frameId = requestAnimationFrame(() => {
+        const logSwitcher = document.querySelector('[data-log-viewer-switcher="true"]')
+        const workspaceTabs = workspaceTabsRef.current
+        const workspaceTabsMeasure = workspaceTabsMeasureRef.current
+        if (
+          !(logSwitcher instanceof HTMLElement) ||
+          !workspaceTabs ||
+          !workspaceTabsMeasure
+        ) {
+          setWorkspaceTabsCompact(false)
+          return
+        }
+
+        const logSwitcherVisible = window.getComputedStyle(logSwitcher).display !== 'none'
+        const logSwitcherCompact = logSwitcher.dataset.logViewerSwitcherCompact === 'true'
+        if (!logSwitcherVisible || !logSwitcherCompact) {
+          setWorkspaceTabsCompact(false)
+          return
+        }
+
+        const logSwitcherRect = logSwitcher.getBoundingClientRect()
+        const workspaceTabsRect = workspaceTabs.getBoundingClientRect()
+        const workspaceTabsMeasureRect = workspaceTabsMeasure.getBoundingClientRect()
+        const fullWorkspaceTabsLeft = workspaceTabsRect.right - workspaceTabsMeasureRect.width
+        const gap = fullWorkspaceTabsLeft - logSwitcherRect.right
+        const threshold = workspaceTabsCompactRef.current
+          ? LOG_WORKSPACE_EXPAND_GAP
+          : LOG_WORKSPACE_COMPACT_GAP
+        setWorkspaceTabsCompact(gap < threshold)
+      })
+    }
+
+    updateCompactState()
+    window.addEventListener('resize', updateCompactState)
+
+    const resizeObserver = new ResizeObserver(updateCompactState)
+    resizeObserver.observe(document.body)
+    if (workspaceTabsRef.current) {
+      resizeObserver.observe(workspaceTabsRef.current)
+    }
+    if (workspaceTabsMeasureRef.current) {
+      resizeObserver.observe(workspaceTabsMeasureRef.current)
+    }
+    const logSwitcher = document.querySelector('[data-log-viewer-switcher="true"]')
+    if (logSwitcher instanceof HTMLElement) {
+      resizeObserver.observe(logSwitcher)
+    }
+
+    return () => {
+      cancelAnimationFrame(frameId)
+      window.removeEventListener('resize', updateCompactState)
+      resizeObserver.disconnect()
+    }
+  }, [workspaceMode])
 
   const handleLogout = async () => {
     await logout()
@@ -170,6 +245,14 @@ export function Header({
       )}
       <div className={cn(topbarCollapsed ? 'hidden' : 'contents')}>
         <div className="relative z-10 flex h-full min-h-0 items-center justify-between gap-2">
+          <div
+            id="log-viewer-topbar-tabs"
+            className={cn(
+              'absolute top-1/2 left-0 hidden min-w-0 shrink-0 -translate-y-1/2 items-center',
+              workspaceMode === 'logs' && 'sm:flex'
+            )}
+          />
+
           <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-4">
             {/* 移动端菜单按钮 */}
             <button
@@ -211,8 +294,27 @@ export function Header({
           <div className="flex min-w-0 flex-1 items-center justify-end gap-1 sm:gap-2">
             {/* 工作区切换：复用 Tabs 组件 + Motion 动画指示器 */}
             <LayoutGroup id="workspace-switcher">
+              <div
+                ref={workspaceTabsMeasureRef}
+                data-dashboard-workspace-tabs-measure="true"
+                aria-hidden="true"
+                className="pointer-events-none invisible absolute top-0 left-0 inline-flex h-9 items-center justify-center gap-0.5 rounded-lg border p-1"
+              >
+                {WORKSPACE_TABS.map(({ value, icon: Icon, labelKey }) => (
+                  <div
+                    key={value}
+                    className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap"
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span className="font-sans text-base font-semibold tracking-wider uppercase">
+                      {t(labelKey)}
+                    </span>
+                  </div>
+                ))}
+              </div>
               <Tabs value={workspaceMode} aria-label={t('workspace.switcherLabel')}>
                 <TabsList
+                  ref={workspaceTabsRef}
                   data-dashboard-workspace-tabs="true"
                   className="relative h-9 gap-0.5 border bg-transparent p-1 shadow-sm"
                 >
@@ -221,7 +323,10 @@ export function Header({
                       key={value}
                       asChild
                       value={value}
-                      className="data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent px-2.5 text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                      className={cn(
+                        'data-[state=active]:text-primary-foreground relative h-7 gap-1.5 bg-transparent text-sm font-medium data-[state=active]:bg-transparent data-[state=active]:shadow-none',
+                        workspaceTabsCompact ? 'px-2' : 'px-2.5'
+                      )}
                     >
                       <Link to={to}>
                         {workspaceMode === value && (
@@ -232,7 +337,12 @@ export function Header({
                           />
                         )}
                         <Icon className="h-3.5 w-3.5" />
-                        <span className="hidden font-sans text-base font-semibold tracking-wider uppercase sm:inline">
+                        <span
+                          className={cn(
+                            'hidden font-sans text-base font-semibold tracking-wider uppercase',
+                            !workspaceTabsCompact && 'sm:inline'
+                          )}
+                        >
                           {t(labelKey)}
                         </span>
                       </Link>
@@ -243,6 +353,18 @@ export function Header({
             </LayoutGroup>
 
             <div className="bg-border hidden h-6 w-px sm:block" />
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className={cn(pathname === '/focus' && 'bg-accent text-accent-foreground')}
+              title={t('sidebar.menu.focusCompanion')}
+              aria-label={t('sidebar.menu.focusCompanion')}
+            >
+              <Link to="/focus">
+                <TimerReset className="h-4 w-4" />
+              </Link>
+            </Button>
             <Button
               asChild
               variant="ghost"
@@ -414,6 +536,12 @@ export function Header({
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem asChild className="cursor-pointer gap-2">
+                  <Link to="/focus">
+                    <TimerReset className="h-4 w-4" />
+                    {t('sidebar.menu.focusCompanion')}
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} className="cursor-pointer gap-2">
                   <LogOut className="h-4 w-4" />
                   {t('header.logoutLabel')}

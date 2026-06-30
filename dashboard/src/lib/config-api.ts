@@ -306,6 +306,33 @@ export interface TestConnectionResult {
 }
 
 /**
+ * 单个模型测试返回的工具调用摘要
+ */
+export interface ModelTestToolCall {
+  id: string
+  name: string
+  arguments: Record<string, unknown>
+}
+
+/**
+ * 单个模型测试结果
+ */
+export interface ModelTestResult {
+  success: boolean
+  model_name: string
+  visual_tested: boolean
+  tool_call_ok: boolean
+  response: string
+  reasoning: string
+  tool_calls: ModelTestToolCall[]
+  latency_ms: number | null
+  error: string | null
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+/**
  * 测试提供商连接状态（通过提供商名称）
  * @param providerName 提供商名称
  */
@@ -315,5 +342,16 @@ export async function testProviderConnection(
   return backendApi.post<TestConnectionResult>('/api/webui/models/test-connection-by-name', {
     query: { provider_name: providerName },
     errorMessage: '测试提供商连接失败',
+  })
+}
+
+/**
+ * 测试单个模型的文本、tool call 与可选视觉能力
+ * @param modelName 模型名称
+ */
+export async function testModelCapability(modelName: string): Promise<ModelTestResult> {
+  return backendApi.post<ModelTestResult>('/api/webui/models/test-model', {
+    body: { model_name: modelName },
+    errorMessage: '测试模型能力失败',
   })
 }

@@ -1,12 +1,12 @@
 ﻿"""Maisaka 非 CLI 运行时。"""
 
-import asyncio
-import json
-import time
 from collections import deque
 from datetime import datetime
 from math import ceil
 from typing import Any, Literal, Optional, Sequence
+import asyncio
+import json
+import time
 
 from src.chat.heart_flow.heartFC_utils import CycleDetail
 from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
@@ -70,6 +70,10 @@ logger = get_logger("maisaka_runtime")
 MAX_INTERNAL_ROUNDS = 10
 MAX_RETAINED_MESSAGE_CACHE_SIZE = 200
 CONTEXT_RESTORE_FILL_RATIO = 0.5
+CONTEXT_RESTORE_SHORT_RESTART_SECONDS = 5 * 60
+CONTEXT_RESTORE_SHORT_OFFLINE_SECONDS = 30 * 60
+CONTEXT_RESTORE_LONG_SLEEP_SECONDS = 6 * 60 * 60
+CONTEXT_RESTORE_DAY_SECONDS = 24 * 60 * 60
 EXTERNAL_MESSAGE_INTERVAL_SAMPLE_WINDOW_SECONDS = 1800.0
 # 低于该间隔的相邻外部消息视为同一阵「连发」抖动，不计入平均消息间隔统计，
 # 避免连发把平均间隔严重拉低、令空窗补偿过早触发。
@@ -340,6 +344,12 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return
 
         self._chat_history.extend(restored_history)
+        restore_reference_message = self._build_context_restore_reference_message(
+            restored_history,
+            now=datetime.now(),
+        )
+        if restore_reference_message is not None:
+            self._chat_history.append(restore_reference_message)
         self.message_cache = restored_user_messages[-MAX_RETAINED_MESSAGE_CACHE_SIZE:]
         self._last_processed_index = len(self.message_cache)
         logger.info(
@@ -351,6 +361,78 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         """返回启动时最多回灌的真实消息数量。"""
 
         return max(1, ceil(self._max_context_size * CONTEXT_RESTORE_FILL_RATIO))
+
+    @staticmethod
+    def _build_context_restore_reference_message(
+        restored_history: Sequence[LLMContextMessage],
+        *,
+        now: datetime,
+    ) -> ReferenceMessage | None:
+        """构造启动上下文恢复提示，帮助模型理解离线间隔。"""
+
+        if not restored_history:
+            return None
+
+        last_context_time = restored_history[-1].timestamp
+        elapsed_seconds = max(0.0, (now - last_context_time).total_seconds())
+        elapsed_text = MaisakaHeartFlowChatting._format_context_restore_elapsed(elapsed_seconds)
+        wakeup_text = MaisakaHeartFlowChatting._build_context_restore_wakeup_text(elapsed_seconds, elapsed_text)
+        content = (
+            "这是启动时恢复的历史上下文提醒，不代表当前用户刚刚发来新消息。\n"
+            f"距离上次关机前最后一条可恢复聊天记录已经过去 {elapsed_text}。\n"
+            f"{wakeup_text}\n"
+            "前面恢复出来的历史消息是你上次关机前记得的聊天内容；"
+            "回复时请结合实际间隔，短间隔自然续聊，长间隔可以表现出刚醒来或重新上线后的状态。"
+        )
+        return ReferenceMessage(
+            content=content,
+            timestamp=now,
+            reference_type=ReferenceMessageType.CONTEXT_RESTORE,
+            remaining_uses_value=None,
+            display_prefix="[上下文恢复]",
+        )
+
+    @staticmethod
+    def _format_context_restore_elapsed(elapsed_seconds: float) -> str:
+        """将上下文恢复间隔格式化为适合 Prompt 阅读的中文时间。"""
+
+        total_seconds = max(0, int(elapsed_seconds))
+        if total_seconds < 60:
+            return "不到 1 分钟"
+
+        total_minutes = total_seconds // 60
+        if total_minutes < 60:
+            seconds = total_seconds % 60
+            if seconds == 0:
+                return f"{total_minutes} 分钟"
+            return f"{total_minutes} 分 {seconds} 秒"
+
+        total_hours = total_minutes // 60
+        minutes = total_minutes % 60
+        if total_hours < 24:
+            if minutes == 0:
+                return f"{total_hours} 小时"
+            return f"{total_hours} 小时 {minutes} 分钟"
+
+        days = total_hours // 24
+        hours = total_hours % 24
+        if hours == 0:
+            return f"{days} 天"
+        return f"{days} 天 {hours} 小时"
+
+    @staticmethod
+    def _build_context_restore_wakeup_text(elapsed_seconds: float, elapsed_text: str) -> str:
+        """根据离线间隔生成不同强度的恢复描述。"""
+
+        if elapsed_seconds < CONTEXT_RESTORE_SHORT_RESTART_SECONDS:
+            return "你只是短暂重启了一下，几乎没有明显中断，可以自然接上刚才的话题。"
+        if elapsed_seconds < CONTEXT_RESTORE_SHORT_OFFLINE_SECONDS:
+            return f"你短暂离线了 {elapsed_text}，仍然清楚记得刚才的聊天内容。"
+        if elapsed_seconds < CONTEXT_RESTORE_LONG_SLEEP_SECONDS:
+            return f"你离线休息了 {elapsed_text}，醒来后仍记得上次关机前的聊天内容。"
+        if elapsed_seconds < CONTEXT_RESTORE_DAY_SECONDS:
+            return f"你沉睡了 {elapsed_text}，重新上线后仍记得上次关机前的聊天内容。"
+        return f"你已经离线了 {elapsed_text}，像沉睡了一段时间；恢复后仍记得上次关机前的聊天内容。"
 
     @staticmethod
     def _resolve_restored_message_source_kind(message: SessionMessage) -> str:
