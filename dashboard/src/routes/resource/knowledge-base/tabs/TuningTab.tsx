@@ -3,6 +3,7 @@ import { Sparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { CodeEditor } from '@/components/CodeEditor'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,6 +28,8 @@ export function TuningTab({ tuning }: TuningTabProps) {
     setTuningSampleSize,
     tuningTopKEval,
     setTuningTopKEval,
+    persistBestProfile,
+    setPersistBestProfile,
     submitTuningTask,
     creatingTuning,
     tuningProfile,
@@ -97,6 +100,17 @@ export function TuningTab({ tuning }: TuningTabProps) {
                 </div>
               </div>
             </div>
+            <div className="flex items-start gap-3 rounded-lg border bg-muted/20 p-4">
+              <Checkbox
+                id="persist-best-profile"
+                checked={persistBestProfile}
+                onCheckedChange={(checked) => setPersistBestProfile(checked === true)}
+              />
+              <div className="space-y-1">
+                <Label htmlFor="persist-best-profile">同时写入配置文件</Label>
+                <div className="text-xs text-muted-foreground">默认只热应用到当前运行时。勾选后会同步写入 bot_config.toml。</div>
+              </div>
+            </div>
             <Button onClick={() => void submitTuningTask()} disabled={creatingTuning}>
               <Sparkles className="mr-2 h-4 w-4" />
               创建调优任务
@@ -111,12 +125,21 @@ export function TuningTab({ tuning }: TuningTabProps) {
               <CardDescription>展示当前生效的检索调优参数，便于在应用新结果前做对照。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="text-xs font-medium text-muted-foreground">运行时 Profile</div>
               <CodeEditor
-                value={JSON.stringify(tuningProfile, null, 2)}
+                value={JSON.stringify(tuningProfile.runtime, null, 2)}
                 language="json"
                 readOnly
                 height="220px"
               />
+              <div className="text-xs font-medium text-muted-foreground">可持久化 Profile</div>
+              <CodeEditor
+                value={JSON.stringify(tuningProfile.persistable, null, 2)}
+                language="json"
+                readOnly
+                height="220px"
+              />
+              <div className="text-xs font-medium text-muted-foreground">TOML 片段</div>
               <CodeEditor
                 value={tuningProfileToml}
                 language="toml"
@@ -154,7 +177,7 @@ export function TuningTab({ tuning }: TuningTabProps) {
                           size="sm"
                           variant="outline"
                           onClick={() => void applyBestTask(String(task.task_id ?? ''))}
-                          disabled={!task.task_id}
+                          disabled={!task.task_id || String(task.status ?? '') !== 'completed' || task.recommended !== true}
                         >
                           应用最佳
                         </Button>

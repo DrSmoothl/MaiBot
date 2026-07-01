@@ -513,7 +513,7 @@ describe('KnowledgeBasePage import workflow', () => {
     })
     vi.mocked(memoryApi.getMemoryTuningTasks).mockResolvedValue({
       success: true,
-      items: [{ task_id: 'tune-1', status: 'done' }],
+      items: [{ task_id: 'tune-1', status: 'completed', recommended: true }],
     })
     vi.mocked(memoryApi.createMemoryTuningTask).mockResolvedValue({ success: true } as never)
     vi.mocked(memoryApi.applyBestMemoryTuningProfile).mockResolvedValue({ success: true } as never)
@@ -1505,7 +1505,45 @@ describe('KnowledgeBasePage import workflow', () => {
     )
 
     await user.click(screen.getByRole('button', { name: '应用最佳' }))
-    await waitFor(() => expect(memoryApi.applyBestMemoryTuningProfile).toHaveBeenCalledWith('tune-1'))
+    await waitFor(() =>
+      expect(memoryApi.applyBestMemoryTuningProfile).toHaveBeenCalledWith('tune-1', {
+        persist: false,
+        validate: true,
+      }),
+    )
+  }, 20_000)
+
+  it('applies tuning best profile with persist option enabled', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await screen.findByText('调优任务')
+
+    await user.click(screen.getByLabelText('同时写入配置文件'))
+    await user.click(screen.getByRole('button', { name: '应用最佳' }))
+    await waitFor(() =>
+      expect(memoryApi.applyBestMemoryTuningProfile).toHaveBeenCalledWith('tune-1', {
+        persist: true,
+        validate: true,
+      }),
+    )
+  }, 20_000)
+
+  it('disables tuning apply button when task is not recommended', async () => {
+    vi.mocked(memoryApi.getMemoryTuningTasks).mockResolvedValue({
+      success: true,
+      items: [{ task_id: 'tune-2', status: 'completed', recommended: false }],
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await screen.findByText('调优任务')
+
+    expect(screen.getByRole('button', { name: '应用最佳' })).toBeDisabled()
   }, 20_000)
 
   it('previews executes and restores source delete (delete module)', async () => {

@@ -7,6 +7,7 @@ from typing import Any, Callable, Coroutine, Dict, Iterable, List, Optional, Seq
 
 from json_repair import repair_json
 import asyncio
+import copy
 import json
 import numpy as np
 import pickle
@@ -100,6 +101,14 @@ class _KernelRuntimeFacade:
         executor: Callable[[], Coroutine[Any, Any, Dict[str, Any]]],
     ) -> tuple[bool, Dict[str, Any]]:
         return await self._kernel.execute_request_with_dedup(request_key, executor)
+
+    async def apply_retrieval_tuning_profile(
+        self,
+        profile: Dict[str, Any],
+        *,
+        validate: bool = True,
+    ) -> Dict[str, Any]:
+        return await self._kernel.apply_retrieval_tuning_profile(profile, validate=validate)
 
     @property
     def vector_store(self) -> Optional[VectorStore]:
@@ -272,8 +281,8 @@ class SDKMemoryKernel:
             current = next_value
         current[parts[-1]] = value
 
-    def _build_runtime_config(self) -> Dict[str, Any]:
-        runtime_config = dict(self.config)
+    def _build_runtime_config(self, base_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        runtime_config = dict(base_config if isinstance(base_config, dict) else self.config)
         runtime_cfg = runtime_config.get("runtime")
         runtime_config["runtime"] = dict(runtime_cfg) if isinstance(runtime_cfg, dict) else {}
         runtime_config["runtime"]["vector_pools_ready"] = self._dual_vector_pools_enabled()
@@ -291,6 +300,66 @@ class SDKMemoryKernel:
             }
         )
         return runtime_config
+
+    @staticmethod
+    def _merge_runtime_config_patch(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+        merged = copy.deepcopy(base)
+        for key, value in (patch or {}).items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = SDKMemoryKernel._merge_runtime_config_patch(merged[key], value)
+            else:
+                merged[key] = copy.deepcopy(value)
+        return merged
+
+    async def apply_retrieval_tuning_profile(
+        self,
+        profile: Dict[str, Any],
+        *,
+        validate: bool = True,
+    ) -> Dict[str, Any]:
+        if not isinstance(profile, dict):
+            return {
+                "success": False,
+                "runtime_rebuilt": False,
+                "validation_passed": False,
+                "error": "profile 必须是字典",
+            }
+
+        next_config = self._merge_runtime_config_patch(self.config, profile)
+        runtime_bundle = build_search_runtime(
+            plugin_config=self._build_runtime_config(next_config),
+            logger_obj=logger,
+            owner_tag="sdk_kernel_tuning_apply",
+            log_prefix="[sdk]",
+        )
+        if validate and not runtime_bundle.ready:
+            return {
+                "success": False,
+                "runtime_rebuilt": False,
+                "validation_passed": False,
+                "error": runtime_bundle.error or "检索运行时热重建失败",
+            }
+        if runtime_bundle.ready:
+            self.config.clear()
+            self.config.update(next_config)
+            self._runtime_bundle = runtime_bundle
+            self.retriever = runtime_bundle.retriever
+            self.threshold_filter = runtime_bundle.threshold_filter
+            self.sparse_index = runtime_bundle.sparse_index or self.sparse_index
+            self._refresh_runtime_dependents(preserve_managers=True)
+            self._apply_runtime_sparse_mode()
+            return {
+                "success": True,
+                "runtime_rebuilt": True,
+                "validation_passed": True,
+                "error": "",
+            }
+        return {
+            "success": False,
+            "runtime_rebuilt": False,
+            "validation_passed": False,
+            "error": runtime_bundle.error or "检索运行时热重建失败",
+        }
 
     def is_runtime_ready(self) -> bool:
         return bool(
@@ -3559,7 +3628,14 @@ class SDKMemoryKernel:
             return {"success": True, "settings": manager.get_runtime_settings()}
         if act == "get_profile":
             profile = manager.get_profile_snapshot()
-            return {"success": True, "profile": profile, "toml": manager.export_toml_snippet(profile)}
+            persistable_profile = manager.get_persistable_profile(profile)
+            return {
+                "success": True,
+                "profile": profile,
+                "runtime_profile": profile,
+                "persistable_profile": persistable_profile,
+                "toml": manager.export_toml_snippet(persistable_profile),
+            }
         if act == "apply_profile":
             profile_raw = kwargs.get("profile")
             if isinstance(profile_raw, dict):
@@ -3575,13 +3651,21 @@ class SDKMemoryKernel:
                 **await manager.apply_profile(
                     profile_payload,
                     reason=str(kwargs.get("reason", "manual") or "manual"),
+                    validate=bool(kwargs.get("validate", True)),
                 ),
             }
         if act == "rollback_profile":
             return {"success": True, **await manager.rollback_profile()}
         if act == "export_profile":
             profile = manager.get_profile_snapshot()
-            return {"success": True, "profile": profile, "toml": manager.export_toml_snippet(profile)}
+            persistable_profile = manager.get_persistable_profile(profile)
+            return {
+                "success": True,
+                "profile": profile,
+                "runtime_profile": profile,
+                "persistable_profile": persistable_profile,
+                "toml": manager.export_toml_snippet(persistable_profile),
+            }
         if act == "create_task":
             payload = kwargs.get("payload") if isinstance(kwargs.get("payload"), dict) else kwargs
             return {"success": True, "task": await manager.create_task(payload)}
@@ -3605,7 +3689,13 @@ class SDKMemoryKernel:
             task = await manager.cancel_task(str(kwargs.get("task_id", "") or ""))
             return {"success": task is not None, "task": task, "error": "" if task is not None else "任务不存在"}
         if act == "apply_best":
-            return {"success": True, **await manager.apply_best(str(kwargs.get("task_id", "") or ""))}
+            return {
+                "success": True,
+                **await manager.apply_best(
+                    str(kwargs.get("task_id", "") or ""),
+                    validate=bool(kwargs.get("validate", True)),
+                ),
+            }
         if act == "get_report":
             report = await manager.get_report(str(kwargs.get("task_id", "") or ""), fmt=str(kwargs.get("format", "md") or "md"))
             return {"success": report is not None, "report": report, "error": "" if report is not None else "任务不存在"}

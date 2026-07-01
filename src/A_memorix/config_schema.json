@@ -34,6 +34,8 @@
         "title": "检索",
         "sections": [
           "retrieval",
+          "retrieval.search.smart_fallback",
+          "retrieval.fusion",
           "retrieval.relation_vectorization",
           "retrieval.vector_pools",
           "retrieval.sparse",
@@ -526,6 +528,108 @@
           "disabled": false,
           "order": 9,
           "hint": "允许多路候选召回并发执行。",
+          "choices": null
+        }
+      }
+    },
+    "retrieval.search.smart_fallback": {
+      "name": "retrieval.search.smart_fallback",
+      "title": "智能兜底检索",
+      "description": "控制检索结果不足时是否启用智能兜底补召回。",
+      "icon": null,
+      "collapsed": false,
+      "order": 6.1,
+      "fields": {
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "default": true,
+          "description": "是否启用智能兜底检索",
+          "label": "启用智能兜底",
+          "ui_type": "switch",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 1,
+          "hint": "结果过少时尝试补充召回，通常能降低空结果率。",
+          "choices": null
+        }
+      }
+    },
+    "retrieval.fusion": {
+      "name": "retrieval.fusion",
+      "title": "检索融合",
+      "description": "控制向量检索与稀疏检索的融合方式和权重。",
+      "icon": null,
+      "collapsed": false,
+      "order": 6.2,
+      "fields": {
+        "method": {
+          "name": "method",
+          "type": "string",
+          "default": "weighted_rrf",
+          "description": "检索融合方法",
+          "label": "融合方法",
+          "ui_type": "select",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 1,
+          "hint": "weighted_rrf 使用权重化 RRF；alpha_legacy 保持旧版 alpha 融合口径。",
+          "choices": [
+            "weighted_rrf",
+            "alpha_legacy"
+          ]
+        },
+        "rrf_k": {
+          "name": "rrf_k",
+          "type": "integer",
+          "default": 60,
+          "description": "RRF 融合参数",
+          "label": "RRF K",
+          "ui_type": "number",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 2,
+          "hint": "数值越大，排名差异带来的分数差距越平滑。",
+          "min": 1,
+          "max": 500,
+          "step": 1,
+          "choices": null
+        },
+        "vector_weight": {
+          "name": "vector_weight",
+          "type": "number",
+          "default": 0.7,
+          "description": "向量检索权重",
+          "label": "向量权重",
+          "ui_type": "number",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 3,
+          "hint": "weighted_rrf 下向量候选的融合权重。",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "choices": null
+        },
+        "bm25_weight": {
+          "name": "bm25_weight",
+          "type": "number",
+          "default": 0.3,
+          "description": "BM25 稀疏检索权重",
+          "label": "BM25 权重",
+          "ui_type": "number",
+          "required": false,
+          "hidden": false,
+          "disabled": false,
+          "order": 4,
+          "hint": "weighted_rrf 下稀疏候选的融合权重。",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
           "choices": null
         }
       }

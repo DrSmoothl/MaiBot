@@ -1989,6 +1989,95 @@ class AMemorixSparseRetrievalConfig(ConfigBase):
     """关系候选数"""
 
 
+class AMemorixSmartFallbackConfig(ConfigBase):
+    """A_Memorix 智能兜底检索配置"""
+
+    enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用智能兜底",
+                "en_US": "Enable smart fallback",
+                "ja_JP": "スマートフォールバックを有効化",
+            },
+        },
+    )
+    """是否启用智能兜底检索"""
+
+
+class AMemorixRetrievalSearchConfig(ConfigBase):
+    """A_Memorix 搜索后处理配置"""
+
+    smart_fallback: AMemorixSmartFallbackConfig = Field(
+        default_factory=AMemorixSmartFallbackConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "智能兜底",
+                "en_US": "Smart fallback",
+                "ja_JP": "スマートフォールバック",
+            },
+        },
+    )
+    """智能兜底检索配置"""
+
+
+class AMemorixFusionRetrievalConfig(ConfigBase):
+    """A_Memorix 检索融合配置"""
+
+    method: Literal["weighted_rrf", "alpha_legacy"] = Field(
+        default="weighted_rrf",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "融合方法",
+                "en_US": "Fusion method",
+                "ja_JP": "融合方式",
+            },
+        },
+    )
+    """检索融合方法"""
+
+    rrf_k: int = Field(
+        default=60,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "RRF K",
+                "en_US": "RRF K",
+                "ja_JP": "RRF K",
+            },
+        },
+    )
+    """RRF 融合参数"""
+
+    vector_weight: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "向量权重",
+                "en_US": "Vector weight",
+                "ja_JP": "ベクトル重み",
+            },
+        },
+    )
+    """向量检索权重"""
+
+    bm25_weight: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "BM25 权重",
+                "en_US": "BM25 weight",
+                "ja_JP": "BM25 重み",
+            },
+        },
+    )
+    """BM25 稀疏检索权重"""
+
+
 class AMemorixRelationVectorizationConfig(ConfigBase):
     """A_Memorix 关系向量化配置"""
 
@@ -2374,6 +2463,30 @@ class AMemorixRetrievalConfig(ConfigBase):
         },
     )
     """是否启用并行检索"""
+
+    search: AMemorixRetrievalSearchConfig = Field(
+        default_factory=AMemorixRetrievalSearchConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "搜索后处理",
+                "en_US": "Search post-processing",
+                "ja_JP": "検索後処理",
+            },
+        },
+    )
+    """搜索后处理配置"""
+
+    fusion: AMemorixFusionRetrievalConfig = Field(
+        default_factory=AMemorixFusionRetrievalConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "检索融合",
+                "en_US": "Retrieval fusion",
+                "ja_JP": "検索融合",
+            },
+        },
+    )
+    """检索融合配置"""
 
     relation_vectorization: AMemorixRelationVectorizationConfig = Field(
         default_factory=AMemorixRelationVectorizationConfig,
