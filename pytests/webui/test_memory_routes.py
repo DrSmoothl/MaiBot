@@ -664,6 +664,18 @@ def test_webui_memory_timeline_returns_chat_scoped_events(client: TestClient, mo
     assert payload["range"]["max_time"] == 170.0
 
 
+def test_memory_metadata_matches_chat_ids_list() -> None:
+    assert memory_router_module._metadata_matches_chat({"chat_ids": ["chat-1"]}, "chat-1") is True
+    assert (
+        memory_router_module._metadata_matches_chat(
+            {"source_context": {"chat_ids": ["chat-2"], "chat_id": "chat-3"}},
+            "chat-2",
+        )
+        is True
+    )
+    assert memory_router_module._metadata_matches_chat({"chat_ids": ["chat-1"]}, "chat-2") is False
+
+
 def test_webui_memory_timeline_filters_types_and_limit(client: TestClient, monkeypatch):
     monkeypatch.setattr(
         memory_router_module,
