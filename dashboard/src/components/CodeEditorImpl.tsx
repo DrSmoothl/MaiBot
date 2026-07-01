@@ -4,13 +4,14 @@ import { python } from '@codemirror/lang-python'
 import { StreamLanguage } from '@codemirror/language'
 import { toml as tomlMode } from '@codemirror/legacy-modes/mode/toml'
 import { linter } from '@codemirror/lint'
+import type { Range, RangeSet } from '@codemirror/state'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorView, ViewPlugin } from '@codemirror/view'
+import { Decoration, EditorView, ViewPlugin } from '@codemirror/view'
 import CodeMirror from '@uiw/react-codemirror'
 
 import { useTheme } from '@/components/use-theme'
 
-import type { CodeEditorProps, Language } from './CodeEditor'
+import type { CodeEditorProps, CodeEditorRangeClassName, Language } from './CodeEditor'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const languageExtensions: Record<Language, any[]> = {
@@ -30,6 +31,50 @@ const dashboardCodeScrollerMarker = ViewPlugin.fromClass(
   }
 )
 
+function createDiffDecorationExtension(
+  lineClassNames: Record<number, string> = {},
+  rangeClassNames: CodeEditorRangeClassName[] = []
+) {
+  return EditorView.decorations.compute([], (state) => {
+    const lineDecorations = Object.entries(lineClassNames)
+      .map(([lineNumber, className]) => {
+        const parsedLineNumber = Number(lineNumber)
+        if (!Number.isInteger(parsedLineNumber) || parsedLineNumber < 1 || parsedLineNumber > state.doc.lines) {
+          return null
+        }
+        return Decoration.line({ class: className }).range(state.doc.line(parsedLineNumber).from)
+      })
+      .filter((decoration): decoration is Range<Decoration> => decoration !== null)
+
+    const rangeDecorations = rangeClassNames
+      .map((range) => {
+        if (
+          range.fromLine < 1 ||
+          range.toLine < 1 ||
+          range.fromLine > state.doc.lines ||
+          range.toLine > state.doc.lines ||
+          range.fromLine > range.toLine
+        ) {
+          return null
+        }
+
+        const fromLine = state.doc.line(range.fromLine)
+        const toLine = state.doc.line(range.toLine)
+        const fromCh = Math.max(0, Math.min(range.fromCh, fromLine.length))
+        const toCh = Math.max(0, Math.min(range.toCh, toLine.length))
+        const from = fromLine.from + fromCh
+        const to = toLine.from + toCh
+        if (to <= from) {
+          return null
+        }
+        return Decoration.mark({ class: range.className }).range(from, to)
+      })
+      .filter((decoration): decoration is Range<Decoration> => decoration !== null)
+
+    return Decoration.set([...lineDecorations, ...rangeDecorations], true) as RangeSet<Decoration>
+  })
+}
+
 export default function CodeEditorImpl({
   value,
   onChange,
@@ -41,6 +86,8 @@ export default function CodeEditorImpl({
   placeholder,
   theme,
   className = '',
+  lineClassNames = {},
+  rangeClassNames = [],
 }: CodeEditorProps) {
   const { resolvedTheme } = useTheme()
 
@@ -66,8 +113,27 @@ export default function CodeEditorImpl({
         overscrollBehavior: 'contain',
         touchAction: 'pan-x pan-y',
       },
+      '.cm-prompt-diff-added': {
+        backgroundColor: 'rgba(34, 197, 94, 0.18)',
+        boxShadow: 'inset 4px 0 0 rgb(34, 197, 94)',
+      },
+      '.cm-prompt-diff-removed': {
+        backgroundColor: 'rgba(239, 68, 68, 0.18)',
+        boxShadow: 'inset 4px 0 0 rgb(239, 68, 68)',
+      },
+      '.cm-prompt-diff-added-text': {
+        backgroundColor: 'rgba(34, 197, 94, 0.38)',
+        borderRadius: '2px',
+        color: 'rgb(20, 83, 45)',
+      },
+      '.cm-prompt-diff-removed-text': {
+        backgroundColor: 'rgba(239, 68, 68, 0.34)',
+        borderRadius: '2px',
+        color: 'rgb(127, 29, 29)',
+      },
     }),
     dashboardCodeScrollerMarker,
+    createDiffDecorationExtension(lineClassNames, rangeClassNames),
   ]
 
   if (readOnly) {

@@ -6,7 +6,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Edit3,
-  Info,
   Plus,
   RefreshCw,
   Save,
@@ -1969,31 +1968,43 @@ export function ChatManagementPage() {
                     <TableHead className="w-[3rem] px-2 text-right">表达数</TableHead>
                     <TableHead className="w-[3rem] px-2 text-right">黑话数</TableHead>
                     <TableHead className="w-[3rem] px-2">最后活跃</TableHead>
-                    <TableHead className="w-[4rem] px-2 text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-muted-foreground h-28 text-center">
+                      <TableCell colSpan={8} className="text-muted-foreground h-28 text-center">
                         正在加载聊天流...
                       </TableCell>
                     </TableRow>
                   ) : error ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-destructive h-28 text-center">
+                      <TableCell colSpan={8} className="text-destructive h-28 text-center">
                         加载聊天流失败
                       </TableCell>
                     </TableRow>
                   ) : filteredChats.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-muted-foreground h-28 text-center">
+                      <TableCell colSpan={8} className="text-muted-foreground h-28 text-center">
                         暂无匹配的聊天流
                       </TableCell>
                     </TableRow>
                   ) : (
                     paginatedChats.map((chat) => (
-                      <TableRow key={chat.session_id}>
+                      <TableRow
+                        key={chat.session_id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`查看 ${chat.display_name} 详情`}
+                        className="cursor-pointer hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-primary/60 focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
+                        onClick={() => setSelectedChat(chat)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            setSelectedChat(chat)
+                          }
+                        }}
+                      >
                         <TableCell className="px-3">
                           <div className="flex min-w-0 items-center gap-3">
                             <ChatStreamAvatar chat={chat} />
@@ -2027,76 +2038,63 @@ export function ChatManagementPage() {
                         <TableCell className="text-muted-foreground px-2">
                           {formatTimestamp(chat.last_active_at)}
                         </TableCell>
-                        <TableCell className="px-2 text-right">
-                          <div className="flex justify-end">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`查看 ${chat.display_name} 详情`}
-                              onClick={() => setSelectedChat(chat)}
-                            >
-                              <Info className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
                       </TableRow>
                     ))
                   )}
                 </TableBody>
               </Table>
             </div>
-            <div className="text-muted-foreground flex shrink-0 flex-col gap-3 border-t px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-muted-foreground flex shrink-0 flex-col gap-2 border-t px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 显示 {visibleStart}-{visibleEnd} / {filteredChats.length} 个聊天流
               </div>
-              <div className="flex max-w-full min-w-0 items-center gap-1 overflow-x-auto pb-1 sm:justify-end">
+              <div className="flex max-w-full min-w-0 items-center gap-1 overflow-x-auto sm:justify-end">
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="h-7 w-7 shrink-0"
                   disabled={currentPage <= 1}
                   aria-label="第一页"
                   onClick={() => setPage(1)}
                 >
-                  <ChevronsLeft className="h-4 w-4" />
+                  <ChevronsLeft className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="h-7 w-7 shrink-0"
                   disabled={currentPage <= 1}
                   aria-label="上一页"
                   onClick={() => setPage((value) => Math.max(1, value - 1))}
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <ChevronLeft className="h-3.5 w-3.5" />
                 </Button>
-                <span className="min-w-20 shrink-0 px-2 text-center tabular-nums">
+                <span className="min-w-16 shrink-0 px-1 text-center tabular-nums">
                   {currentPage} / {pageCount}
                 </span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="h-7 w-7 shrink-0"
                   disabled={currentPage >= pageCount}
                   aria-label="下一页"
                   onClick={() => setPage((value) => Math.min(pageCount, value + 1))}
                 >
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="h-7 w-7 shrink-0"
                   disabled={currentPage >= pageCount}
                   aria-label="最后一页"
                   onClick={() => setPage(pageCount)}
                 >
-                  <ChevronsRight className="h-4 w-4" />
+                  <ChevronsRight className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
