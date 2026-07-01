@@ -412,6 +412,7 @@ class BaseMaisakaReplyGenerator:
         self,
         reply_message: Optional[SessionMessage],
         reply_reason: str,
+        reply_guide: str = "",
         reply_requirements: str = "",
         keywords_reaction_prompt: str = "",
     ) -> str:
@@ -421,8 +422,9 @@ class BaseMaisakaReplyGenerator:
         if target_message_block:
             sections.append(target_message_block)
         reply_reference_lines: List[str] = []
-        if reply_reason.strip():
-            reply_reference_lines.append(f"【最新推理】\n{reply_reason.strip()}")
+        latest_thought = reply_reason.strip() or reply_guide.strip()
+        if latest_thought:
+            reply_reference_lines.append(f"你的最新想法：\n{latest_thought}")
         if reply_reference_lines:
             sections.append("【回复信息参考】\n" + "\n\n".join(reply_reference_lines))
         if reply_requirements.strip():
@@ -500,6 +502,7 @@ class BaseMaisakaReplyGenerator:
         final_user_message = self._build_final_user_message(
             reply_message=reply_message,
             reply_reason=reply_reason,
+            reply_guide=str((reply_tool_args or {}).get("reply_guide") or ""),
             reply_requirements=reply_requirements,
             keywords_reaction_prompt=keywords_reaction_prompt,
         )
