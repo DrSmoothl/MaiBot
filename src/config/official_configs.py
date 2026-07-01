@@ -1,5 +1,6 @@
+from typing import List, Literal, Optional
+
 import re
-from typing import Literal, Optional
 
 from .config_base import ConfigBase, Field
 
@@ -2740,6 +2741,19 @@ class AMemorixEpisodeConfig(ConfigBase):
     )
     """分段模型选择"""
 
+    disabled_source_types: List[str] = Field(
+        default_factory=lambda: ["person_fact"],
+        json_schema_extra={
+            "label": {
+                "zh_CN": "跳过来源类型",
+                "en_US": "Disabled source types",
+                "ja_JP": "スキップするソース種別",
+            },
+            "advanced": True,
+        },
+    )
+    """自动生成 Episode 时跳过的来源类型"""
+
 
 class AMemorixPersonProfileConfig(ConfigBase):
     """A_Memorix 人物画像配置"""
@@ -2794,6 +2808,76 @@ class AMemorixPersonProfileConfig(ConfigBase):
         },
     )
     """单轮最大刷新数"""
+
+    refresh_debounce_seconds: int = Field(
+        default=120,
+        ge=0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "刷新静默期",
+                "en_US": "Refresh debounce",
+                "ja_JP": "更新デバウンス",
+            },
+            "advanced": True,
+        },
+    )
+    """写入触发画像刷新前等待的静默秒数"""
+
+    refresh_queue_interval_seconds: int = Field(
+        default=60,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "刷新队列间隔",
+                "en_US": "Refresh queue interval",
+                "ja_JP": "更新キュー間隔",
+            },
+            "advanced": True,
+        },
+    )
+    """画像刷新队列扫描间隔秒数"""
+
+    refresh_queue_batch_size: int = Field(
+        default=10,
+        ge=1,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "刷新队列批量",
+                "en_US": "Refresh queue batch size",
+                "ja_JP": "更新キューバッチサイズ",
+            },
+            "advanced": True,
+        },
+    )
+    """画像刷新队列单轮处理人数"""
+
+    refresh_retry_backoff_seconds: int = Field(
+        default=300,
+        ge=0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "刷新重试等待",
+                "en_US": "Refresh retry backoff",
+                "ja_JP": "更新リトライ待機",
+            },
+            "advanced": True,
+        },
+    )
+    """画像刷新失败后再次重试前等待的秒数"""
+
+    max_retry: int = Field(
+        default=3,
+        ge=0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "刷新最大重试",
+                "en_US": "Refresh max retries",
+                "ja_JP": "更新最大リトライ",
+            },
+            "advanced": True,
+        },
+    )
+    """画像刷新队列最大重试次数"""
 
     top_k_evidence: int = Field(
         default=12,

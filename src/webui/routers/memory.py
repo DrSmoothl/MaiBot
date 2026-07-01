@@ -581,12 +581,29 @@ def _decode_json_payload(raw: Any, fallback: Any) -> Any:
     return fallback
 
 
+def _extend_metadata_chat_tokens(tokens: set[str], value: Any) -> None:
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            _extend_metadata_chat_tokens(tokens, item)
+        return
+
+    token = str(value or "").strip()
+    if token:
+        tokens.add(token)
+
+
+def _metadata_chat_tokens(metadata: dict[str, Any]) -> set[str]:
+    tokens: set[str] = set()
+    for key in ("chat_id", "session_id", "stream_id", "chat_ids", "session_ids", "stream_ids"):
+        _extend_metadata_chat_tokens(tokens, metadata.get(key))
+    return tokens
+
+
 def _metadata_matches_chat(metadata: dict[str, Any], chat_id: str) -> bool:
     token = str(chat_id or "").strip()
     if not token:
         return False
-    direct_keys = ("chat_id", "session_id", "stream_id")
-    if any(str(metadata.get(key) or "").strip() == token for key in direct_keys):
+    if token in _metadata_chat_tokens(metadata):
         return True
     nested_candidates = [
         metadata.get("chat"),
@@ -595,7 +612,7 @@ def _metadata_matches_chat(metadata: dict[str, Any], chat_id: str) -> bool:
         metadata.get("import_context"),
     ]
     for candidate in nested_candidates:
-        if isinstance(candidate, dict) and any(str(candidate.get(key) or "").strip() == token for key in direct_keys):
+        if isinstance(candidate, dict) and token in _metadata_chat_tokens(candidate):
             return True
     return False
 

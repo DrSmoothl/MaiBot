@@ -116,6 +116,20 @@ def start_background_tasks(plugin: Any) -> None:
     ):
         plugin._person_profile_refresh_task = asyncio.create_task(plugin._person_profile_refresh_loop())
 
+    if not hasattr(plugin, "_person_profile_refresh_queue_task"):
+        plugin._person_profile_refresh_queue_task = None
+
+    profile_queue_loop = getattr(plugin, "_person_profile_refresh_queue_loop", None)
+    if (
+        callable(profile_queue_loop)
+        and plugin.get_config("person_profile.enabled", True)
+        and (
+            plugin._person_profile_refresh_queue_task is None
+            or plugin._person_profile_refresh_queue_task.done()
+        )
+    ):
+        plugin._person_profile_refresh_queue_task = asyncio.create_task(profile_queue_loop())
+
     if plugin._memory_maintenance_task is None or plugin._memory_maintenance_task.done():
         plugin._memory_maintenance_task = asyncio.create_task(plugin._memory_maintenance_loop())
 
@@ -149,6 +163,7 @@ async def cancel_background_tasks(plugin: Any) -> None:
         ("scheduled_import", plugin._scheduled_import_task),
         ("auto_save", plugin._auto_save_task),
         ("person_profile_refresh", plugin._person_profile_refresh_task),
+        ("person_profile_refresh_queue", getattr(plugin, "_person_profile_refresh_queue_task", None)),
         ("memory_maintenance", plugin._memory_maintenance_task),
         ("relation_vector_backfill", plugin._relation_vector_backfill_task),
         ("episode_generation", getattr(plugin, "_episode_generation_task", None)),
@@ -170,6 +185,7 @@ async def cancel_background_tasks(plugin: Any) -> None:
     plugin._scheduled_import_task = None
     plugin._auto_save_task = None
     plugin._person_profile_refresh_task = None
+    plugin._person_profile_refresh_queue_task = None
     plugin._memory_maintenance_task = None
     plugin._relation_vector_backfill_task = None
     plugin._episode_generation_task = None
