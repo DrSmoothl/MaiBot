@@ -5102,7 +5102,12 @@ class SDKMemoryKernel:
         request = self.metadata_store.get_person_profile_refresh_request(person_id)
         if not isinstance(request, dict):
             return False
-        return str(request.get("status", "") or "").strip().lower() in {"pending", "running", "failed"}
+        status = str(request.get("status", "") or "").strip().lower()
+        if status in {"pending", "running"}:
+            return True
+        if status != "failed":
+            return False
+        return int(request.get("retry_count", 0) or 0) < self._person_profile_refresh_max_retry()
 
     async def _process_person_profile_refresh_queue_batch(self, *, limit: int) -> Dict[str, Any]:
         return await self._process_feedback_profile_refresh_batch(

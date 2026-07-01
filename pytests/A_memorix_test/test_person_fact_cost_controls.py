@@ -46,6 +46,15 @@ class _FakeMetadataStore:
         return payload
 
 
+class _FakeProfileRefreshRequestStore:
+    def __init__(self, request: Dict[str, Any] | None) -> None:
+        self.request = request
+
+    def get_person_profile_refresh_request(self, person_id: str) -> Dict[str, Any] | None:
+        assert person_id == "person-1"
+        return self.request
+
+
 class _FakeVectorResult:
     @staticmethod
     async def upsert_relation_with_vector(**kwargs: Any) -> Dict[str, Any]:
@@ -190,3 +199,30 @@ def test_person_profile_refresh_queue_debounce_and_retry_backoff(tmp_path) -> No
         assert retry_ready[0]["retry_count"] == 1
     finally:
         store.close()
+
+
+def test_has_pending_person_profile_refresh_ignores_failed_after_max_retry(tmp_path) -> None:
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path,
+        config={"person_profile": {"max_retry": 3}},
+    )
+
+    kernel.metadata_store = _FakeProfileRefreshRequestStore(  # type: ignore[assignment]
+        {"person_id": "person-1", "status": "pending", "retry_count": 0}
+    )
+    assert kernel._has_pending_person_profile_refresh("person-1") is True
+
+    kernel.metadata_store = _FakeProfileRefreshRequestStore(  # type: ignore[assignment]
+        {"person_id": "person-1", "status": "running", "retry_count": 0}
+    )
+    assert kernel._has_pending_person_profile_refresh("person-1") is True
+
+    kernel.metadata_store = _FakeProfileRefreshRequestStore(  # type: ignore[assignment]
+        {"person_id": "person-1", "status": "failed", "retry_count": 2}
+    )
+    assert kernel._has_pending_person_profile_refresh("person-1") is True
+
+    kernel.metadata_store = _FakeProfileRefreshRequestStore(  # type: ignore[assignment]
+        {"person_id": "person-1", "status": "failed", "retry_count": 3}
+    )
+    assert kernel._has_pending_person_profile_refresh("person-1") is False
