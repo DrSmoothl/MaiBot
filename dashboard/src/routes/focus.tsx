@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { VRMHumanBoneName, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import {
   Expand,
@@ -17,6 +18,7 @@ import * as THREE from 'three'
 import { Button } from '@/components/ui/button'
 import { getChatStreams } from '@/lib/chat-management-api'
 import { chatWsClient } from '@/lib/chat-ws-client'
+import { DEFAULT_SETTINGS, getSetting } from '@/lib/settings-manager'
 import { cn } from '@/lib/utils'
 
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -1474,7 +1476,57 @@ function SaplingGarden({ saplings, compact = false, showHoverDescription = false
   )
 }
 
+function useFocusCompanionEnabled(): boolean {
+  const [enabled, setEnabled] = useState(() => getSetting('enableFocusCompanion'))
+
+  useEffect(() => {
+    const handleSettingsChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; value?: unknown }>).detail
+      if (detail?.key === 'enableFocusCompanion') {
+        setEnabled(Boolean(detail.value))
+      }
+    }
+
+    const handleSettingsReset = () => {
+      setEnabled(DEFAULT_SETTINGS.enableFocusCompanion)
+    }
+
+    window.addEventListener('maibot-settings-change', handleSettingsChange)
+    window.addEventListener('maibot-settings-reset', handleSettingsReset)
+    return () => {
+      window.removeEventListener('maibot-settings-change', handleSettingsChange)
+      window.removeEventListener('maibot-settings-reset', handleSettingsReset)
+    }
+  }, [])
+
+  return enabled
+}
+
+function FocusCompanionDisabled() {
+  return (
+    <section className="flex h-full min-h-[520px] items-center justify-center bg-[#f3e3cc] p-6 text-[#0a4550]">
+      <div className="max-w-md border-4 border-[#0a4550] bg-[#f3e3cc] p-5">
+        <div className="text-sm font-black tracking-[0.24em] text-[#c24d24] uppercase">focus</div>
+        <h1 className="mt-2 text-2xl font-black">专注陪伴已隐藏</h1>
+        <p className="mt-3 text-sm font-bold text-[#0a4550]/80">
+          这个沉浸式番茄钟陪伴功能默认关闭。需要使用时，可以在 WebUI 设置里打开入口。
+        </p>
+        <Button asChild className="mt-5 rounded-none border-4 border-[#0a4550] bg-[#0a4550] text-[#f3e3cc] shadow-none hover:bg-[#c24d24]">
+          <Link to="/settings" search={{ tab: 'other' }}>
+            去设置打开
+          </Link>
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 export function FocusCompanionPage() {
+  const enabled = useFocusCompanionEnabled()
+  return enabled ? <FocusCompanionExperience /> : <FocusCompanionDisabled />
+}
+
+function FocusCompanionExperience() {
   const initialStorage = useMemo(() => readFocusCompanionStorage(), [])
   const [mode, setMode] = useState<TimerMode>('focus')
   const [customFocusMinutes, setCustomFocusMinutes] = useState(initialStorage.customFocusMinutes)

@@ -778,6 +778,16 @@ class PluginRuntimeManager(
             statuses.update(supervisor.get_plugin_load_statuses())
         return statuses
 
+    def get_plugin_load_failure_reasons(self) -> Dict[str, str]:
+        """汇总所有 Supervisor 上报的插件加载失败原因。"""
+
+        reasons: Dict[str, str] = {}
+        for supervisor in self.supervisors:
+            get_reasons = getattr(supervisor, "get_plugin_load_failure_reasons", None)
+            if callable(get_reasons):
+                reasons.update(get_reasons())
+        return reasons
+
     def get_plugin_circuit_statuses(self) -> Dict[str, Dict[str, Any]]:
         """返回当前插件熔断状态。"""
 

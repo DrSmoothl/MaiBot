@@ -35,7 +35,6 @@ import {
   DeleteConfirmDialog,
   JargonCreateDialog,
   JargonDetailDialog,
-  JargonEditDialog,
 } from './JargonDialogs'
 import { JargonList } from './JargonList'
 
@@ -56,7 +55,6 @@ type JargonSummaryTab = 'total' | JargonStatusFilter | 'global_count' | 'complet
 export function JargonManagementPage() {
   const [selectedJargon, setSelectedJargon] = useState<Jargon | null>(null)
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [deleteConfirmJargon, setDeleteConfirmJargon] = useState<Jargon | null>(null)
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
@@ -157,8 +155,7 @@ export function JargonManagementPage() {
 
   // 编辑黑话
   const handleEdit = (jargon: Jargon) => {
-    setSelectedJargon(jargon)
-    setIsEditDialogOpen(true)
+    handleViewDetail(jargon)
   }
 
   // 删除黑话（失败由全局 mutation 错误 toast 呈现）
@@ -413,9 +410,7 @@ export function JargonManagementPage() {
               selectedItemId={filterChatId}
               onItemSelect={(chatId) => handleChatChange(String(chatId))}
               emptyContent={
-                <div className="text-muted-foreground px-2 py-6 text-center text-sm">
-                  暂无聊天
-                </div>
+                <div className="text-muted-foreground px-2 py-6 text-center text-sm">暂无聊天</div>
               }
               collapsed={scopePanelCollapsed}
               onCollapsedChange={setScopePanelCollapsed}
@@ -446,7 +441,6 @@ export function JargonManagementPage() {
                   hideChatColumn={summaryFilter === 'global_count' || filterChatId !== 'all'}
                   className="lg:h-full"
                   onEdit={handleEdit}
-                  onViewDetail={handleViewDetail}
                   onDelete={(jargon) => setDeleteConfirmJargon(jargon)}
                   onToggleSelect={list.toggle}
                   onToggleSelectAll={list.toggleAll}
@@ -464,6 +458,11 @@ export function JargonManagementPage() {
         jargon={selectedJargon}
         open={isDetailDialogOpen}
         onOpenChange={setIsDetailDialogOpen}
+        chatList={formChatList}
+        onChanged={(jargon) => {
+          setSelectedJargon(jargon)
+          invalidateJargon()
+        }}
       />
 
       {/* 创建对话框 */}
@@ -474,18 +473,6 @@ export function JargonManagementPage() {
         onSuccess={() => {
           invalidateJargon()
           setIsCreateDialogOpen(false)
-        }}
-      />
-
-      {/* 编辑对话框 */}
-      <JargonEditDialog
-        jargon={selectedJargon}
-        open={isEditDialogOpen}
-        onOpenChange={setIsEditDialogOpen}
-        chatList={formChatList}
-        onSuccess={() => {
-          invalidateJargon()
-          setIsEditDialogOpen(false)
         }}
       />
 

@@ -22,6 +22,7 @@ from .support import (
     load_manifest_json,
     parse_repository_url,
     read_plugin_changelog,
+    read_plugin_readme,
     remove_tree,
     require_plugin_token,
     resolve_installed_plugin_path,
@@ -34,40 +35,14 @@ logger = get_logger("webui.plugin_routes")
 router = APIRouter()
 
 
-def _infer_plugin_id(folder_name: str, manifest: Dict[str, Any], manifest_path: Path) -> str:
-    if "id" in manifest:
-        return str(manifest["id"])
+def _read_manifest_plugin_id(manifest: Dict[str, Any]) -> str:
+    return str(manifest.get("id") or "").strip()
 
-    author_name: Optional[str] = None
-    repo_name: Optional[str] = None
-    if "author" in manifest:
-        author_data = manifest["author"]
-        if isinstance(author_data, dict) and "name" in author_data:
-            author_name = str(author_data["name"])
-        elif isinstance(author_data, str):
-            author_name = author_data
 
-    if "repository_url" in manifest:
-        repo_url = str(manifest["repository_url"]).rstrip("/").removesuffix(".git")
-        repo_name = repo_url.split("/")[-1]
-
-    if author_name and repo_name:
-        plugin_id = f"{author_name}.{repo_name}"
-    elif author_name:
-        plugin_id = f"{author_name}.{folder_name}"
-    elif "_" in folder_name and "." not in folder_name:
-        plugin_id = folder_name.replace("_", ".", 1)
-    else:
-        plugin_id = folder_name
-
-    logger.info(f"为插件 {folder_name} 自动生成 ID: {plugin_id}")
-    manifest["id"] = plugin_id
-    try:
-        safe_manifest_path = resolve_plugin_file_path(manifest_path.parent, "_manifest.json")
-        with open(safe_manifest_path, "w", encoding="utf-8") as file_obj:
-            json.dump(manifest, file_obj, ensure_ascii=False, indent=2)
-    except Exception as write_error:
-        logger.warning(f"无法写入 ID 到 manifest: {write_error}")
+def _require_manifest_plugin_id(manifest: Dict[str, Any]) -> str:
+    plugin_id = _read_manifest_plugin_id(manifest)
+    if not plugin_id:
+        raise HTTPException(status_code=400, detail="无效的插件：_manifest.json 缺少 id")
     return plugin_id
 
 
@@ -102,6 +77,34 @@ def _get_runtime_plugin_load_statuses() -> Dict[str, str]:
     except Exception as exc:
         logger.warning(f"获取插件运行时加载状态失败: {exc}")
         return {}
+
+
+def _get_runtime_plugin_load_failure_reasons() -> Dict[str, str]:
+    try:
+        from src.plugin_runtime.integration import get_plugin_runtime_manager
+
+        return get_plugin_runtime_manager().get_plugin_load_failure_reasons()
+    except Exception as exc:
+        logger.warning(f"获取插件运行时加载失败原因失败: {exc}")
+        return {}
+
+
+def _lookup_runtime_plugin_value(values: Dict[str, str], aliases: List[str], default: str = "") -> str:
+    """按插件 ID 查找运行时上报值。"""
+
+    normalized_aliases = [str(alias or "").strip() for alias in aliases if str(alias or "").strip()]
+    for alias in normalized_aliases:
+        value = values.get(alias)
+        if value is not None:
+            return value
+
+    casefold_values = {key.casefold(): value for key, value in values.items()}
+    for alias in normalized_aliases:
+        value = casefold_values.get(alias.casefold())
+        if value is not None:
+            return value
+
+    return default
 
 
 def _get_runtime_plugin_circuit_statuses() -> Dict[str, Dict[str, Any]]:
@@ -215,7 +218,7 @@ async def _update_non_git_plugin(
     request: UpdatePluginRequest,
 ) -> Dict[str, Any]:
     old_version = str(old_manifest.get("version", "unknown"))
-    old_manifest_id = str(old_manifest.get("id") or plugin_id).strip()
+    old_manifest_id = _require_manifest_plugin_id(old_manifest)
     candidate_path = _build_update_work_path(plugin_path, plugin_id, ".update_tmp")
     backup_path = _build_update_work_path(plugin_path, plugin_id, ".update_backups")
     old_moved = False
@@ -397,13 +400,12 @@ async def install_plugin(request: InstallPluginRequest, maibot_session: Optional
         try:
             with open(manifest_path, "r", encoding="utf-8") as file_obj:
                 manifest = json.load(file_obj)
-            for field in ["manifest_version", "name", "version", "author"]:
+            for field in ["manifest_version", "id", "name", "version", "author"]:
                 if field not in manifest:
                     raise ValueError(f"缺少必需字段: {field}")
-            if not str(manifest.get("id", "")).strip():
-                manifest["id"] = plugin_id
-                with open(manifest_path, "w", encoding="utf-8") as file_obj:
-                    json.dump(manifest, file_obj, ensure_ascii=False, indent=2)
+            manifest_plugin_id = _read_manifest_plugin_id(manifest)
+            if manifest_plugin_id != plugin_id:
+                raise ValueError(f"插件 ID 不匹配：期望 {plugin_id}，实际 {manifest_plugin_id}")
         except Exception as e:
             remove_tree(target_path)
             await update_progress(
@@ -470,9 +472,9 @@ async def uninstall_plugin(
             )
             raise HTTPException(status_code=404, detail="插件未安装")
 
-        manifest = load_manifest_json(resolve_plugin_file_path(plugin_path, "_manifest.json"))
-        plugin_name = str(manifest.get("name", plugin_id)) if manifest is not None else plugin_id
-        runtime_plugin_id = str(manifest.get("id", plugin_id)) if manifest is not None else plugin_id
+        manifest = _read_required_manifest(plugin_path)
+        plugin_name = str(manifest.get("name", plugin_id))
+        runtime_plugin_id = _require_manifest_plugin_id(manifest)
         await update_progress(
             stage="loading",
             progress=30,
@@ -551,7 +553,7 @@ async def update_plugin(request: UpdatePluginRequest, maibot_session: Optional[s
 
         manifest = _read_required_manifest(plugin_path)
         old_version = str(manifest.get("version", "unknown"))
-        old_manifest_id = str(manifest.get("id") or plugin_id).strip()
+        old_manifest_id = _require_manifest_plugin_id(manifest)
         await update_progress(
             stage="loading",
             progress=10,
@@ -667,6 +669,7 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
     try:
         installed_plugins: List[Dict[str, Any]] = []
         runtime_statuses = _get_runtime_plugin_load_statuses()
+        runtime_failure_reasons = _get_runtime_plugin_load_failure_reasons()
         circuit_statuses = _get_runtime_plugin_circuit_statuses()
         runtime_loading = _is_runtime_loading()
         for plugin_path in iter_plugin_directories():
@@ -687,12 +690,17 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
                 if "name" not in manifest or "version" not in manifest:
                     logger.warning(f"插件文件夹 {folder_name} 的 _manifest.json 格式无效，跳过")
                     continue
-                plugin_id = _infer_plugin_id(folder_name, manifest, manifest_path)
+                plugin_id = _read_manifest_plugin_id(manifest)
+                if not plugin_id:
+                    logger.warning(f"插件文件夹 {folder_name} 的 _manifest.json 缺少 id，跳过")
+                    continue
                 enabled = _read_plugin_enabled(plugin_id, plugin_path)
-                load_status = runtime_statuses.get(plugin_id, "unknown")
+                runtime_aliases = [plugin_id, str(manifest.get("id", ""))]
+                load_status = _lookup_runtime_plugin_value(runtime_statuses, runtime_aliases, "unknown")
                 if enabled and load_status == "unknown" and runtime_loading:
                     load_status = "loading"
                 circuit_status = circuit_statuses.get(plugin_id)
+                load_error = _lookup_runtime_plugin_value(runtime_failure_reasons, runtime_aliases, "")
                 changelog = read_plugin_changelog(plugin_path)
                 installed_plugins.append(
                     {
@@ -703,6 +711,7 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
                         "disabled": not enabled,
                         "loaded": load_status == "success",
                         "load_status": "disabled" if not enabled else load_status,
+                        "load_error": "" if not enabled or load_status != "failed" else load_error,
                         "circuit_status": circuit_status,
                         "changelog": changelog,
                     }
@@ -745,16 +754,9 @@ async def get_local_plugin_readme(plugin_id: str, maibot_session: Optional[str] 
         if plugin_path is None:
             return {"success": False, "error": "插件未安装"}
 
-        for readme_name in ["README.md", "readme.md", "Readme.md", "README.MD"]:
-            readme_path = resolve_plugin_file_path(plugin_path, readme_name)
-            if readme_path.exists():
-                try:
-                    with open(readme_path, "r", encoding="utf-8") as file_obj:
-                        readme_content = file_obj.read()
-                    logger.info(f"成功读取本地 README: {readme_path}")
-                    return {"success": True, "data": readme_content}
-                except Exception as e:
-                    logger.warning(f"读取 {readme_path} 失败: {e}")
+        readme = read_plugin_readme(plugin_path)
+        if readme:
+            return {"success": True, "data": readme}
 
         return {"success": False, "error": "本地未找到 README 文件"}
     except Exception as e:

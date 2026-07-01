@@ -420,7 +420,8 @@ class PluginRunner:
         logger.info(f"已加载 {len(plugins)} 个插件")
 
         # 4. 注入 PluginContext + 调用 on_load 生命周期钩子
-        failed_plugins: Set[str] = set(self._loader.failed_plugins.keys())
+        failed_plugin_reasons: Dict[str, str] = dict(self._loader.failed_plugins)
+        failed_plugins: Set[str] = set(failed_plugin_reasons)
         inactive_plugins: Set[str] = set()
         available_plugin_versions: Dict[str, str] = dict(self._external_available_plugins)
         for meta in plugins:
@@ -441,6 +442,7 @@ class PluginRunner:
                     inactive_plugins.add(meta.plugin_id)
                     continue
                 failed_plugins.add(meta.plugin_id)
+                failed_plugin_reasons[meta.plugin_id] = f"依赖未满足: {', '.join(unsatisfied_dependencies)}"
                 continue
 
             activation_status = await self._activate_plugin(meta)
@@ -451,13 +453,19 @@ class PluginRunner:
                 inactive_plugins.add(meta.plugin_id)
                 continue
             failed_plugins.add(meta.plugin_id)
+            failed_plugin_reasons[meta.plugin_id] = "插件初始化失败"
 
         successful_plugins = [
             meta.plugin_id
             for meta in plugins
             if meta.plugin_id not in failed_plugins and meta.plugin_id not in inactive_plugins
         ]
-        await self._notify_ready(successful_plugins, sorted(failed_plugins), sorted(inactive_plugins))
+        await self._notify_ready(
+            successful_plugins,
+            sorted(failed_plugins),
+            sorted(inactive_plugins),
+            failed_plugin_reasons,
+        )
 
         # 5. 等待直到收到关停信号
         with contextlib.suppress(asyncio.CancelledError):
@@ -1913,6 +1921,7 @@ class PluginRunner:
         loaded_plugins: List[str],
         failed_plugins: List[str],
         inactive_plugins: List[str],
+        failed_plugin_reasons: Dict[str, str] | None = None,
     ) -> None:
         """通知 Host 当前 Runner 已完成插件初始化。
 
@@ -1920,10 +1929,12 @@ class PluginRunner:
             loaded_plugins: 成功初始化的插件列表。
             failed_plugins: 初始化失败的插件列表。
             inactive_plugins: 因禁用或依赖不可用而未激活的插件列表。
+            failed_plugin_reasons: 初始化失败的插件及原因。
         """
         payload = RunnerReadyPayload(
             loaded_plugins=loaded_plugins,
             failed_plugins=failed_plugins,
+            failed_plugin_reasons=failed_plugin_reasons or {},
             inactive_plugins=inactive_plugins,
         )
         await self._rpc_client.send_request(

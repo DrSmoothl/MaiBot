@@ -320,6 +320,8 @@ class RunnerReadyPayload(BaseModel):
     """已完成初始化的插件列表"""
     failed_plugins: List[str] = Field(default_factory=list, description="初始化失败的插件列表")
     """初始化失败的插件列表"""
+    failed_plugin_reasons: Dict[str, str] = Field(default_factory=dict, description="初始化失败的插件及原因")
+    """初始化失败的插件及原因"""
     inactive_plugins: List[str] = Field(default_factory=list, description="当前因禁用或依赖不可用而未激活的插件列表")
     """当前因禁用或依赖不可用而未激活的插件列表"""
 
