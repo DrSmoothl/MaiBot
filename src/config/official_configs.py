@@ -1,5 +1,6 @@
-import re
 from typing import List, Literal, Optional
+
+import re
 
 from .config_base import ConfigBase, Field
 
