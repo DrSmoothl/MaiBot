@@ -7325,7 +7325,11 @@ class SDKMemoryKernel:
         hit_type = str(hit.get("type", "") or "").strip()
         metadata_chat_ids = cls._metadata_chat_scope_ids(metadata)
         if metadata_chat_ids:
-            return bool(metadata_chat_ids & allowed_chat_ids)
+            if metadata_chat_ids & allowed_chat_ids:
+                return True
+            if hit_type in {"paragraph", "relation"}:
+                return None
+            return False
 
         source = str(metadata.get("source", "") or hit.get("source", "") or "").strip()
         chat_sources = {str(cls._chat_source(allowed_chat_id) or "") for allowed_chat_id in allowed_chat_ids}

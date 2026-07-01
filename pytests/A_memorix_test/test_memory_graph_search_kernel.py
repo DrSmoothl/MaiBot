@@ -465,6 +465,49 @@ def test_chat_scope_filter_accepts_chat_ids_metadata() -> None:
     assert [item["hash"] for item in filtered] == ["para-rebound", "rel-rebound"]
 
 
+def test_chat_scope_filter_defers_stale_metadata_to_store_for_rebound_records() -> None:
+    kernel = _build_retrieval_filter_kernel(config={})
+    hits = [
+        {
+            "type": "paragraph",
+            "hash": "para-rebound",
+            "content": "重复导入后绑定到当前聊天流的段落。",
+            "metadata": {"chat_ids": ["session-other"]},
+        },
+        {
+            "type": "relation",
+            "hash": "rel-rebound",
+            "content": "Alice 持有 地图",
+            "metadata": {"chat_ids": ["session-other"]},
+        },
+        {
+            "type": "episode",
+            "hash": "episode-other",
+            "content": "其他聊天流片段。",
+            "metadata": {"chat_ids": ["session-other"]},
+        },
+    ]
+    kernel.metadata_store.paragraphs["para-rebound"] = {
+        "hash": "para-rebound",
+        "content": "重复导入后绑定到当前聊天流的段落。",
+        "source": "web_import:demo.txt",
+        "metadata": {"chat_ids": ["session-current"]},
+    }
+    kernel.metadata_store.paragraphs["para-rebound-relation"] = {
+        "hash": "para-rebound-relation",
+        "content": "重复导入后绑定到当前聊天流的关系支撑段落。",
+        "source": "web_import:demo.txt",
+        "metadata": {"chat_ids": ["session-current"]},
+    }
+    kernel.metadata_store.relation_paragraphs["rel-rebound"] = [
+        kernel.metadata_store.paragraphs["para-rebound-relation"]
+    ]
+
+    filtered = kernel._filter_hits_by_chat_scope(hits, chat_id="session-current")
+
+    assert [item["hash"] for item in filtered] == ["para-rebound", "rel-rebound"]
+
+
 def test_retrieval_type_filter_requires_enabled_flag() -> None:
     kernel = _build_retrieval_filter_kernel(
         config={
