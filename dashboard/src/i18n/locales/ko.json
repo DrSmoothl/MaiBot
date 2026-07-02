@@ -825,6 +825,25 @@
       "30d": "30일"
     },
     "autoRefresh": "자동 새로고침",
+    "cards": {
+      "add": "카드 추가",
+      "edit": "카드 편집",
+      "done": "완료",
+      "reset": "기본 레이아웃 복원",
+      "row": {
+        "low": "낮은 행",
+        "high": "높은 행"
+      },
+      "dialog": {
+        "title": "홈 카드 관리",
+        "description": "플러그인 또는 기본 제공 카드를 추가하거나 기본 레이아웃으로 복원합니다.",
+        "hiddenCards": "추가 가능한 카드",
+        "noHiddenCards": "추가 가능한 카드가 없습니다",
+        "restore": "추가",
+        "reset": "기본 레이아웃 복원",
+        "cancel": "닫기"
+      }
+    },
     "botStatus": {
       "title": "MaiBot 상태",
       "loading": "읽는 중",
