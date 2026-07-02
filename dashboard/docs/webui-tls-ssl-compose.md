@@ -86,10 +86,11 @@ maibot.example.com {
 
 ### 6.1 修改 WebUI 配置
 
-先在 config/bot_config.toml 中确认：
+先在 docker-config/mmc/bot_config.toml 中确认：
 
 ```toml
 [webui]
+host = ["0.0.0.0"]
 mode = "production"
 secure_cookie = true
 trust_xff = true

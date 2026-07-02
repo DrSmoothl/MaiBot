@@ -1685,6 +1685,19 @@
   backdrop-filter: none !important;
 }
 
+:root[data-dashboard-style='future-retro'] [data-focus-companion='true'] .focus-local-glass {
+  background-color: rgb(255 246 230 / 68%);
+  box-shadow: none;
+  -webkit-backdrop-filter: blur(22px) !important;
+  backdrop-filter: blur(22px) !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-focus-companion='true'] .focus-local-glass-input {
+  background-color: rgb(255 246 230 / 58%);
+  -webkit-backdrop-filter: blur(16px) !important;
+  backdrop-filter: blur(16px) !important;
+}
+
 :root[data-dashboard-style='future-retro']
   [data-dashboard-shell='true']
   :is([class*='bg-gradient-'], [class*='from-'], [class*='via-'], [class*='to-']) {

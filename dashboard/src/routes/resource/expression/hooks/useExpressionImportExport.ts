@@ -3,7 +3,7 @@
  *
  * 收编按聊天的导入导出清除写逻辑：
  * - 导入导出清除都需要先在左侧选择一个具体聊天（currentChat），未选中时弹 toast 拦截；
- * - 导出：拉取数据后在浏览器侧下载 JSON（全部 / 仅所选）；
+ * - 导出：拉取选中数据后在浏览器侧下载 JSON；
  * - 导入：解析上传的 JSON、规范化条目后提交，成功后调用 onChanged() 刷新；
  * - 清除：清空当前聊天全部表达方式，成功后调用 onChanged() 刷新；
  * - 写失败弹全局 toast（与原页面一致）。
@@ -35,8 +35,8 @@ export interface UseExpressionImportExportOptions {
 }
 
 export interface UseExpressionImportExportResult {
-  /** 导出表达方式（onlySelected=true 仅导出选中项） */
-  exportExpressionsToFile: (onlySelected: boolean) => Promise<void>
+  /** 导出选中的表达方式 */
+  exportSelectedExpressionsToFile: () => Promise<void>
   /** 导入文件变更处理（绑定到 <input type="file"> 的 onChange） */
   handleImportFileChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
   /** 清除当前聊天全部表达方式 */
@@ -83,11 +83,11 @@ export function useExpressionImportExport({
     return name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || 'chat'
   }, [])
 
-  const exportExpressionsToFile = useCallback(
-    async (onlySelected: boolean) => {
+  const exportSelectedExpressionsToFile = useCallback(
+    async () => {
       const chatId = getImportExportChatId()
       if (!chatId || !currentChat) return
-      if (onlySelected && selectedIds.size === 0) {
+      if (selectedIds.size === 0) {
         toast({
           title: '没有选中项目',
           description: '请先选择要导出的表达方式',
@@ -100,7 +100,7 @@ export function useExpressionImportExport({
       try {
         result = await exportExpressions({
           chat_id: chatId,
-          ids: onlySelected ? Array.from(selectedIds) : undefined,
+          ids: Array.from(selectedIds),
         })
       } catch (error) {
         toast({
@@ -111,7 +111,7 @@ export function useExpressionImportExport({
         return
       }
 
-      const filename = `expressions-${sanitizeFilename(currentChat.chat_name)}-${onlySelected ? 'selected' : 'all'}.json`
+      const filename = `expressions-${sanitizeFilename(currentChat.chat_name)}-selected.json`
       downloadJson(filename, result)
       toast({
         title: '导出成功',
@@ -201,7 +201,7 @@ export function useExpressionImportExport({
   }, [getImportExportChatId, onChanged, onClearSelection, onCloseClearConfirm, toast])
 
   return {
-    exportExpressionsToFile,
+    exportSelectedExpressionsToFile,
     handleImportFileChange,
     clearCurrentChat,
   }

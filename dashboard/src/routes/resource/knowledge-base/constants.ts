@@ -6,6 +6,8 @@ export const DELETE_OPERATION_ITEM_PAGE_SIZE = 8
 export const FEEDBACK_CORRECTION_FETCH_LIMIT = 100
 export const FEEDBACK_CORRECTION_PAGE_SIZE = 6
 export const FEEDBACK_ACTION_LOG_PAGE_SIZE = 8
+export const MEMORY_CORRECTION_FETCH_LIMIT = 100
+export const MEMORY_CORRECTION_PAGE_SIZE = 6
 export const IMPORT_CHUNK_PAGE_SIZE = 50
 
 export const RUNNING_IMPORT_STATUS = new Set(['preparing', 'running', 'cancel_requested'])

@@ -169,16 +169,67 @@ export interface MemoryGraphEdgeDetailPayload {
   evidence_graph: MemoryEvidenceGraphPayload
 }
 
+export interface MemoryGraphParagraphDetailResponsePayload {
+  success: boolean
+  paragraph: MemoryGraphParagraphDetailPayload
+  evidence_graph: MemoryEvidenceGraphPayload
+}
+
+export interface MemoryVectorStoreSnapshot {
+  available: boolean
+  dimension: number
+  num_vectors: number
+  has_data: boolean
+}
+
+export interface MemoryVectorMigrationProgress extends Record<string, unknown> {
+  total?: number
+  processed?: number
+  percent?: number
+  elapsed_seconds?: number
+  estimated_remaining_seconds?: number | null
+}
+
+export interface MemoryVectorAutoMigrationStatus {
+  running?: boolean
+  attempted?: boolean
+  success?: boolean
+  stage?: string
+  progress?: MemoryVectorMigrationProgress
+  last_error?: string
+  started_at?: number | null
+  finished_at?: number | null
+  updated_at?: number | null
+}
+
+export interface MemoryVectorPoolsStatus {
+  configured_mode?: string
+  effective_mode?: string
+  ready?: boolean
+  single_pool?: MemoryVectorStoreSnapshot
+  paragraph_pool?: MemoryVectorStoreSnapshot
+  graph_pool?: MemoryVectorStoreSnapshot
+  ready_manifest?: string
+  auto_migration?: MemoryVectorAutoMigrationStatus
+}
+
 export interface MemoryRuntimeConfigPayload {
   success: boolean
   config: Record<string, unknown>
   data_dir: string
   embedding_dimension: number
+  embedding_fingerprint?: Record<string, unknown>
+  stored_embedding_fingerprint?: Record<string, unknown>
+  embedding_fingerprint_status?: string
+  fuzzy_modify_candidate_limit?: number
   stored_vector_dimension?: number
   vector_rebuild_required?: boolean
   vector_rebuild_message?: string
   auto_save: boolean
   relation_vectors_enabled: boolean
+  vector_pools?: MemoryVectorPoolsStatus
+  vector_pools_ready?: boolean
+  vector_pools_effective_mode?: string
   runtime_ready: boolean
   embedding_degraded: boolean
   embedding_degraded_reason: string
@@ -207,6 +258,9 @@ export interface MemoryVectorRebuildPayload {
   errors?: string[]
   elapsed_ms?: number
   embedding_degraded?: boolean
+  embedding_fingerprint?: Record<string, unknown>
+  stored_embedding_fingerprint?: Record<string, unknown>
+  embedding_fingerprint_status?: string
   stored_vector_dimension?: number
   embedding_dimension?: number
   vector_rebuild_required?: boolean
@@ -578,6 +632,355 @@ export interface MemoryDeleteOperationDetailPayload {
   error?: string
 }
 
+export interface MemoryCorrectionRequestPayload {
+  request_text: string
+  scope?: string
+  person_id?: string
+  person_keyword?: string
+  chat_id?: string
+  limit?: number
+  requested_by?: string
+  reason?: string
+}
+
+export interface MemoryCorrectionExecuteRequestPayload {
+  plan_id: string
+  confirmed?: boolean
+  requested_by?: string
+  reason?: string
+}
+
+export interface MemoryCorrectionRollbackRequestPayload {
+  requested_by?: string
+  reason?: string
+}
+
+export type MemoryCorrectionScope = 'person_profile' | 'memory' | (string & {})
+export type MemoryCorrectionTargetType = 'paragraph' | 'relation' | (string & {})
+export type MemoryCorrectionAction = 'mark_superseded' | 'ingest_text' | 'refresh_person_profile' | (string & {})
+export type MemoryCorrectionStatus =
+  | 'awaiting_confirmation'
+  | 'executing'
+  | 'executed'
+  | 'failed'
+  | 'rolled_back'
+  | 'rollback_failed'
+  | (string & {})
+
+export interface MemoryCorrectionRelationPayload {
+  subject: string
+  predicate: string
+  object: string
+  confidence: number
+}
+
+export type MemoryCorrectionRelationCascadeAction =
+  | 'mark_inactive'
+  | 'mark_stale_evidence'
+  | 'skipped_protected'
+
+export type MemoryCorrectionEntityCascadeAction = 'record_impact_only'
+
+export interface MemoryCorrectionStaleMarkPayload {
+  paragraph_hash: string
+  relation_hash: string
+  query_tool_id: string
+  task_id?: number | null
+  reason: string
+  source_type: string
+  source_id: string
+  source_operation_id: string
+  created_at?: number | null
+  updated_at?: number | null
+}
+
+export interface MemoryCorrectionRelationCascadePayload {
+  paragraph_hash: string
+  relation_hash: string
+  action: MemoryCorrectionRelationCascadeAction
+  reason: string
+  source_reason?: string
+  subject: string
+  predicate: string
+  object: string
+  is_pinned?: boolean
+  protected_until?: number | null
+  is_inactive?: boolean
+  inactive_since?: number | null
+  preview_only?: boolean
+  source_operation_id?: string
+  previous_metadata?: Record<string, unknown>
+  updated_metadata?: Record<string, unknown>
+  previous_is_inactive?: boolean
+  previous_inactive_since?: number | null
+  written_mark?: MemoryCorrectionStaleMarkPayload | null
+}
+
+export interface MemoryCorrectionEntityCascadePayload {
+  paragraph_hash: string
+  entity_hash: string
+  action: MemoryCorrectionEntityCascadeAction
+  reason: string
+  name: string
+  type: string
+  preview_only?: boolean
+}
+
+export interface MemoryCorrectionCascadeCountsPayload {
+  relations: number
+  relations_mark_inactive: number
+  relations_mark_stale_evidence: number
+  relations_skipped_protected: number
+  entities: number
+}
+
+export interface MemoryCorrectionCascadePreviewPayload {
+  relations: MemoryCorrectionRelationCascadePayload[]
+  entities: MemoryCorrectionEntityCascadePayload[]
+  counts: MemoryCorrectionCascadeCountsPayload
+}
+
+export interface MemoryCorrectionStaleMarkSnapshotPayload {
+  paragraph_hash: string
+  relation_hash: string
+  source_type: string
+  source_id: string
+  source_operation_id: string
+  previous_mark?: MemoryCorrectionStaleMarkPayload | null
+  written_mark?: MemoryCorrectionStaleMarkPayload | null
+}
+
+export interface MemoryCorrectionTargetCascadePayload {
+  relations_marked_inactive: MemoryCorrectionRelationCascadePayload[]
+  relations_marked_stale: MemoryCorrectionRelationCascadePayload[]
+  relations_skipped: MemoryCorrectionRelationCascadePayload[]
+  impacted_entities: MemoryCorrectionEntityCascadePayload[]
+  stale_mark_snapshots: MemoryCorrectionStaleMarkSnapshotPayload[]
+}
+
+export type MemoryCorrectionStaleRollbackAction =
+  | 'deleted'
+  | 'restored'
+  | 'skipped_due_to_source_mismatch'
+  | 'already_missing'
+  | 'restore_failed'
+  | 'invalid_target'
+
+export interface MemoryCorrectionStaleMarkRollbackPayload {
+  success: boolean
+  action: MemoryCorrectionStaleRollbackAction
+  paragraph_hash: string
+  relation_hash: string
+  before?: MemoryCorrectionStaleMarkPayload
+  after?: MemoryCorrectionStaleMarkPayload | null
+  current?: MemoryCorrectionStaleMarkPayload
+  expected_source?: {
+    source_type: string
+    source_id: string
+    source_operation_id: string
+  }
+  error?: string
+}
+
+export interface MemoryCorrectionCandidatePayload {
+  candidate_id: string
+  target_type: MemoryCorrectionTargetType
+  evidence_type: string
+  hash: string
+  content: string
+  source: string
+  metadata: Record<string, unknown>
+  score?: number | null
+}
+
+export interface MemoryCorrectionMarkSupersededOperationPayload {
+  action: 'mark_superseded'
+  candidate_id: string
+  target_type: MemoryCorrectionTargetType
+  hash: string
+  reason: string
+  valid_to?: number | null
+}
+
+export interface MemoryCorrectionIngestTextOperationPayload {
+  action: 'ingest_text'
+  text: string
+  source_type: string
+  chat_id: string
+  person_ids: string[]
+  participants: string[]
+  tags: string[]
+  relations: MemoryCorrectionRelationPayload[]
+  valid_from?: number | null
+  reason: string
+}
+
+export interface MemoryCorrectionRefreshPersonProfileOperationPayload {
+  action: 'refresh_person_profile'
+  person_id: string
+}
+
+export type MemoryCorrectionOperationPayload =
+  | MemoryCorrectionMarkSupersededOperationPayload
+  | MemoryCorrectionIngestTextOperationPayload
+  | MemoryCorrectionRefreshPersonProfileOperationPayload
+  | {
+      action: MemoryCorrectionAction
+      reason?: string
+    }
+
+export interface MemoryCorrectionPlanContentPayload {
+  scope: MemoryCorrectionScope
+  request_text: string
+  person_id: string
+  chat_id: string
+  confidence: number
+  risk_level: string
+  reason: string
+  operations: MemoryCorrectionOperationPayload[]
+}
+
+export interface MemoryCorrectionPreviewContentPayload {
+  request_text: string
+  scope: MemoryCorrectionScope
+  person_id: string
+  person_keyword: string
+  chat_id: string
+  candidates: MemoryCorrectionCandidatePayload[]
+  operations: MemoryCorrectionOperationPayload[]
+  cascade_preview?: MemoryCorrectionCascadePreviewPayload
+  requires_confirmation: boolean
+  confirm_threshold: number
+  reason: string
+}
+
+export interface MemoryCorrectionAttemptPayload {
+  status: string
+  started_at?: number
+  finished_at?: number
+  requested_by?: string
+  reason?: string
+  recovered_from_stale_executing?: boolean
+}
+
+export interface MemoryCorrectionIngestResultPayload {
+  operation: MemoryCorrectionIngestTextOperationPayload
+  result: Record<string, unknown>
+}
+
+export interface MemoryCorrectionSupersededTargetPayload {
+  target_type: MemoryCorrectionTargetType
+  hash: string
+  previous_metadata: Record<string, unknown>
+  previous_is_inactive?: boolean
+  previous_inactive_since?: number | null
+  cascade?: MemoryCorrectionTargetCascadePayload
+}
+
+export interface MemoryCorrectionExecutionPayload {
+  success?: boolean
+  stored_ids?: string[]
+  ingest_results?: MemoryCorrectionIngestResultPayload[]
+  superseded_targets?: MemoryCorrectionSupersededTargetPayload[]
+  refreshed_profiles?: Array<Record<string, unknown>>
+  changed_at?: number
+  changed_by?: string
+  reason?: string
+  attempt?: MemoryCorrectionAttemptPayload
+  rollback?: MemoryCorrectionRollbackResultPayload
+  error?: string
+}
+
+export interface MemoryCorrectionRollbackItemPayload {
+  type: string
+  result: Record<string, unknown>
+}
+
+export interface MemoryCorrectionRestoredTargetPayload {
+  target_type: MemoryCorrectionTargetType
+  hash: string
+}
+
+export interface MemoryCorrectionRestoreFailurePayload {
+  target_type: MemoryCorrectionTargetType
+  hash: string
+  error: string
+}
+
+export interface MemoryCorrectionRollbackResultPayload {
+  success: boolean
+  stored_ids_deleted?: string[]
+  stored_ids_delete_requested?: string[]
+  new_relations_deactivated: string[]
+  restored_targets: MemoryCorrectionRestoredTargetPayload[]
+  restore_failures?: MemoryCorrectionRestoreFailurePayload[]
+  stale_marks_deleted?: MemoryCorrectionStaleMarkRollbackPayload[]
+  stale_marks_restored?: MemoryCorrectionStaleMarkRollbackPayload[]
+  stale_marks_skipped?: MemoryCorrectionStaleMarkRollbackPayload[]
+  items: MemoryCorrectionRollbackItemPayload[]
+  requested_by: string
+  reason: string
+  error?: string
+}
+
+export interface MemoryCorrectionPlanPayload {
+  plan_id: string
+  request_text: string
+  scope: MemoryCorrectionScope
+  target_person_id: string
+  target_chat_id: string
+  status: MemoryCorrectionStatus
+  confidence: number
+  plan: MemoryCorrectionPlanContentPayload
+  preview: MemoryCorrectionPreviewContentPayload
+  execution: MemoryCorrectionExecutionPayload
+  created_at: number
+  updated_at: number
+  executed_at?: number | null
+  requested_by: string
+  reason: string
+}
+
+export interface MemoryCorrectionPreviewPayload {
+  success: boolean
+  plan_id?: string
+  plan?: MemoryCorrectionPlanPayload | null
+  preview?: MemoryCorrectionPreviewContentPayload
+  requires_confirmation?: boolean
+  raw_plan?: Record<string, unknown>
+  candidates?: MemoryCorrectionCandidatePayload[]
+  request_text?: string
+  error?: string
+}
+
+export interface MemoryCorrectionExecutePayload {
+  success: boolean
+  plan?: MemoryCorrectionPlanPayload | null
+  execution?: MemoryCorrectionExecutionPayload
+  requires_confirmation?: boolean
+  error?: string
+}
+
+export interface MemoryCorrectionPlanListPayload {
+  success: boolean
+  items: MemoryCorrectionPlanPayload[]
+  count?: number
+  error?: string
+}
+
+export interface MemoryCorrectionPlanDetailPayload {
+  success: boolean
+  plan?: MemoryCorrectionPlanPayload | null
+  error?: string
+}
+
+export interface MemoryCorrectionRollbackPayload {
+  success: boolean
+  plan?: MemoryCorrectionPlanPayload | null
+  rollback?: MemoryCorrectionRollbackResultPayload
+  error?: string
+}
+
 export interface MemoryFeedbackAffectedCountsPayload {
   relations?: number
   stale_paragraphs?: number
@@ -869,6 +1272,19 @@ export async function getMemoryGraphEdgeDetail(
   return requestJson<MemoryGraphEdgeDetailPayload>(`/graph/edge-detail?${params.toString()}`)
 }
 
+export async function getMemoryGraphParagraphDetail(
+  paragraphHash: string,
+  options?: {
+    evidenceNodeLimit?: number
+  },
+): Promise<MemoryGraphParagraphDetailResponsePayload> {
+  const params = new URLSearchParams({
+    paragraph_hash: paragraphHash,
+    evidence_node_limit: String(options?.evidenceNodeLimit ?? 80),
+  })
+  return requestJson<MemoryGraphParagraphDetailResponsePayload>(`/graph/paragraph-detail?${params.toString()}`)
+}
+
 export async function previewMemoryDelete(
   payload: MemoryDeleteRequestPayload,
 ): Promise<MemoryDeletePreviewPayload> {
@@ -915,6 +1331,63 @@ export async function getMemoryDeleteOperation(
   operationId: string,
 ): Promise<MemoryDeleteOperationDetailPayload> {
   return requestJson<MemoryDeleteOperationDetailPayload>(`/delete/operations/${encodeURIComponent(operationId)}`)
+}
+
+export async function previewMemoryCorrection(
+  payload: MemoryCorrectionRequestPayload,
+): Promise<MemoryCorrectionPreviewPayload> {
+  const body = { ...payload }
+  if (body.limit === undefined) {
+    delete body.limit
+  }
+  return requestJson<MemoryCorrectionPreviewPayload>('/corrections/preview', {
+    method: 'POST',
+    body,
+  })
+}
+
+export async function executeMemoryCorrection(
+  payload: MemoryCorrectionExecuteRequestPayload,
+): Promise<MemoryCorrectionExecutePayload> {
+  return requestJson<MemoryCorrectionExecutePayload>('/corrections/execute', {
+    method: 'POST',
+    body: payload,
+  })
+}
+
+export async function getMemoryCorrectionPlans(
+  options?: {
+    limit?: number
+    status?: string
+    scope?: string
+  },
+): Promise<MemoryCorrectionPlanListPayload> {
+  const params = new URLSearchParams({
+    limit: String(options?.limit ?? 50),
+  })
+  if (options?.status?.trim()) {
+    params.set('status', options.status.trim())
+  }
+  if (options?.scope?.trim()) {
+    params.set('scope', options.scope.trim())
+  }
+  return requestJson<MemoryCorrectionPlanListPayload>(`/corrections/plans?${params.toString()}`)
+}
+
+export async function getMemoryCorrectionPlan(
+  planId: string,
+): Promise<MemoryCorrectionPlanDetailPayload> {
+  return requestJson<MemoryCorrectionPlanDetailPayload>(`/corrections/plans/${encodeURIComponent(planId)}`)
+}
+
+export async function rollbackMemoryCorrectionPlan(
+  planId: string,
+  payload: MemoryCorrectionRollbackRequestPayload,
+): Promise<MemoryCorrectionRollbackPayload> {
+  return requestJson<MemoryCorrectionRollbackPayload>(`/corrections/plans/${encodeURIComponent(planId)}/rollback`, {
+    method: 'POST',
+    body: payload,
+  })
 }
 
 export async function getMemoryFeedbackCorrections(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRouter, useRouterState } from '@tanstack/react-router'
 import { AnimatePresence, motion } from 'motion/react'
@@ -22,6 +22,21 @@ import { Sidebar } from './Sidebar'
 import type { LayoutProps, WorkspaceMode } from './types'
 import { useMenuSections } from './use-menu-sections'
 
+const SIDEBAR_OPEN_STORAGE_KEY = 'maibot-layout-sidebar-open'
+const TOPBAR_COLLAPSED_STORAGE_KEY = 'maibot-layout-topbar-collapsed'
+const LAYOUT_IMMERSIVE_EVENT = 'maibot-layout-immersive-change'
+
+function loadStoredBoolean(key: string, fallback: boolean): boolean {
+  if (typeof window === 'undefined') {
+    return fallback
+  }
+
+  const stored = localStorage.getItem(key)
+  if (stored === 'true') return true
+  if (stored === 'false') return false
+  return fallback
+}
+
 export function Layout({ children }: LayoutProps) {
   const { t } = useTranslation()
   const { checking } = useAuthGuard() // 检查认证状态
@@ -34,18 +49,56 @@ export function Layout({ children }: LayoutProps) {
   const isChatWorkspace = workspaceMode === 'chat'
   const showBackToTop = isSettingsWorkspace && pathname !== '/planner-monitor'
 
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(() => loadStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true))
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [topbarCollapsed, setTopbarCollapsed] = useState(false)
+  const [topbarCollapsed, setTopbarCollapsed] = useState(() => loadStoredBoolean(TOPBAR_COLLAPSED_STORAGE_KEY, false))
   const [visibleWorkspaceMode, setVisibleWorkspaceMode] = useState<WorkspaceMode>(workspaceMode)
   const [visibleChildren, setVisibleChildren] = useState<LayoutProps['children']>(children)
   const [pendingWorkspace, setPendingWorkspace] = useState<{
     children: LayoutProps['children']
     mode: WorkspaceMode
   } | null>(null)
+  const shellStateRef = useRef({ sidebarOpen, topbarCollapsed })
+  const immersiveRestoreRef = useRef<{ sidebarOpen: boolean; topbarCollapsed: boolean } | null>(null)
   const { theme, setTheme } = useTheme()
   const menuSections = useMenuSections()
+
+  useEffect(() => {
+    shellStateRef.current = { sidebarOpen, topbarCollapsed }
+  }, [sidebarOpen, topbarCollapsed])
+
+  useEffect(() => {
+    const handleImmersiveChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ immersive?: boolean }>).detail
+      const immersive = detail?.immersive === true
+
+      if (immersive) {
+        immersiveRestoreRef.current ??= shellStateRef.current
+        setSidebarOpen(false)
+        setTopbarCollapsed(true)
+        setMobileMenuOpen(false)
+        return
+      }
+
+      if (immersiveRestoreRef.current) {
+        setSidebarOpen(immersiveRestoreRef.current.sidebarOpen)
+        setTopbarCollapsed(immersiveRestoreRef.current.topbarCollapsed)
+        immersiveRestoreRef.current = null
+      }
+    }
+
+    window.addEventListener(LAYOUT_IMMERSIVE_EVENT, handleImmersiveChange)
+    return () => window.removeEventListener(LAYOUT_IMMERSIVE_EVENT, handleImmersiveChange)
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(sidebarOpen))
+  }, [sidebarOpen])
+
+  useEffect(() => {
+    localStorage.setItem(TOPBAR_COLLAPSED_STORAGE_KEY, String(topbarCollapsed))
+  }, [topbarCollapsed])
 
   // 搜索快捷键监听（Cmd/Ctrl + K）
   useEffect(() => {
@@ -79,6 +132,7 @@ export function Layout({ children }: LayoutProps) {
       }
     }
     pathToLabel['/chat'] = t('workspace.chat')
+    pathToLabel['/focus'] = t('sidebar.menu.focusCompanion')
     pathToLabel['/logs'] = t('workspace.logs')
     pathToLabel['/reasoning-process'] = t('sidebar.menu.reasoningProcess')
 

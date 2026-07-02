@@ -28,6 +28,7 @@
     },
     "menu": {
       "home": "首页",
+      "focusCompanion": "专注陪伴",
       "botMainConfig": "麦麦设置",
       "aiModelProvider": "模型厂商设置",
       "modelManagement": "模型管理",
@@ -774,6 +775,7 @@
     "title": "搜索",
     "noResults": "未找到匹配的页面",
     "startSearch": "输入关键词开始搜索",
+    "recent": "最近访问",
     "navigate": "导航",
     "select": "选择",
     "close": "关闭",
@@ -788,6 +790,7 @@
     "items": {
       "home": "首页",
       "homeDesc": "查看仪表板概览",
+      "focusCompanionDesc": "打开麦麦沉浸专注陪伴",
       "botConfig": "麦麦设置",
       "botConfigDesc": "配置麦麦的核心设置",
       "model": "麦麦模型配置",
@@ -821,7 +824,7 @@
   },
   "home": {
     "title": "首页",
-    "subtitle": "观看基本信息和快捷入口",
+    "subtitle": "查看基本信息和快捷入口",
     "loading": "加载中...",
     "loadingHint": "加载中...",
     "timeRange": {

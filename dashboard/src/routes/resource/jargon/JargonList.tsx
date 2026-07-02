@@ -6,7 +6,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Edit,
-  Eye,
   Globe,
   HelpCircle,
   Trash2,
@@ -41,7 +40,6 @@ interface JargonListProps {
   hideChatColumn?: boolean
   className?: string
   onEdit: (jargon: Jargon) => void
-  onViewDetail: (jargon: Jargon) => void
   onDelete: (jargon: Jargon) => void
   onToggleSelect: (id: number) => void
   onToggleSelectAll: () => void
@@ -76,11 +74,18 @@ function renderJargonStatus(jargon: Jargon) {
   )
 }
 
-function renderCreatedBy(createdBy: Jargon['created_by']) {
-  return createdBy === 'MANUAL' ? (
-    <Badge variant="outline">手动</Badge>
+function renderManualMarker(createdBy: Jargon['created_by'], showLabel = false) {
+  if (createdBy !== 'MANUAL') {
+    return null
+  }
+
+  return showLabel ? (
+    <Badge variant="outline">
+      <Check className="mr-1 h-3 w-3" />
+      手动
+    </Badge>
   ) : (
-    <Badge variant="secondary">AI</Badge>
+    <Check className="h-4 w-4 text-green-600" aria-label="手动创建" />
   )
 }
 
@@ -105,7 +110,6 @@ export function JargonList({
   hideChatColumn = false,
   className,
   onEdit,
-  onViewDetail,
   onDelete,
   onToggleSelect,
   onToggleSelectAll,
@@ -140,7 +144,7 @@ export function JargonList({
               <TableHead className="h-9 px-2">内容</TableHead>
               <TableHead className="h-9 px-2">含义</TableHead>
               {!hideChatColumn && <TableHead className="h-9 px-2">聊天</TableHead>}
-              <TableHead className="h-9 px-2">状态</TableHead>
+              <TableHead className="h-9 px-2 text-center">手动</TableHead>
               <TableHead className="h-9 px-2 text-center">遇见次数</TableHead>
               <TableHead className="h-9 px-2 text-right">操作</TableHead>
             </TableRow>
@@ -204,10 +208,9 @@ export function JargonList({
                       </span>
                     </TableCell>
                   )}
-                  <TableCell className="px-2 py-1.5">
-                    <div className="flex flex-wrap gap-1">
-                      {renderJargonStatus(jargon)}
-                      {renderCreatedBy(jargon.created_by)}
+                  <TableCell className="px-2 py-1.5 text-center">
+                    <div className="flex justify-center">
+                      {renderManualMarker(jargon.created_by)}
                     </div>
                   </TableCell>
                   <TableCell className="px-2 py-1.5 text-center">{jargon.count}</TableCell>
@@ -218,18 +221,10 @@ export function JargonList({
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => onEdit(jargon)}
-                        title="编辑"
+                        title="查看/编辑"
+                        aria-label="查看或编辑黑话"
                       >
                         <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => onViewDetail(jargon)}
-                        title="查看详情"
-                      >
-                        <Eye className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="outline"
@@ -279,7 +274,7 @@ export function JargonList({
                   )}
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     {renderJargonStatus(jargon)}
-                    {renderCreatedBy(jargon.created_by)}
+                    {renderManualMarker(jargon.created_by, true)}
                     <span className="text-muted-foreground">次数: {jargon.count}</span>
                   </div>
                   {!hideChatColumn && (
@@ -297,15 +292,7 @@ export function JargonList({
                   className="h-auto px-2 py-1 text-xs"
                 >
                   <Edit className="mr-1 h-3 w-3" />
-                  编辑
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onViewDetail(jargon)}
-                  className="h-auto px-2 py-1 text-xs"
-                >
-                  <Eye className="h-3 w-3" />
+                  查看/编辑
                 </Button>
                 <Button
                   variant="outline"

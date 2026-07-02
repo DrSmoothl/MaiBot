@@ -1,7 +1,19 @@
 import { type ReactNode, useMemo, useState } from 'react'
 
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, Copy, Download, FileText, Loader2, RefreshCw, Sparkles, Upload, Wand2 } from 'lucide-react'
+import {
+  Bot,
+  Copy,
+  Download,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Save,
+  Sparkles,
+  Trash2,
+  Upload,
+  Wand2,
+} from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,7 +21,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
@@ -26,11 +44,26 @@ import { cn } from '@/lib/utils'
 type OutputTab = 'blocks' | 'toml' | 'raw'
 type TargetScene = 'group' | 'private' | 'both'
 
+const PROMPT_GENERATOR_SAVED_PERSONAS_KEY = 'maibot_prompt_generator_saved_personas'
+const MAX_SAVED_PROMPT_PERSONAS = 50
+
 interface PromptGeneratorModel {
   api_provider: string
   model_identifier: string
   name: string
   visual: boolean
+}
+
+interface PromptGeneratorSavedPersona {
+  id: string
+  title: string
+  saved_at: string
+  model_name: string
+  source_text: string
+  target_scene: TargetScene
+  language: string
+  extra_requirements: string
+  response: PromptGeneratorResponse
 }
 
 function unwrapConfigPayload(payload: unknown): Record<string, unknown> {
@@ -71,6 +104,106 @@ function normalizeModels(payload: unknown): PromptGeneratorModel[] {
     .filter((item): item is PromptGeneratorModel => item !== null)
 }
 
+function isTargetScene(value: unknown): value is TargetScene {
+  return value === 'group' || value === 'private' || value === 'both'
+}
+
+function isPromptGeneratorResponse(value: unknown): value is PromptGeneratorResponse {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const record = value as Record<string, unknown>
+  const result = record.result
+  return (
+    typeof record.model_name === 'string' &&
+    Array.isArray(record.config_blocks) &&
+    typeof record.toml_snippet === 'string' &&
+    typeof record.raw_response === 'string' &&
+    typeof record.reasoning === 'string' &&
+    Boolean(
+      result &&
+      typeof result === 'object' &&
+      Array.isArray((result as Record<string, unknown>).notes)
+    )
+  )
+}
+
+function isSavedPersona(value: unknown): value is PromptGeneratorSavedPersona {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.id === 'string' &&
+    typeof record.title === 'string' &&
+    typeof record.saved_at === 'string' &&
+    Number.isFinite(Date.parse(record.saved_at)) &&
+    typeof record.model_name === 'string' &&
+    typeof record.source_text === 'string' &&
+    isTargetScene(record.target_scene) &&
+    typeof record.language === 'string' &&
+    typeof record.extra_requirements === 'string' &&
+    isPromptGeneratorResponse(record.response)
+  )
+}
+
+function loadSavedPersonas(): PromptGeneratorSavedPersona[] {
+  if (typeof window === 'undefined') {
+    return []
+  }
+  const raw = window.localStorage.getItem(PROMPT_GENERATOR_SAVED_PERSONAS_KEY)
+  if (!raw) {
+    return []
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter(isSavedPersona).slice(0, MAX_SAVED_PROMPT_PERSONAS)
+      : []
+  } catch (error) {
+    console.warn('读取已保存人设失败:', error)
+    return []
+  }
+}
+
+function savePersonasToStorage(personas: PromptGeneratorSavedPersona[]) {
+  window.localStorage.setItem(
+    PROMPT_GENERATOR_SAVED_PERSONAS_KEY,
+    JSON.stringify(personas.slice(0, MAX_SAVED_PROMPT_PERSONAS))
+  )
+}
+
+function createSavedPersonaId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function truncateText(value: string, maxLength: number) {
+  const normalized = value.trim().replace(/\s+/g, ' ')
+  const chars = Array.from(normalized)
+  if (chars.length <= maxLength) {
+    return normalized
+  }
+  return `${chars.slice(0, maxLength).join('')}...`
+}
+
+function createSavedPersonaTitle(sourceText: string, generated: PromptGeneratorResponse) {
+  const fromSource = truncateText(sourceText, 28)
+  if (fromSource) {
+    return fromSource
+  }
+  const fromPersonality = truncateText(generated.result.personality, 28)
+  return fromPersonality || `${generated.model_name} 生成结果`
+}
+
+function formatSavedPersonaTime(savedAt: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(savedAt))
+}
+
 function FieldBlock({
   children,
   description,
@@ -84,7 +217,7 @@ function FieldBlock({
     <div className="space-y-2">
       <Label>{label}</Label>
       {children}
-      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      {description && <p className="text-muted-foreground text-xs">{description}</p>}
     </div>
   )
 }
@@ -103,14 +236,18 @@ function ConfigBlockView({
   onCopy: (content: string, label: string) => void
 }) {
   return (
-    <div className="rounded-md border bg-background p-3">
+    <div className="bg-background rounded-md border p-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-medium">{block.title}</h3>
-            <Badge variant="secondary">{block.section}.{block.field}</Badge>
+            <Badge variant="secondary">
+              {block.section}.{block.field}
+            </Badge>
           </div>
-          {block.description && <p className="text-xs text-muted-foreground">{block.description}</p>}
+          {block.description && (
+            <p className="text-muted-foreground text-xs">{block.description}</p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => onCopy(block.toml, block.title)}>
@@ -118,12 +255,21 @@ function ConfigBlockView({
             复制
           </Button>
           <Button size="sm" onClick={() => onApply(block)} disabled={disabled}>
-            {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {applying ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4" />
+            )}
             注入此块
           </Button>
         </div>
       </div>
-      <Textarea readOnly autoResize={false} value={block.toml} className="mt-3 min-h-[132px] font-mono text-xs" />
+      <Textarea
+        readOnly
+        autoResize={false}
+        value={block.toml}
+        className="mt-3 min-h-[132px] font-mono text-xs"
+      />
     </div>
   )
 }
@@ -140,6 +286,8 @@ export function PromptGeneratorPage() {
   const [applyingBlockId, setApplyingBlockId] = useState<string | null>(null)
   const [outputTab, setOutputTab] = useState<OutputTab>('blocks')
   const [generated, setGenerated] = useState<PromptGeneratorResponse | null>(null)
+  const [savedPersonas, setSavedPersonas] =
+    useState<PromptGeneratorSavedPersona[]>(loadSavedPersonas)
 
   // 模型列表：读取失败用局部呈现（不弹 toast），「刷新模型」按钮调 refetch
   const modelsQuery = useQuery({
@@ -152,13 +300,16 @@ export function PromptGeneratorPage() {
   // 当前选中项：用户已选且仍有效则沿用，否则回落到首个模型（渲染期派生，避免与列表加载同步的副作用）
   const modelName = models.some((model) => model.name === selectedModelName)
     ? selectedModelName
-    : models[0]?.name ?? ''
+    : (models[0]?.name ?? '')
   const selectedModel = models.find((model) => model.name === modelName)
 
   // 注入配置块（失败由全局 mutation 错误 toast 呈现）
   const applyMutation = useMutation({
-    mutationFn: async (vars: { blocks: PromptGeneratorConfigBlock[]; label: string; blockId?: string }) =>
-      applyPromptGeneratorBlocks(vars.blocks),
+    mutationFn: async (vars: {
+      blocks: PromptGeneratorConfigBlock[]
+      label: string
+      blockId?: string
+    }) => applyPromptGeneratorBlocks(vars.blocks),
     meta: { errorTitle: '注入失败' },
     onMutate: (vars) => {
       setApplyingBlockId(vars.blockId ?? null)
@@ -225,12 +376,73 @@ export function PromptGeneratorPage() {
     toast({ title: '已生成下载文件', description: filename })
   }
 
-  const handleApplyBlocks = (blocks: PromptGeneratorConfigBlock[], label: string, blockId?: string) => {
+  const handleApplyBlocks = (
+    blocks: PromptGeneratorConfigBlock[],
+    label: string,
+    blockId?: string
+  ) => {
     if (blocks.length === 0) {
       toast({ title: '没有可注入的配置块', variant: 'destructive' })
       return
     }
     applyMutation.mutate({ blocks, label, blockId })
+  }
+
+  const handleSaveGenerated = () => {
+    if (!generated) {
+      toast({ title: '没有可保存的人设', variant: 'destructive' })
+      return
+    }
+
+    const savedPersona: PromptGeneratorSavedPersona = {
+      id: createSavedPersonaId(),
+      title: createSavedPersonaTitle(sourceText, generated),
+      saved_at: new Date().toISOString(),
+      model_name: generated.model_name,
+      source_text: sourceText,
+      target_scene: targetScene,
+      language,
+      extra_requirements: extraRequirements,
+      response: generated,
+    }
+    const nextPersonas = [savedPersona, ...savedPersonas].slice(0, MAX_SAVED_PROMPT_PERSONAS)
+    try {
+      savePersonasToStorage(nextPersonas)
+      setSavedPersonas(nextPersonas)
+      toast({ title: '人设已保存', description: savedPersona.title })
+    } catch (error) {
+      toast({
+        title: '保存人设失败',
+        description: (error as Error).message,
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleSelectSavedPersona = (persona: PromptGeneratorSavedPersona) => {
+    setSelectedModelName(persona.model_name)
+    setSourceText(persona.source_text)
+    setTargetScene(persona.target_scene)
+    setLanguage(persona.language)
+    setExtraRequirements(persona.extra_requirements)
+    setGenerated(persona.response)
+    setOutputTab('blocks')
+    toast({ title: '已载入保存的人设', description: persona.title })
+  }
+
+  const handleDeleteSavedPersona = (persona: PromptGeneratorSavedPersona) => {
+    const nextPersonas = savedPersonas.filter((item) => item.id !== persona.id)
+    try {
+      savePersonasToStorage(nextPersonas)
+      setSavedPersonas(nextPersonas)
+      toast({ title: '已删除保存的人设', description: persona.title })
+    } catch (error) {
+      toast({
+        title: '删除人设失败',
+        description: (error as Error).message,
+        variant: 'destructive',
+      })
+    }
   }
 
   const handleGenerate = () => {
@@ -272,20 +484,29 @@ export function PromptGeneratorPage() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-6 w-6 text-primary" />
+              <Sparkles className="text-primary h-6 w-6" />
               <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">人设生成器（测试功能）</h1>
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               选择已配置模型，把任意文段、角色卡或人设解析成 MaiBot 配置格式。
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => void modelsQuery.refetch()} disabled={loadingModels}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void modelsQuery.refetch()}
+              disabled={loadingModels}
+            >
               <RefreshCw className={cn('h-4 w-4', loadingModels && 'animate-spin')} />
               刷新模型
             </Button>
             <Button size="sm" onClick={handleGenerate} disabled={generating || !modelName}>
-              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+              {generating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="h-4 w-4" />
+              )}
               {generating ? '生成中' : '生成'}
             </Button>
           </div>
@@ -303,7 +524,11 @@ export function PromptGeneratorPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <FieldBlock label="生成模型" description="来自模型管理中定义的 models。">
-                  <Select value={modelName} onValueChange={setSelectedModelName} disabled={loadingModels || models.length === 0}>
+                  <Select
+                    value={modelName}
+                    onValueChange={setSelectedModelName}
+                    disabled={loadingModels || models.length === 0}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder={loadingModels ? '加载模型中...' : '选择模型'} />
                     </SelectTrigger>
@@ -317,8 +542,12 @@ export function PromptGeneratorPage() {
                   </Select>
                   {selectedModel && (
                     <div className="flex flex-wrap gap-2">
-                      <Badge variant="secondary">{selectedModel.api_provider || '未指定提供商'}</Badge>
-                      <Badge variant="outline">{selectedModel.model_identifier || selectedModel.name}</Badge>
+                      <Badge variant="secondary">
+                        {selectedModel.api_provider || '未指定提供商'}
+                      </Badge>
+                      <Badge variant="outline">
+                        {selectedModel.model_identifier || selectedModel.name}
+                      </Badge>
                       {selectedModel.visual && <Badge variant="outline">视觉模型</Badge>}
                     </div>
                   )}
@@ -326,7 +555,10 @@ export function PromptGeneratorPage() {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <FieldBlock label="目标场景">
-                    <Select value={targetScene} onValueChange={(value) => setTargetScene(value as TargetScene)}>
+                    <Select
+                      value={targetScene}
+                      onValueChange={(value) => setTargetScene(value as TargetScene)}
+                    >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -350,7 +582,9 @@ export function PromptGeneratorPage() {
                     className="min-h-[380px]"
                     maxLength={20000}
                   />
-                  <div className="text-right text-xs text-muted-foreground">{sourceText.length}/20000</div>
+                  <div className="text-muted-foreground text-right text-xs">
+                    {sourceText.length}/20000
+                  </div>
                 </FieldBlock>
 
                 <FieldBlock label="额外要求">
@@ -365,12 +599,67 @@ export function PromptGeneratorPage() {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <FieldBlock label="温度">
-                    <Input value={temperature} onChange={(event) => setTemperature(event.target.value)} inputMode="decimal" />
+                    <Input
+                      value={temperature}
+                      onChange={(event) => setTemperature(event.target.value)}
+                      inputMode="decimal"
+                    />
                   </FieldBlock>
                   <FieldBlock label="最大输出 Token">
-                    <Input value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} inputMode="numeric" />
+                    <Input
+                      value={maxTokens}
+                      onChange={(event) => setMaxTokens(event.target.value)}
+                      inputMode="numeric"
+                    />
                   </FieldBlock>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Save className="h-4 w-4" />
+                  已保存人设
+                </CardTitle>
+                <CardDescription>保存当前生成结果后，可以从这里重新载入或删除。</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {savedPersonas.length > 0 ? (
+                  <div className="space-y-2">
+                    {savedPersonas.map((persona) => (
+                      <div
+                        key={persona.id}
+                        className="bg-background hover:bg-muted/50 flex gap-2 rounded-md border p-2 transition-colors"
+                      >
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => handleSelectSavedPersona(persona)}
+                        >
+                          <div className="truncate text-sm font-medium">{persona.title}</div>
+                          <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-2 text-xs">
+                            <span>{persona.model_name}</span>
+                            <span>{formatSavedPersonaTime(persona.saved_at)}</span>
+                          </div>
+                        </button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          title="删除保存的人设"
+                          onClick={() => handleDeleteSavedPersona(persona)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground rounded-md border border-dashed p-4 text-center text-sm">
+                    还没有保存的人设
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -384,16 +673,33 @@ export function PromptGeneratorPage() {
                       <FileText className="h-4 w-4" />
                       生成结果
                     </CardTitle>
-                    <CardDescription>生成结果会拆成配置块，注入时只覆盖对应字段，不影响其它配置。</CardDescription>
+                    <CardDescription>
+                      生成结果会拆成配置块，注入时只覆盖对应字段，不影响其它配置。
+                    </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      onClick={() => generated && void handleApplyBlocks(generated.config_blocks, '全部配置块')}
+                      onClick={() =>
+                        generated && void handleApplyBlocks(generated.config_blocks, '全部配置块')
+                      }
                       disabled={!generated || applying}
                     >
-                      {applyingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                      {applyingAll ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
                       全部注入
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSaveGenerated}
+                      disabled={!generated}
+                    >
+                      <Save className="h-4 w-4" />
+                      保存人设
                     </Button>
                     <Button
                       variant="outline"
@@ -407,7 +713,10 @@ export function PromptGeneratorPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => generated && handleDownload('maibot-personality-prompt.toml', generated.toml_snippet)}
+                      onClick={() =>
+                        generated &&
+                        handleDownload('maibot-personality-prompt.toml', generated.toml_snippet)
+                      }
                       disabled={!generated}
                     >
                       <Download className="h-4 w-4" />
@@ -419,7 +728,10 @@ export function PromptGeneratorPage() {
               <Separator />
               <CardContent className="pt-4">
                 {generated ? (
-                  <Tabs value={outputTab} onValueChange={(value) => setOutputTab(value as OutputTab)}>
+                  <Tabs
+                    value={outputTab}
+                    onValueChange={(value) => setOutputTab(value as OutputTab)}
+                  >
                     <TabsList className="grid w-full grid-cols-3 lg:w-[28rem]">
                       <TabsTrigger value="blocks">配置块</TabsTrigger>
                       <TabsTrigger value="toml">配置片段</TabsTrigger>
@@ -433,7 +745,9 @@ export function PromptGeneratorPage() {
                             applying={applyingBlockId === block.id}
                             block={block}
                             disabled={applying}
-                            onApply={(nextBlock) => void handleApplyBlocks([nextBlock], nextBlock.title, nextBlock.id)}
+                            onApply={(nextBlock) =>
+                              void handleApplyBlocks([nextBlock], nextBlock.title, nextBlock.id)
+                            }
                             onCopy={handleCopy}
                           />
                         ))}
@@ -451,16 +765,19 @@ export function PromptGeneratorPage() {
                       <Textarea
                         readOnly
                         autoResize={false}
-                        value={[generated.raw_response, generated.reasoning ? `\n\n# reasoning\n${generated.reasoning}` : ''].join('')}
+                        value={[
+                          generated.raw_response,
+                          generated.reasoning ? `\n\n# reasoning\n${generated.reasoning}` : '',
+                        ].join('')}
                         className="h-[560px] font-mono text-xs"
                       />
                     </TabsContent>
                   </Tabs>
                 ) : (
                   <div className="flex h-[560px] flex-col items-center justify-center rounded-md border border-dashed text-center">
-                    <Wand2 className="mb-3 h-10 w-10 text-muted-foreground/50" />
+                    <Wand2 className="text-muted-foreground/50 mb-3 h-10 w-10" />
                     <p className="text-sm font-medium">等待生成</p>
-                    <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                    <p className="text-muted-foreground mt-1 max-w-md text-xs">
                       选择模型并输入人设后，结果会按 bot_config.toml 字段拆成可注入的配置块。
                     </p>
                   </div>
@@ -470,13 +787,17 @@ export function PromptGeneratorPage() {
 
             {generated && (
               <Card>
-                <CardContent className="flex flex-wrap items-center gap-2 p-4 text-xs text-muted-foreground">
+                <CardContent className="text-muted-foreground flex flex-wrap items-center gap-2 p-4 text-xs">
                   <Badge variant="secondary">{generated.model_name}</Badge>
                   <span>输入 {generated.prompt_tokens || 0}</span>
                   <span>输出 {generated.completion_tokens || 0}</span>
                   <span>总计 {generated.total_tokens || 0} tokens</span>
                   {generated.result.notes.map((note) => (
-                    <Badge key={note} variant="outline" className="max-w-full whitespace-normal text-left">
+                    <Badge
+                      key={note}
+                      variant="outline"
+                      className="max-w-full text-left whitespace-normal"
+                    >
                       {note}
                     </Badge>
                   ))}

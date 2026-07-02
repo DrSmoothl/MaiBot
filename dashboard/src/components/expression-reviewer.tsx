@@ -91,9 +91,7 @@ export function ExpressionReviewer({
   const [expressions, setExpressions] = useState<Expression[]>([])
 
   // 快速审核模式状态
-  const [quickFilterType, setQuickFilterType] = useState<'unchecked' | 'passed' | 'all'>(
-    'unchecked'
-  )
+  const [quickFilterType, setQuickFilterType] = useState<'unchecked' | 'passed'>('unchecked')
   const [quickExpressions, setQuickExpressions] = useState<Expression[]>([])
   const quickExpressionsRef = useRef<Expression[]>([])
   const quickExcludedIdsRef = useRef<Set<number>>(new Set())
@@ -254,22 +252,12 @@ export function ExpressionReviewer({
     (expr: Expression | undefined) => {
       if (!expr) return { left: false, right: false }
 
-      if (quickFilterType === 'unchecked') {
-        // 待审核：左拒绝，右通过
-        return { left: true, right: true }
-      } else if (quickFilterType === 'passed') {
+      if (quickFilterType === 'passed') {
         // 已通过：只能左滑改为拒绝
         return { left: true, right: false }
-      } else {
-        // 全部：智能判断
-        if (!expr.checked) {
-          // 未审核：双向
-          return { left: true, right: true }
-        } else {
-          // 已通过：只能左滑
-          return { left: true, right: false }
-        }
       }
+      // 待浏览：左拒绝，右通过
+      return { left: true, right: true }
     },
     [quickFilterType]
   )
@@ -874,7 +862,7 @@ export function ExpressionReviewer({
             )}
           >
             <Zap className="h-4 w-4" />
-            <span>快速审核</span>
+            <span>精选</span>
             <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
               新
             </Badge>
@@ -1328,11 +1316,10 @@ export function ExpressionReviewer({
                 onValueChange={(v) => setQuickFilterType(v as typeof quickFilterType)}
                 className="w-full sm:flex-1"
               >
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="unchecked" className="gap-1 text-xs sm:text-sm">
                     <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:inline">待审核</span>
-                    <span className="sm:hidden">待审</span>
+                    <span>待浏览</span>
                     <span className="hidden sm:inline">({stats?.unchecked ?? 0})</span>
                   </TabsTrigger>
                   <TabsTrigger value="passed" className="gap-1 text-xs sm:text-sm">
@@ -1340,10 +1327,6 @@ export function ExpressionReviewer({
                     <span className="hidden sm:inline">已通过</span>
                     <span className="sm:hidden">通过</span>
                     <span className="hidden sm:inline">({stats?.passed ?? 0})</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="all" className="gap-1 text-xs sm:text-sm">
-                    <span>全部</span>
-                    <span className="hidden sm:inline">({stats?.total ?? 0})</span>
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -1426,7 +1409,7 @@ export function ExpressionReviewer({
                   className="relative flex max-h-[560px] min-h-[320px] w-full max-w-md flex-1 items-center justify-center"
                   role="listbox"
                   tabIndex={0}
-                  aria-label="待审核的表达方式"
+                  aria-label="待浏览的表达方式"
                   aria-activedescendant={
                     quickExpressions[quickCurrentIndex]
                       ? `quick-expr-${quickExpressions[quickCurrentIndex].id}`

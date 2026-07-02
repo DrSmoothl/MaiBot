@@ -24,39 +24,39 @@ def get_tool_spec(*, enabled: bool = True) -> ToolSpec:
 
     return ToolSpec(
         name="query_memory",
-        description="检索长期记忆并返回可读结果。",
+        description="检索长期记忆。",
         parameters_schema={
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "要检索的关键词或问题。",
+                    "description": "关键词或问题；非纯时间检索必填。",
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "返回条数，默认使用系统配置值。",
+                    "description": "返回条数。",
                 },
                 "mode": {
                     "type": "string",
-                    "description": "检索模式：search/time/hybrid/episode/aggregate。`search` 查事实或偏好，`time` 查某段时间，`episode` 查某次经历，`aggregate` 查整体情况；拿不准时用 `hybrid`。",
+                    "description": "search事实偏好，time时间段，episode经历，aggregate整体，hybrid不确定。",
                     "enum": sorted(_ALLOWED_QUERY_MODES),
                     "default": "search",
                 },
                 "person_name": {
                     "type": "string",
-                    "description": "人物名称，可选。提供后优先按人物过滤。",
+                    "description": "人物名；用于定向过滤。",
                 },
                 "time_start": {
                     "type": "string",
-                    "description": "起始时间，可填写时间戳或可解析时间文本。",
+                    "description": "起始时间。",
                 },
                 "time_end": {
                     "type": "string",
-                    "description": "结束时间，可填写时间戳或可解析时间文本。",
+                    "description": "结束时间。",
                 },
                 "respect_filter": {
                     "type": "boolean",
-                    "description": "是否应用聊天过滤配置。",
+                    "description": "是否遵守记忆过滤规则；默认true，模糊来源或整体印象可false。",
                     "default": True,
                 },
             },

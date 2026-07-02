@@ -34,6 +34,8 @@ from src.maisaka.builtin_tool import get_builtin_tools
 from src.maisaka.context.messages import (
     AssistantMessage,
     LLMContextMessage,
+    ReferenceMessage,
+    ReferenceMessageType,
     SessionBackedMessage,
     ToolResultMessage,
     build_llm_message_from_context,
@@ -1041,6 +1043,10 @@ class MaisakaChatLoopService:
             if enable_visual_message is not None
             else MaisakaChatLoopService._resolve_enable_visual_message(request_kind)
         )
+        always_selected_indices = MaisakaChatLoopService._collect_always_selected_reference_indices(
+            filtered_history,
+            enable_visual_message=active_enable_visual_message,
+        )
 
         for index in range(len(filtered_history) - 1, -1, -1):
             message = filtered_history[index]
@@ -1059,7 +1065,7 @@ class MaisakaChatLoopService:
                 if counted_message_count >= effective_context_size:
                     break
 
-        selected_indices = sorted(set(selected_indices))
+        selected_indices = sorted({*always_selected_indices, *selected_indices})
 
         if not selected_indices:
             return [], "实际发送 0 条消息（tool 0 条，普通消息 0 条）"
@@ -1078,6 +1084,26 @@ class MaisakaChatLoopService:
             selected_history,
             selection_reason,
         )
+
+    @staticmethod
+    def _collect_always_selected_reference_indices(
+        chat_history: List[LLMContextMessage],
+        *,
+        enable_visual_message: bool,
+    ) -> List[int]:
+        """收集需要长期随请求发送的参考消息索引。"""
+
+        selected_indices: List[int] = []
+        for index, message in enumerate(chat_history):
+            if not (
+                isinstance(message, ReferenceMessage)
+                and message.reference_type == ReferenceMessageType.CONTEXT_RESTORE
+            ):
+                continue
+            if build_llm_message_from_context(message, enable_visual_message=enable_visual_message) is None:
+                continue
+            selected_indices.append(index)
+        return selected_indices
 
     @staticmethod
     def _filter_history_for_request_kind(

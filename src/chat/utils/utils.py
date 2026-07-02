@@ -10,6 +10,7 @@ import time
 
 from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
 from src.chat.message_receive.message import SessionMessage
+from src.common.data_models.message_component_data_model import AtComponent
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.person_info.person_info import Person
@@ -129,6 +130,16 @@ def is_bot_self(platform: str, user_id: str) -> bool:
     return False
 
 
+def _has_at_component_targeting_bot(message: SessionMessage, platform: str) -> bool:
+    """检查消息中的结构化 @ 组件是否直接指向当前 bot。"""
+
+    raw_message = getattr(message, "raw_message", None)
+    for component in getattr(raw_message, "components", []) or []:
+        if isinstance(component, AtComponent) and is_bot_self(platform, component.target_user_id):
+            return True
+    return False
+
+
 def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, float]:
     """检查消息是否提到了机器人（统一多平台实现）"""
     text = message.processed_plain_text or ""
@@ -150,12 +161,17 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
     if isinstance(add_cfg, dict):
         if add_cfg.get("at_bot") or add_cfg.get("is_mentioned"):
             is_mentioned = True
+            if add_cfg.get("at_bot"):
+                is_at = True
             # 当提供数值型 is_mentioned 时，当作概率提升；布尔提及标记只负责标记命中。
             raw_mention_boost = add_cfg.get("is_mentioned")
             if raw_mention_boost not in (None, "") and not isinstance(raw_mention_boost, bool):
                 reply_probability = float(raw_mention_boost)
 
-    # 2) 已经在上游设置过的 message.is_mentioned
+    # 2) 已经在上游设置过的 message.is_at / message.is_mentioned
+    if getattr(message, "is_at", False):
+        is_at = True
+        is_mentioned = True
     if getattr(message, "is_mentioned", False):
         is_mentioned = True
 
@@ -178,7 +194,12 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
         is_at = True
         is_mentioned = True
 
-    # 4) 统一的 @ 检测逻辑
+    # 4) 结构化 @ 组件检测。处理后的文本可能只剩群名片，不能依赖文本里的显示名判断。
+    if not is_at and _has_at_component_targeting_bot(message, platform):
+        is_at = True
+        is_mentioned = True
+
+    # 5) 统一的 @ 检测逻辑
     if current_account and not is_at and not is_mentioned:
         if platform == "qq":
             # QQ 格式: @<name:qq_id>
@@ -191,7 +212,7 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
                 is_at = True
                 is_mentioned = True
 
-    # 5) 统一的回复检测逻辑
+    # 6) 统一的回复检测逻辑
     if not is_mentioned:
         # 通用回复格式：包含 "(你)" 或 "（你）"
         if re.search(r"\[回复 .*?\(你\)：", text) or re.search(r"\[回复 .*?（你）：", text):
@@ -205,7 +226,7 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
             ):
                 is_mentioned = True
 
-    # 6) 名称/别名 提及（去除 @/回复标记后再匹配）
+    # 7) 名称/别名 提及（去除 @/回复标记后再匹配）
     if not is_mentioned and keywords:
         msg_content = text
         # 去除各种 @ 与 回复标记，避免误判
@@ -218,7 +239,7 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
                 is_mentioned = True
                 break
 
-    # 7) 概率设置
+    # 8) 概率设置
     reply_timing_config = global_config.chat.reply_timing
     if is_at and reply_timing_config.inevitable_at_reply:
         reply_probability = 1.0
@@ -655,8 +676,11 @@ def protect_kaomoji(sentence):
     kaomoji_matches = kaomoji_pattern.findall(sentence)
     placeholder_to_kaomoji = {}
 
-    for idx, match in enumerate(kaomoji_matches):
+    for match in kaomoji_matches:
         kaomoji = match[0] or match[1]
+        if kaomoji.startswith("[表情包") and kaomoji.endswith("]"):
+            continue
+        idx = len(placeholder_to_kaomoji)
         placeholder = f"__KAOMOJI_{idx}__"
         sentence = sentence.replace(kaomoji, placeholder, 1)
         placeholder_to_kaomoji[placeholder] = kaomoji

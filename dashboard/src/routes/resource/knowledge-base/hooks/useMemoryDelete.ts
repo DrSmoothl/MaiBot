@@ -43,6 +43,8 @@ export interface UseMemoryDeleteOptions {
   initialOperationSearch?: string
   /** 深链接初始值：选中操作 ID */
   initialOperationId?: string
+  /** 深链接初始值：操作影响对象搜索框 */
+  initialItemSearch?: string
 }
 
 export interface UseMemoryDeleteResult {
@@ -106,6 +108,7 @@ export function useMemoryDelete({
   initialSourceSearch = '',
   initialOperationSearch = '',
   initialOperationId = '',
+  initialItemSearch = '',
 }: UseMemoryDeleteOptions): UseMemoryDeleteResult {
   const { toast } = useToast()
 
@@ -146,7 +149,7 @@ export function useMemoryDelete({
   const [operationStatusFilter, setOperationStatusFilter] = useState('all')
   const [operationPage, setOperationPage] = useState(1)
   const [selectedOperationId, setSelectedOperationId] = useState(initialOperationId)
-  const [selectedOperationItemSearch, setSelectedOperationItemSearch] = useState('')
+  const [selectedOperationItemSearch, setSelectedOperationItemSearch] = useState(initialItemSearch)
   const [selectedOperationItemPage, setSelectedOperationItemPage] = useState(1)
   const [selectedSources, setSelectedSources] = useState<string[]>([])
 

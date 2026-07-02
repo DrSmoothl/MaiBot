@@ -28,6 +28,7 @@
     },
     "menu": {
       "home": "ホーム",
+      "focusCompanion": "集中コンパニオン",
       "botMainConfig": "ボットメイン設定",
       "aiModelProvider": "AIモデルプロバイダー",
       "modelManagement": "モデル管理",
@@ -774,6 +775,7 @@
     "title": "検索",
     "noResults": "一致するページが見つかりません",
     "startSearch": "キーワードを入力して検索を開始",
+    "recent": "最近",
     "navigate": "ナビゲート",
     "select": "選択",
     "close": "閉じる",
@@ -788,6 +790,7 @@
     "items": {
       "home": "ホーム",
       "homeDesc": "ダッシュボード概要を表示",
+      "focusCompanionDesc": "MaiBot の没入型集中コンパニオンを開く",
       "botConfig": "ボットメイン設定",
       "botConfigDesc": "ボットのコア設定を構成",
       "model": "モデル設定",

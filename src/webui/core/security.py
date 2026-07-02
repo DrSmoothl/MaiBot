@@ -3,14 +3,19 @@ WebUI Token 管理模块
 负责生成、保存、验证和更新访问令牌
 """
 
-import json
-import secrets
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+
+import json
+import secrets
 
 from src.common.logger import get_logger
 
 logger = get_logger("webui")
+
+TOKEN_SOURCE_TEMPORARY = "temporary"
+TOKEN_SOURCE_CONFIGURED = "configured"
+VALID_TOKEN_SOURCES = {TOKEN_SOURCE_TEMPORARY, TOKEN_SOURCE_CONFIGURED}
 
 
 class TokenManager:
@@ -45,12 +50,46 @@ class TokenManager:
                 config = self._load_config()
                 if not config.get("access_token"):
                     logger.warning("WebUI 配置文件中缺少 access_token，正在重新生成")
-                    self._create_new_token()
+                    self._create_new_token(preserve_setup_state=True)
                 else:
-                    logger.info(f"WebUI Token 已加载: {config['access_token'][:8]}...")
+                    token_source = self._resolve_token_source(config)
+                    if config.get("token_source") != token_source:
+                        config["token_source"] = token_source
+                        self._save_config(config)
+
+                    if token_source == TOKEN_SOURCE_TEMPORARY:
+                        logger.info("WebUI 尚未配置固定 Token，正在重新生成本次启动临时 Token")
+                        self._create_new_token(preserve_setup_state=True)
+                    else:
+                        logger.info(f"WebUI Token 已加载: {config['access_token'][:8]}...")
             except Exception as e:
                 logger.error(f"读取 WebUI 配置文件失败: {e}，正在重新创建")
                 self._create_new_token()
+
+    def _resolve_token_source(self, config: Dict) -> str:
+        """解析 Token 来源，兼容旧版未写入 token_source 的配置。"""
+        configured_source = str(config.get("token_source") or "").strip().lower()
+        if configured_source in VALID_TOKEN_SOURCES:
+            return configured_source
+
+        token = str(config.get("access_token") or "")
+        if not token:
+            return TOKEN_SOURCE_TEMPORARY
+
+        # 旧版自定义 Token 不会是系统生成的 64 位十六进制串，可直接归为用户配置。
+        if not self._validate_token_format(token):
+            return TOKEN_SOURCE_CONFIGURED
+
+        return TOKEN_SOURCE_TEMPORARY
+
+    def get_token_source(self) -> str:
+        """获取当前 Token 来源。"""
+        config = self._load_config()
+        return self._resolve_token_source(config)
+
+    def should_show_startup_token(self) -> bool:
+        """是否应在启动日志中展示完整 Token。"""
+        return self.get_token_source() == TOKEN_SOURCE_TEMPORARY
 
     def _load_config(self) -> Dict:
         """加载配置文件"""
@@ -71,17 +110,27 @@ class TokenManager:
             logger.error(f"保存 WebUI 配置失败: {e}")
             raise
 
-    def _create_new_token(self) -> str:
+    def _create_new_token(
+        self,
+        *,
+        token_source: str = TOKEN_SOURCE_TEMPORARY,
+        preserve_setup_state: bool = False,
+    ) -> str:
         """生成新的 64 位随机 token"""
         # 生成 64 位十六进制字符串 (32 字节 = 64 hex 字符)
         token = secrets.token_hex(32)
+        existing_config = self._load_config() if preserve_setup_state and self.config_path.exists() else {}
+        first_setup_completed = bool(existing_config.get("first_setup_completed", False))
 
         config = {
             "access_token": token,
             "created_at": self._get_current_timestamp(),
             "updated_at": self._get_current_timestamp(),
-            "first_setup_completed": False,  # 标记首次配置未完成
+            "first_setup_completed": first_setup_completed,  # 保留首次配置状态
+            "token_source": token_source if token_source in VALID_TOKEN_SOURCES else TOKEN_SOURCE_TEMPORARY,
         }
+        if first_setup_completed and existing_config.get("setup_completed_at"):
+            config["setup_completed_at"] = existing_config["setup_completed_at"]
 
         self._save_config(config)
         logger.info(f"新的 WebUI Token 已生成: {token[:8]}...")
@@ -149,6 +198,7 @@ class TokenManager:
 
             config["access_token"] = new_token
             config["updated_at"] = self._get_current_timestamp()
+            config["token_source"] = TOKEN_SOURCE_CONFIGURED
 
             self._save_config(config)
             logger.info(f"Token 已更新: {old_token}... -> {new_token[:8]}...")
@@ -178,6 +228,7 @@ class TokenManager:
         config["access_token"] = new_token
         config["updated_at"] = self._get_current_timestamp()
         config["first_setup_completed"] = first_setup_completed  # 保留原来的状态
+        config["token_source"] = TOKEN_SOURCE_CONFIGURED
 
         self._save_config(config)
         logger.info(f"WebUI Token 已重新生成: {old_token}... -> {new_token[:8]}...")

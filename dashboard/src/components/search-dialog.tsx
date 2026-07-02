@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { FileText, Search, SlidersHorizontal } from 'lucide-react'
+import { Clock, FileText, Search, SlidersHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -24,6 +24,9 @@ import type { ConfigSchema, FieldSchema } from '@/types/config-schema'
 
 const ConfigFileIcon = createStreamlineIcon('file-bookmark-solid', FileText)
 const ModelConfigIcon = createStreamlineIcon('horizontal-slider-2-solid', SlidersHorizontal)
+const RecentIcon: MenuIcon = Clock
+const RECENT_SEARCH_ROUTES_KEY = 'maibot-search-recent-routes'
+const MAX_RECENT_SEARCH_ROUTES = 8
 
 interface SearchDialogProps {
   open: boolean
@@ -38,6 +41,45 @@ interface SearchItem {
   path: string
   category: string
   keywords: string
+}
+
+function loadRecentSearchRoutes(): string[] {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  const stored = localStorage.getItem(RECENT_SEARCH_ROUTES_KEY)
+  if (!stored) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(stored)
+    return Array.isArray(parsed)
+      ? parsed.filter((path): path is string => typeof path === 'string').slice(0, MAX_RECENT_SEARCH_ROUTES)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function saveRecentSearchRoutes(paths: string[]): void {
+  localStorage.setItem(RECENT_SEARCH_ROUTES_KEY, JSON.stringify(paths.slice(0, MAX_RECENT_SEARCH_ROUTES)))
+}
+
+function getSearchRank(item: SearchItem, query: string): number {
+  if (!query) {
+    return 0
+  }
+
+  const title = item.title.toLowerCase()
+  const category = item.category.toLowerCase()
+  const path = item.path.toLowerCase()
+  if (title === query || path === query) return 0
+  if (title.startsWith(query)) return 1
+  if (category.includes(query)) return 2
+  if (path.includes(query)) return 3
+  return 4
 }
 
 function resolveSchemaTitle(schema: ConfigSchema, fallback: string) {
@@ -133,6 +175,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [configSearchItems, setConfigSearchItems] = useState<SearchItem[]>([])
+  const [recentSearchRoutes, setRecentSearchRoutes] = useState<string[]>(loadRecentSearchRoutes)
   const inputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const { i18n, t } = useTranslation()
@@ -239,20 +282,58 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
     [menuSections, t]
   )
 
+  const searchItemMap = useMemo(
+    () => new Map(searchItems.map((item) => [item.path, item])),
+    [searchItems]
+  )
+
+  const recentSearchItems = useMemo<SearchItem[]>(
+    () =>
+      recentSearchRoutes
+        .map<SearchItem | null>((path) => {
+          const item = searchItemMap.get(path)
+          if (!item) {
+            return null
+          }
+
+          return {
+            ...item,
+            id: `recent:${item.path}`,
+            icon: RecentIcon,
+            category: t('search.recent'),
+          }
+        })
+        .filter((item): item is SearchItem => item !== null),
+    [recentSearchRoutes, searchItemMap, t]
+  )
+
   // 过滤搜索结果
   const normalizedQuery = searchQuery.trim().toLowerCase()
-  const filteredItems = (normalizedQuery ? [...searchItems, ...configSearchItems] : searchItems)
+  const filteredItems = (normalizedQuery ? [...searchItems, ...configSearchItems] : [...recentSearchItems, ...searchItems])
+    .filter((item, index, all) => all.findIndex((candidate) => candidate.path === item.path) === index)
     .filter((item) => item.keywords.toLowerCase().includes(normalizedQuery))
+    .sort((left, right) => {
+      if (!normalizedQuery) {
+        return 0
+      }
+
+      const rankDiff = getSearchRank(left, normalizedQuery) - getSearchRank(right, normalizedQuery)
+      return rankDiff === 0 ? left.title.localeCompare(right.title) : rankDiff
+    })
     .slice(0, 80)
 
   // 导航到页面
   const handleNavigate = useCallback((path: string) => {
+    const nextRoutes = [path, ...recentSearchRoutes.filter((recentPath) => recentPath !== path)]
+      .slice(0, MAX_RECENT_SEARCH_ROUTES)
+    setRecentSearchRoutes(nextRoutes)
+    saveRecentSearchRoutes(nextRoutes)
     navigate({ to: path })
     onOpenChange(false)
     // 在导航后重置状态
     setSearchQuery('')
     setSelectedIndex(0)
-  }, [navigate, onOpenChange])
+  }, [navigate, onOpenChange, recentSearchRoutes])
 
   // 键盘导航
   const handleKeyDown = useCallback(
@@ -265,6 +346,12 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
         e.preventDefault()
         if (filteredItems.length === 0) return
         setSelectedIndex((prev) => (prev - 1 + filteredItems.length) % filteredItems.length)
+      } else if (e.key === 'Home') {
+        e.preventDefault()
+        setSelectedIndex(0)
+      } else if (e.key === 'End') {
+        e.preventDefault()
+        setSelectedIndex(Math.max(0, filteredItems.length - 1))
       } else if (e.key === 'Enter' && filteredItems[selectedIndex]) {
         e.preventDefault()
         handleNavigate(filteredItems[selectedIndex].path)
@@ -309,6 +396,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
                       key={item.id}
                       onClick={() => handleNavigate(item.path)}
                       onMouseEnter={() => setSelectedIndex(index)}
+                      title={`${item.title} · ${item.description} · ${item.path}`}
                       className={cn(
                         'w-full flex items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors',
                         index === selectedIndex

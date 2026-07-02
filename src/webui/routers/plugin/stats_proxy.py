@@ -3,15 +3,16 @@ from typing import Any, Dict
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
 from src.common.logger import get_logger
+from src.webui.dependencies import require_auth
 
 logger = get_logger("webui.plugin_stats_proxy")
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 PLUGIN_STATS_BASE_URL = getenv("MAIBOT_PLUGIN_STATS_BASE_URL", "http://hyybuth.xyz:10059").rstrip("/")
 PLUGIN_STATS_TIMEOUT = float(getenv("MAIBOT_PLUGIN_STATS_TIMEOUT", "8"))

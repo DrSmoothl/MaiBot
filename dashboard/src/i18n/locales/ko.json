@@ -28,6 +28,7 @@
     },
     "menu": {
       "home": "홈",
+      "focusCompanion": "집중 동반",
       "botMainConfig": "봇 메인 설정",
       "aiModelProvider": "AI 모델 공급자",
       "modelManagement": "모델 관리",
@@ -766,6 +767,7 @@
     "title": "검색",
     "noResults": "일치하는 페이지를 찾을 수 없습니다",
     "startSearch": "키워드를 입력하여 검색 시작",
+    "recent": "최근",
     "navigate": "탐색",
     "select": "선택",
     "close": "닫기",
@@ -780,6 +782,7 @@
     "items": {
       "home": "홈",
       "homeDesc": "대시보드 개요 보기",
+      "focusCompanionDesc": "MaiBot 몰입형 집중 동반 화면 열기",
       "botConfig": "속 메인 설정",
       "botConfigDesc": "속 핵심 설정 구성",
       "model": "모델 설정",

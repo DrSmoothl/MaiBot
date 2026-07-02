@@ -261,6 +261,8 @@ def show_access_token():
 
         token_manager = get_token_manager()
         current_token = token_manager.get_token()
-        logger.info(t("startup.webui_access_token", token=current_token))
+        if token_manager.should_show_startup_token():
+            logger.info(t("startup.webui_access_token", token=current_token))
+            logger.info(t("startup.webui_access_token_login_hint"))
     except Exception as e:
         logger.error(t("startup.webui_access_token_failed", error=e))

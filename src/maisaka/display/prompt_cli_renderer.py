@@ -562,8 +562,9 @@ class PromptCLIVisualizer:
             "tool_definitions": tool_definitions or [],
         }
 
-    @staticmethod
+    @classmethod
     def _build_preview_access_body(
+        cls,
         *,
         record_path: Path,
         record_link_text: str,
@@ -571,24 +572,42 @@ class PromptCLIVisualizer:
         record_uri = build_file_uri(record_path)
         record_display_path = build_display_path(record_path)
         reasoning_web_uri = _build_prompt_reasoning_web_uri(record_path)
+        lines: list[RenderableType] = [
+            cls._build_preview_link_line(
+                label=f"结构化记录：{record_display_path}",
+                label_style="bold green",
+                link_uri=record_uri,
+                link_text=record_link_text,
+            )
+        ]
         reasoning_line = (
-            Text.from_markup(
-                f"[bold cyan]推理详情浏览：{reasoning_web_uri}[/bold cyan] "
-                f"[link={reasoning_web_uri}]点击跳转到推理页面[/link]"
+            cls._build_preview_link_line(
+                label=f"推理详情浏览：{reasoning_web_uri}",
+                label_style="bold cyan",
+                link_uri=reasoning_web_uri,
+                link_text="点击跳转到推理页面",
             )
             if reasoning_web_uri
             else None
         )
-        lines: list[RenderableType] = [
-            Text.from_markup(
-                f"[bold green]结构化记录：{record_display_path}[/bold green] "
-                f"[link={record_uri}]{record_link_text}[/link]"
-            )
-        ]
         if reasoning_line is not None:
             lines.append(reasoning_line)
 
         return Group(*lines)
+
+    @staticmethod
+    def _build_preview_link_line(
+        *,
+        label: str,
+        label_style: str,
+        link_uri: str,
+        link_text: str,
+    ) -> Text:
+        line = Text()
+        line.append(label, style=label_style)
+        line.append(" ")
+        line.append(link_text, style=f"link {link_uri}")
+        return line
 
     @classmethod
     def _save_structured_preview_access(

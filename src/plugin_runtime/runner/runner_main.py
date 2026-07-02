@@ -63,6 +63,7 @@ from src.plugin_runtime.protocol.envelope import (
 )
 from src.plugin_runtime.protocol.errors import ErrorCode
 from src.plugin_runtime.runner.log_handler import RunnerIPCLogHandler
+from src.plugin_runtime.runner.plugin_paths import PluginPaths, build_plugin_paths
 from src.plugin_runtime.runner.plugin_loader import PluginCandidate, PluginLoader, PluginMeta
 from src.plugin_runtime.runner.rpc_client import RPCClient
 
@@ -419,7 +420,8 @@ class PluginRunner:
         logger.info(f"已加载 {len(plugins)} 个插件")
 
         # 4. 注入 PluginContext + 调用 on_load 生命周期钩子
-        failed_plugins: Set[str] = set(self._loader.failed_plugins.keys())
+        failed_plugin_reasons: Dict[str, str] = dict(self._loader.failed_plugins)
+        failed_plugins: Set[str] = set(failed_plugin_reasons)
         inactive_plugins: Set[str] = set()
         available_plugin_versions: Dict[str, str] = dict(self._external_available_plugins)
         for meta in plugins:
@@ -440,6 +442,7 @@ class PluginRunner:
                     inactive_plugins.add(meta.plugin_id)
                     continue
                 failed_plugins.add(meta.plugin_id)
+                failed_plugin_reasons[meta.plugin_id] = f"依赖未满足: {', '.join(unsatisfied_dependencies)}"
                 continue
 
             activation_status = await self._activate_plugin(meta)
@@ -450,13 +453,19 @@ class PluginRunner:
                 inactive_plugins.add(meta.plugin_id)
                 continue
             failed_plugins.add(meta.plugin_id)
+            failed_plugin_reasons[meta.plugin_id] = "插件初始化失败"
 
         successful_plugins = [
             meta.plugin_id
             for meta in plugins
             if meta.plugin_id not in failed_plugins and meta.plugin_id not in inactive_plugins
         ]
-        await self._notify_ready(successful_plugins, sorted(failed_plugins), sorted(inactive_plugins))
+        await self._notify_ready(
+            successful_plugins,
+            sorted(failed_plugins),
+            sorted(inactive_plugins),
+            failed_plugin_reasons,
+        )
 
         # 5. 等待直到收到关停信号
         with contextlib.suppress(asyncio.CancelledError):
@@ -664,7 +673,7 @@ class PluginRunner:
             return await result
         return result
 
-    def _inject_context(self, plugin_id: str, instance: object) -> None:
+    def _inject_context(self, plugin_id: str, instance: object, plugin_dir: Optional[str] = None) -> None:
         """为插件实例创建并注入 PluginContext。
 
         对新版 MaiBotPlugin（具有 _set_context 方法）：创建 PluginContext 并注入。
@@ -734,10 +743,51 @@ class PluginRunner:
                 return resp.payload.get("result")
             return resp.payload
 
-        ctx = PluginContext(plugin_id=plugin_id, rpc_call=_rpc_call)
+        plugin_paths = build_plugin_paths(plugin_id, _PROJECT_ROOT)
+        ctx = self._create_plugin_context(
+            PluginContext,
+            plugin_id=plugin_id,
+            rpc_call=_rpc_call,
+            plugin_paths=plugin_paths,
+        )
+        self._warn_legacy_plugin_data_dir(plugin_id, plugin_dir, plugin_paths.data_dir)
         self._ensure_context_llm_helpers(ctx)
         cast(_ContextAwarePlugin, instance)._set_context(ctx)
         logger.debug(f"已为插件 {plugin_id} 注入 PluginContext")
+
+    @staticmethod
+    def _create_plugin_context(
+        context_class: Any,
+        *,
+        plugin_id: str,
+        rpc_call: Callable[..., Any],
+        plugin_paths: PluginPaths,
+    ) -> Any:
+        """创建 PluginContext，并兼容尚未正式支持 paths 参数的 SDK。"""
+
+        context_signature = inspect.signature(context_class)
+        if "paths" in context_signature.parameters:
+            return context_class(plugin_id=plugin_id, rpc_call=rpc_call, paths=plugin_paths)
+
+        ctx = context_class(plugin_id=plugin_id, rpc_call=rpc_call)
+        ctx.paths = plugin_paths
+        return ctx
+
+    @staticmethod
+    def _warn_legacy_plugin_data_dir(plugin_id: str, plugin_dir: Optional[str], data_dir: Path) -> None:
+        """提示插件作者迁移旧式源码目录 data。"""
+
+        if not plugin_dir:
+            return
+
+        legacy_data_dir = Path(plugin_dir) / "data"
+        if not legacy_data_dir.exists():
+            return
+
+        logger.warning(
+            f"插件 {plugin_id} 检测到旧式数据目录 {legacy_data_dir}，"
+            f"建议迁移到统一持久化目录 {data_dir}"
+        )
 
     @staticmethod
     def _ensure_context_llm_helpers(ctx: Any) -> None:
@@ -1468,7 +1518,7 @@ class PluginRunner:
         Returns:
             PluginActivationStatus: 插件激活结果。
         """
-        self._inject_context(meta.plugin_id, meta.instance)
+        self._inject_context(meta.plugin_id, meta.instance, meta.plugin_dir)
         try:
             plugin_config = self._apply_plugin_config(meta)
         except PluginConfigVersionError as exc:
@@ -1871,6 +1921,7 @@ class PluginRunner:
         loaded_plugins: List[str],
         failed_plugins: List[str],
         inactive_plugins: List[str],
+        failed_plugin_reasons: Dict[str, str] | None = None,
     ) -> None:
         """通知 Host 当前 Runner 已完成插件初始化。
 
@@ -1878,10 +1929,12 @@ class PluginRunner:
             loaded_plugins: 成功初始化的插件列表。
             failed_plugins: 初始化失败的插件列表。
             inactive_plugins: 因禁用或依赖不可用而未激活的插件列表。
+            failed_plugin_reasons: 初始化失败的插件及原因。
         """
         payload = RunnerReadyPayload(
             loaded_plugins=loaded_plugins,
             failed_plugins=failed_plugins,
+            failed_plugin_reasons=failed_plugin_reasons or {},
             inactive_plugins=inactive_plugins,
         )
         await self._rpc_client.send_request(

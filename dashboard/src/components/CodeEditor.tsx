@@ -14,6 +14,16 @@ export interface CodeEditorProps {
   placeholder?: string
   theme?: 'light' | 'dark'
   className?: string
+  lineClassNames?: Record<number, string>
+  rangeClassNames?: CodeEditorRangeClassName[]
+}
+
+export interface CodeEditorRangeClassName {
+  fromLine: number
+  fromCh: number
+  toLine: number
+  toCh: number
+  className: string
 }
 
 const CodeEditorImpl = lazy(() => import('./CodeEditorImpl'))

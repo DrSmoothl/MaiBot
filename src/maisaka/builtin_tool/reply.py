@@ -15,7 +15,7 @@ from src.services import send_service
 from .context import BuiltinToolRuntimeContext
 
 logger = get_logger("maisaka_builtin_reply")
-_REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote", "reference_info"}
+_REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote"}
 
 
 def _use_expression_intent() -> bool:

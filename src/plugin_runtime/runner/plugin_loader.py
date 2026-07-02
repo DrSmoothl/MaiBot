@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 import contextlib
 import importlib
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -184,7 +185,11 @@ class PluginLoader:
         manifest = self._manifest_validator.load_from_plugin_path(plugin_dir)
         if manifest is None:
             errors = "; ".join(self._manifest_validator.errors)
-            self._failed_plugins[plugin_dir.name] = f"manifest 校验失败: {errors}"
+            plugin_id = self._read_manifest_id_for_failure(plugin_dir)
+            if plugin_id is not None:
+                self._failed_plugins[plugin_id] = f"manifest 校验失败: {errors}"
+            else:
+                logger.error(f"插件 {plugin_dir.name} manifest 校验失败，但 manifest 未声明 id，无法按插件 ID 上报: {errors}")
             return None
 
         plugin_id = manifest.id
@@ -194,6 +199,23 @@ class PluginLoader:
             return None
 
         return plugin_id, (plugin_dir, manifest, plugin_path)
+
+    def _read_manifest_id_for_failure(self, plugin_dir: Path) -> Optional[str]:
+        """manifest 校验失败时仍按原始插件 ID 记录失败原因。"""
+        manifest_path = plugin_dir / "_manifest.json"
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as file_obj:
+                manifest_data = json.load(file_obj)
+        except Exception as exc:
+            logger.warning(f"读取插件 {plugin_dir.name} manifest ID 失败，无法按插件 ID 上报失败原因: {exc}")
+            return None
+
+        if isinstance(manifest_data, dict):
+            plugin_id = str(manifest_data.get("id") or "").strip()
+            if plugin_id:
+                return plugin_id
+
+        return None
 
     def _record_duplicate_candidates(self, duplicate_candidates: Dict[str, List[Path]]) -> None:
         """记录重复插件 ID 错误。"""

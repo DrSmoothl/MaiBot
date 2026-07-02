@@ -19,12 +19,19 @@ vi.mock('@/hooks/use-toast', () => ({
 vi.mock('@/components/memory/MemoryDeleteDialog', () => ({
   MemoryDeleteDialog: ({
     open,
+    onExecute,
     preview,
   }: {
     open: boolean
+    onExecute?: () => void
     preview?: { mode?: string; item_count?: number } | null
   }) => (
-    open ? <div data-testid="memory-delete-dialog">{`delete:${preview?.mode ?? 'none'}:${preview?.item_count ?? 0}`}</div> : null
+    open ? (
+      <div data-testid="memory-delete-dialog">
+        <div>{`delete:${preview?.mode ?? 'none'}:${preview?.item_count ?? 0}`}</div>
+        <button type="button" onClick={onExecute}>执行删除</button>
+      </div>
+    ) : null
   ),
 }))
 
@@ -102,7 +109,20 @@ vi.mock('../knowledge-graph/GraphDialogs', () => ({
     ) : null
   ),
   RelationDetailDialog: () => null,
-  ParagraphDetailDialog: () => null,
+  ParagraphDetailDialog: ({
+    paragraph,
+    onDeleteParagraph,
+  }: {
+    paragraph: { hash: string } | null
+    onDeleteParagraph?: (paragraph: { hash: string }) => void
+  }) => (
+    paragraph ? (
+      <div data-testid="paragraph-detail-dialog">
+        <div>{`paragraph:${paragraph.hash}`}</div>
+        <button type="button" onClick={() => onDeleteParagraph?.(paragraph)}>删除这段证据</button>
+      </div>
+    ) : null
+  ),
 }))
 
 vi.mock('@/lib/memory-api', () => ({
@@ -110,6 +130,7 @@ vi.mock('@/lib/memory-api', () => ({
   getMemoryGraphSearch: vi.fn(),
   getMemoryGraphNodeDetail: vi.fn(),
   getMemoryGraphEdgeDetail: vi.fn(),
+  getMemoryGraphParagraphDetail: vi.fn(),
   previewMemoryDelete: vi.fn(),
   executeMemoryDelete: vi.fn(),
   restoreMemoryDelete: vi.fn(),
@@ -236,6 +257,31 @@ describe('KnowledgeGraphPage', () => {
           { source: 'relation:rel-1', target: 'entity:beta', kind: 'object', label: '宾语', weight: 1 },
         ],
         focus_entities: ['alpha', 'beta'],
+      },
+    })
+    vi.mocked(memoryApi.getMemoryGraphParagraphDetail).mockResolvedValue({
+      success: true,
+      paragraph: {
+        hash: 'p-1',
+        content: 'Alpha 提到了 Beta',
+        preview: 'Alpha 提到了 Beta',
+        source: 'demo',
+        entity_count: 2,
+        relation_count: 1,
+        entities: ['Alpha', 'Beta'],
+        relations: ['alpha 关联 beta'],
+      },
+      evidence_graph: {
+        nodes: [
+          { id: 'paragraph:p-1', type: 'paragraph', content: 'Alpha 提到了 Beta', metadata: { hash: 'p-1' } },
+          { id: 'entity:alpha', type: 'entity', content: 'Alpha' },
+          { id: 'relation:rel-1', type: 'relation', content: 'alpha 关联 beta' },
+        ],
+        edges: [
+          { source: 'paragraph:p-1', target: 'entity:alpha', kind: 'mentions', label: '提及', weight: 1 },
+          { source: 'paragraph:p-1', target: 'relation:rel-1', kind: 'supports', label: '支撑', weight: 1 },
+        ],
+        focus_entities: ['Alpha', 'Beta'],
       },
     })
     vi.mocked(memoryApi.previewMemoryDelete).mockResolvedValue({
@@ -419,6 +465,57 @@ describe('KnowledgeGraphPage', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('edge-detail-dialog')).not.toBeInTheDocument()
     })
+  })
+
+  it('opens paragraph detail from initial paragraph hash', async () => {
+    render(<KnowledgeGraphPage initialParagraphHash="p-1" />)
+
+    await waitFor(() => {
+      expect(memoryApi.getMemoryGraphParagraphDetail).toHaveBeenCalledWith('p-1')
+    })
+    expect(screen.getByRole('tab', { name: '证据视图' })).toHaveAttribute('data-state', 'active')
+    expect(await screen.findByTestId('paragraph-detail-dialog')).toHaveTextContent('paragraph:p-1')
+  })
+
+  it('returns to entity graph when a directly opened paragraph is deleted', async () => {
+    const user = userEvent.setup()
+    vi.mocked(memoryApi.getMemoryGraphParagraphDetail)
+      .mockResolvedValueOnce({
+        success: true,
+        paragraph: {
+          hash: 'p-1',
+          content: 'Alpha 提到了 Beta',
+          preview: 'Alpha 提到了 Beta',
+          source: 'demo',
+          entity_count: 2,
+          relation_count: 1,
+          entities: ['Alpha', 'Beta'],
+          relations: ['alpha 关联 beta'],
+        },
+        evidence_graph: {
+          nodes: [{ id: 'paragraph:p-1', type: 'paragraph', content: 'Alpha 提到了 Beta', metadata: { hash: 'p-1' } }],
+          edges: [],
+          focus_entities: ['Alpha', 'Beta'],
+        },
+      })
+      .mockRejectedValueOnce(new Error('paragraph missing'))
+
+    render(<KnowledgeGraphPage initialParagraphHash="p-1" />)
+
+    expect(await screen.findByTestId('paragraph-detail-dialog')).toHaveTextContent('paragraph:p-1')
+    await user.click(screen.getByRole('button', { name: '删除这段证据' }))
+    await screen.findByTestId('memory-delete-dialog')
+    await user.click(screen.getByRole('button', { name: '执行删除' }))
+
+    await waitFor(() => {
+      expect(memoryApi.executeMemoryDelete).toHaveBeenCalled()
+      expect(screen.getByRole('tab', { name: '实体关系图' })).toHaveAttribute('data-state', 'active')
+    })
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '已刷新图谱',
+      }),
+    )
   })
 
   it('opens delete preview dialog from node detail', async () => {

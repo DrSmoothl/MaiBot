@@ -82,6 +82,8 @@ export interface PluginManifest {
   plugin_type?: PluginType | string
   /** 插件展示元信息 */
   display?: PluginDisplay
+  /** 更新日志地址或插件内相对路径 */
+  changelog?: string
   /** 插件默认语言 */
   default_locale: string
   /** 插件语言文件夹（可选） */

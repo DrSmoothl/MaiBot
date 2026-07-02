@@ -28,6 +28,7 @@
     },
     "menu": {
       "home": "Home",
+      "focusCompanion": "Focus Companion",
       "botMainConfig": "Bot Main Config",
       "aiModelProvider": "AI Model Providers",
       "modelManagement": "Model Management",
@@ -774,6 +775,7 @@
     "title": "Search",
     "noResults": "No matching pages found",
     "startSearch": "Type a keyword to start searching",
+    "recent": "Recent",
     "navigate": "Navigate",
     "select": "Select",
     "close": "Close",
@@ -788,6 +790,7 @@
     "items": {
       "home": "Home",
       "homeDesc": "View dashboard overview",
+      "focusCompanionDesc": "Open MaiBot immersive focus companion",
       "botConfig": "Bot Main Config",
       "botConfigDesc": "Configure bot core settings",
       "model": "Model Config",

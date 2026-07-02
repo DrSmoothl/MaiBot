@@ -17,21 +17,21 @@ def get_tool_spec(*, enabled: bool = True) -> ToolSpec:
 
     return ToolSpec(
         name="query_person_profile",
-        description="查询人物画像，用于了解某个人的稳定背景、倾向和已知特征。",
+        description="查询人物画像。",
         parameters_schema={
             "type": "object",
             "properties": {
                 "person_id": {
                     "type": "string",
-                    "description": "人物 ID。提供后优先使用。",
+                    "description": "内部人物ID；明确给出时填。",
                 },
                 "person_name": {
                     "type": "string",
-                    "description": "人物名称、昵称或关键词。未提供 person_id 时使用。",
+                    "description": "名称/昵称/关键词；通常填这个。",
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "画像检索使用的证据上限。",
+                    "description": "证据上限。",
                     "default": DEFAULT_PROFILE_LIMIT,
                 },
             },

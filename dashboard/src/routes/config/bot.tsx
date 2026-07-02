@@ -387,7 +387,7 @@ function BotConfigPageContent() {
         fieldHooks.unregister(fieldPath)
       }
     }
-  }, [])
+  })
 
   const { triggerAutoSave, cancelPendingAutoSave } = useAutoSave(
     initialLoadRef.current,

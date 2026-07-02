@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -53,13 +54,18 @@ import {
   RotateCw,
   Code2,
   Layout,
+  BookOpen,
+  FileText,
+  GripHorizontal,
   Trash2,
   Wrench,
   Terminal,
+  X,
 } from 'lucide-react'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { RestartOverlay } from '@/components/restart-overlay'
-import { getPluginRuntimeComponents } from '@/lib/plugin-api'
+import { getLocalPluginChangelog, getLocalPluginReadme, getPluginRuntimeComponents } from '@/lib/plugin-api'
+import { MarkdownRenderer } from '@/components/markdown-renderer'
 import { PluginStats } from '@/components/plugin-stats'
 import type {
   InstalledPlugin,
@@ -394,21 +400,18 @@ function SectionRenderer({ sectionName, section, config, onChange }: SectionRend
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <Card>
         <CollapsibleTrigger asChild>
-          <CardHeader className="hover:bg-muted/50 cursor-pointer transition-colors">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+          <CardHeader className="hover:bg-muted/50 cursor-pointer gap-0.5 px-4! py-2! transition-colors sm:px-4! sm:py-2!">
+            <div className="flex items-center">
+              <div className="flex min-w-0 items-center gap-2">
                 {isOpen ? (
                   <ChevronDown className="text-muted-foreground h-4 w-4" />
                 ) : (
                   <ChevronRight className="text-muted-foreground h-4 w-4" />
                 )}
-                <CardTitle className="text-lg">{title}</CardTitle>
+                <CardTitle className="min-w-0 truncate text-base">{title}</CardTitle>
               </div>
-              <Badge variant="secondary" className="text-xs">
-                {sortedFields.length} 项
-              </Badge>
             </div>
-            {description && <CardDescription className="ml-6">{description}</CardDescription>}
+            {description && <CardDescription className="ml-6 text-xs leading-tight">{description}</CardDescription>}
           </CardHeader>
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -443,6 +446,7 @@ interface PluginDetailsPanelProps {
   repositoryUrl?: string
   documentationUrl?: string
   issuesUrl?: string
+  changelog?: string | null
 }
 
 type ComponentDisplayGroup = 'tool' | 'command'
@@ -498,10 +502,14 @@ function PluginDetailsPanel({
   repositoryUrl,
   documentationUrl,
   issuesUrl,
+  changelog,
 }: PluginDetailsPanelProps) {
   const [components, setComponents] = useState<PluginRuntimeComponent[]>([])
   const [componentsLoading, setComponentsLoading] = useState(true)
   const [componentsError, setComponentsError] = useState('')
+  const [readme, setReadme] = useState('')
+  const [readmeLoading, setReadmeLoading] = useState(true)
+  const [readmeError, setReadmeError] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -522,6 +530,34 @@ function PluginDetailsPanel({
       .finally(() => {
         if (!cancelled) {
           setComponentsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [plugin.id])
+
+  useEffect(() => {
+    let cancelled = false
+
+    setReadmeLoading(true)
+    setReadmeError('')
+    setReadme('')
+    getLocalPluginReadme(plugin.id)
+      .then((content) => {
+        if (!cancelled) {
+          setReadme(content)
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setReadmeError(error instanceof Error ? error.message : 'README 加载失败')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setReadmeLoading(false)
         }
       })
 
@@ -596,6 +632,52 @@ function PluginDetailsPanel({
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>README</CardTitle>
+          <CardDescription>插件根目录中的说明文档。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {readmeLoading ? (
+            <div className="text-muted-foreground flex items-center justify-center gap-2 py-8 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              正在加载 README
+            </div>
+          ) : readmeError ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{readmeError}</AlertDescription>
+            </Alert>
+          ) : readme ? (
+            <ScrollArea className="h-[min(48vh,540px)] pr-4">
+              <MarkdownRenderer content={readme} />
+            </ScrollArea>
+          ) : (
+            <div className="text-muted-foreground rounded-md border border-dashed px-4 py-8 text-center text-sm">
+              暂无 README
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>更新日志</CardTitle>
+          <CardDescription>插件作者提供的版本变更记录。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {changelog ? (
+            <ScrollArea className="h-[min(36vh,420px)] pr-4">
+              <MarkdownRenderer content={changelog} />
+            </ScrollArea>
+          ) : (
+            <div className="text-muted-foreground rounded-md border border-dashed px-4 py-8 text-center text-sm">
+              暂无更新日志
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -708,6 +790,280 @@ function PluginDetailsPanel({
   )
 }
 
+type PluginDocumentMode = 'readme' | 'changelog'
+
+interface PluginDocumentPanelPosition {
+  left: number
+  top: number
+}
+
+const DOCUMENT_PANEL_WIDTH = 560
+const DOCUMENT_PANEL_HEIGHT = 620
+const DOCUMENT_PANEL_MARGIN = 16
+
+function clampPanelValue(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+function getInitialDocumentPanelPosition(): PluginDocumentPanelPosition {
+  if (typeof window === 'undefined') {
+    return { left: 320, top: 120 }
+  }
+
+  return {
+    left: Math.max(DOCUMENT_PANEL_MARGIN, window.innerWidth - DOCUMENT_PANEL_WIDTH - 32),
+    top: 112,
+  }
+}
+
+interface PluginDocumentFloatingPanelProps {
+  plugin: InstalledPlugin
+  onClose: () => void
+}
+
+function PluginDocumentFloatingPanel({ plugin, onClose }: PluginDocumentFloatingPanelProps) {
+  const [mode, setMode] = useState<PluginDocumentMode>('readme')
+  const [readme, setReadme] = useState('')
+  const [changelog, setChangelog] = useState(plugin.changelog ?? '')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [dragging, setDragging] = useState(false)
+  const [position, setPosition] = useState<PluginDocumentPanelPosition>(getInitialDocumentPanelPosition)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const dragRef = useRef<{
+    pointerId?: number
+    offsetX: number
+    offsetY: number
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadDocument() {
+      setLoading(true)
+      setError('')
+      try {
+        if (mode === 'readme') {
+          const content = await getLocalPluginReadme(plugin.id)
+          if (!cancelled) {
+            setReadme(content)
+          }
+          return
+        }
+
+        const localChangelog = plugin.changelog?.trim()
+          ? plugin.changelog
+          : await getLocalPluginChangelog(plugin.id)
+        if (!cancelled) {
+          setChangelog(localChangelog ?? '')
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : '文档加载失败')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void loadDocument()
+
+    return () => {
+      cancelled = true
+    }
+  }, [mode, plugin.changelog, plugin.id])
+
+  const movePanel = (clientX: number, clientY: number) => {
+    const dragState = dragRef.current
+    if (!dragState) {
+      return
+    }
+
+    const panelRect = panelRef.current?.getBoundingClientRect()
+    const panelWidth = panelRect?.width ?? DOCUMENT_PANEL_WIDTH
+    const panelHeight = panelRect?.height ?? DOCUMENT_PANEL_HEIGHT
+    const maxLeft = Math.max(
+      DOCUMENT_PANEL_MARGIN,
+      window.innerWidth - DOCUMENT_PANEL_MARGIN - panelWidth
+    )
+    const maxTop = Math.max(
+      DOCUMENT_PANEL_MARGIN,
+      window.innerHeight - DOCUMENT_PANEL_MARGIN - panelHeight
+    )
+    setPosition({
+      left: clampPanelValue(clientX - dragState.offsetX, DOCUMENT_PANEL_MARGIN, maxLeft),
+      top: clampPanelValue(clientY - dragState.offsetY, DOCUMENT_PANEL_MARGIN, maxTop),
+    })
+  }
+
+  const startDrag = (clientX: number, clientY: number, pointerId?: number) => {
+    const rect = panelRef.current?.getBoundingClientRect()
+    if (!rect) {
+      return
+    }
+
+    dragRef.current = {
+      pointerId,
+      offsetX: clientX - rect.left,
+      offsetY: clientY - rect.top,
+    }
+    setDragging(true)
+  }
+
+  useEffect(() => {
+    if (!dragging) {
+      return
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (dragRef.current?.pointerId !== undefined) {
+        return
+      }
+      movePanel(event.clientX, event.clientY)
+    }
+    const handleMouseUp = () => {
+      if (dragRef.current?.pointerId !== undefined) {
+        return
+      }
+      dragRef.current = null
+      setDragging(false)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [dragging])
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || dragRef.current) {
+      return
+    }
+
+    startDrag(event.clientX, event.clientY, event.pointerId)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = dragRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+
+    movePanel(event.clientX, event.clientY)
+  }
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null
+      setDragging(false)
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+    }
+  }
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || dragRef.current) {
+      return
+    }
+
+    startDrag(event.clientX, event.clientY)
+  }
+
+  const content = mode === 'readme' ? readme : changelog
+  const panelStyle = {
+    left: position.left,
+    top: position.top,
+  } satisfies CSSProperties
+
+  const panel = (
+    <div
+      ref={panelRef}
+      data-dashboard-floating-content="true"
+      className="fixed z-50 w-[min(calc(100vw-2rem),35rem)] overflow-hidden rounded-md border bg-background shadow-2xl"
+      style={panelStyle}
+    >
+      <div
+        className={`flex touch-none select-none items-center gap-2 border-b bg-muted/70 px-3 py-2 ${
+          dragging ? 'cursor-grabbing' : 'cursor-grab'
+        }`}
+        onPointerCancel={endDrag}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onMouseDown={handleMouseDown}
+      >
+        <GripHorizontal className="text-muted-foreground h-4 w-4 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold">插件文档</div>
+          <div className="text-muted-foreground truncate text-xs">{plugin.manifest.name}</div>
+        </div>
+        <div
+          className="flex shrink-0 items-center gap-1"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <Button
+            type="button"
+            variant={mode === 'readme' ? 'default' : 'outline'}
+            size="sm"
+            className="h-8"
+            onClick={() => setMode('readme')}
+          >
+            <BookOpen className="mr-1.5 h-3.5 w-3.5" />
+            README
+          </Button>
+          <Button
+            type="button"
+            variant={mode === 'changelog' ? 'default' : 'outline'}
+            size="sm"
+            className="h-8"
+            onClick={() => setMode('changelog')}
+          >
+            <FileText className="mr-1.5 h-3.5 w-3.5" />
+            更新日志
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-3">
+        {loading ? (
+          <div className="text-muted-foreground flex h-64 items-center justify-center gap-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            正在加载文档
+          </div>
+        ) : error ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : content ? (
+          <ScrollArea className="h-[min(62vh,31rem)] pr-4">
+            <MarkdownRenderer content={content} />
+          </ScrollArea>
+        ) : (
+          <div className="text-muted-foreground flex h-64 items-center justify-center rounded-md border border-dashed text-sm">
+            {mode === 'readme' ? '暂无 README' : '暂无更新日志'}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  if (typeof document === 'undefined') {
+    return panel
+  }
+
+  return createPortal(panel, document.body)
+}
+
 // 插件配置编辑器
 interface PluginConfigEditorProps {
   plugin: InstalledPlugin
@@ -718,6 +1074,7 @@ interface PluginConfigEditorProps {
 function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorProps) {
   const { i18n } = useTranslation()
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
+  const [documentPanelOpen, setDocumentPanelOpen] = useState(false)
 
   const {
     editMode,
@@ -834,6 +1191,15 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2 whitespace-nowrap sm:gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() => setDocumentPanelOpen(true)}
+          >
+            <BookOpen className="mr-2 h-4 w-4" />
+            打开文档
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -994,9 +1360,17 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
             repositoryUrl={pluginRepositoryUrl}
             documentationUrl={manifestUrls?.documentation}
             issuesUrl={manifestUrls?.issues}
+            changelog={plugin.changelog}
           />
         </TabsContent>
       </Tabs>
+
+      {documentPanelOpen && (
+        <PluginDocumentFloatingPanel
+          plugin={plugin}
+          onClose={() => setDocumentPanelOpen(false)}
+        />
+      )}
 
       <Dialog
         open={internalLeavePromptOpen || navigationBlocker.status === 'blocked'}
@@ -1087,6 +1461,7 @@ function PluginConfigPageContent() {
     getPluginUpdateState,
     getPluginRepositoryUrl,
     isPluginDisabled,
+    isPluginLoadFailed,
     getPluginStatusBarClassName,
     getPluginStatusLabel,
     getPluginStatusMeta,
@@ -1129,6 +1504,7 @@ function PluginConfigPageContent() {
 
   const isModernDashboardStyle = themeConfig.dashboardStyle === 'modern'
   const isFutureRetroDashboardStyle = themeConfig.dashboardStyle === 'future-retro'
+  const [loadFailureDetailPlugin, setLoadFailureDetailPlugin] = useState<InstalledPlugin | null>(null)
 
   // 如果选中了插件，显示配置编辑器
   if (selectedPlugin) {
@@ -1324,6 +1700,8 @@ function PluginConfigPageContent() {
               const pluginActing = actingPluginId === plugin.id
               const pluginDisabled = isPluginDisabled(plugin)
               const updateState = getPluginUpdateState(plugin)
+              const pluginLoadFailed = isPluginLoadFailed(plugin)
+              const loadFailureReason = plugin.load_error?.trim() || '运行时未返回具体失败原因'
               return (
                 <div
                   key={plugin.id}
@@ -1385,6 +1763,28 @@ function PluginConfigPageContent() {
                       <p className="text-muted-foreground line-clamp-2 text-sm leading-relaxed sm:truncate sm:leading-normal">
                         {plugin.manifest.description || '暂无描述'}
                       </p>
+                      {pluginLoadFailed && (
+                        <div className="flex min-w-0 flex-col gap-2 rounded-md border border-red-200 bg-red-50/80 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/25 dark:text-red-300 sm:flex-row sm:items-center">
+                          <div className="flex min-w-0 flex-1 items-start gap-1.5">
+                            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span className="min-w-0 line-clamp-2 break-words">
+                              失败原因：{loadFailureReason}
+                            </span>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 shrink-0 border-red-300 px-2 text-xs text-red-700 hover:bg-red-100 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setLoadFailureDetailPlugin(plugin)
+                            }}
+                          >
+                            查看详情
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center justify-end gap-2 border-t pt-2 sm:flex-shrink-0 sm:border-t-0 sm:pt-0">
@@ -1457,6 +1857,59 @@ function PluginConfigPageContent() {
             })}
           </div>
         )}
+
+        <Dialog
+          open={loadFailureDetailPlugin !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setLoadFailureDetailPlugin(null)
+            }
+          }}
+        >
+          <DialogContent className="max-w-[min(92vw,44rem)]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="h-5 w-5" />
+                插件加载失败详情
+              </DialogTitle>
+              <DialogDescription>
+                {loadFailureDetailPlugin?.manifest.name || '插件'} 未能完成加载。
+              </DialogDescription>
+            </DialogHeader>
+
+            {loadFailureDetailPlugin && (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="text-muted-foreground text-xs font-medium">插件 ID</div>
+                    <div className="mt-1 break-words text-sm">{loadFailureDetailPlugin.id}</div>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="text-muted-foreground text-xs font-medium">版本</div>
+                    <div className="mt-1 text-sm">v{loadFailureDetailPlugin.manifest.version}</div>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="text-muted-foreground text-xs font-medium">加载状态</div>
+                    <div className="mt-1 text-sm">{getPluginStatusLabel(loadFailureDetailPlugin)}</div>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="text-muted-foreground text-xs font-medium">安装路径</div>
+                    <div className="mt-1 break-words text-sm">{loadFailureDetailPlugin.path}</div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">失败原因</div>
+                  <ScrollArea className="max-h-[min(42vh,20rem)] rounded-md border bg-muted/30 p-3">
+                    <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                      {loadFailureDetailPlugin.load_error?.trim() || '运行时未返回具体失败原因'}
+                    </pre>
+                  </ScrollArea>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         <Dialog
           open={updateDialogOpen}
