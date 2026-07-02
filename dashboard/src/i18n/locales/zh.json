@@ -833,6 +833,21 @@
       "30d": "30天"
     },
     "autoRefresh": "自动刷新",
+    "cards": {
+      "add": "新增卡片",
+      "edit": "编辑卡片",
+      "done": "完成编辑",
+      "reset": "恢复默认布局",
+      "dialog": {
+        "title": "管理首页卡片",
+        "description": "添加插件或内置提供的卡片，或恢复默认布局。",
+        "hiddenCards": "可添加卡片",
+        "noHiddenCards": "暂无可添加卡片",
+        "restore": "添加",
+        "reset": "恢复默认布局",
+        "cancel": "关闭"
+      }
+    },
     "botStatus": {
       "title": "麦麦状态",
       "loading": "读取中",

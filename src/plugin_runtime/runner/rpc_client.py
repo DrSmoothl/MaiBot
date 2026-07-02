@@ -7,6 +7,7 @@ import contextlib
 import uuid
 
 from src.common.logger import get_logger
+from src.plugin_runtime.local_sdk import read_local_sdk_version
 from src.plugin_runtime.protocol.codec import Codec, MsgPackCodec
 from src.plugin_runtime.protocol.envelope import (
     Envelope,
@@ -28,8 +29,12 @@ def _get_sdk_version() -> str:
     """读取 SDK 版本号。
 
     Returns:
-        str: 已安装的 SDK 版本；读取失败时回退到 ``1.0.0``。
+        str: SDK 版本；读取失败时回退到 ``1.0.0``。
     """
+    local_sdk_version = read_local_sdk_version()
+    if local_sdk_version:
+        return local_sdk_version
+
     try:
         from importlib.metadata import version
 

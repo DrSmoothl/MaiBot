@@ -833,6 +833,21 @@
       "30d": "30 Days"
     },
     "autoRefresh": "Auto Refresh",
+    "cards": {
+      "add": "Add card",
+      "edit": "Edit cards",
+      "done": "Done",
+      "reset": "Restore default layout",
+      "dialog": {
+        "title": "Manage Home Cards",
+        "description": "Add plugin or built-in cards, or restore the default layout.",
+        "hiddenCards": "Available cards",
+        "noHiddenCards": "No cards available",
+        "restore": "Add",
+        "reset": "Restore default layout",
+        "cancel": "Close"
+      }
+    },
     "botStatus": {
       "title": "MaiBot Status",
       "loading": "Reading",

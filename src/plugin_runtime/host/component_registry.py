@@ -55,6 +55,7 @@ class ComponentTypes(str, Enum):
     EVENT_HANDLER = "EVENT_HANDLER"
     HOOK_HANDLER = "HOOK_HANDLER"
     MESSAGE_GATEWAY = "MESSAGE_GATEWAY"
+    HOME_CARD = "HOME_CARD"
 
 
 ComponentChatScope = Literal["all", "group", "private"]
@@ -450,6 +451,43 @@ class MessageGatewayEntry(ComponentEntry):
         return self.route_type in {"receive", "duplex"}
 
 
+class HomeCardEntry(ComponentEntry):
+    """WebUI 首页卡片组件条目。"""
+
+    def __init__(
+        self,
+        name: str,
+        component_type: str,
+        plugin_id: str,
+        metadata: Dict[str, Any],
+        chat_scope: str = "all",
+        allowed_session: Optional[List[str]] = None,
+    ) -> None:
+        self.title: str = str(metadata.get("title", "") or name).strip()
+        self.description: str = str(metadata.get("description", "") or "").strip()
+        self.width: str = self._normalize_width(metadata.get("width", "medium"))
+        self.order: int = self._normalize_order(metadata.get("order", 1000))
+        super().__init__(name, component_type, plugin_id, metadata, chat_scope, allowed_session)
+
+    @staticmethod
+    def _normalize_width(raw_value: Any) -> str:
+        """规范化首页卡片宽度。"""
+
+        normalized_value = str(raw_value or "medium").strip().lower()
+        if normalized_value in {"small", "medium", "large", "full"}:
+            return normalized_value
+        return "medium"
+
+    @staticmethod
+    def _normalize_order(raw_value: Any) -> int:
+        """规范化首页卡片默认排序。"""
+
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return 1000
+
+
 class ComponentRegistry:
     """Host 侧组件注册表。
 
@@ -681,6 +719,15 @@ class ComponentRegistry:
                 self._validate_hook_handler_entry(component)
             elif normalized_type == ComponentTypes.MESSAGE_GATEWAY:
                 component = MessageGatewayEntry(
+                    name,
+                    normalized_type.value,
+                    plugin_id,
+                    normalized_metadata,
+                    chat_scope,
+                    allowed_session,
+                )
+            elif normalized_type == ComponentTypes.HOME_CARD:
+                component = HomeCardEntry(
                     name,
                     normalized_type.value,
                     plugin_id,

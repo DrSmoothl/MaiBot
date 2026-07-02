@@ -28,6 +28,10 @@ import tomllib
 
 import tomlkit
 
+from src.plugin_runtime.local_sdk import activate_local_sdk_import_path
+
+activate_local_sdk_import_path()
+
 from src.common.logger import get_console_handler, get_logger, initialize_logging
 from src.config.config_utils import compare_versions
 from src.plugin_runtime import (
