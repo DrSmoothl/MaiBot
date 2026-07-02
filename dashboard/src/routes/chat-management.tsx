@@ -72,8 +72,15 @@ import { cn } from '@/lib/utils'
 const PAGE_SIZE = 10
 type ChatTypeFilter = 'all' | ChatStreamType
 type ChatManagementView = 'groups' | 'streams'
-type MutualGroupKind = 'expression' | 'jargon'
+type MutualGroupKind = 'expression' | 'jargon' | 'memory'
 type LearningKind = 'expression' | 'jargon' | 'behavior'
+const MUTUAL_GROUP_CHAT_RESULT_LIMIT = 50
+
+const MUTUAL_GROUP_KIND_LABEL: Record<MutualGroupKind, string> = {
+  expression: '表达',
+  jargon: '黑话',
+  memory: '记忆',
+}
 
 interface TargetItem {
   platform: string
@@ -1223,7 +1230,13 @@ function ChatPromptSection({ detail }: { detail: ChatStreamDetail }) {
 function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  const [kind, setKind] = useState<MutualGroupKind>('expression')
+  const [kind, setKind] = useState<MutualGroupKind>(() => {
+    if (typeof window === 'undefined') {
+      return 'expression'
+    }
+    const queryKind = new URLSearchParams(window.location.search).get('kind')
+    return queryKind === 'memory' || queryKind === 'jargon' ? queryKind : 'expression'
+  })
   const [addDialogGroupIndex, setAddDialogGroupIndex] = useState<number | null>(null)
   const [addDialogSearch, setAddDialogSearch] = useState('')
   const [selectedTargetKeys, setSelectedTargetKeys] = useState<string[]>([])
@@ -1231,11 +1244,18 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
     queryKey: ['chat-management-mutual-groups-config'],
     queryFn: () => getBotConfig(),
   })
-  const sectionName = kind === 'expression' ? 'expression' : 'jargon'
-  const groupFieldName = kind === 'expression' ? 'expression_groups' : 'jargon_groups'
+  const sectionName = kind === 'memory' ? 'a_memorix' : kind
+  const groupFieldName =
+    kind === 'memory'
+      ? 'shared_memory_groups'
+      : kind === 'expression'
+        ? 'expression_groups'
+        : 'jargon_groups'
   const sectionData = (configQuery.data?.[sectionName] && typeof configQuery.data[sectionName] === 'object'
     ? configQuery.data[sectionName]
     : {}) as Record<string, unknown>
+  const globalMemorySharingEnabled =
+    kind === 'memory' && sectionData.global_memory_sharing_enabled === true
   const groups = useMemo(
     () => normalizeMutualGroups(sectionData[groupFieldName]),
     [groupFieldName, sectionData]
@@ -1274,6 +1294,8 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
         .includes(keyword)
     })
   }, [addDialogExistingKeySet, addDialogSearch, chats])
+  const visibleAddDialogChats = addDialogChats.slice(0, MUTUAL_GROUP_CHAT_RESULT_LIMIT)
+  const isAddDialogLimited = addDialogChats.length > visibleAddDialogChats.length
 
   const saveMutation = useMutation({
     mutationFn: (nextSectionData: Record<string, unknown>) => updateBotConfigSection(sectionName, nextSectionData),
@@ -1281,7 +1303,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
       void queryClient.invalidateQueries({ queryKey: ['chat-management-mutual-groups-config'] })
       toast({
         title: '互通组已保存',
-        description: `${kind === 'expression' ? '表达' : '黑话'}互通组配置已更新。`,
+        description: `${MUTUAL_GROUP_KIND_LABEL[kind]}互通组配置已更新。`,
       })
     },
     onError: (error) => {
@@ -1294,6 +1316,9 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
   })
 
   const updateGroups = (nextGroups: ChatStreamGroupConfig[]) => {
+    if (globalMemorySharingEnabled) {
+      return
+    }
     saveMutation.mutate({
       ...sectionData,
       [groupFieldName]: serializeMutualGroups(nextGroups),
@@ -1301,10 +1326,16 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
   }
 
   const createGroup = () => {
+    if (globalMemorySharingEnabled) {
+      return
+    }
     updateGroups([...groups, { targets: [] }])
   }
 
   const openAddDialog = (groupIndex: number) => {
+    if (globalMemorySharingEnabled) {
+      return
+    }
     setAddDialogGroupIndex(groupIndex)
     setAddDialogSearch('')
     setSelectedTargetKeys([])
@@ -1326,7 +1357,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
   }
 
   const applySelectedChatsToGroup = () => {
-    if (addDialogGroupIndex === null || selectedTargetKeys.length === 0) {
+    if (globalMemorySharingEnabled || addDialogGroupIndex === null || selectedTargetKeys.length === 0) {
       return
     }
     const selectedKeySet = new Set(selectedTargetKeys)
@@ -1347,6 +1378,9 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
   }
 
   const removeTarget = (groupIndex: number, targetIndex: number) => {
+    if (globalMemorySharingEnabled) {
+      return
+    }
     updateGroups(
       groups.map((group, index) =>
         index === groupIndex
@@ -1357,21 +1391,28 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
   }
 
   const deleteGroup = (groupIndex: number) => {
+    if (globalMemorySharingEnabled) {
+      return
+    }
     updateGroups(groups.filter((_, index) => index !== groupIndex))
   }
+  const editingDisabled = saveMutation.isPending || globalMemorySharingEnabled
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
       <div className="flex shrink-0 flex-col gap-3 border-b p-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-1">
           <h2 className="text-base font-semibold">互通组管理</h2>
-          <p className="text-sm text-muted-foreground">管理表达和黑话的聊天流互通组。</p>
+          <p className="text-sm text-muted-foreground">
+            管理表达、黑话和记忆的聊天流互通组。
+          </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="inline-flex rounded-md border bg-background p-1">
             {[
               ['expression', '表达'],
               ['jargon', '黑话'],
+              ['memory', '记忆'],
             ].map(([value, label]) => (
               <Button
                 key={value}
@@ -1385,7 +1426,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
               </Button>
             ))}
           </div>
-          <Button type="button" disabled={saveMutation.isPending} onClick={createGroup}>
+          <Button type="button" disabled={editingDisabled} onClick={createGroup}>
             <Plus className="mr-2 h-4 w-4" />
             新建互通组
           </Button>
@@ -1393,6 +1434,11 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-4">
+        {globalMemorySharingEnabled && (
+          <div className="mb-3 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+            全局共享记忆已开启，记忆互通组暂不参与普通记忆检索范围控制。
+          </div>
+        )}
         {configQuery.isLoading ? (
           <div className="space-y-3">
             <Skeleton className="h-20" />
@@ -1404,7 +1450,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
           </div>
         ) : groups.length === 0 ? (
           <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-            暂无{kind === 'expression' ? '表达' : '黑话'}互通组。
+            暂无{MUTUAL_GROUP_KIND_LABEL[kind]}互通组。
           </div>
         ) : (
           <div className="grid gap-3">
@@ -1417,7 +1463,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={saveMutation.isPending}
+                      disabled={editingDisabled}
                       onClick={() => openAddDialog(groupIndex)}
                     >
                       <Plus className="mr-2 h-4 w-4" />
@@ -1428,7 +1474,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
                       variant="ghost"
                       size="icon"
                       className="text-destructive hover:text-destructive"
-                      disabled={saveMutation.isPending}
+                      disabled={editingDisabled}
                       aria-label={`删除互通组 ${groupIndex + 1}`}
                       onClick={() => deleteGroup(groupIndex)}
                     >
@@ -1453,7 +1499,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
                         <button
                           type="button"
                           className="text-muted-foreground hover:text-destructive"
-                          disabled={saveMutation.isPending}
+                          disabled={editingDisabled}
                           aria-label={`移除 ${getTargetDisplayName(target, chatNameByTargetKey)}`}
                           onClick={() => removeTarget(groupIndex, targetIndex)}
                         >
@@ -1489,7 +1535,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
                   <div className="p-4 text-center text-sm text-muted-foreground">没有可加入的聊天流</div>
                 ) : (
                   <div className="divide-y">
-                    {addDialogChats.map((chat) => {
+                    {visibleAddDialogChats.map((chat) => {
                       const target = chatToTarget(chat)
                       const key = targetKey(target)
                       const checked = selectedTargetKeySet.has(key)
@@ -1516,6 +1562,11 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
                   </div>
                 )}
               </div>
+              {isAddDialogLimited && (
+                <div className="text-xs text-muted-foreground">
+                  仅显示前 {MUTUAL_GROUP_CHAT_RESULT_LIMIT} 个匹配项，请输入关键词缩小范围。
+                </div>
+              )}
             </div>
           </DialogBody>
           <DialogFooter>
@@ -1524,7 +1575,7 @@ function MutualGroupsView({ chats }: { chats: ChatStream[] }) {
             </Button>
             <Button
               type="button"
-              disabled={selectedTargetKeys.length === 0 || saveMutation.isPending}
+              disabled={selectedTargetKeys.length === 0 || editingDisabled}
               onClick={applySelectedChatsToGroup}
             >
               加入 {selectedTargetKeys.length} 个聊天
@@ -1781,7 +1832,12 @@ function DeleteChatStreamDialog({
 }
 
 export function ChatManagementPage() {
-  const [activeView, setActiveView] = useState<ChatManagementView>('streams')
+  const [activeView, setActiveView] = useState<ChatManagementView>(() => {
+    if (typeof window === 'undefined') {
+      return 'streams'
+    }
+    return new URLSearchParams(window.location.search).get('view') === 'groups' ? 'groups' : 'streams'
+  })
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<ChatTypeFilter>('all')
   const [page, setPage] = useState(1)

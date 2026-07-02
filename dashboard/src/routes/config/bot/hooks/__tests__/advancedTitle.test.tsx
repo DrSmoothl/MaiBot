@@ -1,10 +1,61 @@
-import { describe, expect, it, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
-import { MultipleReplyStyleHook } from '../complexFieldHooks'
+import { ExpressionGroupsHook, MultipleReplyStyleHook } from '../complexFieldHooks'
 import { createJsonFieldHook } from '../JsonFieldHookFactory'
 import { createListItemEditorHook } from '../ListItemEditorHookFactory'
 import type { FieldSchema } from '@/types/config-schema'
+
+vi.mock('@/lib/chat-management-api', () => ({
+  getChatStreams: vi.fn(async () => [
+    {
+      id: 1,
+      session_id: 'session-group',
+      display_name: '测试群',
+      chat_type: 'group',
+      target_id: '10001',
+      platform: 'qq',
+      account_id: null,
+      scope: null,
+      user_id: '',
+      user_nickname: null,
+      user_cardname: null,
+      group_id: '10001',
+      group_name: '测试群',
+      message_count: 10,
+      expression_count: 0,
+      jargon_count: 0,
+      created_at: null,
+      last_active_at: null,
+      latest_message: '',
+      latest_message_at: null,
+    },
+    {
+      id: 2,
+      session_id: 'session-private',
+      display_name: '小明的私聊',
+      chat_type: 'private',
+      target_id: '20002',
+      platform: 'qq',
+      account_id: null,
+      scope: null,
+      user_id: '20002',
+      user_nickname: '小明',
+      user_cardname: null,
+      group_id: null,
+      group_name: null,
+      message_count: 8,
+      expression_count: 0,
+      jargon_count: 0,
+      created_at: null,
+      last_active_at: null,
+      latest_message: '',
+      latest_message_at: null,
+    },
+  ]),
+  resolveChatTargets: vi.fn(async () => []),
+}))
 
 const advancedSchema: FieldSchema = {
   name: 'advanced_field',
@@ -15,7 +66,35 @@ const advancedSchema: FieldSchema = {
   advanced: true,
 }
 
+const sharedMemorySchema: FieldSchema = {
+  name: 'shared_memory_groups',
+  type: 'array',
+  label: '共享记忆组',
+  description: '共享记忆组',
+  required: false,
+  'x-display-as-section': true,
+}
+
 describe('custom bot config hooks', () => {
+  beforeAll(() => {
+    Object.defineProperty(HTMLElement.prototype, 'hasPointerCapture', {
+      configurable: true,
+      value: vi.fn(() => false),
+    })
+    Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    })
+  })
+
   it('colors string-list hook titles for advanced fields', () => {
     const { container } = render(
       <MultipleReplyStyleHook
@@ -66,5 +145,166 @@ describe('custom bot config hooks', () => {
     )
 
     expect(getByText('Advanced field')).toHaveClass('text-sky-700')
+  })
+
+  it('folds shared memory groups while global memory sharing is enabled', async () => {
+    const user = userEvent.setup()
+    const onParentChange = vi.fn()
+    const sharedMemoryGroups = [
+      {
+        targets: [
+          {
+            platform: 'qq',
+            item_id: '123456',
+            rule_type: 'group',
+          },
+        ],
+      },
+    ]
+
+    const { rerender } = render(
+      <ExpressionGroupsHook
+        fieldPath="a_memorix.shared_memory_groups"
+        onChange={vi.fn()}
+        onParentChange={onParentChange}
+        parentValues={{ global_memory_sharing_enabled: true }}
+        schema={sharedMemorySchema}
+        value={sharedMemoryGroups}
+      />,
+    )
+
+    expect(screen.queryByDisplayValue('123456')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('添加共享记忆组')).toBeDisabled()
+    expect(screen.getByRole('switch', { name: '全局共享记忆' })).toBeChecked()
+
+    rerender(
+      <ExpressionGroupsHook
+        fieldPath="a_memorix.shared_memory_groups"
+        onChange={vi.fn()}
+        onParentChange={onParentChange}
+        parentValues={{ global_memory_sharing_enabled: false }}
+        schema={sharedMemorySchema}
+        value={sharedMemoryGroups}
+      />,
+    )
+
+    expect(screen.queryByDisplayValue('123456')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('添加共享记忆组')).not.toBeDisabled()
+    expect(screen.getByRole('switch', { name: '全局共享记忆' })).not.toBeChecked()
+
+    await user.click(screen.getByLabelText('展开共享记忆组 1'))
+
+    expect(screen.getByDisplayValue('123456')).toBeInTheDocument()
+    expect(screen.getByText('qq:123456')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('switch', { name: '全局共享记忆' }))
+
+    expect(onParentChange).toHaveBeenLastCalledWith('global_memory_sharing_enabled', true)
+  })
+
+  it('selects shared memory group members from known group or private chats inline', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+
+    render(
+      <ExpressionGroupsHook
+        fieldPath="a_memorix.shared_memory_groups"
+        onChange={onChange}
+        parentValues={{ global_memory_sharing_enabled: false }}
+        schema={sharedMemorySchema}
+        value={[
+          {
+            targets: [
+              {
+                platform: 'qq',
+                item_id: '',
+                rule_type: 'group',
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    await user.click(screen.getByLabelText('展开共享记忆组 1'))
+
+    await waitFor(() => {
+      expect(screen.getByText('选择群聊/私聊')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('未选择聊天流')).toBeInTheDocument()
+    expect(screen.queryByText('平台')).not.toBeInTheDocument()
+    expect(screen.queryByText('聊天流 ID')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    expect(screen.getByText('群号或用户 ID')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('群号或用户 ID'), {
+      target: { value: '30003' },
+    })
+
+    expect(onChange).toHaveBeenLastCalledWith([
+      {
+        targets: [
+          {
+            platform: 'qq',
+            item_id: '30003',
+            rule_type: 'group',
+          },
+        ],
+      },
+    ])
+
+    await user.click(screen.getByRole('combobox', { name: '选择群聊或私聊' }))
+    await user.click(await screen.findByText(/测试群 · 群聊/))
+
+    expect(onChange).toHaveBeenLastCalledWith([
+      {
+        targets: [
+          {
+            platform: 'qq',
+            item_id: '10001',
+            rule_type: 'group',
+          },
+        ],
+      },
+    ])
+  })
+
+  it('allows collapsing manual fields for unmatched shared memory members', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <ExpressionGroupsHook
+        fieldPath="a_memorix.shared_memory_groups"
+        onChange={vi.fn()}
+        parentValues={{ global_memory_sharing_enabled: false }}
+        schema={sharedMemorySchema}
+        value={[
+          {
+            targets: [
+              {
+                platform: 'qq',
+                item_id: 'not-found',
+                rule_type: 'group',
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    await user.click(screen.getByLabelText('展开共享记忆组 1'))
+
+    await waitFor(() => {
+      expect(screen.getByText('未匹配')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('群号或用户 ID')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '收起手动填写' }))
+
+    expect(screen.queryByText('群号或用户 ID')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '手动填写' })).toBeInTheDocument()
   })
 })
