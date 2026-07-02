@@ -94,7 +94,7 @@ export function ExpressionList({
     const modifier = expression.modified_by?.toLowerCase()
 
     if (expression.checked && modifier === 'user') {
-      return <Badge className="bg-green-600 whitespace-nowrap hover:bg-green-600">通过</Badge>
+      return <Badge className="bg-green-600 whitespace-nowrap hover:bg-green-600">精选</Badge>
     }
     return null
   }
@@ -154,14 +154,14 @@ export function ExpressionList({
               {!hideChatColumn && <TableHead>聊天</TableHead>}
               <TableHead>
                 <div className="flex items-center gap-1.5">
-                  <span>审核</span>
+                  <span>精选</span>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
                         className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex h-7 w-7 items-center justify-center transition-colors focus-visible:ring-1 focus-visible:outline-none"
-                        title="筛选审核状态"
-                        aria-label="筛选审核状态"
+                        title="筛选精选状态"
+                        aria-label="筛选精选状态"
                       >
                         <ListFilter className="h-3.5 w-3.5" />
                       </button>
@@ -173,9 +173,9 @@ export function ExpressionList({
                       >
                         <DropdownMenuRadioItem value="all">全部</DropdownMenuRadioItem>
                         <DropdownMenuRadioItem value="user_checked">
-                          仅人工通过
+                          已精选
                         </DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="unchecked">未人工检查</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="unchecked">未精选</DropdownMenuRadioItem>
                       </DropdownMenuRadioGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -344,7 +344,7 @@ export function ExpressionList({
               )}
 
               <div className="text-sm">
-                <div className="text-muted-foreground mb-1 text-xs">审核</div>
+                <div className="text-muted-foreground mb-1 text-xs">精选</div>
                 <div className="flex flex-wrap items-center gap-2">
                   {getReviewBadge(expression)}
                 </div>
@@ -442,20 +442,22 @@ function Pagination({
   }
 
   return (
-    <div className="flex flex-col items-center justify-between gap-4 border-t px-4 py-4 sm:flex-row sm:py-3">
-      <div className="text-muted-foreground text-sm">
-        共 {total} 条记录，第 {page} / {totalPages} 页
+    <div className="flex flex-col items-center justify-between gap-2 border-t px-3 py-2 sm:flex-row sm:py-1.5">
+      <div className="text-muted-foreground text-xs">
+        {total} 条 · {page}/{totalPages}
       </div>
-      <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:w-auto sm:flex-nowrap">
+      <div className="flex w-full flex-wrap items-center justify-center gap-1.5 sm:w-auto sm:flex-nowrap">
         {/* 首页 */}
         <Button
           variant="outline"
           size="sm"
           onClick={() => onPageChange(1)}
           disabled={page === 1}
-          className="hidden sm:flex"
+          className="hidden h-7 px-2 sm:flex"
+          title="首页"
+          aria-label="首页"
         >
-          <ChevronsLeft className="h-4 w-4" />
+          <ChevronsLeft className="h-3.5 w-3.5" />
         </Button>
 
         {/* 上一页 */}
@@ -464,20 +466,22 @@ function Pagination({
           size="sm"
           onClick={() => onPageChange(page - 1)}
           disabled={page === 1}
+          className="h-7 px-2"
+          title="上一页"
+          aria-label="上一页"
         >
-          <ChevronLeft className="h-4 w-4 sm:mr-1" />
-          <span className="hidden sm:inline">上一页</span>
+          <ChevronLeft className="h-3.5 w-3.5" />
         </Button>
 
         {/* 页码跳转 */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Input
             type="number"
             value={jumpToPage}
             onChange={(e) => setJumpToPage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleJump()}
             placeholder={page.toString()}
-            className="h-9 w-16 text-center sm:h-8"
+            className="h-7 w-12 text-center text-xs"
             min={1}
             max={totalPages}
           />
@@ -486,9 +490,9 @@ function Pagination({
             size="sm"
             onClick={handleJump}
             disabled={!jumpToPage}
-            className="h-9 sm:h-8"
+            className="h-7 px-2 text-xs"
           >
-            跳转
+            跳
           </Button>
         </div>
 
@@ -498,9 +502,11 @@ function Pagination({
           size="sm"
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
+          className="h-7 px-2"
+          title="下一页"
+          aria-label="下一页"
         >
-          <span className="hidden sm:inline">下一页</span>
-          <ChevronRight className="h-4 w-4 sm:ml-1" />
+          <ChevronRight className="h-3.5 w-3.5" />
         </Button>
 
         {/* 末页 */}
@@ -509,9 +515,11 @@ function Pagination({
           size="sm"
           onClick={() => onPageChange(totalPages)}
           disabled={page >= totalPages}
-          className="hidden sm:flex"
+          className="hidden h-7 px-2 sm:flex"
+          title="末页"
+          aria-label="末页"
         >
-          <ChevronsRight className="h-4 w-4" />
+          <ChevronsRight className="h-3.5 w-3.5" />
         </Button>
       </div>
     </div>

@@ -230,7 +230,11 @@ export function EmojiManagementPage() {
               value={list.filters.status === 'all' ? 'adopted' : list.filters.status}
               onValueChange={(value) => list.setFilter('status', value as EmojiStatus)}
             >
-              <DashboardTabBar data-emoji-status-tabs="true" variant="grid" className="grid-cols-2 sm:grid-cols-4">
+              <DashboardTabBar
+                data-emoji-status-tabs="true"
+                variant="grid"
+                className="grid-cols-2 sm:grid-cols-4"
+              >
                 {[
                   {
                     value: 'known' as const,
@@ -433,13 +437,6 @@ export function EmojiManagementPage() {
             </CardHeader>
           </Card>
 
-          <EmojiCacheMaintenancePanel
-            onCacheChanged={() => {
-              list.invalidate()
-              void statsQuery.refetch()
-            }}
-          />
-
           {/* 表情包卡片列表 */}
           <Card>
             <CardHeader className="pb-3">
@@ -480,6 +477,13 @@ export function EmojiManagementPage() {
               )}
             </CardContent>
           </Card>
+
+          <EmojiCacheMaintenancePanel
+            onCacheChanged={() => {
+              list.invalidate()
+              void statsQuery.refetch()
+            }}
+          />
 
           {/* 详情对话框 */}
           <EmojiDetailDialog

@@ -20,11 +20,13 @@ from src.plugin_runtime import (
     ENV_EXTERNAL_PLUGIN_IDS,
     ENV_HOST_VERSION,
     ENV_IPC_ADDRESS,
+    ENV_LOCAL_PLUGIN_SDK_PATH,
     ENV_PLUGIN_DIRS,
     ENV_RUNNER_GROUP,
     ENV_SESSION_TOKEN,
     detect_host_application_version,
 )
+from src.plugin_runtime.local_sdk import build_pythonpath_with_local_sdk
 from src.plugin_runtime.protocol.envelope import (
     BootstrapPluginPayload,
     ConfigReloadScope,
@@ -269,6 +271,56 @@ class PluginRunnerSupervisor:
         for plugin_id in self._registered_plugins:
             statuses[plugin_id] = "success"
         return statuses
+
+    def get_plugin_load_failure_reasons(self) -> Dict[str, str]:
+        """返回 Runner 最近一次上报的插件加载失败原因。"""
+
+        reasons = {
+            str(plugin_id or "").strip(): str(reason or "").strip()
+            for plugin_id, reason in self._runner_ready_payloads.failed_plugin_reasons.items()
+            if str(plugin_id or "").strip() and str(reason or "").strip()
+        }
+        for plugin_id in self._runner_ready_payloads.failed_plugins:
+            reasons.setdefault(plugin_id, "插件初始化失败")
+        return reasons
+
+    def _apply_plugin_reload_result(
+        self,
+        reloaded_plugins: List[str],
+        inactive_plugins: List[str],
+        failed_plugins: Dict[str, str],
+    ) -> None:
+        """把插件重载结果合并到最近一次加载状态中。"""
+
+        loaded_set = set(self._runner_ready_payloads.loaded_plugins)
+        failed_set = set(self._runner_ready_payloads.failed_plugins)
+        inactive_set = set(self._runner_ready_payloads.inactive_plugins)
+        failure_reasons = dict(self._runner_ready_payloads.failed_plugin_reasons)
+
+        for plugin_id in reloaded_plugins:
+            loaded_set.add(plugin_id)
+            failed_set.discard(plugin_id)
+            inactive_set.discard(plugin_id)
+            failure_reasons.pop(plugin_id, None)
+
+        for plugin_id in inactive_plugins:
+            inactive_set.add(plugin_id)
+            loaded_set.discard(plugin_id)
+            failed_set.discard(plugin_id)
+            failure_reasons.pop(plugin_id, None)
+
+        for plugin_id, reason in failed_plugins.items():
+            failed_set.add(plugin_id)
+            loaded_set.discard(plugin_id)
+            inactive_set.discard(plugin_id)
+            failure_reasons[plugin_id] = str(reason or "").strip() or "插件重载失败"
+
+        self._runner_ready_payloads = RunnerReadyPayload(
+            loaded_plugins=sorted(loaded_set),
+            failed_plugins=sorted(failed_set),
+            failed_plugin_reasons=failure_reasons,
+            inactive_plugins=sorted(inactive_set),
+        )
 
     @property
     def is_loading(self) -> bool:
@@ -578,6 +630,11 @@ class PluginRunnerSupervisor:
             return False
 
         result = ReloadPluginResultPayload.model_validate(response.payload)
+        self._apply_plugin_reload_result(
+            reloaded_plugins=result.reloaded_plugins,
+            inactive_plugins=result.inactive_plugins,
+            failed_plugins=result.failed_plugins,
+        )
         if not result.success:
             logger.warning(f"插件 {plugin_id} 重载失败: {result.failed_plugins}")
         return result.success
@@ -630,6 +687,11 @@ class PluginRunnerSupervisor:
             return False
 
         result = ReloadPluginsResultPayload.model_validate(response.payload)
+        self._apply_plugin_reload_result(
+            reloaded_plugins=result.reloaded_plugins,
+            inactive_plugins=result.inactive_plugins,
+            failed_plugins=result.failed_plugins,
+        )
         if not result.success:
             logger.warning(f"插件批量重载失败: {result.failed_plugins}")
         return result.success
@@ -1469,7 +1531,11 @@ class PluginRunnerSupervisor:
 
         self._runner_ready_payloads = payload
         if payload.failed_plugins:
-            logger.error(f"插件注册失败: {', '.join(payload.failed_plugins)}")
+            failed_details = [
+                f"{plugin_id}: {payload.failed_plugin_reasons.get(plugin_id, '未知原因')}"
+                for plugin_id in payload.failed_plugins
+            ]
+            logger.error(f"插件注册失败: {'; '.join(failed_details)}")
         if payload.inactive_plugins:
             logger.warning(f"插件未激活: {', '.join(payload.inactive_plugins)}")
         logger.info(
@@ -1505,6 +1571,10 @@ class PluginRunnerSupervisor:
 
         env = os.environ.copy()
         env.update(self._build_runner_environment())
+        local_sdk_pythonpath = build_pythonpath_with_local_sdk(env)
+        if local_sdk_pythonpath is not None:
+            env["PYTHONPATH"] = local_sdk_pythonpath
+            logger.info(f"Runner 将优先使用本地插件 SDK: {env.get(ENV_LOCAL_PLUGIN_SDK_PATH)}")
 
         self._runner_process = await asyncio.create_subprocess_exec(
             sys.executable,

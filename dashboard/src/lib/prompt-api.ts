@@ -10,6 +10,23 @@ export interface PromptFileInfo {
   advanced: boolean
   description: string
   customized: boolean
+  custom_version_count: number
+}
+
+export interface PromptValidationResult {
+  valid: boolean
+  missing_placeholders: string[]
+  extra_placeholders: string[]
+  message: string
+}
+
+export interface PromptVersionInfo {
+  id: string
+  label: string
+  created_at: number
+  modified_at: number
+  size: number
+  active: boolean
 }
 
 export interface PromptCatalog {
@@ -24,6 +41,15 @@ export interface PromptFileContent {
   filename: string
   content: string
   customized: boolean
+  active_version_id: string | null
+  versions: PromptVersionInfo[]
+  validation: PromptValidationResult
+}
+
+export interface PromptUpdateOptions {
+  versionId?: string | null
+  label?: string
+  createVersion?: boolean
 }
 
 export async function getPromptCatalog(): Promise<PromptCatalog> {
@@ -59,12 +85,18 @@ export async function getDefaultPromptFile(
 export async function updatePromptFile(
   language: string,
   filename: string,
-  content: string
+  content: string,
+  options: PromptUpdateOptions = {}
 ): Promise<PromptFileContent> {
   return backendApi.put<PromptFileContent>(
     `${API_BASE}/${encodeURIComponent(language)}/${encodeURIComponent(filename)}`,
     {
-      body: { content },
+      body: {
+        content,
+        version_id: options.versionId,
+        label: options.label ?? '',
+        create_version: options.createVersion ?? false,
+      },
       errorMessage: '保存 Prompt 文件失败',
     }
   )
@@ -78,6 +110,32 @@ export async function resetPromptFile(
     `${API_BASE}/${encodeURIComponent(language)}/${encodeURIComponent(filename)}`,
     {
       errorMessage: '重置 Prompt 文件失败',
+    }
+  )
+}
+
+export async function getPromptVersionFile(
+  language: string,
+  filename: string,
+  versionId: string
+): Promise<PromptFileContent> {
+  return backendApi.get<PromptFileContent>(
+    `${API_BASE}/${encodeURIComponent(language)}/${encodeURIComponent(filename)}/versions/${encodeURIComponent(versionId)}`,
+    {
+      errorMessage: '获取 Prompt 版本失败',
+    }
+  )
+}
+
+export async function activatePromptVersion(
+  language: string,
+  filename: string,
+  versionId: string
+): Promise<PromptFileContent> {
+  return backendApi.post<PromptFileContent>(
+    `${API_BASE}/${encodeURIComponent(language)}/${encodeURIComponent(filename)}/versions/${encodeURIComponent(versionId)}/activate`,
+    {
+      errorMessage: '启用 Prompt 版本失败',
     }
   )
 }

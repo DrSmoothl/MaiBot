@@ -163,10 +163,10 @@ describe('ExpressionManagementPage 特征化', () => {
     expect(await screen.findByTestId('list-count')).toHaveTextContent('2/2')
   })
 
-  it('切到快速审核显示审核器，切回显示列表', async () => {
+  it('切到精选显示审核器，切回显示列表', async () => {
     const user = userEvent.setup()
     await renderPage()
-    await user.click(screen.getByRole('tab', { name: /快速审核/ }))
+    await user.click(screen.getByRole('tab', { name: /精选/ }))
     expect(await screen.findByTestId('expression-reviewer')).toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: '表达' }))
     expect(await screen.findByTestId('expression-list')).toBeInTheDocument()

@@ -368,6 +368,7 @@ export function usePluginList() {
     getPluginRepositoryUrl,
     // 状态派生
     isPluginDisabled,
+    isPluginLoadFailed,
     getPluginStatusBarClassName,
     getPluginStatusLabel,
     getPluginStatusMeta,

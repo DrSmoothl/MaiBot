@@ -11,77 +11,92 @@ description = "Finds semantically duplicated behavior patterns and outputs keepe
 [maisaka_chat]
 display_name = "Planner"
 advanced = false
-description = "Maisaka 主规划模板，负责整合身份、时间、工具说明和聊天上下文，驱动主循环进行思考、决策与工具调用。"
+description = "Main Maisaka planning template that combines identity, time, tool instructions, and chat context to drive thinking, decisions, and tool calls."
 
 [maisaka_chat_merged_timing]
 display_name = "Planner (Timing merged)"
 advanced = false
-description = "独立时间感知关闭时使用的 Maisaka 主规划模板，将节奏控制判断合并到 Planner。"
+description = "Main Maisaka planning template used when independent timing awareness is disabled, with timing decisions merged into the planner."
 
 [maisaka_replyer]
 display_name = "Replyer"
 advanced = false
-description = "Maisaka 回复生成模板，负责根据人格、表达风格、群聊注意事项和待回复上下文生成最终回复。"
+description = "Maisaka reply generation template that creates the final reply from persona, expression style, chat notes, and reply context."
 
 [default_expressor]
-display_name = "默认表达器"
+display_name = "Default Expressor"
 advanced = true
-description = "表达方式生成与整理相关模板，通常只在调试表达系统时需要修改。"
+description = "Template for expression generation and cleanup, usually only edited while debugging the expression system."
 
 [emoji_content_analysis]
-display_name = "表情包内容分析"
+display_name = "Emoji Content Analysis"
 advanced = true
-description = "用于分析表情包图片内容的模板。"
+description = "Template for analyzing the visual content of emoji or sticker images."
 
 [emoji_content_filtration]
-display_name = "表情包内容过滤"
+display_name = "Emoji Content Filtration"
 advanced = true
-description = "用于判断表情包内容是否符合过滤要求的模板。"
+description = "Template for judging whether emoji or sticker content meets filtration requirements."
 
 [emoji_replace]
-display_name = "表情包替换"
+display_name = "Emoji Replacement"
 advanced = true
-description = "用于根据文本语境选择或替换表情包的模板。"
+description = "Template for selecting or replacing emojis or stickers based on text context."
+
+[emoji_selection]
+display_name = "Emoji Selection"
+advanced = true
+description = "Template for choosing the most suitable emoji or sticker from a grid according to context and tone."
+
+[evaluate_behavior_feedback]
+display_name = "Behavior Feedback Evaluation"
+advanced = true
+description = "Template for evaluating whether a selected behavior was actually adopted and what conversational outcome it produced."
 
 [expression_evaluation]
-display_name = "表达评价"
+display_name = "Expression Evaluation"
 advanced = true
-description = "用于评价候选表达方式质量的模板。"
+description = "Template for evaluating the quality of candidate expressions."
 
 [expression_select]
-display_name = "表达选择"
+display_name = "Expression Selection"
 advanced = true
-description = "用于从表达库中选择合适表达方式的模板。"
+description = "Template for selecting a suitable expression from the expression library."
 
 [image_description]
-display_name = "图片描述"
+display_name = "Image Description"
+advanced = false
+description = "Template for converting image content into a text description."
+
+[heuristic_memory_impression]
+display_name = "Memory Retrieval Impression"
 advanced = true
-description = "用于将图片内容转换为文本描述的模板。"
+description = "Template for generating a natural-language impression of the current chat to guide semantic long-term memory retrieval."
 
 [jargon_compare_inference]
-display_name = "术语对比推理"
+display_name = "Jargon Comparison Inference"
 advanced = true
-description = "用于比较和推理群内术语含义的模板。"
+description = "Template for comparing and inferring the meaning of group-specific jargon."
 
 [jargon_explainer_summarize]
-display_name = "术语解释总结"
+display_name = "Jargon Explanation Summary"
 advanced = true
-description = "用于总结术语解释结果的模板。"
+description = "Template for summarizing jargon explanation results."
 
 [jargon_inference_content_only]
-display_name = "术语推理"
+display_name = "Jargon Inference"
 advanced = true
-description = "用于仅基于内容推理术语含义的模板。"
+description = "Template for inferring jargon meaning from content only."
 
 [jargon_inference_with_context]
-display_name = "术语上下文推理"
+display_name = "Jargon Context Inference"
 advanced = true
-description = "用于结合上下文推理术语含义的模板。"
+description = "Template for inferring jargon meaning with surrounding context."
 
 [learn_style]
-display_name = "表达风格学习"
+display_name = "Style Learning"
 advanced = true
-description = "用于从聊天内容中学习表达风格的模板。"
+description = "Template for learning expression style from chat content."
 
 [learn_jargon]
 display_name = "Jargon Learning"
@@ -101,7 +116,12 @@ description = "Maisaka planner template for Focus mode, choosing the next action
 [maisaka_timing_gate]
 display_name = "Timing Gate"
 advanced = false
-description = "Maisaka 节奏控制模板，负责在每轮主循环前判断当前应该等待、停止，还是继续进入思考与回复流程。"
+description = "Maisaka timing control template that decides whether to wait, stop, or continue into thinking and replying before each main-loop turn."
+
+[memory_fuzzy_modify_plan]
+display_name = "Memory Fuzzy Modification Plan"
+advanced = true
+description = "Template for planning which old memories to supersede and which new memories to write from a natural-language modification request."
 
 [mid_term_memory_summary]
 display_name = "Mid-term Chat Summary"
@@ -109,6 +129,6 @@ advanced = true
 description = "Used during context trimming to summarize removed chat history into long_summary, brief, and keywords."
 
 [memory_retrieval_react_prompt_head_memory]
-display_name = "记忆检索 ReAct 头部"
+display_name = "Memory Retrieval ReAct Header"
 advanced = true
-description = "ReAct 式记忆查询流程使用的高级记忆检索提示词头部。"
+description = "Advanced memory retrieval prompt header used by the ReAct-style memory query flow."

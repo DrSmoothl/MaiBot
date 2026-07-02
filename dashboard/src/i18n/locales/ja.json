@@ -979,6 +979,21 @@
       "30d": "30日間"
     },
     "autoRefresh": "自動更新",
+    "cards": {
+      "add": "カードを追加",
+      "edit": "カードを編集",
+      "done": "完了",
+      "reset": "既定のレイアウトに戻す",
+      "dialog": {
+        "title": "ホームカード管理",
+        "description": "プラグインまたは組み込みのカードを追加するか、既定のレイアウトに戻せます。",
+        "hiddenCards": "追加できるカード",
+        "noHiddenCards": "追加できるカードはありません",
+        "restore": "追加",
+        "reset": "既定のレイアウトに戻す",
+        "cancel": "閉じる"
+      }
+    },
     "botStatus": {
       "title": "MaiBot ステータス",
       "loading": "読み取り中",

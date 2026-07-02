@@ -34,6 +34,9 @@ ENV_RUNNER_GROUP = "MAIBOT_RUNNER_GROUP"
 ENV_GLOBAL_CONFIG_SNAPSHOT = "MAIBOT_GLOBAL_CONFIG_SNAPSHOT"
 """Runner 启动时注入的全局配置快照（JSON 对象）"""
 
+ENV_LOCAL_PLUGIN_SDK_PATH = "MAIBOT_PLUGIN_SDK_PATH"
+"""本地 maibot-plugin-sdk 仓库路径；设置后 Runner 优先从该路径导入 SDK。"""
+
 
 def detect_host_application_version(project_root: Path | None = None) -> str:
     """读取当前 Host 应用版本号。

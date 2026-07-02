@@ -78,6 +78,8 @@ import { useDashboardData } from './home/hooks/useDashboardData'
 import { useFeatureStatus } from './home/hooks/useFeatureStatus'
 import { useLocalCacheMetrics } from './home/hooks/useLocalCacheMetrics'
 import { useMaibotVersion } from './home/hooks/useMaibotVersion'
+import { HomeCardManager, type HomeCardDefinition } from './home/HomeCardManager'
+import { usePluginHomeCards } from './home/hooks/usePluginHomeCards'
 import { useQuickShortcuts } from './home/hooks/useQuickShortcuts'
 import { useReviewStats } from './home/hooks/useReviewStats'
 
@@ -229,6 +231,7 @@ function IndexPageContent() {
   const { localCacheStats, isLocalCacheStatsLoading, fetchLocalCacheStats } = useLocalCacheMetrics()
   const { uncheckedCount, fetchReviewStats } = useReviewStats()
   const { hitokoto, hitokotoLoading, maibotStableRelease, fetchHitokoto } = useMaibotVersion()
+  const { pluginHomeCards } = usePluginHomeCards()
 
   const [isReviewerOpen, setIsReviewerOpen] = useState(false)
   const [platformAccountConfigured, setPlatformAccountConfigured] = useState<boolean | null>(null)
@@ -431,6 +434,433 @@ function IndexPageContent() {
     },
   ]
 
+  const homeCards: HomeCardDefinition[] = [
+    {
+      id: 'builtin:version',
+      title: t('home.versionCard.title'),
+      width: 'small',
+      source: 'builtin',
+      render: () => (
+        <Card className="h-full">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
+              <FileText className="h-4 w-4" />
+              {t('home.versionCard.title')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-muted-foreground">{t('home.versionCard.mainVersion')}</span>
+                <Badge
+                  variant="secondary"
+                  data-dashboard-version-value="true"
+                  className="border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary"
+                >
+                  {botStatus?.version ? `v${botStatus?.version}` : t('home.versionCard.unknown')}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-muted-foreground">{t('home.versionCard.webuiVersion')}</span>
+                <Badge
+                  variant="secondary"
+                  data-dashboard-version-value="true"
+                  className="border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary"
+                >
+                  v{APP_VERSION}
+                </Badge>
+              </div>
+              <div className="space-y-1 border-t border-border/50 pt-2 text-xs text-muted-foreground/60">
+                <a
+                  href={maibotStableRelease?.url || 'https://github.com/Mai-with-u/MaiBot/releases'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-2 transition-colors hover:text-muted-foreground"
+                >
+                  <span>{t('home.versionCard.stableLatest')}</span>
+                  <span className="inline-flex items-center gap-1">
+                    {maibotStableRelease ? `v${maibotStableRelease?.version}` : t('home.versionCard.githubReleases')}
+                    <ExternalLink className="h-3 w-3" />
+                  </span>
+                </a>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: 'builtin:bot-status',
+      title: t('home.botStatus.title'),
+      width: 'medium',
+      source: 'builtin',
+      render: () => (
+        <Card className="h-full">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
+              <StreamlineIcon name="button-power-circle-1-remix" fallback={Power} className="h-4 w-4" />
+              {t('home.botStatus.title')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {themeConfig.dashboardStyle === 'future-retro' ? (
+                <div className="space-y-2">
+                  {isBotStatusLoading && !botStatus ? (
+                    <FeatureStatusIndicator enabled={false} accent="green" label={t('home.botStatus.loading')} />
+                  ) : botStatus?.running === true ? (
+                    <FeatureStatusIndicator
+                      enabled
+                      accent="green"
+                      label={t('home.botStatus.running')}
+                      detail={t('home.botStatus.uptime', { time: formatTime(botStatus?.uptime ?? 0) })}
+                    />
+                  ) : botStatus ? (
+                    <FeatureStatusIndicator enabled accent="red" label={t('home.botStatus.stopped')} />
+                  ) : (
+                    <FeatureStatusIndicator enabled={false} accent="green" label={t('home.botStatus.unknown')} />
+                  )}
+                  <FeatureStatusIndicator
+                    accent="orange"
+                    enabled={featureStatus.visualEnabled}
+                    label={t('home.botStatus.visualEnabled')}
+                  />
+                  <FeatureStatusIndicator
+                    accent="yellow"
+                    enabled={featureStatus.memoryEnabled}
+                    label={t('home.botStatus.memoryEnabled')}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      {isBotStatusLoading && !botStatus ? (
+                        <>
+                          <div data-dashboard-status-dot="true" data-state="loading" className="h-3 w-3 rounded-full bg-muted-foreground/40 animate-pulse" />
+                          <Badge data-dashboard-status-badge="true" data-state="loading" variant="outline" className="whitespace-nowrap text-muted-foreground">
+                            <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                            {t('home.botStatus.loading')}
+                          </Badge>
+                        </>
+                      ) : botStatus?.running === true ? (
+                        <>
+                          <div data-dashboard-status-dot="true" data-state="running" className="h-3 w-3 rounded-full bg-green-500 animate-pulse" />
+                          <Badge data-dashboard-status-badge="true" data-state="running" variant="outline" className="whitespace-nowrap text-green-600 border-green-300 bg-green-50">
+                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                            {t('home.botStatus.running')}
+                          </Badge>
+                        </>
+                      ) : botStatus ? (
+                        <>
+                          <div data-dashboard-status-dot="true" data-state="stopped" className="h-3 w-3 rounded-full bg-red-500" />
+                          <Badge data-dashboard-status-badge="true" data-state="stopped" variant="outline" className="whitespace-nowrap text-red-600 border-red-300 bg-red-50">
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            {t('home.botStatus.stopped')}
+                          </Badge>
+                        </>
+                      ) : (
+                        <>
+                          <div data-dashboard-status-dot="true" data-state="unknown" className="h-3 w-3 rounded-full bg-muted-foreground/40" />
+                          <Badge data-dashboard-status-badge="true" data-state="unknown" variant="outline" className="whitespace-nowrap text-muted-foreground">
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            {t('home.botStatus.unknown')}
+                          </Badge>
+                        </>
+                      )}
+                    </div>
+                    {botStatus && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>{t('home.botStatus.uptime', { time: formatTime(botStatus?.uptime ?? 0) })}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <FeatureStatusLight enabled={featureStatus.visualEnabled} label={t('home.botStatus.visualEnabled')} />
+                    <FeatureStatusLight enabled={featureStatus.memoryEnabled} label={t('home.botStatus.memoryEnabled')} />
+                  </div>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: 'builtin:quick-actions',
+      title: t('home.quickActions.title'),
+      width: 'large',
+      source: 'builtin',
+      render: () => (
+        <Card className="h-full">
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
+              <StreamlineIcon name="one-finger-short-tap-remix" fallback={Zap} className="h-4 w-4" />
+              {t('home.quickActions.title')}
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setQuickShortcutDialogOpen(true)}
+              aria-label={t('home.quickActions.customize')}
+              className="h-8 w-8"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {selectedQuickShortcuts.length === 0 ? (
+              <div className="flex flex-col gap-3 rounded-lg border border-dashed p-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                <span>{t('home.quickActions.empty')}</span>
+                <Button variant="outline" size="sm" onClick={() => setQuickShortcutDialogOpen(true)}>
+                  {t('home.quickActions.add')}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {selectedQuickShortcuts.map((shortcut) => {
+                  const Icon = shortcut.icon
+                  const content = (
+                    <>
+                      <Icon className={`h-4 w-4 ${shortcut.id === 'action:restart' && isRestarting ? 'animate-spin' : ''}`} />
+                      <span className="min-w-0 flex-1 truncate text-left">{shortcut.label}</span>
+                      {shortcut.badge && (
+                        <span data-quick-action-badge="true" className="ml-1 shrink-0 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs text-white">
+                          {shortcut.badge}
+                        </span>
+                      )}
+                      {shortcut.external && <ExternalLink className="h-3.5 w-3.5 shrink-0" />}
+                    </>
+                  )
+
+                  if (shortcut.href) {
+                    return (
+                      <Button key={shortcut.id} variant="outline" size="sm" asChild className="max-w-[14rem] justify-start gap-2 overflow-hidden sm:max-w-[18rem]">
+                        <a href={shortcut.href} target={shortcut.external ? '_blank' : undefined} rel={shortcut.external ? 'noopener noreferrer' : undefined} title={shortcut.label}>
+                          {content}
+                        </a>
+                      </Button>
+                    )
+                  }
+
+                  return (
+                    <Button
+                      key={shortcut.id}
+                      variant="outline"
+                      size="sm"
+                      onClick={shortcut.action}
+                      disabled={shortcut.disabled}
+                      className="max-w-[14rem] justify-start gap-2 overflow-hidden sm:max-w-[18rem]"
+                      title={shortcut.label}
+                    >
+                      {content}
+                    </Button>
+                  )
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ),
+    },
+    ...(platformAccountConfigured === false
+      ? [{
+          id: 'builtin:platform-guide',
+          title: t('home.platformGuide.title'),
+          width: 'full' as const,
+          source: 'builtin' as const,
+          render: () => (
+            <Card className="h-full border-2 border-orange-500 bg-orange-50/80 dark:border-orange-500 dark:bg-orange-950/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-2xl text-orange-700 dark:text-orange-300">{t('home.platformGuide.title')}</CardTitle>
+                <CardDescription>{t('home.platformGuide.description')}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">{t('home.platformGuide.detail')}</p>
+                <Button asChild className="shrink-0">
+                  <Link to="/config/bot">{t('home.platformGuide.action')}</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ),
+        }]
+      : []),
+    {
+      id: 'builtin:stats-overview',
+      title: t('home.stats.overviewTitle'),
+      width: 'full',
+      source: 'builtin',
+      render: () => (
+        <Card className="h-full">
+          <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1.5">
+              <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
+                <BarChart3 className="h-4 w-4" />
+                {t('home.stats.overviewTitle')}
+              </CardTitle>
+              <CardDescription>
+                {t('home.stats.recentPeriod', {
+                  range: timeRange < 48
+                    ? timeRange + t('home.stats.hours')
+                    : Math.floor(timeRange / 24) + t('home.stats.days'),
+                })}
+              </CardDescription>
+            </div>
+            <Tabs value={timeRange.toString()} onValueChange={(v) => setTimeRange(Number(v))}>
+              <TabsList className="grid grid-cols-3">
+                <TabsTrigger value="24">{t('home.timeRange.24h')}</TabsTrigger>
+                <TabsTrigger value="168">{t('home.timeRange.7d')}</TabsTrigger>
+                <TabsTrigger value="720">{t('home.timeRange.30d')}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </CardHeader>
+          <CardContent className="flex flex-col justify-center py-3 sm:py-3">
+            <div className="grid gap-y-1 lg:grid-cols-2 xl:grid-cols-3 [&>*:nth-child(even)]:lg:border-l [&>*:nth-child(odd)]:lg:border-l-0 [&>*:not(:nth-child(3n+1))]:xl:border-l [&>*:nth-child(3n+1)]:xl:border-l-0">
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.totalRequests')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatNumber(summary.total_requests).display}
+                    {formatNumber(summary.total_requests).needsExact && <span className="ml-1 text-xs font-normal text-muted-foreground">({formatNumber(summary.total_requests).exact})</span>}
+                  </span>
+                </div>
+              </div>
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <DollarSign className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.totalCost')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatCurrency(summary.total_cost).display}
+                    {formatCurrency(summary.total_cost).needsExact && <span className="ml-1 text-xs font-normal text-muted-foreground">({formatCurrency(summary.total_cost).exact})</span>}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">
+                  {summary.cost_per_hour > 0 ? t('home.stats.perHour', { value: `¥${summary.cost_per_hour.toFixed(2)}` }) : t('home.stats.noData')}
+                </p>
+              </div>
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.tokenUsage')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatNumber(summary.total_tokens).display}
+                    {formatNumber(summary.total_tokens).needsExact && <span className="ml-1 text-xs font-normal text-muted-foreground">({formatNumber(summary.total_tokens).exact})</span>}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">
+                  {summary.tokens_per_hour > 0 ? t('home.stats.perHour', { value: formatNumber(summary.tokens_per_hour).display }) : t('home.stats.noData')}
+                </p>
+              </div>
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <Zap className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.avgResponse')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">{summary.avg_response_time.toFixed(2)}s</span>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">{t('home.stats.avgResponseDesc')}</p>
+              </div>
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.onlineTime')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatTime(summary.online_time)}
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">({summary.online_time.toLocaleString()}{t('home.stats.seconds')})</span>
+                  </span>
+                </div>
+              </div>
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.messageProcessing')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {formatNumber(summary.total_messages).display}
+                    {formatNumber(summary.total_messages).needsExact && <span className="ml-1 text-xs font-normal text-muted-foreground">({formatNumber(summary.total_messages).exact})</span>}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">
+                  {t('home.stats.replied', { num: formatNumber(summary.total_replies).display })}
+                  {formatNumber(summary.total_replies).needsExact && <span>({formatNumber(summary.total_replies).exact})</span>}
+                </p>
+              </div>
+              <div className="flex min-h-10 min-w-0 flex-col justify-center border-border px-3 py-1">
+                <div className="flex min-w-0 items-center gap-2 text-xs leading-4">
+                  <TrendingUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 font-bold text-muted-foreground">{t('home.stats.costEfficiency')}</span>
+                  <span className="ml-auto min-w-0 truncate text-right text-base font-bold leading-5 text-primary">
+                    {summary.total_messages > 0 ? `¥${((summary.total_cost / summary.total_messages) * 100).toFixed(2)}` : '¥0.00'}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-3 text-muted-foreground">{t('home.stats.per100Messages')}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: 'builtin:storage',
+      title: t('home.storage.title'),
+      width: 'medium',
+      source: 'builtin',
+      render: () => (
+        <Card className="h-full xl:self-stretch">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex h-5 items-center gap-2 text-sm font-medium leading-5">
+              <HardDrive className="h-4 w-4" />
+              {t('home.storage.title')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div>
+                <div className="text-2xl font-bold">
+                  {hasLocalCacheStats ? formatStorageBytes(totalStorageSize) : isLocalCacheStatsLoading ? t('home.storage.reading') : '-'}
+                </div>
+                {!hasLocalCacheStats && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {isLocalCacheStatsLoading ? t('home.storage.readingDescription') : t('home.storage.unavailable')}
+                  </p>
+                )}
+              </div>
+              {hasLocalCacheStats && (
+                <div className="space-y-2.5">
+                  {storageDetails.map((item) => {
+                    const Icon = item.icon
+                    const percent = totalStorageSize > 0 ? (item.size / totalStorageSize) * 100 : 0
+                    const visiblePercent = item.size > 0 ? Math.max(percent, 2) : 0
+                    return (
+                      <div key={item.key} className="space-y-1.5">
+                        <div className="flex min-w-0 items-center gap-2 text-xs">
+                          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="shrink-0 font-bold">{item.label}</span>
+                          <span className="shrink-0 font-semibold text-primary">{formatStorageBytes(item.size)}</span>
+                          <span className="min-w-0 truncate text-muted-foreground">{item.detail}</span>
+                          <span className="ml-auto shrink-0 text-muted-foreground">{percent.toFixed(percent >= 10 ? 0 : 1)}%</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${visiblePercent}%` }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <Button variant="outline" size="sm" asChild className="w-full justify-start gap-2">
+                <Link to="/settings" search={{ tab: 'local-cache' }}>
+                  <HardDrive className="h-4 w-4" />
+                  {t('home.storage.manage')}
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ),
+    },
+  ]
+  const showLegacyHomeCards = false
+
   return (
     <ScrollArea className="h-full">
       <div className="space-y-2 sm:space-y-4 p-4 sm:p-6">
@@ -473,6 +903,14 @@ function IndexPageContent() {
         ) : null}
       </div>
 
+      <HomeCardManager
+        cards={homeCards}
+        pluginCards={pluginHomeCards}
+        controlsPortalId="home-card-controls-bottom"
+      />
+
+      {showLegacyHomeCards && (
+      <>
       {/* 机器人状态和快速操作 */}
       <div
         data-home-summary-cards="true"
@@ -495,7 +933,7 @@ function IndexPageContent() {
                   data-dashboard-version-value="true"
                   className="border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary"
                 >
-                  {botStatus?.version ? `v${botStatus.version}` : t('home.versionCard.unknown')}
+                  {botStatus?.version ? `v${botStatus?.version}` : t('home.versionCard.unknown')}
                 </Badge>
               </div>
               <div className="flex items-center justify-between gap-3">
@@ -517,7 +955,7 @@ function IndexPageContent() {
                 >
                   <span>{t('home.versionCard.stableLatest')}</span>
                   <span className="inline-flex items-center gap-1">
-                    {maibotStableRelease ? `v${maibotStableRelease.version}` : t('home.versionCard.githubReleases')}
+                    {maibotStableRelease ? `v${maibotStableRelease?.version}` : t('home.versionCard.githubReleases')}
                     <ExternalLink className="h-3 w-3" />
                   </span>
                 </a>
@@ -539,12 +977,12 @@ function IndexPageContent() {
                 <div className="space-y-2">
                   {isBotStatusLoading && !botStatus ? (
                     <FeatureStatusIndicator enabled={false} accent="green" label={t('home.botStatus.loading')} />
-                  ) : botStatus?.running ? (
+                  ) : botStatus?.running === true ? (
                     <FeatureStatusIndicator
                       enabled
                       accent="green"
                       label={t('home.botStatus.running')}
-                      detail={t('home.botStatus.uptime', { time: formatTime(botStatus.uptime) })}
+                      detail={t('home.botStatus.uptime', { time: formatTime(botStatus?.uptime ?? 0) })}
                     />
                   ) : botStatus ? (
                     <FeatureStatusIndicator enabled accent="red" label={t('home.botStatus.stopped')} />
@@ -583,7 +1021,7 @@ function IndexPageContent() {
                             {t('home.botStatus.loading')}
                           </Badge>
                         </>
-                      ) : botStatus?.running ? (
+                      ) : botStatus?.running === true ? (
                         <>
                           <div
                             data-dashboard-status-dot="true"
@@ -638,7 +1076,7 @@ function IndexPageContent() {
                     </div>
                     {botStatus && (
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{t('home.botStatus.uptime', { time: formatTime(botStatus.uptime) })}</span>
+                        <span>{t('home.botStatus.uptime', { time: formatTime(botStatus?.uptime ?? 0) })}</span>
                       </div>
                     )}
                   </div>
@@ -969,6 +1407,8 @@ function IndexPageContent() {
           </CardContent>
         </Card>
       </div>
+      </>
+      )}
 
       {/* 图表区域 */}
       <Tabs defaultValue="trends" className="space-y-4">
@@ -1294,6 +1734,8 @@ function IndexPageContent() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <div id="home-card-controls-bottom" className="flex justify-end pt-2" />
 
       <Dialog open={quickShortcutDialogOpen} onOpenChange={setQuickShortcutDialogOpen}>
         <DialogContent style={{ '--dialog-width': '46rem' } as CSSProperties}>

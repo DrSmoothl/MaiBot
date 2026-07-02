@@ -39,6 +39,7 @@ import { toggleThemeWithTransition } from '@/components/use-theme'
 import { useBackground } from '@/hooks/use-background'
 import { logout } from '@/lib/auth'
 import { isElectron } from '@/lib/runtime'
+import { DEFAULT_SETTINGS, getSetting } from '@/lib/settings-manager'
 import { cn } from '@/lib/utils'
 
 import type { WorkspaceMode } from './types'
@@ -98,6 +99,7 @@ export function Header({
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const [backendManagerOpen, setBackendManagerOpen] = useState(false)
   const [activeBackendName, setActiveBackendName] = useState<string>('')
+  const [focusCompanionEnabled, setFocusCompanionEnabled] = useState(() => getSetting('enableFocusCompanion'))
   const [workspaceTabsCompact, setWorkspaceTabsCompact] = useState(false)
   const workspaceTabsCompactRef = useRef(false)
   const workspaceTabsRef = useRef<HTMLDivElement | null>(null)
@@ -113,6 +115,26 @@ export function Header({
   useEffect(() => {
     workspaceTabsCompactRef.current = workspaceTabsCompact
   }, [workspaceTabsCompact])
+
+  useEffect(() => {
+    const handleSettingsChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; value?: unknown }>).detail
+      if (detail?.key === 'enableFocusCompanion') {
+        setFocusCompanionEnabled(Boolean(detail.value))
+      }
+    }
+
+    const handleSettingsReset = () => {
+      setFocusCompanionEnabled(DEFAULT_SETTINGS.enableFocusCompanion)
+    }
+
+    window.addEventListener('maibot-settings-change', handleSettingsChange)
+    window.addEventListener('maibot-settings-reset', handleSettingsReset)
+    return () => {
+      window.removeEventListener('maibot-settings-change', handleSettingsChange)
+      window.removeEventListener('maibot-settings-reset', handleSettingsReset)
+    }
+  }, [])
 
   useEffect(() => {
     if (workspaceMode !== 'logs') {
@@ -352,19 +374,23 @@ export function Header({
               </Tabs>
             </LayoutGroup>
 
-            <div className="bg-border hidden h-6 w-px sm:block" />
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className={cn(pathname === '/focus' && 'bg-accent text-accent-foreground')}
-              title={t('sidebar.menu.focusCompanion')}
-              aria-label={t('sidebar.menu.focusCompanion')}
-            >
-              <Link to="/focus">
-                <TimerReset className="h-4 w-4" />
-              </Link>
-            </Button>
+            {focusCompanionEnabled && (
+              <>
+                <div className="bg-border hidden h-6 w-px sm:block" />
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="icon"
+                  className={cn(pathname === '/focus' && 'bg-accent text-accent-foreground')}
+                  title={t('sidebar.menu.focusCompanion')}
+                  aria-label={t('sidebar.menu.focusCompanion')}
+                >
+                  <Link to="/focus">
+                    <TimerReset className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </>
+            )}
             <Button
               asChild
               variant="ghost"
@@ -535,13 +561,17 @@ export function Header({
                     ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild className="cursor-pointer gap-2">
-                  <Link to="/focus">
-                    <TimerReset className="h-4 w-4" />
-                    {t('sidebar.menu.focusCompanion')}
-                  </Link>
-                </DropdownMenuItem>
+                {focusCompanionEnabled && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild className="cursor-pointer gap-2">
+                      <Link to="/focus">
+                        <TimerReset className="h-4 w-4" />
+                        {t('sidebar.menu.focusCompanion')}
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuItem onClick={handleLogout} className="cursor-pointer gap-2">
                   <LogOut className="h-4 w-4" />
                   {t('header.logoutLabel')}

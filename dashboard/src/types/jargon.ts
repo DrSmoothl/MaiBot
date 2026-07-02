@@ -13,7 +13,7 @@ export interface Jargon {
   meaning: string | null
   session_id: string
   session_ids: string[]
-  chat_name: string | null  // 解析后的聊天名称，用于前端显示
+  chat_name: string | null // 解析后的聊天名称，用于前端显示
   chat_names: string[]
   is_global: boolean
   count: number
@@ -83,6 +83,7 @@ export interface JargonUpdateRequest {
   session_ids?: string[]
   is_global?: boolean
   is_jargon?: boolean
+  created_by?: JargonCreatedBy
 }
 
 /**

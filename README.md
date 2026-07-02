@@ -84,12 +84,14 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 <sub><sup>Updates and Installation</sup></sub>
 
 > **最新版本: v1.0.8** ([📄 更新日志](changelogs/changelog.md))  
-> <sub><sup><strong>Latest Version: v1.0.7</strong> (<a href="changelogs/changelog.md">📄 Changelog</a>)</sup></sub>
+> <sub><sup><strong>Latest Version: v1.0.8</strong> (<a href="changelogs/changelog.md">📄 Changelog</a>)</sup></sub>
 
 - **下载**：前往 [Release](https://github.com/MaiM-with-u/MaiBot/releases/) 页面下载最新版本。  
   <sub><sup><strong>Download</strong>: Visit the <a href="https://github.com/MaiM-with-u/MaiBot/releases/">Release</a> page to get the latest version.</sup></sub>
-- **启动器**：[Mailauncher](https://github.com/MaiM-with-u/mailauncher/releases/)（仅支持 MacOS，早期开发中）。  
-  <sub><sup><strong>Launcher</strong>: <a href="https://github.com/MaiM-with-u/mailauncher/releases/">Mailauncher</a> (MacOS only, still in early development).</sup></sub>
+
+- **方便使用的 Windows 一键包 下载**：[Maibot-OK](https://github.com/Mai-with-u/MaiBotOneKey/releases/)  
+  <sub><sup><strong>Launcher</strong>: <a href="https://github.com/Mai-with-u/MaiBotOneKey/releases/">Maibot OneKey</a></sup></sub>
+
 
 | 分支 / Branch | 说明 / Description |
 | :--- | :--- |
@@ -116,14 +118,11 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 | 类别 / Category | 群组 / Group | 说明 / Description |
 | :--- | :--- | :--- |
-| **技术交流**<br><sub><sup>Technical</sup></sub> | 麦麦脑电图:571780722
-<br><sub><sup>MaiBrain EEG</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
-| **技术交流**<br><sub><sup>Technical</sup></sub> | 麦麦大脑磁共振:766798517
-<br><sub><sup>MaiBrain MRI</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
+| **技术交流**<br><sub><sup>Technical</sup></sub> | 麦麦脑电图:571780722<br><sub><sup>MaiBrain EEG</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
+| **技术交流**<br><sub><sup>Technical</sup></sub> | 麦麦大脑磁共振:766798517<br><sub><sup>MaiBrain MRI</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
 | **技术交流**<br><sub><sup>Technical</sup></sub> | [麦麦要当 VTB](https://qm.qq.com/q/wGePTl1UyY)<br><sub><sup>Mai Wants to Be a VTuber</sup></sub> | 技术交流 / 答疑<br><sub><sup>Technical discussion / Q&A</sup></sub> |
 | **闲聊吹水**<br><sub><sup>Casual Chat</sup></sub> | [麦麦之闲聊群](https://qm.qq.com/q/JxvHZnxyec)<br><sub><sup>Mai Casual Chat Group</sup></sub> | 仅限闲聊，不答疑<br><sub><sup>Casual chat only, no support</sup></sub> |
-| **插件开发**<br><sub><sup>Plugin Development</sup></sub> | 插件开发群:1036092828
-<br><sub><sup>Plugin Dev Group</sup></sub> | 进阶开发与测试<br><sub><sup>Advanced development and testing</sup></sub> |
+| **插件开发**<br><sub><sup>Plugin Development</sup></sub> | 插件开发群:1036092828<br><sub><sup>Plugin Dev Group</sup></sub> | 进阶开发与测试<br><sub><sup>Advanced development and testing</sup></sub> |
 
 ---
 

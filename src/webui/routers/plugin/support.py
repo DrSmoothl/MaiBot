@@ -17,7 +17,9 @@ from src.webui.core import get_token_manager
 logger = get_logger("webui.plugin_routes")
 
 PLUGIN_CHANGELOG_FILENAMES = ("CHANGELOG.md", "Changelog.md", "changelog.md", "CHANGELOG.MD")
+PLUGIN_README_FILENAMES = ("README.md", "Readme.md", "readme.md", "README.MD")
 MAX_PLUGIN_CHANGELOG_CHARS = 500000
+MAX_PLUGIN_README_CHARS = 500000
 
 
 def require_plugin_token(maibot_session: Optional[str]) -> str:
@@ -226,13 +228,6 @@ def is_plugin_install_residue(plugin_path: Path) -> bool:
 
 
 def resolve_installed_plugin_path(plugin_id: str) -> Optional[Path]:
-    new_format_path, old_format_path = get_plugin_candidate_paths(plugin_id)
-    plugins_dir = get_plugins_dir()
-
-    if new_format_path.exists():
-        return _resolve_safe_plugin_directory(new_format_path, plugins_dir, strict=True)
-    if old_format_path.exists():
-        return _resolve_safe_plugin_directory(old_format_path, plugins_dir, strict=True)
     return find_plugin_path_by_id(plugin_id)
 
 
@@ -284,6 +279,25 @@ def read_plugin_changelog(plugin_path: Path) -> Optional[str]:
     return None
 
 
+def read_plugin_readme(plugin_path: Path) -> Optional[str]:
+    """读取插件根目录中的 README；缺失或不可读时返回 None，不影响插件加载。"""
+    for readme_name in PLUGIN_README_FILENAMES:
+        readme_path = resolve_plugin_file_path(plugin_path, readme_name)
+        if not readme_path.exists():
+            continue
+        if not readme_path.is_file():
+            continue
+
+        try:
+            with open(readme_path, "r", encoding="utf-8") as file_obj:
+                return file_obj.read(MAX_PLUGIN_README_CHARS + 1)[:MAX_PLUGIN_README_CHARS]
+        except Exception as exc:
+            logger.warning(f"读取插件 README 失败: {readme_path} ({exc})")
+            return None
+
+    return None
+
+
 def iter_plugin_directories() -> List[Path]:
     plugins_dir = get_plugins_dir()
     plugin_directories: List[Path] = []
@@ -306,14 +320,11 @@ def find_plugin_path_by_id(plugin_id: str) -> Optional[Path]:
         if manifest is None:
             continue
 
-        manifest_id = str(manifest.get("id", ""))
-        if manifest_id == plugin_id or plugin_path.name == plugin_id:
+        manifest_id = str(manifest.get("id") or "").strip()
+        if manifest_id == plugin_id:
             return plugin_path
 
-        if (
-            casefold_matched_path is None
-            and (manifest_id.casefold() == normalized_plugin_id or plugin_path.name.casefold() == normalized_plugin_id)
-        ):
+        if casefold_matched_path is None and manifest_id.casefold() == normalized_plugin_id:
             casefold_matched_path = plugin_path
 
     if casefold_matched_path is not None:

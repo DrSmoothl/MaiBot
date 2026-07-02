@@ -1,4 +1,4 @@
-import { Hash, HelpCircle } from 'lucide-react'
+import { Check, Hash, HelpCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import {
@@ -24,7 +24,6 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { MarkdownRenderer } from '@/components/markdown-renderer'
 import { MultiSelect } from '@/components/ui/multi-select'
 import {
   Select,
@@ -74,14 +73,6 @@ function InfoItem({
   )
 }
 
-function formatJargonChatDisplay(jargon: Jargon) {
-  const chatNames = jargon.chat_names?.length ? jargon.chat_names : []
-  if (chatNames.length > 0) {
-    return chatNames.join('、')
-  }
-  return jargon.chat_name || jargon.session_id
-}
-
 // ====================
 // 黑话详情对话框
 // ====================
@@ -89,21 +80,129 @@ interface JargonDetailDialogProps {
   jargon: Jargon | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  chatList: JargonChatInfo[]
+  onChanged: (jargon: Jargon) => void
 }
 
 export function JargonDetailDialog({
   jargon,
   open,
   onOpenChange,
+  chatList,
+  onChanged,
 }: JargonDetailDialogProps) {
+  const [formData, setFormData] = useState<JargonUpdateRequest>({})
+  const [saving, setSaving] = useState(false)
+  const [pinning, setPinning] = useState(false)
+  const { toast } = useToast()
+
+  useEffect(() => {
+    if (jargon && open) {
+      setFormData({
+        content: jargon.content,
+        meaning: jargon.meaning || '',
+        session_id: jargon.session_id,
+        session_ids: jargon.session_ids?.length
+          ? jargon.session_ids
+          : [jargon.session_id].filter(Boolean),
+        is_global: jargon.is_global,
+        is_jargon: jargon.is_jargon,
+      })
+    }
+  }, [jargon, open])
+
+  const handleSave = async () => {
+    if (!jargon) return
+    if (formData.content !== undefined && !formData.content.trim()) {
+      toast({
+        title: '验证失败',
+        description: '黑话内容不能为空',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (formData.session_ids && formData.session_ids.length === 0) {
+      toast({
+        title: '验证失败',
+        description: '请至少选择一个聊天',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      setSaving(true)
+      const response = await updateJargon(jargon.id, formData)
+      if (response.data) {
+        onChanged(response.data)
+      }
+      toast({
+        title: '保存成功',
+        description: '黑话已更新',
+      })
+    } catch (error) {
+      toast({
+        title: '保存失败',
+        description: error instanceof Error ? error.message : '无法更新黑话',
+        variant: 'destructive',
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handlePinMeaning = async () => {
+    if (!jargon) return
+    const meaning = (formData.meaning ?? jargon.meaning ?? '').trim()
+    if (!meaning) {
+      toast({
+        title: '无法固定',
+        description: '当前黑话还没有含义，不能固定为手动记录',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      setPinning(true)
+      const response = await updateJargon(jargon.id, {
+        ...formData,
+        meaning,
+        created_by: 'MANUAL',
+        is_jargon: true,
+      })
+      if (response.data) {
+        onChanged(response.data)
+      }
+      toast({
+        title: '已固定含义',
+        description: '这条黑话已标记为手动记录，后续 AI 学习不会再覆盖它',
+      })
+    } catch (error) {
+      toast({
+        title: '固定失败',
+        description: error instanceof Error ? error.message : '无法固定黑话含义',
+        variant: 'destructive',
+      })
+    } finally {
+      setPinning(false)
+    }
+  }
+
   if (!jargon) return null
+
+  const canPinMeaning =
+    jargon.created_by !== 'MANUAL' && Boolean((formData.meaning ?? jargon.meaning ?? '').trim())
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid max-h-[80vh] max-w-2xl grid-rows-[auto_1fr_auto] overflow-hidden">
+      <DialogContent
+        className="grid max-h-[80vh] max-w-2xl grid-rows-[auto_1fr_auto] overflow-hidden"
+        confirmOnEnter
+      >
         <DialogHeader>
           <DialogTitle>黑话详情</DialogTitle>
-          <DialogDescription>查看黑话的完整信息</DialogDescription>
+          <DialogDescription>查看并修改黑话信息</DialogDescription>
         </DialogHeader>
 
         <DialogBody className="h-full">
@@ -114,30 +213,51 @@ export function JargonDetailDialog({
             </div>
 
             <div className="space-y-1">
-              <Label className="text-muted-foreground text-xs">内容</Label>
-              <div className="bg-muted rounded p-2 text-sm break-all whitespace-pre-wrap">
-                {jargon.content}
-              </div>
+              <Label htmlFor="detail_content">内容</Label>
+              <Input
+                id="detail_content"
+                value={formData.content || ''}
+                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                placeholder="输入黑话内容"
+              />
             </div>
 
             <div className="space-y-1">
-              <Label className="text-muted-foreground text-xs">含义</Label>
-              <div className="bg-muted rounded p-2 text-sm break-all">
-                {jargon.meaning ? <MarkdownRenderer content={jargon.meaning} /> : '-'}
-              </div>
+              <Label htmlFor="detail_meaning">含义</Label>
+              <Textarea
+                id="detail_meaning"
+                value={formData.meaning || ''}
+                onChange={(e) => setFormData({ ...formData, meaning: e.target.value })}
+                placeholder="输入黑话含义"
+                rows={4}
+              />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <InfoItem label="聊天" value={formatJargonChatDisplay(jargon)} />
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <Label>聊天</Label>
+                <MultiSelect
+                  options={chatList.map((chat) => ({
+                    label: chat.chat_name,
+                    value: chat.session_id,
+                  }))}
+                  selected={formData.session_ids || []}
+                  onChange={(values) =>
+                    setFormData({ ...formData, session_ids: values, session_id: values[0] })
+                  }
+                  placeholder="选择关联的聊天"
+                  emptyText="没有可选聊天"
+                />
+              </div>
               <div className="space-y-1">
                 <Label className="text-muted-foreground text-xs">状态</Label>
                 <div className="flex items-center gap-2">
-                  {jargon.is_jargon === true && (
+                  {formData.is_jargon === true && (
                     <Badge variant="default" className="bg-green-600">
                       是黑话
                     </Badge>
                   )}
-                  {jargon.is_jargon !== true && <Badge variant="secondary">无黑话</Badge>}
+                  {formData.is_jargon !== true && <Badge variant="secondary">无黑话</Badge>}
                   {jargon.is_legacy_empty_meaning && (
                     <Badge variant="outline">
                       <HelpCircle className="mr-1 h-3 w-3" />
@@ -162,11 +282,57 @@ export function JargonDetailDialog({
                 </div>
               </div>
             </div>
+
+            <div className="space-y-2">
+              <Label>黑话状态</Label>
+              <Select
+                value={formData.is_jargon ? 'true' : 'false'}
+                onValueChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    is_jargon: value === 'true',
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">是黑话</SelectItem>
+                  <SelectItem value="false">无黑话</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="detail_is_global"
+                checked={formData.is_global}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })}
+              />
+              <Label htmlFor="detail_is_global">全局黑话</Label>
+            </div>
           </div>
         </DialogBody>
 
         <DialogFooter className="flex-shrink-0">
-          <Button onClick={() => onOpenChange(false)}>关闭</Button>
+          {jargon.created_by !== 'MANUAL' && (
+            <Button
+              variant="outline"
+              onClick={handlePinMeaning}
+              disabled={pinning || !canPinMeaning}
+              title={canPinMeaning ? '固定当前含义，后续不再由 AI 更新' : '当前黑话还没有含义'}
+            >
+              <Check className="mr-1 h-4 w-4" />
+              {pinning ? '固定中...' : '固定含义'}
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+          <Button data-dialog-action="confirm" onClick={handleSave} disabled={saving || pinning}>
+            {saving ? '保存中...' : '保存'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -296,167 +462,6 @@ export function JargonCreateDialog({
           </Button>
           <Button data-dialog-action="confirm" onClick={handleCreate} disabled={saving}>
             {saving ? '创建中...' : '创建'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ====================
-// 黑话编辑对话框
-// ====================
-interface JargonEditDialogProps {
-  jargon: Jargon | null
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  chatList: JargonChatInfo[]
-  onSuccess: () => void
-}
-
-export function JargonEditDialog({
-  jargon,
-  open,
-  onOpenChange,
-  chatList,
-  onSuccess,
-}: JargonEditDialogProps) {
-  const [formData, setFormData] = useState<JargonUpdateRequest>({})
-  const [saving, setSaving] = useState(false)
-  const { toast } = useToast()
-
-  useEffect(() => {
-    if (jargon) {
-      setFormData({
-        content: jargon.content,
-        meaning: jargon.meaning || '',
-        session_id: jargon.session_id,
-        session_ids: jargon.session_ids?.length
-          ? jargon.session_ids
-          : [jargon.session_id].filter(Boolean),
-        is_global: jargon.is_global,
-        is_jargon: jargon.is_jargon,
-      })
-    }
-  }, [jargon])
-
-  const handleSave = async () => {
-    if (!jargon) return
-    if (formData.session_ids && formData.session_ids.length === 0) {
-      toast({
-        title: '验证失败',
-        description: '请至少选择一个聊天',
-        variant: 'destructive',
-      })
-      return
-    }
-
-    try {
-      setSaving(true)
-      await updateJargon(jargon.id, formData)
-      toast({
-        title: '保存成功',
-        description: '黑话已更新',
-      })
-      onSuccess()
-    } catch (error) {
-      toast({
-        title: '保存失败',
-        description: error instanceof Error ? error.message : '无法更新黑话',
-        variant: 'destructive',
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (!jargon) return null
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl" confirmOnEnter>
-        <DialogHeader>
-          <DialogTitle>编辑黑话</DialogTitle>
-          <DialogDescription>修改黑话的信息</DialogDescription>
-        </DialogHeader>
-
-        <DialogBody>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit_content">内容</Label>
-              <Input
-                id="edit_content"
-                value={formData.content || ''}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                placeholder="输入黑话内容"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="edit_meaning">含义</Label>
-              <Textarea
-                id="edit_meaning"
-                value={formData.meaning || ''}
-                onChange={(e) => setFormData({ ...formData, meaning: e.target.value })}
-                placeholder="输入黑话含义"
-                rows={3}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>聊天</Label>
-              <MultiSelect
-                options={chatList.map((chat) => ({
-                  label: chat.chat_name,
-                  value: chat.session_id,
-                }))}
-                selected={formData.session_ids || []}
-                onChange={(values) =>
-                  setFormData({ ...formData, session_ids: values, session_id: values[0] })
-                }
-                placeholder="选择关联的聊天"
-                emptyText="没有可选聊天"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>黑话状态</Label>
-              <Select
-                value={formData.is_jargon ? 'true' : 'false'}
-                onValueChange={(value) =>
-                  setFormData({
-                    ...formData,
-                    is_jargon: value === 'true',
-                  })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">是黑话</SelectItem>
-                  <SelectItem value="false">无黑话</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="edit_is_global"
-                checked={formData.is_global}
-                onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })}
-              />
-              <Label htmlFor="edit_is_global">全局黑话</Label>
-            </div>
-          </div>
-        </DialogBody>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button data-dialog-action="confirm" onClick={handleSave} disabled={saving}>
-            {saving ? '保存中...' : '保存'}
           </Button>
         </DialogFooter>
       </DialogContent>

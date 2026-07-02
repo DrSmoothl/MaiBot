@@ -208,6 +208,7 @@ class JargonUpdateRequest(BaseModel):
     session_ids: Optional[List[str]] = None
     is_global: Optional[bool] = None
     is_jargon: Optional[bool] = None
+    created_by: Optional[JargonCreatedBy] = None
 
 
 class JargonCreateResponse(BaseModel):
@@ -960,6 +961,8 @@ async def update_jargon(jargon_id: int, request: JargonUpdateRequest) -> JargonU
                     jargon.is_global = update_data["is_global"]
                 if "is_jargon" in update_data:
                     jargon.is_jargon = update_data["is_jargon"]
+                if "created_by" in update_data and update_data["created_by"] is not None:
+                    jargon.created_by = update_data["created_by"]
                 jargon.updated_timestamp = datetime.now()
                 session.add(jargon)
 
