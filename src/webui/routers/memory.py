@@ -2349,7 +2349,12 @@ async def _tuning_apply_best(task_id: str, payload: TuningApplyBestRequest | Non
         result["persist_error"] = "runtime_config_unavailable"
         return result
 
-    persist_payload = await a_memorix_host_service.update_config(runtime_config)
+    try:
+        persist_payload = await a_memorix_host_service.update_config(runtime_config)
+    except Exception as exc:
+        result["persisted"] = False
+        result["persist_error"] = f"persist_failed: {exc}"
+        return result
     result["persisted"] = bool(isinstance(persist_payload, dict) and persist_payload.get("success", False))
     result["persist_result"] = persist_payload
     return result

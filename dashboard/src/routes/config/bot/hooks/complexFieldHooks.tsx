@@ -927,10 +927,11 @@ function SharedMemoryChatStreamSelect({
       .includes(normalizedSearch)
   })
   const resultLimit = 50
-  const visibleChats = matchedChats.slice(0, resultLimit)
-  const groups = visibleChats.filter((chat) => chat.chat_type === 'group')
-  const privateChats = visibleChats.filter((chat) => chat.chat_type === 'private')
-  const isResultLimited = matchedChats.length > visibleChats.length
+  const allGroups = matchedChats.filter((chat) => chat.chat_type === 'group')
+  const allPrivateChats = matchedChats.filter((chat) => chat.chat_type === 'private')
+  const groups = allGroups.slice(0, resultLimit)
+  const privateChats = allPrivateChats.slice(0, resultLimit)
+  const isResultLimited = groups.length < allGroups.length || privateChats.length < allPrivateChats.length
 
   const renderOption = (chat: ChatStream) => {
     const selected = selectedChat ? chatStreamOptionKey(selectedChat) === chatStreamOptionKey(chat) : false
@@ -1004,7 +1005,7 @@ function SharedMemoryChatStreamSelect({
               )}
               {isResultLimited && (
                 <div className="border-t px-3 py-2 text-xs text-muted-foreground">
-                  仅显示前 {resultLimit} 个匹配项，请输入关键词缩小范围。
+                  群聊和私聊各最多显示 {resultLimit} 个匹配项，请输入关键词缩小范围。
                 </div>
               )}
             </CommandList>
@@ -3046,15 +3047,23 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
       return
     }
 
-    const allGroupIndexes = new Set(Array.from({ length: groups.length }, (_, index) => index))
     if (globalMemorySharingEnabled) {
+      const allGroupIndexes = new Set(Array.from({ length: groups.length }, (_, index) => index))
       setCollapsedGroups(allGroupIndexes)
       setShowAddGroupPanel(false)
       setAddingMemberGroupIndex(null)
       return
     }
 
-    setCollapsedGroups(allGroupIndexes)
+    setCollapsedGroups((current) => {
+      const next = new Set<number>()
+      current.forEach((index) => {
+        if (index < groups.length) {
+          next.add(index)
+        }
+      })
+      return next
+    })
   }, [globalMemorySharingEnabled, groups.length, isSharedMemoryGroup])
 
   useEffect(() => {

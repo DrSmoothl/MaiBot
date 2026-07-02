@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { ExpressionGroupsHook, MultipleReplyStyleHook } from '../complexFieldHooks'
 import { createJsonFieldHook } from '../JsonFieldHookFactory'
 import { createListItemEditorHook } from '../ListItemEditorHookFactory'
+import { getChatStreams, type ChatStream } from '@/lib/chat-management-api'
 import type { FieldSchema } from '@/types/config-schema'
 
 vi.mock('@/lib/chat-management-api', () => ({
@@ -73,6 +74,33 @@ const sharedMemorySchema: FieldSchema = {
   description: '共享记忆组',
   required: false,
   'x-display-as-section': true,
+}
+
+const createChatStream = (index: number, chatType: 'group' | 'private'): ChatStream => {
+  const targetId = chatType === 'group' ? `10${index.toString().padStart(3, '0')}` : `20${index.toString().padStart(3, '0')}`
+  const displayName = chatType === 'group' ? `测试群 ${index}` : `目标私聊 ${index}`
+  return {
+    id: index,
+    session_id: `session-${chatType}-${index}`,
+    display_name: displayName,
+    chat_type: chatType,
+    target_id: targetId,
+    platform: 'qq',
+    account_id: null,
+    scope: null,
+    user_id: chatType === 'private' ? targetId : '',
+    user_nickname: chatType === 'private' ? displayName : null,
+    user_cardname: null,
+    group_id: chatType === 'group' ? targetId : null,
+    group_name: chatType === 'group' ? displayName : null,
+    message_count: index,
+    expression_count: 0,
+    jargon_count: 0,
+    created_at: null,
+    last_active_at: null,
+    latest_message: '',
+    latest_message_at: null,
+  }
 }
 
 describe('custom bot config hooks', () => {
@@ -269,6 +297,88 @@ describe('custom bot config hooks', () => {
         ],
       },
     ])
+  })
+
+  it('keeps private chat matches visible when group matches exceed the display limit', async () => {
+    const user = userEvent.setup()
+    vi.mocked(getChatStreams).mockResolvedValueOnce([
+      ...Array.from({ length: 55 }, (_, index) => createChatStream(index + 1, 'group')),
+      createChatStream(99, 'private'),
+    ])
+
+    render(
+      <ExpressionGroupsHook
+        fieldPath="a_memorix.shared_memory_groups"
+        onChange={vi.fn()}
+        parentValues={{ global_memory_sharing_enabled: false }}
+        schema={sharedMemorySchema}
+        value={[
+          {
+            targets: [
+              {
+                platform: 'qq',
+                item_id: '',
+                rule_type: 'group',
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    await user.click(screen.getByLabelText('展开共享记忆组 1'))
+    await user.click(await screen.findByRole('combobox', { name: '选择群聊或私聊' }))
+
+    expect(await screen.findByText(/目标私聊 99 · 私聊/)).toBeInTheDocument()
+    expect(screen.getByText('群聊和私聊各最多显示 50 个匹配项，请输入关键词缩小范围。')).toBeInTheDocument()
+  })
+
+  it('keeps expanded shared memory groups open when another group is added', async () => {
+    const user = userEvent.setup()
+    const firstGroup = {
+      targets: [
+        {
+          platform: 'qq',
+          item_id: '123456',
+          rule_type: 'group' as const,
+        },
+      ],
+    }
+    const { rerender } = render(
+      <ExpressionGroupsHook
+        fieldPath="a_memorix.shared_memory_groups"
+        onChange={vi.fn()}
+        parentValues={{ global_memory_sharing_enabled: false }}
+        schema={sharedMemorySchema}
+        value={[firstGroup]}
+      />,
+    )
+
+    await user.click(screen.getByLabelText('展开共享记忆组 1'))
+    expect(screen.getByDisplayValue('123456')).toBeInTheDocument()
+
+    rerender(
+      <ExpressionGroupsHook
+        fieldPath="a_memorix.shared_memory_groups"
+        onChange={vi.fn()}
+        parentValues={{ global_memory_sharing_enabled: false }}
+        schema={sharedMemorySchema}
+        value={[
+          firstGroup,
+          {
+            targets: [
+              {
+                platform: 'qq',
+                item_id: '654321',
+                rule_type: 'group',
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByDisplayValue('123456')).toBeInTheDocument()
   })
 
   it('allows collapsing manual fields for unmatched shared memory members', async () => {

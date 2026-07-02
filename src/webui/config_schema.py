@@ -248,6 +248,7 @@ class ConfigSchemaGenerator:
 
             field_path = cls._join_field_path(resolved_path_prefix, field_name)
             nested_schema = cls._build_nested_schema(field_info.annotation, field_path) if include_nested else None
+            visibility_schema = nested_schema
             visibility = cls._get_a_memorix_visibility(field_path)
 
             if visibility == "excluded":
@@ -255,9 +256,11 @@ class ConfigSchemaGenerator:
             if nested_schema is not None and not cls._schema_has_visible_content(nested_schema):
                 continue
             if visibility is None and cls._is_a_memorix_path(field_path):
-                if nested_schema is None:
+                if visibility_schema is None and not include_nested:
+                    visibility_schema = cls._build_nested_schema(field_info.annotation, field_path)
+                if visibility_schema is None or not cls._schema_has_visible_content(visibility_schema):
                     continue
-                visibility = "advanced" if cls._schema_has_only_advanced_content(nested_schema) else "basic"
+                visibility = "advanced" if cls._schema_has_only_advanced_content(visibility_schema) else "basic"
 
             field_schema = cls._build_field_schema(
                 config_class,

@@ -1717,6 +1717,37 @@ describe('KnowledgeBasePage import workflow', () => {
     expect(screen.getByRole('button', { name: '应用推荐结果' })).toBeDisabled()
   }, 20_000)
 
+  it('uses validation recommendation when enabling tuning apply button', async () => {
+    vi.mocked(memoryApi.getMemoryTuningTasks).mockResolvedValue({
+      success: true,
+      items: [
+        {
+          task_id: 'tune-3',
+          status: 'completed',
+          recommended: false,
+          validation_summary: { recommended: true },
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await screen.findByText('记忆搜索调优')
+
+    const applyButton = screen.getByRole('button', { name: '应用推荐结果' })
+    expect(applyButton).not.toBeDisabled()
+
+    await user.click(applyButton)
+    await waitFor(() =>
+      expect(memoryApi.applyBestMemoryTuningProfile).toHaveBeenCalledWith('tune-3', {
+        persist: false,
+        validate: true,
+      }),
+    )
+  }, 20_000)
+
   it('previews executes and restores source delete (delete module)', async () => {
     const user = userEvent.setup()
     renderPage()

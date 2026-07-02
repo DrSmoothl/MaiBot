@@ -198,6 +198,11 @@ function formatResultDelta(value: number | undefined, format: 'number' | 'percen
   return `${prefix}${value.toFixed(3)}`
 }
 
+function isTuningTaskRecommended(task: Record<string, unknown>): boolean {
+  const validation = asRecord(task.validation_summary)
+  return validation.recommended === true || task.recommended === true
+}
+
 function getTuningEvaluationSummary(task: Record<string, unknown> | undefined): TuningEvaluationSummary | null {
   if (!task) {
     return null
@@ -219,7 +224,7 @@ function getTuningEvaluationSummary(task: Record<string, unknown> | undefined): 
     baselineScore !== undefined && bestScore !== undefined ? bestScore - baselineScore : undefined
   )
   const holdoutCaseCount = numberFrom(validation.holdout_case_count)
-  const recommended = validation.recommended === true || task.recommended === true
+  const recommended = isTuningTaskRecommended(task)
   const hasEvaluation = baselineScore !== undefined
     || bestScore !== undefined
     || Object.keys(baselineMetrics).length > 0
@@ -516,7 +521,8 @@ function TuningTaskListCard({
             {tasks.map((task, index) => {
               const taskId = String(task.task_id ?? '')
               const status = String(task.status ?? '-')
-              const canApply = Boolean(task.task_id) && status === 'completed' && task.recommended === true
+              const recommended = isTuningTaskRecommended(task)
+              const canApply = Boolean(task.task_id) && status === 'completed' && recommended
               const statusLabel = t(`memory.tuning.status.${status}`, { defaultValue: status })
               return (
                 <div
@@ -534,8 +540,8 @@ function TuningTaskListCard({
                     <Badge variant={getImportStatusVariant(status)}>{statusLabel}</Badge>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <Badge variant={task.recommended === true ? 'secondary' : 'outline'}>
-                      {task.recommended === true ? t('memory.tuning.tasks.recommended') : t('memory.tuning.tasks.notRecommended')}
+                    <Badge variant={recommended ? 'secondary' : 'outline'}>
+                      {recommended ? t('memory.tuning.tasks.recommended') : t('memory.tuning.tasks.notRecommended')}
                     </Badge>
                     <Button
                       size="sm"
