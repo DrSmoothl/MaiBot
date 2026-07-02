@@ -84,12 +84,12 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 <sub><sup>Updates and Installation</sup></sub>
 
 > **最新版本: v1.0.8** ([📄 更新日志](changelogs/changelog.md))  
-> <sub><sup><strong>Latest Version: v1.0.7</strong> (<a href="changelogs/changelog.md">📄 Changelog</a>)</sup></sub>
+> <sub><sup><strong>Latest Version: v1.0.8</strong> (<a href="changelogs/changelog.md">📄 Changelog</a>)</sup></sub>
 
 - **下载**：前往 [Release](https://github.com/MaiM-with-u/MaiBot/releases/) 页面下载最新版本。  
   <sub><sup><strong>Download</strong>: Visit the <a href="https://github.com/MaiM-with-u/MaiBot/releases/">Release</a> page to get the latest version.</sup></sub>
-- **启动器**：[Mailauncher](https://github.com/MaiM-with-u/mailauncher/releases/)（仅支持 MacOS，早期开发中）。  
-  <sub><sup><strong>Launcher</strong>: <a href="https://github.com/MaiM-with-u/mailauncher/releases/">Mailauncher</a> (MacOS only, still in early development).</sup></sub>
+- **一键包**：[Maibot-OK](https://github.com/Mai-with-u/MaiBotOneKey/releases/)  
+  <sub><sup><strong>Launcher</strong>: <a href="https://github.com/Mai-with-u/MaiBotOneKey/releases/">Mailauncher</a> (MacOS only, still in early development).</sup></sub>
 
 | 分支 / Branch | 说明 / Description |
 | :--- | :--- |
