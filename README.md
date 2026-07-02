@@ -88,8 +88,8 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 - **下载**：前往 [Release](https://github.com/MaiM-with-u/MaiBot/releases/) 页面下载最新版本。  
   <sub><sup><strong>Download</strong>: Visit the <a href="https://github.com/MaiM-with-u/MaiBot/releases/">Release</a> page to get the latest version.</sup></sub>
-- **一键包**：[Maibot-OK](https://github.com/Mai-with-u/MaiBotOneKey/releases/)  
-  <sub><sup><strong>Launcher</strong>: <a href="https://github.com/Mai-with-u/MaiBotOneKey/releases/">Mailauncher</a> (MacOS only, still in early development).</sup></sub>
+- **方便使用的 Windows 一键包 下载**：[Maibot-OK](https://github.com/Mai-with-u/MaiBotOneKey/releases/)  
+  <sub><sup><strong>Launcher</strong>: <a href="https://github.com/Mai-with-u/MaiBotOneKey/releases/">Maibot OneKey</a></sup></sub>
 
 | 分支 / Branch | 说明 / Description |
 | :--- | :--- |
