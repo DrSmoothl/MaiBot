@@ -984,6 +984,10 @@
       "edit": "Edit cards",
       "done": "Done",
       "reset": "Restore default layout",
+      "row": {
+        "low": "Low row",
+        "high": "High row"
+      },
       "dialog": {
         "title": "Manage Home Cards",
         "description": "Add plugin or built-in cards, or restore the default layout.",
