@@ -211,6 +211,7 @@ async def handle_tool(
     reply_text = reply_result.completion.response_text.strip() if success else ""
     original_reply_text_for_rich_output = reply_text
     if rich_reply_enabled and reply_text:
+        reply_result.metrics.extra["rich_reply_original_response"] = original_reply_text_for_rich_output
         try:
             check_result = await replyer.check_rich_reply_output(
                 generated_reply=reply_text,
@@ -234,6 +235,7 @@ async def handle_tool(
                 "total_tokens": check_result.total_tokens,
             }
             rich_reply_events.append(rich_reply_event)
+            reply_result.metrics.extra["rich_reply_checker_output"] = check_result.output_text
             rich_reply_checker_records.append(
                 {
                     "prompt_title": "Reply Checker Prompt #1",
@@ -261,8 +263,6 @@ async def handle_tool(
 
             if check_result.action == "rewrite":
                 reply_text = check_result.output_text
-                reply_result.completion.response_text = reply_text
-                reply_result.metrics.extra["rich_reply_checker_output"] = check_result.output_text
                 reply_result.metrics.extra["rich_reply_checker_request_message_count"] = check_result.request_message_count
                 reply_result.metrics.extra["rich_reply_checker_request_messages"] = check_result.request_messages
                 reply_result.metrics.extra["rich_reply_checker_reasoning"] = check_result.reasoning_text
@@ -271,10 +271,10 @@ async def handle_tool(
         reply_result.metrics.extra["rich_reply_checker_events"] = rich_reply_events
     if rich_reply_checker_records:
         reply_result.metrics.extra["rich_reply_checker_records"] = rich_reply_checker_records
-    reply_result.monitor_detail = build_reply_monitor_detail(reply_result)
 
-    reply_metadata = _build_monitor_metadata(reply_result)
     if not reply_text:
+        reply_result.monitor_detail = build_reply_monitor_detail(reply_result)
+        reply_metadata = _build_monitor_metadata(reply_result)
         logger.warning(
             f"{tool_ctx.runtime.log_prefix} 回复生成器返回空文本: "
             f"目标消息编号={target_message_id} 错误信息={reply_result.error_message!r}"
@@ -294,6 +294,9 @@ async def handle_tool(
         else:
             reply_sequences = await tool_ctx.post_process_reply_message_sequences_async(reply_text)
     except Exception as exc:
+        reply_result.completion.response_text = reply_text
+        reply_result.monitor_detail = build_reply_monitor_detail(reply_result)
+        reply_metadata = _build_monitor_metadata(reply_result)
         logger.exception(f"{tool_ctx.runtime.log_prefix} 解析丰富回复输出失败: {exc}")
         return tool_ctx.build_failure_result(
             invocation.tool_name,
@@ -302,6 +305,10 @@ async def handle_tool(
         )
     reply_segments = [build_visible_text_from_sequence(sequence) for sequence in reply_sequences]
     combined_reply_text = "".join(reply_segments)
+    reply_result.completion.response_text = combined_reply_text
+    reply_result.text_fragments = reply_segments
+    reply_result.monitor_detail = build_reply_monitor_detail(reply_result)
+    reply_metadata = _build_monitor_metadata(reply_result)
     sent_message_ids: list[str] = []
     send_results: list[dict[str, Any]] = []
     try:

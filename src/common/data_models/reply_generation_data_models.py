@@ -239,6 +239,18 @@ def build_reply_monitor_detail(result: ReplyGenerationResult) -> Dict[str, Any]:
             "title": "已选表达方式",
             "content": selected_expression_content,
         })
+    original_reply_text = str(result.metrics.extra.get("rich_reply_original_response") or "").strip()
+    if original_reply_text:
+        extra_sections.append({
+            "title": "Replyer 原始回复",
+            "content": original_reply_text,
+        })
+    checker_output_text = str(result.metrics.extra.get("rich_reply_checker_output") or "").strip()
+    if checker_output_text:
+        extra_sections.append({
+            "title": "修改器输出",
+            "content": checker_output_text,
+        })
     if result.metrics.stage_logs:
         extra_sections.append({
             "title": "阶段日志",
