@@ -2597,19 +2597,19 @@ class AMemorixThresholdConfig(ConfigBase):
 
 
 class AMemorixRetrievalSubtypeFilterConfig(ConfigBase):
-    """A_Memorix 检索结果分类型聊天过滤配置"""
+    """A_Memorix 跨聊天流检索结果分类型过滤配置"""
 
     enabled: bool = Field(
         default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "启用结果过滤",
-                "en_US": "Enable result filter",
-                "ja_JP": "結果フィルターを有効化",
+                "zh_CN": "启用跨聊天流过滤",
+                "en_US": "Enable cross-chat filter",
+                "ja_JP": "チャット横断フィルターを有効化",
             },
         },
     )
-    """是否启用当前检索结果类型的聊天过滤"""
+    """是否启用当前检索结果类型的跨聊天流过滤"""
 
     mode: Literal["blacklist", "whitelist"] = Field(
         default="blacklist",
@@ -2637,7 +2637,7 @@ class AMemorixRetrievalSubtypeFilterConfig(ConfigBase):
 
 
 class AMemorixRetrievalFilterConfig(ConfigBase):
-    """A_Memorix 检索结果后置聊天过滤配置"""
+    """A_Memorix 跨聊天流检索结果后置过滤配置"""
 
     chat_stream: AMemorixRetrievalSubtypeFilterConfig = Field(
         default_factory=AMemorixRetrievalSubtypeFilterConfig,
@@ -2650,7 +2650,7 @@ class AMemorixRetrievalFilterConfig(ConfigBase):
             "x-collapsed-by-default": True,
         },
     )
-    """普通 paragraph/relation 命中的检索后置过滤"""
+    """普通 paragraph/relation 命中的跨聊天流检索后置过滤"""
 
     chat_summary: AMemorixRetrievalSubtypeFilterConfig = Field(
         default_factory=AMemorixRetrievalSubtypeFilterConfig,
@@ -2663,7 +2663,7 @@ class AMemorixRetrievalFilterConfig(ConfigBase):
             "x-collapsed-by-default": True,
         },
     )
-    """聊天总结命中的检索后置过滤"""
+    """聊天总结命中的跨聊天流检索后置过滤"""
 
     episode: AMemorixRetrievalSubtypeFilterConfig = Field(
         default_factory=AMemorixRetrievalSubtypeFilterConfig,
@@ -2676,7 +2676,7 @@ class AMemorixRetrievalFilterConfig(ConfigBase):
             "x-collapsed-by-default": True,
         },
     )
-    """Episode 命中的检索后置过滤"""
+    """Episode 命中的跨聊天流检索后置过滤"""
 
 
 class AMemorixFilterConfig(ConfigBase):
@@ -2722,14 +2722,14 @@ class AMemorixFilterConfig(ConfigBase):
         default_factory=AMemorixRetrievalFilterConfig,
         json_schema_extra={
             "label": {
-                "zh_CN": "检索结果过滤",
-                "en_US": "Retrieval result filter",
-                "ja_JP": "検索結果フィルター",
+                "zh_CN": "跨聊天流检索结果过滤",
+                "en_US": "Cross-chat retrieval result filter",
+                "ja_JP": "チャット横断検索結果フィルター",
             },
             "x-collapsed-by-default": True,
         },
     )
-    """仅对检索结果生效的分类型聊天过滤，不影响写入和后台生成"""
+    """仅对跨聊天流检索结果生效的分类型过滤，不影响本聊天流读取自身记忆、写入和后台生成"""
 
 
 class AMemorixSharedMemoryGroupConfig(ConfigBase):
@@ -3571,6 +3571,20 @@ class AMemorixConfig(ConfigBase):
         },
     )
     """聊天过滤配置"""
+
+    global_memory_sharing_enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "全局共享记忆",
+                "en_US": "Global memory sharing",
+                "ja_JP": "記憶のグローバル共有",
+            },
+            "x-widget": "switch",
+            "x-icon": "globe-2",
+        },
+    )
+    """是否让普通记忆查询在所有聊天流范围内检索"""
 
     shared_memory_groups: list[AMemorixSharedMemoryGroupConfig] = Field(
         default_factory=list,

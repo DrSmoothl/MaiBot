@@ -345,6 +345,14 @@ chats = []
   `episode` 裁剪 Episode 命中。
 - 人物画像当前保持全局聚合与缓存，不按群组隔离。
 
+### `global_memory_sharing_enabled`
+
+- 默认 `false`
+- 关闭时，普通记忆查询只检索当前聊天流以及 `shared_memory_groups`
+  配置出的同组聊天流。
+- 开启时，普通记忆查询会在所有聊天流范围内检索；
+  `shared_memory_groups` 会保留配置，但不再限制普通查询范围。
+
 ### `shared_memory_groups`
 
 用于配置多个聊天流共享同一长期记忆检索范围。写入仍保留原始

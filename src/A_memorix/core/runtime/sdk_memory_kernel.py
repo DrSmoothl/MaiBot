@@ -2653,7 +2653,12 @@ class SDKMemoryKernel:
             hits = self._filter_episode_hits([self._episode_hit(row) for row in rows])
             hits = self._filter_hits_by_chat_scope(hits, request.chat_id, shared_chat_ids)
             if request.respect_filter:
-                hits = self._filter_hits_by_retrieval_type_scope(hits)
+                hits = self._filter_hits_by_retrieval_type_scope(
+                    hits,
+                    current_stream_id=request.chat_id,
+                    current_group_id=request.group_id,
+                    current_user_id=request.user_id,
+                )
             hits = hits[:limit]
             return {"summary": self._summary(hits), "hits": hits}
 
@@ -2676,7 +2681,12 @@ class SDKMemoryKernel:
             filtered = self._filter_user_visible_hits(filtered)
             filtered = self._filter_hits_by_chat_scope(filtered, request.chat_id, shared_chat_ids)
             if request.respect_filter:
-                filtered = self._filter_hits_by_retrieval_type_scope(filtered)
+                filtered = self._filter_hits_by_retrieval_type_scope(
+                    filtered,
+                    current_stream_id=request.chat_id,
+                    current_group_id=request.group_id,
+                    current_user_id=request.user_id,
+                )
             filtered = filtered[:limit]
             return {"summary": self._summary(filtered), "hits": filtered}
 
@@ -2703,7 +2713,12 @@ class SDKMemoryKernel:
         filtered = self._filter_user_visible_hits(filtered)
         filtered = self._filter_hits_by_chat_scope(filtered, request.chat_id, shared_chat_ids)
         if request.respect_filter:
-            filtered = self._filter_hits_by_retrieval_type_scope(filtered)
+            filtered = self._filter_hits_by_retrieval_type_scope(
+                filtered,
+                current_stream_id=request.chat_id,
+                current_group_id=request.group_id,
+                current_user_id=request.user_id,
+            )
         filtered = filtered[:limit]
         return {"summary": self._summary(filtered), "hits": filtered}
 
@@ -7502,11 +7517,23 @@ class SDKMemoryKernel:
 
         return [dict(hit) for index, hit in enumerate(hits) if index in allowed_indexes]
 
-    def _filter_hits_by_retrieval_type_scope(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """按检索结果类型应用可选聊天过滤，不改变写入和全局入口过滤。"""
+    def _filter_hits_by_retrieval_type_scope(
+        self,
+        hits: List[Dict[str, Any]],
+        *,
+        current_stream_id: str = "",
+        current_group_id: str = "",
+        current_user_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        """按检索结果类型应用跨聊天流过滤，不改变本聊天流读取自身记忆。"""
 
         if not hits or not self._has_enabled_retrieval_type_filter():
             return hits
+        current_context = self._current_retrieval_filter_context(
+            stream_id=current_stream_id,
+            group_id=current_group_id,
+            user_id=current_user_id,
+        )
 
         paragraph_hashes: List[str] = []
         relation_hashes: List[str] = []
@@ -7533,6 +7560,12 @@ class SDKMemoryKernel:
                 paragraph_map=paragraph_map,
                 relation_paragraph_map=relation_paragraph_map,
             )
+            if any(
+                self._retrieval_filter_context_is_current_source(context, current_context)
+                for context in contexts
+            ):
+                filtered.append(dict(item))
+                continue
             if any(self._retrieval_filter_context_allowed(context) for context in contexts):
                 filtered.append(dict(item))
         return filtered
@@ -7646,6 +7679,39 @@ class SDKMemoryKernel:
             "group_id": group_id,
             "user_id": user_id,
         }
+
+    def _current_retrieval_filter_context(
+        self,
+        *,
+        stream_id: str,
+        group_id: str,
+        user_id: str,
+    ) -> Dict[str, str]:
+        resolved_context = self._retrieval_filter_context(kind="", stream_id=stream_id)
+        resolved_context["group_id"] = str(group_id or "").strip() or resolved_context["group_id"]
+        resolved_context["user_id"] = str(user_id or "").strip() or resolved_context["user_id"]
+        return resolved_context
+
+    @staticmethod
+    def _retrieval_filter_context_is_current_source(
+        context: Dict[str, str],
+        current_context: Dict[str, str],
+    ) -> bool:
+        current_stream_id = str(current_context.get("stream_id", "") or "").strip()
+        source_stream_id = str(context.get("stream_id", "") or "").strip()
+        if current_stream_id and source_stream_id and current_stream_id == source_stream_id:
+            return True
+
+        current_group_id = str(current_context.get("group_id", "") or "").strip()
+        source_group_id = str(context.get("group_id", "") or "").strip()
+        if current_group_id and source_group_id and current_group_id == source_group_id:
+            return True
+
+        current_user_id = str(current_context.get("user_id", "") or "").strip()
+        source_user_id = str(context.get("user_id", "") or "").strip()
+        current_is_private = bool(current_user_id) and not current_group_id
+        source_is_private = bool(source_user_id) and not source_group_id
+        return current_is_private and source_is_private and current_user_id == source_user_id
 
     def _retrieval_filter_context_allowed(self, context: Dict[str, str]) -> bool:
         kind = str(context.get("kind", "") or "").strip()
