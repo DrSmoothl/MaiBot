@@ -898,6 +898,20 @@ class ExperimentalConfig(ConfigBase):
     )
     """让麦麦从聊天中学习什么时候该怎么回应的经验。"""
 
+    enable_rich_reply: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "丰富回复能力",
+                "en_US": "Rich reply ability",
+                "ja_JP": "豊かな返信能力",
+            },
+            "x-widget": "switch",
+            "x-icon": "sparkles",
+        },
+    )
+    """开启后，replyer 生成文本后会由检查器决定是否插入图片、表情包或 at。"""
+
     behavior_learning_list: list["LearningItem"] = Field(
         default_factory=lambda: [
             LearningItem(
