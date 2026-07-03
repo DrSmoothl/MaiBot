@@ -1025,11 +1025,11 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         return snapshot
 
     def _get_message_trigger_threshold(self) -> int:
-        """根据回复频率折算出触发一轮循环所需的消息数。"""
+        """根据回复频率按反平方关系折算出触发一轮循环所需的消息数。"""
         effective_frequency = min(1.0, self._get_effective_reply_frequency())
         if effective_frequency <= 0:
             return 0
-        return max(1, int(ceil(1.0 / effective_frequency)))
+        return max(1, int(ceil(1.0 / (effective_frequency * effective_frequency))))
 
     def _get_pending_message_count(self) -> int:
         """统计当前尚未进入内部循环的新消息数量。"""

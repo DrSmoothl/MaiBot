@@ -671,10 +671,16 @@ class MaisakaChatLoopService:
 
 
     @staticmethod
+    def _build_time_user_message(timestamp: datetime) -> str:
+        """构建统一格式的时间提示消息。"""
+
+        return f"时间：{timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    @staticmethod
     def _build_current_time_user_message() -> str:
         """构建追加到请求末尾的当前时间消息。"""
 
-        return f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        return MaisakaChatLoopService._build_time_user_message(datetime.now())
 
     def _build_group_chat_attention_block(self) -> str:
         """构建当前聊天场景下的额外注意事项块。"""
@@ -766,6 +772,7 @@ class MaisakaChatLoopService:
         selected_history: List[LLMContextMessage],
         *,
         enable_visual_message: bool,
+        include_day_boundary_time_messages: bool = False,
         injected_user_messages: Sequence[str] | None = None,
         tail_user_messages: Sequence[str] | None = None,
         system_prompt: Optional[str] = None,
@@ -790,13 +797,30 @@ class MaisakaChatLoopService:
         system_msg.add_text_content(resolved_system_prompt)
         messages.append(system_msg.build())
 
+        previous_context_timestamp: datetime | None = None
         for msg in selected_history:
             llm_message = build_llm_message_from_context(
                 msg,
                 enable_visual_message=enable_visual_message,
             )
-            if llm_message is not None:
-                messages.append(llm_message)
+            if llm_message is None:
+                continue
+
+            if (
+                include_day_boundary_time_messages
+                and previous_context_timestamp is not None
+                and previous_context_timestamp.date() != msg.timestamp.date()
+            ):
+                boundary_message = self._build_time_user_message(msg.timestamp)
+                messages.append(
+                    MessageBuilder()
+                    .set_role(RoleType.User)
+                    .add_text_content(boundary_message)
+                    .build()
+                )
+
+            messages.append(llm_message)
+            previous_context_timestamp = msg.timestamp
 
         normalized_injected_messages: List[Message] = []
         current_chat_attention = self._build_current_chat_attention_tail_message()
@@ -854,6 +878,7 @@ class MaisakaChatLoopService:
         built_messages = self._build_request_messages(
             selected_history,
             enable_visual_message=enable_visual_message,
+            include_day_boundary_time_messages=request_kind == "planner",
             injected_user_messages=injected_user_messages,
             tail_user_messages=tail_user_messages,
             system_prompt=system_prompt,
