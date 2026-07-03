@@ -20,11 +20,13 @@ from src.plugin_runtime import (
     ENV_EXTERNAL_PLUGIN_IDS,
     ENV_HOST_VERSION,
     ENV_IPC_ADDRESS,
+    ENV_LOCAL_PLUGIN_SDK_PATH,
     ENV_PLUGIN_DIRS,
     ENV_RUNNER_GROUP,
     ENV_SESSION_TOKEN,
     detect_host_application_version,
 )
+from src.plugin_runtime.local_sdk import build_pythonpath_with_local_sdk
 from src.plugin_runtime.protocol.envelope import (
     BootstrapPluginPayload,
     ConfigReloadScope,
@@ -1569,6 +1571,10 @@ class PluginRunnerSupervisor:
 
         env = os.environ.copy()
         env.update(self._build_runner_environment())
+        local_sdk_pythonpath = build_pythonpath_with_local_sdk(env)
+        if local_sdk_pythonpath is not None:
+            env["PYTHONPATH"] = local_sdk_pythonpath
+            logger.info(f"Runner 将优先使用本地插件 SDK: {env.get(ENV_LOCAL_PLUGIN_SDK_PATH)}")
 
         self._runner_process = await asyncio.create_subprocess_exec(
             sys.executable,

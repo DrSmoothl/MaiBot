@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from src.common.logger import get_logger
 from src.plugin_runtime import detect_host_application_version
+from src.plugin_runtime.local_sdk import read_local_sdk_version
 
 logger = get_logger("plugin_runtime.runner.manifest_validator")
 
@@ -1249,6 +1250,10 @@ class ManifestValidator:
         Returns:
             str: 探测到的 SDK 版本号；失败时返回空字符串。
         """
+        local_sdk_version = read_local_sdk_version(project_root=project_root)
+        if local_sdk_version and VersionComparator.is_valid_project_version(local_sdk_version):
+            return local_sdk_version
+
         try:
             raw_version = importlib_metadata.version("maibot-plugin-sdk")
             if VersionComparator.is_valid_project_version(raw_version):
@@ -1323,6 +1328,11 @@ class ManifestValidator:
         Returns:
             Optional[str]: 已安装版本号；未安装时返回 ``None``。
         """
+        if canonicalize_name(package_name) == "maibot-plugin-sdk":
+            local_sdk_version = read_local_sdk_version()
+            if local_sdk_version:
+                return local_sdk_version
+
         try:
             return importlib_metadata.version(package_name)
         except importlib_metadata.PackageNotFoundError:

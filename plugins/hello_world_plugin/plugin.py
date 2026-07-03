@@ -9,7 +9,7 @@ from typing import Any
 import random
 import re
 
-from maibot_sdk import Action, Command, EventHandler, Field, MaiBotPlugin, PluginConfigBase, Tool
+from maibot_sdk import Action, Command, EventHandler, Field, HomeCard, MaiBotPlugin, PluginConfigBase, Tool
 from maibot_sdk.types import ActivationType, EventType, ToolParameterInfo, ToolParamType
 
 
@@ -73,6 +73,71 @@ class HelloWorldPlugin(MaiBotPlugin):
 
     async def on_unload(self) -> None:
         """处理插件卸载。"""
+
+    # ===== HomeCard 组件 =====
+
+    @HomeCard(
+        "hello_world_feature_card",
+        title="Hello World 功能入口",
+        description="展示示例插件提供的命令、Action 和工具入口。",
+        content=[
+            {
+                "type": "markdown",
+                "content": "这是一个偏功能展示的首页卡片，用来告诉插件开发者如何把入口放到 WebUI 首页。",
+            },
+            {
+                "type": "list",
+                "items": [
+                    "/test：发送测试消息",
+                    "/time：按配置格式查询当前时间",
+                    "/random_emojis：发送随机表情包",
+                    "compare_numbers：供 LLM 调用的数字比较工具",
+                ],
+            },
+            {
+                "type": "actions",
+                "actions": [
+                    {"label": "打开插件配置", "url": "/plugin-config?plugin=maibot-team.hello-world-plugin"},
+                    {"label": "查看插件市场", "url": "/plugins"},
+                ],
+            },
+        ],
+        link_url="/plugin-config?plugin=maibot-team.hello-world-plugin",
+        link_label="配置示例插件",
+        width="large",
+        order=120,
+    )
+    async def home_feature_card(self) -> None:
+        """声明偏功能展示的 WebUI 首页卡片。"""
+
+        return None
+
+    @HomeCard(
+        "hello_world_data_card",
+        title="Hello World 示例数据",
+        description="用静态示例数据演示首页数据型卡片的结构化写法。",
+        content=[
+            {"type": "stat", "label": "已声明组件", "value": "8+", "detail": "Tool / Action / Command / EventHandler / HomeCard"},
+            {
+                "type": "key_value",
+                "entries": {
+                    "配置版本": "2.0.0",
+                    "默认问候": "嗨！很开心见到你！",
+                    "时间格式": "%Y-%m-%d %H:%M:%S",
+                },
+            },
+            {
+                "type": "markdown",
+                "content": "数据型卡片适合放运行摘要、计数、状态快照；复杂详情建议跳转到独立页面。",
+            },
+        ],
+        width="medium",
+        order=130,
+    )
+    async def home_data_card(self) -> None:
+        """声明偏数据展示的 WebUI 首页卡片。"""
+
+        return None
 
     # ===== Tool 组件 =====
 
