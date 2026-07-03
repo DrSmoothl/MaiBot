@@ -18,6 +18,7 @@ import {
   Search,
   Timer,
   Trash2,
+  X,
 } from 'lucide-react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -1247,8 +1248,8 @@ function ReasoningReplayPanel({
   return (
     <aside
       className={cn(
-        'bg-background pointer-events-none absolute inset-y-0 right-0 z-20 flex w-full translate-x-full flex-col border-l shadow-xl transition-transform duration-300 ease-out',
-        open && 'pointer-events-auto translate-x-0'
+        'bg-background min-h-0 flex-col overflow-hidden rounded-md border shadow-sm',
+        open ? 'flex' : 'hidden'
       )}
       aria-hidden={!open}
     >
@@ -1257,14 +1258,22 @@ function ReasoningReplayPanel({
           <div className="text-sm font-semibold">重放推理请求</div>
           <div className="text-muted-foreground truncate text-xs">{selectedTitle}</div>
         </div>
-        <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>
-          关闭
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 w-8 p-0"
+          onClick={onClose}
+          disabled={submitting}
+          title="关闭重放边栏"
+          aria-label="关闭重放边栏"
+        >
+          <X className="h-4 w-4" />
         </Button>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="border-b p-3 sm:p-4">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px_140px]">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex-shrink-0 border-b p-3 sm:p-4">
+          <div className="grid gap-3">
             <div className="grid gap-2">
               <Label htmlFor="reasoning-replay-model">模型名称</Label>
               <Input
@@ -1300,92 +1309,115 @@ function ReasoningReplayPanel({
               />
             </div>
           </div>
+          <Button
+            className="mt-3 h-9 w-full gap-1.5"
+            onClick={handleReplay}
+            disabled={submitting || messages.length === 0}
+          >
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            执行重放
+          </Button>
         </div>
 
-        <div className="divide-y">
-          {messages.map((message, index) => (
-            <section key={message.id} className="p-3 sm:p-4">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge variant="outline">#{index + 1}</Badge>
-                <Select
-                  value={message.role}
-                  onValueChange={(value) => updateMessage(message.id, { role: value })}
-                >
-                  <SelectTrigger className="h-8 w-[130px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="system">system</SelectItem>
-                    <SelectItem value="user">user</SelectItem>
-                    <SelectItem value="assistant">assistant</SelectItem>
-                    <SelectItem value="tool">tool</SelectItem>
-                  </SelectContent>
-                </Select>
-                {message.tool_call_id && (
-                  <span className="text-muted-foreground text-xs">
-                    tool_call_id: {message.tool_call_id}
-                  </span>
-                )}
-                {message.tool_calls && message.tool_calls.length > 0 && (
-                  <Badge variant="secondary">工具调用 {message.tool_calls.length}</Badge>
-                )}
-              </div>
-              <Textarea
-                value={message.contentText}
-                onChange={(event) => updateMessage(message.id, { contentText: event.target.value })}
-                minHeight={110}
-                maxHeight={360}
-                className="font-mono text-xs leading-5"
-              />
-            </section>
-          ))}
-        </div>
-
-        {result && (
-          <section className="space-y-3 border-t p-3 sm:p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={result.success ? 'default' : 'destructive'}>
-                {result.success ? '重放结果' : '重放失败'}
-              </Badge>
-              <span className="text-muted-foreground text-xs">{result.model_name}</span>
-              <span className="text-muted-foreground text-xs">{formatReplayTokenSummary(result)}</span>
+        <section className="flex-shrink-0 space-y-3 border-b p-3 sm:p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-semibold">重放结果</div>
+            {submitting && (
+              <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                请求中
+              </span>
+            )}
+          </div>
+          {!result && !submitting ? (
+            <div className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-sm">
+              执行重放后，模型回复、推理内容和工具调用会显示在这里。
             </div>
-            {result.error && (
-              <div className="border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {result.error}
+          ) : null}
+          {result && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={result.success ? 'default' : 'destructive'}>
+                  {result.success ? '完成' : '失败'}
+                </Badge>
+                <span className="text-muted-foreground text-xs">{result.model_name}</span>
               </div>
-            )}
-            {result.reasoning && (
-              <Collapsible className="border">
-                <CollapsibleTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium"
-                  >
-                    推理内容
-                    <ChevronDown className="h-4 w-4" />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="border-t">
-                  <pre className="p-3 text-sm leading-6 whitespace-pre-wrap">{result.reasoning}</pre>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
-            <pre className="bg-muted/30 min-h-32 border p-3 text-sm leading-6 whitespace-pre-wrap">
-              {result.response || '空响应'}
-            </pre>
-            {result.tool_calls && result.tool_calls.length > 0 && (
-              <ToolCallsCollapsible toolCalls={result.tool_calls} />
-            )}
-          </section>
-        )}
-      </ScrollArea>
+              <div className="text-muted-foreground text-xs leading-5">
+                {formatReplayTokenSummary(result)}
+              </div>
+              {result.error && (
+                <div className="border-destructive/30 bg-destructive/10 rounded-md border px-3 py-2 text-sm text-destructive">
+                  {result.error}
+                </div>
+              )}
+              <pre className="bg-muted/30 max-h-56 min-h-24 overflow-auto rounded-md border p-3 text-sm leading-6 whitespace-pre-wrap">
+                {result.response || '空响应'}
+              </pre>
+              {result.reasoning && (
+                <Collapsible className="rounded-md border">
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium"
+                    >
+                      推理内容
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="border-t">
+                    <pre className="max-h-56 overflow-auto p-3 text-sm leading-6 whitespace-pre-wrap">
+                      {result.reasoning}
+                    </pre>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+              {result.tool_calls && result.tool_calls.length > 0 && (
+                <ToolCallsCollapsible toolCalls={result.tool_calls} />
+              )}
+            </div>
+          )}
+        </section>
 
-      <div className="flex justify-end gap-2 border-t p-3 sm:p-4">
-        <Button onClick={handleReplay} disabled={submitting || messages.length === 0}>
-          {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-          执行重放
-        </Button>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="divide-y">
+            {messages.map((message, index) => (
+              <section key={message.id} className="p-3 sm:p-4">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">#{index + 1}</Badge>
+                  <Select
+                    value={message.role}
+                    onValueChange={(value) => updateMessage(message.id, { role: value })}
+                  >
+                    <SelectTrigger className="h-8 w-[130px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="system">system</SelectItem>
+                      <SelectItem value="user">user</SelectItem>
+                      <SelectItem value="assistant">assistant</SelectItem>
+                      <SelectItem value="tool">tool</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {message.tool_call_id && (
+                    <span className="text-muted-foreground text-xs">
+                      tool_call_id: {message.tool_call_id}
+                    </span>
+                  )}
+                  {message.tool_calls && message.tool_calls.length > 0 && (
+                    <Badge variant="secondary">工具调用 {message.tool_calls.length}</Badge>
+                  )}
+                </div>
+                <Textarea
+                  value={message.contentText}
+                  onChange={(event) => updateMessage(message.id, { contentText: event.target.value })}
+                  minHeight={110}
+                  maxHeight={360}
+                  className="font-mono text-xs leading-5"
+                />
+              </section>
+            ))}
+          </div>
+        </ScrollArea>
       </div>
     </aside>
   )
@@ -2133,17 +2165,14 @@ export function ReasoningProcessPage({
       ) : (
         <div
           className={cn(
-            'grid min-h-0 flex-1 grid-cols-1 transition-[gap,grid-template-columns] duration-300 ease-out',
-            replayPanelOpen ? 'gap-0 lg:grid-cols-[0px_1fr]' : 'gap-2 lg:grid-cols-[280px_1fr] lg:gap-3'
+            'grid min-h-0 flex-1 grid-cols-1 gap-2 transition-[gap,grid-template-columns] duration-300 ease-out lg:gap-3',
+            replayPanelOpen
+              ? 'lg:grid-cols-[280px_minmax(0,1fr)_420px] xl:grid-cols-[300px_minmax(0,1fr)_460px]'
+              : 'lg:grid-cols-[280px_minmax(0,1fr)]'
           )}
         >
           <div
-            className={cn(
-              'bg-background flex flex-col overflow-hidden rounded-md border transition-[height,min-height,opacity,transform,border-width] duration-300 ease-out lg:transition-[opacity,transform,border-width]',
-              replayPanelOpen
-                ? 'pointer-events-none h-0 min-h-0 -translate-x-3 opacity-0 lg:h-auto lg:min-h-0 lg:border-0'
-                : 'h-[32vh] min-h-[180px] translate-x-0 opacity-100 lg:h-auto lg:min-h-0'
-            )}
+            className="bg-background flex h-[32vh] min-h-[180px] flex-col overflow-hidden rounded-md border transition-[height,min-height,opacity,transform,border-width] duration-300 ease-out lg:h-auto lg:min-h-0 lg:transition-[opacity,transform,border-width]"
           >
             <div className="text-muted-foreground flex h-8 flex-shrink-0 items-center justify-between border-b px-2.5 text-xs">
               <span>{total} 条记录</span>
@@ -2270,12 +2299,7 @@ export function ReasoningProcessPage({
               className="flex min-h-0 flex-1 flex-col"
             >
               <div className="relative min-h-0 flex-1 overflow-hidden">
-                <ScrollArea
-                  className={cn(
-                    'h-full transition-transform duration-300 ease-out',
-                    replayPanelOpen && '-translate-x-full'
-                  )}
-                >
+                <ScrollArea className="h-full transition-transform duration-300 ease-out">
                   <div className="min-h-full">
                     <div className="flex min-h-12 flex-col gap-2 border-b px-3 py-2 sm:min-h-14 sm:px-4 sm:py-3 xl:flex-row xl:items-center xl:justify-between">
                       <div className="min-w-0 flex-1">
@@ -2610,16 +2634,16 @@ export function ReasoningProcessPage({
                   </TabsContent>
                   </div>
                 </ScrollArea>
-                <ReasoningReplayPanel
-                  open={replayPanelOpen}
-                  onClose={() => setReplayPanelOpen(false)}
-                  selected={selected}
-                  selectedTitle={selectedTitle}
-                  structuredPrompt={structuredPrompt}
-                />
               </div>
             </Tabs>
           </div>
+          <ReasoningReplayPanel
+            open={replayPanelOpen}
+            onClose={() => setReplayPanelOpen(false)}
+            selected={selected}
+            selectedTitle={selectedTitle}
+            structuredPrompt={structuredPrompt}
+          />
         </div>
       )}
     </div>
