@@ -302,7 +302,7 @@ class FocusModeManager:
         to_scope_key = self._resolve_focus_scope_key(normalized_to_session_id)
         if from_scope_key != to_scope_key:
             return (
-                f"chat_id={normalized_to_session_id} 不在当前 Focus 互通组内，"
+                f"chat_id={normalized_to_session_id} 不在当前 Focus 共享组内，"
                 "不能通过 switch_chat 切换；它可以独立进入自己的 Focus。"
             )
 
