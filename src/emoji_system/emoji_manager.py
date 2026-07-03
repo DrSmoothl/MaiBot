@@ -715,7 +715,7 @@ class EmojiManager:
                         emoji.query_count = image_record.query_count
                         emoji.last_used_time = current_time
                     session.add(image_record)
-                    logger.info(f"[记录表情包使用] 成功记录表情包使用: {normalized_hash}")
+                    # logger.info(f"[记录表情包使用] 成功记录表情包使用: {normalized_hash}")
                 else:
                     if log_missing:
                         logger.error(f"[记录表情包使用] 未找到表情包记录: {normalized_hash}")
