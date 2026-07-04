@@ -122,7 +122,7 @@ MODULE_ALIASES = {
     "emoji": "表情包",
     "emoji_cache_cleanup": "表情包缓存清理",
     "chat": "所见",
-    "maisaka_turn_scheduler": "读空气"
+    "maisaka_turn_scheduler": "读空气",
     "chat_image": "识图",
     "action_manager": "动作",
     "memory_activator": "记忆",
