@@ -460,9 +460,9 @@ class EmojiManager:
             emoji_bytes: 表情包字节数据。
         """
         try:
-            logger.info(f"表情包描述后台构建已开始，哈希值: {emoji_hash}")
+            logger.debug(f"表情包描述后台构建已开始，哈希值: {emoji_hash}")
             await self._build_and_cache_emoji_description(emoji_hash, emoji_bytes, session_id=session_id)
-            logger.info(f"表情包描述后台构建完成，哈希值: {emoji_hash}")
+            logger.debug(f"表情包描述后台构建完成，哈希值: {emoji_hash}")
         except Exception as exc:
             logger.warning(f"表情包描述后台构建失败，哈希值: {emoji_hash}，错误: {exc}")
 
@@ -1069,7 +1069,7 @@ class EmojiManager:
 
         target_emoji.description = ",".join(normalized_emotions)
         target_emoji.emotion = normalized_emotions
-        logger.info(f"[构建描述] 成功为表情包构建情绪标签: {target_emoji.description}")
+        logger.info(f"理解表情包情绪: {target_emoji.description}")
         return True, target_emoji
 
     def _mark_emoji_vlm_processed(self, target_emoji: MaiEmoji) -> None:
