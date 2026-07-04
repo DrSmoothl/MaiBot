@@ -857,6 +857,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         if not self._is_focus_mode_active_for_current_chat():
             return True
 
+        if message.is_at and focus_mode_manager.unblock_focus_entry(self.session_id):
+            logger.info(f"{self.log_prefix} 收到 @ 消息，已解除连续空闲退出 Focus 后的重新进入限制")
         can_enter_focus = focus_mode_manager.try_enter_focus(
             self.session_id,
             is_group_chat=self.chat_stream.is_group_session,
