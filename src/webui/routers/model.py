@@ -4,7 +4,7 @@
 提供从各个 AI 厂商 API 获取可用模型列表的代理接口
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -380,7 +380,7 @@ def _get_model_config(model_name: str) -> Optional[Dict]:
         return None
 
 
-def _get_embedding_task_model_names() -> set:
+def _get_embedding_task_model_names() -> Set[str]:
     """从 model_config.toml 获取嵌入任务配置的模型名称集合。
 
     Returns:
@@ -420,6 +420,8 @@ async def _test_embedding_model(model_name: str) -> ModelTestResponse:
             response=f"嵌入向量维度: {len(result.embedding)}",
             latency_ms=latency_ms,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"嵌入模型测试失败: model={model_name}, error={e}", exc_info=True)
         latency_ms = round((time.time() - start_time) * 1000, 2)

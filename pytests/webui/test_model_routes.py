@@ -299,7 +299,7 @@ model_list = ["embed-model"]
     assert result.success is True
     assert result.tool_call_ok is False
     assert result.visual_tested is False
-    assert "8" in result.response
+    assert result.response == "嵌入向量维度: 8"
     assert captured["model_name"] == "embed-model"
     assert captured["embedding_input"]
 
