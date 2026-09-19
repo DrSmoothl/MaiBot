@@ -479,9 +479,8 @@ describe('ChatManagementPage 详情弹窗', () => {
     expect(scope.getByText('频率：0.800')).toBeInTheDocument()
     expect(scope.getByText('*:*:-')).toBeInTheDocument()
     expect(scope.getByText('时间：默认')).toBeInTheDocument()
-    // 默认时间轴编辑模式：已有规则与新增规则各有一对拖拽手柄
-    expect(scope.getByText('仅编辑 qq:10001:群聊 的精确规则。')).toBeInTheDocument()
-    expect(scope.getAllByRole('button', { name: '调整开始时间' })).toHaveLength(2)
+    // 默认时间轴编辑模式：仅已有精确规则有一对拖拽手柄
+    expect(scope.getAllByRole('button', { name: '调整开始时间' })).toHaveLength(1)
 
     // Prompt：基础 Prompt 与专属 Prompt
     expect(scope.getByText('群聊基础 Prompt')).toBeInTheDocument()
@@ -553,7 +552,7 @@ describe('ChatManagementPage 详情弹窗', () => {
         action: 'allow',
       })
     )
-    await waitFor(() => expect(toastMock).toHaveBeenCalledWith({ title: '适配器放行规则已保存' }))
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith({ title: '适配器规则已保存' }))
 
     await user.click(within(dialog).getByRole('button', { name: '阻止' }))
     await waitFor(() =>
@@ -629,17 +628,13 @@ describe('ChatManagementPage 详情弹窗', () => {
       })
     )
 
-    // 新增规则：previous_time 为 null，默认频率取当前生效值
-    const newTimeInput = within(dialog).getByDisplayValue('*')
-    const newEditor = newTimeInput.parentElement?.parentElement as HTMLElement
-    await user.clear(newTimeInput)
-    await user.type(newTimeInput, '20:00-22:00')
-    await user.click(within(newEditor).getByRole('button', { name: '新增' }))
+    // 新增规则：一键写入 1.0 的全天精确规则
+    await user.click(within(dialog).getByRole('button', { name: '新增规则' }))
     await waitFor(() =>
       expect(chatApi.updateChatStreamTalkFrequency).toHaveBeenCalledWith('sess-1', {
         previous_time: null,
-        time: '20:00-22:00',
-        value: 0.8,
+        time: '00:00-23:59',
+        value: 1,
       })
     )
 
@@ -1042,13 +1037,12 @@ describe('ChatManagementPage 时间轴规则', () => {
     const dialog = await openDetail(user)
     await flushRafResets()
 
-    const newRuleBlock = within(dialog).getByText('新增规则').parentElement as HTMLElement
-    await user.click(within(newRuleBlock).getByRole('button', { name: '新增' }))
+    await user.click(within(dialog).getByRole('button', { name: '新增规则' }))
     await waitFor(() =>
       expect(chatApi.updateChatStreamTalkFrequency).toHaveBeenCalledWith('sess-1', {
         previous_time: null,
         time: '00:00-23:59',
-        value: 0.8,
+        value: 1,
       })
     )
     await waitFor(() =>
@@ -1155,7 +1149,7 @@ describe('ChatManagementPage 时间轴规则', () => {
     expect(tracks[0].querySelectorAll('[class*="bg-sky-500"]')).toHaveLength(2)
     expect(tracks[1].querySelectorAll('[class*="bg-emerald-500"]').length).toBeGreaterThan(0)
     expect(tracks[2].querySelectorAll('[class*="bg-amber-500"]').length).toBeGreaterThan(0)
-    expect(scope.getAllByRole('button', { name: '调整开始时间' })).toHaveLength(3)
+    expect(scope.getAllByRole('button', { name: '调整开始时间' })).toHaveLength(2)
 
     vi.mocked(chatApi.getChatStreamDetail).mockResolvedValue(
       makeDetail({
@@ -1229,7 +1223,7 @@ describe('ChatManagementPage 详情空态与错误', () => {
     await user.click(within(dialog).getByRole('button', { name: '允许' }))
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith({
-        title: '适配器放行规则保存失败',
+        title: '适配器规则保存失败',
         description: '请稍后重试',
         variant: 'destructive',
       })
@@ -1319,7 +1313,6 @@ describe('ChatManagementPage 详情空态与错误', () => {
     const scope = within(dialog)
 
     expect(scope.getByText('已允许当前聊天')).toBeInTheDocument()
-    expect(scope.getByText('这条聊天已被单独加入允许规则。')).toBeInTheDocument()
     expect(scope.getByText('已阻止当前聊天')).toBeInTheDocument()
     expect(scope.getByText('这条聊天已被单独加入阻止规则。')).toBeInTheDocument()
     expect(scope.getByText('黑名单未命中')).toBeInTheDocument()

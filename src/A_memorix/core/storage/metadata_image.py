@@ -939,20 +939,46 @@ class MetadataImageMixin:
         )
         return True
 
-    def list_image_assets(self, *, limit: int, offset: int) -> List[Dict[str, Any]]:
+    def list_image_assets(self, *, limit: int, offset: int, chat_id: str = "") -> List[Dict[str, Any]]:
+        """列出图片资产；chat_id 非空时仅保留在该聊天下出现过且仍可见的图片。"""
+        chat_filter = " WHERE asset.status='active'"
+        params: List[Any] = []
+        normalized_chat_id = str(chat_id or "").strip()
+        if normalized_chat_id:
+            chat_filter += (
+                " AND EXISTS ("
+                "SELECT 1 FROM image_occurrences fc "
+                "WHERE fc.asset_id=asset.asset_id AND fc.status='active' AND fc.chat_id=?)"
+            )
+            params.append(normalized_chat_id)
+        params.extend([max(1, int(limit)), max(0, int(offset))])
         rows = self._conn.execute(
-            """
+            f"""
             SELECT asset.*, COUNT(occurrence.occurrence_id) AS occurrence_count,
                    MAX(COALESCE(occurrence.occurred_at, occurrence.created_at)) AS latest_occurrence_at
             FROM image_assets AS asset
             LEFT JOIN image_occurrences AS occurrence
               ON occurrence.asset_id=asset.asset_id AND occurrence.status='active'
-            WHERE asset.status='active'
+            {chat_filter}
             GROUP BY asset.asset_id
             ORDER BY latest_occurrence_at DESC, asset.updated_at DESC
             LIMIT ? OFFSET ?
             """,
-            (max(1, int(limit)), max(0, int(offset))),
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_image_chat_stats(self) -> List[Dict[str, Any]]:
+        """按聊天聚合可见图片资产数，供 WebUI 按聊天浏览筛选。"""
+        rows = self._conn.execute(
+            """
+            SELECT occurrence.chat_id AS chat_id,
+                   COUNT(DISTINCT occurrence.asset_id) AS asset_count
+            FROM image_occurrences AS occurrence
+            WHERE occurrence.status='active' AND TRIM(occurrence.chat_id)!=''
+            GROUP BY occurrence.chat_id
+            ORDER BY asset_count DESC, occurrence.chat_id ASC
+            """
         ).fetchall()
         return [dict(row) for row in rows]
 

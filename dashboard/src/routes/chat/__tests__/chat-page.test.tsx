@@ -249,6 +249,19 @@ vi.mock('../ChatTabBar', () => ({
   ChatTabBar: () => null,
 }))
 
+// 聊天流设置弹窗：只暴露打开状态与传入的聊天流信息
+vi.mock('@/components/chat-stream-settings-dialog', () => ({
+  ChatStreamSettingsDialog: (props: {
+    chat: { session_id: string; display_name: string } | null
+  }) => (
+    <div
+      data-testid="chat-stream-settings-dialog"
+      data-session-id={props.chat?.session_id ?? ''}
+      data-display-name={props.chat?.display_name ?? ''}
+    />
+  ),
+}))
+
 // ---------- 测试工具函数 ----------
 
 const USER_ID = 'webui_user_test1'
@@ -630,10 +643,15 @@ describe('聊天页 ChatPage', () => {
     expect(screen.queryByTestId('composer')).not.toBeInTheDocument()
 
     act(() => sidebarProps().onOpenObservedSettings('observed-1'))
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: '/chat-management',
-      search: { session_id: 'observed-1' },
-    })
+    // 设置在页内弹窗直接打开，不再跳转聊天管理页
+    expect(screen.getByTestId('chat-stream-settings-dialog')).toHaveAttribute(
+      'data-session-id',
+      'observed-1'
+    )
+    expect(screen.getByTestId('chat-stream-settings-dialog')).toHaveAttribute(
+      'data-display-name',
+      '测试群(123)'
+    )
 
     act(() => sidebarProps().onSwitch('webui-default'))
     expect(screen.getByTestId('composer')).toBeInTheDocument()

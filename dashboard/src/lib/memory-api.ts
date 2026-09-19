@@ -2475,6 +2475,12 @@ export interface MemoryImageListPayload extends MemoryImageStatusPayload {
   items?: MemoryImageAssetPayload[]
 }
 
+export interface MemoryImageChatSummaryPayload {
+  chat_id: string
+  chat_name: string
+  asset_count: number
+}
+
 export interface MemoryImageDetailPayload {
   success: boolean
   asset?: MemoryImageAssetPayload
@@ -2490,9 +2496,18 @@ export async function getMemoryImageStatus(): Promise<MemoryImageStatusPayload> 
 
 export async function getMemoryImages(
   limit: number = 50,
-  offset: number = 0
+  offset: number = 0,
+  chatId: string = ''
 ): Promise<MemoryImageListPayload> {
-  return requestJson<MemoryImageListPayload>(`/images?limit=${limit}&offset=${offset}`)
+  const chatQuery = chatId ? `&chat_id=${encodeURIComponent(chatId)}` : ''
+  return requestJson<MemoryImageListPayload>(`/images?limit=${limit}&offset=${offset}${chatQuery}`)
+}
+
+export async function getMemoryImageChats(): Promise<MemoryImageChatSummaryPayload[]> {
+  const result = await requestJson<{ success?: boolean; items?: MemoryImageChatSummaryPayload[] }>(
+    '/images/chats'
+  )
+  return result.items ?? []
 }
 
 export async function getMemoryImage(assetId: string): Promise<MemoryImageDetailPayload> {

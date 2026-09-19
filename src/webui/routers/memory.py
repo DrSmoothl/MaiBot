@@ -4399,8 +4399,32 @@ async def get_image_memory_status():
 async def list_image_memories(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    chat_id: str = Query(""),
 ):
-    return await memory_service.image_memory(action="list", limit=limit, offset=offset)
+    """列出图片资产；chat_id 非空时按聊天浏览。"""
+    return await memory_service.image_memory(
+        action="list", limit=limit, offset=offset, chat_id=chat_id
+    )
+
+
+@router.get("/images/chats")
+async def list_image_memory_chats():
+    """按聊天聚合图片资产数量，供按聊天浏览筛选；名称解析为真实聊天流名。"""
+    payload = await memory_service.image_memory(action="list_chats")
+    items = []
+    for row in payload.get("items") or []:
+        chat_id = str(row.get("chat_id") or "").strip()
+        if not chat_id:
+            continue
+        chat_session = _find_real_chat_session(chat_id)
+        items.append(
+            {
+                "chat_id": chat_id,
+                "chat_name": _get_chat_name(chat_session, {}) if chat_session is not None else chat_id,
+                "asset_count": int(row.get("asset_count") or 0),
+            }
+        )
+    return {"success": True, "items": items}
 
 
 @router.get("/images/{asset_id}")

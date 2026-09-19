@@ -355,7 +355,7 @@ export async function updateChatStreamAdapterPolicy(
     `/api/chat/sessions/${encodeURIComponent(sessionId)}/adapters/policy`,
     {
       body: payload,
-      errorMessage: '保存适配器放行规则失败',
+      errorMessage: '保存适配器规则失败',
     }
   )
   if (!result.detail) {
