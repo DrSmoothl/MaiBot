@@ -203,8 +203,8 @@ describe('ImagesTab 图片详情请求顺序', () => {
     const assets = await screen.findAllByRole('button', { name: /图片记忆/ })
     fireEvent.click(assets[0])
     await screen.findByText('详情-asset-a')
-    // 相似检索在详情弹窗内，命中图片后上方详情直接切换，结果保留供继续对比
-    fireEvent.click(screen.getByRole('button', { name: '查找同图与相似图' }))
+    // 相似检索在详情弹窗内：点搜索出命中列表，命中图片后上方详情直接切换，结果保留供继续对比
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
     fireEvent.click(await screen.findByRole('button', { name: '检索匹配图片' }))
     expect(await screen.findByText('详情-asset-b')).toBeInTheDocument()
     expect(screen.getByText('相似图片 · 0.9000')).toBeInTheDocument()
@@ -215,10 +215,9 @@ describe('ImagesTab 图片详情请求顺序', () => {
     renderTab()
 
     const assetHeading = (await screen.findAllByText('已记住的图片'))[1]
-    // 相似检索在详情弹窗内：打开弹窗确认检索区存在且默认收起匹配范围
+    // 相似检索在详情弹窗内：打开弹窗确认检索区存在
     fireEvent.click((await screen.findAllByRole('button', { name: /图片记忆/ }))[0])
-    await screen.findByText('相似图片检索')
-    expect(screen.getByText('调整匹配范围').closest('details')).not.toHaveAttribute('open')
+    await screen.findByText('相似图片')
 
     // 关闭弹窗后，主页只保留图片列表与次级维护区
     fireEvent.keyDown(document.body, { key: 'Escape' })
