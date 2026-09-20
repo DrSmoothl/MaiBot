@@ -161,6 +161,10 @@
       "title": "マイスタンプ"
     },
     "sidebar": {
+      "adapterAllowedGroup": "アダプター許可",
+      "adapterBlockedGroup": "アダプター不許可",
+      "adapterBlockedHint": "このチャットはアダプター規則で阻止されているため、麦麦は新しいメッセージを受信しません",
+      "adapterBlockedOverrideHint": "このチャットは個別の阻止規則に追加されています",
       "closeConversation": "{{label}} を閉じる",
       "conversations": "チャット会話",
       "emptyPreview": "まだメッセージはありません",

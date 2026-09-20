@@ -56,6 +56,7 @@ vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
 vi.mock('@/lib/avatar-url', () => ({ useResolvedAvatarUrl: () => undefined }))
 
 vi.mock('@/lib/chat-management-api', () => ({
+  CHAT_ADAPTER_STATUS_QUERY_KEY: 'chat-adapter-status',
   deleteChatStream: vi.fn(),
   deleteChatStreamPrompt: vi.fn(),
   deleteChatStreamTalkFrequency: vi.fn(),

@@ -1,4 +1,5 @@
 import {
+  Ban,
   Bot,
   Camera,
   Check,
@@ -20,6 +21,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
+import type { SessionAdapterStatus } from '@/lib/chat-management-api'
 import { cn } from '@/lib/utils'
 import type { SessionInfo, StageStatusInfo } from '@/routes/monitor/use-maisaka-monitor'
 
@@ -34,6 +36,7 @@ interface ChatWorkspaceSidebarProps {
   observedSessions: Map<string, SessionInfo>
   observedStageStatuses: Map<string, StageStatusInfo>
   observedLatestMessages: Map<string, ObservedMessagePreview>
+  observedAdapterStatuses: Map<string, SessionAdapterStatus>
   userId: string
   userName: string
   userAvatarVersion?: number
@@ -147,6 +150,7 @@ function ObservedConversationItem({
   session,
   status,
   latestMessage,
+  adapterStatus,
   active,
   onSelect,
   onOpenSettings,
@@ -154,6 +158,7 @@ function ObservedConversationItem({
   session: SessionInfo
   status?: StageStatusInfo
   latestMessage?: ObservedMessagePreview
+  adapterStatus?: SessionAdapterStatus
   active: boolean
   onSelect: (sessionId: string) => void
   onOpenSettings: (sessionId: string) => void
@@ -170,6 +175,12 @@ function ObservedConversationItem({
     session.isGroupChat && latestMessage?.speakerName
       ? `${latestMessage.speakerName}: ${messagePreview}`
       : messagePreview
+  // 适配器不允许的聊天流实际不活跃，提示区分是被单独阻止还是名单未放行
+  const adapterBlocked = adapterStatus?.allowed === false
+  const adapterBlockedHint =
+    adapterStatus?.reason === 'matched_deny_override'
+      ? t('chat.sidebar.adapterBlockedOverrideHint')
+      : t('chat.sidebar.adapterBlockedHint')
 
   return (
     <div
@@ -177,7 +188,8 @@ function ObservedConversationItem({
         'group relative flex w-full min-w-0 items-center gap-1 rounded-xl pr-1 transition-colors',
         active
           ? 'bg-primary/12 text-foreground shadow-inner'
-          : 'hover:bg-muted/70 text-foreground/90'
+          : 'hover:bg-muted/70 text-foreground/90',
+        adapterBlocked && 'opacity-70'
       )}
     >
       {active && (
@@ -214,7 +226,23 @@ function ObservedConversationItem({
           />
         </div>
         <div className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{session.sessionName}</span>
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{session.sessionName}</span>
+            {adapterBlocked && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    aria-label={adapterBlockedHint}
+                    className="text-muted-foreground shrink-0"
+                    role="img"
+                  >
+                    <Ban className="h-3 w-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="right">{adapterBlockedHint}</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
           {status?.stage && (
             <p className="text-muted-foreground mt-0.5 truncate text-xs">{status.stage}</p>
           )}
@@ -240,6 +268,54 @@ function ObservedConversationItem({
   )
 }
 
+function ObservedConversationGroup({
+  headingId,
+  title,
+  sessions,
+  observedStageStatuses,
+  observedLatestMessages,
+  observedAdapterStatuses,
+  activeObservedSessionId,
+  onSelectObserved,
+  onOpenObservedSettings,
+}: {
+  headingId: string
+  title: string
+  sessions: SessionInfo[]
+  observedStageStatuses: Map<string, StageStatusInfo>
+  observedLatestMessages: Map<string, ObservedMessagePreview>
+  observedAdapterStatuses: Map<string, SessionAdapterStatus>
+  activeObservedSessionId: string | null
+  onSelectObserved: (sessionId: string) => void
+  onOpenObservedSettings: (sessionId: string) => void
+}) {
+  if (sessions.length === 0) return null
+
+  return (
+    <div aria-labelledby={headingId} className="space-y-0.5" role="group">
+      <h3
+        id={headingId}
+        className="text-muted-foreground flex items-center gap-1 px-2.5 pt-1.5 pb-0.5 text-[10px] font-medium tracking-wide"
+      >
+        {title}
+        <span className="opacity-70">{sessions.length}</span>
+      </h3>
+      {sessions.map((session) => (
+        <ObservedConversationItem
+          key={session.sessionId}
+          session={session}
+          status={observedStageStatuses.get(session.sessionId)}
+          latestMessage={observedLatestMessages.get(session.sessionId)}
+          adapterStatus={observedAdapterStatuses.get(session.sessionId)}
+          active={activeObservedSessionId === session.sessionId}
+          onSelect={onSelectObserved}
+          onOpenSettings={onOpenObservedSettings}
+        />
+      ))}
+    </div>
+  )
+}
+
 export function ChatWorkspaceSidebar({
   className,
   tabs,
@@ -248,6 +324,7 @@ export function ChatWorkspaceSidebar({
   observedSessions,
   observedStageStatuses,
   observedLatestMessages,
+  observedAdapterStatuses,
   userId,
   userName,
   userAvatarVersion,
@@ -287,6 +364,15 @@ export function ChatWorkspaceSidebar({
         session.sessionName.toLowerCase().includes(normalizedQuery)
       )
     : sortedObservedSessions
+  // 适配器不允许的聊天流不再处理消息，单独归到不活跃分组
+  const isAdapterBlocked = (sessionId: string) =>
+    observedAdapterStatuses.get(sessionId)?.allowed === false
+  const allowedObservedSessions = filteredObservedSessions.filter(
+    (session) => !isAdapterBlocked(session.sessionId)
+  )
+  const blockedObservedSessions = filteredObservedSessions.filter((session) =>
+    isAdapterBlocked(session.sessionId)
+  )
   const showLocalSection = !normalizedQuery || filteredTabs.length > 0
   const showObservedSection = !normalizedQuery || filteredObservedSessions.length > 0
   const showNoResults =
@@ -374,17 +460,30 @@ export function ChatWorkspaceSidebar({
                   {t('chat.sidebar.waitingObservedChats')}
                 </p>
               ) : (
-                filteredObservedSessions.map((session) => (
-                  <ObservedConversationItem
-                    key={session.sessionId}
-                    session={session}
-                    status={observedStageStatuses.get(session.sessionId)}
-                    latestMessage={observedLatestMessages.get(session.sessionId)}
-                    active={activeObservedSessionId === session.sessionId}
-                    onSelect={onSelectObserved}
-                    onOpenSettings={onOpenObservedSettings}
+                <>
+                  <ObservedConversationGroup
+                    headingId="chat-sidebar-observed-allowed-heading"
+                    title={t('chat.sidebar.adapterAllowedGroup')}
+                    sessions={allowedObservedSessions}
+                    observedStageStatuses={observedStageStatuses}
+                    observedLatestMessages={observedLatestMessages}
+                    observedAdapterStatuses={observedAdapterStatuses}
+                    activeObservedSessionId={activeObservedSessionId}
+                    onSelectObserved={onSelectObserved}
+                    onOpenObservedSettings={onOpenObservedSettings}
                   />
-                ))
+                  <ObservedConversationGroup
+                    headingId="chat-sidebar-observed-blocked-heading"
+                    title={t('chat.sidebar.adapterBlockedGroup')}
+                    sessions={blockedObservedSessions}
+                    observedStageStatuses={observedStageStatuses}
+                    observedLatestMessages={observedLatestMessages}
+                    observedAdapterStatuses={observedAdapterStatuses}
+                    activeObservedSessionId={activeObservedSessionId}
+                    onSelectObserved={onSelectObserved}
+                    onOpenObservedSettings={onOpenObservedSettings}
+                  />
+                </>
               )}
             </section>
           )}

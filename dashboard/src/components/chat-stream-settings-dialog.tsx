@@ -39,6 +39,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { formatChatDisplayName, getChatTypeText } from '@/lib/chat-display'
 import {
+  CHAT_ADAPTER_STATUS_QUERY_KEY,
   deleteChatStream,
   deleteChatStreamPrompt,
   deleteChatStreamTalkFrequency,
@@ -1141,6 +1142,7 @@ function ChatAdapterSection({ detail }: { detail: ChatStreamDetail }) {
     onSuccess: (defaults) => {
       queryClient.setQueryData(['adapter-policy-defaults'], defaults)
       void queryClient.invalidateQueries({ queryKey: ['chat-stream-detail'] })
+      void queryClient.invalidateQueries({ queryKey: [CHAT_ADAPTER_STATUS_QUERY_KEY] })
       toast({ title: '适配器默认策略已保存' })
     },
     onError: (error) => {
@@ -1156,6 +1158,8 @@ function ChatAdapterSection({ detail }: { detail: ChatStreamDetail }) {
       updateChatStreamAdapterPolicy(detail.session_id, payload),
     onSuccess: (nextDetail) => {
       queryClient.setQueryData(['chat-stream-detail', detail.session_id], nextDetail)
+      // 放行结果变化会改变聊天页侧边栏的分组，需要让适配器放行状态缓存失效
+      void queryClient.invalidateQueries({ queryKey: [CHAT_ADAPTER_STATUS_QUERY_KEY] })
       toast({ title: '适配器规则已保存' })
     },
     onError: (error) => {

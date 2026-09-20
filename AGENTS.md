@@ -10,13 +10,10 @@
     - 对于同一个文件夹下的模块导入，使用相对导入，排列顺序按照**不发生import错误的前提下**，随便排列。
     - 对于不同文件夹下的模块导入，使用绝对导入。这些导入应该以`from src`开头，并且按照**不发生import错误的前提下**，尽量使得第二层的文件夹名称相同的导入放在一起；第二层文件夹名称排列随机。
 3. 标准库和第三方库的导入应该放在本地模块导入的前面。
-4. 各个导入块之间应该使用一个空行进行分隔。
-5. 对于现有的代码，如果导入顺序不符合上述规范，在重构代码时应该调整导入顺序以符合规范。
 
 ## 注释规范
-1. 尽量保持良好的注释
-2. 如果原来的代码中有注释，则重构的时候，除非这部分代码被删除，否则相同功能的代码应该保留注释（可以对注释进行修改以保持准确性，但不应该删除注释）。
-3. 如果原来的代码中没有注释，则重构的时候，如果某个功能块的代码较长或者逻辑较为复杂，则应该添加注释来解释这部分代码的功能和逻辑。
+1. 如果原来的代码中有注释，则重构的时候，除非这部分代码被删除，否则相同功能的代码应该保留注释（可以对注释进行修改以保持准确性，但不应该删除注释）。
+2. 如果原来的代码中没有注释，则重构的时候，如果某个功能块的代码较长或者逻辑较为复杂，则应该添加注释来解释这部分代码的功能和逻辑。
 ## 类型注解规范
 1. 重构代码时，如果原来的代码中有类型注解，则相同功能的代码应该保留类型注解（可以对类型注解进行修改以保持准确性，但不应该删除类型注解）。
 2. 重构代码时，如果原来的代码中没有类型注解，则重构的时候，如果某个函数的功能较为复杂或者参数较多，则应该添加类型注解来提高代码的可读性和可维护性。（对于简单的变量，可以不添加类型注解）
@@ -39,34 +36,17 @@
 # 运行/调试/构建/测试/依赖
 优先使用uv
 依赖项以 pyproject.toml 为准，要同步更新requirements.txt
-不要总是考虑fallback，如果哪里有错误，一定要让他及时完整的暴露，而不是用fall_back兜底掩盖过去
 
-# 语言规范
-项目的首选语言为简体中文，无论是注释语言，日志展示语言，还是 WebUI 展示语言都首要以简体中文为首要实现目标
+# Webui规范
+对于dashboard的前端测试，在细节改动，改动范围小时，别测试，别写测试，别build，直接快速做，避免无谓的时间浪费和代码浪费
+修改完webui，如果是小改动小修复，不用急着npm run build。当完成一个较大功能新增或者较广重构时，才需要运行 npm run build。
+
+WebUI 开发服务固定起到 7999 端口。
 
 # 配置文件修改
 如果你需要改动配置文件，不需要修改实际的bot_config.toml或者model_config.toml，只需要修改配置文件模版，并新增一个版本号即可，也不必要为配置改动创建测试文件。
 除非明确说明，否则不要擅自新增 ConfigUpgradeHook
 禁止改动 legacy_migration，此文件以固定
-
-# Webui规范
-涉及显示聊天流信息的，优先显示聊天流实际名称（群名称或 xxx的私聊），而不是session_id
-
-如果遇到 UI 高度/布局问题：
-对比展开前后 DOM，找新增元素和新增属性。
-查 data-dashboard-style 主题样式，尤其是 !important。
-查 computed style 的实际 height/min-height，而不是只看 Tailwind class。
-如果遇到 UI 底纹、阴影、半透明、模糊或颜色叠加问题，先按 DOM 层级拆分父容器、触发器、内部装饰元素和伪元素，逐层查 computed style 的 background/background-color/background-image/backdrop-filter/box-shadow/opacity，不要只盯着截图中最显眼的子元素或只看 class。
-涉及 Tabs/TabsList/TabsTrigger、Radix 或 motion 动画指示器时，要先确认视觉效果来自 TabsList 容器、TabsTrigger 本体、内部 motion/span，还是父级 header/card/dialog 的 backdrop-filter 或主题覆盖，再做最小范围修改。
-Radix 组件不随便移出上下文，像 TabsTrigger 必须留在 TabsList 里。
-
-# Webui修改和测试
-
-修改完webui，如果是小改动小修复，不用急着npm run build。当完成一个较大功能新增或者较广重构时，才需要运行 npm run build。
-
-不要每次小修改都起全量webui测试，一般只有较大的更改或者明确要求测试，再进行webui的测试，节省开发时间
-
-WebUI 开发服务固定起到 7999 端口。
 
 # 事件循环规范
 不要阻塞事件循环。同一进程里有两个事件循环（bot 主循环、WebUI 独立线程的循环），任何一个被同步工作占住，界面上对应的一侧就会整体卡住。
@@ -78,6 +58,8 @@ WebUI 开发服务固定起到 7999 端口。
 
 # 会话 ID 规范
 除聊天流创建/注册链路外，业务模块不应自行调用 `SessionUtils.calculate_session_id` 计算资源归属 ID。表达学习、黑话、记忆、WebUI、配置匹配等模块应通过 `chat_manager` 的内部接口，基于 platform、目标 ID 和聊天类型解析已存在的真实聊天流；如果解析不到真实 `ChatSession.session_id`，不要把自行计算的 fallback hash 写入数据库。
+
+webui中设计聊天会话流的，涉及显示聊天流信息的，优先显示聊天流实际名称（群名称或 xxx的私聊），而不是session_id
 
 # 关于 A_memorix 修改
 如果修改涉及 `src/A_memorix`，请先阅读 `src/A_memorix/MODIFICATION_POLICY.md`。
@@ -94,7 +76,6 @@ https://github.com/Mai-with-u/maibot-plugin-sdk/blob/main/docs/guide.md
 
 如果你要编写插件，不要改动根目录的.gitignore，而是在/plugins下创建独立仓库，然后进行编写
 如果你要编写插件有需求需要改动主程序代码，请你先请求许可。
-
 
 # 如何提交maibot插件
 https://github.com/Mai-with-u/plugin-repo/blob/main/CONTRIBUTING.md

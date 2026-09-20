@@ -233,6 +233,10 @@
       "title": "我的表情包"
     },
     "sidebar": {
+      "adapterAllowedGroup": "适配器允许",
+      "adapterBlockedGroup": "适配器不允许",
+      "adapterBlockedHint": "该聊天被适配器规则阻止，麦麦不会接收这里的新消息",
+      "adapterBlockedOverrideHint": "该聊天已被单独加入阻止规则",
       "closeConversation": "关闭 {{label}}",
       "conversations": "聊天会话",
       "emptyPreview": "暂无消息",

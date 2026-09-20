@@ -26,6 +26,7 @@ import { ChatComposer } from './ChatComposer'
 import { ChatTabBar } from './ChatTabBar'
 import { ChatWorkspaceSidebar } from './ChatWorkspaceSidebar'
 import { MessageList } from './MessageList'
+import { useObservedAdapterStatuses } from './use-observed-adapter-status'
 import type {
   ChatImageAttachment,
   ChatIncomingImage,
@@ -261,6 +262,13 @@ export function ChatPage() {
     }
     return latestMessages
   }, [allTimeline])
+
+  // 观察聊天流的适配器放行状态，用于侧边栏区分活跃与不活跃聊天
+  const observedSessionIds = useMemo(
+    () => Array.from(observedSessions.keys()),
+    [observedSessions]
+  )
+  const observedAdapterStatuses = useObservedAdapterStatuses(observedSessionIds)
 
   // 默认本地聊天标签页
   const defaultTab: ChatTab = {
@@ -1097,6 +1105,7 @@ export function ChatPage() {
           observedSessions={observedSessions}
           observedStageStatuses={observedStageStatuses}
           observedLatestMessages={observedLatestMessages}
+          observedAdapterStatuses={observedAdapterStatuses}
           userId={userId}
           userName={userName}
           userAvatarVersion={userAvatarVersion}

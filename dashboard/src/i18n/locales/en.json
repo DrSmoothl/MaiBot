@@ -233,6 +233,10 @@
       "title": "My stickers"
     },
     "sidebar": {
+      "adapterAllowedGroup": "Adapter allowed",
+      "adapterBlockedGroup": "Adapter blocked",
+      "adapterBlockedHint": "Adapter rules block this chat, so Mai won't receive new messages here",
+      "adapterBlockedOverrideHint": "This chat was added to the block rules",
       "closeConversation": "Close {{label}}",
       "conversations": "Chat conversations",
       "emptyPreview": "No messages yet",
