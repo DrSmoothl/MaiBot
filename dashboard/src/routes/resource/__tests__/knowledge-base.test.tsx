@@ -1991,8 +1991,8 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '删除' }))
-    await screen.findByText('来源批量删除')
+    await user.click(screen.getByRole('tab', { name: '记忆抹除' }))
+    await screen.findByRole('button', { name: '全选当前结果' })
 
     const sourceCellCandidates = await screen.findAllByText('demo-1')
     const sourceRow = sourceCellCandidates
@@ -2444,7 +2444,7 @@ describe('KnowledgeBasePage import workflow', () => {
     await user.click(screen.getByRole('button', { name: '跳转' }))
 
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: '删除' })).toHaveAttribute('data-state', 'active')
+      expect(screen.getByRole('tab', { name: '记忆抹除' })).toHaveAttribute('data-state', 'active')
     })
     expect(screen.getByPlaceholderText('搜索 operation / reason / requested_by / source')).toHaveValue('paragraph-missing-op')
     // 来源检索输入框已改为类别标签页，深链接带入的来源限定以可清除的芯片呈现

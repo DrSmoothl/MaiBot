@@ -1477,15 +1477,15 @@ describe('MemoryTimelineManager 范围、筛选与分页', () => {
     expect(screen.getByText('事件20')).toBeInTheDocument()
   })
 
-  it('审计范围独占整行，摘要合并到事件列表且不显示时间滑块', async () => {
+  it('审计范围卡片不显示标题，事件列表不显示变动摘要', async () => {
     await renderTimeline({ initialChatId: 'chat-1' })
     const cards = document.querySelectorAll<HTMLElement>('[data-dashboard-card="true"]')
 
     expect(cards).toHaveLength(2)
-    expect(within(cards[0]).getByText('审计范围')).toBeInTheDocument()
+    expect(within(cards[0]).queryByText('事件列表')).not.toBeInTheDocument()
     expect(within(cards[1]).getByText('事件列表')).toBeInTheDocument()
-    expect(within(cards[1]).getByRole('region', { name: '变动摘要' })).toBeInTheDocument()
-    expect(screen.queryByText('选择真实聊天流与时间窗口，核对长期记忆对象的变动记录。')).not.toBeInTheDocument()
+    expect(within(cards[1]).queryByRole('region', { name: '变动摘要' })).not.toBeInTheDocument()
+    expect(within(cards[0]).queryByText('审计范围')).not.toBeInTheDocument()
     expect(screen.queryByText(/窗口开始：|窗口结束：/)).not.toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '刷新时间线' }).compareDocumentPosition(

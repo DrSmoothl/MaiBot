@@ -1,7 +1,7 @@
 /**
  * DeleteTab：用 mock hook 结果锁定来源删除、操作恢复与明细 UI。
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
@@ -87,7 +87,7 @@ function makeOperation(
 
 function makeDelete(overrides: Partial<UseMemoryDeleteResult> = {}): UseMemoryDeleteResult {
   return {
-    sourceKindFilter: 'all',
+    sourceKindFilter: 'chat_summary',
     setSourceKindFilter: vi.fn(),
     sourceSearch: '',
     setSourceSearch: vi.fn(),
@@ -112,6 +112,7 @@ function makeDelete(overrides: Partial<UseMemoryDeleteResult> = {}): UseMemoryDe
     deleteOperationPageCount: 1,
     pagedDeleteOperations: [],
     selectedDeleteOperation: null,
+    selectedOperationId: '',
     setSelectedOperationId: vi.fn(),
     restoreDeleteOperation: vi.fn(async () => {}),
     deleteRestoring: false,
@@ -153,11 +154,13 @@ function renderDelete(overrides: Partial<UseMemoryDeleteResult> = {}) {
 }
 
 describe('DeleteTab', () => {
-  it('空来源与未选操作展示占位，预览删除保持禁用', () => {
+  it('空来源展示占位，预览删除保持禁用，操作详情以弹窗呈现', () => {
     renderDelete()
 
     expect(screen.getByText('当前没有可删除的来源')).toBeInTheDocument()
-    expect(screen.getByText('当前没有可查看的删除操作详情')).toBeInTheDocument()
+    // 操作详情改为弹出卡片，页面不再渲染固定的详情占位区
+    expect(screen.queryByText('当前没有可查看的删除操作详情')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '删除操作详情' })).not.toBeInTheDocument()
     expect(screen.getByText('当前筛选条件下没有删除操作')).toBeInTheDocument()
     expect(screen.getByText('当前命中 0 个来源')).toBeInTheDocument()
     expect(screen.getByText('已选择 0 个来源')).toBeInTheDocument()
@@ -191,13 +194,14 @@ describe('DeleteTab', () => {
     expect(screen.getByText('chat:alpha').closest('tr')).toHaveTextContent('3')
     expect(screen.getByText('chat:beta').closest('tr')).toHaveTextContent('0')
 
-    // 类别用标签页切换，用户不需要猜该输入什么
-    expect(screen.getByRole('tab', { name: '全部' })).toHaveAttribute('data-state', 'active')
+    // 类别用标签页切换，用户不需要猜该输入什么；不提供「全部」入口，默认落在聊天摘要
+    expect(screen.queryByRole('tab', { name: '全部' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '聊天摘要' })).toHaveAttribute('data-state', 'active')
     // 聊天流、聊天记录没有独立标签页，统一收在「其他」里
     expect(screen.queryByRole('tab', { name: '聊天流' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '聊天记录' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('tab', { name: '聊天摘要' }))
-    expect(memoryDelete.setSourceKindFilter).toHaveBeenCalledWith('chat_summary')
+    await user.click(screen.getByRole('tab', { name: '人物事实' }))
+    expect(memoryDelete.setSourceKindFilter).toHaveBeenCalledWith('person_fact')
     await user.click(screen.getByRole('tab', { name: '其他' }))
     expect(memoryDelete.setSourceKindFilter).toHaveBeenCalledWith('other')
 
@@ -234,7 +238,9 @@ describe('DeleteTab', () => {
   })
 
   it('来源优先展示聊天流名称与来源类型，裸 source 降级为副标题', () => {
+    // 「其他」下类别徽章保留，借此断言行内类型文案
     renderDelete({
+      sourceKindFilter: 'other',
       filteredSources: [
         makeSource({
           source: 'chat_summary:s1',
@@ -284,7 +290,7 @@ describe('DeleteTab', () => {
     expect(tooltip).toHaveTextContent('段落数：6')
   })
 
-  it('切到具体类别后行尾不再重复展示类别徽章', () => {
+  it('切到具体类别后行尾不再重复展示类别徽章，其他下保留', () => {
     const sources = [
       makeSource({
         source: 'person_fact:abc',
@@ -295,16 +301,7 @@ describe('DeleteTab', () => {
       }),
     ]
 
-    const { rerender } = renderDelete({ sourceKindFilter: 'all', filteredSources: sources })
-    expect(screen.getByText('张三').closest('tr')).toHaveTextContent('人物事实')
-
-    rerender(
-      <Tabs defaultValue="delete">
-        <DeleteTab
-          delete={makeDelete({ sourceKindFilter: 'person_fact', filteredSources: sources })}
-        />
-      </Tabs>,
-    )
+    const { rerender } = renderDelete({ sourceKindFilter: 'person_fact', filteredSources: sources })
     expect(screen.getByText('张三').closest('tr')).not.toHaveTextContent('人物事实')
 
     // 「其他」下类别不固定，仍保留徽章以便区分来源
@@ -428,6 +425,8 @@ describe('DeleteTab', () => {
     ]
     const { memoryDelete } = renderDelete({
       selectedDeleteOperation: operation,
+      // 传入 selectedOperationId 使 DeleteTab 初始即打开详情弹窗
+      selectedOperationId: operation.operation_id,
       selectedOperationCounts: { entities: 1, relations: 2, paragraphs: 3, sources: 4 },
       selectedOperationSources: ['chat:alpha', 'chat:beta'],
       sourceNameBySource: { 'chat:beta': '摸鱼群' },
@@ -470,6 +469,7 @@ describe('DeleteTab', () => {
     const restored = makeOperation({ status: 'restored', restored_at: 1_710_000_100, requested_by: '' })
     const { memoryDelete, rerender } = renderDelete({
       selectedDeleteOperation: restored,
+      selectedOperationId: restored.operation_id,
     })
 
     expect(screen.getByRole('button', { name: '已恢复' })).toBeDisabled()
@@ -483,6 +483,7 @@ describe('DeleteTab', () => {
         <DeleteTab
           delete={makeDelete({
             selectedDeleteOperation: makeOperation({ reason: null }),
+            selectedOperationId: 'op-1',
             deleteRestoring: true,
             restoreDeleteOperation: memoryDelete.restoreDeleteOperation,
           })}
@@ -498,6 +499,7 @@ describe('DeleteTab', () => {
   it('详情加载中、错误与无明细占位', () => {
     renderDelete({
       selectedDeleteOperation: makeOperation({ selector: undefined }),
+      selectedOperationId: 'op-1',
       selectedOperationDetailLoading: true,
       selectedOperationDetailError: '加载删除明细失败',
       selectedOperationItems: [],
@@ -512,11 +514,11 @@ describe('DeleteTab', () => {
     expect(document.querySelector('pre')).toHaveTextContent('{}')
   })
 
-  it('筛选后无明细与对象分页、搜索', async () => {
-    const user = userEvent.setup()
+  it('筛选后无明细与对象分页、搜索', () => {
     const items = [makeItem()]
     const { memoryDelete } = renderDelete({
       selectedDeleteOperation: makeOperation(),
+      selectedOperationId: 'op-1',
       selectedOperationItems: items,
       filteredSelectedOperationItems: [],
       pagedSelectedOperationItems: [],
@@ -534,13 +536,13 @@ describe('DeleteTab', () => {
     })
     expect(memoryDelete.setSelectedOperationItemSearch).toHaveBeenCalledWith('张三')
 
-    const prevButtons = screen.getAllByRole('button', { name: '上一页' })
-    const nextButtons = screen.getAllByRole('button', { name: '下一页' })
-    await user.click(prevButtons[1])
+    // 详情弹窗的 portal 在主树之外，用 within 精确命中弹窗内的对象分页按钮
+    const detailDialog = screen.getByRole('dialog', { name: '删除操作详情' })
+    fireEvent.click(within(detailDialog).getByRole('button', { name: '上一页' }))
     const prev = pageUpdater(memoryDelete.setSelectedOperationItemPage, 0)
     expect(prev(2)).toBe(1)
     expect(prev(1)).toBe(1)
-    await user.click(nextButtons[1])
+    fireEvent.click(within(detailDialog).getByRole('button', { name: '下一页' }))
     const next = pageUpdater(memoryDelete.setSelectedOperationItemPage, 1)
     expect(next(2)).toBe(3)
     expect(next(3)).toBe(3)

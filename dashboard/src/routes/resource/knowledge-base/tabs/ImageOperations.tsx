@@ -89,16 +89,8 @@ export function ImageSearchPanel({ assetId, status, onSelect }: ImageSearchPanel
 
   return (
     <Card>
-      <CardHeader className="border-b pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <Search className="h-4 w-4" />
-          相似图片检索
-        </CardTitle>
-        <CardDescription>
-          {assetId
-            ? '查找麦麦是否见过这张图片，或记住过类似的图片。'
-            : '先在图片列表中选择一张图片，再查找相似内容。'}
-        </CardDescription>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">相似图片</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 pt-4">
         {error && (
@@ -107,35 +99,28 @@ export function ImageSearchPanel({ assetId, status, onSelect }: ImageSearchPanel
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end md:grid-cols-1">
-          <details className="text-muted-foreground text-xs">
-            <summary className="cursor-pointer">调整匹配范围</summary>
-            <label htmlFor="image-search-threshold" className="mt-2 block space-y-1.5 text-sm">
-              <span className="font-medium">相似度阈值</span>
-              <Input
-                id="image-search-threshold"
-                type="number"
-                min={-1}
-                max={1}
-                step={0.01}
-                value={threshold}
-                onChange={(event) => setThreshold(event.target.value)}
-              />
-            </label>
-            <p className="mt-2">默认即可使用。数值越高，匹配越严格。</p>
-          </details>
-          <Button disabled={!assetId || searching} onClick={() => void search()}>
+        <div className="flex items-end gap-3">
+          <label htmlFor="image-search-threshold" className="w-32 space-y-1.5 text-sm">
+            <span className="text-muted-foreground font-medium">相似度</span>
+            <Input
+              id="image-search-threshold"
+              type="number"
+              min={-1}
+              max={1}
+              step={0.01}
+              value={threshold}
+              onChange={(event) => setThreshold(event.target.value)}
+            />
+          </label>
+          <Button className="flex-1" disabled={!assetId || searching} onClick={() => void search()}>
             {searching ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Search className="h-4 w-4" />
             )}
-            {searching ? '检索中' : '查找同图与相似图'}
+            {searching ? '检索中' : '搜索'}
           </Button>
         </div>
-        <p className="text-muted-foreground text-xs">
-          管理员检索范围包含全部图片记忆；相似度不代表身份确认。
-        </p>
         {result && (
           <div className="space-y-3 border-t pt-3">
             <p className="text-sm font-medium">上次检索结果</p>
@@ -144,7 +129,7 @@ export function ImageSearchPanel({ assetId, status, onSelect }: ImageSearchPanel
             </p>
             {result.hits.length === 0 && (
               <p className="text-muted-foreground text-sm">
-                没有找到匹配图片。可以换一张图片，或在调整匹配范围中降低相似度阈值。
+                没有找到匹配图片。可以换一张图片，或降低相似度阈值。
               </p>
             )}
             <details className="text-muted-foreground text-xs">
@@ -162,41 +147,54 @@ export function ImageSearchPanel({ assetId, status, onSelect }: ImageSearchPanel
               </Alert>
             )}
             <div className="grid max-h-80 gap-3 overflow-auto pr-1 sm:grid-cols-2 md:grid-cols-1">
-              {result.hits.map((hit) => (
-                <div key={hit.asset_id} className="space-y-2 rounded-lg border p-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      resultSelection.current = hit.asset_id
-                      onSelect(hit.asset_id)
-                    }}
-                    className="w-full"
+              {result.hits.map((hit) => {
+                // 竖图时图片与信息左右排布，横图保持上下排布
+                const isPortrait = hit.height > hit.width
+                return (
+                  <div
+                    key={hit.asset_id}
+                    className={
+                      isPortrait
+                        ? 'flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start'
+                        : 'space-y-2 rounded-lg border p-3'
+                    }
                   >
-                    <img
-                      src={getMemoryImageContentUrl(hit.asset_id)}
-                      alt="检索匹配图片"
-                      className="bg-muted h-28 w-full rounded-md object-contain"
-                    />
-                  </button>
-                  <p className="text-sm font-medium">
-                    {hit.match_kind === 'exact_hash' ? '同一图片' : '相似图片'} ·{' '}
-                    {hit.similarity.toFixed(4)}
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    {[...new Set(hit.occurrences.map((item) => item.chat_name))].join('、')}
-                  </p>
-                  {hit.observations.map((item) => (
-                    <p key={item.observation_id} className="text-sm">
-                      {item.text}
-                    </p>
-                  ))}
-                  {hit.related_memories.map((item, index) => (
-                    <p key={index} className="text-sm">
-                      关联：{item.content}
-                    </p>
-                  ))}
-                </div>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resultSelection.current = hit.asset_id
+                        onSelect(hit.asset_id)
+                      }}
+                      className={isPortrait ? 'w-full sm:w-40 sm:shrink-0' : 'w-full'}
+                    >
+                      <img
+                        src={getMemoryImageContentUrl(hit.asset_id)}
+                        alt="检索匹配图片"
+                        className="bg-muted h-28 rounded-md object-contain"
+                      />
+                    </button>
+                    <div className={isPortrait ? 'min-w-0 flex-1 space-y-2' : 'space-y-2'}>
+                      <p className="text-sm font-medium">
+                        {hit.match_kind === 'exact_hash' ? '同一图片' : '相似图片'} ·{' '}
+                        {hit.similarity.toFixed(4)}
+                      </p>
+                      <p className="text-muted-foreground text-xs">
+                        {[...new Set(hit.occurrences.map((item) => item.chat_name))].join('、')}
+                      </p>
+                      {hit.observations.map((item) => (
+                        <p key={item.observation_id} className="text-sm">
+                          {item.text}
+                        </p>
+                      ))}
+                      {hit.related_memories.map((item, index) => (
+                        <p key={index} className="text-sm">
+                          关联：{item.content}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

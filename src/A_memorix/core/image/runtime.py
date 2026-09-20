@@ -504,6 +504,8 @@ class ImageMemoryRuntime:
                 {
                     **hit,
                     "content_hash": str(asset.get("content_hash") or ""),
+                    "width": int(asset.get("width") or 0),
+                    "height": int(asset.get("height") or 0),
                     "occurrences": occurrences,
                     "observations": self.metadata_store.list_image_observations(occurrence_ids),
                     "related_memories": related,

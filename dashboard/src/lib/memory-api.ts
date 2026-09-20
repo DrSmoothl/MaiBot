@@ -2630,6 +2630,8 @@ export interface MemoryImageSearchPayload {
     asset_id: string
     similarity: number
     match_kind: string
+    width: number
+    height: number
     occurrences: MemoryImageOccurrencePayload[]
     observations: MemoryImageObservationPayload[]
     related_memories: Array<{ content: string }>

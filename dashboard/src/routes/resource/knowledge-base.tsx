@@ -101,7 +101,6 @@ const MEMORY_CONSOLE_TABS: MemoryConsoleTab[] = [
   'import',
   'inspection',
   'delete',
-  'feedback',
 ]
 
 // 记忆查询下的内容切面：文字记录与人物画像共用「记忆查询」这一入口
@@ -116,8 +115,8 @@ const MEMORY_VIEW_OPTIONS = [
   description: string
 }>
 
-// 情景记忆管理并入记忆检修后的子模式，人物画像维护同样并入检修
-type InspectionMode = 'maintenance' | 'correction' | 'tuning' | 'episodes' | 'profiles'
+// 情景记忆管理并入记忆检修后的子模式，人物画像维护与纠错历史同样并入检修
+type InspectionMode = 'maintenance' | 'correction' | 'tuning' | 'episodes' | 'profiles' | 'feedback'
 
 interface KnowledgeBaseDeepLinkState {
   tab: MemoryConsoleTab
@@ -152,13 +151,15 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
   const rawTab = params.get('tab')
   const legacyInspectionMode =
     rawTab === 'maintenance' || rawTab === 'correction' || rawTab === 'tuning' ? rawTab : undefined
-  // 情景记忆曾是独立标签，旧链接 tab=episodes 迁移为 inspection 的子模式
+  // 情景记忆曾是独立标签，旧链接 tab=episodes 迁移为 inspection 的子模式；
+  // 纠错历史同样并入检修，旧链接 tab=feedback 迁移为 inspection 的 feedback 子模式
   const legacyEpisodesTab = rawTab === 'episodes'
+  const legacyFeedbackTab = rawTab === 'feedback'
   // 人物画像曾是独立标签，旧链接 tab=profiles 迁移为「记忆查询 → 人物画像」切面（保留 person_id），
   // 后端审计时间线的 jump_target 仍指向 tab=profiles，由这里统一翻译
   const legacyProfilesTab = rawTab === 'profiles'
   const tabParam =
-    legacyInspectionMode || legacyEpisodesTab
+    legacyInspectionMode || legacyEpisodesTab || legacyFeedbackTab
       ? 'inspection'
       : legacyProfilesTab
         ? 'records'
@@ -171,7 +172,8 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
     rawMode === 'maintenance' ||
     rawMode === 'tuning' ||
     rawMode === 'episodes' ||
-    rawMode === 'profiles'
+    rawMode === 'profiles' ||
+    rawMode === 'feedback'
       ? (rawMode as InspectionMode)
       : undefined
   const rawView = params.get('view')
@@ -181,7 +183,10 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
     tab,
     // 旧 tab=profiles 链接与显式 view=profiles 都落到记忆查询的人物画像切面
     memoryView: memoryViewParam ?? (legacyProfilesTab ? 'profiles' : undefined),
-    inspectionMode: legacyInspectionMode ?? modeParam ?? (legacyEpisodesTab ? 'episodes' : 'correction'),
+    inspectionMode:
+      legacyInspectionMode ??
+      modeParam ??
+      (legacyEpisodesTab ? 'episodes' : legacyFeedbackTab ? 'feedback' : 'correction'),
     chatId: params.get('chat_id') || undefined,
     timeStart: parseOptionalTimestampQuery(params.get('from') ?? params.get('time_start')),
     timeEnd: parseOptionalTimestampQuery(params.get('to') ?? params.get('time_end')),
@@ -575,8 +580,9 @@ export function KnowledgeBasePage() {
   })
 
   // 纠错领域：纠错历史懒加载、任务详情、行为日志分页、回退；回退后刷新来源与运行时配置
+  // 纠错历史已并入记忆检修，激活条件跟随检修的 feedback 子模式
   const memoryFeedback = useMemoryFeedback({
-    active: activeTab === 'feedback',
+    active: activeTab === 'inspection' && inspectionMode === 'feedback',
     initialSearch: deepLinkRef.current.taskId ? String(deepLinkRef.current.taskId) : '',
     initialTaskId: deepLinkRef.current.taskId ?? 0,
     onRuntimeChanged: () => memoryRuntime.refreshRuntimeConfig(),
@@ -849,15 +855,16 @@ export function KnowledgeBasePage() {
         return
       }
 
-      if (tab === 'feedback') {
+      // 纠错历史已并入记忆检修；后端跳转目标仍是 tab=feedback，这里转译为检修子模式
+      if (rawTab === 'feedback') {
         const taskId = Math.floor(readJumpNumber(target, 'task_id') ?? 0)
         if (taskId > 0) {
           memoryFeedback.setSelectedFeedbackTaskId(taskId)
           memoryFeedback.setFeedbackSearch(String(taskId))
           memoryFeedback.setFeedbackActionLogPage(1)
         }
-        switchMemoryTab('feedback', { task_id: taskId > 0 ? taskId : undefined })
-        // 纠错数据由 useMemoryFeedback 自管加载（enabled:active），切到该 tab 即触发拉取
+        switchMemoryTab('inspection', { mode: 'feedback', task_id: taskId > 0 ? taskId : undefined })
+        // 纠错数据由 useMemoryFeedback 自管加载（enabled:active），切到该子模式即触发拉取
         return
       }
 
@@ -1239,7 +1246,7 @@ export function KnowledgeBasePage() {
                     description: '查询权威记录与人物画像',
                   },
                   { value: 'images', label: '图片记忆', description: '图片向量、认知与关联记忆' },
-                  { value: 'timeline', label: '审计时间线', description: '核对聊天流记忆变动' },
+                  { value: 'timeline', label: '记忆流', description: '核对聊天流记忆变动' },
                 ].map((item) => (
                   <DashboardTabTrigger
                     key={item.value}
@@ -1262,8 +1269,7 @@ export function KnowledgeBasePage() {
                     description: '导入资料并管理可分享记忆包',
                   },
                   { value: 'inspection', label: '记忆检修', description: '维护记忆状态并修正记忆内容' },
-                  { value: 'delete', label: '删除', description: '批量删除与历史回溯' },
-                  { value: 'feedback', label: '纠错历史', description: '查看反馈与回滚' },
+                  { value: 'delete', label: '记忆抹除', description: '批量抹除记忆与历史回溯' },
                 ].map((item) => (
                   <DashboardTabTrigger
                     key={item.value}
@@ -1376,12 +1382,13 @@ export function KnowledgeBasePage() {
                   }}
                   className="space-y-4"
                 >
-                  <TabsList className="grid w-full grid-cols-5">
+                  <TabsList className="grid w-full grid-cols-6">
                     <TabsTrigger value="correction">内容修正</TabsTrigger>
                     <TabsTrigger value="maintenance">状态维护</TabsTrigger>
                     <TabsTrigger value="tuning">检索调优</TabsTrigger>
                     <TabsTrigger value="episodes">情景记忆</TabsTrigger>
                     <TabsTrigger value="profiles">画像维护</TabsTrigger>
+                    <TabsTrigger value="feedback">纠错历史</TabsTrigger>
                   </TabsList>
                   <CorrectionTab correction={memoryCorrection} />
                   <TabsContent value="maintenance" className="space-y-4">
@@ -1402,6 +1409,7 @@ export function KnowledgeBasePage() {
                   <TabsContent value="profiles" className="space-y-4">
                     <ProfileMaintenancePanel profile={memoryProfile} />
                   </TabsContent>
+                  <FeedbackTab feedback={memoryFeedback} />
                   <TuningTab tuning={memoryTuning} />
                 </Tabs>
               ) : null}
@@ -1409,9 +1417,6 @@ export function KnowledgeBasePage() {
 
             {/* 删除面板数据由 useMemoryDelete 自管加载（enabled:active），不再走懒加载占位门控 */}
             {shouldRenderMemoryTab('delete') && <DeleteTab delete={memoryDelete} />}
-
-            {/* 纠错面板数据由 useMemoryFeedback 自管加载（enabled:active），不再走懒加载占位门控 */}
-            {shouldRenderMemoryTab('feedback') && <FeedbackTab feedback={memoryFeedback} />}
           </Tabs>
         </div>
       </div>

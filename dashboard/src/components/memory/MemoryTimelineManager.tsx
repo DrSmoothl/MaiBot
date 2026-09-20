@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
-  CalendarClock,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  GitBranch,
   RefreshCw,
-  Search,
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -182,10 +179,6 @@ export function MemoryTimelineManager({
   const initialAppliedRef = useRef(false)
   const latestRequestRef = useRef(0)
 
-  const selectedChat = useMemo(
-    () => chatTargets.find((item) => item.chat_id === chatId) ?? null,
-    [chatId, chatTargets],
-  )
   const filteredTypes = useMemo(() => (typeFilter === 'all' ? [] : [typeFilter]), [typeFilter])
 
   useEffect(() => {
@@ -283,12 +276,6 @@ export function MemoryTimelineManager({
   return (
     <div className="space-y-4">
       <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CalendarClock className="h-4 w-4" />
-            审计范围
-          </CardTitle>
-        </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-[minmax(0,1.5fr)_minmax(12rem,0.5fr)]">
             <div className="space-y-2">
@@ -364,36 +351,7 @@ export function MemoryTimelineManager({
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-4 w-4" />
-            事件列表
-          </CardTitle>
-          <CardDescription>按时间倒序分页展示长期记忆审计事件。</CardDescription>
-        </CardHeader>
         <CardContent className="space-y-4">
-          <section aria-label="变动摘要" className="space-y-3 border-b pb-4">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <GitBranch className="h-4 w-4" />
-                变动摘要
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {selectedChat
-                  ? formatChatDisplayName(selectedChat.chat_name, selectedChat.account_id)
-                  : '未选择聊天流'} · {payload?.summary.total ?? 0} 条事件
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              {TYPE_FILTERS.filter((item) => item.value !== 'all').map((item) => (
-                <div key={item.value} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-                  <span className="text-xs text-muted-foreground">{item.label}</span>
-                  <span className="text-lg font-semibold">{payload?.summary.by_type[item.value] ?? 0}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-
           {events.length > 0 ? (
             <>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

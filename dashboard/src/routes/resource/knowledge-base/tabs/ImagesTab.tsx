@@ -1,6 +1,5 @@
 import {
   Check,
-  Database,
   Image as ImageIcon,
   Link2Off,
   Loader2,
@@ -15,14 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogBody, DialogContent } from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -385,13 +377,6 @@ export function ImagesTab() {
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent style={{ '--dialog-width': '48rem' } as CSSProperties}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-sm">
-              <Database className="h-4 w-4" />
-              这张图片记住了什么
-            </DialogTitle>
-            <DialogDescription>查看图片说明、来源和关联内容，说明有误可直接修正。</DialogDescription>
-          </DialogHeader>
           <DialogBody>
             <div className="space-y-4 break-words">
               {detailLoading ? (
@@ -404,21 +389,37 @@ export function ImagesTab() {
                   图片详情加载失败
                 </div>
               ) : (
-                <>
-                  <img
-                    src={getMemoryImageContentUrl(detail.asset.asset_id)}
-                    alt="选中的图片记忆"
-                    className="bg-muted max-h-64 w-full rounded-lg object-contain"
-                  />
-                  <details className="space-y-1 text-xs">
-                    <summary className="text-muted-foreground cursor-pointer">文件信息</summary>
-                    <div className="font-mono break-all">{detail.asset.content_hash}</div>
-                    <div className="text-muted-foreground">
-                      {detail.asset.mime_type} · {formatBytes(detail.asset.byte_size)} ·{' '}
-                      {detail.asset.width} × {detail.asset.height}
-                    </div>
-                  </details>
-                  <section className="space-y-2">
+                (() => {
+                  // 竖图时图片与信息左右排布，横图保持上下排布
+                  const isPortrait = detail.asset.height > detail.asset.width
+                  return (
+                    <>
+                      <div
+                        className={
+                          isPortrait
+                            ? 'flex flex-col gap-4 sm:flex-row sm:items-start'
+                            : 'space-y-4'
+                        }
+                      >
+                        <img
+                          src={getMemoryImageContentUrl(detail.asset.asset_id)}
+                          alt="选中的图片记忆"
+                          className={
+                            isPortrait
+                              ? 'bg-muted max-h-72 w-full rounded-lg object-contain sm:max-w-[45%] sm:self-start sm:w-auto'
+                              : 'bg-muted max-h-64 w-full rounded-lg object-contain'
+                          }
+                        />
+                        <div className={isPortrait ? 'min-w-0 flex-1 space-y-4' : 'space-y-4'}>
+                          <details className="space-y-1 text-xs">
+                            <summary className="text-muted-foreground cursor-pointer">文件信息</summary>
+                            <div className="font-mono break-all">{detail.asset.content_hash}</div>
+                            <div className="text-muted-foreground">
+                              {detail.asset.mime_type} · {formatBytes(detail.asset.byte_size)} ·{' '}
+                              {detail.asset.width} × {detail.asset.height}
+                            </div>
+                          </details>
+                          <section className="space-y-2">
                     <h3 className="text-sm font-semibold">图片来自哪里</h3>
                     {(detail.occurrences ?? []).map((occurrence) => (
                       <div
@@ -597,7 +598,11 @@ export function ImagesTab() {
                       <div className="text-muted-foreground text-xs">暂无关联记忆</div>
                     )}
                   </section>
-                </>
+                        </div>
+                      </div>
+                    </>
+                  )
+                })()
               )}
 
               {/* 相似图片检索：放进详情弹窗，命中图片直接更新上方详情，结果保留可继续对比 */}

@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import { RotateCcw, Trash2, X } from 'lucide-react'
 
 import { MemoryMiniTabs } from '@/components/memory/MemoryMiniTabs'
@@ -6,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -18,7 +21,6 @@ import { cn } from '@/lib/utils'
 import {
   DELETE_OPERATION_ITEM_PAGE_SIZE,
   DELETE_OPERATION_PAGE_SIZE,
-  MEMORY_SOURCE_KIND_FILTER_ALL,
   MEMORY_SOURCE_KIND_FILTER_KINDS,
   MEMORY_SOURCE_KIND_FILTER_OTHER,
 } from '../constants'
@@ -36,9 +38,8 @@ import {
   summarizeDeleteSelector,
 } from '../utils'
 
-/** 来源类别筛选标签：全部 + 有独立标签页的类别 + 收敛其余来源的「其他」 */
+/** 来源类别筛选标签：有独立标签页的类别 + 收敛其余来源的「其他」 */
 const SOURCE_KIND_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: MEMORY_SOURCE_KIND_FILTER_ALL, label: '全部' },
   ...MEMORY_SOURCE_KIND_FILTER_KINDS.map((kind) => ({
     value: kind,
     label: getMemorySourceKindLabel(kind),
@@ -96,32 +97,50 @@ export function DeleteTab({ delete: memoryDelete }: DeleteTabProps) {
   const selectedStatusGroup = getDeleteOperationStatusGroup(
     String(selectedDeleteOperation?.status ?? '')
   )
-  // 切到具体某个类别时，行尾再挂一枚同类徽章没有信息量；「全部」「其他」下才需要它区分来源
-  const showSourceKindBadge =
-    sourceKindFilter === MEMORY_SOURCE_KIND_FILTER_ALL ||
-    sourceKindFilter === MEMORY_SOURCE_KIND_FILTER_OTHER
+  // 切到具体某个类别时，行尾再挂一枚同类徽章没有信息量；「其他」下类别不固定才需要它区分来源
+  const showSourceKindBadge = sourceKindFilter === MEMORY_SOURCE_KIND_FILTER_OTHER
+  // 删除操作详情以弹出卡片展示；深链接带入初始操作时直接打开
+  const [operationDetailOpen, setOperationDetailOpen] = useState(
+    () => Boolean(memoryDelete.selectedOperationId)
+  )
+
+  const openOperationDetail = (operationId: string) => {
+    setSelectedOperationId(operationId)
+    setOperationDetailOpen(true)
+  }
 
   return (
     <TabsContent value="delete" className="space-y-4">
+      {/* 来源删除与删除记录恢复左右并排，窄屏时自动堆叠 */}
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2 xl:items-start">
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Trash2 className="h-4 w-4" />
-            来源批量删除
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 pt-6">
           <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <Tabs value={sourceKindFilter} onValueChange={setSourceKindFilter} className="min-w-0">
-                <MemoryMiniTabs items={SOURCE_KIND_FILTER_OPTIONS} />
-              </Tabs>
-              <Button
-                variant="outline"
-                onClick={() => setSelectedSources(filteredSources.map((item) => String(item.source ?? '')).filter(Boolean))}
-              >
-                全选当前结果
-              </Button>
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                <Tabs value={sourceKindFilter} onValueChange={setSourceKindFilter} className="min-w-0">
+                  <MemoryMiniTabs items={SOURCE_KIND_FILTER_OPTIONS} />
+                </Tabs>
+                <Badge variant="outline" className="bg-background/70">当前命中 {filteredSources.length} 个来源</Badge>
+                <Badge variant={selectedSources.length > 0 ? 'secondary' : 'outline'} className="bg-background/70">
+                  已选择 {selectedSources.length} 个来源
+                </Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedSources(filteredSources.map((item) => String(item.source ?? '')).filter(Boolean))}
+                >
+                  全选当前结果
+                </Button>
+                <Button
+                  onClick={() => void openSourceDeletePreview()}
+                  disabled={selectedSources.length <= 0}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  预览删除
+                </Button>
+              </div>
             </div>
             {sourceSearch.trim() ? (
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -138,22 +157,6 @@ export function DeleteTab({ delete: memoryDelete }: DeleteTabProps) {
                 </Button>
               </div>
             ) : null}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <Badge variant="outline" className="bg-background/70">当前命中 {filteredSources.length} 个来源</Badge>
-                <Badge variant={selectedSources.length > 0 ? 'secondary' : 'outline'} className="bg-background/70">
-                  已选择 {selectedSources.length} 个来源
-                </Badge>
-                <span className="text-xs">选中的来源会一起删除</span>
-              </div>
-              <Button
-                onClick={() => void openSourceDeletePreview()}
-                disabled={selectedSources.length <= 0}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                预览删除
-              </Button>
-            </div>
           </div>
 
           <TooltipProvider delayDuration={150}>
@@ -235,7 +238,7 @@ export function DeleteTab({ delete: memoryDelete }: DeleteTabProps) {
             <RotateCcw className="h-4 w-4" />
             删除操作恢复
           </CardTitle>
-          <CardDescription>按列表浏览最近的删除操作，先选中记录，再在下方确认影响范围并执行恢复</CardDescription>
+          <CardDescription>按列表浏览最近的删除操作，点击记录弹出详情并执行恢复</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 rounded-xl border bg-muted/20 p-4 lg:grid-cols-[minmax(0,1fr)_180px_180px]">
@@ -284,7 +287,7 @@ export function DeleteTab({ delete: memoryDelete }: DeleteTabProps) {
                   <button
                     key={operation.operation_id}
                     type="button"
-                    onClick={() => setSelectedOperationId(operation.operation_id)}
+                    onClick={() => openOperationDetail(operation.operation_id)}
                     className={cn(
                       'w-full rounded-xl border p-4 text-left transition-colors',
                       isSelected
@@ -355,42 +358,39 @@ export function DeleteTab({ delete: memoryDelete }: DeleteTabProps) {
               下一页
             </Button>
           </div>
+        </CardContent>
+      </Card>
+      </div>
 
-          <div className="rounded-xl border bg-muted/20 p-4">
+      {/* 删除操作详情弹出卡片 */}
+      <Dialog open={operationDetailOpen} onOpenChange={setOperationDetailOpen}>
+        <DialogContent
+          className="sm:[--dialog-width:64rem]"
+          data-tour="operation-detail-dialog"
+          aria-describedby={undefined}
+        >
+          <DialogHeader>
+            <DialogTitle>删除操作详情</DialogTitle>
+            <DialogDescription className="font-mono text-xs break-all">
+              {selectedDeleteOperation?.operation_id ?? ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogBody viewportClassName="min-h-0 flex-1 pr-3 sm:pr-4 [&>div]:!block">
             {selectedDeleteOperation ? (
               <div className="space-y-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={selectedStatusGroup === 'applied' ? 'default' : 'secondary'}>
-                        {formatDeleteOperationStatus(String(selectedDeleteOperation.status ?? ''))}
-                      </Badge>
-                      <Badge variant="outline">
-                        {formatDeleteOperationMode(String(selectedDeleteOperation.mode ?? ''))}
-                      </Badge>
-                    </div>
-                    <div className="font-mono text-xs break-all">{selectedDeleteOperation.operation_id}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {selectedDeleteOperation.reason || '未填写删除原因'}
-                    </div>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={selectedStatusGroup === 'applied' ? 'default' : 'secondary'}>
+                      {formatDeleteOperationStatus(String(selectedDeleteOperation.status ?? ''))}
+                    </Badge>
+                    <Badge variant="outline">
+                      {formatDeleteOperationMode(String(selectedDeleteOperation.mode ?? ''))}
+                    </Badge>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void restoreDeleteOperation(selectedDeleteOperation.operation_id)}
-                    disabled={
-                      selectedStatusGroup === 'restored' ||
-                      selectedStatusGroup === 'restoring' ||
-                      deleteRestoring
-                    }
-                  >
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    {selectedStatusGroup === 'restored'
-                      ? '已恢复'
-                      : selectedStatusGroup === 'restoring'
-                        ? '恢复中'
-                        : '恢复这次删除'}
-                  </Button>
+                  <div className="text-sm text-muted-foreground">
+                    {selectedDeleteOperation.reason || '未填写删除原因'}
+                  </div>
                 </div>
 
                 <div className="grid gap-3 lg:grid-cols-4">
@@ -554,14 +554,35 @@ export function DeleteTab({ delete: memoryDelete }: DeleteTabProps) {
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="flex min-h-[320px] items-center justify-center rounded-lg border border-dashed bg-background/40 p-6 text-center text-sm text-muted-foreground">
-                当前没有可查看的删除操作详情
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+            ) : null}
+          </DialogBody>
+
+          <DialogFooter className="flex-row justify-end gap-2 space-x-0">
+            {selectedDeleteOperation ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void restoreDeleteOperation(selectedDeleteOperation.operation_id)}
+                disabled={
+                  selectedStatusGroup === 'restored' ||
+                  selectedStatusGroup === 'restoring' ||
+                  deleteRestoring
+                }
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                {selectedStatusGroup === 'restored'
+                  ? '已恢复'
+                  : selectedStatusGroup === 'restoring'
+                    ? '恢复中'
+                    : '恢复这次删除'}
+              </Button>
+            ) : null}
+            <Button size="sm" variant="outline" onClick={() => setOperationDetailOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TabsContent>
   )
 }
