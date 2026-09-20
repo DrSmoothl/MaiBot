@@ -16,7 +16,6 @@ interface ModelInfo {
   name: string
   api_provider: string
   price_in?: number
-  cache?: boolean
   cache_price_in?: number
   price_periods?: ModelPricePeriod[]
   price_out?: number
@@ -206,7 +205,6 @@ function createBasicModel(
 ): ModelInfo {
   return {
     price_in: 0,
-    cache: false,
     cache_price_in: 0,
     price_out: 0,
     force_stream_mode: false,

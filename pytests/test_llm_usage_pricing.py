@@ -79,7 +79,8 @@ def test_prices_follow_request_start_not_recording_time(recorded_usage, started_
 
 @pytest.mark.parametrize(
     ("cache", "hit", "miss", "expected"),
-    [(False, 250_000, 750_000, 3.0), (True, 250_000, 0, 2.775), (True, 0, 0, 3.0)],
+    # cache 布尔不再参与计价：缓存单价大于 0 时按缓存价计，且 prompt_cache_enabled 为 True
+    [(False, 250_000, 750_000, 2.775), (True, 250_000, 0, 2.775), (True, 0, 0, 3.0)],
 )
 def test_period_prices_preserve_cache_accounting(recorded_usage, cache, hit, miss, expected) -> None:
     LLMUsageRecorder().record_usage_to_database(
@@ -87,7 +88,23 @@ def test_period_prices_preserve_cache_accounting(recorded_usage, cache, hit, mis
     )
 
     assert recorded_usage[0].cost == pytest.approx(expected)
-    assert recorded_usage[0].prompt_cache_enabled is cache
+    # 时段缓存单价 0.1 > 0，无论 cache 布尔如何，缓存计价均视为启用
+    assert recorded_usage[0].prompt_cache_enabled is True
+
+
+def test_cache_price_left_blank_matches_uncached_price(recorded_usage) -> None:
+    """缓存单价未填写（为 0）时，缓存命中的输入与非缓存一致，全部按 price_in 计费。"""
+    LLMUsageRecorder().record_usage_to_database(
+        _model(cache=True, price_periods=[_period(cache_price_in=0.0)]),
+        _usage(250_000, 750_000),
+        "system",
+        "test",
+        request_started_at=datetime(2026, 9, 18, 1),
+    )
+
+    # 输入 1M * 1.0 + 输出 0.5M * 4.0
+    assert recorded_usage[0].cost == pytest.approx(3.0)
+    assert recorded_usage[0].prompt_cache_enabled is False
 
 
 def test_legacy_model_uses_default_prices(recorded_usage) -> None:

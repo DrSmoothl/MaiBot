@@ -59,7 +59,6 @@ describe('useModelAutoSave', () => {
     const onUnsavedChange = vi.fn()
     const initialModels: ModelInfo[] = [{
       ...createModel('timed'),
-      cache: false,
       price_periods: [{
         start_time: '23:00',
         end_time: '07:00',
@@ -95,7 +94,7 @@ describe('useModelAutoSave', () => {
     await act(async () => vi.advanceTimersByTimeAsync(100))
     expect(updateModelConfigSectionMock).toHaveBeenCalledTimes(1)
     expect(updateModelConfigSectionMock).toHaveBeenLastCalledWith('models', [
-      expect.objectContaining({ cache: false, price_periods: nextModels[0].price_periods }),
+      expect.objectContaining({ price_periods: nextModels[0].price_periods }),
     ])
     expect(onUnsavedChange).toHaveBeenLastCalledWith(false)
 

@@ -116,6 +116,12 @@ class ChatTargetResolveBatchRequest(BaseModel):
     targets: List[ChatTargetResolveItem] = Field(default_factory=list)
 
 
+class SessionAdapterStatusRequest(BaseModel):
+    """批量查询聊天流适配器放行状态的请求。"""
+
+    session_ids: List[str] = Field(default_factory=list)
+
+
 def _datetime_to_timestamp(value: Optional[datetime]) -> Optional[float]:
     """将数据库时间转换为前端更易处理的秒级时间戳。"""
 
@@ -1009,6 +1015,33 @@ def _get_adapter_policy_details(chat_session: ChatSession) -> List[Dict[str, Any
     return sorted(adapter_details, key=lambda item: (not item["routed"], item["plugin_id"], item["gateway_name"]))
 
 
+def _summarize_session_adapter_allowance(chat_session: ChatSession) -> Dict[str, Any]:
+    """汇总单个聊天流是否被适配器放行，供聊天页侧边栏分组展示。"""
+
+    platform = str(chat_session.platform or "").strip().lower()
+    # 只统计同平台适配器，避免其它平台的默认放行结果把阻止结果掩盖掉
+    platform_adapters = [
+        adapter
+        for adapter in _get_adapter_policy_details(chat_session)
+        if str(adapter.get("platform") or "").strip().lower() == platform
+    ]
+    # 正在承载当前聊天流的适配器优先，没有接入记录时退回同平台的全部适配器
+    candidates = [adapter for adapter in platform_adapters if adapter.get("routed")] or platform_adapters
+    if not candidates:
+        # 没有运行中的适配器插件时无法判断放行结果，按主程序默认放行处理
+        return {"allowed": True, "reason": "adapter_unavailable"}
+
+    blocking_policy = next(
+        (adapter["policy"] for adapter in candidates if not adapter["policy"]["allowed"]),
+        None,
+    )
+    return {
+        # 只要还有适配器放行，这个聊天流的消息就仍会被处理
+        "allowed": blocking_policy is None,
+        "reason": blocking_policy["reason"] if blocking_policy else "",
+    }
+
+
 def _get_driver_adapter_identity(driver: Any) -> AdapterIdentity:
     """根据运行中的插件驱动描述构造适配器策略身份。"""
 
@@ -1300,6 +1333,33 @@ def get_chat_sessions(
         for chat_session in chat_sessions
     ]
     return {"success": True, "sessions": items, "total": len(items)}
+
+
+@router.post("/sessions/adapter-status")
+def get_chat_sessions_adapter_status(request: SessionAdapterStatusRequest) -> Dict[str, object]:
+    """批量获取聊天流的适配器放行状态，供聊天页按放行状态分组。"""
+
+    normalized_session_ids = [
+        session_id
+        for session_id in dict.fromkeys(str(session_id or "").strip() for session_id in request.session_ids)
+        if session_id
+    ][:500]
+    if not normalized_session_ids:
+        return {"success": True, "statuses": {}}
+
+    with get_db_session() as session:
+        chat_sessions = session.exec(
+            select(ChatSession).where(col(ChatSession.session_id).in_(normalized_session_ids))
+        ).all()
+
+    return {
+        "success": True,
+        "statuses": {
+            chat_session.session_id: _summarize_session_adapter_allowance(chat_session)
+            for chat_session in chat_sessions
+            if chat_session.session_id
+        },
+    }
 
 
 @router.get("/resolve-target")

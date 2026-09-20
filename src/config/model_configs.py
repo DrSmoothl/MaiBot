@@ -274,11 +274,8 @@ class ModelInfo(ConfigBase):
 
     cache: bool = Field(
         default=False,
-        json_schema_extra={
-            "x-widget": "switch",
-        },
     )
-    """是否启用模型输入缓存计费。开启后命中缓存的输入 token 使用 cache_price_in 计费。"""
+    """遗留兼容字段，不再参与计价。是否启用缓存计价由 cache_price_in 是否填写（大于 0）决定。"""
 
     cache_price_in: float = Field(
         default=0.0,
@@ -288,7 +285,7 @@ class ModelInfo(ConfigBase):
             "step": 0.001,
         },
     )
-    """缓存命中输入价格 (用于API调用统计, 单位：元/ M token)。仅当 cache=true 时使用。"""
+    """缓存命中输入价格 (用于API调用统计, 单位：元/ M token)。留空（为 0）时缓存命中与非缓存输入一致，全部按 price_in 计费。"""
 
     price_out: float = Field(
         default=0.0,
@@ -304,7 +301,7 @@ class ModelInfo(ConfigBase):
     """分时价格组合，每天按服务器本地时间重复，以成功请求尝试的开始时间计价。
     每项包含 start_time、end_time（HH:MM）、price_in、price_out、cache_price_in，价格单位：元 / M token。
     时段包含开始、不包含结束，支持跨午夜，开始和结束不能相同，时段之间不能重叠。
-    未匹配时段时使用模型默认价格；空列表表示全天使用默认价格。缓存单价仅在 cache=true 时使用。"""
+    未匹配时段时使用模型默认价格；空列表表示全天使用默认价格。时段的缓存单价未填写（为 0）时与非缓存输入一致。"""
 
     temperature: float | None = Field(
         default=None,

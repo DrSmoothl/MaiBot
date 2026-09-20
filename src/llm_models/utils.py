@@ -191,12 +191,16 @@ class LLMUsageRecorder:
         model_usage: UsageRecord,
         prices: ModelInfo | ModelPricePeriod | None = None,
     ) -> float:
-        """根据模型缓存配置计算输入 token 费用。"""
+        """计算输入 token 费用，区分缓存命中与未命中部分。
+
+        是否启用缓存计价仅取决于当前价格档位的 cache_price_in 是否大于 0：
+        未填写（为 0）时缓存命中的输入与非缓存一致，全部按 price_in 计费。
+        """
 
         if prices is None:
             prices = model_info
         prompt_tokens = model_usage.prompt_tokens or 0
-        if not model_info.cache:
+        if prices.cache_price_in <= 0:
             return (prompt_tokens / 1000000) * prices.price_in
 
         cache_hit_tokens = model_usage.prompt_cache_hit_tokens or 0
@@ -241,7 +245,7 @@ class LLMUsageRecorder:
                     prompt_tokens=model_usage.prompt_tokens or 0,
                     completion_tokens=model_usage.completion_tokens or 0,
                     total_tokens=model_usage.total_tokens or 0,
-                    prompt_cache_enabled=bool(model_info.cache),
+                    prompt_cache_enabled=bool(prices.cache_price_in > 0),
                     prompt_cache_hit_tokens=model_usage.prompt_cache_hit_tokens or 0,
                     prompt_cache_miss_tokens=model_usage.prompt_cache_miss_tokens or 0,
                     cost=total_cost or 0.0,

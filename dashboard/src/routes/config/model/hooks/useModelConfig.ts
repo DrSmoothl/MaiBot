@@ -40,7 +40,6 @@ import type { ConfigSchema } from '@/types/config-schema'
 import type { ModelInfo, ModelPricePeriod, ModelTaskConfig, ProviderConfig, TaskConfig } from '../types'
 import type { APIProvider, DeleteConfirmState } from '../../modelProvider/types'
 import { cleanProviderData } from '../../modelProvider/utils'
-import { findTemplateByBaseUrl } from '../../providerTemplates'
 import { useModelAutoSave } from './useModelAutoSave'
 import { useEmbeddingWarning, type PendingEmbeddingUpdate } from './useEmbeddingWarning'
 
@@ -465,15 +464,8 @@ export function useModelConfig() {
     [providerConfigs]
   )
 
-  const isDeepSeekTemplateProvider = useCallback(
-    (providerName: string): boolean => {
-      const provider = getProviderConfig(providerName)
-      return provider ? findTemplateByBaseUrl(provider.base_url)?.id === 'deepseek' : false
-    },
-    [getProviderConfig]
-  )
-
   // 清理模型中的 null 值（TOML 不支持 null）
+  // cache 为遗留兼容字段，不再保存：是否启用缓存计价由 cache_price_in 是否填写决定
   const cleanModelForSave = useCallback((model: ModelInfo): ModelInfo => {
     const cleaned: ModelInfo = {
       model_identifier: model.model_identifier,
@@ -481,7 +473,6 @@ export function useModelConfig() {
       api_provider: model.api_provider,
       price_in: model.price_in ?? 0,
       price_out: model.price_out ?? 0,
-      cache: model.cache ?? false,
       cache_price_in: model.cache_price_in ?? 0,
       price_periods: model.price_periods?.map((period) => ({ ...period })),
       send_temperature: model.send_temperature ?? true,
@@ -937,7 +928,6 @@ export function useModelConfig() {
           api_provider: defaultProvider,
           price_in: 0,
           price_out: 0,
-          cache: isDeepSeekTemplateProvider(defaultProvider),
           cache_price_in: 0,
           price_periods: [],
           temperature: null,
@@ -952,7 +942,7 @@ export function useModelConfig() {
       setEditingIndex(index)
       setEditDialogOpen(true)
     },
-    [isDeepSeekTemplateProvider, providers]
+    [providers]
   )
 
   const openProviderDialog = useCallback((provider: APIProvider | null, index: number | null) => {
@@ -1051,13 +1041,13 @@ export function useModelConfig() {
     setFormErrors({})
 
     // 填充空值的默认值，并移除 null 值的可选字段（TOML 不支持 null）
+    // cache 为遗留兼容字段，不再保存：是否启用缓存计价由 cache_price_in 是否填写决定
     const modelToSave: ModelInfo = {
       model_identifier: editingModel.model_identifier,
       name: editingModel.name,
       api_provider: editingModel.api_provider,
       price_in: editingModel.price_in ?? 0,
       price_out: editingModel.price_out ?? 0,
-      cache: editingModel.cache ?? false,
       cache_price_in: editingModel.cache_price_in ?? 0,
       price_periods: editingModel.price_periods?.map((period) => ({ ...period })),
       send_temperature: editingModel.send_temperature ?? true,
@@ -1518,7 +1508,6 @@ export function useModelConfig() {
     formErrors,
     setFormErrors,
     openEditDialog,
-    isDeepSeekTemplateProvider,
     handleSaveEdit,
     handleEditDialogClose,
     deleteDialogOpen,

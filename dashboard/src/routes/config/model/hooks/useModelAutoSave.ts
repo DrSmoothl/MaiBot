@@ -136,7 +136,6 @@ export function useModelAutoSave(options: UseModelAutoSaveOptions): UseModelAuto
       api_provider: model.api_provider,
       price_in: model.price_in ?? 0,
       price_out: model.price_out ?? 0,
-      cache: model.cache ?? false,
       cache_price_in: model.cache_price_in ?? 0,
       price_periods: model.price_periods?.map((period) => ({ ...period })),
       visual: model.visual ?? false,

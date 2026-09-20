@@ -20,7 +20,7 @@ export interface ModelInfo {
   api_provider: string
   price_in: number | null
   price_out: number | null
-  cache?: boolean
+  // cache 为后端遗留兼容字段，不再保存；是否启用缓存计价由 cache_price_in 是否填写决定
   cache_price_in?: number | null
   price_periods?: ModelPricePeriod[]
   temperature?: number | null // 模型级别温度，覆盖任务配置中的温度

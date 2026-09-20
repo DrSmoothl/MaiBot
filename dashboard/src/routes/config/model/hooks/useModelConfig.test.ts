@@ -645,7 +645,7 @@ describe('useModelConfig 任务配置与 embedding', () => {
 })
 
 describe('useModelConfig 模型编辑与校验', () => {
-  it('打开编辑框：沿用已有模型，新增时按 DeepSeek 模板打开 cache', async () => {
+  it('打开编辑框：沿用已有模型，新增时使用第一个提供商', async () => {
     stubConfig({
       api_providers: [provider('deepseek'), provider('spare')],
     })
@@ -658,9 +658,6 @@ describe('useModelConfig 模型编辑与校验', () => {
     expect(onOpened).toHaveBeenCalledOnce()
     expect(result.current.editingIndex).toBe(0)
     expect(result.current.editingModel?.name).toBe('chat')
-    expect(result.current.isDeepSeekTemplateProvider('deepseek')).toBe(true)
-    expect(result.current.isDeepSeekTemplateProvider('spare')).toBe(false)
-    expect(result.current.isDeepSeekTemplateProvider('missing')).toBe(false)
     expect(result.current.getProviderConfig('deepseek')?.base_url).toBe('https://api.deepseek.com')
     expect(result.current.getProviderConfig('nope')).toBeUndefined()
 
@@ -672,7 +669,7 @@ describe('useModelConfig 模型编辑与校验', () => {
       expect.objectContaining({
         name: '',
         api_provider: 'deepseek',
-        cache: true,
+        cache_price_in: 0,
       })
     )
     unmount()
@@ -702,7 +699,6 @@ describe('useModelConfig 模型编辑与校验', () => {
     expect(result.current.editingModel).toEqual(
       expect.objectContaining({
         api_provider: 'selected',
-        cache: false,
       })
     )
     unmount()
@@ -921,7 +917,6 @@ describe('useModelConfig 分时价格', () => {
     const { result, unmount } = await renderLoadedHook()
     act(() => {
       result.current.openEditDialog(model('chat', 'main', {
-        cache: false,
         price_periods: [pricePeriod(extra)],
       }), 0)
     })
@@ -957,7 +952,7 @@ describe('useModelConfig 分时价格', () => {
     unmount()
   })
 
-  it('保存跨午夜和相邻时段，保留零价及关闭缓存后的缓存价，并支持清空', async () => {
+  it('保存跨午夜和相邻时段，保留零价及缓存价，并支持清空', async () => {
     const periods = [
       pricePeriod({ start_time: '23:00', end_time: '00:00', price_out: 0 }),
       pricePeriod({ start_time: '00:00', end_time: '07:00', cache_price_in: 0.2 }),
@@ -966,7 +961,6 @@ describe('useModelConfig 分时价格', () => {
     const { result, unmount } = await renderLoadedHook()
     act(() => {
       result.current.openEditDialog(model('chat', 'main', {
-        cache: false,
         price_periods: periods,
       }), 0)
     })
@@ -977,7 +971,7 @@ describe('useModelConfig 分时价格', () => {
     expect(result.current.models[0].price_periods).not.toBe(periods)
     expect(result.current.models[0].price_periods?.[0]).not.toBe(periods[0])
     expect(updateModelConfigMock).toHaveBeenLastCalledWith(expect.objectContaining({
-      models: [expect.objectContaining({ cache: false, price_periods: periods })],
+      models: [expect.objectContaining({ price_periods: periods })],
     }))
 
     act(() => result.current.openEditDialog(result.current.models[0], 0))

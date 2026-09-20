@@ -440,7 +440,6 @@ describe('saveModelSetupConfig', () => {
         models: [
           {
             price_in: 0,
-            cache: false,
             cache_price_in: 0,
             price_out: 0,
             force_stream_mode: false,
@@ -453,7 +452,6 @@ describe('saveModelSetupConfig', () => {
           },
           {
             price_in: 0,
-            cache: false,
             cache_price_in: 0,
             price_out: 0,
             force_stream_mode: false,

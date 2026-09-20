@@ -131,6 +131,7 @@ describe('ModelTable', () => {
         onEdit={onEdit}
         onDelete={onDelete}
         onTest={onTest}
+        onAdd={vi.fn()}
         onToggleSelection={onToggleSelection}
         onToggleSelectAll={vi.fn()}
         isModelUsed={() => true}
@@ -168,6 +169,7 @@ describe('ModelTable', () => {
       onEdit: vi.fn(),
       onDelete: vi.fn(),
       onTest: vi.fn(),
+      onAdd: vi.fn(),
       onToggleSelection: vi.fn(),
       onToggleSelectAll: vi.fn(),
       isModelUsed: vi.fn(() => false),
@@ -190,6 +192,7 @@ describe('ModelTable', () => {
       onEdit: vi.fn(),
       onDelete: vi.fn(),
       onTest: vi.fn(),
+      onAdd: vi.fn(),
       onToggleSelection: vi.fn(),
       onToggleSelectAll: vi.fn(),
       isModelUsed: vi.fn(() => false),
