@@ -900,7 +900,7 @@ requires-dist = [
     { name = "httpx", extras = ["socks"] },
     { name = "jieba", specifier = ">=0.42.1" },
     { name = "json-repair", specifier = ">=0.60.1,<0.61" },
-    { name = "maibot-dashboard", specifier = "==1.7.5.dev20260917431" },
+    { name = "maibot-dashboard", specifier = "==1.7.5.dev20260920436" },
     { name = "maibot-plugin-sdk", specifier = ">=2.8.2" },
     { name = "maim-message", specifier = "==0.6.8" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
@@ -937,11 +937,11 @@ dev = [
 
 [[package]]
 name = "maibot-dashboard"
-version = "1.7.5.dev20260917431"
-source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c6/52/5c486de9e0e9bce679fc1312116fff72bdaa1136d6eb1cd9ec1efa6d751d/maibot_dashboard-1.7.5.dev20260917431.tar.gz", hash = "sha256:5ec8746d53a90a333cabf43a41536860b976c4acd331717c748a216963b1f69b", size = 12830305, upload-time = "2026-09-17T09:43:41.917Z" }
+version = "1.7.5.dev20260920436"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4d/af/104cef122581f7e799e9b7c6ee5f96fde7c28c8002104af1f6b02ee7eede/maibot_dashboard-1.7.5.dev20260920436.tar.gz", hash = "sha256:f2dbb53d19ef2a17e9e0b983f43bd3a68452d16d527d5cab24ee3aef5c7b9fca", size = 12836695, upload-time = "2026-09-20T13:55:32.09Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/bb/ea/804ded5fc20fc1cf3d1d26f5a086edd19bb0b5d1172d0c9603760cda581a/maibot_dashboard-1.7.5.dev20260917431-py3-none-any.whl", hash = "sha256:82425b8549e5141028a7dafde998deb4ddb006c4be58d5cffb83f0c0b711ad06", size = 12921125, upload-time = "2026-09-17T09:43:39.244Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/3f/ae1fe7c75a00ff1c1619301c1916566f9c43c44377a4c21e6dca0708408c/maibot_dashboard-1.7.5.dev20260920436-py3-none-any.whl", hash = "sha256:ce3c6375cf7bbd1d8ecaa45dfa77531a229960c43cf4f5d0a8ca2c33db675432", size = 12927313, upload-time = "2026-09-20T13:55:29.172Z" },
 ]
 
 [[package]]
