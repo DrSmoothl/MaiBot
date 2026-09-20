@@ -160,8 +160,12 @@ function ProfileConsoleHarness({ initialPersonId }: { initialPersonId?: string }
   })
   return (
     <div>
-      <ProfileSearchPanel profile={profile} />
-      <ProfileMaintenancePanel profile={profile} />
+      <div data-testid="profile-search-panel">
+        <ProfileSearchPanel profile={profile} />
+      </div>
+      <div data-testid="profile-maintenance-panel">
+        <ProfileMaintenancePanel profile={profile} />
+      </div>
     </div>
   )
 }
@@ -283,17 +287,23 @@ describe('ProfileConsole 查询流程', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '切换为模糊查询' }))
 
-    // 已切到模糊：按钮改标注「精确查询」，输入区换成关键词
-    expect(screen.getByLabelText('人物关键词')).toBeInTheDocument()
-    expect(screen.queryByLabelText('平台')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('用户账号')).not.toBeInTheDocument()
+    // 已切到模糊：按钮改标注「精确查询」，输入区换成关键词（输入区切换带退场动画，需等待卸载）
+    await waitFor(() => {
+      expect(screen.getByLabelText('人物关键词')).toBeInTheDocument()
+      expect(screen.queryByLabelText('平台')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('用户账号')).not.toBeInTheDocument()
+    })
     expect(screen.queryByLabelText('强制刷新画像')).not.toBeInTheDocument()
 
     // 再点同一个按钮滚回精确，平台/用户账号重新出现
     fireEvent.click(screen.getByRole('button', { name: '切换为精确查询' }))
-    expect(screen.getByLabelText('平台')).toBeInTheDocument()
-    expect(screen.getByLabelText('用户账号')).toBeInTheDocument()
-    expect(screen.queryByLabelText('人物关键词')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByLabelText('平台')).toBeInTheDocument()
+      expect(screen.getByLabelText('用户账号')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.queryByLabelText('人物关键词')).not.toBeInTheDocument()
+    })
   })
 
   it('没有任何查询条件时提交只弹提示，不发起请求', async () => {
@@ -598,7 +608,7 @@ describe('ProfileConsole 画像覆写', () => {
     await renderManager()
     // 空库时列表给出空态；覆写卡提示需先选人
     expect(screen.getByText('还没有人物画像快照')).toBeInTheDocument()
-    expect(screen.getByText('请选择或输入 person_id 后再编辑画像覆写。')).toBeInTheDocument()
+    expect(screen.getByText('请先在「记忆查询 → 人物画像」中选择或查询一个 person_id。')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /保存画像覆写/ }))
     await waitFor(() => {
@@ -933,7 +943,8 @@ describe('ProfileConsole 查询补充', () => {
   it('查询表单已无证据数量与强制刷新，查询按固定采样量且不强制刷新', async () => {
     await renderManager()
     // 证据数量归检修侧画像维护；强制刷新由检修侧「刷新证据」承担，查询侧不再重复提供
-    expect(screen.queryByLabelText('证据数量')).not.toBeInTheDocument()
+    const searchPanel = screen.getByTestId('profile-search-panel')
+    expect(within(searchPanel).queryByLabelText('证据数量')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('强制刷新画像')).not.toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '强制刷新画像' })).not.toBeInTheDocument()
 
