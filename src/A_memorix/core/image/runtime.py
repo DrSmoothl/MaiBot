@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from contextvars import copy_context
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
@@ -50,8 +51,29 @@ class ImageMemoryRuntime:
         self._status_message = "等待真实图片嵌入探测"
         self._initialization_lock = asyncio.Lock()
         self._publication_lock = asyncio.Lock()
-        # 内核创建运行时发生在写入任务启动前；以已提交的出现记录为准核对发布中断。
-        self.recovery = self.reconcile_assets()
+        self.recovery: Dict[str, Any] = {"removed_files": 0, "issues": []}
+
+    async def recover_assets(self) -> None:
+        """在开放图片写入前，以已提交的出现记录为准核对发布中断。"""
+        async with self._publication_lock:
+            # 直接持有 executor Future，避免整体取消 Task 时丢失仍在执行的核对线程。
+            worker = asyncio.get_running_loop().run_in_executor(None, copy_context().run, self.reconcile_assets)
+            try:
+                self.recovery = await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                # 取消等待不会中断同步 I/O；数据库和写者锁必须在线程退出后才能释放。
+                while not worker.done():
+                    try:
+                        await asyncio.shield(worker)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                try:
+                    worker.result()
+                except Exception:
+                    logger.exception("图片资产核对任务取消收尾失败")
+                raise
 
     def reconcile_assets(self) -> Dict[str, Any]:
         """恢复文件发布与数据库提交之间中断留下的资产，不删除仍有引用的文件。"""
