@@ -52,7 +52,6 @@ export interface TaskConfig {
   model_list: string[]
   temperature?: number
   max_tokens?: number
-  slow_threshold?: number
   hard_timeout?: number
   selection_strategy?: string
 }

@@ -161,21 +161,6 @@ class LLMOrchestrator:
             self.model_usage = {model: self.model_usage.get(model, (0, 0, 0)) for model in latest.model_list}
         return self.model_for_task
 
-    def _check_slow_request(self, time_cost: float, model_name: str) -> None:
-        """检查请求是否过慢并输出警告日志。
-
-        Args:
-            time_cost: 请求耗时（秒）。
-            model_name: 使用的模型名称。
-        """
-        threshold = self.model_for_task.slow_threshold
-        if time_cost > threshold:
-            request_type_display = self.request_type or "未知任务"
-            logger.warning(
-                f"LLM请求耗时过长: {request_type_display} 使用模型 {model_name} 耗时 {time_cost:.1f}s（阈值: {threshold}s），请考虑使用更快的模型\n"
-                f"  如果你认为该警告出现得过于频繁，请调整model_config.toml中对应任务的slow_threshold至符合你实际情况的合理值"
-            )
-
     @staticmethod
     def _can_retry_with_compressed_images(
         active_request: ClientRequest,
@@ -353,7 +338,6 @@ class LLMOrchestrator:
         response = execution_result.api_response
         model_info = execution_result.model_info
         time_cost = time.time() - start_time
-        self._check_slow_request(time_cost, model_info.name)
         if usage := response.usage:
             await asyncio.to_thread(
                 llm_usage_recorder.record_usage_to_database,
@@ -512,7 +496,6 @@ class LLMOrchestrator:
         time_cost = time.time() - start_time
         logger.debug(f"LLM请求总耗时: {time_cost}")
 
-        self._check_slow_request(time_cost, model_info.name)
         if usage := response.usage:
             await asyncio.to_thread(
                 llm_usage_recorder.record_usage_to_database,
@@ -1517,7 +1500,6 @@ class LLMRequest(LLMOrchestrator):
             tuple(task_config.model_list),
             task_config.max_tokens,
             task_config.temperature,
-            task_config.slow_threshold,
             task_config.selection_strategy,
             task_config.hard_timeout,
         )

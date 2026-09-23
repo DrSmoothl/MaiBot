@@ -300,7 +300,6 @@ class _SingleModelPromptOrchestrator(LLMOrchestrator):
             model_list=[model_name],
             max_tokens=max_tokens,
             temperature=temperature,
-            slow_threshold=30.0,
             selection_strategy="sequential",
             hard_timeout=180.0,
         )

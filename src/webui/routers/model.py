@@ -118,7 +118,6 @@ class _SingleModelTestOrchestrator(LLMOrchestrator):
             model_list=[model_name],
             max_tokens=512,
             temperature=0.0,
-            slow_threshold=30.0,
             selection_strategy="sequential",
             hard_timeout=90.0,
         )

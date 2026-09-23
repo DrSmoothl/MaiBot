@@ -415,17 +415,6 @@ class TaskConfig(ConfigBase):
     )
     """模型温度"""
 
-    slow_threshold: float = Field(
-        default=15.0,
-        ge=0,
-        json_schema_extra={
-            "x-widget": "input",
-            "step": 0.1,
-            "advanced": True,
-        },
-    )
-    """超时警告时间（秒），超过此时间会输出警告日志"""
-
     selection_strategy: str = Field(
         default="balance",
         json_schema_extra={

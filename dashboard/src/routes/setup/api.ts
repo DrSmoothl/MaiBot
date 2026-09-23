@@ -38,7 +38,6 @@ interface TaskConfig {
   model_list?: string[]
   max_tokens?: number
   temperature?: number
-  slow_threshold?: number
   selection_strategy?: string
 }
 
