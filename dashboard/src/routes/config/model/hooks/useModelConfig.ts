@@ -502,9 +502,9 @@ export function useModelConfig() {
         api_key: provider.api_key,
         client_type: provider.client_type,
         default_headers: provider.default_headers,
-        max_retry: provider.max_retry ?? 2,
-        timeout: provider.timeout ?? 30,
-        retry_interval: provider.retry_interval ?? 10,
+        max_retry: provider.max_retry,
+        timeout: provider.timeout,
+        retry_interval: provider.retry_interval,
       }))
     )
   }, [])
@@ -952,9 +952,6 @@ export function useModelConfig() {
         base_url: '',
         api_key: '',
         client_type: 'openai',
-        max_retry: 2,
-        timeout: 30,
-        retry_interval: 10,
       }
     )
     setEditingProviderIndex(index)

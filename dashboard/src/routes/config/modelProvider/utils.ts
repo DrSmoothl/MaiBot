@@ -1,15 +1,15 @@
 import type { APIProvider } from './types'
 
 /**
- * 清理 provider 数据，填充默认值
- * 用于确保所有数值字段都有有效值，避免 null 导致的后端验证错误
+ * 清理 provider 数据：数值字段缺省时不向下发，由后端 schema 默认值填充
+ * 避免前后端各写一套默认值导致分叉；null 转为 undefined 后会在序列化时丢弃，防止后端校验报错
  */
 export const cleanProviderData = (provider: APIProvider): APIProvider => ({
   ...provider,
   default_headers: provider.default_headers ?? {},
-  max_retry: provider.max_retry ?? 2,
-  timeout: provider.timeout ?? 30,
-  retry_interval: provider.retry_interval ?? 10,
+  max_retry: provider.max_retry ?? undefined,
+  timeout: provider.timeout ?? undefined,
+  retry_interval: provider.retry_interval ?? undefined,
 })
 
 /**

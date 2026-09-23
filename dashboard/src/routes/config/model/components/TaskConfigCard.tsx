@@ -216,7 +216,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 type="number"
                 step="1"
                 min="1"
-                value={taskConfig.hard_timeout ?? 240}
+                value={taskConfig.hard_timeout ?? ''}
                 onChange={(e) => {
                   const value = parseInt(e.target.value)
                   if (!isNaN(value) && value >= 1) {

@@ -49,6 +49,12 @@ interface ModelTableProps {
   onAdd: () => void
 }
 
+// 表格内容（模型标识符、价格等列）在窄屏下宽于容器，操作列固定在右缘，
+// 保证「添加」与每行的测试/编辑/删除三个按钮始终可见可点。
+// 背景色需为不透明色，否则滚动内容会透过固定列显示；retro 主题的实色见 index.css。
+const ACTION_CELL_CLASS = 'sticky right-0 z-10 bg-background text-right'
+const ACTION_CELL_ATTR = { 'data-model-config-action-cell': 'true' } as const
+
 function getModelTestStatus(result: ModelTestResult | undefined, isTesting: boolean) {
   if (isTesting) {
     return {
@@ -123,7 +129,7 @@ export const ModelTable = React.memo(function ModelTable({
               <TableHead className="w-14 text-center whitespace-nowrap">视觉</TableHead>
               <TableHead className="text-right whitespace-nowrap">默认输入</TableHead>
               <TableHead className="text-right whitespace-nowrap">默认输出</TableHead>
-              <TableHead className="text-right">
+              <TableHead {...ACTION_CELL_ATTR} className={ACTION_CELL_CLASS}>
                 <Button
                   onClick={onAdd}
                   size="sm"
@@ -201,7 +207,7 @@ export const ModelTable = React.memo(function ModelTable({
                     </TableCell>
                     <TableCell className="text-right">¥{model.price_in}/M</TableCell>
                     <TableCell className="text-right">¥{model.price_out}/M</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell {...ACTION_CELL_ATTR} className={ACTION_CELL_CLASS}>
                       <div className="flex justify-end gap-2">
                         <Button
                           variant="outline"

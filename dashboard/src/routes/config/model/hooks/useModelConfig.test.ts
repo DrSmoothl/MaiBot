@@ -1210,7 +1210,7 @@ describe('useModelConfig 删除、批量与分页搜索', () => {
 })
 
 describe('useModelConfig 提供商编辑与级联删除', () => {
-  it('打开提供商对话框：新增给默认值，编辑回填当前项', async () => {
+  it('打开提供商对话框：新增只给基础字段，编辑回填当前项', async () => {
     const { result, unmount } = await renderLoadedHook()
 
     act(() => {
@@ -1222,11 +1222,10 @@ describe('useModelConfig 提供商编辑与级联删除', () => {
       expect.objectContaining({
         name: '',
         client_type: 'openai',
-        max_retry: 2,
-        timeout: 30,
-        retry_interval: 10,
       })
     )
+    // 超时等数值字段不再前端预填，缺省由后端 schema 默认值填充
+    expect(result.current.editingProvider?.timeout).toBeUndefined()
 
     act(() => {
       result.current.openProviderDialog(result.current.apiProviders[1], 1)

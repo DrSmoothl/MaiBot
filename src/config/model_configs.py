@@ -167,7 +167,7 @@ class APIProvider(ConfigBase):
     """最大重试次数 (单个模型API调用失败, 最多重试的次数)"""
 
     timeout: int = Field(
-        default=60,
+        default=120,
         ge=1,
         json_schema_extra={
             "x-widget": "input",
@@ -177,7 +177,7 @@ class APIProvider(ConfigBase):
     """API调用的超时时长 (超过这个时长, 本次请求将被视为"请求超时", 单位: 秒)"""
 
     retry_interval: int = Field(
-        default=5,
+        default=4,
         ge=1,
         json_schema_extra={
             "x-widget": "input",

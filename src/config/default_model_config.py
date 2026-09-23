@@ -12,8 +12,8 @@ DEFAULT_PROVIDER_TEMPLATES: list[dict[str, Any]] = [
         "api_key": "your-api-key",
         "auth_type": OpenAICompatibleAuthType.BEARER.value,
         "max_retry": 3,
-        "timeout": 100,
-        "retry_interval": 8,
+        "timeout": 120,
+        "retry_interval": 4,
     }
 ]
 
