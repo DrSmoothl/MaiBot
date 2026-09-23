@@ -63,7 +63,6 @@ vi.mock('@/lib/chat-management-api', () => ({
   getAdapterPolicyDefaults: vi.fn(),
   getChatStreamDetail: vi.fn(),
   getChatStreams: vi.fn(),
-  updateAdapterPolicyDefaults: vi.fn(),
   updateChatStreamAdapterPolicy: vi.fn(),
   updateChatStreamLearning: vi.fn(),
   updateChatStreamTalkFrequency: vi.fn(),
@@ -327,10 +326,6 @@ beforeEach(() => {
   vi.mocked(chatApi.getChatStreams).mockResolvedValue([groupChat, privateChat])
   vi.mocked(chatApi.getChatStreamDetail).mockResolvedValue(makeDetail())
   vi.mocked(chatApi.getAdapterPolicyDefaults).mockResolvedValue({
-    group: 'allow',
-    private: 'allow',
-  })
-  vi.mocked(chatApi.updateAdapterPolicyDefaults).mockResolvedValue({
     group: 'allow',
     private: 'allow',
   })
@@ -1179,29 +1174,23 @@ describe('ChatManagementPage 时间轴规则', () => {
 })
 
 describe('ChatManagementPage 详情空态与错误', () => {
-  it('默认策略加载中按钮禁用', async () => {
+  it('默认策略加载中仅展示状态，不提供编辑按钮', async () => {
     vi.mocked(chatApi.getAdapterPolicyDefaults).mockImplementation(() => new Promise(() => {}))
     const user = userEvent.setup()
     const dialog = await openDetail(user)
-    expect(within(dialog).getAllByRole('button', { name: '放行' })[0]).toBeDisabled()
+    expect(within(dialog).getByText('全局默认：加载中')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '放行' })).not.toBeInTheDocument()
   })
 
-  it('适配器默认策略保存、继承与失败 toast', async () => {
+  it('适配器默认策略只读展示，当前聊天规则仍可继承并提示保存失败', async () => {
     const user = userEvent.setup()
     vi.mocked(chatApi.getAdapterPolicyDefaults).mockResolvedValue({
       group: 'allow',
       private: 'block',
     })
     const dialog = await openDetail(user)
-
-    await user.click(within(dialog).getAllByRole('button', { name: '拒绝' })[0])
-    await waitFor(() =>
-      expect(vi.mocked(chatApi.updateAdapterPolicyDefaults).mock.calls[0]?.[0]).toEqual({
-        group: 'block',
-        private: 'block',
-      })
-    )
-    await waitFor(() => expect(toastMock).toHaveBeenCalledWith({ title: '适配器默认策略已保存' }))
+    expect(await within(dialog).findByText('全局默认：群聊 放行 · 私聊 拒绝')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '拒绝' })).not.toBeInTheDocument()
 
     await user.click(within(dialog).getByRole('button', { name: '使用默认' }))
     await waitFor(() =>
@@ -1211,16 +1200,7 @@ describe('ChatManagementPage 详情空态与错误', () => {
       })
     )
 
-    vi.mocked(chatApi.updateAdapterPolicyDefaults).mockRejectedValue(new Error('默认策略失败'))
     vi.mocked(chatApi.updateChatStreamAdapterPolicy).mockRejectedValue('策略字符串错误')
-    await user.click(within(dialog).getAllByRole('button', { name: '放行' })[1])
-    await waitFor(() =>
-      expect(toastMock).toHaveBeenCalledWith({
-        title: '适配器默认策略保存失败',
-        description: '默认策略失败',
-        variant: 'destructive',
-      })
-    )
     await user.click(within(dialog).getByRole('button', { name: '允许' }))
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith({
@@ -1229,6 +1209,12 @@ describe('ChatManagementPage 详情空态与错误', () => {
         variant: 'destructive',
       })
     )
+  })
+
+  it('默认策略读取失败时不猜测放行状态', async () => {
+    vi.mocked(chatApi.getAdapterPolicyDefaults).mockRejectedValue(new Error('服务不可用'))
+    const dialog = await openDetail(userEvent.setup())
+    expect(await within(dialog).findByText('全局默认：获取失败')).toBeInTheDocument()
   })
 
   it('适配器策略标签、路由文案与显示名回退', async () => {

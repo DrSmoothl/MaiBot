@@ -45,12 +45,10 @@ import {
   deleteChatStreamTalkFrequency,
   getAdapterPolicyDefaults,
   getChatStreamDetail,
-  updateAdapterPolicyDefaults,
   updateChatStreamAdapterPolicy,
   updateChatStreamLearning,
   updateChatStreamTalkFrequency,
   upsertChatStreamPrompt,
-  type AdapterPolicyDefaults,
   type ChatAdapterStatus,
   type ChatConfigRule,
   type ChatLearningStatus,
@@ -1137,22 +1135,6 @@ function ChatAdapterSection({ detail }: { detail: ChatStreamDetail }) {
     queryKey: ['adapter-policy-defaults'],
     queryFn: getAdapterPolicyDefaults,
   })
-  const defaultsMutation = useMutation({
-    mutationFn: updateAdapterPolicyDefaults,
-    onSuccess: (defaults) => {
-      queryClient.setQueryData(['adapter-policy-defaults'], defaults)
-      void queryClient.invalidateQueries({ queryKey: ['chat-stream-detail'] })
-      void queryClient.invalidateQueries({ queryKey: [CHAT_ADAPTER_STATUS_QUERY_KEY] })
-      toast({ title: '适配器默认策略已保存' })
-    },
-    onError: (error) => {
-      toast({
-        title: '适配器默认策略保存失败',
-        description: error instanceof Error ? error.message : '请稍后重试',
-        variant: 'destructive',
-      })
-    },
-  })
   const policyMutation = useMutation({
     mutationFn: (payload: { adapter_id: string; action: 'allow' | 'block' | 'inherit' }) =>
       updateChatStreamAdapterPolicy(detail.session_id, payload),
@@ -1171,56 +1153,22 @@ function ChatAdapterSection({ detail }: { detail: ChatStreamDetail }) {
     },
   })
   const savingAdapterId = policyMutation.variables?.adapter_id
+  const defaultPolicySummary = defaultsQuery.isError
+    ? '获取失败'
+    : defaultsQuery.data
+      ? `群聊 ${defaultsQuery.data.group === 'allow' ? '放行' : '拒绝'} · 私聊 ${defaultsQuery.data.private === 'allow' ? '放行' : '拒绝'}`
+      : '加载中'
 
   const saveAdapterPolicy = (adapter: ChatAdapterStatus, action: 'allow' | 'block' | 'inherit') => {
     policyMutation.mutate({ adapter_id: adapter.adapter_id, action })
   }
-  const saveDefaultPolicy = (chatType: keyof AdapterPolicyDefaults, action: 'allow' | 'block') => {
-    const current = defaultsQuery.data ?? { group: 'allow', private: 'allow' }
-    defaultsMutation.mutate({ ...current, [chatType]: action })
-  }
-
   return (
     <section className="space-y-3 rounded-md border p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="font-medium">适配器规则</div>
         <Badge variant="outline">{adapters.length} 个</Badge>
       </div>
-      <div className="bg-muted/20 grid gap-2 rounded-md border p-3 sm:grid-cols-2">
-        {(['group', 'private'] as const).map((chatType) => {
-          const action = defaultsQuery.data?.[chatType] ?? 'allow'
-          return (
-            <div key={chatType} className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium">
-                  {chatType === 'group' ? '群聊默认策略' : '私聊默认策略'}
-                </div>
-                <div className="text-muted-foreground text-xs">未设置单独规则时生效</div>
-              </div>
-              <div className="flex gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={action === 'allow' ? 'secondary' : 'outline'}
-                  disabled={defaultsQuery.isLoading || defaultsMutation.isPending}
-                  onClick={() => saveDefaultPolicy(chatType, 'allow')}
-                >
-                  放行
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={action === 'block' ? 'destructive' : 'outline'}
-                  disabled={defaultsQuery.isLoading || defaultsMutation.isPending}
-                  onClick={() => saveDefaultPolicy(chatType, 'block')}
-                >
-                  拒绝
-                </Button>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      <p className="text-muted-foreground text-xs">全局默认：{defaultPolicySummary}</p>
       {adapters.length === 0 ? (
         <div className="text-muted-foreground rounded-md border border-dashed px-3 py-2 text-sm">
           当前没有运行中的适配器插件路由。

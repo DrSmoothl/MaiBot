@@ -1550,6 +1550,24 @@ def update_adapter_policy_defaults(request: AdapterPolicyDefaultsUpdateRequest) 
     return {"success": True, "defaults": manager.get_default_actions()}
 
 
+def _get_plugin_adapter_identity(plugin_id: str) -> Optional[AdapterIdentity]:
+    """按 plugin_id 查找运行中的适配器驱动并返回完整身份。
+
+    面板读写必须使用与运行时求值一致的完整身份（adapter_id、platform、
+    account_id 等），否则会读到/写出与实际生效规则脱靶的条目。
+    """
+
+    for driver in get_platform_io_manager().driver_registry.list():
+        descriptor = driver.descriptor
+        if (descriptor.plugin_id or "") != plugin_id:
+            continue
+        metadata = descriptor.metadata if isinstance(descriptor.metadata, dict) else {}
+        if str(metadata.get("plugin_type") or "").strip().lower() != "adapter":
+            continue
+        return _get_driver_adapter_identity(driver)
+    return None
+
+
 @router.get("/adapters/plugins/{plugin_id}/policy")
 def get_adapter_plugin_policy(plugin_id: str) -> Dict[str, object]:
     """返回指定适配器插件在主程序侧的群聊与私聊规则。"""
@@ -1558,9 +1576,13 @@ def get_adapter_plugin_policy(plugin_id: str) -> Dict[str, object]:
     if not normalized_plugin_id:
         raise HTTPException(status_code=400, detail="缺少适配器插件 ID")
 
+    # 优先用运行中驱动的完整身份；未运行时退回 plugin_id 单键做只读展示
+    identity = _get_plugin_adapter_identity(normalized_plugin_id) or AdapterIdentity(
+        plugin_id=normalized_plugin_id
+    )
     manager = get_adapter_policy_manager()
     try:
-        policy = manager.get_adapter_policy(AdapterIdentity(plugin_id=normalized_plugin_id))
+        policy = manager.get_adapter_policy(identity)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -1576,16 +1598,25 @@ def update_adapter_plugin_policy(
     plugin_id: str,
     request: AdapterHostPolicyUpdateRequest,
 ) -> Dict[str, object]:
-    """更新指定适配器插件在主程序侧的群聊与私聊规则。"""
+    """更新指定适配器插件在主程序侧的群聊与私聊规则。
+
+    纯同步文件读写，写成 `def` 由 FastAPI 交给线程池执行，避免自动保存
+    的写入占用 WebUI 事件循环。
+    """
 
     normalized_plugin_id = str(plugin_id or "").strip()
     if not normalized_plugin_id:
         raise HTTPException(status_code=400, detail="缺少适配器插件 ID")
 
+    # 写入必须能确定规则归属；适配器未运行时拒绝而不是猜一个身份静默写出死规则
+    identity = _get_plugin_adapter_identity(normalized_plugin_id)
+    if identity is None:
+        raise HTTPException(status_code=404, detail="适配器当前未运行，无法确定规则归属，请先启动适配器")
+
     manager = get_adapter_policy_manager()
     try:
         manager.set_adapter_policy(
-            AdapterIdentity(plugin_id=normalized_plugin_id),
+            identity,
             request.model_dump(),
         )
     except ValueError as exc:
@@ -1594,7 +1625,7 @@ def update_adapter_plugin_policy(
         "success": True,
         "plugin_id": normalized_plugin_id,
         "global_defaults": manager.get_default_actions(),
-        "policy": manager.get_adapter_policy(AdapterIdentity(plugin_id=normalized_plugin_id)),
+        "policy": manager.get_adapter_policy(identity),
     }
 
 

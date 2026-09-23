@@ -77,6 +77,7 @@ import type {
 import { PluginIcon } from './plugins/PluginIcon'
 import { getPluginType, getPluginTypeLabel } from './plugins/types'
 import { AdapterHostPolicyPanel } from './plugin-config/AdapterHostPolicyPanel'
+import { AdapterPolicyDefaultsCard } from './plugin-config/AdapterPolicyDefaultsCard'
 import { getNestedRecord, getPluginMarketplaceRoutePath, isAdapterManagementPath } from './plugin-config/utils'
 import { usePluginList } from './plugin-config/hooks/usePluginList'
 import { usePluginLifecycle } from './plugin-config/hooks/usePluginLifecycle'
@@ -1583,6 +1584,7 @@ function PluginConfigPageContent() {
     <>
       <ScrollArea className="h-full">
       <div className="space-y-4 p-4 sm:space-y-6 sm:p-6">
+        {adapterManagement && <AdapterPolicyDefaultsCard />}
         {!adapterManagement && (
         <div className="flex flex-nowrap items-center gap-2 sm:gap-3">
           <div className="relative min-w-0 flex-1 basis-0 sm:basis-72">
