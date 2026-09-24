@@ -1584,7 +1584,6 @@ function PluginConfigPageContent() {
     <>
       <ScrollArea className="h-full">
       <div className="space-y-4 p-4 sm:space-y-6 sm:p-6">
-        {adapterManagement && <AdapterPolicyDefaultsCard />}
         {!adapterManagement && (
         <div className="flex flex-nowrap items-center gap-2 sm:gap-3">
           <div className="relative min-w-0 flex-1 basis-0 sm:basis-72">
@@ -1726,6 +1725,9 @@ function PluginConfigPageContent() {
             </div>
           </div>
         )}
+
+        {/* 适配器全局默认策略（位于插件加载情况下方） */}
+        {adapterManagement && <AdapterPolicyDefaultsCard />}
 
         {/* 插件列表 */}
         {loading ? (
