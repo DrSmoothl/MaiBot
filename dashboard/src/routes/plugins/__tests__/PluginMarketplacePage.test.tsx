@@ -353,6 +353,38 @@ describe('PluginMarketplacePage 初始加载与数据合并', () => {
     expect(screen.queryByTestId('marketplace-tab')).not.toBeInTheDocument()
   })
 
+  it('存在被兼容性过滤挡掉的插件时提示数量，并支持跳转设置关闭', async () => {
+    vi.mocked(pluginApi.fetchPluginList).mockResolvedValue([
+      makeMarketPlugin('plugin-ok'),
+      // releases 模式且无推荐版本：checkPluginCompatibility 判为不兼容，被「只看兼容」隐藏
+      makeMarketPlugin('plugin-old', {
+        releases: {
+          id: 'plugin-old',
+          repositoryUrl: 'https://example.com/plugin-old.git',
+          mode: 'releases',
+          versions: [],
+          recommended_version: null,
+        },
+      }),
+    ])
+
+    render(<PluginMarketplacePage />)
+
+    // 提示说明隐藏数量与当前麦麦版本，计数徽章只统计可见插件
+    expect(await screen.findByText(/已隐藏 1 个与当前麦麦版本（v1\.2\.0）不兼容的插件/)).toBeInTheDocument()
+    await waitFor(() => expect(getCountBadgeText()).toBe('全部插件 1'))
+
+    // 点击跳转到插件设置页（「只看兼容」开关所在页）
+    fireEvent.click(screen.getByRole('button', { name: '去设置关闭「只看兼容」' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/plugin-mirrors' })
+  })
+
+  it('没有被兼容性过滤挡掉的插件时不展示隐藏提示', async () => {
+    await renderPage()
+
+    expect(screen.queryByText(/已隐藏 \d+ 个与当前麦麦版本/)).not.toBeInTheDocument()
+  })
+
   it('Git 未安装时显示警告卡片，并阻断安装与更新操作', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginApi.checkGitStatus).mockResolvedValue({

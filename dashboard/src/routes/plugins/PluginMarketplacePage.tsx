@@ -957,6 +957,27 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     }).length
   }
 
+  // 被「只看兼容」挡在当前视图外的插件数。市场默认只展示兼容插件，不给出提示时
+  // 用户会误以为插件已下架（例如搜「联网」时老插件全部消失，只剩现代插件）。
+  const getCompatibilityHiddenCount = () => {
+    if (!showCompatibleOnly || !maimaiVersion) {
+      return 0
+    }
+    return plugins.filter((p) => {
+      if (!p.manifest) return false
+      if (p.source === 'local') return false
+      if (!showInstalledPlugins && p.installed) return false
+      const matchesSearch =
+        searchQuery === '' ||
+        p.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.manifest.keywords && p.manifest.keywords.some((k) => k.toLowerCase().includes(searchQuery.toLowerCase())))
+      const matchesType = pluginTypeFilter === 'all' || getPluginType(p) === pluginTypeFilter
+
+      return matchesSearch && matchesType && !checkPluginCompatibility(p)
+    }).length
+  }
+
   return (
     <ScrollArea className="h-full" viewportRef={scrollViewportRef}>
       <div className="space-y-6 p-4 sm:p-6">
@@ -1109,6 +1130,25 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             </div>
           )}
         </Card>
+
+        {/* 兼容性过滤提示：说明当前结果为何偏少，并给出去设置关闭「只看兼容」的入口 */}
+        {!loading && !error && getCompatibilityHiddenCount() > 0 && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+            <Filter className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              已隐藏 {getCompatibilityHiddenCount()} 个与当前麦麦版本（v{maimaiVersion?.version}）不兼容的插件
+            </span>
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-xs"
+              onClick={() => navigate({ to: settingsRoute })}
+            >
+              去设置关闭「只看兼容」
+            </Button>
+          </div>
+        )}
 
         {/* 加载错误显示 */}
         {marketplaceProgress
