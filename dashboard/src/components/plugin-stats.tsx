@@ -28,6 +28,36 @@ interface PluginStatsProps {
   compact?: boolean
 }
 
+type RecentRating = NonNullable<PluginStatsData['recent_ratings']>[number]
+
+/** 单条最近评价：有评分显示星级，无评分标注「仅评论」；有评论内容时展示评论正文 */
+function RecentRatingItem({ item }: { item: RecentRating }) {
+  return (
+    <div className="rounded-lg border bg-muted/50 p-3">
+      <div className={`flex items-center justify-between${item.comment ? ' mb-2' : ''}`}>
+        <div className="flex gap-1">
+          {item.rating == null ? (
+            <span className="text-xs text-muted-foreground">仅评论</span>
+          ) : (
+            [1, 2, 3, 4, 5].map((star) => (
+              <Star
+                key={star}
+                className={`h-3 w-3 ${
+                  star <= Number(item.rating) ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground'
+                }`}
+              />
+            ))
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {new Date(item.created_at).toLocaleDateString()}
+        </span>
+      </div>
+      {item.comment && <p className="text-sm text-muted-foreground">{item.comment}</p>}
+    </div>
+  )
+}
+
 export function PluginStats(props: PluginStatsProps) {
   return <PluginStatsContent key={props.pluginId} {...props} />
 }
@@ -230,6 +260,11 @@ function PluginStatsContent({ pluginId, compact = false }: PluginStatsProps) {
     )
   }
 
+  // 评分与评论分流：有评论内容的进入「最近评论」（同时展示其星级），仅有评分的进入「最近评分」
+  const recentRatings = stats.recent_ratings ?? []
+  const recentComments = recentRatings.filter((item) => item.comment?.trim())
+  const recentRatingOnly = recentRatings.filter((item) => item.rating != null && !item.comment?.trim())
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -355,37 +390,24 @@ function PluginStatsContent({ pluginId, compact = false }: PluginStatsProps) {
         </Dialog>
       </div>
 
-      {stats.recent_ratings && stats.recent_ratings.length > 0 && (
+      {/* 评分与评论是两种内容：有评论文字的归入「最近评论」并保留星级，仅有评分的归入「最近评分」 */}
+      {recentComments.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-sm font-semibold">最近评价</h4>
+          <h4 className="text-sm font-semibold">最近评论</h4>
           <div className="space-y-3">
-            {stats.recent_ratings.map((rating, index) => (
-              <div key={`${rating.user_id}-${rating.created_at}-${index}`} className="rounded-lg border bg-muted/50 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="flex gap-1">
-                    {rating.rating == null ? (
-                      <span className="text-xs text-muted-foreground">仅评论</span>
-                    ) : (
-                      [1, 2, 3, 4, 5].map((star) => (
-                        <Star
-                          key={star}
-                          className={`h-3 w-3 ${
-                            star <= Number(rating.rating)
-                              ? 'fill-yellow-400 text-yellow-400'
-                              : 'text-muted-foreground'
-                          }`}
-                        />
-                      ))
-                    )}
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(rating.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-                {rating.comment && (
-                  <p className="text-sm text-muted-foreground">{rating.comment}</p>
-                )}
-              </div>
+            {recentComments.map((item, index) => (
+              <RecentRatingItem key={`${item.user_id}-${item.created_at}-${index}`} item={item} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {recentRatingOnly.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold">最近评分</h4>
+          <div className="space-y-3">
+            {recentRatingOnly.map((item, index) => (
+              <RecentRatingItem key={`${item.user_id}-${item.created_at}-${index}`} item={item} />
             ))}
           </div>
         </div>
