@@ -42,6 +42,7 @@ import {
   type GitStatus,
   type MaimaiVersion,
 } from '@/lib/plugin-api'
+import { describeRejectedReleaseError, shortenReleaseReasons } from '@/lib/plugin-api/release-reasons'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
 import { PluginStats } from '@/components/plugin-stats'
 import { recordPluginDownload } from '@/lib/plugin-stats'
@@ -304,7 +305,8 @@ export function PluginDetailPage({
   const detailScrollClassName = isDialog
     ? 'h-[min(68vh,720px)]'
     : 'h-[calc(100vh-200px)] sm:h-[calc(100vh-220px)]'
-  const readmeScrollClassName = isDialog ? 'h-[min(48vh,540px)] pr-4' : 'h-[600px] pr-4'
+  // 由外层详情滚动容器统一滚动，避免 README 内层固定高度造成嵌套滚动和内容截断。
+  const readmeScrollClassName = 'pr-4'
   const handleBack = () => {
     if (onClose) {
       onClose()
@@ -654,9 +656,9 @@ export function PluginDetailPage({
             variant="ghost" 
             size="icon"
             onClick={handleBack}
-            className="shrink-0"
+            className="h-8 w-8 shrink-0"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           {!isDialog && (
             <div>
@@ -746,7 +748,7 @@ export function PluginDetailPage({
                           <option key={release.version} value={release.version} disabled={!release.compatible}>
                             {release.version}{release.version === releaseCatalog.recommended_version ? ' · 推荐' : ''}
                             {release.prerelease ? ' · 预发布' : ''}{release.yanked ? ' · 已撤回' : ''}
-                            {!release.compatible ? ` · ${release.reasons.join('；')}` : ''}
+                            {!release.compatible ? ` · ${shortenReleaseReasons(release.reasons)}` : ''}
                           </option>
                         ))}
                       </select>
@@ -778,7 +780,11 @@ export function PluginDetailPage({
                       <details className="text-sm text-muted-foreground">
                         <summary>有 {releaseCatalog.rejected_releases.length} 个发布版本未通过校验</summary>
                         <ul className="mt-2 space-y-1">
-                          {releaseCatalog.rejected_releases.map((item) => <li key={item.tag}>{item.tag}：{item.error}</li>)}
+                          {releaseCatalog.rejected_releases.map((item) => (
+                            <li key={item.tag}>
+                              {item.tag}：{describeRejectedReleaseError(item.error)}
+                            </li>
+                          ))}
                         </ul>
                       </details>
                     )}
