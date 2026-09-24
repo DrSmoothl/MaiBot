@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -409,6 +409,14 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             setLoading(true)
           }
           setError(null)
+          // 统计摘要与市场清单、本地扫描互不依赖，提前并发发起，避免下载量/评分比列表晚一整跳才出现；
+          // 但清单失败时不等待统计请求，保证错误提示及时返回。
+          const statsSummaryPromise = getPluginStatsSummary({
+            forceRefresh: Boolean(cachedStatsSummary),
+          }).catch((statsError: unknown) => {
+            console.warn('刷新插件统计失败:', statsError)
+            return {}
+          })
           const [gitStatus, maimaiVersion, marketResult, installed] = await Promise.all([
             checkGitStatus(),
             getMaimaiVersion(),
@@ -450,16 +458,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary))
           }
           setPlugins(mergedData)
-
-          getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
-            .then((statsSummary) => {
-              if (!isUnmounted) {
-                setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
-              }
-            })
-            .catch((statsError) => {
-              console.warn('刷新插件统计失败:', statsError)
-            })
+          setPluginStats(buildPluginStatsMap(mergedData, await statsSummaryPromise))
         } finally {
           if (!isUnmounted) {
             setLoading(false)

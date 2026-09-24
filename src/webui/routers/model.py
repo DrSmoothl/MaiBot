@@ -30,6 +30,7 @@ from src.llm_models.payload_content.tool_option import ToolCall
 from src.llm_models.request_snapshot import format_request_snapshot_log_info
 from src.llm_models.utils_model import LLMOrchestrator, LLMResponseResult
 from src.webui.dependencies import require_auth
+from src.webui.utils.http_client import get_shared_ssl_context
 from src.webui.utils.network_security import validate_public_url
 
 logger = get_logger("webui")
@@ -320,7 +321,8 @@ async def _fetch_models_from_provider(
             headers["Authorization"] = f"Bearer {client_config.api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # 复用共享 SSLContext，避免每次获取模型列表都重新加载整套 CA 证书（实测约 5s/次）
+        async with httpx.AsyncClient(verify=get_shared_ssl_context(), timeout=30.0) as client:
             response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
             data = response.json()
@@ -831,7 +833,10 @@ async def _test_provider_connection(
     # 第一步：测试网络连通性
     try:
         start_time = time.time()
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+        # 复用共享 SSLContext，避免连接测试新建客户端时重新加载整套 CA 证书（实测约 5s/次）
+        async with httpx.AsyncClient(
+            verify=get_shared_ssl_context(), timeout=10.0, follow_redirects=False
+        ) as client:
             # 尝试 GET 请求 base_url（不需要 API Key）
             response = await client.get(base_url)
             latency = (time.time() - start_time) * 1000
@@ -857,7 +862,10 @@ async def _test_provider_connection(
     if api_key:
         try:
             start_time = time.time()
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+            # 复用共享 SSLContext，避免校验 API Key 新建客户端时重新加载整套 CA 证书（实测约 5s/次）
+            async with httpx.AsyncClient(
+                verify=get_shared_ssl_context(), timeout=15.0, follow_redirects=False
+            ) as client:
                 headers = {"Content-Type": "application/json"}
                 params = {}
 
