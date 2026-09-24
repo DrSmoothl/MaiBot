@@ -18,6 +18,7 @@ from src.person_info.person_info import Person
 from src.services.bot_account_service import get_bot_accounts
 from src.services.embedding_service import EmbeddingServiceClient
 
+from .llm_sentence_splitter import split_text_with_llm
 from .typo_generator import ChineseTypoGenerator
 
 if TYPE_CHECKING:
@@ -564,6 +565,33 @@ def _get_random_default_reply() -> str:
     return random.choice(default_replies)
 
 
+def _apply_response_post_processing(
+    split_sentences: list[tuple[str, str]],
+    typo_generator: ChineseTypoGenerator,
+    enable_chinese_typo: bool,
+) -> list[ProcessedResponseSegment]:
+    """对已完成断句的文本执行错别字注入和纠正段处理。"""
+    segments: list[ProcessedResponseSegment] = []
+    for sentence, sentence_separator in split_sentences:
+        if global_config.chinese_typo.enable and enable_chinese_typo:
+            typoed_text, typo_corrections = typo_generator.create_typo_sentence(sentence)
+            if typo_corrections:
+                if random.random() < 0.5:
+                    quote_previous = (
+                        global_config.chinese_typo.enable_correction_quote
+                        and random.random() < global_config.chinese_typo.correction_quote_probability
+                    )
+                    segments.append(ProcessedResponseSegment(typoed_text, separator=sentence_separator))
+                    segments.append(ProcessedResponseSegment(typo_corrections, quote_previous=quote_previous))
+                else:
+                    segments.append(ProcessedResponseSegment(sentence, separator=sentence_separator))
+            else:
+                segments.append(ProcessedResponseSegment(typoed_text, separator=sentence_separator))
+        else:
+            segments.append(ProcessedResponseSegment(sentence, separator=sentence_separator))
+    return segments
+
+
 def process_llm_response_segments(
     text: str,
     enable_splitter: bool = True,
@@ -613,32 +641,7 @@ def process_llm_response_segments(
     else:
         split_sentences = [(cleaned_text, "")]
 
-    segments: list[ProcessedResponseSegment] = []
-    for sentence, sentence_separator in split_sentences:
-        if global_config.chinese_typo.enable and enable_chinese_typo:
-            typoed_text, typo_corrections = typo_generator.create_typo_sentence(sentence)
-            if typo_corrections:
-                # 50%概率新增正确字/词，50%概率用正确分句替换错别字分句
-                if random.random() < 0.5:
-                    quote_previous = (
-                        global_config.chinese_typo.enable_correction_quote
-                        and random.random() < global_config.chinese_typo.correction_quote_probability
-                    )
-                    segments.append(ProcessedResponseSegment(typoed_text, separator=sentence_separator))
-                    # 纠正消息是插入的合成段，不属于原始文本，不带分隔符
-                    segments.append(
-                        ProcessedResponseSegment(
-                            typo_corrections,
-                            quote_previous=quote_previous,
-                        )
-                    )
-                else:
-                    # 用正确的分句替换错别字分句
-                    segments.append(ProcessedResponseSegment(sentence, separator=sentence_separator))
-            else:
-                segments.append(ProcessedResponseSegment(typoed_text, separator=sentence_separator))
-        else:
-            segments.append(ProcessedResponseSegment(sentence, separator=sentence_separator))
+    segments = _apply_response_post_processing(split_sentences, typo_generator, enable_chinese_typo)
 
     if len(segments) > max_sentence_num:
         if global_config.response_splitter.enable_overflow_return_all:
@@ -667,6 +670,39 @@ def process_llm_response_segments(
         ]
 
     return segments
+
+
+async def process_llm_response_segments_async(
+    text: str,
+    enable_splitter: bool = True,
+    enable_chinese_typo: bool = True,
+) -> list[ProcessedResponseSegment]:
+    """异步处理回复文本，支持使用 LLM 按语义断句。"""
+    if global_config.response_splitter.mode != "llm":
+        return process_llm_response_segments(text, enable_splitter, enable_chinese_typo)
+
+    if not global_config.response_post_process.enable_response_post_process or not enable_splitter:
+        return process_llm_response_segments(text, enable_splitter, enable_chinese_typo)
+
+    try:
+        split_sentences = await split_text_with_llm(text)
+    except Exception:
+        logger.exception("LLM 断句失败")
+        raise
+
+    typo_generator = ChineseTypoGenerator(
+        error_rate=global_config.chinese_typo.error_rate,
+        min_freq=global_config.chinese_typo.min_freq,
+        tone_error_rate=global_config.chinese_typo.tone_error_rate,
+        word_replace_rate=global_config.chinese_typo.word_replace_rate,
+    )
+    segments = _apply_response_post_processing(split_sentences, typo_generator, enable_chinese_typo)
+    max_sentence_num = global_config.response_splitter.max_sentence_num
+    if len(segments) > max_sentence_num:
+        if global_config.response_splitter.enable_overflow_return_all:
+            return [ProcessedResponseSegment(text)]
+        return [ProcessedResponseSegment(_get_random_default_reply())]
+    return _merge_processed_segments_to_max_count(segments, global_config.response_splitter.max_split_num)
 
 
 def process_llm_response(text: str, enable_splitter: bool = True, enable_chinese_typo: bool = True) -> list[str]:

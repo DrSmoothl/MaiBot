@@ -4679,6 +4679,20 @@ class ResponseSplitterConfig(ConfigBase):
 
     __ui_parent__ = "response_post_process"
 
+    mode: Literal["rule", "llm"] = Field(
+        default="rule",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "断句模式",
+                "en_US": "Splitting mode",
+                "ja_JP": "分割モード",
+            },
+            "x-widget": "select",
+            "options": ["rule", "llm"],
+        },
+    )
+    """规则断句或使用 LLM 按语义断句。"""
+
     enable: bool = Field(
         default=True,
         json_schema_extra={
