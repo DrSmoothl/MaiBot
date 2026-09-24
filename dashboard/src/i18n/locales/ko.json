@@ -1460,6 +1460,16 @@
       "missTokens": "미적중 Token",
       "eligibleTokens": "통계 대상 {{value}} Token"
     },
+    "news": {
+      "title": "뉴스",
+      "description": "서버의 최신 소식",
+      "refresh": "뉴스 새로고침",
+      "retry": "다시 불러오기",
+      "open": "뉴스 상세 열기",
+      "openLink": "원문 링크 열기",
+      "pinned": "고정됨",
+      "empty": "아직 뉴스가 없습니다"
+    },
     "storage": {
       "title": "저장소 사용량",
       "reading": "읽는 중",

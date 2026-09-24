@@ -34,6 +34,12 @@ from .emoji import (
     ThumbnailPreheatResponse,
 )
 
+# News schemas
+from .news import (
+    NewsItem,
+    NewsResponse,
+)
+
 # Plugin schemas
 from .plugin import (
     AddMirrorRequest,
@@ -106,4 +112,7 @@ __all__ = [
     "UninstallPluginRequest",
     "UpdatePluginRequest",
     "UpdatePluginConfigRequest",
+    # News
+    "NewsItem",
+    "NewsResponse",
 ]

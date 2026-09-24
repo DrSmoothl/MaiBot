@@ -1477,6 +1477,16 @@
       "missTokens": "未命中Token",
       "eligibleTokens": "参与统计 {{value}} Token"
     },
+    "news": {
+      "title": "资讯",
+      "description": "来自服务器的新闻动态",
+      "refresh": "刷新资讯",
+      "retry": "重新加载",
+      "open": "打开资讯详情",
+      "openLink": "打开原文链接",
+      "pinned": "置顶",
+      "empty": "暂无资讯"
+    },
     "storage": {
       "title": "存储占用",
       "reading": "读取中",

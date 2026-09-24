@@ -1408,6 +1408,16 @@
       "missTokens": "未ヒットToken",
       "eligibleTokens": "集計対象 {{value}} Token"
     },
+    "news": {
+      "title": "ニュース",
+      "description": "サーバーからの最新ニュース",
+      "refresh": "ニュースを更新",
+      "retry": "再読み込み",
+      "open": "ニュースの詳細を開く",
+      "openLink": "原文リンクを開く",
+      "pinned": "ピン留め",
+      "empty": "ニュースはまだありません"
+    },
     "storage": {
       "title": "ストレージ使用量",
       "reading": "読み取り中",
