@@ -1,10 +1,20 @@
 import type { APIProvider } from './types'
 
 /**
+ * 清理后的 provider：可空数值字段已归一为 undefined，缺省字段不会向下发
+ * （由后端 schema 默认值填充，避免前后端各写一套默认值导致分叉）
+ */
+export type CleanedProvider = Omit<APIProvider, 'max_retry' | 'timeout' | 'retry_interval'> & {
+  max_retry?: number
+  timeout?: number
+  retry_interval?: number
+}
+
+/**
  * 清理 provider 数据：数值字段缺省时不向下发，由后端 schema 默认值填充
  * 避免前后端各写一套默认值导致分叉；null 转为 undefined 后会在序列化时丢弃，防止后端校验报错
  */
-export const cleanProviderData = (provider: APIProvider): APIProvider => ({
+export const cleanProviderData = (provider: APIProvider): CleanedProvider => ({
   ...provider,
   default_headers: provider.default_headers ?? {},
   max_retry: provider.max_retry ?? undefined,
