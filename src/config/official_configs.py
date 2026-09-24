@@ -5031,7 +5031,7 @@ class DebugConfig(ConfigBase):
     __ui_label__ = "其他"
 
     enable_console_input: bool = Field(
-        default=False,
+        default=True,
         json_schema_extra={
             "label": {
                 "zh_CN": "启用终端输入",
