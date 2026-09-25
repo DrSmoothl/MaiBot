@@ -118,7 +118,7 @@ class _SingleModelTestOrchestrator(LLMOrchestrator):
         self._model_test_task_config = TaskConfig(
             model_list=[model_name],
             max_tokens=512,
-            temperature=0.0,
+            temperature=0.7,
             selection_strategy="sequential",
             hard_timeout=90.0,
         )
@@ -174,7 +174,6 @@ async def test_model_capability(request: ModelTestRequest):
         orchestrator = _SingleModelTestOrchestrator(model_name=model_name)
         result = await orchestrator.generate_response_with_context_async(
             context_factory=_build_model_test_context_factory(visual_enabled),
-            temperature=0.0,
             max_tokens=512,
             model_name=model_name,
             tools=_build_model_test_tools(),

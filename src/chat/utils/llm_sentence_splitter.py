@@ -28,7 +28,7 @@ async def split_text_with_llm(text: str) -> list[tuple[str, str]]:
     client = LLMServiceClient(task_name="utils", request_type="response.splitter")
     result = await client.generate_response(
         _SPLITTER_PROMPT + text,
-        options=LLMGenerationOptions(temperature=0, max_tokens=max(128, len(text) * 2)),
+        options=LLMGenerationOptions(max_tokens=max(128, len(text) * 2)),
     )
     payload = result.response.strip()
     try:

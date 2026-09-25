@@ -28,7 +28,7 @@ DEFAULT_TASK_CONFIG_TEMPLATES: dict[str, dict[str, Any]] = {
     "memory": {
         "model_list": [],
         "max_tokens": 8192,
-        "temperature": 0.5,
+        "temperature": 0.3,
         "selection_strategy": "random",
         "hard_timeout": 240.0,
     },

@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import col, func, select
 
-from src.common.data_models.llm_service_data_models import LLMGenerationOptions
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
     BehaviorAction,
@@ -232,7 +231,6 @@ async def _analyze_debug_scene_text(scene_text: str) -> BehaviorScenarioProfile:
         scene_messages = _build_debug_scene_messages(normalized_scene_text, system_prompt)
         generation_result = await behavior_scene_debug_model.generate_response_with_context(
             lambda _client: scene_messages,
-            options=LLMGenerationOptions(temperature=0.2),
         )
         return generation_result.response or ""
 

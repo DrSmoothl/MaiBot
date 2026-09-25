@@ -12,6 +12,7 @@ import re
 import time
 import traceback
 
+from openai import APITimeoutError
 from rich.traceback import install
 
 from src.common.logger import get_logger
@@ -67,6 +68,7 @@ from src.llm_models.utils import compress_messages, llm_usage_recorder
 install(extra_lines=3)
 
 logger = get_logger("model_utils")
+model_logger = get_logger("llm_models")
 
 DATA_URI_LIMIT_PATTERN = re.compile(
     r"Exceeded limit on max bytes per data-uri item\s*:\s*(?P<limit>\d+)",
@@ -1056,18 +1058,37 @@ class LLMOrchestrator:
 
                 retry_remain -= 1
                 task_display = self.request_type or "未知任务"
-                if retry_remain <= 0:
-                    logger.error(
-                        f"任务 '{task_display}' 的模型 '{model_info.name}' 在网络错误重试用尽后仍然失败。{original_error_info}"
+                if isinstance(e.__cause__, APITimeoutError):
+                    replay_command = getattr(e, "request_snapshot_replay_command", "")
+                    timeout_log = (
+                        f"任务 '{task_display}' 的模型 '{model_info.name}' 遇到错误: 网络连接超时\n"
+                        f"  底层异常: {type(e.__cause__).__name__} | {e.__cause__} | "
+                        f"最大超时时间：{api_provider.timeout}s | 重试次数: {max_attempts - retry_remain - 1} | "
+                        f"剩余重试次数: {retry_remain}"
                     )
-                    raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
+                    if replay_command:
+                        timeout_log += f"\n  调用完整信息: {replay_command}"
+                    timeout_log += (
+                        "\n  如此类型错误过多，请尝试调整模型配置中对应 API Provider 的 timeout 值"
+                        "\n  其他可能原因: 网络波动、DNS 故障、连接超时、防火墙限制或代理问题"
+                    )
+                    if retry_remain <= 0:
+                        model_logger.error(timeout_log)
+                        raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
+                    model_logger.warning(timeout_log)
+                else:
+                    if retry_remain <= 0:
+                        logger.error(
+                            f"任务 '{task_display}' 的模型 '{model_info.name}' 在网络错误重试用尽后仍然失败。{original_error_info}"
+                        )
+                        raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
 
-                logger.warning(
-                    f"任务 '{task_display}' 的模型 '{model_info.name}' 遇到网络错误(可重试): {str(e)}{original_error_info}\n"
-                    f"  常见原因: 如请求的API正常但APITimeoutError类型错误过多，请尝试调整模型配置中对应API Provider的timeout值\n"
-                    f"  其它可能原因: 网络波动、DNS 故障、连接超时、防火墙限制或代理问题\n"
-                    f"  剩余重试次数: {retry_remain}"
-                )
+                    logger.warning(
+                        f"任务 '{task_display}' 的模型 '{model_info.name}' 遇到网络错误(可重试): {str(e)}{original_error_info}\n"
+                        f"  常见原因: 如请求的API正常但APITimeoutError类型错误过多，请尝试调整模型配置中对应API Provider的timeout值\n"
+                        f"  其它可能原因: 网络波动、DNS 故障、连接超时、防火墙限制或代理问题\n"
+                        f"  剩余重试次数: {retry_remain}"
+                    )
                 self._schedule_llm_retry_event(
                     model_name=model_info.name,
                     attempt=max_attempts - retry_remain + 1,

@@ -405,7 +405,7 @@ class TaskConfig(ConfigBase):
     """任务最大输出token数"""
 
     temperature: float = Field(
-        default=0.3,
+        default=0.7,
         ge=0,
         le=2,
         json_schema_extra={
