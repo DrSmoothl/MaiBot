@@ -427,6 +427,18 @@ def _migrate_removed_expression_selection_mode(data: dict[str, Any]) -> list[str
     return ["expression.expression_selection_mode"]
 
 
+def _remove_person_profile_classification_temperature(data: dict[str, Any]) -> list[str]:
+    """8.14.50: 移除人物画像证据分类的独立温度配置。"""
+
+    a_memorix = _as_dict(data.get("a_memorix"))
+    person_profile = _as_dict(a_memorix.get("person_profile")) if a_memorix is not None else None
+    if person_profile is None or "evidence_classification_temperature" not in person_profile:
+        return []
+
+    person_profile.pop("evidence_classification_temperature", None)
+    return ["a_memorix.person_profile.evidence_classification_temperature"]
+
+
 BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
     ConfigUpgradeHook(
         target_version="8.10.11",
@@ -472,6 +484,11 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.14.40",
         config_names=("bot_config.toml",),
         migrate=_migrate_removed_expression_selection_mode,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.14.50",
+        config_names=("bot_config.toml",),
+        migrate=_remove_person_profile_classification_temperature,
     ),
 )
 MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = ()

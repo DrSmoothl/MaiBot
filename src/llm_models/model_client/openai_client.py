@@ -81,6 +81,7 @@ from .base_client import (
     AudioTranscriptionRequest,
     EmbeddingRequest,
     ImageEmbeddingRequest,
+    RequestTraceContext,
     ResponseRequest,
     UsageTuple,
     client_registry,
@@ -891,15 +892,21 @@ def _extract_content_blocks(
     return reasoning_content, content, tool_calls or None
 
 
-def _log_length_truncation(finish_reason: str | None, model_name: str | None) -> None:
-    """记录因长度截断导致的告警日志。
-
-    Args:
-        finish_reason: OpenAI 兼容接口返回的完成原因。
-        model_name: 上游返回的模型标识。
-    """
+def _log_length_truncation(
+    finish_reason: str | None,
+    model_name: str | None,
+    max_tokens: int | None,
+    trace_context: RequestTraceContext | None,
+) -> None:
+    """记录因长度截断导致的告警日志。"""
     if finish_reason == "length":
-        logger.info(f"模型{model_name or ''}因为超过最大 max_token 限制，可能仅输出部分内容，可视情况调整")
+        task_name = trace_context.task_name if trace_context else "未知"
+        request_type = trace_context.request_type if trace_context else "未知"
+        limit = str(max_tokens) if max_tokens is not None else "未指定（由服务商决定）"
+        logger.info(
+            f"模型{model_name or ''}因为达到最大输出 token 限制（max_tokens={limit}，"
+            f"任务={task_name}，请求类型={request_type}），可能仅输出部分内容，可视情况调整"
+        )
 
 
 def _apply_xml_tool_call_fallback(
@@ -1226,6 +1233,8 @@ async def _default_stream_response_handler(
     tool_argument_parse_mode: ToolArgumentParseMode,
     reasoning_key: str,
     logical_turn_id: str,
+    max_tokens: int | None,
+    trace_context: RequestTraceContext | None,
 ) -> Tuple[APIResponse, UsageTuple | None]:
     """处理 OpenAI 兼容流式响应。
 
@@ -1266,7 +1275,7 @@ async def _default_stream_response_handler(
         model_name = None
         if isinstance(response.raw_data, dict):
             model_name = response.raw_data.get("model")
-        _log_length_truncation(accumulator.finish_reason, model_name)
+        _log_length_truncation(accumulator.finish_reason, model_name, max_tokens, trace_context)
         return response, usage_record
     finally:
         accumulator.close()
@@ -1279,6 +1288,8 @@ def _default_normal_response_parser(
     tool_argument_parse_mode: ToolArgumentParseMode,
     reasoning_key: str,
     logical_turn_id: str,
+    max_tokens: int | None,
+    trace_context: RequestTraceContext | None,
 ) -> Tuple[APIResponse, UsageTuple | None]:
     """解析 OpenAI 兼容的非流式响应。
 
@@ -1344,7 +1355,7 @@ def _default_normal_response_parser(
     usage_record = _extract_usage_record(getattr(resp, "usage", None))
 
     finish_reason = getattr(resp.choices[0], "finish_reason", None)
-    _log_length_truncation(finish_reason, getattr(resp, "model", None))
+    _log_length_truncation(finish_reason, getattr(resp, "model", None), max_tokens, trace_context)
     content, reasoning_content, resolved_tool_calls = _apply_xml_tool_call_fallback(
         content,
         reasoning_content,
@@ -1421,6 +1432,8 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                 tool_argument_parse_mode=self.tool_argument_parse_mode,
                 reasoning_key=self.reasoning_key,
                 logical_turn_id=request.logical_turn_id,
+                max_tokens=request.max_tokens,
+                trace_context=request.trace_context,
             )
 
         return default_stream_handler
@@ -1447,6 +1460,8 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                 tool_argument_parse_mode=self.tool_argument_parse_mode,
                 reasoning_key=self.reasoning_key,
                 logical_turn_id=request.logical_turn_id,
+                max_tokens=request.max_tokens,
+                trace_context=request.trace_context,
             )
 
         return default_response_parser
@@ -1521,6 +1536,10 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                         if "max_tokens" in extra_body or "max_completion_tokens" in extra_body
                         else _coerce_openai_argument(request.max_tokens)
                     )
+                effective_max_tokens = extra_body.get(
+                    "max_completion_tokens",
+                    extra_body.get("max_tokens", None if max_tokens_argument is omit else max_tokens_argument),
+                )
                 snapshot_provider_request["request_kwargs"] = {
                     "extra_body": extra_body or None,
                     "extra_headers": request_overrides.extra_headers or None,
@@ -1535,6 +1554,11 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                 }
 
                 if model_info.force_stream_mode:
+                    active_stream_handler = (
+                        stream_response_handler
+                        if request.stream_response_handler is not None
+                        else self._build_default_stream_response_handler(request.copy_with(max_tokens=effective_max_tokens))
+                    )
                     stream_task: asyncio.Task[AsyncStream[ChatCompletionChunk]] = asyncio.create_task(
                         self.client.chat.completions.create(
                             model=model_info.model_identifier,
@@ -1553,8 +1577,13 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                         AsyncStream[ChatCompletionChunk],
                         await await_task_with_interrupt(stream_task, request.interrupt_flag),
                     )
-                    return await stream_response_handler(raw_response, request.interrupt_flag)
+                    return await active_stream_handler(raw_response, request.interrupt_flag)
 
+                active_response_parser = (
+                    response_parser
+                    if request.async_response_parser is not None
+                    else self._build_default_response_parser(request.copy_with(max_tokens=effective_max_tokens))
+                )
                 completion_task: asyncio.Task[ChatCompletion] = asyncio.create_task(
                     self.client.chat.completions.create(
                         model=model_info.model_identifier,
@@ -1573,7 +1602,7 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                     ChatCompletion,
                     await await_task_with_interrupt(completion_task, request.interrupt_flag),
                 )
-                return response_parser(raw_response)
+                return active_response_parser(raw_response)
 
             # 已知仅支持 max_completion_tokens 的模型直接走对应分支；否则先按常规发送，
             # 命中「max_tokens 不被支持」的 400 错误时自动改用 max_completion_tokens 重试并记忆。
