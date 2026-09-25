@@ -892,6 +892,7 @@ export interface MemoryDeleteOperationDetailPayload {
 
 export interface MemoryCorrectionRequestPayload {
   request_text: string
+  targets?: { type: 'paragraph' | 'relation'; id: string }[]
   scope?: string
   person_id?: string
   person_keyword?: string
@@ -1376,6 +1377,17 @@ export interface MemoryEpisodeStatusPayload extends Record<string, unknown> {
   error?: string
 }
 
+export interface MemoryEpisodeMigrationBackfillPayload {
+  success: boolean
+  error?: string
+  dry_run: boolean
+  candidates: number
+  discarded: number
+  active_skipped: number
+  by_status: Record<string, number>
+  sample_sources: string[]
+}
+
 export interface MemoryEpisodeActionPayload extends Record<string, unknown> {
   success: boolean
   error?: string
@@ -1412,6 +1424,7 @@ export interface MemoryProfileQueryPayload extends Record<string, unknown> {
   profile?: MemoryProfileItemPayload | Record<string, unknown>
   person_id?: string
   profile_text?: string
+  uncertain_fact_count?: number
   evidence?: Array<Record<string, unknown>>
   error?: string
 }
@@ -1434,6 +1447,7 @@ export interface MemoryProfileEvidenceItemPayload extends Record<string, unknown
 export interface MemoryProfileEvidencePayload extends Record<string, unknown> {
   success: boolean
   person_id?: string
+  uncertain_fact_count?: number
   person_name?: string
   profile_text?: string
   auto_profile_text?: string
@@ -1880,6 +1894,16 @@ export async function getMemoryEpisodeStatus(
   limit: number = 20
 ): Promise<MemoryEpisodeStatusPayload> {
   return requestJson<MemoryEpisodeStatusPayload>(`/episodes/status?limit=${limit}`)
+}
+
+export async function getMemoryEpisodeMigrationBackfill(): Promise<MemoryEpisodeMigrationBackfillPayload> {
+  return requestJson<MemoryEpisodeMigrationBackfillPayload>('/episodes/migration-backfill')
+}
+
+export async function discardMemoryEpisodeMigrationBackfill(): Promise<MemoryEpisodeMigrationBackfillPayload> {
+  return requestJson<MemoryEpisodeMigrationBackfillPayload>('/episodes/migration-backfill/discard', {
+    method: 'POST',
+  })
 }
 
 export async function processMemoryEpisodePending(payload: {

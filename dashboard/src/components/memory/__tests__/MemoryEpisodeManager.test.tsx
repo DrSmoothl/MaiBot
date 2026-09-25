@@ -1,9 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  discardMemoryEpisodeMigrationBackfill,
   getMemoryEpisode,
   getMemoryEpisodes,
+  getMemoryEpisodeMigrationBackfill,
   getMemoryEpisodeStatus,
   processMemoryEpisodePending,
   rebuildMemoryEpisodes,
@@ -11,12 +13,16 @@ import {
 
 import { MemoryEpisodeManager } from '../MemoryEpisodeManager'
 
-vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }))
+const toastMock = vi.hoisted(() => vi.fn())
+
+vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
 
 vi.mock('@/lib/memory-api', () => ({
   getMemoryEpisode: vi.fn(),
   getMemoryEpisodes: vi.fn(),
+  getMemoryEpisodeMigrationBackfill: vi.fn(),
   getMemoryEpisodeStatus: vi.fn(),
+  discardMemoryEpisodeMigrationBackfill: vi.fn(),
   processMemoryEpisodePending: vi.fn(),
   rebuildMemoryEpisodes: vi.fn(),
 }))
@@ -28,6 +34,15 @@ const statusMock = vi.mocked(getMemoryEpisodeStatus)
 beforeEach(() => {
   vi.clearAllMocks()
   statusMock.mockResolvedValue({ success: true, counts: {} })
+  vi.mocked(getMemoryEpisodeMigrationBackfill).mockResolvedValue({
+    success: true,
+    dry_run: true,
+    candidates: 0,
+    discarded: 0,
+    active_skipped: 0,
+    by_status: {},
+    sample_sources: [],
+  })
   vi.mocked(processMemoryEpisodePending).mockResolvedValue({ success: true })
   vi.mocked(rebuildMemoryEpisodes).mockResolvedValue({ success: true })
   episodesMock.mockImplementation(async (params) => ({
@@ -60,6 +75,71 @@ beforeEach(() => {
 })
 
 describe('MemoryEpisodeManager', () => {
+  it('迁移任务接口返回失败时展示错误，不读取缺失的状态字段', async () => {
+    vi.mocked(getMemoryEpisodeMigrationBackfill).mockResolvedValue({
+      success: false,
+      error: '不支持的 memory_episode_admin action',
+    } as Awaited<ReturnType<typeof getMemoryEpisodeMigrationBackfill>>)
+
+    render(<MemoryEpisodeManager />)
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: '加载情节记忆失败',
+          description: '不支持的 memory_episode_admin action',
+          variant: 'destructive',
+        })
+      )
+    })
+    expect(screen.queryByText(/待重建 .*已完成 .*失败/)).not.toBeInTheDocument()
+  })
+
+  it('迁移任务操作位于页面末尾，使用项目确认框和 Toast 反馈', async () => {
+    vi.mocked(getMemoryEpisodeMigrationBackfill).mockResolvedValue({
+      success: true,
+      dry_run: true,
+      candidates: 2,
+      discarded: 0,
+      active_skipped: 0,
+      by_status: { done: 2 },
+      sample_sources: ['source-a'],
+    })
+    vi.mocked(discardMemoryEpisodeMigrationBackfill).mockResolvedValue({
+      success: true,
+      dry_run: false,
+      candidates: 2,
+      discarded: 2,
+      active_skipped: 0,
+      by_status: { done: 2 },
+      sample_sources: ['source-a'],
+    })
+
+    render(<MemoryEpisodeManager />)
+
+    const discardHeading = await screen.findByText('丢弃升级迁移的历史任务')
+    const maintenanceHeading = screen.getByText('Episode 运维')
+    expect(maintenanceHeading.compareDocumentPosition(discardHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '丢弃历史任务' }))
+    expect(screen.getByText('确认丢弃历史 Episode 任务')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(discardMemoryEpisodeMigrationBackfill).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '丢弃历史任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认丢弃' }))
+
+    await waitFor(() => expect(discardMemoryEpisodeMigrationBackfill).toHaveBeenCalledOnce())
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: '已丢弃历史 Episode 任务',
+          description: expect.stringContaining('已丢弃 2 条迁移任务'),
+        })
+      )
+    })
+  })
+
   it('显式跳转目标不会被 Episode 列表默认项覆盖', async () => {
     render(
       <MemoryEpisodeManager

@@ -25,7 +25,9 @@ vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
 vi.mock('@/lib/memory-api', () => ({
   getMemoryEpisode: vi.fn(),
   getMemoryEpisodes: vi.fn(),
+  getMemoryEpisodeMigrationBackfill: vi.fn(),
   getMemoryEpisodeStatus: vi.fn(),
+  discardMemoryEpisodeMigrationBackfill: vi.fn(),
   getMemoryTimeline: vi.fn(),
   processMemoryEpisodePending: vi.fn(),
   rebuildMemoryEpisodes: vi.fn(),
@@ -244,6 +246,15 @@ beforeEach(() => {
   patchPointerCapture()
   vi.mocked(memoryApi.getMemoryEpisodes).mockResolvedValue({ success: true, items: [] })
   vi.mocked(memoryApi.getMemoryEpisodeStatus).mockResolvedValue(makeEpisodeStatus())
+  vi.mocked(memoryApi.getMemoryEpisodeMigrationBackfill).mockResolvedValue({
+    success: true,
+    dry_run: true,
+    candidates: 0,
+    discarded: 0,
+    active_skipped: 0,
+    by_status: {},
+    sample_sources: [],
+  })
   vi.mocked(memoryApi.getMemoryEpisode).mockResolvedValue(makeEpisodeDetail(makeEpisode()))
   vi.mocked(memoryApi.rebuildMemoryEpisodes).mockResolvedValue(makeAction())
   vi.mocked(memoryApi.processMemoryEpisodePending).mockResolvedValue(makeAction({ rebuilt: undefined, processed: 4 }))

@@ -26,6 +26,15 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -38,15 +47,19 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { TabsContent } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import {
   createMemoryFact,
   getMemoryRecordContext,
+  getMemoryCorrectionPlan,
+  previewMemoryCorrection,
   restoreMemoryFact,
   retractMemoryFact,
   searchMemoryRecords,
   updateMemoryFact,
   type MemoryFactWritePayload,
+  type MemoryCorrectionPlanListPayload,
   type MemoryRecordContextPayload,
   type MemoryRecordPayload,
   type MemoryRecordType,
@@ -137,19 +150,14 @@ const EVIDENCE_STANCE_LABELS: Record<string, string> = {
   refute: 'memory.records.evidenceStance.refute',
 }
 
-function LocalizedEnumLabel({
-  value,
-  labels,
-}: {
-  value: string
-  labels: Record<string, string>
-}) {
+function LocalizedEnumLabel({ value, labels }: { value: string; labels: Record<string, string> }) {
   const { t } = useTranslation()
   const translationKey = labels[value]
   return <>{translationKey ? t(translationKey) : value}</>
 }
 
 interface MemoryRecordsTabProps {
+  onCorrectionPlan?: (planId: string, requestText: string) => void
   onAction: (
     action: string,
     record: MemoryRecordPayload,
@@ -272,7 +280,7 @@ function RelatedRecords({
   )
 }
 
-export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
+export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTabProps) {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const [draftQuery, setDraftQuery] = useState('')
@@ -280,6 +288,9 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
   const [recordType, setRecordType] = useState<'all' | MemoryRecordType>('all')
   const [includeInactive, setIncludeInactive] = useState(false)
   const [selectedRecord, setSelectedRecord] = useState<MemoryRecordPayload | null>(null)
+  const [checkedKeys, setCheckedKeys] = useState<Set<string>>(() => new Set())
+  const [batchEditorOpen, setBatchEditorOpen] = useState(false)
+  const [batchRequest, setBatchRequest] = useState('')
   const [factEditorOpen, setFactEditorOpen] = useState(false)
   const [editingFact, setEditingFact] = useState<MemoryRecordPayload | null>(null)
 
@@ -294,13 +305,62 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
   })
 
   const effectiveSelectedRecord = selectedRecord ?? searchQuery.data?.items[0] ?? null
+  const records = searchQuery.data?.items ?? []
+  const checkedRecords = records.filter((record) => checkedKeys.has(`${record.type}:${record.id}`))
+  const allChecked = records.length > 0 && checkedRecords.length === records.length
+  const hasUnsupportedRecords = checkedRecords.some(
+    (record) => record.type !== 'paragraph' && record.type !== 'relation'
+  )
+
+  const previewBatchMutation = useMutation({
+    mutationFn: async () => {
+      const requestText = batchRequest.trim()
+      if (!requestText || !checkedRecords.length || hasUnsupportedRecords) {
+        throw new Error('请选择段落或关系，并填写修正内容')
+      }
+      const payload = await previewMemoryCorrection({
+        request_text: requestText,
+        scope: 'memory',
+        targets: checkedRecords.map((record) => ({
+          type: record.type as 'paragraph' | 'relation',
+          id: record.id,
+        })),
+        requested_by: 'knowledge_base',
+        reason: '用户多选记忆修正',
+      })
+      const planId = payload.plan_id || payload.plan?.plan_id
+      if (!payload.success || !planId) {
+        throw new Error(payload.error || '未能生成批量修正预览')
+      }
+      const plan = payload.plan ?? (await getMemoryCorrectionPlan(planId)).plan
+      if (!plan) throw new Error('预览已生成，但无法读取修正计划，请重试')
+      return plan
+    },
+    onSuccess: (plan) => {
+      // 先让计划列表包含新计划，再跳转，避免选择状态被旧列表清空。
+      queryClient.setQueryData<MemoryCorrectionPlanListPayload>(
+        ['memory-correction', 'plans'],
+        (previous) => {
+          const items = [
+            plan,
+            ...(previous?.items ?? []).filter((item) => item.plan_id !== plan.plan_id),
+          ]
+          return { ...previous, success: true, items, count: items.length }
+        }
+      )
+      setBatchEditorOpen(false)
+      setBatchRequest('')
+      setCheckedKeys(new Set())
+      onCorrectionPlan?.(plan.plan_id, plan.request_text)
+      toast({
+        title: '已生成批量修正预览',
+        description: '请检查修改操作和关联影响，确认后再执行。',
+      })
+    },
+  })
 
   const detailQuery = useQuery({
-    queryKey: [
-      'memory-record-context',
-      effectiveSelectedRecord?.type,
-      effectiveSelectedRecord?.id,
-    ],
+    queryKey: ['memory-record-context', effectiveSelectedRecord?.type, effectiveSelectedRecord?.id],
     queryFn: () =>
       getMemoryRecordContext(effectiveSelectedRecord!.type, effectiveSelectedRecord!.id),
     enabled: Boolean(effectiveSelectedRecord),
@@ -316,6 +376,7 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
 
   const refreshRecords = async () => {
     setSelectedRecord(null)
+    setCheckedKeys(new Set())
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['memory-records'] }),
       queryClient.invalidateQueries({ queryKey: ['memory-record-context'] }),
@@ -378,6 +439,7 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
   })
 
   const submitSearch = () => {
+    setCheckedKeys(new Set())
     const nextQuery = draftQuery.trim()
     if (nextQuery === query) {
       void searchQuery.refetch()
@@ -439,6 +501,7 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
                 value={recordType}
                 onValueChange={(value) => {
                   setSelectedRecord(null)
+                  setCheckedKeys(new Set())
                   setRecordType(value as 'all' | MemoryRecordType)
                 }}
               >
@@ -460,6 +523,7 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
                 checked={includeInactive}
                 onCheckedChange={(checked) => {
                   setSelectedRecord(null)
+                  setCheckedKeys(new Set())
                   setIncludeInactive(checked)
                 }}
               />
@@ -478,6 +542,54 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
           </form>
         </CardContent>
       </Card>
+
+      <div
+        className="flex flex-wrap items-center gap-3 rounded-lg border p-3"
+        aria-label="记忆多选操作"
+      >
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            aria-label="全选当前结果"
+            checked={allChecked ? true : checkedRecords.length > 0 ? 'indeterminate' : false}
+            disabled={!records.length || searchQuery.isFetching}
+            onCheckedChange={(checked) =>
+              setCheckedKeys(
+                checked === true
+                  ? new Set(records.map((record) => `${record.type}:${record.id}`))
+                  : new Set()
+              )
+            }
+          />
+          全选当前结果
+        </label>
+        <span className="text-muted-foreground text-sm" aria-live="polite">
+          已选 {checkedRecords.length} 条
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={!checkedRecords.length}
+          onClick={() => setCheckedKeys(new Set())}
+        >
+          清空选择
+        </Button>
+        <Button
+          size="sm"
+          disabled={!checkedRecords.length || hasUnsupportedRecords || searchQuery.isFetching}
+          onClick={() => {
+            previewBatchMutation.reset()
+            setBatchEditorOpen(true)
+          }}
+        >
+          <Pencil className="h-4 w-4" />
+          修正所选
+        </Button>
+        {hasUnsupportedRecords ? (
+          <span className="text-muted-foreground w-full text-sm">
+            批量修正支持段落和关系；事实请逐条编辑，实体请在图谱中修改。
+          </span>
+        ) : null}
+      </div>
 
       {errorText ? (
         <Alert variant="destructive">
@@ -531,15 +643,30 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
                 </div>
               ) : searchQuery.data?.items.length ? (
                 searchQuery.data.items.map((record) => (
-                  <RecordButton
-                    key={`${record.type}:${record.id}`}
-                    record={record}
-                    selected={
-                      record.type === effectiveSelectedRecord?.type &&
-                      record.id === effectiveSelectedRecord.id
-                    }
-                    onSelect={setSelectedRecord}
-                  />
+                  <div key={`${record.type}:${record.id}`} className="flex items-start gap-1">
+                    <Checkbox
+                      className="mt-4 ml-2 shrink-0"
+                      aria-label={`选择${RECORD_LABELS[record.type]}：${record.title || record.id}`}
+                      checked={checkedKeys.has(`${record.type}:${record.id}`)}
+                      onCheckedChange={(checked) =>
+                        setCheckedKeys((previous) => {
+                          const next = new Set(previous)
+                          const key = `${record.type}:${record.id}`
+                          if (checked === true) next.add(key)
+                          else next.delete(key)
+                          return next
+                        })
+                      }
+                    />
+                    <RecordButton
+                      record={record}
+                      selected={
+                        record.type === effectiveSelectedRecord?.type &&
+                        record.id === effectiveSelectedRecord.id
+                      }
+                      onSelect={setSelectedRecord}
+                    />
+                  </div>
                 ))
               ) : (
                 <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">
@@ -851,6 +978,60 @@ export function MemoryRecordsTab({ onAction }: MemoryRecordsTabProps) {
           </ScrollArea>
         </Card>
       </div>
+
+      <Dialog
+        open={batchEditorOpen}
+        onOpenChange={(open) => {
+          if (!previewBatchMutation.isPending) setBatchEditorOpen(open)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修正所选记忆</DialogTitle>
+            <DialogDescription>
+              已选择 {checkedRecords.length} 条记忆。先生成预览，检查连带影响后再确认执行。
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="max-h-40 space-y-1 overflow-y-auto text-sm">
+            {checkedRecords.map((record) => (
+              <li key={`${record.type}:${record.id}`} className="break-words">
+                {RECORD_LABELS[record.type]}：{record.title || record.id}
+              </li>
+            ))}
+          </ul>
+          <Label htmlFor="batch-memory-correction">修正内容</Label>
+          <Textarea
+            id="batch-memory-correction"
+            value={batchRequest}
+            onChange={(event) => setBatchRequest(event.target.value)}
+            placeholder="说明这些记忆中哪些信息需要修改，以及正确的信息。"
+            disabled={previewBatchMutation.isPending}
+          />
+          {previewBatchMutation.error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{previewBatchMutation.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={previewBatchMutation.isPending}
+              onClick={() => setBatchEditorOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              disabled={
+                !batchRequest.trim() || !checkedRecords.length || previewBatchMutation.isPending
+              }
+              onClick={() => previewBatchMutation.mutate()}
+            >
+              {previewBatchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              生成预览
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {factEditorOpen ? (
         <MemoryFactEditorDialog

@@ -165,6 +165,21 @@ async function renderManager(initialPersonId?: string) {
 }
 
 describe('MemoryProfileManager 画像库加载', () => {
+  it('展示后端返回的待确认事实总数并提供事实记录入口', async () => {
+    const onOpenFactRecords = vi.fn()
+    vi.mocked(memoryApi.getMemoryProfileEvidence).mockResolvedValue({
+      success: true,
+      person_id: 'p1',
+      profile_text: '画像摘要',
+      uncertain_fact_count: 257,
+      evidence: [],
+    })
+    render(<MemoryProfileManager onOpenFactRecords={onOpenFactRecords} />)
+    expect(await screen.findByText(/待确认事实 257 条/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看事实记录' }))
+    expect(onOpenFactRecords).toHaveBeenCalledOnce()
+  })
+
   it('两列高度不一致时，画像查询卡片不跟随详情列拉伸', async () => {
     await renderManager()
 

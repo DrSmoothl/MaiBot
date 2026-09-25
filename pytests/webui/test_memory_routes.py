@@ -1865,6 +1865,29 @@ def test_episode_process_pending_route(client: TestClient, monkeypatch, path: st
 
 
 @pytest.mark.parametrize(
+    ("path", "method", "dry_run"),
+    [
+        ("/api/webui/memory/episodes/migration-backfill", "get", True),
+        ("/api/webui/memory/episodes/migration-backfill/discard", "post", False),
+        ("/api/episodes/migration_backfill", "get", True),
+        ("/api/episodes/migration_backfill/discard", "post", False),
+    ],
+)
+def test_episode_migration_backfill_route(client: TestClient, monkeypatch, path: str, method: str, dry_run: bool):
+    async def fake_episode_admin(*, action: str, **kwargs):
+        assert action == "discard_migration_backfill"
+        assert kwargs == {"dry_run": dry_run}
+        return {"success": True, "candidates": 2, "discarded": 0 if dry_run else 2}
+
+    monkeypatch.setattr(memory_router_module.memory_service, "episode_admin", fake_episode_admin)
+
+    response = getattr(client, method)(path)
+
+    assert response.status_code == 200
+    assert response.json()["discarded"] == (0 if dry_run else 2)
+
+
+@pytest.mark.parametrize(
     "path",
     [
         "/api/webui/memory/episodes/process-pending",
@@ -2163,6 +2186,27 @@ def test_memory_correction_routes(client: TestClient, monkeypatch):
     assert rollback_response.status_code == 200
     assert rollback_response.json()["rollback_result"]["restored"] == 1
     assert [action for action, _ in calls] == ["preview", "execute", "list", "get", "rollback"]
+
+
+def test_memory_correction_preview_forwards_selected_targets(client: TestClient, monkeypatch):
+    captured = {}
+
+    async def preview(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "plan_id": "selected-plan"}
+
+    monkeypatch.setattr(memory_router_module.memory_service, "memory_correction_admin", preview)
+    targets = [{"type": "paragraph", "id": "paragraph-1"}, {"type": "relation", "id": "relation-1"}]
+    response = client.post("/api/webui/memory/corrections/preview", json={
+        "request_text": "修正所选记忆", "scope": "memory", "targets": targets,
+    })
+    assert response.status_code == 200
+    assert captured["targets"] == targets
+    for invalid in ([], [{"type": "entity", "id": "entity-1"}], [{"type": "paragraph", "id": ""}]):
+        response = client.post("/api/webui/memory/corrections/preview", json={
+            "request_text": "修正所选记忆", "scope": "memory", "targets": invalid,
+        })
+        assert response.status_code == 422
 
 
 def test_memory_correction_preview_resolves_fuzzy_chat_id(client: TestClient, monkeypatch):

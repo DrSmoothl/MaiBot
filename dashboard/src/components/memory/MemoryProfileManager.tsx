@@ -155,12 +155,13 @@ function formatEvidenceScore(item: MemoryProfileEvidenceItemPayload): string {
 
 export interface MemoryProfileManagerProps {
   initialPersonId?: string
+  onOpenFactRecords?: () => void
 }
 
 type ProfileQueryMode = 'exact' | 'fuzzy'
 type AccountMatchStatus = 'idle' | 'loading' | 'matched' | 'unmatched' | 'error'
 
-export function MemoryProfileManager({ initialPersonId = '' }: MemoryProfileManagerProps) {
+export function MemoryProfileManager({ initialPersonId = '', onOpenFactRecords }: MemoryProfileManagerProps) {
   const { toast } = useToast()
   const [profiles, setProfiles] = useState<MemoryProfileItemPayload[]>([])
   const [profileListMode, setProfileListMode] = useState<'library' | 'search'>('library')
@@ -1063,6 +1064,16 @@ export function MemoryProfileManager({ initialPersonId = '' }: MemoryProfileMana
                   className="min-h-[180px]"
                   placeholder="当前没有画像文本"
                 />
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">
+                    待确认事实 {currentProfileEvidence?.uncertain_fact_count ?? queryResult?.uncertain_fact_count ?? 0} 条；画像正文只展示摘要。
+                  </span>
+                  {onOpenFactRecords ? (
+                    <Button type="button" variant="outline" size="sm" onClick={onOpenFactRecords}>
+                      查看事实记录
+                    </Button>
+                  ) : null}
+                </div>
 
                 <div className="rounded-lg border">
                   <div className="flex items-center justify-between gap-3 border-b px-3 py-2">

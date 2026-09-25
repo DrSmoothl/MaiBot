@@ -976,6 +976,25 @@ class MetadataFactMixin:
         )
         return [self._fact_claim_row(row) or {} for row in cursor.fetchall()]
 
+    def list_uncertain_person_fact_claims(self, person_id: str) -> List[Dict[str, Any]]:
+        """读取人物全部有效的未确认事实，不受画像摘要的数量上限影响。"""
+
+        token = _required_token("person_id", person_id)
+        point = datetime.now().timestamp()
+        rows = self.query(
+            """
+            SELECT * FROM fact_claims
+            WHERE scope_type = 'person' AND scope_id = ? AND status = 'active'
+              AND stability = 'uncertain' AND authority = 'summary_derived'
+              AND profile_section = 'uncertain_notes'
+              AND (valid_from IS NULL OR valid_from <= ?)
+              AND (valid_to IS NULL OR valid_to > ?)
+            ORDER BY last_confirmed_at DESC, claim_id ASC
+            """,
+            (token, point, point),
+        )
+        return [self._fact_claim_row(row) or {} for row in rows]
+
     def backfill_person_fact_claims(self, *, limit: Optional[int] = None) -> Dict[str, int]:
         """把现有原子人物事实段落确定性迁移到事实账本。
 

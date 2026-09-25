@@ -1235,7 +1235,20 @@ export function KnowledgeBasePage() {
             </div>
 
             {shouldRenderMemoryTab('records') && (
-              <MemoryRecordsTab onAction={handleMemoryRecordAction} />
+              <MemoryRecordsTab
+                onAction={handleMemoryRecordAction}
+                onCorrectionPlan={(planId, requestText) => {
+                  memoryCorrection.setRequestText(requestText)
+                  memoryCorrection.setScope('memory')
+                  memoryCorrection.setPersonId('')
+                  memoryCorrection.setPersonKeyword('')
+                  memoryCorrection.setChatId('')
+                  memoryCorrection.setSelectedPlanId(planId)
+                  memoryCorrection.setPlanSearch(planId)
+                  setInspectionMode('correction')
+                  switchMemoryTab('inspection', { mode: 'correction', plan_id: planId })
+                }}
+              />
             )}
 
             {shouldRenderMemoryTab('images') && <ImagesTab />}
@@ -1283,7 +1296,10 @@ export function KnowledgeBasePage() {
 
             <TabsContent value="profiles" className="space-y-4">
               {shouldRenderMemoryTab('profiles') ? (
-                <MemoryProfileManager initialPersonId={profileInitialPersonId} />
+                <MemoryProfileManager
+                  initialPersonId={profileInitialPersonId}
+                  onOpenFactRecords={() => switchMemoryTab('records')}
+                />
               ) : null}
             </TabsContent>
 

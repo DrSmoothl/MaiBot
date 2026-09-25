@@ -75,6 +75,80 @@ def _payload(source: str, paragraph_hash: str) -> Dict[str, Any]:
     }
 
 
+def test_discard_migration_backfill_preserves_new_writes_and_active_lease(tmp_path) -> None:
+    store = MetadataStore(data_dir=tmp_path)
+    store.connect()
+    now = time.time()
+    try:
+        store.enqueue_episode_source_rebuild(
+            "historical", reason="schema_19_source_discovery", debounce_seconds=0.0, now=now
+        )
+        store.enqueue_episode_source_rebuild(
+            "old-pending", reason="schema_19_pending_migration", debounce_seconds=0.0, now=now
+        )
+        store.enqueue_episode_source_rebuild(
+            "updated", reason="schema_19_source_discovery", debounce_seconds=0.0, now=now
+        )
+        store.enqueue_episode_source_rebuild("updated", reason="paragraph_added", debounce_seconds=0.0, now=now)
+        store.enqueue_episode_source_rebuild(
+            "active", reason="schema_19_source_discovery", debounce_seconds=0.0, now=now
+        )
+        paragraph_hash = store.add_paragraph("已生成的历史情景", source="completed")
+        store.enqueue_episode_source_rebuild(
+            "completed", reason="schema_19_source_discovery", debounce_seconds=0.0, now=now
+        )
+        completed_claim = store.claim_episode_source_rebuild_batch(
+            generation_hash="generation-v1",
+            sources=["completed"],
+            limit=1,
+            max_wait_seconds=0.0,
+            now=now,
+        )[0]
+        published = store.publish_episode_source_rebuild(
+            "completed",
+            lease_token=completed_claim["lease_token"],
+            claimed_revision=completed_claim["claimed_revision"],
+            generation_hash="generation-v1",
+            episodes_payloads=[_payload("completed", paragraph_hash)],
+            now=now,
+        )
+        assert published["published"] is True
+        active_claim = store.claim_episode_source_rebuild_batch(
+            generation_hash="generation-v1",
+            sources=["active"],
+            limit=1,
+            lease_seconds=1800.0,
+            max_wait_seconds=0.0,
+            now=now,
+        )
+        assert len(active_claim) == 1
+
+        preview = store.discard_migration_episode_rebuilds()
+        assert preview["candidates"] == 3
+        assert preview["discarded"] == 0
+        assert preview["active_skipped"] == 1
+
+        result = store.discard_migration_episode_rebuilds(dry_run=False)
+        assert result["discarded"] == 3
+        remaining = {row["source"] for row in store.list_episode_source_rebuilds(limit=10)}
+        assert remaining == {"updated", "active"}
+        assert len(store.query_episodes(source="completed")) == 1
+
+        store.enqueue_episode_source_rebuild(
+            "historical", reason="paragraph_added", debounce_seconds=0.0, now=now
+        )
+        future_claim = store.claim_episode_source_rebuild_batch(
+            generation_hash="generation-v1",
+            sources=["historical"],
+            limit=1,
+            max_wait_seconds=0.0,
+            now=now,
+        )
+        assert len(future_claim) == 1
+    finally:
+        store.close()
+
+
 def test_source_revision_cas_rejects_stale_publish_and_keeps_old_snapshot(tmp_path) -> None:
     store = MetadataStore(data_dir=tmp_path)
     store.connect()
