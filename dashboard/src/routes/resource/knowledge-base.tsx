@@ -1327,7 +1327,20 @@ export function KnowledgeBasePage() {
                   className="space-y-3"
                 >
                   <MemoryMiniTabs items={MEMORY_VIEW_OPTIONS} />
-                  <MemoryRecordsTab onAction={handleMemoryRecordAction} />
+                  <MemoryRecordsTab
+                    onAction={handleMemoryRecordAction}
+                    onCorrectionPlan={(planId, requestText) => {
+                      memoryCorrection.setRequestText(requestText)
+                      memoryCorrection.setScope('memory')
+                      memoryCorrection.setPersonId('')
+                      memoryCorrection.setPersonKeyword('')
+                      memoryCorrection.setChatId('')
+                      memoryCorrection.setSelectedPlanId(planId)
+                      memoryCorrection.setPlanSearch(planId)
+                      setInspectionMode('correction')
+                      switchMemoryTab('inspection', { mode: 'correction', plan_id: planId })
+                    }}
+                  />
                   <TabsContent value="profiles" className="space-y-4">
                     <ProfileSearchPanel profile={memoryProfile} />
                   </TabsContent>

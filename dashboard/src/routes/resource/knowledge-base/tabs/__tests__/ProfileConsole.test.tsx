@@ -193,6 +193,16 @@ async function openProfileDetail(name: string) {
 }
 
 describe('ProfileConsole 画像库加载', () => {
+  it('展示待确认事实总数', async () => {
+    vi.mocked(memoryApi.getMemoryProfileEvidence).mockResolvedValue({
+      ...makeEvidencePayload('p1'),
+      uncertain_fact_count: 257,
+    })
+    await renderManager()
+    await openProfileDetail('张三')
+    expect(await screen.findByText(/待确认事实 257 条/)).toBeInTheDocument()
+  })
+
   it('画像详情默认收起，点击候选项才弹出弹窗，关闭后回到列表', async () => {
     await renderManager()
 

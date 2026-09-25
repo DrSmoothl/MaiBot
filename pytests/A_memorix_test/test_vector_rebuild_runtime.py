@@ -13,6 +13,7 @@ import pytest
 from src.A_memorix.core.runtime import sdk_memory_kernel as kernel_module
 from src.A_memorix.core.runtime.sdk_memory_kernel import SDKMemoryKernel
 from src.A_memorix.core.runtime.services.embedding_state_service import MemoryEmbeddingStateService
+from src.A_memorix.core.storage import MetadataStore, VectorStore
 
 
 class _FakeEmbeddingManager:
@@ -123,6 +124,123 @@ def _dual_kernel_config(data_dir: Path, dimension: int) -> dict[str, Any]:
     config = _kernel_config(data_dir, dimension)
     config["retrieval"]["vector_pools"] = {"mode": "dual"}
     return config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pool_mode", "stored_state"),
+    [
+        ("single", "compatible"),
+        ("dual", "compatible"),
+        ("single", "fingerprint_mismatch"),
+        ("dual", "fingerprint_mismatch"),
+        ("single", "missing"),
+        ("dual", "missing"),
+        ("dual", "dual_fingerprint_mismatch"),
+    ],
+)
+async def test_pending_single_pool_recovers_after_real_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    pool_mode: str,
+    stored_state: str,
+) -> None:
+    """真实磁盘单池在请求确认指纹后恢复；不兼容或丢失时保留准确的阻塞状态。"""
+    data_dir = tmp_path / "memory"
+    embedding = _FallbackEmbeddingManager(
+        candidates=("fake-embedding",),
+        successful_model="fake-embedding",
+        initial_observed_model="fake-embedding",
+    )
+    metadata = MetadataStore(data_dir=data_dir / "metadata")
+    metadata.connect()
+    try:
+        paragraph_hash = metadata.add_paragraph(content="重启后仍应检索到的旧单池记忆", source="test")
+    finally:
+        metadata.close()
+    vector = await embedding.encode("重启后仍应检索到的旧单池记忆")
+    store = VectorStore(dimension=embedding.default_dimension, data_dir=data_dir / "vectors")
+    store.add(np.asarray([vector]), [paragraph_hash])
+    fingerprint = embedding.get_embedding_fingerprint()
+    if stored_state == "fingerprint_mismatch":
+        fingerprint["hash"] = "different-model-fingerprint"
+    store.save(embedding_fingerprint=fingerprint)
+    if stored_state == "dual_fingerprint_mismatch":
+        # 已发布双池明确不兼容时，即使旧单池完整且兼容，也不能绕过双池校验。
+        (data_dir / "vectors" / "dual_ready.json").write_text(
+            json.dumps(
+                {
+                    "status": "ready",
+                    "dimension": embedding.default_dimension,
+                    "paragraph_vectors": 1,
+                    "graph_vectors": 1,
+                    "embedding_fingerprint": {"hash": "different-dual-model"},
+                }
+            ),
+            encoding="utf-8",
+        )
+    embedding.observed_model = ""
+    embedding.encode_calls.clear()
+
+    config = _kernel_config(data_dir, embedding.default_dimension)
+    config["retrieval"]["vector_pools"]["mode"] = pool_mode
+    kernel = SDKMemoryKernel(plugin_root=tmp_path, config=config)
+    monkeypatch.setattr(kernel_module, "create_embedding_api_adapter", lambda **kwargs: embedding)
+
+    async def no_background_tasks() -> None:
+        # 手动驱动同一个恢复入口，避免后台探测与断言并发；不调用外部模型。
+        pass
+
+    monkeypatch.setattr(kernel, "_start_background_tasks", no_background_tasks)
+    try:
+        await kernel.initialize()
+        assert kernel._vector_health["error_code"] == "embedding_fingerprint_unavailable"
+        assert kernel.vector_store is None
+        assert embedding.encode_calls == []
+        if stored_state == "missing":
+            (data_dir / "vectors" / "vectors_metadata.json").unlink()
+        files_before = {
+            path.name: path.read_bytes() for path in (data_dir / "vectors").iterdir() if path.is_file()
+        }
+
+        result = await kernel.memory_runtime_admin(action="recover_embedding")
+
+        assert result["success"] is True
+        assert result["recovered"] is True
+        assert embedding.observed_model == "fake-embedding"
+        assert len(embedding.encode_calls) == 1
+        assert kernel._dual_vector_pools_enabled() is False
+        if stored_state == "compatible":
+            assert result["vector_restored"] is True
+            assert result["vector_available"] is True
+            assert result["vector_health"]["state"] == "healthy"
+            assert paragraph_hash in kernel.vector_store
+            assert kernel._runtime_capabilities["vector_read"] is True
+            assert kernel._runtime_capabilities["vector_write"] is True
+            assert kernel.retriever is not None
+            assert kernel.retriever.config.vector_pools.mode == "single"
+            assert kernel.retriever._is_sparse_only_runtime() is False
+            hashes, _ = kernel.vector_store.search(vector, k=1)
+            assert hashes == [paragraph_hash]
+        else:
+            assert result["vector_restored"] is False
+            assert result["vector_available"] is False
+            expected_code = (
+                "vector_generation_missing" if stored_state == "missing" else "v2_fingerprint_mismatch"
+            )
+            assert result["vector_health"]["error_code"] == expected_code
+            assert result["vector_health"]["recovery_stage"] == "rebuild_required"
+            assert kernel.vector_store is None
+            # 再次手动探测必须仍返回真实的向量故障，不能把 Embedding 成功当作通道恢复。
+            repeated = await kernel.memory_runtime_admin(action="recover_embedding")
+            assert repeated["vector_available"] is False
+            assert repeated["vector_health"]["error_code"] == expected_code
+        for name, content in files_before.items():
+            assert (data_dir / "vectors" / name).read_bytes() == content
+        assert not (data_dir / "vector_quarantine").exists()
+        assert (data_dir / "vectors" / "dual_ready.json").exists() == (stored_state == "dual_fingerprint_mismatch")
+    finally:
+        await kernel.shutdown()
 
 
 async def _fake_runtime_self_check(**kwargs: Any) -> dict[str, Any]:

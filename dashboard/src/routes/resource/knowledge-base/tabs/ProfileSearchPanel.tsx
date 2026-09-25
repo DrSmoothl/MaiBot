@@ -308,6 +308,9 @@ export function ProfileSearchPanel({ profile }: ProfileSearchPanelProps) {
                   className="min-h-[180px]"
                   placeholder="当前没有画像文本"
                 />
+                <div className="text-sm text-muted-foreground">
+                  待确认事实 {currentProfileEvidence?.uncertain_fact_count ?? queryResult?.uncertain_fact_count ?? 0} 条；画像正文只展示摘要。
+                </div>
 
                 {/* 证据纠错与刷新属于检修动作，已移到记忆检修 → 画像维护 */}
                 <div className="text-muted-foreground rounded-lg border border-dashed px-3 py-2 text-xs">

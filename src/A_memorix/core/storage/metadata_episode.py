@@ -13,6 +13,58 @@ from .tokenizer_runtime import HAS_JIEBA, JIEBA_MODULE
 class MetadataEpisodeMixin:
     """维护 Episode、重建队列与段落回填任务。"""
 
+    _MIGRATION_REBUILD_REASONS = ("schema_19_pending_migration", "schema_19_source_discovery")
+
+    def discard_migration_episode_rebuilds(self, *, dry_run: bool = True) -> Dict[str, Any]:
+        """仅丢弃升级迁移留下的来源任务，保留已有 Episode 和后续增量任务。"""
+        now_ts = datetime.now().timestamp()
+        reasons = self._MIGRATION_REBUILD_REASONS
+        eligible_sql = (
+            "reason IN (?, ?) AND "
+            "(lease_token IS NULL OR lease_token = '' OR COALESCE(lease_until, 0) <= ?)"
+        )
+        params = (*reasons, now_ts)
+        with self.transaction(immediate=not dry_run) as database:
+            rows = database.execute(
+                f"SELECT status, COUNT(*) AS count FROM episode_rebuild_sources "
+                f"WHERE {eligible_sql} GROUP BY status",
+                params,
+            ).fetchall()
+            by_status = {str(row["status"]): int(row["count"]) for row in rows}
+            candidates = sum(by_status.values())
+            sample = [
+                str(row["source"])
+                for row in database.execute(
+                    f"SELECT source FROM episode_rebuild_sources WHERE {eligible_sql} "
+                    "ORDER BY requested_at ASC, source ASC LIMIT 10",
+                    params,
+                ).fetchall()
+            ]
+            active = int(
+                database.execute(
+                    "SELECT COUNT(*) FROM episode_rebuild_sources "
+                    "WHERE reason IN (?, ?) AND lease_token IS NOT NULL "
+                    "AND lease_token != '' AND COALESCE(lease_until, 0) > ?",
+                    params,
+                ).fetchone()[0]
+            )
+            discarded = 0
+            if not dry_run and candidates:
+                discarded = int(
+                    database.execute(
+                        f"DELETE FROM episode_rebuild_sources WHERE {eligible_sql}",
+                        params,
+                    ).rowcount
+                )
+        return {
+            "dry_run": dry_run,
+            "candidates": candidates,
+            "discarded": discarded,
+            "active_skipped": active,
+            "by_status": by_status,
+            "sample_sources": sample,
+        }
+
     @staticmethod
     def _normalize_episode_source(source: Any) -> str:
         return str(source or "").strip()

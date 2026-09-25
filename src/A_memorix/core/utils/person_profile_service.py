@@ -900,6 +900,7 @@ class PersonProfileService:
                 model,
                 PROFILE_CLASSIFICATION_REQUEST_TYPE,
                 prompt,
+                temperature=0.1,
                 max_tokens=self._profile_classification_max_tokens(),
             )
         except Exception as exc:

@@ -681,6 +681,11 @@ async def test_embedding_recover_uses_kernel_patched_recovery_boundaries(
     assert result == {
         "success": True,
         "recovered": True,
+        "vector_restored": False,
+        "vector_available": (
+            kernel._runtime_capabilities["vector_read"] and kernel._runtime_capabilities["vector_write"]
+        ),
+        "vector_health": kernel._vector_health_snapshot(),
         "report": report,
         "backfill": {"success": True, "processed": 2},
     }

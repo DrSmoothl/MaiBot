@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, List, Literal, Optional
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -295,8 +295,14 @@ class DeletePurgeRequest(BaseModel):
     limit: int = Field(1000, ge=1, le=5000)
 
 
+class MemoryCorrectionTarget(BaseModel):
+    type: Literal["paragraph", "relation"]
+    id: str = Field(..., min_length=1)
+
+
 class MemoryCorrectionPreviewRequest(BaseModel):
     request_text: str = Field(..., min_length=1)
+    targets: Optional[List[MemoryCorrectionTarget]] = Field(default=None, min_length=1)
     scope: str = "person_profile"
     person_id: str = ""
     person_keyword: str = ""
@@ -3179,6 +3185,10 @@ async def _episode_status(limit: int) -> dict:
     return await memory_service.episode_admin(action="status", limit=limit)
 
 
+async def _episode_migration_backfill(dry_run: bool) -> dict:
+    return await memory_service.episode_admin(action="discard_migration_backfill", dry_run=dry_run)
+
+
 async def _episode_process_pending(payload: EpisodeProcessPendingRequest) -> dict:
     return await memory_service.episode_admin(
         action="process_sources",
@@ -3649,6 +3659,7 @@ async def _memory_correction_preview(payload: MemoryCorrectionPreviewRequest) ->
     return await memory_service.memory_correction_admin(
         action="preview",
         request_text=payload.request_text,
+        **({"targets": [target.model_dump() for target in payload.targets]} if payload.targets is not None else {}),
         scope=payload.scope,
         person_id=payload.person_id,
         person_keyword=payload.person_keyword,
@@ -4104,6 +4115,16 @@ async def list_memory_episodes(
 @router.get("/episodes/status")
 async def get_memory_episode_status(limit: int = Query(20, ge=1, le=200)):
     return await _episode_status(limit)
+
+
+@router.get("/episodes/migration-backfill")
+async def get_memory_episode_migration_backfill():
+    return await _episode_migration_backfill(dry_run=True)
+
+
+@router.post("/episodes/migration-backfill/discard")
+async def discard_memory_episode_migration_backfill():
+    return await _episode_migration_backfill(dry_run=False)
 
 
 @router.get("/episodes/{episode_id}")
@@ -5022,6 +5043,16 @@ async def compat_list_episodes(
 @compat_router.get("/episodes/status")
 async def compat_episode_status(limit: int = Query(20, ge=1, le=200)):
     return await _episode_status(limit)
+
+
+@compat_router.get("/episodes/migration_backfill")
+async def compat_episode_migration_backfill():
+    return await _episode_migration_backfill(dry_run=True)
+
+
+@compat_router.post("/episodes/migration_backfill/discard")
+async def compat_discard_episode_migration_backfill():
+    return await _episode_migration_backfill(dry_run=False)
 
 
 @compat_router.get("/episodes/{episode_id}")
