@@ -80,7 +80,7 @@ class NativeImageEmbeddingResult:
     """校验后的嵌入向量。"""
 
     usage: UsageTuple | None
-    """统一使用量五元组；响应未提供 usage 时为 None。"""
+    """统一使用量元组；响应未提供 usage 时为 None。嵌入调用不含缓存字段，末位恒为未上报。"""
 
 
 def resolve_native_image_embedding_protocol(base_url: str) -> str | None:
@@ -291,14 +291,16 @@ def _extract_dashscope_usage(usage: Any) -> UsageTuple | None:
     if not isinstance(usage, Mapping):
         return None
     total_tokens = _as_non_negative_int(usage.get("total_tokens"))
-    return (total_tokens, 0, total_tokens, 0, 0)
+    # 嵌入调用不参与 Prompt 缓存用量探测，末位恒为未上报
+    return (total_tokens, 0, total_tokens, 0, 0, False)
 
 
 def _extract_ark_usage(usage: Any) -> UsageTuple | None:
     if not isinstance(usage, Mapping):
         return None
     total_tokens = _as_non_negative_int(usage.get("total_tokens"))
-    return (total_tokens, 0, total_tokens, 0, 0)
+    # 嵌入调用不参与 Prompt 缓存用量探测，末位恒为未上报
+    return (total_tokens, 0, total_tokens, 0, 0, False)
 
 
 def _as_non_negative_int(value: Any) -> int:

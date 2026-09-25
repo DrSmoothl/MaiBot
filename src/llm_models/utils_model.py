@@ -67,8 +67,7 @@ from src.llm_models.utils import compress_messages, llm_usage_recorder
 
 install(extra_lines=3)
 
-logger = get_logger("model_utils")
-model_logger = get_logger("llm_models")
+logger = get_logger("llm_models")
 
 DATA_URI_LIMIT_PATTERN = re.compile(
     r"Exceeded limit on max bytes per data-uri item\s*:\s*(?P<limit>\d+)",
@@ -1080,9 +1079,9 @@ class LLMOrchestrator:
                         "\n  其他可能原因: 网络波动、DNS 故障、连接超时、防火墙限制或代理问题"
                     )
                     if retry_remain <= 0:
-                        model_logger.error(timeout_log)
+                        logger.error(timeout_log)
                         raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
-                    model_logger.warning(timeout_log)
+                    logger.warning(timeout_log)
                 else:
                     if retry_remain <= 0:
                         logger.error(
@@ -1450,7 +1449,7 @@ class LLMOrchestrator:
         if e.__cause__:
             detail_lines.append(f"底层异常: {type(e.__cause__).__name__} | {e.__cause__}")
 
-        snapshot_info = format_request_snapshot_log_info(e)
+        snapshot_info = format_request_snapshot_log_info(e, include_snapshot_path=False)
         if detail_lines or snapshot_info:
             detail_text = "\n  " + "\n  ".join(detail_lines) if detail_lines else ""
             return f"{detail_text}{snapshot_info}"

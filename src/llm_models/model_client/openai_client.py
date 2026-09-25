@@ -606,22 +606,30 @@ def _convert_tool_options(tool_options: List[ToolOption]) -> List[ChatCompletion
 
 
 def _extract_usage_record(usage: Any) -> UsageTuple | None:
-    """从响应对象中提取 usage 三元组。
+    """从响应对象中提取 usage 元组，并判断供应商是否上报了 Prompt 缓存用量。
 
     Args:
         usage: OpenAI SDK 返回的 usage 对象。
 
     Returns:
-        UsageTuple | None: `(prompt_tokens, completion_tokens, total_tokens)`。
+        UsageTuple | None: `(prompt_tokens, completion_tokens, total_tokens,
+        prompt_cache_hit_tokens, prompt_cache_miss_tokens, prompt_cache_reported)`。
     """
     if usage is None:
         return None
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-    prompt_cache_hit_tokens = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
-    prompt_cache_miss_tokens = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
+    # 用 None 哨兵区分「字段缺失」与「字段为 0」：StepFun 等供应商只在命中时返回缓存字段
+    reported_hit_tokens = getattr(usage, "prompt_cache_hit_tokens", None)
+    reported_miss_tokens = getattr(usage, "prompt_cache_miss_tokens", None)
     prompt_tokens_details = getattr(usage, "prompt_tokens_details", None)
-    if prompt_cache_hit_tokens == 0 and prompt_tokens_details is not None:
-        prompt_cache_hit_tokens = getattr(prompt_tokens_details, "cached_tokens", 0) or 0
+    reported_cached_tokens = (
+        getattr(prompt_tokens_details, "cached_tokens", None) if prompt_tokens_details is not None else None
+    )
+    prompt_cache_reported = (
+        reported_hit_tokens is not None or reported_miss_tokens is not None or reported_cached_tokens is not None
+    )
+    prompt_cache_hit_tokens = reported_hit_tokens or reported_cached_tokens or 0
+    prompt_cache_miss_tokens = reported_miss_tokens or 0
     if prompt_cache_miss_tokens == 0 and prompt_cache_hit_tokens > 0:
         prompt_cache_miss_tokens = max(prompt_tokens - prompt_cache_hit_tokens, 0)
     return (
@@ -630,6 +638,7 @@ def _extract_usage_record(usage: Any) -> UsageTuple | None:
         getattr(usage, "total_tokens", 0) or 0,
         prompt_cache_hit_tokens,
         prompt_cache_miss_tokens,
+        prompt_cache_reported,
     )
 
 
