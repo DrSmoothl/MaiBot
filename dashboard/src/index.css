@@ -2129,6 +2129,14 @@
   background-color: transparent;
 }
 
+/* 模型表格操作列固定右缘：retro 主题下 .bg-background 为透明，需用纸面实色遮盖滚动内容。
+   放在 .bg-background 透明规则之后，避免被其覆盖。 */
+:root[data-dashboard-style='future-retro'] [data-model-config-action-cell='true'] {
+  background-color: var(--retro-paper) !important;
+  background-image: var(--retro-paper-brightness-overlay), var(--retro-paper-texture) !important;
+  background-size: auto, var(--retro-paper-texture-size) !important;
+}
+
 :root[data-dashboard-style='future-retro'] .text-muted-foreground {
   color: var(--retro-ink-soft) !important;
 }
@@ -2613,6 +2621,13 @@
   padding-bottom: 0.625rem;
 }
 
+/* 记忆查询结果头部：单行「标题 + 计数徽标 + 刷新」，收紧纵向留白，
+   让头部高度由这一行控件决定而不是被内边距撑高 */
+.memory-console-density
+  [data-dashboard-card-header='true'][data-memory-records-result-header='true'] {
+  padding: 0.5rem 0.75rem;
+}
+
 .memory-console-density .space-y-4 > :not([hidden]) ~ :not([hidden]),
 .memory-console-density .space-y-5 > :not([hidden]) ~ :not([hidden]),
 .memory-console-density .space-y-6 > :not([hidden]) ~ :not([hidden]),
@@ -2676,6 +2691,13 @@
 
 .memory-console-density [data-dashboard-tabs-trigger='true'] {
   padding: 0.25rem 0.625rem;
+}
+
+/* 记忆控制台标签行：去掉列表纵向内边距，让标签铺满该行高度，
+   与同行右侧 2rem 高的「更多操作」按钮对齐 */
+.memory-console-density [data-memory-console-tab-row='true'] [data-dashboard-tabs-list='true'] {
+  gap: 0.25rem;
+  padding-block: 0;
 }
 
 .memory-console-density th {
@@ -3034,8 +3056,12 @@
     [data-model-config-table-surface='true'] [data-dashboard-table-header='true'],
     [data-model-config-table-surface='true'] [data-dashboard-table-body='true'],
     [data-model-config-table-surface='true'] [data-dashboard-table-row='true'],
-    [data-model-config-table-surface='true'] [data-dashboard-table-head='true'],
-    [data-model-config-table-surface='true'] [data-dashboard-table-cell='true']
+    [data-model-config-table-surface='true'] [data-dashboard-table-head='true']:not(
+      [data-model-config-action-cell='true']
+    ),
+    [data-model-config-table-surface='true'] [data-dashboard-table-cell='true']:not(
+      [data-model-config-action-cell='true']
+    )
   ) {
   background: transparent !important;
   background-color: transparent !important;

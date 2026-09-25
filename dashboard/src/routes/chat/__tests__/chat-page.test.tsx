@@ -7,9 +7,12 @@
  *
  * 注意：vitest.config.ts 开启了 mockReset，所有 vi.fn 的实现必须在 beforeEach 里重建。
  */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { SessionAdapterStatus } from '@/lib/chat-management-api'
 import type { MaisakaMonitorEvent, StageStatusEvent } from '@/lib/maisaka-monitor-client'
 import type { UserEmojiItem } from '@/lib/user-emoji-api'
 import type { SessionInfo, StageStatusInfo } from '@/routes/monitor/use-maisaka-monitor'
@@ -54,6 +57,7 @@ interface SidebarStubProps {
   observedSessions: Map<string, SessionInfo>
   observedStageStatuses: Map<string, StageStatusInfo>
   observedLatestMessages: Map<string, ObservedMessagePreview>
+  observedAdapterStatuses: Map<string, SessionAdapterStatus>
   userId: string
   userName: string
   isUploadingUserAvatar: boolean
@@ -87,6 +91,7 @@ const mocks = vi.hoisted(() => ({
   setSelectedObservedSession: vi.fn(),
   uploadWebuiUserAvatar: vi.fn(),
   loadUserEmojiPayload: vi.fn(),
+  getChatSessionsAdapterStatus: vi.fn(),
   // 会话消息监听器：tabId -> 监听器列表，由 onSessionMessage 的实现填充
   sessionListeners: new Map<string, Array<(message: Record<string, unknown>) => void>>(),
   connectionListeners: [] as Array<(connected: boolean) => void>,
@@ -170,6 +175,11 @@ vi.mock('@/lib/user-emoji-api', () => ({
   loadUserEmojiPayload: mocks.loadUserEmojiPayload,
 }))
 
+vi.mock('@/lib/chat-management-api', () => ({
+  CHAT_ADAPTER_STATUS_QUERY_KEY: 'chat-adapter-status',
+  getChatSessionsAdapterStatus: mocks.getChatSessionsAdapterStatus,
+}))
+
 vi.mock('../MessageList', () => ({
   MessageList: (props: MessageListStubProps) => {
     mocks.messageList = props
@@ -247,6 +257,19 @@ vi.mock('../ChatWorkspaceSidebar', () => ({
 // 移动端标签条与侧边栏功能重复，桩成空组件避免重复节点干扰断言
 vi.mock('../ChatTabBar', () => ({
   ChatTabBar: () => null,
+}))
+
+// 聊天流设置弹窗：只暴露打开状态与传入的聊天流信息
+vi.mock('@/components/chat-stream-settings-dialog', () => ({
+  ChatStreamSettingsDialog: (props: {
+    chat: { session_id: string; display_name: string } | null
+  }) => (
+    <div
+      data-testid="chat-stream-settings-dialog"
+      data-session-id={props.chat?.session_id ?? ''}
+      data-display-name={props.chat?.display_name ?? ''}
+    />
+  ),
 }))
 
 // ---------- 测试工具函数 ----------
@@ -331,9 +354,17 @@ function presetVirtualTab(): void {
   )
 }
 
+/** 页面内的适配器放行状态查询依赖 QueryClient，测试统一注入独立实例 */
+function queryClientWrapper() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  )
+}
+
 /** 渲染页面并等待默认标签页连接成功 */
 async function renderConnectedPage() {
-  const result = render(<ChatPage />)
+  const result = render(<ChatPage />, { wrapper: queryClientWrapper() })
   await waitFor(() => {
     expect(screen.getByTestId('tab-webui-default')).toHaveAttribute('data-connected', 'true')
   })
@@ -361,6 +392,7 @@ beforeEach(() => {
   mocks.updateNickname.mockResolvedValue(undefined)
   mocks.closeSession.mockResolvedValue(undefined)
   mocks.uploadWebuiUserAvatar.mockResolvedValue(undefined)
+  mocks.getChatSessionsAdapterStatus.mockResolvedValue({})
   mocks.loadUserEmojiPayload.mockResolvedValue({
     name: '猫猫',
     mime_type: 'image/gif',
@@ -400,7 +432,7 @@ afterEach(() => cleanup())
 
 describe('聊天页 ChatPage', () => {
   it('首屏打开默认本地会话：注册监听、传入本地身份、连接成功后启用输入区', async () => {
-    render(<ChatPage />)
+    render(<ChatPage />, { wrapper: queryClientWrapper() })
 
     // 初始为加载历史状态，输入区未连接
     expect(screen.getByTestId('message-list')).toHaveAttribute('data-loading', 'true')
@@ -541,7 +573,7 @@ describe('聊天页 ChatPage', () => {
   it('打开会话失败：提示连接失败且后续发送被拦截', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.openSession.mockRejectedValue(new Error('offline'))
-    render(<ChatPage />)
+    render(<ChatPage />, { wrapper: queryClientWrapper() })
 
     await waitFor(() => {
       expect(mocks.toast).toHaveBeenCalledWith(
@@ -630,10 +662,15 @@ describe('聊天页 ChatPage', () => {
     expect(screen.queryByTestId('composer')).not.toBeInTheDocument()
 
     act(() => sidebarProps().onOpenObservedSettings('observed-1'))
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: '/chat-management',
-      search: { session_id: 'observed-1' },
-    })
+    // 设置在页内弹窗直接打开，不再跳转聊天管理页
+    expect(screen.getByTestId('chat-stream-settings-dialog')).toHaveAttribute(
+      'data-session-id',
+      'observed-1'
+    )
+    expect(screen.getByTestId('chat-stream-settings-dialog')).toHaveAttribute(
+      'data-display-name',
+      '测试群(123)'
+    )
 
     act(() => sidebarProps().onSwitch('webui-default'))
     expect(screen.getByTestId('composer')).toBeInTheDocument()
@@ -643,7 +680,7 @@ describe('聊天页 ChatPage', () => {
   it('从推理详情携带 observe 参数返回时恢复原聊天流观察视图', async () => {
     window.history.replaceState({}, '', '/chat?observe=session%2Fwith%2Fslash')
 
-    render(<ChatPage />)
+    render(<ChatPage />, { wrapper: queryClientWrapper() })
 
     await waitFor(() => {
       expect(mocks.setSelectedObservedSession).toHaveBeenCalledWith('session/with/slash')
@@ -1040,7 +1077,7 @@ describe('聊天页 ChatPage', () => {
   it('空白发送被拦截；未连接时发送表情失败', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.openSession.mockRejectedValue(new Error('offline'))
-    render(<ChatPage />)
+    render(<ChatPage />, { wrapper: queryClientWrapper() })
 
     await waitFor(() => {
       expect(mocks.toast).toHaveBeenCalledWith(
@@ -1733,7 +1770,7 @@ describe('聊天页 ChatPage', () => {
   it('未连接时修改昵称只写入本地，不调用 WS', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.openSession.mockRejectedValue(new Error('offline'))
-    render(<ChatPage />)
+    render(<ChatPage />, { wrapper: queryClientWrapper() })
 
     await waitFor(() => {
       expect(mocks.toast).toHaveBeenCalledWith(

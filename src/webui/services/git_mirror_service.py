@@ -13,6 +13,7 @@ import subprocess
 import httpx
 
 from src.common.logger import get_logger
+from src.webui.utils.http_client import get_shared_ssl_context
 from src.webui.utils.network_security import validate_public_url
 
 logger = get_logger("webui.git_mirror")
@@ -539,7 +540,11 @@ class GitMirrorService:
             attempts += 1
             try:
                 logger.debug(f"尝试 #{attempt + 1}: {url}")
-                async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=False) as client:
+                # 复用共享 SSLContext：每次新建 AsyncClient 都会重新加载整套 CA 证书（实测约 5s/次），
+                # 镜像源逐个重试时该开销会成倍放大，且构造过程会阻塞 WebUI 事件循环。
+                async with httpx.AsyncClient(
+                    verify=get_shared_ssl_context(), timeout=self.timeout, follow_redirects=False
+                ) as client:
                     response = await client.get(url)
                     response.raise_for_status()
 

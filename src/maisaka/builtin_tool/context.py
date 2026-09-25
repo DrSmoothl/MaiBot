@@ -1,4 +1,4 @@
-﻿"""Maisaka 内置工具执行上下文。"""
+"""Maisaka 内置工具执行上下文。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
-from src.chat.utils.utils import ProcessedResponseSegment, process_llm_response, process_llm_response_segments
+from src.chat.utils.utils import (
+    ProcessedResponseSegment,
+    process_llm_response,
+    process_llm_response_segments,
+    process_llm_response_segments_async,
+)
 from src.common.data_models.message_component_data_model import (
     AtComponent,
     EmojiComponent,
@@ -210,12 +215,27 @@ class BuiltinToolRuntimeContext:
     ) -> List[PostProcessedReplyMessage]:
         """将 replyer 输出处理为带发送提示的组件序列。"""
 
-        return self.post_process_reply_message_items(
+        if skip_post_process:
+            return [
+                PostProcessedReplyMessage(
+                    sequence=MessageSequence([TextComponent(reply_text.strip())]),
+                    quote_previous=False,
+                )
+            ]
+
+        segments = await process_llm_response_segments_async(
             reply_text,
-            skip_post_process=skip_post_process,
             enable_splitter=enable_splitter,
             enable_chinese_typo=enable_chinese_typo,
         )
+        return [
+            PostProcessedReplyMessage(
+                sequence=MessageSequence([TextComponent(segment.text.strip())]),
+                quote_previous=segment.quote_previous,
+            )
+            for segment in segments
+            if segment.text.strip()
+        ]
 
     def post_process_reply_message_items(
         self,

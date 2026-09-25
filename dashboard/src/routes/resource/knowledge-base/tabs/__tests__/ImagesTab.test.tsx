@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   retryWriteback: vi.fn(),
   retryImageJobs: vi.fn(),
   getList: vi.fn(),
+  getChats: vi.fn(),
   getStatus: vi.fn(),
   search: vi.fn(),
   saveObservation: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@/lib/memory-api', async (importOriginal) => {
     retryImageWritebackJobs: api.retryWriteback,
     retryMemoryImageJobs: api.retryImageJobs,
     getMemoryImages: api.getList,
+    getMemoryImageChats: api.getChats,
     getMemoryImageStatus: api.getStatus,
     searchMemoryImages: api.search,
     saveMemoryImageObservation: api.saveObservation,
@@ -77,6 +79,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.getStatus.mockResolvedValue({ success: true, status: 'ready' })
   api.getList.mockResolvedValue({ success: true, items: [firstAsset, secondAsset] })
+  api.getChats.mockResolvedValue([])
   api.getJobs.mockResolvedValue({ success: true, items: [], total: 0 })
   api.getWritebackJobs.mockResolvedValue({ success: true, items: [], total: 0 })
 })
@@ -114,7 +117,6 @@ describe('ImagesTab 图片详情请求顺序', () => {
     const entry = await screen.findByRole('button', { name: '查看历史图片回填' })
     const maintenance = screen.getByText('高级维护 · 历史图片回填与故障处理').closest('details')
     expect(maintenance).not.toHaveAttribute('open')
-    expect(screen.getByText('调整匹配范围').closest('details')).not.toHaveAttribute('open')
     fireEvent.click(entry)
     expect(maintenance).toHaveAttribute('open')
     expect(scroll).toHaveBeenCalled()
@@ -201,7 +203,8 @@ describe('ImagesTab 图片详情请求顺序', () => {
     const assets = await screen.findAllByRole('button', { name: /图片记忆/ })
     fireEvent.click(assets[0])
     await screen.findByText('详情-asset-a')
-    fireEvent.click(screen.getByRole('button', { name: '查找同图与相似图' }))
+    // 相似检索在详情弹窗内：点搜索出命中列表，命中图片后上方详情直接切换，结果保留供继续对比
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
     fireEvent.click(await screen.findByRole('button', { name: '检索匹配图片' }))
     expect(await screen.findByText('详情-asset-b')).toBeInTheDocument()
     expect(screen.getByText('相似图片 · 0.9000')).toBeInTheDocument()
@@ -212,16 +215,37 @@ describe('ImagesTab 图片详情请求顺序', () => {
     renderTab()
 
     const assetHeading = (await screen.findAllByText('已记住的图片'))[1]
-    const searchHeading = screen.getByText('相似图片检索')
-    const maintenanceHeading = screen.getByText('图片维护')
+    // 相似检索在详情弹窗内：打开弹窗确认检索区存在
+    fireEvent.click((await screen.findAllByRole('button', { name: /图片记忆/ }))[0])
+    await screen.findByText('相似图片')
 
+    // 关闭弹窗后，主页只保留图片列表与次级维护区
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    const maintenanceHeading = screen.getByText('图片维护')
     expect(
-      assetHeading.compareDocumentPosition(searchHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+      assetHeading.compareDocumentPosition(maintenanceHeading) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
-    expect(
-      searchHeading.compareDocumentPosition(maintenanceHeading) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    expect(screen.getByRole('button', { name: '查找同图与相似图' })).toBeDisabled()
+  })
+
+  it('按聊天筛选重置页码并携带 chat_id 请求', async () => {
+    api.getChats.mockResolvedValue([
+      { chat_id: 'chat-1', chat_name: '测试读书会', asset_count: 3 },
+    ])
+    renderTab()
+
+    const trigger = await screen.findByRole('combobox', { name: '按聊天筛选' })
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    fireEvent.click(await screen.findByRole('option', { name: '测试读书会 (3)' }))
+    await waitFor(() => {
+      expect(api.getList).toHaveBeenCalledWith(24, 0, 'chat-1')
+    })
+
+    // 切回全部聊天后不再携带 chat_id
+    fireEvent.keyDown(screen.getByRole('combobox', { name: '按聊天筛选' }), { key: 'ArrowDown' })
+    fireEvent.click(await screen.findByRole('option', { name: '全部聊天' }))
+    await waitFor(() => {
+      expect(api.getList).toHaveBeenCalledWith(24, 0, '')
+    })
   })
 
   it('较早的成功响应不会覆盖最后选择的图片详情', async () => {

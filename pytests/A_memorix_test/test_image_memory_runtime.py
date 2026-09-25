@@ -26,8 +26,9 @@ def _png(color: tuple[int, int, int]) -> bytes:
     return output.getvalue()
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["file", "metadata"])
-def test_asset_publication_process_exit_is_reconciled(tmp_path: Path, stage: str) -> None:
+async def test_asset_publication_process_exit_is_reconciled(tmp_path: Path, stage: str) -> None:
     # 真正退出子进程，验证异常处理和finally都没有机会执行时的发布恢复。
     script = """
 from pathlib import Path
@@ -51,6 +52,7 @@ os._exit(27)
     assert child.returncode == 27, child.stderr.decode(errors="replace")
     metadata, runtime = _runtime(tmp_path, _Embedder())
     try:
+        await runtime.recover_assets()
         assert runtime.recovery["removed_files"] == 1
         assert not list(runtime.asset_store.assets_root.iterdir())
         assert metadata.image_memory_stats()["asset_count"] == 0
@@ -65,11 +67,12 @@ async def test_recovery_keeps_referenced_assets_and_reports_missing_file(tmp_pat
         image = await runtime.ingest(
             image_bytes=_png((80, 1, 2)), source_kind="chat", scope_type="chat", external_ref="keep", chat_id="real"
         )
-        assert runtime.reconcile_assets()["removed_files"] == 0
+        await runtime.recover_assets()
+        assert runtime.recovery["removed_files"] == 0
         asset = metadata.get_image_asset(image["asset_id"])
         runtime.asset_store.delete(asset["storage_key"])
-        recovery = runtime.reconcile_assets()
-        assert len(recovery["issues"]) == 1
+        await runtime.recover_assets()
+        assert len(runtime.recovery["issues"]) == 1
         assert metadata.image_memory_stats()["occurrence_count"] == 1
     finally:
         metadata.close()
@@ -156,6 +159,7 @@ async def test_restart_rebuilds_missing_vector_projection(tmp_path: Path) -> Non
             config=runtime.config,
             persist_vector_store=runtime.persist_vector_store,
         )
+        await restarted.recover_assets()
         await restarted.ensure_embedding_space()
         assert metadata.list_image_jobs(limit=10, offset=0, status="pending")["total"] == 1
         assert (await restarted.process_jobs_once())["processed"] == 1

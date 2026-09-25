@@ -47,7 +47,7 @@
       "pluginMarket": "插件市场",
       "configTemplate": "配置模板市场",
       "pluginConfig": "插件管理",
-      "adapterManagement": "适配器管理",
+      "adapterManagement": "适配器设置",
       "mcpSettings": "MCP 设置",
       "dataTransfer": "数据管理",
       "statistics": "详细统计数据",
@@ -233,6 +233,10 @@
       "title": "我的表情包"
     },
     "sidebar": {
+      "adapterAllowedGroup": "适配器允许",
+      "adapterBlockedGroup": "适配器不允许",
+      "adapterBlockedHint": "该聊天被适配器规则阻止，麦麦不会接收这里的新消息",
+      "adapterBlockedOverrideHint": "该聊天已被单独加入阻止规则",
       "closeConversation": "关闭 {{label}}",
       "conversations": "聊天会话",
       "emptyPreview": "暂无消息",
@@ -1472,6 +1476,16 @@
       "hitTokens": "命中Token",
       "missTokens": "未命中Token",
       "eligibleTokens": "参与统计 {{value}} Token"
+    },
+    "news": {
+      "title": "资讯",
+      "description": "来自服务器的新闻动态",
+      "refresh": "刷新资讯",
+      "retry": "重新加载",
+      "open": "打开资讯详情",
+      "openLink": "打开原文链接",
+      "pinned": "置顶",
+      "empty": "暂无资讯"
     },
     "storage": {
       "title": "存储占用",

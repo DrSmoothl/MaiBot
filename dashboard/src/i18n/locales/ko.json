@@ -47,7 +47,7 @@
       "pluginMarket": "플러그인 마켓",
       "configTemplate": "설정 템플릿",
       "pluginConfig": "플러그인 관리",
-      "adapterManagement": "어댑터 관리",
+      "adapterManagement": "어댑터 설정",
       "mcpSettings": "MCP 설정",
       "dataTransfer": "데이터 관리",
       "statistics": "상세 통계 데이터",
@@ -219,6 +219,10 @@
       "title": "내 스티커"
     },
     "sidebar": {
+      "adapterAllowedGroup": "어댑터 허용",
+      "adapterBlockedGroup": "어댑터 차단",
+      "adapterBlockedHint": "이 채팅은 어댑터 규칙으로 차단되어 麦麦가 새 메시지를 받지 않습니다",
+      "adapterBlockedOverrideHint": "이 채팅은 개별 차단 규칙에 추가되었습니다",
       "closeConversation": "{{label}} 닫기",
       "conversations": "채팅 대화",
       "emptyPreview": "아직 메시지가 없습니다",
@@ -1455,6 +1459,16 @@
       "hitTokens": "적중 Token",
       "missTokens": "미적중 Token",
       "eligibleTokens": "통계 대상 {{value}} Token"
+    },
+    "news": {
+      "title": "뉴스",
+      "description": "서버의 최신 소식",
+      "refresh": "뉴스 새로고침",
+      "retry": "다시 불러오기",
+      "open": "뉴스 상세 열기",
+      "openLink": "원문 링크 열기",
+      "pinned": "고정됨",
+      "empty": "아직 뉴스가 없습니다"
     },
     "storage": {
       "title": "저장소 사용량",

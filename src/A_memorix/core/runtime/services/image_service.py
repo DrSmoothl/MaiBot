@@ -100,7 +100,10 @@ class MemoryImageService(KernelServiceBase):
             return runtime.list_assets(
                 limit=max(1, min(500, int(kwargs.get("limit") or 50))),
                 offset=max(0, int(kwargs.get("offset") or 0)),
+                chat_id=str(kwargs.get("chat_id") or "").strip(),
             )
+        if operation == "list_chats":
+            return {"success": True, "items": runtime.list_chat_stats()}
         if operation == "delete_occurrence":
             return await runtime.delete_occurrence(str(kwargs.get("occurrence_id") or ""))
         if operation == "observe":

@@ -47,7 +47,7 @@
       "pluginMarket": "プラグインマーケット",
       "configTemplate": "設定テンプレート",
       "pluginConfig": "プラグイン管理",
-      "adapterManagement": "アダプター管理",
+      "adapterManagement": "アダプター設定",
       "mcpSettings": "MCP 設定",
       "dataTransfer": "データ管理",
       "statistics": "詳細統計データ",
@@ -161,6 +161,10 @@
       "title": "マイスタンプ"
     },
     "sidebar": {
+      "adapterAllowedGroup": "アダプター許可",
+      "adapterBlockedGroup": "アダプター不許可",
+      "adapterBlockedHint": "このチャットはアダプター規則で阻止されているため、麦麦は新しいメッセージを受信しません",
+      "adapterBlockedOverrideHint": "このチャットは個別の阻止規則に追加されています",
       "closeConversation": "{{label}} を閉じる",
       "conversations": "チャット会話",
       "emptyPreview": "まだメッセージはありません",
@@ -1403,6 +1407,16 @@
       "hitTokens": "ヒットToken",
       "missTokens": "未ヒットToken",
       "eligibleTokens": "集計対象 {{value}} Token"
+    },
+    "news": {
+      "title": "ニュース",
+      "description": "サーバーからの最新ニュース",
+      "refresh": "ニュースを更新",
+      "retry": "再読み込み",
+      "open": "ニュースの詳細を開く",
+      "openLink": "原文リンクを開く",
+      "pinned": "ピン留め",
+      "empty": "ニュースはまだありません"
     },
     "storage": {
       "title": "ストレージ使用量",

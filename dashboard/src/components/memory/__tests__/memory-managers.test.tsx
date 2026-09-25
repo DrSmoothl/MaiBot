@@ -1226,7 +1226,6 @@ describe('MemoryTimelineManager 范围、筛选与分页', () => {
   it('没有聊天流时不请求时间线，并显示空列表', async () => {
     await renderTimeline({ chatTargets: [] })
     expect(screen.getByText('当前范围内没有可审计事件。')).toBeInTheDocument()
-    expect(screen.getByText(/未选择聊天流/)).toBeInTheDocument()
     expect(memoryApi.getMemoryTimeline).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: /刷新时间线/ })).toBeDisabled()
   })
@@ -1477,15 +1476,15 @@ describe('MemoryTimelineManager 范围、筛选与分页', () => {
     expect(screen.getByText('事件20')).toBeInTheDocument()
   })
 
-  it('审计范围独占整行，摘要合并到事件列表且不显示时间滑块', async () => {
+  it('审计范围卡片与事件列表卡片均不显示标题，且不显示变动摘要', async () => {
     await renderTimeline({ initialChatId: 'chat-1' })
     const cards = document.querySelectorAll<HTMLElement>('[data-dashboard-card="true"]')
 
     expect(cards).toHaveLength(2)
-    expect(within(cards[0]).getByText('审计范围')).toBeInTheDocument()
-    expect(within(cards[1]).getByText('事件列表')).toBeInTheDocument()
-    expect(within(cards[1]).getByRole('region', { name: '变动摘要' })).toBeInTheDocument()
-    expect(screen.queryByText('选择真实聊天流与时间窗口，核对长期记忆对象的变动记录。')).not.toBeInTheDocument()
+    expect(within(cards[0]).queryByText('事件列表')).not.toBeInTheDocument()
+    expect(within(cards[1]).queryByText('事件列表')).not.toBeInTheDocument()
+    expect(within(cards[1]).queryByRole('region', { name: '变动摘要' })).not.toBeInTheDocument()
+    expect(within(cards[0]).queryByText('审计范围')).not.toBeInTheDocument()
     expect(screen.queryByText(/窗口开始：|窗口结束：/)).not.toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '刷新时间线' }).compareDocumentPosition(
@@ -1538,10 +1537,9 @@ describe('MemoryTimelineManager 范围、筛选与分页', () => {
     )
   })
 
-  it('有聊天流但无事件时展示空列表和零摘要', async () => {
+  it('有聊天流但无事件时展示空列表', async () => {
     await renderTimeline({ initialChatId: 'chat-1' })
     expect(await screen.findByText('当前范围内没有可审计事件。')).toBeInTheDocument()
-    expect(screen.getByText(/测试群 · 账号 acc-1 · 0 条事件/)).toBeInTheDocument()
   })
 
   it('加载中禁用刷新；无法解析的时间字符串会清空结束时间', async () => {
@@ -1633,7 +1631,7 @@ describe('MemoryTimelineManager 范围、筛选与分页', () => {
     })
   })
 
-  it('每页 10 条时分页窗口不超过总页数，缺分类计数按 0 展示', async () => {
+  it('每页 10 条时分页窗口不超过总页数', async () => {
     const user = userEvent.setup()
     const items = Array.from({ length: 12 }, (_, index) => makeTimelineEvent(index + 1))
     vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue(
@@ -1642,7 +1640,6 @@ describe('MemoryTimelineManager 范围、筛选与分页', () => {
     await renderTimeline({ initialChatId: 'chat-1' })
 
     expect(await screen.findByText('事件1')).toBeInTheDocument()
-    expect(screen.getByText(/12 条事件/)).toBeInTheDocument()
 
     await user.click(screen.getByLabelText('每页显示条数'))
     await user.click(await screen.findByRole('option', { name: '10 条' }))

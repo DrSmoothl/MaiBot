@@ -16,7 +16,7 @@ import {
   updateModelConfigSection,
 } from '@/lib/config-api'
 
-import type { ModelInfo, ModelTaskConfig } from '../types'
+import type { ModelInfo, ModelPricePeriod, ModelTaskConfig } from '../types'
 import { useModelConfig } from './useModelConfig'
 
 const toastMock = vi.fn()
@@ -96,6 +96,17 @@ function model(name: string, apiProvider = 'main', extra: Partial<ModelInfo> = {
     api_provider: apiProvider,
     price_in: 1,
     price_out: 2,
+    ...extra,
+  }
+}
+
+function pricePeriod(extra: Partial<ModelPricePeriod> = {}): ModelPricePeriod {
+  return {
+    start_time: '23:00',
+    end_time: '07:00',
+    price_in: 0,
+    price_out: 0.5,
+    cache_price_in: 0,
     ...extra,
   }
 }
@@ -634,7 +645,7 @@ describe('useModelConfig 任务配置与 embedding', () => {
 })
 
 describe('useModelConfig 模型编辑与校验', () => {
-  it('打开编辑框：沿用已有模型，新增时按 DeepSeek 模板打开 cache', async () => {
+  it('打开编辑框：沿用已有模型，新增时使用第一个提供商', async () => {
     stubConfig({
       api_providers: [provider('deepseek'), provider('spare')],
     })
@@ -647,9 +658,6 @@ describe('useModelConfig 模型编辑与校验', () => {
     expect(onOpened).toHaveBeenCalledOnce()
     expect(result.current.editingIndex).toBe(0)
     expect(result.current.editingModel?.name).toBe('chat')
-    expect(result.current.isDeepSeekTemplateProvider('deepseek')).toBe(true)
-    expect(result.current.isDeepSeekTemplateProvider('spare')).toBe(false)
-    expect(result.current.isDeepSeekTemplateProvider('missing')).toBe(false)
     expect(result.current.getProviderConfig('deepseek')?.base_url).toBe('https://api.deepseek.com')
     expect(result.current.getProviderConfig('nope')).toBeUndefined()
 
@@ -661,7 +669,7 @@ describe('useModelConfig 模型编辑与校验', () => {
       expect.objectContaining({
         name: '',
         api_provider: 'deepseek',
-        cache: true,
+        cache_price_in: 0,
       })
     )
     unmount()
@@ -691,7 +699,6 @@ describe('useModelConfig 模型编辑与校验', () => {
     expect(result.current.editingModel).toEqual(
       expect.objectContaining({
         api_provider: 'selected',
-        cache: false,
       })
     )
     unmount()
@@ -891,6 +898,138 @@ describe('useModelConfig 模型编辑与校验', () => {
   })
 })
 
+describe('useModelConfig 分时价格', () => {
+  it.each([
+    ['开始时间缺失', { start_time: '' }, '开始时间必须为 HH:MM'],
+    ['小时非两位', { start_time: '7:00' }, '开始时间必须为 HH:MM'],
+    ['小时越界', { start_time: '24:00' }, '开始时间必须为 HH:MM'],
+    ['分钟越界', { end_time: '07:60' }, '结束时间必须为 HH:MM'],
+    ['包含秒', { end_time: '07:00:00' }, '结束时间必须为 HH:MM'],
+    ['时间含空格', { start_time: ' 23:00' }, '开始时间必须为 HH:MM'],
+    ['时间含换行', { start_time: '23:00\n' }, '开始时间必须为 HH:MM'],
+    ['起止相等', { end_time: '23:00' }, '开始时间与结束时间不能相同'],
+    ['输入价为负数', { price_in: -0.1 }, '输入价格必须为非负有限数值'],
+    ['输入价为空', { price_in: Number.NaN }, '输入价格必须为非负有限数值'],
+    ['输出价无限', { price_out: Infinity }, '输出价格必须为非负有限数值'],
+    ['缓存关闭但价格无限', { cache_price_in: -Infinity }, '缓存价格必须为非负有限数值'],
+    ['缓存价格缺失', { cache_price_in: undefined }, '缓存价格必须为非负有限数值'],
+  ] as const)('拦截%s并保留编辑弹窗', async (_label, extra, message) => {
+    const { result, unmount } = await renderLoadedHook()
+    act(() => {
+      result.current.openEditDialog(model('chat', 'main', {
+        price_periods: [pricePeriod(extra)],
+      }), 0)
+    })
+    await act(async () => result.current.handleSaveEdit())
+
+    expect(result.current.formErrors.price_periods).toContain(`时段 1 的${message}`)
+    expect(result.current.editDialogOpen).toBe(true)
+    expect(updateModelConfigMock).not.toHaveBeenCalled()
+    expect(updateModelConfigSectionMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it.each([
+    ['普通重叠', '09:00', '12:00', '11:00', '13:00'],
+    ['跨午夜前半段重叠', '23:00', '07:00', '22:00', '23:30'],
+    ['跨午夜后半段重叠', '23:00', '07:00', '06:00', '08:00'],
+    ['两个跨午夜时段', '23:00', '07:00', '22:00', '06:00'],
+    ['包含关系', '09:00', '17:00', '10:00', '11:00'],
+  ])('拦截%s并指出冲突的两个时段', async (_label, start, end, nextStart, nextEnd) => {
+    const { result, unmount } = await renderLoadedHook()
+    act(() => {
+      result.current.openEditDialog(model('chat', 'main', {
+        price_periods: [
+          pricePeriod({ start_time: start, end_time: end }),
+          pricePeriod({ start_time: nextStart, end_time: nextEnd }),
+        ],
+      }), 0)
+    })
+    await act(async () => result.current.handleSaveEdit())
+
+    expect(result.current.formErrors.price_periods).toContain('时段 1 与时段 2 重叠')
+    expect(updateModelConfigMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('保存跨午夜和相邻时段，保留零价及缓存价，并支持清空', async () => {
+    const periods = [
+      pricePeriod({ start_time: '23:00', end_time: '00:00', price_out: 0 }),
+      pricePeriod({ start_time: '00:00', end_time: '07:00', cache_price_in: 0.2 }),
+      pricePeriod({ start_time: '07:00', end_time: '23:00' }),
+    ]
+    const { result, unmount } = await renderLoadedHook()
+    act(() => {
+      result.current.openEditDialog(model('chat', 'main', {
+        price_periods: periods,
+      }), 0)
+    })
+    await act(async () => result.current.handleSaveEdit())
+
+    expect(result.current.formErrors).toEqual({})
+    expect(result.current.models[0].price_periods).toEqual(periods)
+    expect(result.current.models[0].price_periods).not.toBe(periods)
+    expect(result.current.models[0].price_periods?.[0]).not.toBe(periods[0])
+    expect(updateModelConfigMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      models: [expect.objectContaining({ price_periods: periods })],
+    }))
+
+    act(() => result.current.openEditDialog(result.current.models[0], 0))
+    expect(result.current.editingModel?.price_periods).toEqual(periods)
+    act(() => result.current.setEditingModel((current) => current && { ...current, price_periods: [] }))
+    await act(async () => result.current.handleSaveEdit())
+    expect(updateModelConfigMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      models: [expect.objectContaining({ price_periods: [] })],
+    }))
+    expect(result.current.models[0].price_periods).toEqual([])
+    unmount()
+  })
+  it('手动整份保存与重新加载保留时段数组和零价', async () => {
+    const periods = [pricePeriod({ price_in: 0, price_out: 0, cache_price_in: 0 })]
+    stubConfig({ models: [model('chat', 'main', { price_periods: periods })] })
+    const { result, unmount } = await renderLoadedHook()
+
+    await act(async () => result.current.saveConfig())
+
+    expect(updateModelConfigMock).toHaveBeenCalledWith(expect.objectContaining({
+      models: [expect.objectContaining({ price_periods: periods })],
+    }))
+    const saved = updateModelConfigMock.mock.calls[0][0]
+    getModelConfigCachedMock.mockResolvedValue(saved)
+    await act(async () => result.current.loadConfig())
+    expect(result.current.models[0].price_periods).toEqual(periods)
+    expect(result.current.hasUnsavedChanges).toBe(false)
+    unmount()
+  })
+
+  it('编辑时段使用独立副本，取消不改变原配置也不触发保存', async () => {
+    const periods = [pricePeriod()]
+    stubConfig({ models: [model('chat', 'main', { price_periods: periods })] })
+    const { result, unmount } = await renderLoadedHook()
+    const original = result.current.models[0]
+    vi.useFakeTimers()
+    act(() => result.current.openEditDialog(original, 0))
+    expect(result.current.editingModel).not.toBe(original)
+    expect(result.current.editingModel?.price_periods).not.toBe(original.price_periods)
+    expect(result.current.editingModel?.price_periods?.[0]).not.toBe(original.price_periods?.[0])
+    act(() => result.current.setEditingModel((current) => current && {
+      ...current,
+      price_periods: current.price_periods?.map((period) => ({ ...period, price_in: 9 })),
+    }))
+    act(() => result.current.handleEditDialogClose(false))
+    await act(async () => vi.advanceTimersByTimeAsync(2500))
+
+    expect(result.current.models[0]).toBe(original)
+    expect(original.price_periods).toEqual(periods)
+    expect(result.current.hasUnsavedChanges).toBe(false)
+    expect(updateModelConfigMock).not.toHaveBeenCalled()
+    expect(updateModelConfigSectionMock).not.toHaveBeenCalled()
+    act(() => result.current.openEditDialog(result.current.models[0], 0))
+    expect(result.current.editingModel?.price_periods).toEqual(periods)
+    unmount()
+  })
+})
+
 describe('useModelConfig 删除、批量与分页搜索', () => {
   it('确认删除模型后重检任务；没有 deletingIndex 时只关对话框', async () => {
     const { result, unmount } = await renderLoadedHook()
@@ -1071,7 +1210,7 @@ describe('useModelConfig 删除、批量与分页搜索', () => {
 })
 
 describe('useModelConfig 提供商编辑与级联删除', () => {
-  it('打开提供商对话框：新增给默认值，编辑回填当前项', async () => {
+  it('打开提供商对话框：新增只给基础字段，编辑回填当前项', async () => {
     const { result, unmount } = await renderLoadedHook()
 
     act(() => {
@@ -1083,11 +1222,10 @@ describe('useModelConfig 提供商编辑与级联删除', () => {
       expect.objectContaining({
         name: '',
         client_type: 'openai',
-        max_retry: 2,
-        timeout: 30,
-        retry_interval: 10,
       })
     )
+    // 超时等数值字段不再前端预填，缺省由后端 schema 默认值填充
+    expect(result.current.editingProvider?.timeout).toBeUndefined()
 
     act(() => {
       result.current.openProviderDialog(result.current.apiProviders[1], 1)

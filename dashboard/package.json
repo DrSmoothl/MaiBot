@@ -163,6 +163,7 @@
     "reactflow": "^11.11.4",
     "recharts": "3.5.1",
     "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "smol-toml": "^1.5.2",

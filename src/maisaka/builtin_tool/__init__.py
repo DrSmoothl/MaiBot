@@ -8,8 +8,8 @@ from typing import Dict, List, Literal, Optional
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
-
 from src.maisaka.focus import focus_mode_manager
+
 from .context import BuiltinToolRuntimeContext
 from .fetch_history import get_tool_spec as get_fetch_history_tool_spec
 from .fetch_history import handle_tool as handle_fetch_history_tool

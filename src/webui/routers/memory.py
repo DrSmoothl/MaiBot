@@ -6,6 +6,7 @@ from typing import Any, Iterator, Optional
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlmodel import col, select
 
 import asyncio
@@ -20,8 +21,10 @@ from src.A_memorix.core.image.component_paths import iter_message_image_componen
 from src.A_memorix.runtime_registry import get_runtime_kernel
 from src.chat.message_receive.message import SessionMessage
 from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
+from src.common.data_models.person_info_data_model import parse_group_cardname_json
 from src.common.database.database import get_db_session
 from src.common.database.database_model import ChatSession, Messages, PersonInfo
+from src.common.logger import get_logger
 from src.person_info.person_info import resolve_person_id_for_memory
 from src.services.memory_flow_service import memory_automation_service
 from src.services.memory_service import MemorySearchResult, memory_service
@@ -29,6 +32,8 @@ from src.webui.dependencies import require_auth
 
 
 router = APIRouter(prefix="/memory", tags=["memory"], dependencies=[Depends(require_auth)])
+
+logger = get_logger("webui.memory")
 compat_router = APIRouter(prefix="/api", tags=["memory-compat"], dependencies=[Depends(require_auth)])
 STAGING_ROOT: Optional[Path] = None
 
@@ -408,22 +413,33 @@ def _prefetch_latest_messages_by_session(db_session: Any, session_ids: list[str]
     if not session_ids:
         return {}
 
+    # 只取每个聊天流时间戳最大的一条消息（SQLite 对唯一 max 聚合的裸列取值来自命中行），
+    # 原写法把会话内全部消息拉回 Python 再逐行丢弃，大聊天流会拖回几十万行
     statement = (
-        select(Messages)
+        select(
+            Messages.session_id,
+            Messages.group_id,
+            Messages.group_name,
+            Messages.user_id,
+            Messages.user_cardname,
+            Messages.user_nickname,
+            func.max(col(Messages.timestamp)).label("max_timestamp"),
+        )
         .where(col(Messages.session_id).in_(session_ids))
-        .order_by(col(Messages.session_id).asc(), col(Messages.timestamp).desc())
+        .group_by(col(Messages.session_id))
     )
     latest: dict[str, dict[str, Any]] = {}
-    for message in db_session.exec(statement).all():
-        chat_id = str(message.session_id or "").strip()
-        if chat_id and chat_id not in latest:
-            latest[chat_id] = {
-                "group_id": message.group_id,
-                "group_name": message.group_name,
-                "user_id": message.user_id,
-                "user_cardname": message.user_cardname,
-                "user_nickname": message.user_nickname,
-            }
+    for row in db_session.exec(statement).all():
+        chat_id = str(row[0] or "").strip()
+        if not chat_id:
+            continue
+        latest[chat_id] = {
+            "group_id": row[1],
+            "group_name": row[2],
+            "user_id": row[3],
+            "user_cardname": row[4],
+            "user_nickname": row[5],
+        }
     return latest
 
 
@@ -973,30 +989,99 @@ def _paragraph_jump_target(paragraph_hash: str) -> dict[str, Any]:
     return {"tab": "graph", "params": {"paragraph_hash": token}}
 
 
-def _delete_jump_target_for_paragraph(paragraph_hash: str, source: str = "") -> dict[str, Any]:
-    token = str(paragraph_hash or "").strip()
-    if token:
-        rows = _query_memory_rows(
-            """
-            SELECT operation_id
-            FROM delete_operation_items
-            WHERE item_hash = ?
-               OR item_key = ?
-               OR payload_json LIKE ?
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-            """,
-            (token, token, f"%{token}%"),
-        )
-        operation_id = str((rows[0] if rows else {}).get("operation_id") or "").strip()
-        if operation_id:
-            return {"tab": "delete", "params": {"operation_id": operation_id}}
+def _delete_jump_targets_for_paragraphs(paragraph_hashes: set[str]) -> dict[str, dict[str, Any]]:
+    """批量解析段落哈希对应的删除跳转目标，替代逐哈希查询的 N+1。
 
-    params = {"paragraph_hash": token}
-    clean_source = str(source or "").strip()
-    if clean_source:
-        params["source"] = clean_source
-    return {"tab": "delete", "params": params}
+    item_hash 有索引，先批量精确命中；item_key 无索引、payload_json 模糊匹配代价高，
+    只对仍未命中的哈希兜底。同一段落命中多条明细时取最新一条（created_at/id 最大）。
+    """
+
+    tokens = sorted(
+        token for token in (str(item or "").strip().lower() for item in paragraph_hashes) if token
+    )
+    resolved: dict[str, tuple[tuple[float, int], dict[str, Any]]] = {}
+    unresolved = set(tokens)
+
+    def _record_match(token: str, operation_id: str, created_at: Any, row_id: Any) -> None:
+        if not operation_id:
+            return
+        rank = (float(created_at or 0), int(row_id or 0))
+        current = resolved.get(token)
+        if current is None or rank > current[0]:
+            resolved[token] = (rank, {"tab": "delete", "params": {"operation_id": operation_id}})
+
+    # 第一轮：item_hash 批量精确命中（走 idx_delete_operation_items_hash）
+    for chunk in _iter_token_chunks(tokens):
+        placeholders = ",".join("?" for _ in chunk)
+        rows = _query_memory_rows(
+            f"""
+            SELECT item_hash, item_key, operation_id, created_at, id
+            FROM delete_operation_items
+            WHERE item_hash IN ({placeholders})
+            """,
+            tuple(chunk),
+        )
+        for row in rows:
+            token = str(row.get("item_hash") or "").strip().lower()
+            if token in unresolved:
+                unresolved.discard(token)
+                _record_match(
+                    token,
+                    str(row.get("operation_id") or "").strip(),
+                    row.get("created_at"),
+                    row.get("id"),
+                )
+
+    # 第二轮：未命中的哈希用 item_key 反查（无索引，按块全扫描，块数通常为 1）
+    if unresolved:
+        for chunk in _iter_token_chunks(sorted(unresolved)):
+            placeholders = ",".join("?" for _ in chunk)
+            rows = _query_memory_rows(
+                f"""
+                SELECT item_key, operation_id, created_at, id
+                FROM delete_operation_items
+                WHERE item_key IN ({placeholders})
+                """,
+                tuple(chunk),
+            )
+            for row in rows:
+                token = str(row.get("item_key") or "").strip().lower()
+                if token in unresolved:
+                    unresolved.discard(token)
+                    _record_match(
+                        token,
+                        str(row.get("operation_id") or "").strip(),
+                        row.get("created_at"),
+                        row.get("id"),
+                    )
+
+    # 第三轮：仍未命中的哈希按 payload_json 包含关系兜底；OR-LIKE 一条语句扫完整块
+    if unresolved:
+        for chunk in _iter_token_chunks(sorted(unresolved)):
+            placeholders = ",".join("?" for _ in chunk)
+            like_clauses = " OR ".join("payload_json LIKE ?" for _ in chunk)
+            rows = _query_memory_rows(
+                f"""
+                SELECT payload_json, operation_id, created_at, id
+                FROM delete_operation_items
+                WHERE {like_clauses}
+                """,
+                tuple(chunk),
+            )
+            for row in rows:
+                payload = row.get("payload_json")
+                payload_text = payload if isinstance(payload, str) else str(payload or "")
+                for token in chunk:
+                    if token in unresolved and token in payload_text:
+                        unresolved.discard(token)
+                        _record_match(
+                            token,
+                            str(row.get("operation_id") or "").strip(),
+                            row.get("created_at"),
+                            row.get("id"),
+                        )
+
+    return {token: target for token, (_, target) in resolved.items()}
 
 
 def _get_memory_metadata_store() -> Any:
@@ -1665,6 +1750,68 @@ def _timeline_query_limit(limit: int, multiplier: int, minimum: int) -> Optional
     return max(limit * multiplier, minimum)
 
 
+def _timeline_time_clause(
+    time_start: Optional[float],
+    time_end: Optional[float],
+    columns: tuple[str, ...],
+) -> tuple[str, list[Any]]:
+    """把请求时间窗口转成 SQL 超集条件（任一列时间戳落在窗口内即保留该行）。
+
+    各收集器在 Python 侧仍用 _event_in_range 做精确过滤，这里只负责把扫描范围收窄，
+    NULL 时间戳天然不命中 BETWEEN，语义与 _event_in_range 一致。
+    """
+
+    if time_start is None and time_end is None:
+        return "", []
+    clauses: list[str] = []
+    params: list[Any] = []
+    for column in columns:
+        bounds: list[str] = []
+        if time_start is not None:
+            bounds.append(f"{column} >= ?")
+            params.append(time_start)
+        if time_end is not None:
+            bounds.append(f"{column} <= ?")
+            params.append(time_end)
+        if bounds:
+            clauses.append(" AND ".join(bounds))
+    if not clauses:
+        return "", []
+    return " AND (" + " OR ".join(clauses) + ")", params
+
+
+# 审计时间线的运行期索引每个进程只需确保一次；CREATE INDEX IF NOT EXISTS 幂等
+_TIMELINE_INDEXES_READY = False
+
+# 画像快照覆盖索引：把查询所需列全部纳入索引，避免按行读出 72MB 的 vector_evidence_json
+_PERSON_PROFILE_SNAPSHOT_COVERING_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_person_profile_snapshots_evidence_covering
+ON person_profile_snapshots(updated_at, person_id, profile_version, source_note, evidence_ids_json)
+"""
+
+
+def _ensure_timeline_indexes() -> None:
+    """确保画像快照覆盖索引存在（一次生效，失败可容忍）。
+
+    画像收集器按 updated_at 顺序扫描全部快照，覆盖索引让扫描只读索引页，
+    否则每次请求都会把整表行页（约 80MB）拖进页缓存。
+    """
+
+    global _TIMELINE_INDEXES_READY
+    if _TIMELINE_INDEXES_READY:
+        return
+    metadata_store = _get_memory_metadata_store()
+    if metadata_store is None:
+        return
+    _TIMELINE_INDEXES_READY = True
+    try:
+        # query 不负责提交，DDL 必须走显式事务边界，否则索引可能留在未决事务里不生效
+        with metadata_store.transaction() as connection:
+            connection.execute(_PERSON_PROFILE_SNAPSHOT_COVERING_INDEX)
+    except Exception as exc:
+        logger.warning("创建审计时间线覆盖索引失败（不影响功能）: %s", exc)
+
+
 def _append_limit(sql: str, limit: Optional[int]) -> str:
     if limit is None:
         return sql
@@ -1682,23 +1829,55 @@ def _timeline_paragraph_events(
     query_limit = _timeline_query_limit(limit, 5, 200)
     # WHERE 只做超集预筛（来源精确匹配 + metadata 模糊匹配），精确的聊天归属
     # 仍由 _paragraph_matches_chat 在 Python 侧逐行校验，两者结论不会冲突。
+    # source IN 与 metadata LIKE 拆成两个子查询再 UNION ALL：OR 会同时废掉两个条件
+    # 的索引能力，拆开后 source 分支走 idx_paragraphs_source，LIKE 分支保留全扫描但
+    # 各自的 LIMIT 与时间下推都能收窄，最后在 Python 侧按段落哈希去重。
     chat_sources = sorted(_timeline_sources_for_chat(chat.chat_id))
     source_placeholders = ",".join("?" for _ in chat_sources)
+    time_clause, time_params = _timeline_time_clause(
+        time_start, time_end, ("created_at", "updated_at", "deleted_at")
+    )
+    order_clause = "ORDER BY COALESCE(updated_at, created_at, 0) DESC"
+    limit_clause = "\n            LIMIT ?" if query_limit is not None else ""
+    columns = "hash, content, created_at, updated_at, metadata, source, is_deleted, deleted_at"
+
+    def _branch_params(prefix: tuple[Any, ...]) -> tuple[Any, ...]:
+        branch_params: list[Any] = [*prefix, *time_params]
+        if query_limit is not None:
+            branch_params.append(query_limit)
+        return tuple(branch_params)
+
+    source_branch_params = _branch_params(tuple(chat_sources))
+    metadata_branch_params = _branch_params((f"%{chat.chat_id}%",))
     rows = _query_memory_rows(
-        _append_limit(
-            f"""
-        SELECT hash, content, created_at, updated_at, metadata, source, is_deleted, deleted_at
-        FROM paragraphs
-        WHERE source IN ({source_placeholders}) OR metadata LIKE ?
-        ORDER BY COALESCE(updated_at, created_at, 0) DESC
+        f"""
+        SELECT {columns} FROM (SELECT {columns} FROM paragraphs
+            WHERE source IN ({source_placeholders}){time_clause}
+            {order_clause}{limit_clause})
+        UNION ALL
+        SELECT {columns} FROM (SELECT {columns} FROM paragraphs
+            WHERE metadata LIKE ?{time_clause}
+            {order_clause}{limit_clause})
         """,
-            query_limit,
-        ),
-        (
-            *chat_sources,
-            f"%{chat.chat_id}%",
-            *((query_limit,) if query_limit is not None else ()),
-        ),
+        (*source_branch_params, *metadata_branch_params),
+    )
+    # 两分支可能返回同一行（source 与 metadata 同时命中），按哈希去重避免重复事件
+    seen_hashes: set[str] = set()
+    unique_rows: list[dict[str, Any]] = []
+    for row in rows:
+        paragraph_hash = str(row.get("hash") or "").strip()
+        if paragraph_hash in seen_hashes:
+            continue
+        seen_hashes.add(paragraph_hash)
+        unique_rows.append(row)
+    rows = unique_rows
+    # 删除段落的跳转目标按批解析，避免逐哈希查询 delete_operation_items 的 N+1
+    deleted_jump_targets = _delete_jump_targets_for_paragraphs(
+        {
+            str(row.get("hash") or "").strip()
+            for row in rows
+            if bool(int(row.get("is_deleted") or 0))
+        }
     )
     events: list[MemoryTimelineEvent] = []
     for row in rows:
@@ -1713,11 +1892,16 @@ def _timeline_paragraph_events(
         updated_at = _safe_float(row.get("updated_at"))
         deleted_at = _safe_float(row.get("deleted_at"))
         is_deleted = bool(int(row.get("is_deleted") or 0))
-        paragraph_jump_target = (
-            _delete_jump_target_for_paragraph(paragraph_hash, source)
-            if is_deleted
-            else _paragraph_jump_target(paragraph_hash)
-        )
+        if is_deleted:
+            paragraph_jump_target = deleted_jump_targets.get(paragraph_hash) or {
+                "tab": "delete",
+                "params": {
+                    "paragraph_hash": paragraph_hash,
+                    **({"source": source} if source else {}),
+                },
+            }
+        else:
+            paragraph_jump_target = _paragraph_jump_target(paragraph_hash)
         if created_at is not None and _event_in_range(created_at, time_start, time_end):
             events.append(
                 _timeline_event(
@@ -1768,7 +1952,7 @@ def _timeline_paragraph_events(
                     source=source,
                     attribution=attribution,
                     metadata={"paragraph_hash": paragraph_hash},
-                    jump_target=_delete_jump_target_for_paragraph(paragraph_hash, source),
+                    jump_target=paragraph_jump_target,
                 )
             )
     return [event for event in events if _types_match(event, accepted_types)]
@@ -1961,6 +2145,9 @@ def _timeline_feedback_events(
 def _looks_like_memory_hash(token: Any) -> bool:
     """判断字符串是否形如记忆对象的哈希（32/64 位十六进制）。"""
     clean = str(token or "").strip().lower()
+    # 删除载荷里绝大多数字符串不是哈希，先按长度预筛避免高频正则调用
+    if len(clean) not in (32, 64):
+        return False
     return bool(_MEMORY_HASH_PATTERN.fullmatch(clean))
 
 
@@ -2162,7 +2349,7 @@ def _timeline_delete_events(
     rows = _query_memory_rows(
         _append_limit(
             """
-        SELECT operation_id, mode, selector, reason, requested_by, status, created_at, restored_at, summary_json
+        SELECT operation_id, mode, reason, requested_by, status, created_at, restored_at, summary_json
         FROM delete_operations
         ORDER BY COALESCE(restored_at, created_at, 0) DESC
         """,
@@ -2172,31 +2359,64 @@ def _timeline_delete_events(
     )
     operation_ids = [str(row.get("operation_id") or "").strip() for row in rows]
     operation_ids = [operation_id for operation_id in operation_ids if operation_id]
-    payloads_by_operation = {
-        operation_id: (
-            _decode_json_payload(row.get("summary_json"), {}),
-            _decode_json_payload(row.get("selector"), row.get("selector")),
-        )
-        for row in rows
-        for operation_id in [str(row.get("operation_id") or "").strip()]
-        if operation_id
-    }
+    # selector 平均上百 KB（见 selector 超集体积），首轮不拉取不解码；
+    # 只有 summary 判定不了归属的操作才按需读取，明细兜底同理。
+    summaries_by_operation: dict[str, dict[str, Any]] = {}
+    selectors_by_operation: dict[str, Any] = {}
+    for row in rows:
+        operation_id = str(row.get("operation_id") or "").strip()
+        if not operation_id:
+            continue
+        summaries_by_operation[operation_id] = _decode_json_payload(row.get("summary_json"), {})
+        selectors_by_operation[operation_id] = None
 
-    # 第一轮只用 selector/summary 判定归属（大多数操作在这里就能定），避免为全部操作加载明细；
-    # 明细动辄上万行，先加载会显著拖慢时间线。
+    def _selector_payload(operation_id: str) -> Any:
+        """按需解码选择器；None 表示无范围声明。"""
+
+        cached = selectors_by_operation.get(operation_id)
+        if cached is not None or operation_id not in selectors_by_operation:
+            return cached
+        selector_rows = _query_memory_rows(
+            "SELECT selector FROM delete_operations WHERE operation_id = ?",
+            (operation_id,),
+        )
+        raw_selector = selector_rows[0].get("selector") if selector_rows else None
+        decoded = _decode_json_payload(raw_selector, raw_selector)
+        selectors_by_operation[operation_id] = decoded if decoded is not None else None
+        return decoded
+
+    # 第一轮只用 summary 判定归属（大多数操作在这里就能定），避免为全部操作解码 selector；
+    # selector/明细动辄上百 KB、上万行，先解码会显著拖慢时间线。
     candidate_hashes: set[str] = set()
-    for summary_payload, selector_payload in payloads_by_operation.values():
+    for summary_payload in summaries_by_operation.values():
         _collect_payload_hashes(summary_payload, candidate_hashes)
-        _collect_payload_hashes(selector_payload, candidate_hashes)
     chat_hashes = _resolve_chat_hashes(candidate_hashes, chat.chat_id)
     matched_operations = {
         operation_id
-        for operation_id, (summary_payload, selector_payload) in payloads_by_operation.items()
+        for operation_id, summary_payload in summaries_by_operation.items()
         if _operation_payload_matches_chat(summary_payload, chat.chat_id, chat_hashes)
-        or _operation_payload_matches_chat(selector_payload, chat.chat_id, chat_hashes)
     }
 
-    # 第二轮：选择器没判定归属的操作再查明细。关系/实体删除可由哈希反查归属，无需明细；
+    # 第二轮：summary 判定不了的操作再解码 selector 判定。
+    summary_unmatched_ids = [
+        operation_id for operation_id in operation_ids if operation_id not in matched_operations
+    ]
+    selector_hashes: set[str] = set()
+    for operation_id in summary_unmatched_ids:
+        selector_payload = _selector_payload(operation_id)
+        if selector_payload is not None:
+            _collect_payload_hashes(selector_payload, selector_hashes)
+    newly_seen_hashes = selector_hashes - candidate_hashes
+    if newly_seen_hashes:
+        chat_hashes |= _resolve_chat_hashes(newly_seen_hashes, chat.chat_id)
+    for operation_id in summary_unmatched_ids:
+        if operation_id in matched_operations:
+            continue
+        selector_payload = selectors_by_operation.get(operation_id)
+        if _operation_payload_matches_chat(selector_payload, chat.chat_id, chat_hashes):
+            matched_operations.add(operation_id)
+
+    # 第三轮：选择器没判定归属的操作再查明细。关系/实体删除可由哈希反查归属，无需明细；
     # 段落删除后原行已不存在，只能靠明细里记录的对象元数据与外部引用判定，
     # 所以默认只取段落明细；选择器为空的操作没有任何范围声明，退回全部明细。
     unmatched_ids = [operation_id for operation_id in operation_ids if operation_id not in matched_operations]
@@ -2204,7 +2424,7 @@ def _timeline_delete_events(
     unscoped_ids = [
         operation_id
         for operation_id in unmatched_ids
-        if not payloads_by_operation.get(operation_id, ({}, {}))[1]
+        if not selectors_by_operation.get(operation_id)
     ]
     for operation_id, items in _load_delete_operation_items(unscoped_ids).items():
         items_by_operation.setdefault(operation_id, []).extend(items)
@@ -2212,7 +2432,7 @@ def _timeline_delete_events(
     extra_hashes: set[str] = set()
     for items in items_by_operation.values():
         _collect_item_hashes(items, extra_hashes)
-    newly_seen = extra_hashes - candidate_hashes
+    newly_seen = extra_hashes - candidate_hashes - selector_hashes
     if newly_seen:
         chat_hashes |= _resolve_chat_hashes(newly_seen, chat.chat_id)
     matched_operations.update(
@@ -2226,7 +2446,7 @@ def _timeline_delete_events(
         operation_id = str(row.get("operation_id") or "").strip()
         if not operation_id or operation_id not in matched_operations:
             continue
-        summary_payload, _selector_payload = payloads_by_operation.get(operation_id, ({}, {}))
+        summary_payload = summaries_by_operation.get(operation_id, {})
         item_count = _delete_operation_object_count(summary_payload, items_by_operation.get(operation_id, []))
         created_at = _safe_float(row.get("created_at"))
         restored_at = _safe_float(row.get("restored_at"))
@@ -2289,36 +2509,24 @@ def _timeline_profile_events(
     candidate_paragraphs = _query_memory_rows(
         f"SELECT hash, metadata, source FROM paragraphs WHERE {chat_filter}", chat_params
     )
-    # 只把校验过的十六进制哈希写进字面量 IN，避免绑定参数上限并防止拼接异常值
-    hash_literals = [
-        f"'{token}'"
-        for row in candidate_paragraphs
-        for token in [str(row.get("hash") or "").strip().lower()]
-        if _looks_like_memory_hash(token)
-    ]
-    if not hash_literals:
-        return []
-
-    time_clause = ""
-    time_params: list[Any] = []
-    if time_start is not None:
-        time_clause += " AND pps.updated_at >= ?"
-        time_params.append(time_start)
-    if time_end is not None:
-        time_clause += " AND pps.updated_at <= ?"
-        time_params.append(time_end)
+    # 快照的证据哈希通过子查询物化匹配（SQLite 会为子查询建自动索引 + bloom filter），
+    # 避免把上千个哈希写成字面量 IN（会退化为逐值线性比对，实测慢一个数量级以上）
+    time_clause, time_params = _timeline_time_clause(
+        time_start, time_end, ("pps.updated_at",)
+    )
     rows = _query_memory_rows(
         _append_limit(
             f"""
         SELECT DISTINCT pps.person_id, pps.profile_version, pps.updated_at, pps.source_note,
                         pps.evidence_ids_json
         FROM person_profile_snapshots pps, json_each(pps.evidence_ids_json) je
-        WHERE je.value IN ({",".join(hash_literals)}){time_clause}
+        JOIN (SELECT DISTINCT hash FROM paragraphs WHERE {chat_filter}) candidate
+            ON candidate.hash = je.value{time_clause}
         ORDER BY pps.updated_at DESC
         """,
             query_limit,
         ),
-        (*time_params, *((query_limit,) if query_limit is not None else ())),
+        (*chat_params, *time_params, *((query_limit,) if query_limit is not None else ())),
     )
     person_ids = [str(row.get("person_id") or "").strip() for row in rows]
     person_ids = [person_id for person_id in person_ids if person_id]
@@ -2487,13 +2695,8 @@ async def _memory_timeline(
     clean_chat_id = str(chat_id or "").strip()
     if not clean_chat_id:
         raise HTTPException(status_code=400, detail="chat_id 不能为空")
-    chat_session = _find_real_chat_session(clean_chat_id)
-    if chat_session is None:
-        raise HTTPException(status_code=400, detail=f"聊天流不存在: {clean_chat_id}")
     if time_start is not None and time_end is not None and time_start > time_end:
         raise HTTPException(status_code=400, detail="time_start 不能晚于 time_end")
-
-    chat = _timeline_chat_from_session(chat_session)
     safe_limit = max(1, min(500, int(limit or 100)))
     accepted_types = {
         token.strip()
@@ -2509,7 +2712,15 @@ async def _memory_timeline(
         _timeline_maintenance_events,
     )
 
-    def _collect_timeline_events() -> list[MemoryTimelineEvent]:
+    def _resolve_timeline_chat() -> MemoryTimelineChat:
+        """定位聊天流并解析展示名；同步查库放在工作线程，避免阻塞 WebUI 事件循环。"""
+        chat_session = _find_real_chat_session(clean_chat_id)
+        if chat_session is None:
+            raise HTTPException(status_code=400, detail=f"聊天流不存在: {clean_chat_id}")
+        return _timeline_chat_from_session(chat_session)
+
+    def _collect_timeline_events(chat: MemoryTimelineChat) -> list[MemoryTimelineEvent]:
+        _ensure_timeline_indexes()
         collected: list[MemoryTimelineEvent] = []
         for collector in collectors:
             collected.extend(
@@ -2524,7 +2735,8 @@ async def _memory_timeline(
         return collected
 
     # 收集器内部是同步 SQLite 查询，放到工作线程执行，避免阻塞 WebUI 事件循环。
-    events = await asyncio.to_thread(_collect_timeline_events)
+    chat = await asyncio.to_thread(_resolve_timeline_chat)
+    events = await asyncio.to_thread(_collect_timeline_events, chat)
     events = _dedupe_timeline_events(events)
     events.sort(key=lambda item: item.occurred_at, reverse=True)
     items = events[:safe_limit]
@@ -2561,7 +2773,8 @@ async def _memory_timeline(
     )
 
 
-async def _import_chat_targets() -> ImportChatTargetsResponse:
+def _load_import_chat_targets() -> ImportChatTargetsResponse:
+    """同步加载导入/时间线面板的聊天流列表；调用方需保证在工作线程执行。"""
     try:
         with get_db_session() as session:
             rows = list(
@@ -2596,6 +2809,11 @@ async def _import_chat_targets() -> ImportChatTargetsResponse:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"获取导入聊天流失败: {exc}") from exc
+
+
+async def _import_chat_targets() -> ImportChatTargetsResponse:
+    # 同步查库放到工作线程，避免阻塞 WebUI 事件循环
+    return await asyncio.to_thread(_load_import_chat_targets)
 
 
 async def _graph_get(limit: int) -> dict:
@@ -2994,17 +3212,49 @@ async def _profile_query(
     )
 
 
+def _get_person_identities(person_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """批量读取人物的可读身份字段：姓名、平台昵称与群名片。
+
+    画像快照只存不透明的 person_id（哈希），可读身份都在 PersonInfo 上。
+    这里一次性取回，避免逐条查库的 N+1；人物画像检索正是靠这些字段才能按
+    「群名片 / 昵称」这类用户实际会输入的内容命中。
+
+    Returns:
+        dict[str, dict[str, Any]]: person_id -> {person_name, user_nickname, group_cardname_list}；
+        查库失败时返回空字典（身份字段只用于展示与检索补充，缺失不应影响画像主体数据）。
+    """
+    clean_ids = [str(person_id or "").strip() for person_id in person_ids]
+    clean_ids = list(dict.fromkeys(person_id for person_id in clean_ids if person_id))
+    if not clean_ids:
+        return {}
+
+    identities: dict[str, dict[str, Any]] = {}
+    try:
+        with get_db_session(auto_commit=False) as session:
+            statement = select(
+                PersonInfo.person_id,
+                PersonInfo.person_name,
+                PersonInfo.user_nickname,
+                PersonInfo.group_cardname,
+            ).where(col(PersonInfo.person_id).in_(clean_ids))
+            for person_id, person_name, user_nickname, group_cardname in session.exec(statement):
+                # 群名片以 JSON 列表存储，复用统一解析器保证与写入侧一致
+                cardnames = parse_group_cardname_json(group_cardname) or []
+                identities[str(person_id or "").strip()] = {
+                    "person_name": str(person_name or "").strip(),
+                    "user_nickname": str(user_nickname or "").strip(),
+                    "group_cardname_list": [item.group_cardname for item in cardnames],
+                }
+    except Exception:
+        return {}
+    return identities
+
+
 def _get_person_name_for_person_id(person_id: str) -> str:
     clean_person_id = str(person_id or "").strip()
     if not clean_person_id:
         return ""
-    try:
-        with get_db_session(auto_commit=False) as session:
-            statement = select(PersonInfo.person_name).where(col(PersonInfo.person_id) == clean_person_id).limit(1)
-            person_name = session.exec(statement).first()
-            return str(person_name or "").strip()
-    except Exception:
-        return ""
+    return _get_person_identities([clean_person_id]).get(clean_person_id, {}).get("person_name", "")
 
 
 def _enrich_episode_person_name(item: dict) -> dict:
@@ -3032,6 +3282,14 @@ async def _profile_list(limit: int) -> dict:
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
         return payload
 
+    # 一次性取回本页所有人物身份，避免逐条查库；身份字段同时用于展示与关键词命中
+    profile_person_ids = [
+        str(item.get("person_id", "") or "").strip()
+        for item in payload["items"]
+        if isinstance(item, dict)
+    ]
+    identities = _get_person_identities(profile_person_ids)
+
     items = []
     for item in payload["items"]:
         if not isinstance(item, dict):
@@ -3039,7 +3297,10 @@ async def _profile_list(limit: int) -> dict:
             continue
         enriched = dict(item)
         person_id = str(enriched.get("person_id", "") or "").strip()
-        enriched["person_name"] = _get_person_name_for_person_id(person_id)
+        identity = identities.get(person_id, {})
+        enriched["person_name"] = identity.get("person_name", "")
+        enriched["user_nickname"] = identity.get("user_nickname", "")
+        enriched["group_cardname_list"] = identity.get("group_cardname_list", [])
         items.append(enriched)
 
     payload = dict(payload)
@@ -3082,10 +3343,18 @@ async def _profile_search(
         elif isinstance(override, str):
             override_text = override
 
+        # 群名片是用户最常用来指代某人的说法，必须参与命中
+        group_cardnames = item.get("group_cardname_list")
+        cardname_text = "\n".join(
+            str(name or "") for name in (group_cardnames if isinstance(group_cardnames, list) else [])
+        )
+
         haystack = "\n".join(
             [
                 str(item.get("person_id", "") or ""),
                 str(item.get("person_name", "") or ""),
+                str(item.get("user_nickname", "") or ""),
+                cardname_text,
                 str(item.get("profile_text", "") or ""),
                 str(item.get("source_note", "") or ""),
                 override_text,
@@ -3612,7 +3881,7 @@ async def _stage_upload_files(files: list[UploadFile]) -> tuple[Path, list[dict[
 
 
 @router.get("/records/search")
-async def search_memory_records(
+def search_memory_records(
     query: str = Query(""),
     types: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
@@ -3669,7 +3938,7 @@ async def restore_memory_fact(claim_id: str, payload: FactStatusRequest):
 
 
 @router.get("/records/{record_type}/{record_id}")
-async def get_memory_record_context(
+def get_memory_record_context(
     record_type: str,
     record_id: str,
     limit: int = Query(50, ge=1, le=200),
@@ -4347,8 +4616,32 @@ async def get_image_memory_status():
 async def list_image_memories(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    chat_id: str = Query(""),
 ):
-    return await memory_service.image_memory(action="list", limit=limit, offset=offset)
+    """列出图片资产；chat_id 非空时按聊天浏览。"""
+    return await memory_service.image_memory(
+        action="list", limit=limit, offset=offset, chat_id=chat_id
+    )
+
+
+@router.get("/images/chats")
+async def list_image_memory_chats():
+    """按聊天聚合图片资产数量，供按聊天浏览筛选；名称解析为真实聊天流名。"""
+    payload = await memory_service.image_memory(action="list_chats")
+    items = []
+    for row in payload.get("items") or []:
+        chat_id = str(row.get("chat_id") or "").strip()
+        if not chat_id:
+            continue
+        chat_session = _find_real_chat_session(chat_id)
+        items.append(
+            {
+                "chat_id": chat_id,
+                "chat_name": _get_chat_name(chat_session, {}) if chat_session is not None else chat_id,
+                "asset_count": int(row.get("asset_count") or 0),
+            }
+        )
+    return {"success": True, "items": items}
 
 
 @router.get("/images/{asset_id}")
@@ -4372,7 +4665,7 @@ async def list_image_memory_jobs(
 
 
 @router.get("/image-writeback-jobs")
-async def list_image_writeback_jobs(
+def list_image_writeback_jobs(
     limit: int = Query(25, ge=1, le=200), offset: int = Query(0, ge=0), status: str = '',
 ):
     payload = memory_automation_service.image_writeback.list_jobs(status, limit, offset)
@@ -4383,7 +4676,7 @@ async def list_image_writeback_jobs(
 
 
 @router.post("/image-writeback-jobs/retry")
-async def retry_image_writeback_jobs():
+def retry_image_writeback_jobs():
     count = memory_automation_service.image_writeback.retry_failed()
     return {'success': True, 'count': count}
 
@@ -4421,7 +4714,7 @@ async def search_image_memories(
 
 
 @router.get("/images/{asset_id}/content", response_class=FileResponse)
-async def get_image_memory_content(asset_id: str) -> FileResponse:
+def get_image_memory_content(asset_id: str) -> FileResponse:
     """从内容寻址资产库返回已登记图片，不接受客户端提供文件路径。"""
 
     kernel = get_runtime_kernel()

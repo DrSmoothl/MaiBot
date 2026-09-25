@@ -233,7 +233,7 @@ export function EmojiManagementPage() {
           {/* 筛选和排序 */}
           <Card>
             <CardHeader className="space-y-3">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-2">
                   <Label htmlFor="emoji-search">搜索 tag</Label>
                   <div className="relative">
@@ -308,11 +308,9 @@ export function EmojiManagementPage() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
 
-              {stats && (
-                <div className="border-t pt-4">
-                  <div className="max-w-xs space-y-2">
+                {stats && (
+                  <div className="space-y-2">
                     <Label>表情包状态</Label>
                     <Select
                       value={list.filters.status === 'all' ? 'adopted' : list.filters.status}
@@ -330,8 +328,8 @@ export function EmojiManagementPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
               <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-3">

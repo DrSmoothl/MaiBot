@@ -30,11 +30,21 @@ describe('providerTemplates', () => {
     expect(template?.modelFetcher).toEqual({ endpoint: '/models', parser: 'openai' })
   })
 
-  it('保留已知但不支持自动获取的内置模板状态', () => {
+  it('未配置 modelFetcher 的内置模板也默认乐观尝试 /models', () => {
     const template = resolveModelFetcherTemplate('https://api.anthropic.com/v1', 'openai')
 
     expect(template?.id).toBe('anthropic')
-    expect(template?.modelFetcher).toBeUndefined()
+    expect(template?.modelFetcher).toEqual({ endpoint: '/models', parser: 'openai' })
+  })
+
+  it('Gemini 内置模板未配置 modelFetcher 时按 Gemini 解析器补齐', () => {
+    const template = resolveModelFetcherTemplate(
+      'https://generativelanguage.googleapis.com/v1beta',
+      'gemini'
+    )
+
+    expect(template?.id).toBe('gemini')
+    expect(template?.modelFetcher).toEqual({ endpoint: '/models', parser: 'gemini' })
   })
 
   it('直接按 URL 查找模板时不把未知 URL 识别为内置模板', () => {

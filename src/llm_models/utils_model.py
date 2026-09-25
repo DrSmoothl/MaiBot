@@ -96,6 +96,7 @@ class LLMExecutionResult:
 
     api_response: APIResponse
     model_info: ModelInfo
+    request_started_at: datetime
 
 
 class LLMOrchestrator:
@@ -159,21 +160,6 @@ class LLMOrchestrator:
         if list(self.model_usage.keys()) != latest.model_list:
             self.model_usage = {model: self.model_usage.get(model, (0, 0, 0)) for model in latest.model_list}
         return self.model_for_task
-
-    def _check_slow_request(self, time_cost: float, model_name: str) -> None:
-        """检查请求是否过慢并输出警告日志。
-
-        Args:
-            time_cost: 请求耗时（秒）。
-            model_name: 使用的模型名称。
-        """
-        threshold = self.model_for_task.slow_threshold
-        if time_cost > threshold:
-            request_type_display = self.request_type or "未知任务"
-            logger.warning(
-                f"LLM请求耗时过长: {request_type_display} 使用模型 {model_name} 耗时 {time_cost:.1f}s（阈值: {threshold}s），请考虑使用更快的模型\n"
-                f"  如果你认为该警告出现得过于频繁，请调整model_config.toml中对应任务的slow_threshold至符合你实际情况的合理值"
-            )
 
     @staticmethod
     def _can_retry_with_compressed_images(
@@ -352,9 +338,10 @@ class LLMOrchestrator:
         response = execution_result.api_response
         model_info = execution_result.model_info
         time_cost = time.time() - start_time
-        self._check_slow_request(time_cost, model_info.name)
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -444,7 +431,9 @@ class LLMOrchestrator:
         logger.debug(f"LLM请求总耗时: {time.time() - start_time}")
 
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -507,9 +496,10 @@ class LLMOrchestrator:
         time_cost = time.time() - start_time
         logger.debug(f"LLM请求总耗时: {time_cost}")
 
-        self._check_slow_request(time_cost, model_info.name)
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -543,7 +533,9 @@ class LLMOrchestrator:
         model_info = execution_result.model_info
         embedding = response.embedding
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -585,7 +577,9 @@ class LLMOrchestrator:
         if not response.embedding:
             raise RuntimeError("图片嵌入模型没有返回向量")
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -594,12 +588,11 @@ class LLMOrchestrator:
                 session_id=self._resolve_effective_session_id(session_id),
                 time_cost=time.time() - start_time,
             )
-        return LLMEmbeddingResult(
-            embedding=response.embedding,
-            model_name=model_info.name,
-            model_identifier=model_info.model_identifier,
-            api_provider=model_info.api_provider,
-            request_protocol_hash=hashlib.sha256(
+        # 原生图片嵌入协议分支由客户端提供精确指纹；其余场景沿用默认算法，
+        # 避免旧模板/插件路径的既有图片索引失效
+        protocol_hash = response.request_protocol_hash
+        if not protocol_hash:
+            protocol_hash = hashlib.sha256(
                 json.dumps(
                     {
                         "input": model_info.extra_params.get("image_embedding_input", "{data_uri}"),
@@ -611,7 +604,13 @@ class LLMOrchestrator:
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ).encode("utf-8")
-            ).hexdigest(),
+            ).hexdigest()
+        return LLMEmbeddingResult(
+            embedding=response.embedding,
+            model_name=model_info.name,
+            model_identifier=model_info.model_identifier,
+            api_provider=model_info.api_provider,
+            request_protocol_hash=protocol_hash,
         )
 
     def _resolve_effective_temperature(
@@ -1329,7 +1328,11 @@ class LLMOrchestrator:
                 if response_usage := response.usage:
                     total_tokens += response_usage.total_tokens
                 self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty - 1)
-                return LLMExecutionResult(api_response=response, model_info=model_info)
+                return LLMExecutionResult(
+                    api_response=response,
+                    model_info=model_info,
+                    request_started_at=datetime.fromtimestamp(trace_context.current_attempt_started_at),
+                )
 
             except ReqAbortException as e:
                 total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
@@ -1497,7 +1500,6 @@ class LLMRequest(LLMOrchestrator):
             tuple(task_config.model_list),
             task_config.max_tokens,
             task_config.temperature,
-            task_config.slow_threshold,
             task_config.selection_strategy,
             task_config.hard_timeout,
         )

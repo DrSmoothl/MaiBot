@@ -37,7 +37,6 @@ import {
   DELETE_OPERATION_FETCH_LIMIT,
   DELETE_OPERATION_ITEM_PAGE_SIZE,
   DELETE_OPERATION_PAGE_SIZE,
-  MEMORY_SOURCE_KIND_FILTER_ALL,
   MEMORY_SOURCE_KIND_FILTER_KINDS,
   MEMORY_SOURCE_KIND_FILTER_OTHER,
 } from '../constants'
@@ -60,7 +59,7 @@ export interface UseMemoryDeleteOptions {
 }
 
 export interface UseMemoryDeleteResult {
-  /** 来源类别筛选：MEMORY_SOURCE_KIND_FILTER_ALL 表示不过滤类别 */
+  /** 来源类别筛选：具体类别或 MEMORY_SOURCE_KIND_FILTER_OTHER */
   sourceKindFilter: string
   setSourceKindFilter: React.Dispatch<React.SetStateAction<string>>
   /** 深链接带入的来源关键字限定；为空表示不额外限定 */
@@ -94,6 +93,8 @@ export interface UseMemoryDeleteResult {
   deleteOperationPageCount: number
   pagedDeleteOperations: MemoryDeleteOperationPayload[]
   selectedDeleteOperation: MemoryDeleteOperationPayload | null
+  /** 当前选中的删除操作 ID；详情弹窗按它加载，深链接可携带初始值 */
+  selectedOperationId: string
   setSelectedOperationId: React.Dispatch<React.SetStateAction<string>>
   restoreDeleteOperation: (operationId: string) => Promise<void>
   deleteRestoring: boolean
@@ -171,7 +172,8 @@ export function useMemoryDelete({
     await sourcesQuery.refetch()
   }, [sourcesQuery])
 
-  const [sourceKindFilter, setSourceKindFilter] = useState(MEMORY_SOURCE_KIND_FILTER_ALL)
+  // 默认落在第一个有独立标签页的类别，页面不再提供「全部」入口
+  const [sourceKindFilter, setSourceKindFilter] = useState<string>(MEMORY_SOURCE_KIND_FILTER_KINDS[0])
   const [sourceSearch, setSourceSearch] = useState(initialSourceSearch)
   const [operationSearch, setOperationSearch] = useState(initialOperationSearch)
   const [operationModeFilter, setOperationModeFilter] = useState('all')
@@ -211,10 +213,7 @@ export function useMemoryDelete({
         if (sourceKind && NAMED_SOURCE_KINDS.has(sourceKind)) {
           return false
         }
-      } else if (
-        sourceKindFilter !== MEMORY_SOURCE_KIND_FILTER_ALL &&
-        sourceKind !== sourceKindFilter
-      ) {
+      } else if (sourceKind !== sourceKindFilter) {
         return false
       }
       if (!keyword) {
@@ -634,6 +633,7 @@ export function useMemoryDelete({
     deleteOperationPageCount,
     pagedDeleteOperations,
     selectedDeleteOperation,
+    selectedOperationId,
     setSelectedOperationId,
     restoreDeleteOperation,
     deleteRestoring,

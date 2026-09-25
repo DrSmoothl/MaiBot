@@ -1767,9 +1767,9 @@ async def test_source_admin_list_uses_metadata_rebuild_block_boundary(
                 {"source": "source-b", "count": 2},
             ]
 
-        def is_episode_source_query_blocked(self, source: str) -> bool:
-            self.checked_sources.append(source)
-            return source == "source-b"
+        def get_episode_source_query_blocked_flags(self, sources: list[str]) -> dict[str, bool]:
+            self.checked_sources.extend(sources)
+            return {source: source == "source-b" for source in sources}
 
     kernel = SDKMemoryKernel(plugin_root=Path.cwd(), config={})
     metadata_store = FakeMetadataStore()
@@ -1790,6 +1790,7 @@ async def test_source_admin_list_uses_metadata_rebuild_block_boundary(
         ],
         "count": 2,
     }
+    # 来源列表页应一次批量查询阻塞态，而不是逐来源 N+1
     assert metadata_store.checked_sources == ["source-a", "source-b"]
 
 

@@ -8,6 +8,7 @@ import {
   formatReplayTokenSummary,
   getReplayTextParts,
   normalizeReplayModelOptions,
+  normalizeReplayResult,
   parseEditableReplayItems,
   unwrapModelConfigPayload,
   updateReplayTextPart,
@@ -271,5 +272,56 @@ describe('formatReplayTokenSummary', () => {
     expect(formatReplayTokenSummary(makeResult({ duration_ms: Number.POSITIVE_INFINITY }))).toBe(
       '输入 12 · 输出 3 · 总计 15 · 耗时 '
     )
+  })
+})
+
+describe('normalizeReplayResult', () => {
+  it('补齐后端精简 attempt 缺失的渲染字段，保留元数据与错误信息', () => {
+    const result = normalizeReplayResult({
+      schema_version: 6,
+      success: false,
+      output_items: [],
+      generation_attempts: [
+        {
+          attempt_id: 'req-1:1',
+          workflow_purpose: 'reply_planner',
+          workflow_attempt: 1,
+          provider_attempt: 1,
+          model_attempt: 1,
+          status: 'failed',
+          started_at: '2026-09-20T12:00:00.000',
+          duration_ms: 120.5,
+          provider: 'demo',
+          endpoint: 'https://api.demo.com/v1',
+          model: 'demo-model',
+          client_type: 'openai',
+          operation: 'chat',
+          wire_protocol: 'openai',
+          error: { message: 'boom', status_code: 500, type: 'HTTPError' },
+        },
+      ],
+      model_name: 'demo-model',
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      prompt_cache_hit_tokens: 0,
+      prompt_cache_miss_tokens: 0,
+      duration_ms: 130,
+      error: 'boom',
+    })
+
+    expect(result.generation_attempts).toHaveLength(1)
+    const attempt = result.generation_attempts[0]
+    // GenerationAttemptTimeline 直接读取这些字段，缺失会导致渲染崩溃
+    expect(attempt.tool_definitions).toEqual([])
+    expect(attempt.request_items).toEqual([])
+    expect(attempt.output_items).toEqual([])
+    expect(attempt.request_parameters).toEqual({})
+    expect(attempt.wire_request).toBeNull()
+    expect(attempt.wire_response).toBeNull()
+    expect(attempt.model).toBe('demo-model')
+    expect(attempt.status).toBe('failed')
+    expect(attempt.error?.message).toBe('boom')
+    expect(attempt.error?.status_code).toBe(500)
   })
 })

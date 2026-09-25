@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
+import type { SessionAdapterStatus } from '@/lib/chat-management-api'
 import type { SessionInfo, StageStatusInfo } from '@/routes/monitor/use-maisaka-monitor'
 
 import { ChatWorkspaceSidebar } from '../ChatWorkspaceSidebar'
@@ -75,6 +76,7 @@ function renderSidebar(overrides: Partial<Parameters<typeof ChatWorkspaceSidebar
     observedSessions: new Map(),
     observedStageStatuses: new Map(),
     observedLatestMessages: new Map<string, ObservedMessagePreview>(),
+    observedAdapterStatuses: new Map<string, SessionAdapterStatus>(),
     userId: 'user-a',
     userName: '人类',
     isUploadingUserAvatar: false,
@@ -230,8 +232,7 @@ describe('ChatWorkspaceSidebar', () => {
     expect(props.onSelectObserved).toHaveBeenCalledTimes(1)
   })
 
-  it('搜索框按显示名过滤本地会话与观察聊天流，无结果时显示提示', async () => {
-    const user = userEvent.setup()
+  it('搜索框按显示名过滤本地会话与观察聊天流，无结果时显示提示', async () => {    const user = userEvent.setup()
     const sessions = new Map<string, SessionInfo>([
       [
         'session-a',

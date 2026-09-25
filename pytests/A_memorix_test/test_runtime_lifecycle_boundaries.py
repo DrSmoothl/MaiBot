@@ -1,10 +1,12 @@
 from pathlib import Path
+from threading import get_ident
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Dict
 
 import asyncio
 import pytest
 
+from src.A_memorix.core.image.runtime import ImageMemoryRuntime
 from src.A_memorix.core.runtime import sdk_memory_kernel as kernel_module
 from src.A_memorix.core.runtime.sdk_memory_kernel import KernelSearchRequest, SDKMemoryKernel
 from src.A_memorix.core.runtime.services import memory_maintenance_service, memory_search_service
@@ -25,6 +27,17 @@ async def test_runtime_lifecycle_initialize_preserves_startup_sequence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
+    loop_thread = get_ident()
+
+    def reconcile_assets(runtime: ImageMemoryRuntime) -> Dict[str, Any]:
+        assert get_ident() != loop_thread
+        assert runtime.metadata_store is kernel.metadata_store
+        assert kernel._initialized is False
+        assert kernel._runtime_writer_lock.held is True
+        events.append("image_recovery")
+        return {"removed_files": 1, "issues": []}
+
+    monkeypatch.setattr(ImageMemoryRuntime, "reconcile_assets", reconcile_assets)
 
     class FakeEmbeddingManager:
         def get_embedding_fingerprint(self, *, dimension: int) -> dict[str, Any]:
@@ -217,6 +230,7 @@ async def test_runtime_lifecycle_initialize_preserves_startup_sequence(
             "migration",
             "embedding_adapter",
             "metadata_connect",
+            "image_recovery",
             "projection_reconcile_failed",
             "sparse_warmup",
             "vectors:load",

@@ -196,40 +196,6 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
           <div className="grid gap-3 rounded-md border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10 sm:grid-cols-2">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex shrink-0 items-center gap-1.5">
-                <Label>超时警告时间 (秒)</Label>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <StreamlineIcon
-                        name="information-circle-solid"
-                        fallback={Info}
-                        className="h-3.5 w-3.5 cursor-help text-muted-foreground"
-                      />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" align="start" className="max-w-64">
-                      模型响应时间超过此时间将输出警告日志
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Input
-                type="number"
-                step="1"
-                min="1"
-                value={taskConfig.slow_threshold ?? 15}
-                onChange={(e) => {
-                  const value = parseInt(e.target.value)
-                  if (!isNaN(value) && value >= 1) {
-                    onChange('slow_threshold', value)
-                  }
-                }}
-                placeholder="15"
-                className="min-w-0 flex-1"
-              />
-            </div>
-
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex shrink-0 items-center gap-1.5">
                 <Label>任务硬超时 (秒)</Label>
                 <TooltipProvider delayDuration={150}>
                   <Tooltip>
@@ -250,7 +216,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 type="number"
                 step="1"
                 min="1"
-                value={taskConfig.hard_timeout ?? 240}
+                value={taskConfig.hard_timeout ?? ''}
                 onChange={(e) => {
                   const value = parseInt(e.target.value)
                   if (!isNaN(value) && value >= 1) {

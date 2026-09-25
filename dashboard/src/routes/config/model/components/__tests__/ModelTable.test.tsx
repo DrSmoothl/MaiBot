@@ -59,6 +59,7 @@ function renderTable(
       onEdit={vi.fn()}
       onDelete={vi.fn()}
       onTest={vi.fn()}
+      onAdd={vi.fn()}
       onToggleSelection={vi.fn()}
       onToggleSelectAll={onToggleSelectAll}
       isModelUsed={() => false}
@@ -128,6 +129,7 @@ describe('ModelTable 缺口', () => {
       onEdit: vi.fn(),
       onDelete: vi.fn(),
       onTest: vi.fn(),
+      onAdd: vi.fn(),
       onToggleSelection: vi.fn(),
       onToggleSelectAll,
       isModelUsed: () => false,

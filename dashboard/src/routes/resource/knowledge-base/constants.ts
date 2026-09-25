@@ -68,9 +68,6 @@ export const MEMORY_SOURCE_KIND_TEXT: Record<string, string> = {
  */
 export const MEMORY_SOURCE_KIND_FILTER_KINDS = ['chat_summary', 'person_fact'] as const
 
-/** 来源类别筛选的「全部」取值 */
-export const MEMORY_SOURCE_KIND_FILTER_ALL = 'all'
-
 /** 来源类别筛选的「其他」取值：兜住没有独立标签页的类别与解析不出类别的来源 */
 export const MEMORY_SOURCE_KIND_FILTER_OTHER = 'other'
 

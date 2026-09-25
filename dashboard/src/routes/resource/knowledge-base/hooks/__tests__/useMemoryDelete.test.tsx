@@ -687,13 +687,14 @@ describe('useMemoryDelete 模式切换与校验', () => {
     vi.mocked(memoryApi.getMemorySources).mockResolvedValue({
       success: true,
       items: [
-        { source: 'chat:alpha', paragraph_count: 1 },
-        { source: 'chat:beta', paragraph_count: 2 },
+        { source: 'chat:alpha', paragraph_count: 1, source_kind: 'chat_summary' },
+        { source: 'chat:beta', paragraph_count: 2, source_kind: 'chat_summary' },
       ],
       count: 2,
     })
     const { result } = renderDeleteHook({ active: true })
 
+    // 不再提供「全部」入口，默认落在第一个类别标签页
     await waitFor(() => expect(result.current.filteredSources).toHaveLength(2))
     act(() => result.current.setSourceSearch('BETA'))
     expect(result.current.filteredSources.map((item) => item.source)).toEqual(['chat:beta'])
@@ -781,7 +782,8 @@ describe('useMemoryDelete 模式切换与校验', () => {
     })
     const { result } = renderDeleteHook({ active: true })
 
-    await waitFor(() => expect(result.current.filteredSources).toHaveLength(4))
+    // 默认落在第一个类别（聊天摘要），聊天流与解析不出类别的来源不在此列
+    await waitFor(() => expect(result.current.filteredSources).toHaveLength(2))
     expect(result.current.sourceNameBySource).toEqual({
       'chat_summary:s1': '摸鱼群',
       'chat_summary:s2': '测试群',
@@ -796,7 +798,7 @@ describe('useMemoryDelete 模式切换与校验', () => {
       'chat_summary:s2',
     ])
 
-    // 类别筛选按后端回填的 source_kind 精确匹配，「全部」恢复完整列表
+    // 类别筛选按后端回填的 source_kind 精确匹配，切回「聊天摘要」恢复该类别列表
     act(() => result.current.setSourceSearch(''))
     act(() => result.current.setSourceKindFilter('chat_summary'))
     expect(result.current.filteredSources.map((item) => item.source)).toEqual([
@@ -810,9 +812,6 @@ describe('useMemoryDelete 模式切换与校验', () => {
       'chat_stream:c1',
       'web_import:notes.txt',
     ])
-
-    act(() => result.current.setSourceKindFilter('all'))
-    expect(result.current.filteredSources).toHaveLength(4)
 
     act(() => result.current.toggleSourceSelection('chat_summary:s1', true))
     await act(async () => {
@@ -839,7 +838,7 @@ describe('useMemoryDelete 模式切换与校验', () => {
   it('确认删除不填原因时回退到来源删除默认原因', async () => {
     vi.mocked(memoryApi.getMemorySources).mockResolvedValue({
       success: true,
-      items: [{ source: 'chat_summary:s1', paragraph_count: 3 }],
+      items: [{ source: 'chat_summary:s1', paragraph_count: 3, source_kind: 'chat_summary' }],
       count: 1,
     })
     const { result } = renderDeleteHook({ active: true })

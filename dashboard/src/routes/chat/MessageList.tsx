@@ -175,7 +175,6 @@ export function MessageList({
   const highlightFrameRef = useRef<number | null>(null)
   const highlightTimerRef = useRef<number | null>(null)
   const highlightedElementRef = useRef<HTMLDivElement | null>(null)
-  const previousMessagesRef = useRef(messages)
   const scrollAnchorsRef = useRef<ScrollAnchor[]>([])
   const [playingMessageIds, setPlayingMessageIds] = useState<Set<string>>(
     () => new Set()
@@ -255,29 +254,9 @@ export function MessageList({
   const virtualListSize = rowVirtualizer.getTotalSize()
 
   useLayoutEffect(() => {
-    const previousMessages = previousMessagesRef.current
-    previousMessagesRef.current = messages
-
-    if (
-      isNearBottomRef.current ||
-      previousMessages.length !== messages.length ||
-      messages.length === 0
-    ) {
-      return
-    }
-
-    const firstRetainedIndex = previousMessages.findIndex(
-      (message) => message.id === messages[0].id
-    )
-    if (firstRetainedIndex <= 0) {
-      return
-    }
-
-    const retainedMessageCount = previousMessages.length - firstRetainedIndex
-    const retainedSequenceMatches = previousMessages
-      .slice(firstRetainedIndex)
-      .every((message, index) => message.id === messages[index]?.id)
-    if (!retainedSequenceMatches || retainedMessageCount >= messages.length) {
+    // 用户不在底部时，任何列表变化（加载历史、收到新消息、虚拟行重新测量）都必须
+    // 保持当前可见消息相对视口的位置，避免内容高度变化造成视觉跳动。
+    if (isNearBottomRef.current || messages.length === 0) {
       return
     }
 
@@ -296,7 +275,7 @@ export function MessageList({
       viewport.scrollTop += offsetDelta
     }
     captureScrollAnchors()
-  }, [captureScrollAnchors, messageIndexById, messages])
+  }, [captureScrollAnchors, messageIndexById, messages, virtualListSize])
 
   useEffect(() => {
     if (!isNearBottomRef.current) {

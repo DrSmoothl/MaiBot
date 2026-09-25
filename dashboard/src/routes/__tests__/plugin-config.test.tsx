@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -148,8 +148,11 @@ vi.mock('@/components/plugin-stats', () => ({
   PluginStats: ({ pluginId }: { pluginId: string }) => <div data-testid="plugin-stats">{pluginId}</div>,
 }))
 vi.mock('@/lib/chat-management-api', () => ({
+  CHAT_ADAPTER_STATUS_QUERY_KEY: 'chat-adapter-status',
   getAdapterHostPolicy: vi.fn(),
+  getAdapterPolicyDefaults: vi.fn(),
   updateAdapterHostPolicy: vi.fn(),
+  updateAdapterPolicyDefaults: vi.fn(),
 }))
 
 vi.mock('@/lib/plugin-api', () => ({
@@ -280,6 +283,8 @@ beforeEach(() => {
   vi.mocked(pluginApi.getLocalPluginChangelog).mockResolvedValue('')
   vi.mocked(chatApi.getAdapterHostPolicy).mockResolvedValue(makeHostPolicyResponse('adapter.qq') as never)
   vi.mocked(chatApi.updateAdapterHostPolicy).mockResolvedValue(makeHostPolicyResponse('adapter.qq') as never)
+  vi.mocked(chatApi.getAdapterPolicyDefaults).mockResolvedValue({ group: 'allow', private: 'block' })
+  vi.mocked(chatApi.updateAdapterPolicyDefaults).mockImplementation(async (defaults) => defaults)
 })
 
 describe('PluginConfigPage 特征化', () => {
@@ -300,7 +305,7 @@ describe('PluginConfigPage 特征化', () => {
     }
     vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([adapterPlugin] as never)
 
-    render(<PluginConfigPage />)
+    renderPage()
 
     expect(await screen.findByText('Adapter Plugin')).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('搜索插件...')).not.toBeInTheDocument()
@@ -644,6 +649,59 @@ describe('PluginConfigPage 主程序放行规则', () => {
     ] as never)
   })
 
+  it('适配器设置页分别修改群聊与私聊全局默认策略', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    const defaults = await screen.findByRole('region', { name: '适配器全局默认策略' })
+    expect(screen.getByText('QQ Adapter')).toBeInTheDocument()
+    expect(within(defaults).getByText('群聊')).toBeInTheDocument()
+    expect(within(defaults).getByText('私聊')).toBeInTheDocument()
+    const groupRow = within(defaults).getByText('群聊').parentElement as HTMLElement
+    const privateRow = within(defaults).getByText('私聊').parentElement as HTMLElement
+    await user.click(within(groupRow).getByRole('button', { name: '拒绝' }))
+    await waitFor(() =>
+      expect(chatApi.updateAdapterPolicyDefaults).toHaveBeenCalledWith(
+        { group: 'block', private: 'block' },
+        expect.anything()
+      )
+    )
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith({ title: '适配器默认策略已保存' })
+    )
+
+    await user.click(within(privateRow).getByRole('button', { name: '放行' }))
+    await waitFor(() =>
+      expect(chatApi.updateAdapterPolicyDefaults).toHaveBeenLastCalledWith(
+        { group: 'block', private: 'allow' },
+        expect.anything()
+      )
+    )
+  })
+
+  it('全局默认策略读取失败时显示错误', async () => {
+    vi.mocked(chatApi.getAdapterPolicyDefaults).mockRejectedValueOnce(new Error('读取失败'))
+    renderPage()
+    const defaults = await screen.findByRole('region', { name: '适配器全局默认策略' })
+    expect(await within(defaults).findByText('默认策略加载失败')).toBeInTheDocument()
+  })
+
+  it('全局默认策略保存失败时提示具体错误', async () => {
+    vi.mocked(chatApi.updateAdapterPolicyDefaults).mockRejectedValue(new Error('写入失败'))
+    const user = userEvent.setup()
+    renderPage()
+    const defaults = await screen.findByRole('region', { name: '适配器全局默认策略' })
+    const groupRow = within(defaults).getByText('群聊').parentElement as HTMLElement
+    await user.click(within(groupRow).getByRole('button', { name: '拒绝' }))
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith({
+        title: '适配器默认策略保存失败',
+        description: '写入失败',
+        variant: 'destructive',
+      })
+    )
+  })
+
   it('适配器管理页只列出适配器并展示主程序放行规则页签', async () => {
     const user = userEvent.setup()
     renderPage()
@@ -707,26 +765,29 @@ describe('PluginConfigPage 主程序放行规则', () => {
     await user.click(await screen.findByRole('button', { name: /QQ Adapter/ }))
     await user.click(await screen.findByRole('tab', { name: '黑白名单规则' }))
 
-    expect(await screen.findByText('这是 MaiBot 主程序侧规则，与适配器自身名单相互独立。')).toBeInTheDocument()
+    expect(await screen.findByText('群聊规则')).toBeInTheDocument()
+    expect(screen.queryByText('这是 MaiBot 主程序侧规则，与适配器自身名单相互独立。')).not.toBeInTheDocument()
+    expect(screen.queryByText(/适配器自身的白名单仍在/)).not.toBeInTheDocument()
     expect(screen.getByText('全局默认：阅读')).toBeInTheDocument()
     expect(screen.getByText('全局默认：不阅读')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /保存主程序规则/ })).toBeDisabled()
-    expect(screen.queryByRole('button', { name: /^保存$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /保存主程序规则/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /源代码/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重置/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
 
     await user.click(screen.getAllByRole('combobox')[0])
     await user.click(await screen.findByText('阅读'))
     await user.click(screen.getAllByRole('button', { name: '添加列表项' })[0])
-    await user.click(screen.getByRole('button', { name: /保存主程序规则/ }))
 
-    await waitFor(() =>
-      expect(chatApi.updateAdapterHostPolicy).toHaveBeenCalledWith('adapter.qq', {
-        group: { default_action: 'allow', allow_ids: ['new-item'], deny_ids: [] },
-        private: { default_action: 'inherit', allow_ids: [], deny_ids: [] },
-      })
+    await waitFor(
+      () =>
+        expect(chatApi.updateAdapterHostPolicy).toHaveBeenCalledWith('adapter.qq', {
+          group: { default_action: 'allow', allow_ids: ['new-item'], deny_ids: [] },
+          private: { default_action: 'inherit', allow_ids: [], deny_ids: [] },
+        }),
+      { timeout: 6000 }
     )
-    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: '主程序放行规则已保存' }))
+    expect(await screen.findByTestId('host-policy-save-status')).toHaveTextContent('已保存')
   })
 
   it('保存主程序放行规则失败时弹出错误 toast', async () => {
@@ -738,16 +799,18 @@ describe('PluginConfigPage 主程序放行规则', () => {
     await user.click(await screen.findByText('群聊规则'))
     await user.click(screen.getAllByRole('combobox')[0])
     await user.click(await screen.findByText('不阅读'))
-    await user.click(screen.getByRole('button', { name: /保存主程序规则/ }))
 
-    await waitFor(() =>
-      expect(toastMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: '主程序放行规则保存失败',
-          description: '写入失败',
-        })
-      )
+    await waitFor(
+      () =>
+        expect(toastMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: '主程序放行规则保存失败',
+            description: '写入失败',
+          })
+        ),
+      { timeout: 6000 }
     )
+    expect(screen.getByTestId('host-policy-save-status')).toHaveTextContent('保存失败')
   })
 
   it('编辑器返回时保持适配器管理路径', async () => {
