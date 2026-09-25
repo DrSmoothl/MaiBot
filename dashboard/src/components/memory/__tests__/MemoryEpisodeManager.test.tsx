@@ -75,7 +75,7 @@ beforeEach(() => {
 })
 
 describe('MemoryEpisodeManager', () => {
-  it('迁移任务接口返回失败时展示错误，不读取缺失的状态字段', async () => {
+  it('迁移任务接口返回失败时仍展示 Episode 列表和状态', async () => {
     vi.mocked(getMemoryEpisodeMigrationBackfill).mockResolvedValue({
       success: false,
       error: '不支持的 memory_episode_admin action',
@@ -86,13 +86,26 @@ describe('MemoryEpisodeManager', () => {
     await waitFor(() => {
       expect(toastMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: '加载情节记忆失败',
+          title: '加载迁移任务失败',
           description: '不支持的 memory_episode_admin action',
           variant: 'destructive',
         })
       )
     })
-    expect(screen.queryByText(/待重建 .*已完成 .*失败/)).not.toBeInTheDocument()
+    expect(await screen.findByText('默认情景')).toBeInTheDocument()
+    expect(toastMock).not.toHaveBeenCalledWith(expect.objectContaining({ title: '加载情节记忆失败' }))
+  })
+
+  it('状态接口返回失败时仍展示 Episode 列表和迁移任务', async () => {
+    statusMock.mockResolvedValue({ success: false, error: '状态服务不可用' })
+
+    render(<MemoryEpisodeManager />)
+
+    expect(await screen.findByText('默认情景')).toBeInTheDocument()
+    expect(await screen.findByText(/待重建 0、已完成 0、失败 0/)).toBeInTheDocument()
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '加载 Episode 状态失败', description: '状态服务不可用' })
+    )
   })
 
   it('迁移任务操作位于页面末尾，使用项目确认框和 Toast 反馈', async () => {

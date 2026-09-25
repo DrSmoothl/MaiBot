@@ -30,9 +30,11 @@ def test_direct_person_fact_requires_same_sender_stream_and_quote(monkeypatch: p
     monkeypatch.setattr(
         person_fact_verifier,
         "find_messages",
-        lambda **kwargs: [messages[kwargs["message_id"]]]
-        if kwargs["session_id"] == "stream-1" and kwargs["message_id"] in messages
-        else [],
+        lambda **kwargs: (
+            [messages[kwargs["message_id"]]]
+            if kwargs["session_id"] == "stream-1" and kwargs["message_id"] in messages
+            else []
+        ),
     )
 
     common = dict(fact="她喜欢猫。", evidence_quote="我喜欢猫。", person_id="test:alice", person_name="Alice")
@@ -52,6 +54,11 @@ def test_direct_person_fact_requires_same_sender_stream_and_quote(monkeypatch: p
     )
     messages["m1"].processed_plain_text = "朋友转述说：我喜欢猫。"
     assert not person_fact_verifier.verify_direct_person_fact(**common, evidence_message_id="m1", session_id="stream-1")
+    for text in ("我喜欢猫吗？", "我喜欢猫。才怪", "我喜欢猫，但现在不喜欢了。"):
+        messages["m1"].processed_plain_text = text
+        assert not person_fact_verifier.verify_direct_person_fact(
+            **{**common, "evidence_quote": "我喜欢猫"}, evidence_message_id="m1", session_id="stream-1"
+        )
     monkeypatch.setattr(person_fact_verifier, "is_bot_self", lambda platform, user_id: True)
     assert not person_fact_verifier.verify_direct_person_fact(**common, evidence_message_id="m1", session_id="stream-1")
 
@@ -106,7 +113,7 @@ def test_relevant_uncertain_facts_are_labeled_beside_stable_profile() -> None:
 async def test_257_uncertain_facts_remain_searchable_and_historical_recheck_is_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    store = MetadataStore(data_dir=tmp_path)
+    store = MetadataStore(data_dir=tmp_path / "metadata")
     store.connect()
     writer = MemoryIngestService(SimpleNamespace(metadata_store=store))
     try:
@@ -133,6 +140,7 @@ async def test_257_uncertain_facts_remain_searchable_and_historical_recheck_is_i
         candidates = service._uncertain_profile_candidates("test:alice", "你还收藏藏品256吗")
         assert candidates["uncertain_fact_count"] == 257
         assert any("藏品256" in item["text"] for item in candidates["uncertain_candidates"])
+        assert len(store.list_uncertain_person_fact_claims("test:alice", limit=10)) == 10
 
         async def initialize() -> None:
             return None

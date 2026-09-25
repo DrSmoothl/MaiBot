@@ -1,13 +1,17 @@
 from collections import Counter
 from pathlib import Path
+from threading import Event
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
+import asyncio
 import importlib
 import sys
 import time
 
 import pytest
 
+from src.A_memorix.core.runtime.services.episode_admin_service import MemoryEpisodeAdminService
 from src.A_memorix.core.storage.metadata_store import MetadataStore
 from src.A_memorix.core.utils.episode_service import EpisodeService
 
@@ -73,6 +77,28 @@ def _payload(source: str, paragraph_hash: str) -> Dict[str, Any]:
         "segmentation_version": "outbox-test-v1",
         "input_fingerprint": "stable-fingerprint",
     }
+
+
+@pytest.mark.asyncio
+async def test_discard_migration_preview_does_not_block_event_loop() -> None:
+    release = Event()
+
+    def slow_preview(*, dry_run: bool) -> Dict[str, Any]:
+        release.wait(timeout=1)
+        return {"dry_run": dry_run, "candidates": 0}
+
+    async def initialize() -> None:
+        return None
+
+    store = SimpleNamespace(discard_migration_episode_rebuilds=slow_preview)
+    service = MemoryEpisodeAdminService(SimpleNamespace(metadata_store=store, initialize=initialize))
+    task = asyncio.create_task(service.memory_episode_admin(action="discard_migration_backfill"))
+    try:
+        await asyncio.sleep(0.02)
+        assert not task.done()
+    finally:
+        release.set()
+    assert (await task)["dry_run"] is True
 
 
 def test_discard_migration_backfill_preserves_new_writes_and_active_lease(tmp_path) -> None:

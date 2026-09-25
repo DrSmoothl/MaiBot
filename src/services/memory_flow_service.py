@@ -81,7 +81,10 @@ class PersonFactWritebackService:
         await asyncio.sleep(5)
         while not self._stopping:
             try:
-                if not (a_memorix_host_service.get_runtime_data_dir() / "metadata.db").exists():
+                if not global_config.a_memorix.integration.person_fact_writeback_enabled:
+                    await asyncio.sleep(30)
+                    continue
+                if not (a_memorix_host_service.get_runtime_data_dir() / "metadata" / "metadata.db").exists():
                     await asyncio.sleep(30)
                     continue
                 state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
@@ -101,7 +104,7 @@ class PersonFactWritebackService:
                 temporary_path.write_text(json.dumps(progress, ensure_ascii=False), encoding="utf-8")
                 os.replace(temporary_path, state_path)
                 if int(result["promoted"]):
-                    logger.info("历史人物事实重验完成一批：晋升 %s 条", result["promoted"])
+                    logger.info(f"历史人物事实重验完成一批：晋升 {result['promoted']} 条")
                 if result["has_more"]:
                     await asyncio.sleep(1)
                 else:
@@ -109,7 +112,7 @@ class PersonFactWritebackService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.error("历史人物事实重验失败: %s", exc, exc_info=True)
+                logger.error(f"历史人物事实重验失败: {exc}", exc_info=True)
                 await asyncio.sleep(60)
 
     async def enqueue(self, message: Any) -> None:

@@ -41,9 +41,9 @@ async def test_selected_preview_reads_exact_records_and_still_requires_confirmat
         return {
             "confidence": 0.9,
             "operations": [
-                {"action": "mark_superseded", "candidate_id": item["candidate_id"]}
-                for item in kwargs["candidates"]
-            ] + [{"action": "mark_superseded", "hash": unrelated}],
+                {"action": "mark_superseded", "candidate_id": item["candidate_id"]} for item in kwargs["candidates"]
+            ]
+            + [{"action": "mark_superseded", "hash": unrelated}],
         }
 
     monkeypatch.setattr(kernel, "_build_fuzzy_modify_llm_plan", make_plan)
@@ -55,7 +55,8 @@ async def test_selected_preview_reads_exact_records_and_still_requires_confirmat
     assert result["success"] is True
     assert result["requires_confirmation"] is True
     assert [(item["target_type"], item["hash"]) for item in captured["candidates"]] == [
-        ("paragraph", first), ("relation", relation)
+        ("paragraph", first),
+        ("relation", relation),
     ]
     assert captured["candidates"][1]["content"] == "小明 喜欢 咖啡"
     assert {item["hash"] for item in result["preview"]["operations"]} == {first, relation}
@@ -88,7 +89,10 @@ async def test_invalid_selected_targets_reject_entire_preview(
     planner = AsyncMock(side_effect=AssertionError("无效目标不应调用模型"))
     monkeypatch.setattr(kernel, "_build_fuzzy_modify_llm_plan", planner)
     result = await kernel.memory_correction_admin(
-        action="preview", request_text="修改记忆", scope="memory", targets=targets,
+        action="preview",
+        request_text="修改记忆",
+        scope="memory",
+        targets=targets,
         chat_id="chat-1" if case == "scope" else "",
     )
     assert result["success"] is False

@@ -69,5 +69,11 @@ def verify_direct_person_fact(
     position = message_text.find(quoted_text)
     if position < 0:
         return False
+    if quoted_text[-1] in "？?":
+        return False
     prefix = message_text[:position].rstrip()
-    return not prefix or prefix[-1] in "。！？；\n"
+    if prefix and prefix[-1] not in "。！？；\n":
+        return False
+    suffix = message_text[position + len(quoted_text) :].strip()
+    # 引述之后只允许一个句末标点；同句省略或后文反转都不能晋升为稳定事实。
+    return not suffix or suffix in "。！；"

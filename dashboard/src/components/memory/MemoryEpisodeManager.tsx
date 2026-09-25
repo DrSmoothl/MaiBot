@@ -183,19 +183,38 @@ export function MemoryEpisodeManager({
   const failedItems = Array.isArray(status?.failed) ? status.failed : []
 
   const loadStatus = useCallback(async () => {
-    const [statusPayload, migrationPayload] = await Promise.all([
+    const [statusResult, migrationResult] = await Promise.allSettled([
       getMemoryEpisodeStatus(parsePositiveInt(limit) ?? 20),
       getMemoryEpisodeMigrationBackfill(),
     ])
-    if (!migrationPayload.success) {
-      throw new Error(migrationPayload.error || '读取 Episode 迁移历史任务失败')
+    if (statusResult.status === 'fulfilled' && statusResult.value.success) {
+      setStatus(statusResult.value)
+    } else {
+      setStatus(null)
+      toast({
+        title: '加载 Episode 状态失败',
+        description: statusResult.status === 'rejected'
+          ? statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason)
+          : statusResult.value.error || 'Episode 状态接口返回失败',
+        variant: 'destructive',
+      })
     }
-    if (!migrationPayload.by_status || !Array.isArray(migrationPayload.sample_sources)) {
-      throw new Error('Episode 迁移历史任务接口返回的数据不完整')
+    const migrationPayload = migrationResult.status === 'fulfilled' ? migrationResult.value : null
+    if (migrationPayload?.success && migrationPayload.by_status && Array.isArray(migrationPayload.sample_sources)) {
+      setMigrationBackfill(migrationPayload)
+    } else {
+      setMigrationBackfill(null)
+      let description = migrationPayload?.error || 'Episode 迁移历史任务接口返回的数据不完整'
+      if (migrationResult.status === 'rejected') {
+        description = migrationResult.reason instanceof Error ? migrationResult.reason.message : String(migrationResult.reason)
+      }
+      toast({
+        title: '加载迁移任务失败',
+        description,
+        variant: 'destructive',
+      })
     }
-    setStatus(statusPayload)
-    setMigrationBackfill(migrationPayload)
-  }, [limit])
+  }, [limit, toast])
 
   const loadEpisodes = useCallback(async () => {
     setLoading(true)

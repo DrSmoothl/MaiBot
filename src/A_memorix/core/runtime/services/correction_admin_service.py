@@ -493,9 +493,7 @@ class MemoryCorrectionAdminService(KernelServiceBase):
         )
         return {"success": rollback_success, "plan": updated, "rollback": rollback_result}
 
-    def _collect_selected_fuzzy_modify_candidates(
-        self, targets: Sequence[Dict[str, str]]
-    ) -> List[Dict[str, Any]]:
+    def _collect_selected_fuzzy_modify_candidates(self, targets: Sequence[Dict[str, str]]) -> List[Dict[str, Any]]:
         """精确读取用户勾选的权威记录；任一目标失效时拒绝整批预览，不扩大搜索范围。"""
         assert self.metadata_store is not None
         max_targets = min(fuzzy_modify_cfg_candidate_limit(), fuzzy_modify_cfg_max_targets())
@@ -510,7 +508,11 @@ class MemoryCorrectionAdminService(KernelServiceBase):
                 raise ValueError("所选记忆格式无效")
             target_type = target.get("type")
             hash_value = target.get("id")
-            if target_type not in {"paragraph", "relation"} or not isinstance(hash_value, str) or not hash_value.strip():
+            if (
+                target_type not in {"paragraph", "relation"}
+                or not isinstance(hash_value, str)
+                or not hash_value.strip()
+            ):
                 raise ValueError("批量修正仅支持指定 ID 的段落和关系")
             hash_value = hash_value.strip()
             key = (target_type, hash_value)

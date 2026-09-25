@@ -266,9 +266,7 @@ async def build_person_profile_injection_messages(
             continue
 
         uncertain_candidates = [
-            str(item.get("text", ""))
-            for item in payload.get("uncertain_candidates", [])
-            if isinstance(item, dict)
+            str(item.get("text", "")) for item in payload.get("uncertain_candidates", []) if isinstance(item, dict)
         ]
         profile_text = build_profile_injection_text(
             _extract_profile_text(payload),

@@ -620,7 +620,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
         className="flex flex-wrap items-center gap-3 rounded-lg border p-3"
         aria-label="记忆多选操作"
       >
-        <label className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-2 text-sm">
           <Checkbox
             aria-label="全选当前结果"
             checked={allChecked ? true : checkedRecords.length > 0 ? 'indeterminate' : false}
@@ -634,7 +634,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
             }
           />
           全选当前结果
-        </label>
+        </div>
         <span className="text-muted-foreground text-sm" aria-live="polite">
           已选 {checkedRecords.length} 条
         </span>

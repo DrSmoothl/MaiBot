@@ -17,7 +17,7 @@ logger = get_logger("person_fact_reverification")
 
 
 def _historical_fact_batch(cursor: str, limit: int) -> Tuple[List[Dict[str, Any]], bool]:
-    db_path = a_memorix_host_service.get_runtime_data_dir() / "metadata.db"
+    db_path = a_memorix_host_service.get_runtime_data_dir() / "metadata" / "metadata.db"
     if not db_path.exists():
         return [], False
     connection = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True, timeout=5)
@@ -83,7 +83,7 @@ async def reverify_historical_person_facts(cursor: str = "", limit: int = 50) ->
         try:
             metadata = json.loads(str(row["paragraph_metadata"] or "{}"))
         except (TypeError, ValueError):
-            logger.warning("历史人物事实证据元数据无效: claim_id=%s", row["claim_id"])
+            logger.warning(f"历史人物事实证据元数据无效: claim_id={row['claim_id']}")
             continue
         if not isinstance(metadata, dict):
             continue

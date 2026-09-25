@@ -310,9 +310,16 @@ async def test_cached_description_preserves_image_file(monkeypatch, tmp_path, fi
     if file_exists:
         path.write_bytes(b"abc")
     record = types.SimpleNamespace(
-        id=1, image_hash="dummy-hash", image_type="image", full_path=str(path),
-        description="缓存描述", vlm_processed=True, no_file_flag=not file_exists,
-        is_registered=False, register_time=None, query_count=0,
+        id=1,
+        image_hash="dummy-hash",
+        image_type="image",
+        full_path=str(path),
+        description="缓存描述",
+        vlm_processed=True,
+        no_file_flag=not file_exists,
+        is_registered=False,
+        register_time=None,
+        query_count=0,
     )
     session = DummySession()
     session.record = record
@@ -334,9 +341,14 @@ async def test_cached_description_preserves_image_file(monkeypatch, tmp_path, fi
 async def test_cached_description_does_not_hide_save_failure(monkeypatch, tmp_path):
     module = _load_image_manager_module(tmp_path)
     manager = module.ImageManager()
-    monkeypatch.setattr(manager, "_get_image_record", lambda _: types.SimpleNamespace(
-        vlm_processed=True, description="缓存描述",
-    ))
+    monkeypatch.setattr(
+        manager,
+        "_get_image_record",
+        lambda _: types.SimpleNamespace(
+            vlm_processed=True,
+            description="缓存描述",
+        ),
+    )
     monkeypatch.setattr(manager, "ensure_image_saved", AsyncMock(side_effect=OSError("磁盘写入失败")))
 
     with pytest.raises(OSError, match="磁盘写入失败"):

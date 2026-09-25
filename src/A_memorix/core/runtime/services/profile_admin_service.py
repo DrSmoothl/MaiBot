@@ -26,10 +26,11 @@ class MemoryProfileAdminService(KernelServiceBase):
         return {token[index : index + 2] for index in range(len(token) - 1)} - ignored
 
     def _uncertain_profile_candidates(self, person_id: str, context_text: str) -> Dict[str, Any]:
-        """从完整事实账本中选当前消息相关的未确认事实。"""
+        """从最近的未确认事实中选择当前消息相关的候选。"""
 
         assert self.metadata_store is not None
-        claims = self.metadata_store.list_uncertain_person_fact_claims(person_id)
+        count = self.metadata_store.count_uncertain_person_fact_claims(person_id)
+        claims = self.metadata_store.list_uncertain_person_fact_claims(person_id, limit=512) if context_text else []
         query_grams = self._profile_relevance_grams(context_text)
         ranked = []
         if query_grams:
@@ -39,7 +40,7 @@ class MemoryProfileAdminService(KernelServiceBase):
                     ranked.append((len(overlap), float(claim.get("last_confirmed_at", 0)), claim))
         ranked.sort(key=lambda item: (-item[0], -item[1], str(item[2].get("claim_id", ""))))
         return {
-            "uncertain_fact_count": len(claims),
+            "uncertain_fact_count": count,
             "uncertain_candidates": [
                 {"claim_id": str(claim.get("claim_id", "")), "text": str(claim.get("value_text", ""))}
                 for _, _, claim in ranked[:2]
@@ -532,10 +533,8 @@ class MemoryProfileAdminService(KernelServiceBase):
             "manual_override_text": str(profile.get("manual_override_text", "") or ""),
             "evidence": evidence[: max(1, int(limit or 12))],
             "evidence_count": len(evidence),
-            "uncertain_fact_count": len(
-                self.metadata_store.list_uncertain_person_fact_claims(
-                    str(profile.get("person_id", "") or requested_person_id)
-                )
+            "uncertain_fact_count": self.metadata_store.count_uncertain_person_fact_claims(
+                str(profile.get("person_id", "") or requested_person_id)
             ),
             "raw_profile": profile,
         }
