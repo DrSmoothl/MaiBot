@@ -1021,7 +1021,9 @@ describe('ModelConfigPage 特征化', () => {
     await waitFor(() =>
       expect(screen.getByRole('tab', { name: '功能分配' })).toHaveAttribute('data-state', 'active')
     )
-    expect(await screen.findByText('温度已隐藏')).toBeInTheDocument()
+    // vlm 现在展示温度滑块，不再上报「温度已隐藏」
+    expect(await screen.findByTestId('task-config-card')).toBeInTheDocument()
+    expect(screen.queryByText('温度已隐藏')).toBeNull()
 
     const voiceButton = await screen.findByRole('button', { name: /voice/ })
     await user.click(voiceButton)
@@ -1098,7 +1100,7 @@ describe('ModelConfigPage 特征化', () => {
     await renderModelPage()
     await user.click(screen.getByRole('tab', { name: '功能分配' }))
 
-    expect(screen.getByText('为不同的任务配置使用的模型和参数')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '功能分配' })).toHaveAttribute('data-state', 'active')
     expect(screen.queryByText('模型类别')).not.toBeInTheDocument()
     expect(screen.queryByTestId('task-config-card')).not.toBeInTheDocument()
 

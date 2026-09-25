@@ -110,7 +110,9 @@ describe('TaskConfigCard 缺口', () => {
     )
 
     expect(container.firstChild).toHaveClass('bg-amber-50/30')
-    expect(screen.getByTestId('multi-select')).toHaveAttribute('data-single-select', 'true')
+    // 单选模型任务改用下拉单选，不再渲染多选标签列表
+    expect(screen.queryByTestId('multi-select')).toBeNull()
+    expect(screen.getAllByTestId('select-root')[0]).toHaveAttribute('data-value', 'alpha')
     expect(document.querySelector('[data-tour="embedding-models"]')).not.toBeNull()
 
     // 硬超时缺省时不预填，输入框为空、由 placeholder 提示后端默认值 240 秒

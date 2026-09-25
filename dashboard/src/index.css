@@ -1953,15 +1953,24 @@
 :root[data-dashboard-style='future-retro']
   [data-dashboard-slider='config']
   [data-dashboard-slider-thumb='true'] {
-  min-width: 2.5rem !important;
-  height: 2rem !important;
+  min-width: 2rem !important;
+  height: 1.75rem !important;
   width: auto !important;
+  padding: 0 0.375rem !important;
+  font-size: 1rem;
 }
 
 :root[data-dashboard-style='future-retro']
   [data-dashboard-slider='config']
   [data-dashboard-slider-value='true'] {
   display: inline !important;
+  font-size: 1rem !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-slider='config']
+  [data-dashboard-slider-value-tail='true'] {
+  font-size: 0.5rem;
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-nav-item='true'] {

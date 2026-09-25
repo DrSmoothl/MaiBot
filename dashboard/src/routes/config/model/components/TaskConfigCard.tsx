@@ -2,8 +2,9 @@
  * 任务配置卡片组件
  */
 import React from 'react'
-import { Info } from 'lucide-react'
+import { Info, X } from 'lucide-react'
 
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
@@ -34,9 +35,12 @@ interface TaskConfigCardProps {
   onChange: (field: keyof TaskConfig, value: string[] | number | string) => void
   hideTemperature?: boolean
   hideMaxTokens?: boolean
+  /** 嵌入类任务不提供选择策略：向量空间必须保持一致 */
+  hideSelectionStrategy?: boolean
   advanced?: boolean
   showAdvancedSettings?: boolean
   dataTour?: string
+  /** 单选模型任务（如嵌入模型）用下拉单选替代多选标签列表 */
   singleModel?: boolean
 }
 
@@ -70,6 +74,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
   onChange,
   hideTemperature = false,
   hideMaxTokens = false,
+  hideSelectionStrategy = false,
   advanced = false,
   showAdvancedSettings = false,
   dataTour,
@@ -77,6 +82,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
 }: TaskConfigCardProps) {
   const temperatureInputId = React.useId()
   const selectedModels = taskConfig.model_list || []
+  const selectedModel = selectedModels[0] ?? ''
 
   const handleModelChange = (values: string[]) => {
     onChange('model_list', values)
@@ -96,50 +102,78 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
 
       <div className="grid gap-3">
         {/* 模型列表 */}
-        <div className="grid gap-2" data-tour={dataTour}>
-          <Label>模型列表</Label>
-          <MultiSelect
-            options={modelNames.map((name) => ({ label: name, value: name }))}
-            selected={selectedModels}
-            onChange={handleModelChange}
-            placeholder="选择模型..."
-            emptyText="暂无可用模型"
-            compact
-            singleSelect={singleModel}
-          />
+        <div data-tour={dataTour}>
+          {singleModel ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <Select
+                value={selectedModel}
+                onValueChange={(value) => onChange('model_list', [value])}
+              >
+                <SelectTrigger className="min-w-0 flex-1">
+                  <SelectValue placeholder="选择模型..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelNames.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedModel && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 flex-none text-muted-foreground hover:text-destructive"
+                  aria-label="清除已选模型"
+                  onClick={() => onChange('model_list', [])}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          ) : (
+            <MultiSelect
+              options={modelNames.map((name) => ({ label: name, value: name }))}
+              selected={selectedModels}
+              onChange={handleModelChange}
+              placeholder="选择模型..."
+              emptyText="暂无可用模型"
+              compact
+            />
+          )}
         </div>
 
         {/* 推理参数 */}
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           {!hideTemperature && (
-            <div className="grid gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <Label htmlFor={temperatureInputId}>温度</Label>
-                <Input
-                  id={temperatureInputId}
-                  type="number"
-                  value={taskConfig.temperature ?? 0.7}
-                  onChange={(e) => {
-                    const value = parseFloat(e.target.value)
-                    if (!isNaN(value)) {
-                      onChange('temperature', clampTemperature(value))
-                    }
-                  }}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  className="h-8 w-24 text-right text-sm tabular-nums sm:hidden"
-                />
-              </div>
+            <div className="flex min-w-0 items-center gap-3">
+              <Label htmlFor={temperatureInputId} className="whitespace-nowrap">温度</Label>
+              <Input
+                id={temperatureInputId}
+                type="number"
+                value={taskConfig.temperature ?? 0.7}
+                onChange={(e) => {
+                  const value = parseFloat(e.target.value)
+                  if (!isNaN(value)) {
+                    onChange('temperature', clampTemperature(value))
+                  }
+                }}
+                min={0}
+                max={2}
+                step={0.1}
+                className="h-8 w-24 flex-none text-right text-sm tabular-nums sm:hidden"
+              />
               <Slider
                 value={[taskConfig.temperature ?? 0.7]}
                 onValueChange={(values) => onChange('temperature', values[0])}
                 min={0}
                 max={2}
                 step={0.1}
-                className="hidden w-full sm:flex"
+                className="hidden min-w-0 flex-1 sm:flex"
                 data-dashboard-slider="config"
-                data-dashboard-slider-value-format="fixed-2"
+                data-dashboard-slider-value-format="fixed-1"
               />
             </div>
           )}
@@ -159,8 +193,9 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
           )}
 
           {/* 模型选择策略 */}
+          {!hideSelectionStrategy && (
           <div className="flex min-w-0 items-center gap-3">
-            <Label className="whitespace-nowrap">模型选择策略</Label>
+            <Label className="whitespace-nowrap">选择策略</Label>
             <Select
               value={taskConfig.selection_strategy ?? 'balance'}
               onValueChange={(value) => onChange('selection_strategy', value)}
@@ -190,6 +225,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
               </SelectContent>
             </Select>
           </div>
+          )}
         </div>
 
         {showAdvancedSettings && (

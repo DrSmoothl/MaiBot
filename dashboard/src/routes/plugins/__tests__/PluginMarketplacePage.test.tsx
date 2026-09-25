@@ -353,10 +353,10 @@ describe('PluginMarketplacePage 初始加载与数据合并', () => {
     expect(screen.queryByTestId('marketplace-tab')).not.toBeInTheDocument()
   })
 
-  it('存在被兼容性过滤挡掉的插件时提示数量，并支持跳转设置关闭', async () => {
+  it('「仅显示当前版本」默认开启，关闭后放开兼容性过滤并写回 localStorage', async () => {
     vi.mocked(pluginApi.fetchPluginList).mockResolvedValue([
       makeMarketPlugin('plugin-ok'),
-      // releases 模式且无推荐版本：checkPluginCompatibility 判为不兼容，被「只看兼容」隐藏
+      // releases 模式且无推荐版本：checkPluginCompatibility 判为不兼容，被兼容性过滤隐藏
       makeMarketPlugin('plugin-old', {
         releases: {
           id: 'plugin-old',
@@ -368,21 +368,29 @@ describe('PluginMarketplacePage 初始加载与数据合并', () => {
       }),
     ])
 
-    render(<PluginMarketplacePage />)
-
-    // 提示说明隐藏数量与当前麦麦版本，计数徽章只统计可见插件
-    expect(await screen.findByText(/已隐藏 1 个与当前麦麦版本（v1\.2\.0）不兼容的插件/)).toBeInTheDocument()
-    await waitFor(() => expect(getCountBadgeText()).toBe('全部插件 1'))
-
-    // 点击跳转到插件设置页（「只看兼容」开关所在页）
-    fireEvent.click(screen.getByRole('button', { name: '去设置关闭「只看兼容」' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/plugin-mirrors' })
-  })
-
-  it('没有被兼容性过滤挡掉的插件时不展示隐藏提示', async () => {
     await renderPage()
 
-    expect(screen.queryByText(/已隐藏 \d+ 个与当前麦麦版本/)).not.toBeInTheDocument()
+    // 默认开启：不兼容插件被计数排除，只统计可见插件
+    const compatSwitch = screen.getByRole('switch', { name: '仅显示当前版本' })
+    expect(compatSwitch).toHaveAttribute('aria-checked', 'true')
+    expect(localStorage.getItem('plugins-market-compatible-only')).toBe('true')
+    expect(getCountBadgeText()).toBe('全部插件 1')
+
+    // 关闭「仅显示当前版本」：兼容性过滤放开，计数包含不兼容插件并写回 localStorage
+    fireEvent.click(compatSwitch)
+    await waitFor(() => expect(getCountBadgeText()).toBe('全部插件 2'))
+    expect(localStorage.getItem('plugins-market-compatible-only')).toBe('false')
+  })
+
+  it('localStorage 为 false 时「仅显示当前版本」初始为关闭', async () => {
+    localStorage.setItem('plugins-market-compatible-only', 'false')
+
+    await renderPage()
+
+    expect(screen.getByRole('switch', { name: '仅显示当前版本' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    )
   })
 
   it('Git 未安装时显示警告卡片，并阻断安装与更新操作', async () => {
@@ -770,7 +778,7 @@ describe('PluginMarketplacePage 视图状态与交互', () => {
     expect(getCountBadgeText()).toBe('全部插件 1')
     expect(screen.getByTestId('marketplace-tab')).toHaveAttribute('data-hide-installed', 'true')
 
-    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('switch', { name: '显示已安装' }))
 
     expect(getCountBadgeText()).toBe('全部插件 2')
     expect(screen.getByTestId('marketplace-tab')).toHaveAttribute('data-hide-installed', 'false')

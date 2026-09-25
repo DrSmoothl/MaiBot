@@ -350,6 +350,14 @@ function ModelConfigPageContent() {
   const selectedTaskHideMaxTokens = Boolean(
     selectedTaskMetadata && 'hideMaxTokens' in selectedTaskMetadata && selectedTaskMetadata.hideMaxTokens
   )
+  const selectedTaskHideSelectionStrategy = Boolean(
+    selectedTaskMetadata &&
+      'hideSelectionStrategy' in selectedTaskMetadata &&
+      selectedTaskMetadata.hideSelectionStrategy
+  )
+  const selectedTaskSingleModel = Boolean(
+    selectedTaskMetadata && 'singleModel' in selectedTaskMetadata && selectedTaskMetadata.singleModel
+  )
 
   if (selectedTaskField && selectedTaskField.name !== selectedTaskName) {
     setSelectedTaskName(selectedTaskField.name)
@@ -964,12 +972,6 @@ function ModelConfigPageContent() {
           value="tasks"
           className="mt-0 flex min-h-0 flex-1 flex-col gap-3 overflow-visible lg:overflow-hidden"
         >
-          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-muted-foreground">
-              为不同的任务配置使用的模型和参数
-            </p>
-          </div>
-
           {taskConfig && taskConfigSchema && selectedTaskField && (
             <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-4 lg:overflow-hidden">
               <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border lg:h-full">
@@ -1073,9 +1075,10 @@ function ModelConfigPageContent() {
                       onChange={(field, value) => updateTaskConfig(selectedTaskField.name, field, value)}
                       hideTemperature={selectedTaskHideTemperature}
                       hideMaxTokens={selectedTaskHideMaxTokens}
+                      hideSelectionStrategy={selectedTaskHideSelectionStrategy}
                       advanced={selectedTaskField.advanced}
                       showAdvancedSettings={advancedTaskSettingsVisible}
-                      singleModel={selectedTaskField.name === 'embedding'}
+                      singleModel={selectedTaskSingleModel}
                       dataTour="task-model-select"
                     />
                   </motion.div>

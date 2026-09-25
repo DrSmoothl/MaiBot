@@ -120,7 +120,6 @@ class PersonProfileService:
         return {
             "generation_version": PROFILE_GENERATION_VERSION,
             "classification_max_tokens": self._profile_classification_max_tokens(),
-            "classification_temperature": self._profile_classification_temperature(),
             "model": model_signature,
         }
 
