@@ -1229,8 +1229,13 @@ def has_request_snapshot(exception: Exception) -> bool:
     return False
 
 
-def format_request_snapshot_log_info(exception: Exception) -> str:
-    """将异常上的快照信息格式化为日志片段。"""
+def format_request_snapshot_log_info(exception: Exception, *, include_snapshot_path: bool = True) -> str:
+    """将异常上的快照信息格式化为日志片段。
+
+    Args:
+        exception: 携带请求快照信息的异常。
+        include_snapshot_path: 是否输出本地快照路径；模型运行日志默认只需要可重放命令。
+    """
     for candidate in (exception, getattr(exception, "__cause__", None)):
         if candidate is None:
             continue
@@ -1241,10 +1246,10 @@ def format_request_snapshot_log_info(exception: Exception) -> str:
             continue
 
         lines: list[str] = []
-        if snapshot_path:
+        if include_snapshot_path and snapshot_path:
             lines.append(f"调用完整信息（如果需要求助，请发送该文本）: {snapshot_path}")
         if replay_command:
-            lines.append(f"使用以下命令重新请求: {replay_command}")
+            lines.append(f"调用完整信息: {replay_command}")
         if lines:
             return "\n  " + "\n  ".join(lines)
 

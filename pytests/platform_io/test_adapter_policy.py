@@ -212,3 +212,85 @@ def test_adapter_plugin_policy_rejects_conflicting_ids_without_writing(tmp_path:
         raise AssertionError("冲突 ID 必须被拒绝")
 
     assert not policy_path.exists()
+
+
+LAYERED_POLICY_TOML = """
+[[adapters]]
+adapter_id = "gateway:maibot-team.snowluma-adapter:snowluma_gateway"
+plugin_id = "maibot-team.snowluma-adapter"
+platform = "qq"
+account_id = "2814567326"
+
+[adapters.group]
+default_action = "block"
+allow_ids = ["10001"]
+
+[defaults.group]
+default_action = "block"
+
+[defaults.private]
+default_action = "block"
+""".strip()
+
+
+def _make_runtime_identity() -> AdapterIdentity:
+    return AdapterIdentity(
+        adapter_id="gateway:maibot-team.snowluma-adapter:snowluma_gateway",
+        plugin_id="maibot-team.snowluma-adapter",
+        gateway_name="snowluma_gateway",
+        platform="qq",
+        account_id="2814567326",
+    )
+
+
+def test_adapter_policy_get_reads_best_matching_entry_instead_of_empty_template(tmp_path: Path) -> None:
+    policy_path = tmp_path / "adapter_policy.toml"
+    policy_path.write_text(LAYERED_POLICY_TOML, encoding="utf-8")
+    manager = AdapterPolicyManager(policy_path)
+
+    expected = {
+        "group": {"default_action": "block", "allow_ids": ["10001"], "deny_ids": []},
+        "private": {"default_action": "inherit", "allow_ids": [], "deny_ids": []},
+    }
+    assert manager.get_adapter_policy(_make_runtime_identity()) == expected
+    # 适配器未运行、只能提供 plugin_id 时，也应展示该插件名下真实生效的条目
+    assert manager.get_adapter_policy(AdapterIdentity(plugin_id="maibot-team.snowluma-adapter")) == expected
+
+
+def test_adapter_policy_set_updates_existing_best_match_without_creating_shadow(tmp_path: Path) -> None:
+    policy_path = tmp_path / "adapter_policy.toml"
+    policy_path.write_text(LAYERED_POLICY_TOML, encoding="utf-8")
+    manager = AdapterPolicyManager(policy_path)
+
+    manager.set_adapter_policy(
+        _make_runtime_identity(),
+        {
+            "group": {"default_action": "inherit", "allow_ids": [], "deny_ids": ["10002"]},
+            "private": {"default_action": "inherit", "allow_ids": [], "deny_ids": []},
+        },
+    )
+
+    # 必须更新既有条目而不是追加一条会被遮蔽的新条目
+    assert policy_path.read_text(encoding="utf-8").count("[[adapters]]") == 1
+    assert manager.evaluate(_make_runtime_identity(), chat_type="group", target_id="10001").allowed is False
+    denied = manager.evaluate(_make_runtime_identity(), chat_type="group", target_id="10002")
+    assert denied.allowed is False
+    assert denied.reason == "matched_deny_override"
+
+
+def test_adapter_policy_chat_override_writes_into_existing_best_match(tmp_path: Path) -> None:
+    policy_path = tmp_path / "adapter_policy.toml"
+    policy_path.write_text(LAYERED_POLICY_TOML, encoding="utf-8")
+    manager = AdapterPolicyManager(policy_path)
+
+    manager.set_chat_override(
+        _make_runtime_identity(),
+        chat_type="group",
+        target_id="10001",
+        action="block",
+    )
+
+    assert policy_path.read_text(encoding="utf-8").count("[[adapters]]") == 1
+    blocked = manager.evaluate(_make_runtime_identity(), chat_type="group", target_id="10001")
+    assert blocked.allowed is False
+    assert blocked.reason == "matched_deny_override"

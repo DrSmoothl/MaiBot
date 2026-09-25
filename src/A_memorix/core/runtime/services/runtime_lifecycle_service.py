@@ -177,6 +177,7 @@ class MemoryRuntimeLifecycleService(KernelServiceBase):
                 config=image_config,
                 persist_vector_store=persist_image_vectors,
             )
+            await self.image_memory_runtime.recover_assets()
 
         try:
             self.graph_store = kernel_module.GraphStore(

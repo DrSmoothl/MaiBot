@@ -473,15 +473,15 @@ describe('事件入账', () => {
     expect(window.localStorage.getItem(LAST_EVENT_ID_STORAGE_KEY)).toBeNull()
   })
 
-  it('时间线按时间戳升序排列（乱序到达自动重排）', async () => {
+  it('时间线按事件账本顺序排列（消息时间早于推理完成时间时仍保持事件顺序）', async () => {
     const hookModule = await importHookModule()
     const view = await mountMonitor(hookModule)
 
-    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 202, timestamp: 200 }))
-    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 201, timestamp: 100 }))
+    emitMonitorEvent('message.sent', makeMessageData({ event_id: 202, timestamp: 100 }))
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 201, timestamp: 200 }))
 
     expect(view.result.current.allTimeline.map((entry) => entry.id)).toEqual(['evt_201', 'evt_202'])
-    expect(view.result.current.allTimeline.map((entry) => entry.timestamp)).toEqual([100, 200])
+    expect(view.result.current.allTimeline.map((entry) => entry.timestamp)).toEqual([200, 100])
   })
 
   it('缺少 session_id 或 timestamp 非数字的事件被丢弃', async () => {

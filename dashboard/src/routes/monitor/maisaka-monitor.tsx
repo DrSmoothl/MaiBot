@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock,
   Eraser,
   FileCode2,
@@ -44,6 +45,7 @@ import { backendApi } from '@/lib/http'
 import { cn } from '@/lib/utils'
 
 import type {
+  MaisakaContextSection,
   MaisakaMessageMedia,
   MaisakaToolCall,
   MessageIngestedEvent,
@@ -314,15 +316,160 @@ function SessionSidebar({
 
 // ─── 单条时间线事件渲染 ──────────────────────────────────────
 
+/** 上下文分段：token 由该轮真实 prompt token 按字符占比换算 */
+interface MonitorContextSection {
+  key: string
+  tokens: number
+  percent: number
+}
+
 interface MonitorStats {
   messages: number
   cycles: number
   toolCalls: number
+  /** 最近一轮 planner 请求的输入 token，即当前上下文占用 */
+  contextTokens: number
+  /** 与最近一轮 planner 请求对应的上下文分段 */
+  contextSections: MonitorContextSection[]
+  /** 会话累计 token 用量 */
+  totalPromptTokens: number
+  totalCompletionTokens: number
+  /** 会话累计缓存命中率，无缓存数据时为 null */
+  cacheHitRate: number | null
+}
+
+/** 上下文分段的展示标签与配色，未知分段直接以 key 展示 */
+const CONTEXT_SECTION_META: Record<string, { label: string; color: string }> = {
+  messages: { label: '消息', color: 'hsl(var(--color-chart-1))' },
+  mcp_tools: { label: 'MCP 工具', color: 'hsl(var(--color-chart-4))' },
+  builtin_tools: { label: '系统工具', color: 'hsl(var(--color-chart-2))' },
+  plugin_tools: { label: '插件工具', color: 'hsl(var(--primary))' },
+  system_prompt: { label: '系统提示词', color: 'hsl(var(--color-chart-5))' },
+  instant_notice: { label: '即时提示', color: 'hsl(var(--color-chart-3))' },
+  other_tools: { label: '其他工具', color: 'hsl(var(--muted-foreground))' },
+}
+
+function resolveContextSectionMeta(key: string) {
+  return CONTEXT_SECTION_META[key] ?? { label: key, color: 'hsl(var(--muted-foreground))' }
+}
+
+const STATS_TOKEN_FORMATTER = new Intl.NumberFormat('zh-CN', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+
+function formatTokenCount(value: number): string {
+  return STATS_TOKEN_FORMATTER.format(Math.max(Math.round(value), 0))
+}
+
+/** 统计浮层内的单行指标 */
+function StatsRow({
+  children,
+  value,
+  valueClassName,
+}: {
+  children: ReactNode
+  value: ReactNode
+  valueClassName?: string
+}) {
+  return (
+    <div className="flex items-center gap-2 text-[11px] leading-5">
+      {children}
+      <span className={cn('ml-auto font-mono tabular-nums', valueClassName)}>{value}</span>
+    </div>
+  )
+}
+
+/**
+ * 统计浮层：展示最近一轮上下文构成、缓存命中率与会话累计计数。
+ *
+ * 上下文 token 总量取自模型返回的真实 prompt token，分段占比按后端统计的字符数换算。
+ */
+function MonitorStatsPanel({ stats }: { stats: MonitorStats }) {
+  const hasContext = stats.contextTokens > 0 && stats.contextSections.length > 0
+
+  return (
+    <div className="w-72 space-y-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-xs font-medium">上下文容量</span>
+        <span className="font-mono text-[11px] tabular-nums">
+          {stats.contextTokens > 0 ? `${formatTokenCount(stats.contextTokens)} tokens` : '暂无数据'}
+        </span>
+      </div>
+
+      {hasContext ? (
+        <>
+          <div className="bg-muted flex h-1.5 w-full overflow-hidden rounded-full">
+            {stats.contextSections.map((section) => (
+              <div
+                key={section.key}
+                className="h-full"
+                style={{
+                  width: `${section.percent}%`,
+                  backgroundColor: resolveContextSectionMeta(section.key).color,
+                }}
+              />
+            ))}
+          </div>
+          <div className="space-y-0.5">
+            {stats.contextSections.map((section) => {
+              const sectionMeta = resolveContextSectionMeta(section.key)
+              return (
+                <StatsRow
+                  key={section.key}
+                  value={formatTokenCount(section.tokens)}
+                  valueClassName="text-muted-foreground w-12 text-right"
+                >
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: sectionMeta.color }}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{sectionMeta.label}</span>
+                  <span className="text-muted-foreground w-11 text-right font-mono tabular-nums">
+                    {section.percent.toFixed(1)}%
+                  </span>
+                </StatsRow>
+              )
+            })}
+          </div>
+        </>
+      ) : (
+        <p className="text-muted-foreground text-[11px] leading-5">
+          尚无 planner 请求数据，产生一次推理后展示上下文构成。
+        </p>
+      )}
+
+      <Separator />
+
+      <div className="space-y-0.5">
+        <StatsRow
+          value={stats.cacheHitRate === null ? '—' : `${stats.cacheHitRate.toFixed(0)}%`}
+          valueClassName={stats.cacheHitRate === null ? 'text-muted-foreground' : ''}
+        >
+          <span className="text-muted-foreground">平均缓存命中率</span>
+        </StatsRow>
+        <StatsRow
+          value={`${formatTokenCount(stats.totalPromptTokens)} / ${formatTokenCount(stats.totalCompletionTokens)}`}
+        >
+          <span className="text-muted-foreground">累计输入 / 输出</span>
+        </StatsRow>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-0.5 text-[11px] leading-5">
+        <div>消息：{stats.messages}</div>
+        <div>循环：{stats.cycles}</div>
+        <div>工具调用：{stats.toolCalls}</div>
+      </div>
+    </div>
+  )
 }
 
 interface StageStatusPanelProps {
   autoScroll: boolean
   onClearTimeline: () => void
+  onFindPreviousBotMessage: () => void
   onScrollToBottom: () => void
   stats: MonitorStats
   status?: StageStatusInfo
@@ -331,6 +478,7 @@ interface StageStatusPanelProps {
 function MonitorStatusActions({
   autoScroll,
   onClearTimeline,
+  onFindPreviousBotMessage,
   onScrollToBottom,
   stats,
 }: Omit<StageStatusPanelProps, 'status'>) {
@@ -339,19 +487,38 @@ function MonitorStatusActions({
       <TooltipProvider delayDuration={150}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="bg-background/60 text-muted-foreground flex h-6 shrink-0 items-center gap-1 rounded-md border px-1.5">
-              <Activity className="h-3 w-3" />
-              <span className="text-[10px] font-medium">统计</span>
+            <div
+              className={cn(
+                'group bg-background/60 text-muted-foreground flex h-6 shrink-0 items-center gap-1 rounded-md border px-1.5 transition-[color,background-color,outline-color]',
+                // hover / 浮层展开时高亮：填充色、描边与文字色同用；部分主题会用 !important 固定
+                // 背景、文字、边框与阴影，此时由 outline 与图标色保证高亮仍然可见
+                'hover:bg-accent hover:outline-primary/50 hover:outline-2',
+                'data-[state=delayed-open]:bg-accent data-[state=delayed-open]:outline-primary/50 data-[state=delayed-open]:outline-2',
+                'data-[state=instant-open]:bg-accent data-[state=instant-open]:outline-primary/50 data-[state=instant-open]:outline-2'
+              )}
+            >
+              <Activity className="group-hover:text-primary h-3 w-3 transition-colors" />
+              <span className="group-hover:text-foreground text-[10px] font-medium transition-colors">
+                统计
+              </span>
             </div>
           </TooltipTrigger>
-          <TooltipContent side="bottom" align="start" className="space-y-1">
-            <div>消息：{stats.messages}</div>
-            <div>循环：{stats.cycles}</div>
-            <div>工具调用：{stats.toolCalls}</div>
+          <TooltipContent side="bottom" align="start" className="p-3">
+            <MonitorStatsPanel stats={stats} />
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 shrink-0 px-2 text-[11px]"
+          onClick={onFindPreviousBotMessage}
+          title="查找上条麦麦消息"
+        >
+          <ChevronUp className="mr-1 h-3 w-3" />
+          查找上条
+        </Button>
         <Button
           variant="ghost"
           size="sm"
@@ -380,6 +547,7 @@ function MonitorStatusActions({
 function StageStatusPanel({
   autoScroll,
   onClearTimeline,
+  onFindPreviousBotMessage,
   onScrollToBottom,
   stats,
   status,
@@ -389,6 +557,7 @@ function StageStatusPanel({
     <MonitorStatusActions
       autoScroll={autoScroll}
       onClearTimeline={onClearTimeline}
+      onFindPreviousBotMessage={onFindPreviousBotMessage}
       onScrollToBottom={onScrollToBottom}
       stats={stats}
     />
@@ -999,17 +1168,14 @@ function PlannerToolResultCard({
         <span className="text-foreground font-mono text-sm font-semibold">
           {tool.tool_name || 'unknown'}
         </span>
-        {tool.success ? (
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-        ) : (
-          <XCircle className="h-3.5 w-3.5 text-red-500" />
+        {!tool.success && (
+          <>
+            <XCircle className="h-3.5 w-3.5 text-red-500" />
+            <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">
+              {statusText}
+            </Badge>
+          </>
         )}
-        <Badge
-          variant={tool.success ? 'secondary' : 'destructive'}
-          className="h-5 px-1.5 text-[10px]"
-        >
-          {statusText}
-        </Badge>
         {sourceLabel && (
           <Badge
             variant="outline"
@@ -1051,11 +1217,11 @@ function PlannerToolResultCard({
           </div>
         )}
 
-        <div className="bg-muted/20 flex items-start gap-1.5 rounded-md border px-2.5 py-1">
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
           <span className="text-muted-foreground shrink-0 text-[10px] leading-4 font-medium">
             执行结果
           </span>
-          <p className="text-foreground/80 min-w-0 flex-1 text-xs leading-4 break-words whitespace-pre-wrap">
+          <p className="text-muted-foreground min-w-0 flex-1 text-xs leading-4 break-words whitespace-pre-wrap">
             {tool.summary || '未返回结果摘要。'}
           </p>
         </div>
@@ -1421,6 +1587,8 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
   const [autoScroll, setAutoScroll] = useState(true)
   const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null)
   const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** 程序化跳转滚动期间忽略滚动监听，防止自动跟随把视图拉回底部 */
+  const revealScrollLockRef = useRef(false)
   const previousSelectedSessionRef = useRef<string | null | undefined>(undefined)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     const saved = localStorage.getItem('maisaka-monitor-sidebar-collapsed')
@@ -1533,6 +1701,29 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
     return indexes
   }, [visibleTimelineEntries])
 
+  /** 滚动到指定时间线位置，并短暂高亮该条消息（供消息跳转与“查找上条”共用） */
+  const revealTimelineMessage = useCallback(
+    (targetIndex: number, messageId: string) => {
+      setAutoScroll(false)
+      // 平滑滚动的开头几帧仍在底部阈值内，锁住滚动监听，避免被当成“用户回到底部”而拉回底部
+      revealScrollLockRef.current = true
+      setFocusedMessageId(messageId)
+      timelineVirtualizer.scrollToIndex(targetIndex, {
+        align: 'center',
+        behavior: 'smooth',
+      })
+      if (focusTimerRef.current !== null) {
+        clearTimeout(focusTimerRef.current)
+      }
+      focusTimerRef.current = setTimeout(() => {
+        setFocusedMessageId(null)
+        revealScrollLockRef.current = false
+        focusTimerRef.current = null
+      }, 1800)
+    },
+    [timelineVirtualizer]
+  )
+
   const handleJumpToMessage = useCallback(
     (messageId: string) => {
       const targetIndex = messageEntryIndexes.get(messageId)
@@ -1545,22 +1736,36 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
         return
       }
 
-      setAutoScroll(false)
-      setFocusedMessageId(messageId)
-      timelineVirtualizer.scrollToIndex(targetIndex, {
-        align: 'center',
-        behavior: 'smooth',
-      })
-      if (focusTimerRef.current !== null) {
-        clearTimeout(focusTimerRef.current)
-      }
-      focusTimerRef.current = setTimeout(() => {
-        setFocusedMessageId(null)
-        focusTimerRef.current = null
-      }, 1800)
+      revealTimelineMessage(targetIndex, messageId)
     },
-    [messageEntryIndexes, timelineVirtualizer, toast]
+    [messageEntryIndexes, revealTimelineMessage, toast]
   )
+
+  /** 向上查找当前视口上方最近一条麦麦自己发送的消息并滚动过去 */
+  const handleFindPreviousBotMessage = useCallback(() => {
+    const viewportTop = scrollViewport?.scrollTop ?? 0
+    // 虚拟列表带 overscan，按行位置过滤出视口内第一行，避免选中视口上方的预渲染行
+    const firstVisibleIndex =
+      timelineVirtualizer.getVirtualItems().find((item) => item.end > viewportTop)?.index ?? 0
+
+    for (let index = firstVisibleIndex - 1; index >= 0; index -= 1) {
+      const entry = visibleTimelineEntries[index]
+      if (entry?.type !== 'message.sent') {
+        continue
+      }
+      const data = entry.data as MessageSentEvent
+      if (!data.message_id) {
+        continue
+      }
+      revealTimelineMessage(index, data.message_id)
+      return
+    }
+
+    toast({
+      title: '上方没有更多麦麦发送的消息',
+      description: '已经到达当前时间线里麦麦发送消息的最上方。',
+    })
+  }, [revealTimelineMessage, scrollViewport, timelineVirtualizer, toast, visibleTimelineEntries])
 
   const scrollToBottom = useCallback(
     (behavior: TimelineScrollBehavior = 'smooth') => {
@@ -1602,34 +1807,90 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
         scrollViewport ?? e.currentTarget.querySelector('[data-radix-scroll-area-viewport]')
       if (!target) return
       const { scrollTop, scrollHeight, clientHeight } = target as HTMLElement
-      setAutoScroll(scrollHeight - scrollTop - clientHeight < 80)
+      const distanceToBottom = scrollHeight - scrollTop - clientHeight
+
+      // 程序化跳转期间：平滑滚动的起始帧仍在底部阈值内，
+      // 此时既不能重新开启自动跟随（会打断滚动并拉回底部），也不需要关闭
+      if (revealScrollLockRef.current) {
+        if (distanceToBottom < 80) return
+        // 已经离开底部阈值，恢复正常判定
+        revealScrollLockRef.current = false
+      }
+
+      setAutoScroll(distanceToBottom < 80)
     },
     [scrollViewport]
   )
 
-  // 统计当前会话的各事件类型计数
-  const stats = useMemo(
-    () =>
-      timeline.reduce<MonitorStats>(
-        (currentStats, entry) => {
-          if (entry.type === 'message.ingested' || entry.type === 'message.sent') {
-            currentStats.messages += 1
-            return currentStats
-          }
-          if (entry.type === 'planner.finalized') {
-            currentStats.cycles += 1
-            currentStats.toolCalls += (entry.data as PlannerFinalizedEvent).tools?.length ?? 0
-            return currentStats
-          }
-          if (entry.type === 'tool.execution') {
-            currentStats.toolCalls += 1
-          }
-          return currentStats
-        },
-        { messages: 0, cycles: 0, toolCalls: 0 }
-      ),
-    [timeline]
-  )
+  // 统计当前会话的各事件类型计数，以及上下文构成与缓存命中情况
+  const stats = useMemo(() => {
+    const currentStats: MonitorStats = {
+      messages: 0,
+      cycles: 0,
+      toolCalls: 0,
+      contextTokens: 0,
+      contextSections: [],
+      totalPromptTokens: 0,
+      totalCompletionTokens: 0,
+      cacheHitRate: null,
+    }
+    let cacheHitTokens = 0
+    let cacheMissTokens = 0
+    // 最近一轮带上下文分段统计的请求
+    let latestSections: MaisakaContextSection[] = []
+
+    for (const entry of timeline) {
+      if (entry.type === 'message.ingested' || entry.type === 'message.sent') {
+        currentStats.messages += 1
+        continue
+      }
+      if (entry.type === 'tool.execution') {
+        currentStats.toolCalls += 1
+        continue
+      }
+      if (entry.type !== 'planner.finalized') {
+        continue
+      }
+
+      currentStats.cycles += 1
+      const finalized = entry.data as PlannerFinalizedEvent
+      currentStats.toolCalls += finalized.tools?.length ?? 0
+      const planner = finalized.planner
+      if (!planner) {
+        continue
+      }
+
+      currentStats.totalPromptTokens += planner.prompt_tokens
+      currentStats.totalCompletionTokens += planner.completion_tokens
+      cacheHitTokens += planner.prompt_cache_hit_tokens ?? 0
+      cacheMissTokens += planner.prompt_cache_miss_tokens ?? 0
+      // 以最近一轮真实请求代表当前上下文
+      if (planner.prompt_tokens > 0 && finalized.request?.context_sections?.length) {
+        currentStats.contextTokens = planner.prompt_tokens
+        latestSections = finalized.request.context_sections
+      }
+    }
+
+    const cacheTotalTokens = cacheHitTokens + cacheMissTokens
+    if (cacheTotalTokens > 0) {
+      currentStats.cacheHitRate = (cacheHitTokens / cacheTotalTokens) * 100
+    }
+
+    const totalChars = latestSections.reduce((sum, section) => sum + section.chars, 0)
+    if (currentStats.contextTokens > 0 && totalChars > 0) {
+      // 按字符占比把真实 token 总量分摊到各分段，占比大的分段优先展示
+      currentStats.contextSections = latestSections
+        .filter((section) => section.chars > 0)
+        .map((section) => ({
+          key: section.key,
+          tokens: (currentStats.contextTokens * section.chars) / totalChars,
+          percent: (section.chars / totalChars) * 100,
+        }))
+        .sort((a, b) => b.percent - a.percent)
+    }
+
+    return currentStats
+  }, [timeline])
   const selectedStageStatus = selectedSession ? stageStatuses.get(selectedSession) : undefined
   const virtualItems = timelineVirtualizer.getVirtualItems()
 
@@ -1699,6 +1960,7 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
         <StageStatusPanel
           autoScroll={autoScroll}
           onClearTimeline={clearTimeline}
+          onFindPreviousBotMessage={handleFindPreviousBotMessage}
           onScrollToBottom={() => scrollToBottom('smooth')}
           stats={stats}
           status={selectedStageStatus}

@@ -1,8 +1,11 @@
-import { useNavigate } from '@tanstack/react-router'
 import { motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import {
+  ChatStreamSettingsDialog,
+  type ChatStreamSettingsTarget,
+} from '@/components/chat-stream-settings-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { uploadWebuiUserAvatar } from '@/lib/avatar-url'
 import { chatWsClient } from '@/lib/chat-ws-client'
@@ -10,6 +13,8 @@ import {
   maisakaMonitorClient,
   type LlmErrorEvent,
   type LlmRetryEvent,
+  type MessageIngestedEvent,
+  type MessageSentEvent,
   type StageRemovedEvent,
   type StageStatusEvent,
 } from '@/lib/maisaka-monitor-client'
@@ -21,6 +26,7 @@ import { ChatComposer } from './ChatComposer'
 import { ChatTabBar } from './ChatTabBar'
 import { ChatWorkspaceSidebar } from './ChatWorkspaceSidebar'
 import { MessageList } from './MessageList'
+import { useObservedAdapterStatuses } from './use-observed-adapter-status'
 import type {
   ChatImageAttachment,
   ChatIncomingImage,
@@ -28,6 +34,7 @@ import type {
   ChatMessage,
   ChatRuntimeStatus,
   MessageSegment,
+  ObservedMessagePreview,
   SavedVirtualTab,
   VirtualIdentityConfig,
   WsMessage,
@@ -178,6 +185,19 @@ function resolveRetryStatusKind(data: LlmRetryEvent): ChatRuntimeStatus['kind'] 
   return 'acting'
 }
 
+// 侧边栏观察聊天流的最新消息预览：优先正文，纯媒体消息退回媒体占位文案
+function buildObservedMessagePreview(
+  data: MessageIngestedEvent | MessageSentEvent
+): ObservedMessagePreview {
+  const content = data.content.trim()
+  const mediaText = (data.media ?? []).find((media) => media.text.trim())?.text.trim() ?? ''
+  return {
+    speakerName: data.speaker_name,
+    content,
+    mediaText,
+  }
+}
+
 function matchesMonitorTarget(
   tab: ChatTab,
   data: StageStatusEvent | StageRemovedEvent | LlmRetryEvent | LlmErrorEvent
@@ -220,13 +240,35 @@ function buildRuntimeStatusFromStage(data: StageStatusEvent): ChatRuntimeStatus 
 }
 
 export function ChatPage() {
-  const navigate = useNavigate()
   const { t, i18n } = useTranslation()
   const {
     sessions: observedSessions,
     stageStatuses: observedStageStatuses,
+    allTimeline,
     setSelectedSession: setSelectedObservedSession,
   } = useMaisakaMonitor()
+
+  // 每个观察聊天流的最新一条消息，用于侧边栏预览（时间线按时间升序，后写覆盖先写）
+  const observedLatestMessages = useMemo(() => {
+    const latestMessages = new Map<string, ObservedMessagePreview>()
+    for (const entry of allTimeline) {
+      if (entry.type !== 'message.ingested' && entry.type !== 'message.sent') {
+        continue
+      }
+      latestMessages.set(
+        entry.sessionId,
+        buildObservedMessagePreview(entry.data as MessageIngestedEvent | MessageSentEvent)
+      )
+    }
+    return latestMessages
+  }, [allTimeline])
+
+  // 观察聊天流的适配器放行状态，用于侧边栏区分活跃与不活跃聊天
+  const observedSessionIds = useMemo(
+    () => Array.from(observedSessions.keys()),
+    [observedSessions]
+  )
+  const observedAdapterStatuses = useObservedAdapterStatuses(observedSessionIds)
 
   // 默认本地聊天标签页
   const defaultTab: ChatTab = {
@@ -281,6 +323,8 @@ export function ChatPage() {
   const [userName, setUserName] = useState(getStoredUserName())
   const [userAvatarVersion, setUserAvatarVersion] = useState(getStoredUserAvatarVersion)
   const [isUploadingUserAvatar, setIsUploadingUserAvatar] = useState(false)
+  // 页内聊天流设置弹窗：非空时打开
+  const [settingsChat, setSettingsChat] = useState<ChatStreamSettingsTarget | null>(null)
 
   // 持久化用户 ID
   const [userId] = useState(getOrCreateUserId)
@@ -1029,8 +1073,13 @@ export function ChatPage() {
     setActiveObservedSessionId(sessionId)
   }
 
+  // 在页内直接打开观察聊天流的设置弹窗，不再跳转到聊天管理页
   const openObservedSettings = (sessionId: string) => {
-    void navigate({ to: '/chat-management', search: { session_id: sessionId } })
+    const info = observedSessions.get(sessionId)
+    setSettingsChat({
+      session_id: sessionId,
+      display_name: info?.sessionName || sessionId,
+    })
   }
 
   return (
@@ -1055,6 +1104,8 @@ export function ChatPage() {
           activeObservedSessionId={activeObservedSessionId}
           observedSessions={observedSessions}
           observedStageStatuses={observedStageStatuses}
+          observedLatestMessages={observedLatestMessages}
+          observedAdapterStatuses={observedAdapterStatuses}
           userId={userId}
           userName={userName}
           userAvatarVersion={userAvatarVersion}
@@ -1147,6 +1198,17 @@ export function ChatPage() {
           </>
         )}
       </motion.div>
+
+      <ChatStreamSettingsDialog
+        chat={settingsChat}
+        onOpenChange={(open) => !open && setSettingsChat(null)}
+        onDeleted={(sessionId) => {
+          setSettingsChat(null)
+          if (activeObservedSessionId === sessionId) {
+            setActiveObservedSessionId(null)
+          }
+        }}
+      />
     </div>
   )
 }

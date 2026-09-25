@@ -863,7 +863,7 @@ def test_webui_memory_profile_query_prefers_explicit_person_id(client: TestClien
     assert response.json()["person_id"] == "explicit-person-id"
 
 
-def test_webui_memory_profile_list_enriches_person_name(client: TestClient, monkeypatch):
+def test_webui_memory_profile_list_enriches_person_identity(client: TestClient, monkeypatch):
     async def fake_profile_admin(*, action: str, **kwargs):
         assert action == "list"
         assert kwargs["limit"] == 7
@@ -878,15 +878,100 @@ def test_webui_memory_profile_list_enriches_person_name(client: TestClient, monk
     monkeypatch.setattr(memory_router_module.memory_service, "profile_admin", fake_profile_admin)
     monkeypatch.setattr(
         memory_router_module,
-        "_get_person_name_for_person_id",
-        lambda person_id: {"person-1": "Alice"}.get(person_id, ""),
+        "_get_person_identities",
+        lambda person_ids: {
+            "person-1": {
+                "person_name": "Alice",
+                "user_nickname": "小A",
+                "group_cardname_list": ["群里的A"],
+            }
+        },
     )
 
     response = client.get("/api/webui/memory/profiles", params={"limit": 7})
 
     assert response.status_code == 200
+    # 身份字段补齐：姓名、昵称与群名片都随列表返回，供检索与展示使用
     assert response.json()["items"][0]["person_name"] == "Alice"
+    assert response.json()["items"][0]["user_nickname"] == "小A"
+    assert response.json()["items"][0]["group_cardname_list"] == ["群里的A"]
+    # 查不到身份的人物回落到空值，不影响画像主体数据
     assert response.json()["items"][1]["person_name"] == ""
+    assert response.json()["items"][1]["user_nickname"] == ""
+    assert response.json()["items"][1]["group_cardname_list"] == []
+
+
+def test_webui_memory_profile_search_matches_group_cardname(client: TestClient, monkeypatch):
+    """群名片是用户最常用来指代某人的说法，必须能命中（此前只匹配 person_name/profile_text）。"""
+
+    async def fake_profile_list(limit: int):
+        assert limit == 200
+        return {
+            "success": True,
+            "items": [
+                {
+                    "person_id": "person-1",
+                    "person_name": "Alice",
+                    "user_nickname": "小A",
+                    "group_cardname_list": ["群里的A"],
+                    "profile_text": "喜欢咖啡",
+                },
+                {
+                    "person_id": "person-2",
+                    "person_name": "Bob",
+                    "user_nickname": "小B",
+                    "group_cardname_list": ["群里的B"],
+                    "profile_text": "喜欢茶",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(memory_router_module, "_profile_list", fake_profile_list)
+
+    response = client.get("/api/webui/memory/profiles/search", params={"person_keyword": "群里的B"})
+
+    assert response.status_code == 200
+    assert [item["person_id"] for item in response.json()["items"]] == ["person-2"]
+
+
+def test_webui_memory_profile_search_matches_user_nickname(client: TestClient, monkeypatch):
+    """平台昵称同样要参与命中，否则用户按聊天里看到的名字搜不到画像。"""
+
+    async def fake_profile_list(limit: int):
+        return {
+            "success": True,
+            "items": [
+                {"person_id": "person-1", "person_name": "Alice", "user_nickname": "小A"},
+                {"person_id": "person-2", "person_name": "Bob", "user_nickname": "小B"},
+            ],
+        }
+
+    monkeypatch.setattr(memory_router_module, "_profile_list", fake_profile_list)
+
+    response = client.get("/api/webui/memory/profiles/search", params={"person_keyword": "小A"})
+
+    assert response.status_code == 200
+    assert [item["person_id"] for item in response.json()["items"]] == ["person-1"]
+
+
+def test_webui_memory_profile_search_tolerates_missing_group_cardname(client: TestClient, monkeypatch):
+    """身份字段缺失时不应报错：群名片可能为空，或人物不在 PersonInfo 里。"""
+
+    async def fake_profile_list(limit: int):
+        return {
+            "success": True,
+            "items": [
+                {"person_id": "person-1", "profile_text": "喜欢咖啡"},
+                {"person_id": "person-2", "group_cardname_list": None},
+            ],
+        }
+
+    monkeypatch.setattr(memory_router_module, "_profile_list", fake_profile_list)
+
+    response = client.get("/api/webui/memory/profiles/search", params={"person_keyword": "咖啡"})
+
+    assert response.status_code == 200
+    assert [item["person_id"] for item in response.json()["items"]] == ["person-1"]
 
 
 def test_webui_memory_profile_search_resolves_platform_user_id(client: TestClient, monkeypatch):
@@ -1242,7 +1327,8 @@ def test_webui_memory_timeline_handles_json_bytes_zero_timestamp_and_batches_ite
     }
     assert "p-zero" in paragraph_ids
     assert "p-pickle" not in paragraph_ids
-    assert store.delete_item_query_count == 2
+    # 来源选择器已能直接确定归属时，无需读取删除明细。
+    assert store.delete_item_query_count == 0
 
 
 def test_compat_aggregate_route(client: TestClient, monkeypatch):
@@ -1684,6 +1770,7 @@ def test_import_chat_targets_route(client: TestClient, monkeypatch):
         last_active_timestamp=None,
     )
     monkeypatch.setattr(memory_router_module._chat_manager, "get_session_name", lambda chat_id: "")
+    monkeypatch.setattr(memory_router_module, "_prefetch_latest_messages_by_session", lambda db_session, session_ids: {})
     monkeypatch.setattr(
         memory_router_module,
         "get_db_session",
@@ -1694,7 +1781,7 @@ def test_import_chat_targets_route(client: TestClient, monkeypatch):
 
     response = client.get("/api/webui/memory/import/chat-targets")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
     assert response.json()["success"] is True
     assert response.json()["data"][0]["chat_id"] == "session-1"
     assert response.json()["data"][0]["chat_name"] == "测试群"
@@ -2081,14 +2168,23 @@ def test_sources_route(client: TestClient, monkeypatch):
     async def fake_source_admin(*, action: str, **kwargs):
         assert action == "list"
         assert kwargs == {}
-        return {"success": True, "items": [{"source": "demo", "paragraph_count": 2}], "count": 1}
+        return {"success": True, "items": [{"source": "demo", "count": 2}], "count": 1}
 
     monkeypatch.setattr(memory_router_module.memory_service, "source_admin", fake_source_admin)
 
     response = client.get("/api/webui/memory/sources")
 
     assert response.status_code == 200
-    assert response.json()["items"] == [{"source": "demo", "paragraph_count": 2}]
+    assert response.json()["items"] == [{
+        "source": "demo",
+        "count": 2,
+        "paragraph_count": 2,
+        "source_kind": "",
+        "chat_id": "",
+        "chat_name": "",
+        "person_id": "",
+        "person_name": "",
+    }]
 
 
 def test_delete_operation_routes(client: TestClient, monkeypatch):
@@ -2257,6 +2353,7 @@ def test_memory_correction_preview_resolves_fuzzy_chat_id(client: TestClient, mo
         return {"success": True, "plan": {"plan_id": "corr-1"}}
 
     monkeypatch.setattr(memory_router_module, "_find_real_chat_session", lambda chat_id: None)
+    monkeypatch.setattr(memory_router_module, "_prefetch_latest_messages_by_session", lambda db_session, session_ids: {})
     monkeypatch.setattr(memory_router_module._chat_manager, "get_session_name", lambda chat_id: "测试群")
     monkeypatch.setattr(memory_router_module, "get_db_session", lambda: _FakeDbContext(_FakeSession()))
     monkeypatch.setattr(memory_router_module.memory_service, "memory_correction_admin", fake_memory_correction_admin)

@@ -1008,6 +1008,19 @@ class ExperimentalConfig(ConfigBase):
     )
     """开启后，reply 动作可通过 attach_pic、attach_emoji、attach_at 参数附加图片、表情包或 at。"""
 
+    replyer_retro_prompt: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "复古回复提示词",
+                "en_US": "Retro reply prompt",
+                "ja_JP": "レトロ返信プロンプト",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
+
     emotion_trait: Literal["rational_calm", "neutral", "sentimental"] = Field(
         default="neutral",
         json_schema_extra={
@@ -3231,20 +3244,6 @@ class AMemorixPersonProfileConfig(ConfigBase):
     )
     """人物画像证据分类最大输出 token 数"""
 
-    evidence_classification_temperature: float = Field(
-        default=0.1,
-        ge=0.0,
-        le=2.0,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "证据分类温度",
-                "en_US": "Evidence classification temperature",
-                "ja_JP": "証拠分類の温度",
-            },
-        },
-    )
-    """人物画像证据分类模型温度"""
-
 
 class AMemorixMemoryEvolutionConfig(ConfigBase):
     """A_Memorix 记忆演化配置"""
@@ -4666,6 +4665,20 @@ class ResponseSplitterConfig(ConfigBase):
 
     __ui_parent__ = "response_post_process"
 
+    mode: Literal["rule", "llm"] = Field(
+        default="rule",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "断句模式",
+                "en_US": "Splitting mode",
+                "ja_JP": "分割モード",
+            },
+            "x-widget": "select",
+            "options": ["rule", "llm"],
+        },
+    )
+    """规则断句或使用 LLM 按语义断句。"""
+
     enable: bool = Field(
         default=True,
         json_schema_extra={
@@ -4911,6 +4924,32 @@ class LogConfig(ConfigBase):
     )
     """每个聊天最多保留多少条回复效果记录。"""
 
+    event_loop_watchdog_enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "事件循环卡顿看门狗",
+                "en_US": "Event loop lag watchdog",
+                "ja_JP": "イベントループ遅延ウォッチドッグ",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """是否记录事件循环卡顿；主循环与 WebUI 循环各有一份，用于排查界面卡顿。"""
+
+    event_loop_watchdog_warn_seconds: float = Field(
+        default=0.5,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "卡顿告警阈值（秒）",
+                "en_US": "Lag warning threshold (seconds)",
+                "ja_JP": "遅延警告しきい値（秒）",
+            },
+            "x-widget": "input",
+        },
+    )
+    """事件循环唤醒延迟超过该秒数时记录一条警告日志。"""
+
     suppress_libraries: list[str] = Field(
         default_factory=lambda: [
             "faiss",
@@ -4978,7 +5017,7 @@ class DebugConfig(ConfigBase):
     __ui_label__ = "其他"
 
     enable_console_input: bool = Field(
-        default=False,
+        default=True,
         json_schema_extra={
             "label": {
                 "zh_CN": "启用终端输入",
@@ -5067,6 +5106,19 @@ class DebugConfig(ConfigBase):
         },
     )
     """记录模型 prompt cache 统计，用于性能调试。"""
+
+    force_plugin_compatibility: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "强制插件兼容",
+                "en_US": "Force plugin compatibility",
+                "ja_JP": "プラグイン互換を強制",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """跳过插件声明的 Host 和 SDK 版本范围校验，直接加载插件；开启后需重启生效。"""
 
 
 class ExtraPromptItem(ConfigBase):

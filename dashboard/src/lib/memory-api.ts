@@ -177,7 +177,7 @@ export interface MemoryGraphParagraphDetailResponsePayload {
   evidence_graph: MemoryEvidenceGraphPayload
 }
 
-export type MemoryRecordType = 'paragraph' | 'entity' | 'relation' | 'fact'
+export type MemoryRecordType = 'paragraph' | 'entity' | 'relation' | 'fact' | 'episode'
 
 export interface MemoryRecordPayload {
   type: MemoryRecordType
@@ -185,6 +185,8 @@ export interface MemoryRecordPayload {
   title: string
   summary: string
   source: string
+  /** 来源的可读标签（聊天流名称 / 人物姓名 / 可读的导入来源）；解析不出时为空串 */
+  source_label?: string
   status: string
   created_at?: number | null
   updated_at?: number | null
@@ -1318,8 +1320,19 @@ export interface MemoryFeedbackCorrectionRollbackPayload {
 export interface MemorySourceItemPayload {
   source: string
   count?: number
+  /** 该来源下的段落数；后端由 count 归一化后回填 */
   paragraph_count?: number
-  relation_count?: number
+  last_updated?: number | null
+  /** 来源类型（chat_summary / chat_stream / chat_history / person_fact），由后端按来源前缀解析 */
+  source_kind?: string
+  /** 来源对应的聊天流 session_id；人物事实等非聊天流来源为空串 */
+  chat_id?: string
+  /** 来源对应的聊天流实际名称；无法识别时为空串 */
+  chat_name?: string
+  /** 人物事实来源对应的 person_id；非人物事实来源为空串 */
+  person_id?: string
+  /** 人物事实来源对应的可读姓名；查不到时为空串 */
+  person_name?: string
   episode_rebuild_blocked?: boolean
   [key: string]: unknown
 }
@@ -1403,6 +1416,10 @@ export interface MemoryEpisodeActionPayload extends Record<string, unknown> {
 export interface MemoryProfileItemPayload extends Record<string, unknown> {
   person_id: string
   person_name?: string
+  /** 平台侧用户昵称（来自 PersonInfo），用于检索与展示 */
+  user_nickname?: string
+  /** 群名片列表（来自 PersonInfo），用于检索与展示 */
+  group_cardname_list?: string[]
   profile_version?: number
   profile_text?: string
   updated_at?: number | null
@@ -2482,6 +2499,12 @@ export interface MemoryImageListPayload extends MemoryImageStatusPayload {
   items?: MemoryImageAssetPayload[]
 }
 
+export interface MemoryImageChatSummaryPayload {
+  chat_id: string
+  chat_name: string
+  asset_count: number
+}
+
 export interface MemoryImageDetailPayload {
   success: boolean
   asset?: MemoryImageAssetPayload
@@ -2497,9 +2520,18 @@ export async function getMemoryImageStatus(): Promise<MemoryImageStatusPayload> 
 
 export async function getMemoryImages(
   limit: number = 50,
-  offset: number = 0
+  offset: number = 0,
+  chatId: string = ''
 ): Promise<MemoryImageListPayload> {
-  return requestJson<MemoryImageListPayload>(`/images?limit=${limit}&offset=${offset}`)
+  const chatQuery = chatId ? `&chat_id=${encodeURIComponent(chatId)}` : ''
+  return requestJson<MemoryImageListPayload>(`/images?limit=${limit}&offset=${offset}${chatQuery}`)
+}
+
+export async function getMemoryImageChats(): Promise<MemoryImageChatSummaryPayload[]> {
+  const result = await requestJson<{ success?: boolean; items?: MemoryImageChatSummaryPayload[] }>(
+    '/images/chats'
+  )
+  return result.items ?? []
 }
 
 export async function getMemoryImage(assetId: string): Promise<MemoryImageDetailPayload> {
@@ -2622,6 +2654,8 @@ export interface MemoryImageSearchPayload {
     asset_id: string
     similarity: number
     match_kind: string
+    width: number
+    height: number
     occurrences: MemoryImageOccurrencePayload[]
     observations: MemoryImageObservationPayload[]
     related_memories: Array<{ content: string }>

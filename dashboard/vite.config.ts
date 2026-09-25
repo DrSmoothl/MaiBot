@@ -1,20 +1,42 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import path from 'path'
 
 import { dashboardVersionDefine } from './app-version'
 
+// vitest 运行期间会在源码目录旁留下瞬时临时文件（原子写的 `.tmp-*`、`.tmpdir/` 目录），
+// Windows 上这些文件常处于占用状态，Vite 监听它们会抛 EBUSY。
+const VITEST_TEMP_WATCH_IGNORED = [
+  '**/.tmp-*',
+  '**/.*.tmpdir',
+  '**/.*.tmpdir/**',
+  '**/*.tmp',
+]
+
+// chokidar 对 EBUSY 等错误会 emit 'error'，而 Vite dev server 未监听该事件，
+// 单个文件监听失败（Node 的 'error' 无监听即抛出）会直接打挂 dev 服务。
+function watchErrorGuard(): Plugin {
+  return {
+    name: 'watch-error-guard',
+    configureServer(server) {
+      server.watcher.on('error', (error: Error) => {
+        server.config.logger.warn(`文件监听出错，已忽略: ${error.message}`)
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [tailwindcss(), react()],
+  plugins: [tailwindcss(), react(), watchErrorGuard()],
   define: dashboardVersionDefine,
   server: {
     host: '127.0.0.1',
     port: 7999,
     watch: {
       // 依赖目录的本地备份不应进入 Vite 文件监听，否则会占用大量句柄并导致服务无响应。
-      ignored: ['**/node_modules.mixed-backup-*/**'],
+      ignored: ['**/node_modules.mixed-backup-*/**', ...VITEST_TEMP_WATCH_IGNORED],
     },
     allowedHosts: ['sengokucolad.tail1e46b9.ts.net'],
     proxy: {

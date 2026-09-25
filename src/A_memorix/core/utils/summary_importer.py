@@ -492,7 +492,6 @@ class SummaryImporter:
             model_list=list(template_cfg.model_list),
             max_tokens=template_cfg.max_tokens,
             temperature=template_cfg.temperature,
-            slow_threshold=template_cfg.slow_threshold,
             selection_strategy=template_cfg.selection_strategy,
             hard_timeout=template_cfg.hard_timeout,
         )

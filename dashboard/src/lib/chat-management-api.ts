@@ -125,6 +125,17 @@ export interface AdapterHostPolicy {
   private: AdapterHostPolicySection
 }
 
+/** 聊天流的适配器放行状态：不允许时 reason 说明被阻止的原因 */
+export interface SessionAdapterStatus {
+  allowed: boolean
+  reason: string
+}
+
+interface SessionAdapterStatusResponse {
+  success: boolean
+  statuses?: Record<string, SessionAdapterStatus>
+}
+
 interface AdapterHostPolicyResponse {
   success: boolean
   plugin_id: string
@@ -223,6 +234,23 @@ export async function getChatStreams(limit = 1000): Promise<ChatStream[]> {
     query: { limit },
   })
   return result.sessions ?? []
+}
+
+/** 聊天流适配器放行状态的查询键：适配器规则变化后按此前缀失效缓存 */
+export const CHAT_ADAPTER_STATUS_QUERY_KEY = 'chat-adapter-status'
+
+/** 批量读取聊天流的适配器放行状态，未返回的聊天流按放行处理 */
+export async function getChatSessionsAdapterStatus(
+  sessionIds: string[]
+): Promise<Record<string, SessionAdapterStatus>> {
+  const result = await backendApi.post<SessionAdapterStatusResponse>(
+    '/api/chat/sessions/adapter-status',
+    {
+      body: { session_ids: sessionIds },
+      errorMessage: '读取聊天流适配器放行状态失败',
+    }
+  )
+  return result.statuses ?? {}
 }
 
 export async function resolveChatTarget(
@@ -355,7 +383,7 @@ export async function updateChatStreamAdapterPolicy(
     `/api/chat/sessions/${encodeURIComponent(sessionId)}/adapters/policy`,
     {
       body: payload,
-      errorMessage: '保存适配器放行规则失败',
+      errorMessage: '保存适配器规则失败',
     }
   )
   if (!result.detail) {

@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -163,7 +163,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   const [marketplaceSortBy, setMarketplaceSortBy] = useState<MarketplaceSortKey>(
     initialViewStateRef.current.marketplaceSortBy
   )
-  const [showCompatibleOnly] = useState(
+  const [showCompatibleOnly, setShowCompatibleOnly] = useState(
     () => localStorage.getItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY) !== 'false'
   )
   const [showInstalledPlugins, setShowInstalledPlugins] = useState(initialViewStateRef.current.showInstalledPlugins)
@@ -212,6 +212,11 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     localStorage.setItem('plugins-restart-notice-dismissed', 'true')
     setRestartNoticeVisible(false)
   }
+
+  // 「仅显示当前版本」开关：在市场页内直接切换的兼容性筛选偏好，变化后写回 localStorage
+  useEffect(() => {
+    localStorage.setItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY, String(showCompatibleOnly))
+  }, [showCompatibleOnly])
 
   useEffect(() => {
     sessionStorage.setItem(
@@ -271,7 +276,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     marketPlugins: PluginInfo[],
     installed: InstalledPlugin[]
   ): PluginInfo[] => {
-    const mergedData = marketPlugins.map(plugin => {
+    const mergedData: PluginInfo[] = marketPlugins.map(plugin => {
       const installedPlugin = installed.find(item => item.id === plugin.id || item.manifest?.id === plugin.id)
       const isInstalled = Boolean(installedPlugin) || checkPluginInstalled(plugin.id, installed)
       const installedVersion = installedPlugin?.manifest?.version ?? getInstalledPluginVersion(plugin.id, installed)
@@ -280,6 +285,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         ...plugin,
         installed: isInstalled,
         installed_version: installedVersion,
+        installed_release: installedPlugin?.release,
       }
     })
 
@@ -408,6 +414,14 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             setLoading(true)
           }
           setError(null)
+          // 统计摘要与市场清单、本地扫描互不依赖，提前并发发起，避免下载量/评分比列表晚一整跳才出现；
+          // 但清单失败时不等待统计请求，保证错误提示及时返回。
+          const statsSummaryPromise = getPluginStatsSummary({
+            forceRefresh: Boolean(cachedStatsSummary),
+          }).catch((statsError: unknown) => {
+            console.warn('刷新插件统计失败:', statsError)
+            return {}
+          })
           const [gitStatus, maimaiVersion, marketResult, installed] = await Promise.all([
             checkGitStatus(),
             getMaimaiVersion(),
@@ -449,16 +463,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary))
           }
           setPlugins(mergedData)
-
-          getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
-            .then((statsSummary) => {
-              if (!isUnmounted) {
-                setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
-              }
-            })
-            .catch((statsError) => {
-              console.warn('刷新插件统计失败:', statsError)
-            })
+          setPluginStats(buildPluginStatsMap(mergedData, await statsSummaryPromise))
         } finally {
           if (!isUnmounted) {
             setLoading(false)
@@ -534,6 +539,8 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   // 1. manifest_version === 1 的插件在麦麦 >= 1.0.0 时一律视为不兼容（旧 manifest 已不再被宿主接受）；
   // 2. 否则若声明了 host_application 范围，则按版本范围判定。
   const checkPluginCompatibility = (plugin: PluginInfo): boolean => {
+    if (plugin.releases?.sync_error) return false
+    if (plugin.releases?.mode === 'releases') return Boolean(plugin.releases.recommended_version)
     if (!maimaiVersion) return true
 
     // manifest v1 在 1.0.0+ 麦麦上不再兼容
@@ -553,6 +560,8 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
   // 不兼容原因（用于 UI 提示）
   const getIncompatibleReason = (plugin: PluginInfo): string | null => {
+    if (plugin.releases?.sync_error) return `版本同步失败：${plugin.releases.sync_error}`
+    if (plugin.releases?.mode === 'releases' && !plugin.releases.recommended_version) return '没有兼容的稳定版本，请在插件详情查看版本列表'
     if (!maimaiVersion) return null
     const manifestVersion = plugin.manifest?.manifest_version ?? 1
     if (manifestVersion <= 1 && maimaiVersion.version_major >= 1) {
@@ -573,6 +582,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
   // 检查是否需要更新（市场版本比已安装版本新）
   const needsUpdate = (plugin: PluginInfo): boolean => {
+    if (plugin.installed_release?.pinned) return false
     if (!plugin.installed || !plugin.installed_version || !plugin.manifest?.version) {
       return false
     }
@@ -603,6 +613,11 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
   // 打开安装对话框
   const openInstallDialog = (plugin: PluginInfo) => {
+    if (plugin.releases?.mode === 'releases') {
+      // 发布版本从详情页选择，分支对话框仅用于尚未采用 Release 的插件。
+      setDetailPluginId(plugin.id)
+      return
+    }
     if (!gitStatus?.installed) {
       toast({
         title: '无法安装',
@@ -761,7 +776,8 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             return {
               ...p,
               installed: isInstalled,
-              installed_version: installedVersion
+              installed_version: installedVersion,
+              installed_release: installed.find((item) => item.id === p.id)?.release,
             }
           }
           return p
@@ -815,7 +831,8 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             return {
               ...p,
               installed: isInstalled,
-              installed_version: installedVersion
+              installed_version: installedVersion,
+              installed_release: installed.find((item) => item.id === p.id)?.release,
             }
           }
           return p
@@ -899,7 +916,8 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             return {
               ...p,
               installed: isInstalled,
-              installed_version: installedVersion
+              installed_version: installedVersion,
+              installed_release: installed.find((item) => item.id === p.id)?.release,
             }
           }
           return p
@@ -1069,6 +1087,21 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             </Button>
 
             {/* 兼容性筛选 */}
+            <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:min-w-fit sm:flex-col sm:items-center sm:justify-center sm:gap-1">
+              <label
+                htmlFor="compatible-only-plugins"
+                className="cursor-pointer text-xs font-medium leading-none text-muted-foreground whitespace-nowrap"
+              >
+                仅显示当前版本
+              </label>
+              <Switch
+                id="compatible-only-plugins"
+                checked={showCompatibleOnly}
+                onCheckedChange={setShowCompatibleOnly}
+              />
+            </div>
+
+            {/* 已安装筛选 */}
             <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:min-w-fit sm:flex-col sm:items-center sm:justify-center sm:gap-1">
               <label
                 htmlFor="show-installed-plugins"

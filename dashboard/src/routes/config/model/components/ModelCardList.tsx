@@ -47,8 +47,12 @@ function getModelTestStatus(result: ModelTestResult | undefined, isTesting: bool
   }
 
   if (result.success) {
+    const isEmbeddingTest = result.test_kind === 'text_embedding' || result.test_kind === 'image_embedding'
+    const summary = isEmbeddingTest
+      ? `测试通过：嵌入向量正常${result.embedding_dimension ? `（维度 ${result.embedding_dimension}）` : ''}`
+      : `测试通过：文本${result.visual_tested ? '、视觉' : ''}与工具调用正常`
     return {
-      description: `测试通过：文本${result.visual_tested ? '、视觉' : ''}与工具调用正常${
+      description: `${summary}${
         result.latency_ms != null ? `，耗时 ${(result.latency_ms / 1000).toFixed(2)}s` : ''
       }`,
       className: 'border-green-500',
@@ -134,9 +138,9 @@ export const ModelCardList = React.memo(function ModelCardList({
                   )}
                 </Button>
                 <Button
-                  variant="default"
+                  variant="outline"
                   size="icon"
-                  className="h-8 w-8"
+                  className="border-primary! text-primary hover:text-primary h-8 w-8"
                   onClick={() => onEdit(model, actualIndex)}
                   title="编辑"
                   aria-label={`编辑模型 ${model.name}`}
@@ -144,9 +148,10 @@ export const ModelCardList = React.memo(function ModelCardList({
                   <StreamlineIcon name="edit-pdf-solid" fallback={Pencil} className="h-3.5 w-3.5" />
                 </Button>
                 <Button
+                  variant="outline"
                   size="icon"
                   onClick={() => onDelete(actualIndex)}
-                  className="h-8 w-8 bg-red-600 text-white hover:bg-red-700"
+                  className="border-destructive! text-destructive hover:text-destructive h-8 w-8"
                   title="删除"
                   aria-label={`删除模型 ${model.name}`}
                 >
@@ -174,14 +179,17 @@ export const ModelCardList = React.memo(function ModelCardList({
                 </p>
               </div>
               <div>
-                <span className="text-muted-foreground text-xs">输入价格</span>
+                <span className="text-muted-foreground text-xs">默认输入价格</span>
                 <p className="font-medium">¥{model.price_in}/M</p>
               </div>
               <div>
-                <span className="text-muted-foreground text-xs">输出价格</span>
+                <span className="text-muted-foreground text-xs">默认输出价格</span>
                 <p className="font-medium">¥{model.price_out}/M</p>
               </div>
             </div>
+            {!!model.price_periods?.length && (
+              <p className="text-xs text-muted-foreground">{model.price_periods.length} 个价格时段</p>
+            )}
           </div>
         )
       })}

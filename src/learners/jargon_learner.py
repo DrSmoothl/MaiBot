@@ -8,7 +8,7 @@ import asyncio
 import re
 
 from src.chat.utils.utils import is_bot_self
-from src.common.data_models.llm_service_data_models import LLMGenerationOptions, LLMResponseResult
+from src.common.data_models.llm_service_data_models import LLMResponseResult
 from src.common.data_models.message_component_data_model import EmojiComponent, ReplyComponent
 from src.common.logger import get_logger
 from src.config.config import global_config
@@ -447,7 +447,6 @@ class JargonLearner:
             learning_messages = await self._build_multi_learning_messages(pending_messages, prompt)
             generation_result = await jargon_learn_model.generate_response_with_context(
                 lambda _client: learning_messages,
-                options=LLMGenerationOptions(temperature=0.3),
                 session_id=learning_session_id,
             )
             self._log_learning_context_preview(

@@ -53,14 +53,14 @@ vi.mock('@/components/memory/MemoryDeleteDialog', () => ({
     open: boolean
     preview?: { mode?: string; item_count?: number } | null
     result?: { operation_id?: string } | null
-    onExecute?: () => void
+    onExecute?: (reason: string) => void
     onRestore?: () => void
   }) => (
     open ? (
       <div data-testid="memory-delete-dialog">
         <div>{`preview:${preview?.mode ?? 'none'}:${preview?.item_count ?? 0}`}</div>
         <div>{`result:${result?.operation_id ?? 'none'}`}</div>
-        <button type="button" onClick={onExecute}>执行删除</button>
+        <button type="button" onClick={() => onExecute?.('')}>执行删除</button>
         <button type="button" onClick={onRestore}>执行恢复</button>
       </div>
     ) : null
@@ -236,7 +236,7 @@ function mockImportCompletedWithErrorsDetail(taskId: string): memoryApi.MemoryIm
 }
 
 async function waitForConsoleReady() {
-  await screen.findByRole('tab', { name: '图谱' }, { timeout: 10_000 })
+  await screen.findByRole('tab', { name: '记忆查询' }, { timeout: 10_000 })
 }
 
 async function openMemoryStatusDialog(user: ReturnType<typeof userEvent.setup>) {
@@ -251,11 +251,6 @@ async function openInspectionMode(
 ) {
   await user.click(screen.getByRole('tab', { name: '记忆检修' }))
   await user.click(await screen.findByRole('tab', { name: mode }))
-}
-
-async function openInspectionTuning(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('tab', { name: '记忆检修' }))
-  await user.click(screen.getByRole('tab', { name: '检索调优' }))
 }
 
 const QUICK_START_KEY = 'memory-quick-start-dismissed'
@@ -328,69 +323,6 @@ function mockRecords(record: memoryApi.MemoryRecordPayload, context: memoryApi.M
     items: [record],
   })
   vi.mocked(memoryApi.getMemoryRecordContext).mockResolvedValue(context)
-}
-
-function jumpTarget(
-  tab: string,
-  params: Record<string, string | number | boolean | null | undefined> = {},
-): memoryApi.MemoryTimelineJumpTargetPayload {
-  return { tab, params } as memoryApi.MemoryTimelineJumpTargetPayload
-}
-
-function timelineEvent(
-  title: string,
-  target: memoryApi.MemoryTimelineJumpTargetPayload,
-): memoryApi.MemoryTimelineEventPayload {
-  return {
-    event_id: `event:${title}`,
-    event_type: 'paragraph_created',
-    category: 'paragraph',
-    occurred_at: 1_710_000_100,
-    chat_id: 'chat-1',
-    chat_name: '测试群',
-    title,
-    summary: `${title}摘要`,
-    object_count: 1,
-    key_id: 'key-1',
-    source: 'chat_summary:chat-1',
-    attribution: 'source',
-    metadata: {},
-    jump_target: target,
-  }
-}
-
-function mockTimelineItems(items: memoryApi.MemoryTimelineEventPayload[]) {
-  vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
-    success: true,
-    chat: {
-      chat_id: 'chat-1',
-      chat_name: '测试群',
-      platform: 'qq',
-      group_id: '10001',
-      user_id: null,
-      is_group: true,
-    },
-    range: {
-      time_start: 1_710_000_000,
-      time_end: 1_710_003_600,
-      min_time: 1_710_000_000,
-      max_time: 1_710_003_600,
-    },
-    summary: {
-      total: items.length,
-      by_type: { paragraph: items.length },
-    },
-    items,
-  })
-}
-
-async function clickTimelineJump(user: ReturnType<typeof userEvent.setup>, title: string) {
-  const heading = await screen.findByText(title)
-  const card = heading.closest('.rounded-lg')
-  if (!card) {
-    throw new Error(`missing timeline card for ${title}`)
-  }
-  await user.click(within(card as HTMLElement).getByRole('button', { name: '跳转' }))
 }
 
 async function closeParagraphDialog(user: ReturnType<typeof userEvent.setup>) {
@@ -584,15 +516,6 @@ describe('KnowledgeBasePage import workflow', () => {
         maibot_source_db_default: 'data/maibot.db',
       },
     })
-    vi.mocked(memoryApi.getMemoryImportPathAliases).mockResolvedValue({
-      success: true,
-      path_aliases: {
-        converted: 'data/a-memorix/imports/converted',
-        lpmm: 'data/a-memorix/imports/source/lpmm',
-        maibot: 'data/a-memorix/imports/source/maibot',
-        raw: 'data/a-memorix/imports/source/raw',
-      },
-    })
     vi.mocked(memoryApi.getMemoryImportChatTargets).mockResolvedValue({
       success: true,
       data: [
@@ -741,7 +664,7 @@ describe('KnowledgeBasePage import workflow', () => {
 
     vi.mocked(memoryApi.getMemorySources).mockResolvedValue({
       success: true,
-      items: [{ source: 'demo-1', paragraph_count: 2, relation_count: 1 }],
+      items: [{ source: 'demo-1', source_kind: 'chat_summary', paragraph_count: 2, relation_count: 1 }],
       count: 1,
     })
     vi.mocked(memoryApi.getMemoryDeleteOperations).mockResolvedValue({
@@ -1206,7 +1129,6 @@ describe('KnowledgeBasePage import workflow', () => {
     expect(await screen.findByRole('button', { name: '创建导入任务' })).toBeInTheDocument()
     expect((await screen.findAllByText('import-run-1')).length).toBeGreaterThan(0)
     expect(memoryApi.getMemoryImportSettings).toHaveBeenCalled()
-    expect(memoryApi.getMemoryImportPathAliases).toHaveBeenCalled()
     expect(memoryApi.getMemoryImportTasks).toHaveBeenCalled()
   })
 
@@ -1567,12 +1489,14 @@ describe('KnowledgeBasePage import workflow', () => {
     await waitFor(() => expect(memoryApi.createMemoryRawScanImport).toHaveBeenCalledTimes(1))
 
     await openImportTab()
-    await user.click(screen.getByRole('tab', { name: 'LPMM OpenIE' }))
+    await user.click(screen.getByRole('button', { name: '切换导入方式' }))
+    await user.click(screen.getByRole('menuitemradio', { name: /LPMM OpenIE/ }))
     await user.click(screen.getByRole('button', { name: '创建导入任务' }))
     await waitFor(() => expect(memoryApi.createMemoryLpmmOpenieImport).toHaveBeenCalledTimes(1))
 
     await openImportTab()
-    await user.click(screen.getByRole('tab', { name: 'LPMM 转换' }))
+    await user.click(screen.getByRole('button', { name: '切换导入方式' }))
+    await user.click(screen.getByRole('menuitemradio', { name: /LPMM 转换/ }))
     await user.click(screen.getByRole('button', { name: '创建导入任务' }))
     await waitFor(() => expect(memoryApi.createMemoryLpmmConvertImport).toHaveBeenCalledTimes(1))
 
@@ -1595,6 +1519,9 @@ describe('KnowledgeBasePage import workflow', () => {
 
     await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入导出' }))
+    // 任务详情在弹窗里：先点队列卡片打开
+    await user.click(await screen.findByText('import-run-1'))
+    await screen.findByRole('dialog')
 
     expect(await screen.findByText('alpha.txt')).toBeInTheDocument()
     expect(await screen.findByText('chunk-preview-0')).toBeInTheDocument()
@@ -1625,8 +1552,12 @@ describe('KnowledgeBasePage import workflow', () => {
     await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入导出' }))
 
-    expect((await screen.findAllByText('完成（有错误）')).length).toBeGreaterThan(0)
-    expect(await screen.findByText('成功 9 / 12 分块 · 失败 3')).toBeInTheDocument()
+    await user.click(await screen.findByText('import-run-1'))
+    const failedDialog = await screen.findByRole('dialog')
+
+    expect(within(failedDialog).getByText('完成（有错误）')).toBeInTheDocument()
+    // 任务级进度与文件级明细都会给出分块摘要
+    expect(within(failedDialog).getAllByText('成功 9 / 12 分块 · 失败 3').length).toBeGreaterThan(0)
   }, 20_000)
 
   it('supports cancel and retry actions for selected task', async () => {
@@ -1635,12 +1566,14 @@ describe('KnowledgeBasePage import workflow', () => {
 
     await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '导入导出' }))
-    await screen.findByText('任务详情')
+    // 任务详情改为点开队列卡片后的弹窗
+    await user.click(await screen.findByText('import-run-1'))
+    const detailDialog = await screen.findByRole('dialog')
 
-    await user.click(screen.getByRole('button', { name: '取消选中导入任务' }))
+    await user.click(within(detailDialog).getByRole('button', { name: '取消选中导入任务' }))
     await waitFor(() => expect(memoryApi.cancelMemoryImportTask).toHaveBeenCalledWith('import-run-1'))
 
-    await user.click(screen.getByRole('button', { name: '重试选中导入任务' }))
+    await user.click(within(detailDialog).getByRole('button', { name: '重试选中导入任务' }))
     await waitFor(() => expect(memoryApi.retryMemoryImportTask).toHaveBeenCalled())
     const [taskId, retryPayload] = vi.mocked(memoryApi.retryMemoryImportTask).mock.calls[0]
     expect(taskId).toBe('import-run-1')
@@ -1678,7 +1611,7 @@ describe('KnowledgeBasePage import workflow', () => {
       await new Promise((resolve) => setTimeout(resolve, 350))
     })
 
-    expect(screen.getByRole('tab', { name: '图谱' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '导入导出' })).toBeInTheDocument()
     expect(vi.mocked(memoryApi.getMemoryImportTasks).mock.calls.length).toBeGreaterThan(initialCalls)
   }, 20_000)
 
@@ -1990,8 +1923,8 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '删除' }))
-    await screen.findByText('来源批量删除')
+    await user.click(screen.getByRole('tab', { name: '记忆抹除' }))
+    await screen.findByRole('button', { name: '全选当前结果' })
 
     const sourceCellCandidates = await screen.findAllByText('demo-1')
     const sourceRow = sourceCellCandidates
@@ -2003,11 +1936,11 @@ describe('KnowledgeBasePage import workflow', () => {
     await user.click(within(sourceRow).getByRole('checkbox'))
 
     await user.click(screen.getByRole('button', { name: '预览删除' }))
+    // 预览阶段不带原因，原因在对话框确认执行时才合并进请求
     await waitFor(() =>
       expect(memoryApi.previewMemoryDelete).toHaveBeenCalledWith({
         mode: 'source',
         selector: { sources: ['demo-1'] },
-        reason: 'knowledge_base_source_delete',
         requested_by: 'knowledge_base',
       }),
     )
@@ -2085,6 +2018,7 @@ describe('KnowledgeBasePage import workflow', () => {
     await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '记忆查询' }))
     expect(await screen.findAllByText('待删除段落')).not.toHaveLength(0)
+    await user.click(await screen.findByRole('button', { name: /待删除段落/ }))
     await user.click(await screen.findByRole('button', { name: '删除' }))
 
     await waitFor(() =>
@@ -2096,29 +2030,6 @@ describe('KnowledgeBasePage import workflow', () => {
       })
     )
     expect(await screen.findByTestId('memory-delete-dialog')).toBeInTheDocument()
-  }, 20_000)
-
-  it('shows feedback correction history and supports rollback', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '纠错历史' }))
-    await screen.findByText('反馈纠错历史')
-    await screen.findByText('测试用户最喜欢的颜色是什么')
-    await waitFor(() => expect(memoryApi.getMemoryFeedbackCorrection).toHaveBeenCalledWith(11))
-
-    await user.click(screen.getByRole('button', { name: '回退本次纠错' }))
-    const rollbackReason = await screen.findByLabelText('回退原因')
-    await user.type(rollbackReason, '人工确认回退')
-    await user.click(screen.getByRole('button', { name: '确认回退' }))
-
-    await waitFor(() =>
-      expect(memoryApi.rollbackMemoryFeedbackCorrection).toHaveBeenCalledWith(11, {
-        requested_by: 'knowledge_base',
-        reason: '人工确认回退',
-      }),
-    )
   }, 20_000)
 
   it('shows memory correction entry and submits preview', async () => {
@@ -2196,34 +2107,13 @@ describe('KnowledgeBasePage import workflow', () => {
     )
   }, 20_000)
 
-  it('renders audit timeline and jumps to an episode target', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-    expect(await screen.findByText('事件列表')).toBeInTheDocument()
-    expect(await screen.findByText('Episode 新增：测试 Episode')).toBeInTheDocument()
-    await waitFor(() =>
-      expect(memoryApi.getMemoryTimeline).toHaveBeenCalledWith(expect.objectContaining({ chatId: 'chat-1' })),
-    )
-
-    await user.click(screen.getByRole('button', { name: '跳转' }))
-    expect(await screen.findByText('Episode 查询')).toBeInTheDocument()
-    await waitFor(() =>
-      expect(memoryApi.getMemoryEpisodes).toHaveBeenCalledWith(expect.objectContaining({
-        source: 'chat_summary:chat-1',
-      })),
-    )
-    await waitFor(() => expect(memoryApi.getMemoryEpisode).toHaveBeenCalledWith('ep-1'))
-  }, 20_000)
-
   it('submits the explicit Episode source attempt budget', async () => {
     const user = userEvent.setup()
     vi.mocked(memoryApi.processMemoryEpisodePending).mockClear()
     renderPage()
 
     await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆检修' }))
     await user.click(screen.getByRole('tab', { name: '情景记忆' }))
     expect(await screen.findByText('已完成')).toBeInTheDocument()
 
@@ -2249,6 +2139,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆检修' }))
     await user.click(screen.getByRole('tab', { name: '情景记忆' }))
     const attemptInput = await screen.findByLabelText('最大尝试次数（含首次）')
     await user.clear(attemptInput)
@@ -2277,6 +2168,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆检修' }))
     await user.click(screen.getByRole('tab', { name: '情景记忆' }))
     await user.click(screen.getByRole('button', { name: '处理来源重建任务' }))
 
@@ -2290,269 +2182,10 @@ describe('KnowledgeBasePage import workflow', () => {
     )
   }, 20_000)
 
-  it('prefers a real chat stream over WebUI local chat in audit timeline', async () => {
-    const user = userEvent.setup()
-    vi.mocked(memoryApi.getMemoryImportChatTargets).mockResolvedValueOnce({
-      success: true,
-      data: [
-        {
-          chat_id: 'webui-chat',
-          chat_name: 'WebUI用户的私聊',
-          platform: 'webui',
-          group_id: null,
-          user_id: 'webui',
-          is_group: false,
-        },
-        {
-          chat_id: 'chat-1',
-          chat_name: '测试群',
-          platform: 'qq',
-          group_id: '10001',
-          user_id: null,
-          is_group: true,
-        },
-      ],
-    })
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-
-    await waitFor(() =>
-      expect(memoryApi.getMemoryTimeline).toHaveBeenCalledWith(expect.objectContaining({ chatId: 'chat-1' })),
-    )
-    expect(memoryApi.getMemoryTimeline).not.toHaveBeenCalledWith(expect.objectContaining({ chatId: 'webui-chat' }))
-  }, 20_000)
-
-  it('jumps from paragraph timeline event to graph paragraph detail', async () => {
-    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
-      success: true,
-      chat: {
-        chat_id: 'chat-1',
-        chat_name: '测试群',
-        platform: 'qq',
-        group_id: '10001',
-        user_id: null,
-        is_group: true,
-      },
-      range: {
-        time_start: 1_710_000_000,
-        time_end: 1_710_003_600,
-        min_time: 1_710_000_000,
-        max_time: 1_710_003_600,
-      },
-      summary: {
-        total: 1,
-        by_type: { paragraph: 1, paragraph_created: 1 },
-      },
-      items: [
-        {
-          event_id: 'paragraph_created:paragraph-jump:1710000100',
-          event_type: 'paragraph_created',
-          category: 'paragraph',
-          occurred_at: 1_710_000_100,
-          chat_id: 'chat-1',
-          chat_name: '测试群',
-          title: '段落新增：跳转段落',
-          summary: '跳转段落摘要',
-          object_count: 1,
-          key_id: 'paragraph-jump',
-          source: 'chat_summary:chat-1',
-          attribution: 'source',
-          metadata: { paragraph_hash: 'paragraph-jump' },
-          jump_target: {
-            tab: 'graph',
-            params: { paragraph_hash: 'paragraph-jump' },
-          },
-        },
-      ],
-    })
-
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-    expect(await screen.findByText('段落新增：跳转段落')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '跳转' }))
-
-    await waitFor(() => {
-      expect(memoryApi.getMemoryGraphParagraphDetail).toHaveBeenCalledWith('paragraph-jump')
-    })
-    expect(window.location.search).toContain('tab=graph')
-    expect(window.location.search).toContain('paragraph_hash=paragraph-jump')
-  }, 20_000)
-
-  it('jumps from deleted paragraph timeline event to delete search when operation is missing', async () => {
-    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
-      success: true,
-      chat: {
-        chat_id: 'chat-1',
-        chat_name: '测试群',
-        platform: 'qq',
-        group_id: '10001',
-        user_id: null,
-        is_group: true,
-      },
-      range: {
-        time_start: 1_710_000_000,
-        time_end: 1_710_003_600,
-        min_time: 1_710_000_000,
-        max_time: 1_710_003_600,
-      },
-      summary: {
-        total: 1,
-        by_type: { paragraph: 1, paragraph_deleted: 1 },
-      },
-      items: [
-        {
-          event_id: 'paragraph_deleted:paragraph-missing-op:1710000200',
-          event_type: 'paragraph_deleted',
-          category: 'paragraph',
-          occurred_at: 1_710_000_200,
-          chat_id: 'chat-1',
-          chat_name: '测试群',
-          title: '段落删除：缺少操作',
-          summary: '删除段落摘要',
-          object_count: 1,
-          key_id: 'paragraph-missing-op',
-          source: 'chat_summary:chat-1',
-          attribution: 'source',
-          metadata: { paragraph_hash: 'paragraph-missing-op' },
-          jump_target: {
-            tab: 'delete',
-            params: {
-              paragraph_hash: 'paragraph-missing-op',
-              source: 'chat_summary:chat-1',
-            },
-          },
-        },
-      ],
-    })
-
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-    expect(await screen.findByText('段落删除：缺少操作')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '跳转' }))
-
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: '删除' })).toHaveAttribute('data-state', 'active')
-    })
-    expect(screen.getByPlaceholderText('搜索 operation / reason / requested_by / source')).toHaveValue('paragraph-missing-op')
-    expect(screen.getByPlaceholderText('搜索 source 名称')).toHaveValue('paragraph-missing-op')
-    expect(window.location.search).toContain('tab=delete')
-    expect(window.location.search).toContain('paragraph_hash=paragraph-missing-op')
-  }, 20_000)
-
-  it('paginates audit timeline events and supports page size presets', async () => {
-    const timelineEvents: memoryApi.MemoryTimelineEventPayload[] = Array.from({ length: 7 }, (_, index) => {
-      const itemNumber = index + 1
-      return {
-        event_id: `paragraph_created:paragraph-${itemNumber}:1710000${itemNumber}`,
-        event_type: 'paragraph_created',
-        category: 'paragraph',
-        occurred_at: 1_710_000_700 - index,
-        chat_id: 'chat-1',
-        chat_name: '测试群',
-        title: `段落新增：第 ${itemNumber} 条`,
-        summary: `分页测试摘要 ${itemNumber}`,
-        object_count: 1,
-        key_id: `paragraph-${itemNumber}`,
-        source: 'chat_summary:chat-1',
-        attribution: 'source',
-        metadata: { paragraph_hash: `paragraph-${itemNumber}` },
-        jump_target: {
-          tab: 'graph',
-          params: {
-            paragraph_hash: `paragraph-${itemNumber}`,
-          },
-        },
-      }
-    })
-    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
-      success: true,
-      chat: {
-        chat_id: 'chat-1',
-        chat_name: '测试群',
-        platform: 'qq',
-        group_id: '10001',
-        user_id: null,
-        is_group: true,
-      },
-      range: {
-        time_start: 1_710_000_000,
-        time_end: 1_710_003_600,
-        min_time: 1_710_000_000,
-        max_time: 1_710_003_600,
-      },
-      summary: {
-        total: timelineEvents.length,
-        by_type: { paragraph: timelineEvents.length, paragraph_created: timelineEvents.length },
-      },
-      items: timelineEvents,
-    })
-
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-    expect(await screen.findByText('段落新增：第 1 条')).toBeInTheDocument()
-    expect(screen.getByText('第 1 / 2 页，每页 5 条')).toBeInTheDocument()
-    expect(screen.queryByText('段落新增：第 6 条')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: '下一页' }))
-    expect(await screen.findByText('段落新增：第 6 条')).toBeInTheDocument()
-    expect(screen.getByText('第 2 / 2 页，每页 5 条')).toBeInTheDocument()
-    expect(screen.queryByText('段落新增：第 1 条')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('combobox', { name: '每页显示条数' }))
-    await user.click(await screen.findByRole('option', { name: '10 条' }))
-    expect(await screen.findByText('段落新增：第 7 条')).toBeInTheDocument()
-    expect(screen.getByText('第 1 / 1 页，每页 10 条')).toBeInTheDocument()
-  }, 20_000)
-
   describe('页面壳', () => {
     afterEach(() => {
       window.localStorage.removeItem(QUICK_START_KEY)
     })
-
-    it('switches shell tabs to records import feedback and tuning', async () => {
-      const user = userEvent.setup()
-      renderPage()
-      await waitForConsoleReady()
-
-      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
-      expect(screen.getByRole('tab', { name: '记忆查询' })).toHaveAttribute('data-state', 'active')
-      expect(window.location.search).toContain('tab=records')
-      expect(await screen.findByText('查询结果')).toBeInTheDocument()
-
-      await user.click(screen.getByRole('tab', { name: '导入导出' }))
-      expect(screen.getByRole('tab', { name: '导入导出' })).toHaveAttribute('data-state', 'active')
-      expect(window.location.search).toContain('tab=import')
-      expect(await screen.findByRole('button', { name: '创建导入任务' })).toBeInTheDocument()
-
-      await user.click(screen.getByRole('tab', { name: '纠错历史' }))
-      expect(screen.getByRole('tab', { name: '纠错历史' })).toHaveAttribute('data-state', 'active')
-      expect(window.location.search).toContain('tab=feedback')
-      expect(await screen.findByText('反馈纠错历史')).toBeInTheDocument()
-
-      await openInspectionTuning(user)
-      expect(screen.getByRole('tab', { name: '记忆检修' })).toHaveAttribute('data-state', 'active')
-      expect(screen.getByRole('tab', { name: '检索调优' })).toHaveAttribute('data-state', 'active')
-      expect(window.location.search).toContain('tab=inspection')
-      expect(window.location.search).toContain('mode=tuning')
-      expect(await screen.findByText('记忆搜索调优')).toBeInTheDocument()
-
-      await user.click(screen.getByRole('tab', { name: '内容修正' }))
-      expect(window.location.search).toContain('mode=correction')
-      await user.click(screen.getByRole('tab', { name: '状态维护' }))
-      expect(window.location.search).toContain('mode=maintenance')
-      expect(await screen.findByText('记忆维护操作')).toBeInTheDocument()
-    }, 20_000)
 
     it('reads deep links for records feedback import and legacy tuning', async () => {
       window.history.replaceState(null, '', '/resource/knowledge-base?tab=records')
@@ -2597,6 +2230,27 @@ describe('KnowledgeBasePage import workflow', () => {
       expect(await screen.findByLabelText('维护目标')).toHaveValue('rel-1')
       maintenanceView.unmount()
 
+      // 人物画像已并入记忆查询：旧链接 tab=profiles 落到人物画像切面，并保留 person_id
+      window.history.replaceState(
+        null,
+        '',
+        '/resource/knowledge-base?tab=profiles&person_id=person-legacy-1',
+      )
+      const legacyProfilesView = renderPage()
+      // 定位人物会直接展开画像详情弹窗；弹窗是模态的会隐藏外层标签，
+      // 因此这一步用弹窗作为「页面已就绪」的判据，而不是等标签出现
+      expect(await screen.findByRole('dialog', { name: '画像详情' })).toBeInTheDocument()
+      legacyProfilesView.unmount()
+
+      // 检修子模式同样支持显式 mode=profiles 深链
+      window.history.replaceState(null, '', '/resource/knowledge-base?tab=inspection&mode=profiles')
+      const profilesMaintenanceView = renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByRole('tab', { name: '记忆检修' })).toHaveAttribute('data-state', 'active')
+      expect(screen.getByRole('tab', { name: '画像维护' })).toHaveAttribute('data-state', 'active')
+      expect(await screen.findByText('别名维护')).toBeInTheDocument()
+      profilesMaintenanceView.unmount()
+
       window.history.replaceState(
         null,
         '',
@@ -2604,7 +2258,8 @@ describe('KnowledgeBasePage import workflow', () => {
       )
       renderPage()
       await waitForConsoleReady()
-      expect(screen.getByRole('tab', { name: '图谱' })).toHaveAttribute('data-state', 'active')
+      // 无效 tab 与旧链接 tab=graph 都回落到记忆查询
+      expect(screen.getByRole('tab', { name: '记忆查询' })).toHaveAttribute('data-state', 'active')
     }, 20_000)
 
     it('shows empty runtime status and keeps the console usable', async () => {
@@ -2620,7 +2275,7 @@ describe('KnowledgeBasePage import workflow', () => {
       vi.mocked(memoryApi.getMemoryRuntimeConfig).mockImplementation(() => new Promise(() => {}))
       renderPage()
       expect(await screen.findByRole('status', { name: '加载中' })).toBeInTheDocument()
-      expect(screen.queryByRole('tab', { name: '图谱' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('tab', { name: '记忆查询' })).not.toBeInTheDocument()
     })
 
     it('covers disabled core-unavailable single-pool and dual-not-ready badges', async () => {
@@ -2792,7 +2447,7 @@ describe('KnowledgeBasePage import workflow', () => {
       const user = userEvent.setup()
       renderPage()
       await waitForConsoleReady()
-      expect(screen.getByText('快速开始：先从这三件事入手')).toBeInTheDocument()
+      expect(screen.getByText('快速开始：先从这两件事入手')).toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: /导入或导出资料/ }))
       expect(screen.getByRole('tab', { name: '导入导出' })).toHaveAttribute('data-state', 'active')
@@ -2803,11 +2458,15 @@ describe('KnowledgeBasePage import workflow', () => {
       expect(screen.getByRole('tab', { name: '检索调优' })).toHaveAttribute('data-state', 'active')
       expect(window.location.search).toContain('mode=tuning')
 
-      await user.click(screen.getByRole('button', { name: /打开图谱/ }))
-      expect(screen.getByRole('tab', { name: '图谱' })).toHaveAttribute('data-state', 'active')
+      // 图谱入口在右上角省略号，与查看记忆状态并列；标签栏里不再有图谱
+      expect(screen.queryByRole('tab', { name: '图谱' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /打开图谱/ })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '更多操作' }))
+      await user.click(await screen.findByRole('menuitem', { name: '打开图谱' }))
+      expect(window.location.search).toContain('tab=graph')
 
       await user.click(screen.getByRole('button', { name: '关闭快速开始' }))
-      expect(screen.queryByText('快速开始：先从这三件事入手')).not.toBeInTheDocument()
+      expect(screen.queryByText('快速开始：先从这两件事入手')).not.toBeInTheDocument()
       expect(window.localStorage.getItem(QUICK_START_KEY)).toBe('true')
     }, 20_000)
 
@@ -2815,7 +2474,7 @@ describe('KnowledgeBasePage import workflow', () => {
       window.localStorage.setItem(QUICK_START_KEY, 'true')
       renderPage()
       await waitForConsoleReady()
-      expect(screen.queryByText('快速开始：先从这三件事入手')).not.toBeInTheDocument()
+      expect(screen.queryByText('快速开始：先从这两件事入手')).not.toBeInTheDocument()
     })
 
     it('refreshes runtime data and runs self-check from the status dialog', async () => {
@@ -2846,49 +2505,6 @@ describe('KnowledgeBasePage import workflow', () => {
       await waitFor(() => expect(screen.queryByText('重建全部向量')).not.toBeInTheDocument())
     }, 20_000)
 
-    it('toasts when audit chat targets fail to load', async () => {
-      vi.mocked(memoryApi.getMemoryImportChatTargets).mockRejectedValueOnce(new Error('审计聊天流失败'))
-      const user = userEvent.setup()
-      renderPage()
-      await waitForConsoleReady()
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await waitFor(() =>
-        expect(toastMock).toHaveBeenCalledWith({
-          title: '加载审计聊天流失败',
-          description: '审计聊天流失败',
-          variant: 'destructive',
-        }),
-      )
-    }, 20_000)
-
-    it('toasts a generic error when audit chat targets reject a non-error', async () => {
-      vi.mocked(memoryApi.getMemoryImportChatTargets).mockRejectedValueOnce('boom')
-      const user = userEvent.setup()
-      renderPage()
-      await waitForConsoleReady()
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await waitFor(() =>
-        expect(toastMock).toHaveBeenCalledWith({
-          title: '加载审计聊天流失败',
-          description: '未知错误',
-          variant: 'destructive',
-        }),
-      )
-    }, 20_000)
-
-    it('does not reload timeline chat targets after the panel has been visited', async () => {
-      const user = userEvent.setup()
-      renderPage()
-      await waitForConsoleReady()
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await screen.findByText('事件列表')
-      const callsAfterFirstVisit = vi.mocked(memoryApi.getMemoryImportChatTargets).mock.calls.length
-      await user.click(screen.getByRole('tab', { name: '图谱' }))
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      expect(await screen.findByText('事件列表')).toBeInTheDocument()
-      expect(vi.mocked(memoryApi.getMemoryImportChatTargets).mock.calls.length).toBe(callsAfterFirstVisit)
-    }, 20_000)
-
     it('opens the import tab from an empty embedded graph', async () => {
       vi.mocked(memoryApi.getMemoryGraph).mockResolvedValue({
         success: true,
@@ -2900,6 +2516,11 @@ describe('KnowledgeBasePage import workflow', () => {
       const user = userEvent.setup()
       renderPage()
       await waitForConsoleReady()
+      // 图谱已从标签栏移到右上角「更多操作」菜单，需先经菜单进入图谱
+      await user.click(screen.getByRole('button', { name: '更多操作' }))
+      await user.click(await screen.findByRole('menuitem', { name: '打开图谱' }))
+      expect(window.location.search).toContain('tab=graph')
+      // 空图谱给出回控制台的入口，点击后落到导入导出
       await user.click(await screen.findByRole('button', { name: '前往长期记忆控制台' }))
       expect(screen.getByRole('tab', { name: '导入导出' })).toHaveAttribute('data-state', 'active')
       expect(window.location.search).toContain('tab=import')
@@ -2954,34 +2575,55 @@ describe('KnowledgeBasePage import workflow', () => {
       await user.click(screen.getByRole('tab', { name: '记忆查询' }))
       expect(await screen.findAllByText('可跳转段落')).not.toHaveLength(0)
 
-      await user.click(await screen.findByRole('button', { name: '修正' }))
+      // 记录详情动作都在弹窗内；画像动作可能保持弹窗打开，重开前先按 Escape 关闭
+      const openDetail = async () => {
+        await user.keyboard('{Escape}')
+        await user.click(await screen.findByRole('button', { name: /可跳转段落/ }))
+        await screen.findByRole('button', { name: '修正' })
+      }
+
+      await openDetail()
+      await user.click(screen.getByRole('button', { name: '修正' }))
       expect(window.location.search).toContain('tab=inspection')
       expect(window.location.search).toContain('mode=correction')
       expect(await screen.findByLabelText('修正内容')).toHaveValue('修正以下记忆：可跳转段落')
 
       await user.click(screen.getByRole('tab', { name: '记忆查询' }))
-      await user.click(await screen.findByRole('button', { name: '强化' }))
+      await openDetail()
+      await user.click(screen.getByRole('button', { name: '强化' }))
       expect(window.location.search).toContain('mode=maintenance')
       expect(window.location.search).toContain('target=paragraph-record-action')
       expect(await screen.findByLabelText('维护目标')).toHaveValue('paragraph-record-action')
 
       await user.click(screen.getByRole('tab', { name: '记忆查询' }))
-      await user.click(await screen.findByRole('button', { name: '保护' }))
+      await openDetail()
+      await user.click(screen.getByRole('button', { name: '保护' }))
       expect(await screen.findByLabelText('维护目标')).toHaveValue('paragraph-record-action')
 
       await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await openDetail()
+      await user.click(screen.getByRole('tab', { name: /情景/ }))
       await user.click(await screen.findByText('关联情景一'))
-      expect(window.location.search).toContain('tab=episodes')
+      expect(window.location.search).toContain('tab=inspection')
+      expect(window.location.search).toContain('mode=episodes')
       expect(window.location.search).toContain('episode_id=ep-action-1')
 
       await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await openDetail()
+      await user.click(screen.getByRole('tab', { name: /画像/ }))
       await user.click(await screen.findByText('person-action-1'))
-      expect(window.location.search).toContain('tab=profiles')
+      // 人物画像已并入记忆查询：落到 tab=records 的人物画像切面
+      expect(window.location.search).toContain('tab=records')
+      expect(window.location.search).toContain('view=profiles')
       expect(window.location.search).toContain('person_id=person-action-1')
-      expect(await screen.findByText('人物画像查询')).toBeInTheDocument()
+      // 跳到画像会直接展开详情弹窗；先关掉它再继续操作标签
+      expect(await screen.findByRole('dialog', { name: '画像详情' })).toBeInTheDocument()
+      await user.keyboard('{Escape}')
 
-      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
-      await user.click(await screen.findByRole('button', { name: '图谱' }))
+      // 人物画像切面下要靠内部子标签切回文字记录（外层「记忆查询」此时已是激活态）
+      await user.click(screen.getByRole('tab', { name: '文字记录' }))
+      await openDetail()
+      await user.click(screen.getByRole('button', { name: '图谱' }))
       expect(window.location.search).toContain('tab=graph')
       expect(window.location.search).toContain('paragraph_hash=paragraph-record-action')
     }, 20_000)
@@ -3004,6 +2646,7 @@ describe('KnowledgeBasePage import workflow', () => {
       await waitForConsoleReady()
       await user.click(screen.getByRole('tab', { name: '记忆查询' }))
       expect(await screen.findAllByText('无人物事实')).not.toHaveLength(0)
+      await user.click(await screen.findByRole('button', { name: /无人物事实/ }))
       await user.click(await screen.findByRole('button', { name: '画像' }))
       expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: '缺少人物标识' }))
       await user.click(await screen.findByRole('button', { name: '删除' }))
@@ -3025,6 +2668,7 @@ describe('KnowledgeBasePage import workflow', () => {
       const factView = renderPage()
       await waitForConsoleReady()
       await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await user.click(await screen.findByRole('button', { name: /有人物事实/ }))
       await user.click(await screen.findByRole('button', { name: '修正' }))
       expect(await screen.findByLabelText('人物 ID')).toHaveValue('person-fact-1')
       expect(await screen.findByLabelText('修正内容')).toHaveValue('修正以下记忆：有人物事实')
@@ -3066,12 +2710,7 @@ describe('KnowledgeBasePage import workflow', () => {
       renderPage()
       await waitForConsoleReady()
       await user.click(screen.getByRole('tab', { name: '记忆查询' }))
-      await user.click(await screen.findByRole('button', { name: '图谱' }))
-      expect(window.location.search).toContain('tab=graph')
-      expect(window.location.search).toContain('paragraph_hash=related-paragraph-1')
-      await closeParagraphDialog(user)
-
-      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await user.click(await screen.findByRole('button', { name: /待删除实体/ }))
       await user.click(await screen.findByRole('button', { name: '删除' }))
       await waitFor(() =>
         expect(memoryApi.previewMemoryDelete).toHaveBeenCalledWith({
@@ -3085,101 +2724,14 @@ describe('KnowledgeBasePage import workflow', () => {
       expect(dialog).toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: '执行恢复' }))
       expect(memoryApi.restoreMemoryDelete).not.toHaveBeenCalled()
-    }, 20_000)
 
-    it('routes timeline jumps through inspection tuning and empty graph', async () => {
-      mockTimelineItems([
-        timelineEvent('跳到纠错计划', jumpTarget('correction', { plan_id: 'correction-plan-1' })),
-        timelineEvent('跳到维护', jumpTarget('maintenance', { target: 'rel-maint-1' })),
-        timelineEvent('跳到调优', jumpTarget('tuning')),
-        timelineEvent('跳到无效', jumpTarget('not-a-tab')),
-        timelineEvent('跳到空图谱', jumpTarget('graph')),
-      ])
-      const user = userEvent.setup()
-      renderPage()
-      await waitForConsoleReady()
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      expect(await screen.findByText('跳到纠错计划')).toBeInTheDocument()
-
-      await clickTimelineJump(user, '跳到无效')
-      expect(screen.getByRole('tab', { name: '审计时间线' })).toHaveAttribute('data-state', 'active')
-
-      await clickTimelineJump(user, '跳到纠错计划')
-      expect(window.location.search).toContain('tab=inspection')
-      expect(window.location.search).toContain('mode=correction')
-      expect(window.location.search).toContain('plan_id=correction-plan-1')
-      expect(await screen.findByLabelText('修正内容')).toBeInTheDocument()
-
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await clickTimelineJump(user, '跳到维护')
-      expect(window.location.search).toContain('mode=maintenance')
-      expect(await screen.findByLabelText('维护目标')).toHaveValue('rel-maint-1')
-
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await clickTimelineJump(user, '跳到调优')
-      expect(window.location.search).toContain('mode=tuning')
-      expect(await screen.findByText('记忆搜索调优')).toBeInTheDocument()
-
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await clickTimelineJump(user, '跳到空图谱')
+      // 详情弹窗随删除动作关闭，重新点开记录继续跳转图谱
+      await user.click(await screen.findByRole('button', { name: /待删除实体/ }))
+      await user.click(await screen.findByRole('button', { name: '图谱' }))
       expect(window.location.search).toContain('tab=graph')
-      expect(window.location.search).not.toContain('paragraph_hash=')
+      expect(window.location.search).toContain('paragraph_hash=related-paragraph-1')
+      await closeParagraphDialog(user)
     }, 20_000)
 
-    it('routes timeline jumps to profiles feedback delete import and records', async () => {
-      mockTimelineItems([
-        timelineEvent('跳到画像', jumpTarget('profiles', { person_id: 'person-jump-1' })),
-        timelineEvent('跳到反馈', jumpTarget('feedback', { task_id: 11 })),
-        timelineEvent('跳到删除操作', jumpTarget('delete', { operation_id: 'del-1' })),
-        timelineEvent('跳到导入', jumpTarget('import')),
-        timelineEvent('跳到记录', jumpTarget('records')),
-      ])
-      const user = userEvent.setup()
-      renderPage()
-      await waitForConsoleReady()
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      expect(await screen.findByText('跳到画像')).toBeInTheDocument()
-
-      await clickTimelineJump(user, '跳到画像')
-      expect(window.location.search).toContain('tab=profiles')
-      expect(window.location.search).toContain('person_id=person-jump-1')
-      expect(await screen.findByText('人物画像查询')).toBeInTheDocument()
-
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await clickTimelineJump(user, '跳到反馈')
-      expect(window.location.search).toContain('tab=feedback')
-      expect(screen.getByPlaceholderText('搜索查询编号 / 会话 / 查询内容 / 原因')).toHaveValue('11')
-
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await clickTimelineJump(user, '跳到删除操作')
-      expect(window.location.search).toContain('tab=delete')
-      expect(window.location.search).toContain('operation_id=del-1')
-      expect(screen.getByPlaceholderText('搜索 operation / reason / requested_by / source')).toHaveValue('del-1')
-
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await clickTimelineJump(user, '跳到导入')
-      expect(window.location.search).toContain('tab=import')
-      expect(await screen.findByRole('button', { name: '创建导入任务' })).toBeInTheDocument()
-
-      await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-      await clickTimelineJump(user, '跳到记录')
-      expect(window.location.search).toContain('tab=records')
-      expect(await screen.findByText('查询结果')).toBeInTheDocument()
-    }, 20_000)
-
-    it('cancels feedback rollback from the page dialog', async () => {
-      const user = userEvent.setup()
-      renderPage()
-      await waitForConsoleReady()
-      await user.click(screen.getByRole('tab', { name: '纠错历史' }))
-      await screen.findByText('反馈纠错历史')
-      await user.click(await screen.findByRole('button', { name: '回退本次纠错' }))
-      expect(await screen.findByRole('dialog', { name: '回退本次纠错' })).toBeInTheDocument()
-      await user.click(screen.getByRole('button', { name: '取消' }))
-      await waitFor(() =>
-        expect(screen.queryByRole('dialog', { name: '回退本次纠错' })).not.toBeInTheDocument(),
-      )
-      expect(memoryApi.rollbackMemoryFeedbackCorrection).not.toHaveBeenCalled()
-    }, 20_000)
   })
 })

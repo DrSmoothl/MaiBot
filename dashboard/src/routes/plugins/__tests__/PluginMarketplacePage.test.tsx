@@ -353,6 +353,46 @@ describe('PluginMarketplacePage 初始加载与数据合并', () => {
     expect(screen.queryByTestId('marketplace-tab')).not.toBeInTheDocument()
   })
 
+  it('「仅显示当前版本」默认开启，关闭后放开兼容性过滤并写回 localStorage', async () => {
+    vi.mocked(pluginApi.fetchPluginList).mockResolvedValue([
+      makeMarketPlugin('plugin-ok'),
+      // releases 模式且无推荐版本：checkPluginCompatibility 判为不兼容，被兼容性过滤隐藏
+      makeMarketPlugin('plugin-old', {
+        releases: {
+          id: 'plugin-old',
+          repositoryUrl: 'https://example.com/plugin-old.git',
+          mode: 'releases',
+          versions: [],
+          recommended_version: null,
+        },
+      }),
+    ])
+
+    await renderPage()
+
+    // 默认开启：不兼容插件被计数排除，只统计可见插件
+    const compatSwitch = screen.getByRole('switch', { name: '仅显示当前版本' })
+    expect(compatSwitch).toHaveAttribute('aria-checked', 'true')
+    expect(localStorage.getItem('plugins-market-compatible-only')).toBe('true')
+    expect(getCountBadgeText()).toBe('全部插件 1')
+
+    // 关闭「仅显示当前版本」：兼容性过滤放开，计数包含不兼容插件并写回 localStorage
+    fireEvent.click(compatSwitch)
+    await waitFor(() => expect(getCountBadgeText()).toBe('全部插件 2'))
+    expect(localStorage.getItem('plugins-market-compatible-only')).toBe('false')
+  })
+
+  it('localStorage 为 false 时「仅显示当前版本」初始为关闭', async () => {
+    localStorage.setItem('plugins-market-compatible-only', 'false')
+
+    await renderPage()
+
+    expect(screen.getByRole('switch', { name: '仅显示当前版本' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    )
+  })
+
   it('Git 未安装时显示警告卡片，并阻断安装与更新操作', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginApi.checkGitStatus).mockResolvedValue({
@@ -738,7 +778,7 @@ describe('PluginMarketplacePage 视图状态与交互', () => {
     expect(getCountBadgeText()).toBe('全部插件 1')
     expect(screen.getByTestId('marketplace-tab')).toHaveAttribute('data-hide-installed', 'true')
 
-    await user.click(screen.getByRole('switch'))
+    await user.click(screen.getByRole('switch', { name: '显示已安装' }))
 
     expect(getCountBadgeText()).toBe('全部插件 2')
     expect(screen.getByTestId('marketplace-tab')).toHaveAttribute('data-hide-installed', 'false')
@@ -1258,6 +1298,7 @@ describe('PluginMarketplacePage 合并、兼容性边界与进度清理', () => 
         ...makeInstalledPlugin('runtime-a', '1.0.0'),
         manifest: { ...makeInstalledPlugin('runtime-a', '1.0.0').manifest, id: 'plugin-a' },
       },
+      // 本地安装记录的清单可能缺少 manifest_version / description / license，页面需补齐默认值
       {
         id: 'local-sparse',
         path: '/plugins/local-sparse',
@@ -1272,7 +1313,7 @@ describe('PluginMarketplacePage 合并、兼容性边界与进度清理', () => 
             repository: 'https://example.com/sparse.git',
           },
         },
-      } as InstalledPlugin,
+      } as unknown as InstalledPlugin,
     ])
 
     await renderPage()

@@ -47,6 +47,7 @@ class ImageCacheCleanupResult:
     removed_orphan_bytes: int = 0
     removed_records: int = 0
     restored_file_flags: int = 0
+    skipped_outside_cache_files: int = 0
 
     @property
     def changed(self) -> bool:
@@ -133,7 +134,8 @@ def _cleanup_tracked_image_files(
             if _record_reference_time(record, now) > cutoff_time:
                 continue
             if cache_path is None:
-                logger.warning(f"跳过不在图片缓存目录内的图片文件清理: {record.full_path}")
+                result.skipped_outside_cache_files += 1
+                logger.debug(f"跳过不在图片缓存目录内的图片文件清理: {record.full_path}")
                 continue
 
             try:
@@ -249,6 +251,7 @@ def _merge_results(target: ImageCacheCleanupResult, source: ImageCacheCleanupRes
     target.removed_orphan_bytes += source.removed_orphan_bytes
     target.removed_records += source.removed_records
     target.restored_file_flags += source.restored_file_flags
+    target.skipped_outside_cache_files += source.skipped_outside_cache_files
     return target
 
 
@@ -266,14 +269,15 @@ def run_image_cache_cleanup(config: ImageCacheCleanupConfigLike) -> ImageCacheCl
         _cleanup_no_file_results(now=now, cutoff_time=result_cutoff, batch_size=_CLEANUP_BATCH_SIZE),
     )
 
-    if result.changed:
+    if result.changed or result.skipped_outside_cache_files:
         logger.info(
             "图片缓存自动清理完成："
             f"删除文件 {result.removed_files} 个/{result.removed_bytes} 字节，"
             f"删除孤立文件 {result.removed_orphan_files} 个/{result.removed_orphan_bytes} 字节，"
             f"标记无文件记录 {result.marked_no_file_records} 条，"
             f"删除识别结果 {result.removed_records} 条，"
-            f"恢复文件状态 {result.restored_file_flags} 条"
+            f"恢复文件状态 {result.restored_file_flags} 条，"
+            f"跳过缓存目录外文件 {result.skipped_outside_cache_files} 个"
         )
     return result
 

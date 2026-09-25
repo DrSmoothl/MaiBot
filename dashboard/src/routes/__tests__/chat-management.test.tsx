@@ -56,13 +56,13 @@ vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
 vi.mock('@/lib/avatar-url', () => ({ useResolvedAvatarUrl: () => undefined }))
 
 vi.mock('@/lib/chat-management-api', () => ({
+  CHAT_ADAPTER_STATUS_QUERY_KEY: 'chat-adapter-status',
   deleteChatStream: vi.fn(),
   deleteChatStreamPrompt: vi.fn(),
   deleteChatStreamTalkFrequency: vi.fn(),
   getAdapterPolicyDefaults: vi.fn(),
   getChatStreamDetail: vi.fn(),
   getChatStreams: vi.fn(),
-  updateAdapterPolicyDefaults: vi.fn(),
   updateChatStreamAdapterPolicy: vi.fn(),
   updateChatStreamLearning: vi.fn(),
   updateChatStreamTalkFrequency: vi.fn(),
@@ -329,10 +329,6 @@ beforeEach(() => {
     group: 'allow',
     private: 'allow',
   })
-  vi.mocked(chatApi.updateAdapterPolicyDefaults).mockResolvedValue({
-    group: 'allow',
-    private: 'allow',
-  })
   vi.mocked(chatApi.updateChatStreamLearning).mockResolvedValue(makeDetail())
   vi.mocked(chatApi.updateChatStreamAdapterPolicy).mockResolvedValue(makeDetail())
   vi.mocked(chatApi.updateChatStreamTalkFrequency).mockResolvedValue(makeDetail())
@@ -467,21 +463,18 @@ describe('ChatManagementPage 详情弹窗', () => {
     expect(scope.getByText('Qq Gateway')).toBeInTheDocument()
     expect(scope.getByText('使用默认：允许')).toBeInTheDocument()
     expect(scope.getByText('未设置统一规则，主程序默认放行。')).toBeInTheDocument()
-    expect(scope.getByText('已接入当前聊天，负责收消息、发消息；账号 123')).toBeInTheDocument()
+    expect(scope.getByText('账号 123')).toBeInTheDocument()
 
-    // 发言频率摘要：数值格式化为三位小数，当前时间原样展示
-    expect(scope.getByText('0.500')).toBeInTheDocument()
+    // 发言频率摘要：数值格式化为两位小数，当前时间原样展示
+    expect(scope.getByText('0.50')).toBeInTheDocument()
     expect(scope.getByText('12:34')).toBeInTheDocument()
-    // 规则栈：精确规则生效中，默认规则时间未命中
-    expect(scope.getByText('生效中')).toBeInTheDocument()
+    // 规则栈：精确规则生效（正常字体颜色），默认规则时间未命中置灰
     expect(scope.getByText('时间未命中')).toBeInTheDocument()
-    expect(scope.getByText('优先级 2.1')).toBeInTheDocument()
-    expect(scope.getByText('频率：0.800')).toBeInTheDocument()
+    expect(scope.getByText('频率：0.80')).toBeInTheDocument()
     expect(scope.getByText('*:*:-')).toBeInTheDocument()
     expect(scope.getByText('时间：默认')).toBeInTheDocument()
-    // 默认时间轴编辑模式：已有规则与新增规则各有一对拖拽手柄
-    expect(scope.getByText('仅编辑 qq:10001:群聊 的精确规则。')).toBeInTheDocument()
-    expect(scope.getAllByRole('button', { name: '调整开始时间' })).toHaveLength(2)
+    // 默认时间轴编辑模式：仅已有精确规则有一对拖拽手柄
+    expect(scope.getAllByRole('button', { name: '调整开始时间' })).toHaveLength(1)
 
     // Prompt：基础 Prompt 与专属 Prompt
     expect(scope.getByText('群聊基础 Prompt')).toBeInTheDocument()
@@ -553,7 +546,7 @@ describe('ChatManagementPage 详情弹窗', () => {
         action: 'allow',
       })
     )
-    await waitFor(() => expect(toastMock).toHaveBeenCalledWith({ title: '适配器放行规则已保存' }))
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith({ title: '适配器规则已保存' }))
 
     await user.click(within(dialog).getByRole('button', { name: '阻止' }))
     await waitFor(() =>
@@ -629,17 +622,13 @@ describe('ChatManagementPage 详情弹窗', () => {
       })
     )
 
-    // 新增规则：previous_time 为 null，默认频率取当前生效值
-    const newTimeInput = within(dialog).getByDisplayValue('*')
-    const newEditor = newTimeInput.parentElement?.parentElement as HTMLElement
-    await user.clear(newTimeInput)
-    await user.type(newTimeInput, '20:00-22:00')
-    await user.click(within(newEditor).getByRole('button', { name: '新增' }))
+    // 新增规则：一键写入 1.0 的全天精确规则
+    await user.click(within(dialog).getByRole('button', { name: '新增规则' }))
     await waitFor(() =>
       expect(chatApi.updateChatStreamTalkFrequency).toHaveBeenCalledWith('sess-1', {
         previous_time: null,
-        time: '20:00-22:00',
-        value: 0.8,
+        time: '00:00-23:59',
+        value: 1,
       })
     )
 
@@ -1042,13 +1031,12 @@ describe('ChatManagementPage 时间轴规则', () => {
     const dialog = await openDetail(user)
     await flushRafResets()
 
-    const newRuleBlock = within(dialog).getByText('新增规则').parentElement as HTMLElement
-    await user.click(within(newRuleBlock).getByRole('button', { name: '新增' }))
+    await user.click(within(dialog).getByRole('button', { name: '新增规则' }))
     await waitFor(() =>
       expect(chatApi.updateChatStreamTalkFrequency).toHaveBeenCalledWith('sess-1', {
         previous_time: null,
         time: '00:00-23:59',
-        value: 0.8,
+        value: 1,
       })
     )
     await waitFor(() =>
@@ -1155,7 +1143,7 @@ describe('ChatManagementPage 时间轴规则', () => {
     expect(tracks[0].querySelectorAll('[class*="bg-sky-500"]')).toHaveLength(2)
     expect(tracks[1].querySelectorAll('[class*="bg-emerald-500"]').length).toBeGreaterThan(0)
     expect(tracks[2].querySelectorAll('[class*="bg-amber-500"]').length).toBeGreaterThan(0)
-    expect(scope.getAllByRole('button', { name: '调整开始时间' })).toHaveLength(3)
+    expect(scope.getAllByRole('button', { name: '调整开始时间' })).toHaveLength(2)
 
     vi.mocked(chatApi.getChatStreamDetail).mockResolvedValue(
       makeDetail({
@@ -1184,29 +1172,23 @@ describe('ChatManagementPage 时间轴规则', () => {
 })
 
 describe('ChatManagementPage 详情空态与错误', () => {
-  it('默认策略加载中按钮禁用', async () => {
+  it('默认策略加载中仅展示状态，不提供编辑按钮', async () => {
     vi.mocked(chatApi.getAdapterPolicyDefaults).mockImplementation(() => new Promise(() => {}))
     const user = userEvent.setup()
     const dialog = await openDetail(user)
-    expect(within(dialog).getAllByRole('button', { name: '放行' })[0]).toBeDisabled()
+    expect(within(dialog).getByText('全局默认：加载中')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '放行' })).not.toBeInTheDocument()
   })
 
-  it('适配器默认策略保存、继承与失败 toast', async () => {
+  it('适配器默认策略只读展示，当前聊天规则仍可继承并提示保存失败', async () => {
     const user = userEvent.setup()
     vi.mocked(chatApi.getAdapterPolicyDefaults).mockResolvedValue({
       group: 'allow',
       private: 'block',
     })
     const dialog = await openDetail(user)
-
-    await user.click(within(dialog).getAllByRole('button', { name: '拒绝' })[0])
-    await waitFor(() =>
-      expect(vi.mocked(chatApi.updateAdapterPolicyDefaults).mock.calls[0]?.[0]).toEqual({
-        group: 'block',
-        private: 'block',
-      })
-    )
-    await waitFor(() => expect(toastMock).toHaveBeenCalledWith({ title: '适配器默认策略已保存' }))
+    expect(await within(dialog).findByText('全局默认：群聊 放行 · 私聊 拒绝')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '拒绝' })).not.toBeInTheDocument()
 
     await user.click(within(dialog).getByRole('button', { name: '使用默认' }))
     await waitFor(() =>
@@ -1216,27 +1198,24 @@ describe('ChatManagementPage 详情空态与错误', () => {
       })
     )
 
-    vi.mocked(chatApi.updateAdapterPolicyDefaults).mockRejectedValue(new Error('默认策略失败'))
     vi.mocked(chatApi.updateChatStreamAdapterPolicy).mockRejectedValue('策略字符串错误')
-    await user.click(within(dialog).getAllByRole('button', { name: '放行' })[1])
-    await waitFor(() =>
-      expect(toastMock).toHaveBeenCalledWith({
-        title: '适配器默认策略保存失败',
-        description: '默认策略失败',
-        variant: 'destructive',
-      })
-    )
     await user.click(within(dialog).getByRole('button', { name: '允许' }))
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith({
-        title: '适配器放行规则保存失败',
+        title: '适配器规则保存失败',
         description: '请稍后重试',
         variant: 'destructive',
       })
     )
   })
 
-  it('适配器策略标签、路由文案与显示名回退', async () => {
+  it('默认策略读取失败时不猜测放行状态', async () => {
+    vi.mocked(chatApi.getAdapterPolicyDefaults).mockRejectedValue(new Error('服务不可用'))
+    const dialog = await openDetail(userEvent.setup())
+    expect(await within(dialog).findByText('全局默认：获取失败')).toBeInTheDocument()
+  })
+
+  it('适配器策略标签、说明文案与显示名回退', async () => {
     const user = userEvent.setup()
     vi.mocked(chatApi.getChatStreamDetail).mockResolvedValue(
       makeDetail({
@@ -1318,23 +1297,21 @@ describe('ChatManagementPage 详情空态与错误', () => {
     const dialog = await openDetail(user)
     const scope = within(dialog)
 
-    expect(scope.getByText('已允许当前聊天')).toBeInTheDocument()
-    expect(scope.getByText('这条聊天已被单独加入允许规则。')).toBeInTheDocument()
     expect(scope.getByText('已阻止当前聊天')).toBeInTheDocument()
     expect(scope.getByText('这条聊天已被单独加入阻止规则。')).toBeInTheDocument()
     expect(scope.getByText('黑名单未命中')).toBeInTheDocument()
     expect(scope.getByText('当前聊天被全局适配器规则放行。')).toBeInTheDocument()
     expect(scope.getByText('白名单已放行')).toBeInTheDocument()
-    expect(scope.getByText('当前聊天被这个适配器的规则放行。')).toBeInTheDocument()
+    // 单独放行的适配器不再展示「已允许当前聊天」标签，与白名单放行共用放行说明文案
+    expect(scope.getAllByText('当前聊天被这个适配器的规则放行。')).toHaveLength(2)
+    expect(scope.queryByText('已允许当前聊天')).not.toBeInTheDocument()
     expect(scope.getByText('黑名单已阻止')).toBeInTheDocument()
     expect(scope.getByText('当前聊天被全局适配器规则阻止。')).toBeInTheDocument()
     expect(scope.getByText('白名单未放行')).toBeInTheDocument()
     expect(scope.getByText('当前聊天被这个适配器的规则阻止。')).toBeInTheDocument()
     expect(scope.getByText('使用默认：拒绝')).toBeInTheDocument()
     expect(scope.getByText('未设置统一规则，主程序默认拒绝。')).toBeInTheDocument()
-    expect(scope.getByText('未接入当前聊天')).toBeInTheDocument()
     expect(scope.getByText('适配器')).toBeInTheDocument()
-    expect(scope.getByText('已接入当前聊天，负责收消息')).toBeInTheDocument()
     expect(scope.getByText('Foo')).toBeInTheDocument()
     expect(scope.getByText(/范围：guild/)).toBeInTheDocument()
   })
