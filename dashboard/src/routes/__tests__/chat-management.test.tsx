@@ -463,16 +463,14 @@ describe('ChatManagementPage 详情弹窗', () => {
     expect(scope.getByText('Qq Gateway')).toBeInTheDocument()
     expect(scope.getByText('使用默认：允许')).toBeInTheDocument()
     expect(scope.getByText('未设置统一规则，主程序默认放行。')).toBeInTheDocument()
-    expect(scope.getByText('已接入当前聊天，负责收消息、发消息；账号 123')).toBeInTheDocument()
+    expect(scope.getByText('账号 123')).toBeInTheDocument()
 
-    // 发言频率摘要：数值格式化为三位小数，当前时间原样展示
-    expect(scope.getByText('0.500')).toBeInTheDocument()
+    // 发言频率摘要：数值格式化为两位小数，当前时间原样展示
+    expect(scope.getByText('0.50')).toBeInTheDocument()
     expect(scope.getByText('12:34')).toBeInTheDocument()
-    // 规则栈：精确规则生效中，默认规则时间未命中
-    expect(scope.getByText('生效中')).toBeInTheDocument()
+    // 规则栈：精确规则生效（正常字体颜色），默认规则时间未命中置灰
     expect(scope.getByText('时间未命中')).toBeInTheDocument()
-    expect(scope.getByText('优先级 2.1')).toBeInTheDocument()
-    expect(scope.getByText('频率：0.800')).toBeInTheDocument()
+    expect(scope.getByText('频率：0.80')).toBeInTheDocument()
     expect(scope.getByText('*:*:-')).toBeInTheDocument()
     expect(scope.getByText('时间：默认')).toBeInTheDocument()
     // 默认时间轴编辑模式：仅已有精确规则有一对拖拽手柄
@@ -1217,7 +1215,7 @@ describe('ChatManagementPage 详情空态与错误', () => {
     expect(await within(dialog).findByText('全局默认：获取失败')).toBeInTheDocument()
   })
 
-  it('适配器策略标签、路由文案与显示名回退', async () => {
+  it('适配器策略标签、说明文案与显示名回退', async () => {
     const user = userEvent.setup()
     vi.mocked(chatApi.getChatStreamDetail).mockResolvedValue(
       makeDetail({
@@ -1299,22 +1297,21 @@ describe('ChatManagementPage 详情空态与错误', () => {
     const dialog = await openDetail(user)
     const scope = within(dialog)
 
-    expect(scope.getByText('已允许当前聊天')).toBeInTheDocument()
     expect(scope.getByText('已阻止当前聊天')).toBeInTheDocument()
     expect(scope.getByText('这条聊天已被单独加入阻止规则。')).toBeInTheDocument()
     expect(scope.getByText('黑名单未命中')).toBeInTheDocument()
     expect(scope.getByText('当前聊天被全局适配器规则放行。')).toBeInTheDocument()
     expect(scope.getByText('白名单已放行')).toBeInTheDocument()
-    expect(scope.getByText('当前聊天被这个适配器的规则放行。')).toBeInTheDocument()
+    // 单独放行的适配器不再展示「已允许当前聊天」标签，与白名单放行共用放行说明文案
+    expect(scope.getAllByText('当前聊天被这个适配器的规则放行。')).toHaveLength(2)
+    expect(scope.queryByText('已允许当前聊天')).not.toBeInTheDocument()
     expect(scope.getByText('黑名单已阻止')).toBeInTheDocument()
     expect(scope.getByText('当前聊天被全局适配器规则阻止。')).toBeInTheDocument()
     expect(scope.getByText('白名单未放行')).toBeInTheDocument()
     expect(scope.getByText('当前聊天被这个适配器的规则阻止。')).toBeInTheDocument()
     expect(scope.getByText('使用默认：拒绝')).toBeInTheDocument()
     expect(scope.getByText('未设置统一规则，主程序默认拒绝。')).toBeInTheDocument()
-    expect(scope.getByText('未接入当前聊天')).toBeInTheDocument()
     expect(scope.getByText('适配器')).toBeInTheDocument()
-    expect(scope.getByText('已接入当前聊天，负责收消息')).toBeInTheDocument()
     expect(scope.getByText('Foo')).toBeInTheDocument()
     expect(scope.getByText(/范围：guild/)).toBeInTheDocument()
   })

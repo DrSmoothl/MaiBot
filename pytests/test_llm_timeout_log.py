@@ -13,8 +13,8 @@ import src.llm_models.utils_model as utils_model
 async def test_api_timeout_logs_provider_limit_attempts_and_replay(monkeypatch, tmp_path):
     warnings = []
     errors = []
-    monkeypatch.setattr(utils_model.model_logger, "warning", warnings.append)
-    monkeypatch.setattr(utils_model.model_logger, "error", errors.append)
+    monkeypatch.setattr(utils_model.logger, "warning", warnings.append)
+    monkeypatch.setattr(utils_model.logger, "error", errors.append)
     monkeypatch.setattr(utils_model, "save_failed_request_snapshot", lambda **kwargs: tmp_path / "snapshot.json")
     monkeypatch.setattr(utils_model, "update_failed_request_attempt", lambda *args, **kwargs: None)
     monkeypatch.setattr(LLMOrchestrator, "_schedule_llm_retry_event", lambda self, **kwargs: None)

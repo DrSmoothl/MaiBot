@@ -1168,17 +1168,14 @@ function PlannerToolResultCard({
         <span className="text-foreground font-mono text-sm font-semibold">
           {tool.tool_name || 'unknown'}
         </span>
-        {tool.success ? (
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-        ) : (
-          <XCircle className="h-3.5 w-3.5 text-red-500" />
+        {!tool.success && (
+          <>
+            <XCircle className="h-3.5 w-3.5 text-red-500" />
+            <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">
+              {statusText}
+            </Badge>
+          </>
         )}
-        <Badge
-          variant={tool.success ? 'secondary' : 'destructive'}
-          className="h-5 px-1.5 text-[10px]"
-        >
-          {statusText}
-        </Badge>
         {sourceLabel && (
           <Badge
             variant="outline"
@@ -1220,11 +1217,11 @@ function PlannerToolResultCard({
           </div>
         )}
 
-        <div className="bg-muted/20 flex items-start gap-1.5 rounded-md border px-2.5 py-1">
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
           <span className="text-muted-foreground shrink-0 text-[10px] leading-4 font-medium">
             执行结果
           </span>
-          <p className="text-foreground/80 min-w-0 flex-1 text-xs leading-4 break-words whitespace-pre-wrap">
+          <p className="text-muted-foreground min-w-0 flex-1 text-xs leading-4 break-words whitespace-pre-wrap">
             {tool.summary || '未返回结果摘要。'}
           </p>
         </div>

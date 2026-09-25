@@ -1127,7 +1127,7 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('2 个')).toBeInTheDocument()
     expect(screen.getByText('send_message')).toBeInTheDocument()
     expect(screen.getByText('web_search')).toBeInTheDocument()
-    expect(screen.getByText('执行成功')).toBeInTheDocument()
+    expect(screen.queryByText('执行成功')).not.toBeInTheDocument()
     expect(screen.getByText('执行失败')).toBeInTheDocument()
     expect(screen.getByText('300ms')).toBeInTheDocument()
     // 参数内联块与完整 JSON 折叠入口
@@ -1267,8 +1267,8 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('planner 本轮没有文本内容')).toBeInTheDocument()
     expect(screen.getByText('使用工具')).toBeInTheDocument()
     expect(screen.getByText('search_web')).toBeInTheDocument()
-    // 回退条目默认视为执行成功且无耗时
-    expect(screen.getByText('执行成功')).toBeInTheDocument()
+    // 回退条目默认视为执行成功且无耗时，成功状态不额外显示
+    expect(screen.queryByText('执行成功')).not.toBeInTheDocument()
     expect(screen.getByText('正文调用')).toBeInTheDocument()
     expect(screen.getByText('未返回结果摘要。')).toBeInTheDocument()
   })

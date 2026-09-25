@@ -1699,11 +1699,16 @@ function ModelConfigPageContent() {
                   value={editingModel?.price_in ?? ''}
                   onChange={(e) => {
                     const val = e.target.value === '' ? null : parseFloat(e.target.value)
-                    setEditingModel((prev) =>
-                      prev
-                        ? { ...prev, price_in: val }
-                        : null
-                    )
+                    setEditingModel((prev) => {
+                      if (!prev) return null
+                      // 缓存价格未被手动改过时（当前值仍等于修改前的输入价）跟随输入价格
+                      const cacheFollowsInput = (prev.cache_price_in ?? 0) === (prev.price_in ?? 0)
+                      return {
+                        ...prev,
+                        price_in: val,
+                        cache_price_in: cacheFollowsInput ? val : prev.cache_price_in,
+                      }
+                    })
                   }}
                   placeholder="默认: 0"
                 />
@@ -1745,7 +1750,7 @@ function ModelConfigPageContent() {
                         : null
                     )
                   }}
-                  placeholder="留空与非缓存一致"
+                  placeholder="留空=与输入价一致"
                 />
               </div>
             </fieldset>

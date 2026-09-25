@@ -446,7 +446,7 @@ def _is_same_learning_target(rule: Dict[str, Any], chat_session: ChatSession) ->
 
 def _format_frequency(value: float) -> str:
     normalized_value = max(0.0, float(value))
-    return f"{normalized_value:.3f}（{normalized_value * 100:.1f}%）"
+    return f"{normalized_value:.2f}（{normalized_value * 100:.1f}%）"
 
 
 def _talk_rule_to_dict(rule: Any, session_id: str, is_group_chat: bool, now_min: int) -> Optional[Dict[str, Any]]:
