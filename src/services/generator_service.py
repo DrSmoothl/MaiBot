@@ -13,7 +13,7 @@ from rich.traceback import install
 from src.chat.message_receive.chat_manager import BotChatSession
 from src.chat.replyer.maisaka_generator import MaisakaReplyGenerator
 from src.chat.replyer.replyer_manager import replyer_manager
-from src.chat.utils.utils import process_llm_response, process_llm_response_segments_async
+from src.chat.utils.utils import process_llm_response_segments_async
 from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.common.logger import get_logger
 from src.core.types import ActionInfo
