@@ -1573,12 +1573,32 @@
   box-shadow: none !important;
 }
 
+/* 未选中为描边凹陷方块，选中/半选才填充锈红，避免未选中看起来像已选中 */
 :root[data-dashboard-style='future-retro'] [data-dashboard-checkbox='true'] {
-  border: 0 !important;
+  border: var(--retro-stroke) solid var(--retro-line) !important;
   border-radius: 0 !important;
-  background: var(--retro-rust) !important;
+  background: var(--retro-recessed) !important;
   box-shadow: none !important;
   color: var(--retro-paper) !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-checkbox='true']:is([data-state='checked'], [data-state='indeterminate']) {
+  border-color: var(--retro-rust) !important;
+  background: var(--retro-rust) !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-checkbox='true'][data-state='indeterminate']
+  [data-dashboard-checkbox-indicator='true']::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 3px;
+  background: var(--retro-paper);
+  transform: translate(-50%, -50%);
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-checkbox='true']:focus-visible {
@@ -2237,6 +2257,16 @@
   background: var(--retro-paper);
 }
 
+/* 记忆记录行勾选后用锈红描边标出，需压过上面 .border 的统一线色 */
+:root[data-dashboard-style='future-retro'] [data-memory-record-row='true'] {
+  border-radius: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-memory-record-row='true'][data-checked='true'] {
+  border-color: var(--retro-rust) !important;
+  background: color-mix(in srgb, var(--retro-rust) 7%, transparent) !important;
+}
+
 /* Card carries Tailwind's border class, so keep its retro frame color after the generic border override. */
 :root[data-dashboard-style='future-retro'] [data-dashboard-card='true'].border {
   border-color: var(--retro-ink) !important;
@@ -2630,8 +2660,8 @@
   padding-bottom: 0.625rem;
 }
 
-/* 记忆查询结果头部：单行「标题 + 计数徽标 + 刷新」，收紧纵向留白，
-   让头部高度由这一行控件决定而不是被内边距撑高 */
+/* 记忆查询结果头部：单行「多选操作 + 计数小字」，收紧纵向留白，
+   让头部高度由控件决定而不是被内边距撑高 */
 .memory-console-density
   [data-dashboard-card-header='true'][data-memory-records-result-header='true'] {
   padding: 0.5rem 0.75rem;

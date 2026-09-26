@@ -93,6 +93,7 @@ import {
   validateThinkingParams,
   type ThinkingFormatConfig,
 } from './model/thinkingFormats'
+import { resolveThinkingFormatForModel } from './providerTemplates'
 import {
   getDeepSeekReasoningEffort,
   isDeepSeekThinkingEnabled,
@@ -497,12 +498,14 @@ function ModelConfigPageContent() {
   // 思考开关格式由命中的服务商模板元数据决定，未命中则不显示思考开关
   // DeepSeek 有专用段（含 Responses 客户端的 reasoning.effort 与联网搜索），不走通用开关
   const thinkingFormatActive: ThinkingFormatConfig | null =
-    matchedTemplate?.id !== 'deepseek' ? (matchedTemplate?.thinking ?? null) : null
+    matchedTemplate?.id !== 'deepseek'
+      ? resolveThinkingFormatForModel(matchedTemplate, editingModel?.model_identifier ?? '')
+      : null
   const modelExtraParams = editingModel?.extra_params || {}
   const thinkingEnabled = thinkingFormatActive
     ? isThinkingEnabled(modelExtraParams, thinkingFormatActive)
     : false
-  // 思考力度仅在配置了力度参数时显示；思考关闭且格式不支持关闭时置灰
+  // 思考力度仅在配置了力度参数时显示；思考关闭时置灰
   const thinkingEffortOptions: string[] =
     thinkingFormatActive?.kind === 'reasoning_effort'
       ? (thinkingFormatActive.efforts ?? [])
@@ -511,8 +514,9 @@ function ModelConfigPageContent() {
         : []
   const thinkingEffort = thinkingFormatActive ? getThinkingEffort(modelExtraParams, thinkingFormatActive) : ''
   const thinkingCanDisable =
-    thinkingFormatActive !== null &&
-    (thinkingFormatActive.kind !== 'thinking_type' || thinkingFormatActive.canDisable === true)
+    thinkingFormatActive?.kind === 'enable_thinking' ||
+    (thinkingFormatActive?.kind === 'thinking_type' && thinkingFormatActive.canDisable === true)
+  const thinkingSwitchInteractive = thinkingFormatActive !== null && (thinkingCanDisable || !thinkingEnabled)
   const thinkingBudget = thinkingFormatActive ? getThinkingBudget(modelExtraParams, thinkingFormatActive) : null
   const thinkingExtraParamsError = thinkingFormatActive
     ? validateThinkingParams(modelExtraParams, thinkingFormatActive)
@@ -1206,7 +1210,7 @@ function ModelConfigPageContent() {
           if (!open) setSelectedModelTestResult(null)
         }}
       >
-        <DialogContent className="max-w-[95vw] gap-3 p-4 sm:max-w-3xl sm:gap-4 sm:p-6">
+        <DialogContent className="max-w-[95vw] gap-3 p-4 sm:gap-4 sm:p-6 sm:[--dialog-width:38rem]">
           <DialogHeader>
             <DialogTitle>模型测试详情</DialogTitle>
             <DialogDescription>
@@ -1271,6 +1275,15 @@ function ModelConfigPageContent() {
                         </div>
                       )}
 
+                      {selectedModelTestResult.reasoning && (
+                        <div>
+                          <h4 className="mb-2 text-sm font-semibold">推理内容</h4>
+                          <pre className="bg-muted max-h-56 overflow-auto rounded-md p-3 text-xs whitespace-pre-wrap">
+                            {selectedModelTestResult.reasoning}
+                          </pre>
+                        </div>
+                      )}
+
                       {isEmbeddingTest && (selectedModelTestResult.embedding_pairs?.length ?? 0) > 0 && (
                         <div>
                           <h4 className="mb-2 text-sm font-semibold">
@@ -1305,15 +1318,6 @@ function ModelConfigPageContent() {
                           {selectedModelTestResult.response || '（无文本返回）'}
                         </pre>
                       </div>
-
-                      {selectedModelTestResult.reasoning && (
-                        <div>
-                          <h4 className="mb-2 text-sm font-semibold">推理内容</h4>
-                          <pre className="bg-muted max-h-56 overflow-auto rounded-md p-3 text-xs whitespace-pre-wrap">
-                            {selectedModelTestResult.reasoning}
-                          </pre>
-                        </div>
-                      )}
                     </>
                   )
                 })()}
@@ -1942,12 +1946,12 @@ function ModelConfigPageContent() {
 
             {!deepSeekClientType && thinkingFormatActive && (
               <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-                {/* 思考开关：不支持关闭思考的格式（如 reasoning_effort 家族）恒为开启并置灰 */}
+                {/* 不支持关闭时将已开启的开关置灰；旧配置若为关闭状态，仍允许切回开启。 */}
                 <div className="flex items-center justify-between gap-4 rounded-md border bg-background/50 p-3">
                   <div className="space-y-1">
                     <Label
                       htmlFor="model_thinking"
-                      className={thinkingCanDisable ? 'cursor-pointer' : 'cursor-not-allowed'}
+                      className={thinkingSwitchInteractive ? 'cursor-pointer' : 'cursor-not-allowed'}
                     >
                       启用思考
                     </Label>
@@ -1965,7 +1969,7 @@ function ModelConfigPageContent() {
                   <Switch
                     id="model_thinking"
                     checked={thinkingEnabled}
-                    disabled={!thinkingCanDisable}
+                    disabled={!thinkingSwitchInteractive}
                     onCheckedChange={(checked) => updateModelExtraParams((params) =>
                       setThinkingEnabled(params, thinkingFormatActive, checked)
                     )}
@@ -1978,7 +1982,7 @@ function ModelConfigPageContent() {
                     <Label htmlFor="model_thinking_effort">思考力度</Label>
                     <Select
                       value={thinkingEffort}
-                      disabled={thinkingCanDisable && !thinkingEnabled}
+                      disabled={!thinkingEnabled}
                       onValueChange={(value) => updateModelExtraParams((params) =>
                         setThinkingEffort(params, thinkingFormatActive, value)
                       )}

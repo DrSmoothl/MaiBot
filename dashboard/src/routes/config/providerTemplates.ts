@@ -55,8 +55,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
       effortParam: 'reasoning_effort',
       efforts: ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none'],
       defaultEffort: 'max',
-      // GLM-5.3 / GLM-5.3-Flash 仅支持开启思考，力度档位只接受 low/high/max
-      disableNote: 'GLM-5.3 系列仅支持开启思考，力度档位只接受 low/high/max',
     },
   },
   {
@@ -73,7 +71,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
       effortParam: 'reasoning_effort',
       efforts: ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none'],
       defaultEffort: 'max',
-      disableNote: 'GLM-5.3 系列仅支持开启思考，力度档位只接受 low/high/max',
     },
   },
   {
@@ -310,6 +307,27 @@ export function findTemplateByBaseUrl(baseUrl: string): ProviderTemplate | null 
       (template) => template.id !== 'custom' && normalizeUrl(template.base_url) === normalizedUrl
     ) || null
   )
+}
+
+export function resolveThinkingFormatForModel(
+  template: ProviderTemplate | null,
+  modelIdentifier: string
+): ThinkingFormatConfig | null {
+  const thinking = template?.thinking
+  if (!thinking) return null
+
+  // 普通智谱 API 的 GLM-5.3 系列拒绝关闭思考；Coding 套餐使用独立模板，不受此限制。
+  if (template?.id === 'zhipu' && /^glm-5\.3(?:$|-)/i.test(modelIdentifier.trim())) {
+    return {
+      ...thinking,
+      canDisable: false,
+      efforts: ['low', 'high', 'max'],
+      defaultEffort: 'max',
+      disableNote: '此模型不支持关闭思考',
+    }
+  }
+
+  return thinking
 }
 
 /**
