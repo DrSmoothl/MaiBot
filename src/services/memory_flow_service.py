@@ -427,7 +427,7 @@ class PersonFactWritebackService:
 - 与目标人物无关的信息
 
 严格输出 JSON 数组，每项包含 fact、evidence_message_id、evidence_quote。证据片段必须逐字摘自目标用户原始发言。请勿编造消息 ID。例：
-[{"fact":"他喜欢打游戏","evidence_message_id":"消息ID","evidence_quote":"我喜欢打游戏"}]
+[{{"fact":"他喜欢打游戏","evidence_message_id":"消息ID","evidence_quote":"我喜欢打游戏"}}]
 如果没有可写入的事实，输出 []"""
         try:
             if self._extractor is None:
