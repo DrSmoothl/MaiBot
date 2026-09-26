@@ -1,14 +1,16 @@
-"""百炼与豆包官方图片嵌入协议的自动适配。
+"""百炼、豆包与硅基流动官方图片嵌入协议的自动适配。
 
-两个厂商的多模态图片嵌入接口不是 OpenAI 兼容协议：端点路径、请求体结构
+百炼和豆包的多模态图片嵌入接口不是 OpenAI 兼容协议：端点路径、请求体结构
 和向量返回位置都与 `/embeddings` 不同。当 `client_type = "openai"` 的
 Provider 地址指向官方域名时，图片嵌入请求由本模块自动切换到对应原生协议；
-其他地址仍走 OpenAI 兼容模板逻辑（`image_embedding_input` /
+硅基流动沿用 `/embeddings`，但图片输入需要 `{"image": ...}`，官方地址会
+自动填入该模板。其他地址仍走 OpenAI 兼容模板逻辑（`image_embedding_input` /
 `image_embedding_body`），互不影响。
 
 协议来源：
 - 百炼: https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference
 - 豆包: https://docs.volcengine.com/docs/ark/vectorization?lang=zh
+- 硅基流动: https://docs.siliconflow.cn/docs/api/embeddings-post
 """
 
 from dataclasses import dataclass, field
@@ -99,6 +101,31 @@ def resolve_native_image_embedding_protocol(base_url: str) -> str | None:
     if hostname == "ark.cn-beijing.volces.com" and path in _ARK_BASE_PATHS:
         return ARK_PROTOCOL
     return None
+
+
+def resolve_compatible_image_embedding_input(base_url: str) -> Dict[str, str] | None:
+    """识别硅基流动官方地址，并返回其 `/embeddings` 图片输入模板。"""
+    parsed = urlsplit(normalize_openai_base_url(str(base_url or "")))
+    if parsed.scheme not in ("https", "http") or parsed.path.rstrip("/") != "/v1":
+        return None
+    if parsed.hostname not in {"api.siliconflow.cn", "api.siliconflow.com"}:
+        return None
+    return {"image": "{data_uri}"}
+
+
+def build_compatible_image_embedding_fingerprint(
+    input_template: Mapping[str, str], extra_params: Mapping[str, Any]
+) -> str:
+    """按编排器现有模板指纹格式记录自动适配后的实际图片输入。"""
+    fingerprint_payload = {
+        "input": input_template,
+        "body": None,
+        "task": extra_params.get("task"),
+        "dimensions": extra_params.get("dimensions"),
+    }
+    return hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def build_native_image_embedding_request(

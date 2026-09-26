@@ -1,4 +1,4 @@
-"""百炼/豆包原生图片嵌入协议自动适配的合约测试。
+"""百炼、豆包与硅基流动图片嵌入协议自动适配的合约测试。
 
 通过 httpx.MockTransport 走真实 AsyncOpenAI 请求链路，验证绝对 URL 拼接、
 鉴权头、请求体结构与响应解析；不发起真实网络请求。
@@ -22,6 +22,7 @@ from src.llm_models.model_client.image_embedding_protocols import (
     build_native_image_embedding_fingerprint,
     build_native_image_embedding_request,
     parse_native_image_embedding_response,
+    resolve_compatible_image_embedding_input,
     resolve_native_image_embedding_protocol,
 )
 from src.llm_models.model_client.openai_client import OpenaiClient
@@ -90,6 +91,60 @@ def _make_openai_client(provider: APIProvider, handler: Callable[[httpx.Request]
 )
 def test_resolve_native_image_embedding_protocol_matches_official_urls(base_url: str, expected: str | None) -> None:
     assert resolve_native_image_embedding_protocol(base_url) == expected
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("https://api.siliconflow.cn/v1", {"image": "{data_uri}"}),
+        ("https://api.siliconflow.cn/v1/", {"image": "{data_uri}"}),
+        ("https://api.siliconflow.com/v1", {"image": "{data_uri}"}),
+        ("https://api.siliconflow.cn/v2", None),
+        ("https://fake.example.com/https://api.siliconflow.cn/v1", None),
+    ],
+)
+def test_resolve_compatible_image_embedding_input_matches_siliconflow_urls(
+    base_url: str, expected: dict[str, str] | None
+) -> None:
+    assert resolve_compatible_image_embedding_input(base_url) == expected
+
+
+@pytest.mark.asyncio
+async def test_siliconflow_url_sends_image_object_to_embeddings_endpoint() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["auth"] = request.headers.get("Authorization")
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "model": "Qwen/Qwen3-VL-Embedding-8B",
+                "data": [{"object": "embedding", "embedding": [0.25, -0.5], "index": 0}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5},
+            },
+        )
+
+    provider = _build_provider("https://api.siliconflow.cn/v1")
+    client = _make_openai_client(provider, handler)
+    try:
+        response = await client.get_image_embedding(
+            _build_request("Qwen/Qwen3-VL-Embedding-8B", {"dimensions": 768})
+        )
+    finally:
+        await client.client.close()
+
+    assert captured["url"] == "https://api.siliconflow.cn/v1/embeddings"
+    assert captured["auth"] == "Bearer test-key"
+    assert captured["body"]["model"] == "Qwen/Qwen3-VL-Embedding-8B"
+    assert captured["body"]["input"] == {"image": _expected_data_uri()}
+    assert captured["body"]["dimensions"] == 768
+    assert response.embedding == [0.25, -0.5]
+    assert response.usage is not None
+    assert response.usage.total_tokens == 5
+    assert response.request_protocol_hash
 
 
 @pytest.mark.asyncio

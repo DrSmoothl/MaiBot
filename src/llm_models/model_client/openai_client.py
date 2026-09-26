@@ -87,10 +87,12 @@ from .base_client import (
     client_registry,
 )
 from .image_embedding_protocols import (
+    build_compatible_image_embedding_fingerprint,
     build_native_image_embedding_diagnostic_payload,
     build_native_image_embedding_fingerprint,
     build_native_image_embedding_request,
     parse_native_image_embedding_response,
+    resolve_compatible_image_embedding_input,
     resolve_native_image_embedding_protocol,
 )
 from ..request_snapshot import (
@@ -1708,7 +1710,7 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
         """调用图片嵌入协议。
 
         显式配置 `image_embedding_input` / `image_embedding_body` 时走 OpenAI 兼容模板协议；
-        否则官方百炼/豆包地址自动切换对应原生多模态嵌入协议，其他地址要求模板配置。
+        否则官方百炼/豆包地址切换原生协议，硅基流动地址自动使用其兼容图片输入模板。
         """
 
         extra_params = dict(request.extra_params)
@@ -1717,6 +1719,14 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
         native_protocol = resolve_native_image_embedding_protocol(self.api_provider.base_url)
         if native_protocol is not None:
             return await self._get_native_image_embedding(request, native_protocol)
+        compatible_input = resolve_compatible_image_embedding_input(self.api_provider.base_url)
+        if compatible_input is not None:
+            extra_params["image_embedding_input"] = compatible_input
+            response = await self._get_openai_compatible_image_embedding(request, extra_params)
+            response.request_protocol_hash = build_compatible_image_embedding_fingerprint(
+                compatible_input, request.extra_params
+            )
+            return response
         raise ValueError("图片嵌入必须配置 Provider 对应的 image_embedding_input 或 image_embedding_body")
 
     async def _get_openai_compatible_image_embedding(
