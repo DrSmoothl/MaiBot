@@ -306,6 +306,60 @@ async def test_person_fact_writeback_uses_resolved_person_id(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_person_fact_writeback_marks_verified_user_statement_stable(monkeypatch):
+    from src.services import person_fact_verifier
+
+    stored_payloads: list[dict[str, object]] = []
+    user_message = SimpleNamespace(
+        message_id="user-1",
+        platform="qq",
+        user_id="10001",
+        processed_plain_text="我喜欢猫。",
+        message_info=SimpleNamespace(user_info=SimpleNamespace(user_id="10001")),
+    )
+
+    class FakePerson:
+        person_id = "person-target"
+        person_name = "测试用户"
+        nickname = "测试用户"
+        is_known = True
+
+    service = memory_flow_module.PersonFactWritebackService.__new__(memory_flow_module.PersonFactWritebackService)
+    service._resolve_target_person = lambda message: FakePerson()
+
+    async def fake_extract_facts(person, reply_text, user_evidence_text):
+        assert "消息ID: user-1" in user_evidence_text
+        return [{"fact": "测试用户喜欢猫。", "evidence_message_id": "user-1", "evidence_quote": "我喜欢猫。"}]
+
+    async def fake_store(person_name, memory_content, chat_id, **kwargs):
+        stored_payloads.append(kwargs)
+
+    service._extract_facts = fake_extract_facts
+    monkeypatch.setattr(memory_flow_module, "store_person_memory_from_answer", fake_store)
+    monkeypatch.setattr(memory_flow_module, "find_messages", lambda **kwargs: [user_message])
+    monkeypatch.setattr(memory_flow_module, "is_bot_self", lambda platform, user_id: False)
+    monkeypatch.setattr(memory_flow_module, "get_person_id", lambda platform, user_id: "person-target")
+    monkeypatch.setattr(person_fact_verifier, "find_messages", lambda **kwargs: [user_message])
+    monkeypatch.setattr(person_fact_verifier, "get_person_id", lambda platform, user_id: "person-target")
+
+    message = SimpleNamespace(
+        processed_plain_text="我记住了。",
+        session_id="session-1",
+        reply_to="",
+        timestamp=20.0,
+        session=SimpleNamespace(platform="qq", user_id="bot-1", group_id="", session_id="session-1"),
+    )
+    await service._handle_message(message)
+
+    assert stored_payloads[0]["fact_claim"] == {
+        "trust": "server_verified",
+        "authority": "direct_user",
+        "stability": "stable",
+    }
+    assert stored_payloads[0]["evidence_message_ids"] == ["user-1"]
+
+
+@pytest.mark.asyncio
 async def test_chat_summary_writeback_service_triggers_when_threshold_reached(monkeypatch):
     events: list[tuple[str, object]] = []
 
@@ -477,6 +531,7 @@ def test_summary_prompt_keeps_static_rules_before_chat_history():
         personality_context="你的性格设定是：稳定。",
         previous_summary_context="",
         chat_history="用户：第一条动态消息",
+        image_evidence_catalog="无",
     )
 
     rules_index = prompt.index("事实筛选规则")
@@ -492,6 +547,7 @@ def test_summary_prompt_forbids_repeating_rejected_fact_values():
         personality_context="你的性格设定是：稳定。",
         previous_summary_context="",
         chat_history="用户：不是猫毛，是青霉素",
+        image_evidence_catalog="无",
     )
 
     assert "只输出最终正确事实" in prompt
@@ -549,6 +605,10 @@ async def test_chat_summary_writeback_service_falls_back_to_current_count_for_le
 async def test_chat_summary_writeback_service_loads_trigger_count_from_summary_metadata(monkeypatch):
     class FakeMetadataStore:
         @staticmethod
+        def get_summary_checkpoint_count(chat_id: str) -> int:
+            return 0
+
+        @staticmethod
         def get_paragraphs_by_source(source: str):
             assert source == "chat_summary:session-1"
             return [
@@ -571,7 +631,11 @@ async def test_chat_summary_writeback_service_loads_trigger_count_from_summary_m
 
 
 @pytest.mark.asyncio
-async def test_memory_automation_service_auto_starts_and_delegates():
+async def test_memory_automation_service_auto_starts_and_delegates(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(memory_flow_module.ImageMemoryWritebackService, 'start', AsyncMock())
+    monkeypatch.setattr(memory_flow_module.ImageMemoryWritebackService, 'shutdown', AsyncMock())
     events: list[tuple[str, str]] = []
 
     class FakeFactWriteback:
@@ -612,7 +676,12 @@ async def test_memory_automation_service_auto_starts_and_delegates():
 
 
 @pytest.mark.asyncio
-async def test_memory_automation_service_on_incoming_message_auto_starts_only():
+async def test_memory_automation_service_on_incoming_message_auto_starts_only(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(memory_flow_module.ImageMemoryWritebackService, 'start', AsyncMock())
+    monkeypatch.setattr(memory_flow_module.ImageMemoryWritebackService, 'enqueue', AsyncMock())
+    monkeypatch.setattr(memory_flow_module.ImageMemoryWritebackService, 'shutdown', AsyncMock())
     events: list[tuple[str, str]] = []
 
     class FakeFactWriteback:

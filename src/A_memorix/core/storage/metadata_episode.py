@@ -13,6 +13,58 @@ from .tokenizer_runtime import HAS_JIEBA, JIEBA_MODULE
 class MetadataEpisodeMixin:
     """维护 Episode、重建队列与段落回填任务。"""
 
+    _MIGRATION_REBUILD_REASONS = ("schema_19_pending_migration", "schema_19_source_discovery")
+
+    def discard_migration_episode_rebuilds(self, *, dry_run: bool = True) -> Dict[str, Any]:
+        """仅丢弃升级迁移留下的来源任务，保留已有 Episode 和后续增量任务。"""
+        now_ts = datetime.now().timestamp()
+        reasons = self._MIGRATION_REBUILD_REASONS
+        eligible_sql = (
+            "reason IN (?, ?) AND "
+            "(lease_token IS NULL OR lease_token = '' OR COALESCE(lease_until, 0) <= ?)"
+        )
+        params = (*reasons, now_ts)
+        with self.transaction(immediate=not dry_run) as database:
+            rows = database.execute(
+                f"SELECT status, COUNT(*) AS count FROM episode_rebuild_sources "
+                f"WHERE {eligible_sql} GROUP BY status",
+                params,
+            ).fetchall()
+            by_status = {str(row["status"]): int(row["count"]) for row in rows}
+            candidates = sum(by_status.values())
+            sample = [
+                str(row["source"])
+                for row in database.execute(
+                    f"SELECT source FROM episode_rebuild_sources WHERE {eligible_sql} "
+                    "ORDER BY requested_at ASC, source ASC LIMIT 10",
+                    params,
+                ).fetchall()
+            ]
+            active = int(
+                database.execute(
+                    "SELECT COUNT(*) FROM episode_rebuild_sources "
+                    "WHERE reason IN (?, ?) AND lease_token IS NOT NULL "
+                    "AND lease_token != '' AND COALESCE(lease_until, 0) > ?",
+                    params,
+                ).fetchone()[0]
+            )
+            discarded = 0
+            if not dry_run and candidates:
+                discarded = int(
+                    database.execute(
+                        f"DELETE FROM episode_rebuild_sources WHERE {eligible_sql}",
+                        params,
+                    ).rowcount
+                )
+        return {
+            "dry_run": dry_run,
+            "candidates": candidates,
+            "discarded": discarded,
+            "active_skipped": active,
+            "by_status": by_status,
+            "sample_sources": sample,
+        }
+
     @staticmethod
     def _normalize_episode_source(source: Any) -> str:
         return str(source or "").strip()
@@ -663,34 +715,57 @@ class MetadataEpisodeMixin:
 
     def is_episode_source_query_blocked(self, source: str) -> bool:
         """仅在来源尚无任何完整物化版本时报告阻塞。"""
-        token = self._normalize_episode_source(source)
-        if not token:
-            return False
+        flags = self.get_episode_source_query_blocked_flags([source])
+        return flags.get(source, False)
+
+    def get_episode_source_query_blocked_flags(self, sources: List[str]) -> Dict[str, bool]:
+        """批量判断来源是否处于「已登记重建但尚无任何完整物化版本」的阻塞态。
+
+        与逐条调用 is_episode_source_query_blocked 等价，但把登记表查询收敛为一次
+        IN 查询，且仅在确有候选来源时才扫描 episodes，避免来源列表页的 N+1 全表扫描。
+        返回值按入参原样映射：{source: 是否阻塞}。
+        """
+        normalized: Dict[str, str] = {}
+        for source in sources:
+            token = self._normalize_episode_source(source)
+            if token:
+                normalized[source] = token
+        if not normalized:
+            return {source: False for source in sources}
+
         cursor = self._conn.cursor()
+        tokens = sorted(set(normalized.values()))
+        placeholders = ",".join("?" for _ in tokens)
         cursor.execute(
-            """
-            SELECT desired_revision, built_revision
+            f"""
+            SELECT source, desired_revision, built_revision
             FROM episode_rebuild_sources
-            WHERE source = ?
-            LIMIT 1
+            WHERE source IN ({placeholders})
             """,
-            (token,),
+            tuple(tokens),
         )
-        row = cursor.fetchone()
-        if row is None:
-            return False
-        if int(row["built_revision"] or 0) > 0 or int(row["desired_revision"] or 0) <= 0:
-            return False
-        cursor.execute(
-            """
-            SELECT 1
-            FROM episodes
-            WHERE TRIM(COALESCE(source, '')) = ?
-            LIMIT 1
-            """,
-            (token,),
-        )
-        return cursor.fetchone() is None
+        # 仅「登记了重建、但一个完整物化版本都没有」的来源需要进一步核对 episodes
+        candidates = {
+            row["source"]
+            for row in cursor.fetchall()
+            if int(row["built_revision"] or 0) <= 0 and int(row["desired_revision"] or 0) > 0
+        }
+        materialized: set[str] = set()
+        if candidates:
+            # 历史数据里 episodes.source 可能带空白，无法直接走索引；这里一次聚合取回
+            # 全部已物化来源，在 Python 侧做集合判断，替代逐来源的全表扫描。
+            cursor.execute(
+                """
+                SELECT DISTINCT TRIM(COALESCE(source, '')) AS source
+                FROM episodes
+                """
+            )
+            materialized = {row["source"] for row in cursor.fetchall() if row["source"]}
+
+        return {
+            source: token in candidates and token not in materialized
+            for source, token in normalized.items()
+        }
 
     def replace_episodes_for_source(
         self,

@@ -681,6 +681,11 @@ async def test_embedding_recover_uses_kernel_patched_recovery_boundaries(
     assert result == {
         "success": True,
         "recovered": True,
+        "vector_restored": False,
+        "vector_available": (
+            kernel._runtime_capabilities["vector_read"] and kernel._runtime_capabilities["vector_write"]
+        ),
+        "vector_health": kernel._vector_health_snapshot(),
         "report": report,
         "backfill": {"success": True, "processed": 2},
     }
@@ -784,6 +789,33 @@ async def test_embedding_probe_retries_pending_vector_fingerprint_without_embedd
     monkeypatch.setattr(kernel, "_is_startup_self_check_deferred", lambda: False)
     monkeypatch.setattr(kernel, "_is_embedding_degraded", lambda: False)
     monkeypatch.setattr(kernel, "_recover_embedding_once", fake_recover_embedding_once)
+
+    await kernel._background_task_service._embedding_probe_loop()
+
+    assert calls == ["recover"]
+
+
+@pytest.mark.asyncio
+async def test_embedding_probe_runs_once_before_waiting_for_periodic_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = SDKMemoryKernel(plugin_root=Path.cwd(), config={})
+    kernel._background_stopping = False
+    calls: list[str] = []
+
+    async def fake_recover_embedding_once() -> dict[str, Any]:
+        calls.append("recover")
+        kernel._background_stopping = True
+        return {"success": True}
+
+    async def fail_if_sleep_runs_first(_seconds: float) -> None:
+        raise AssertionError("首次 embedding 探测前不应等待周期定时器")
+
+    monkeypatch.setattr(kernel, "_embedding_fallback_enabled", lambda: True)
+    monkeypatch.setattr(kernel, "_is_startup_self_check_deferred", lambda: True)
+    monkeypatch.setattr(kernel, "_is_embedding_degraded", lambda: False)
+    monkeypatch.setattr(kernel, "_recover_embedding_once", fake_recover_embedding_once)
+    monkeypatch.setattr(asyncio, "sleep", fail_if_sleep_runs_first)
 
     await kernel._background_task_service._embedding_probe_loop()
 
@@ -1740,9 +1772,9 @@ async def test_source_admin_list_uses_metadata_rebuild_block_boundary(
                 {"source": "source-b", "count": 2},
             ]
 
-        def is_episode_source_query_blocked(self, source: str) -> bool:
-            self.checked_sources.append(source)
-            return source == "source-b"
+        def get_episode_source_query_blocked_flags(self, sources: list[str]) -> dict[str, bool]:
+            self.checked_sources.extend(sources)
+            return {source: source == "source-b" for source in sources}
 
     kernel = SDKMemoryKernel(plugin_root=Path.cwd(), config={})
     metadata_store = FakeMetadataStore()
@@ -1763,6 +1795,7 @@ async def test_source_admin_list_uses_metadata_rebuild_block_boundary(
         ],
         "count": 2,
     }
+    # 来源列表页应一次批量查询阻塞态，而不是逐来源 N+1
     assert metadata_store.checked_sources == ["source-a", "source-b"]
 
 

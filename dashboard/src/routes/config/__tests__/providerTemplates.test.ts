@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { findTemplateByBaseUrl, resolveModelFetcherTemplate } from '../providerTemplates'
+import { validateThinkingParams } from '../model/thinkingFormats'
+import { findTemplateByBaseUrl, resolveModelFetcherTemplate, resolveThinkingFormatForModel } from '../providerTemplates'
 
 describe('providerTemplates', () => {
   it('为未知自定义 OpenAI 兼容端点启用模型列表获取', () => {
@@ -30,14 +31,39 @@ describe('providerTemplates', () => {
     expect(template?.modelFetcher).toEqual({ endpoint: '/models', parser: 'openai' })
   })
 
-  it('保留已知但不支持自动获取的内置模板状态', () => {
+  it('未配置 modelFetcher 的内置模板也默认乐观尝试 /models', () => {
     const template = resolveModelFetcherTemplate('https://api.anthropic.com/v1', 'openai')
 
     expect(template?.id).toBe('anthropic')
-    expect(template?.modelFetcher).toBeUndefined()
+    expect(template?.modelFetcher).toEqual({ endpoint: '/models', parser: 'openai' })
+  })
+
+  it('Gemini 内置模板未配置 modelFetcher 时按 Gemini 解析器补齐', () => {
+    const template = resolveModelFetcherTemplate(
+      'https://generativelanguage.googleapis.com/v1beta',
+      'gemini'
+    )
+
+    expect(template?.id).toBe('gemini')
+    expect(template?.modelFetcher).toEqual({ endpoint: '/models', parser: 'gemini' })
   })
 
   it('直接按 URL 查找模板时不把未知 URL 识别为内置模板', () => {
     expect(findTemplateByBaseUrl('https://example.com/v1')).toBeNull()
+  })
+
+  it('普通智谱 GLM-5.3 限制关闭与力度，但 Coding 套餐仍允许关闭', () => {
+    const apiTemplate = findTemplateByBaseUrl('https://open.bigmodel.cn/api/paas/v4')
+    const codingTemplate = findTemplateByBaseUrl('https://open.bigmodel.cn/api/coding/paas/v4')
+    const apiThinking = resolveThinkingFormatForModel(apiTemplate, 'glm-5.3-flash')!
+    const codingThinking = resolveThinkingFormatForModel(codingTemplate, 'glm-5.3-flash')!
+
+    expect(apiThinking.canDisable).toBe(false)
+    expect(apiThinking.efforts).toEqual(['low', 'high', 'max'])
+    expect(validateThinkingParams({ thinking: { type: 'disabled' } }, apiThinking)).toBe('当前模型不支持关闭思考')
+    expect(validateThinkingParams({ reasoning_effort: 'minimal' }, apiThinking)).toContain('reasoning_effort 只能是')
+    expect(codingThinking.canDisable).toBe(true)
+    expect(validateThinkingParams({ thinking: { type: 'disabled' } }, codingThinking)).toBeNull()
+    expect(resolveThinkingFormatForModel(apiTemplate, 'glm-4.7')?.canDisable).toBe(true)
   })
 })

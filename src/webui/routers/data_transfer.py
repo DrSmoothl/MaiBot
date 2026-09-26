@@ -32,6 +32,7 @@ _EXPORT_DIRS: dict[str, Path] = {
 _REQUIRED_EXPORT_PARTS = ("config", "data")
 _OPTIONAL_EXPORT_PARTS = ("plugins", "logs")
 _ALLOWED_IMPORT_PARTS = set(_EXPORT_DIRS)
+_EXCLUDED_EXPORT_PATHS = {"data/.a_memorix_runtime_writer.lock"}
 _TRANSFER_TEMP_DIR = Path(tempfile.gettempdir()) / "maibot_webui_transfer"
 _CHUNK_SIZE = 1024 * 1024
 
@@ -151,8 +152,11 @@ def _iter_export_files(root: Path, archive_root: str, job: _TransferJob) -> list
         return []
     if root.is_file():
         _raise_if_cancelled(job)
+        archive_name = f"{archive_root}/{root.name}"
+        if archive_name in _EXCLUDED_EXPORT_PATHS:
+            return []
         stat = root.stat()
-        return [(root, f"{archive_root}/{root.name}", stat.st_size)]
+        return [(root, archive_name, stat.st_size)]
 
     files: list[tuple[Path, str, int]] = []
     root_resolved = root.resolve()
@@ -164,7 +168,11 @@ def _iter_export_files(root: Path, archive_root: str, job: _TransferJob) -> list
             resolved_path = file_path.resolve()
             resolved_path.relative_to(root_resolved)
             relative_path = resolved_path.relative_to(root_resolved).as_posix()
-            files.append((resolved_path, f"{archive_root}/{relative_path}", resolved_path.stat().st_size))
+            archive_name = f"{archive_root}/{relative_path}"
+            # 运行时写者锁不包含业务数据，Windows 下持锁读取还会触发 PermissionError。
+            if archive_name in _EXCLUDED_EXPORT_PATHS:
+                continue
+            files.append((resolved_path, archive_name, resolved_path.stat().st_size))
         except (OSError, RuntimeError, ValueError) as exc:
             logger.warning(f"跳过无法导出的文件: {file_path}, error={exc}")
     return files
@@ -388,7 +396,7 @@ async def _save_upload_file(file: UploadFile, target_path: Path) -> None:
 
 
 @router.post("/export", response_model=DataTransferJobResponse)
-async def create_data_export(request: DataExportRequest, background_tasks: BackgroundTasks) -> DataTransferJobResponse:
+def create_data_export(request: DataExportRequest, background_tasks: BackgroundTasks) -> DataTransferJobResponse:
     """创建 MaiBot 数据导出任务。"""
     job = _new_job("export")
     background_tasks.add_task(_run_export_job, job.job_id, request)
@@ -396,13 +404,13 @@ async def create_data_export(request: DataExportRequest, background_tasks: Backg
 
 
 @router.get("/jobs/{job_id}", response_model=DataTransferJobResponse)
-async def get_data_transfer_job(job_id: str) -> DataTransferJobResponse:
+def get_data_transfer_job(job_id: str) -> DataTransferJobResponse:
     """查询导入或导出任务进度。"""
     return _get_job_or_404(job_id).to_response()
 
 
 @router.get("/export/{job_id}/download", response_model=None)
-async def download_data_export(job_id: str) -> FileResponse:
+def download_data_export(job_id: str) -> FileResponse:
     """下载已完成的数据导出压缩包。"""
     job = _get_job_or_404(job_id, "export")
     if job.status != "completed" or job.file_path is None or not job.file_path.is_file():
@@ -415,7 +423,7 @@ async def download_data_export(job_id: str) -> FileResponse:
 
 
 @router.post("/export/{job_id}/cancel", response_model=DataTransferJobResponse)
-async def cancel_data_export(job_id: str) -> DataTransferJobResponse:
+def cancel_data_export(job_id: str) -> DataTransferJobResponse:
     """取消正在执行的数据导出任务。"""
     job = _get_job_or_404(job_id, "export")
     if job.status in {"completed", "failed", "cancelled"}:
@@ -462,7 +470,7 @@ async def create_data_import(
 
 
 @router.delete("/jobs/{job_id}", response_model=dict[str, bool])
-async def delete_data_transfer_job(job_id: str) -> dict[str, bool]:
+def delete_data_transfer_job(job_id: str) -> dict[str, bool]:
     """清理任务记录和已生成的临时文件。"""
     job = _get_job_or_404(job_id)
     if job.file_path is not None:

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -148,8 +148,11 @@ vi.mock('@/components/plugin-stats', () => ({
   PluginStats: ({ pluginId }: { pluginId: string }) => <div data-testid="plugin-stats">{pluginId}</div>,
 }))
 vi.mock('@/lib/chat-management-api', () => ({
+  CHAT_ADAPTER_STATUS_QUERY_KEY: 'chat-adapter-status',
   getAdapterHostPolicy: vi.fn(),
+  getAdapterPolicyDefaults: vi.fn(),
   updateAdapterHostPolicy: vi.fn(),
+  updateAdapterPolicyDefaults: vi.fn(),
 }))
 
 vi.mock('@/lib/plugin-api', () => ({
@@ -280,6 +283,8 @@ beforeEach(() => {
   vi.mocked(pluginApi.getLocalPluginChangelog).mockResolvedValue('')
   vi.mocked(chatApi.getAdapterHostPolicy).mockResolvedValue(makeHostPolicyResponse('adapter.qq') as never)
   vi.mocked(chatApi.updateAdapterHostPolicy).mockResolvedValue(makeHostPolicyResponse('adapter.qq') as never)
+  vi.mocked(chatApi.getAdapterPolicyDefaults).mockResolvedValue({ group: 'allow', private: 'block' })
+  vi.mocked(chatApi.updateAdapterPolicyDefaults).mockImplementation(async (defaults) => defaults)
 })
 
 describe('PluginConfigPage 特征化', () => {
@@ -300,7 +305,7 @@ describe('PluginConfigPage 特征化', () => {
     }
     vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([adapterPlugin] as never)
 
-    render(<PluginConfigPage />)
+    renderPage()
 
     expect(await screen.findByText('Adapter Plugin')).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('搜索插件...')).not.toBeInTheDocument()
@@ -644,6 +649,59 @@ describe('PluginConfigPage 主程序放行规则', () => {
     ] as never)
   })
 
+  it('适配器设置页分别修改群聊与私聊全局默认策略', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    const defaults = await screen.findByRole('region', { name: '适配器全局默认策略' })
+    expect(screen.getByText('QQ Adapter')).toBeInTheDocument()
+    expect(within(defaults).getByText('群聊')).toBeInTheDocument()
+    expect(within(defaults).getByText('私聊')).toBeInTheDocument()
+    const groupRow = within(defaults).getByText('群聊').parentElement as HTMLElement
+    const privateRow = within(defaults).getByText('私聊').parentElement as HTMLElement
+    await user.click(within(groupRow).getByRole('button', { name: '拒绝' }))
+    await waitFor(() =>
+      expect(chatApi.updateAdapterPolicyDefaults).toHaveBeenCalledWith(
+        { group: 'block', private: 'block' },
+        expect.anything()
+      )
+    )
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith({ title: '适配器默认策略已保存' })
+    )
+
+    await user.click(within(privateRow).getByRole('button', { name: '放行' }))
+    await waitFor(() =>
+      expect(chatApi.updateAdapterPolicyDefaults).toHaveBeenLastCalledWith(
+        { group: 'block', private: 'allow' },
+        expect.anything()
+      )
+    )
+  })
+
+  it('全局默认策略读取失败时显示错误', async () => {
+    vi.mocked(chatApi.getAdapterPolicyDefaults).mockRejectedValueOnce(new Error('读取失败'))
+    renderPage()
+    const defaults = await screen.findByRole('region', { name: '适配器全局默认策略' })
+    expect(await within(defaults).findByText('默认策略加载失败')).toBeInTheDocument()
+  })
+
+  it('全局默认策略保存失败时提示具体错误', async () => {
+    vi.mocked(chatApi.updateAdapterPolicyDefaults).mockRejectedValue(new Error('写入失败'))
+    const user = userEvent.setup()
+    renderPage()
+    const defaults = await screen.findByRole('region', { name: '适配器全局默认策略' })
+    const groupRow = within(defaults).getByText('群聊').parentElement as HTMLElement
+    await user.click(within(groupRow).getByRole('button', { name: '拒绝' }))
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith({
+        title: '适配器默认策略保存失败',
+        description: '写入失败',
+        variant: 'destructive',
+      })
+    )
+  })
+
   it('适配器管理页只列出适配器并展示主程序放行规则页签', async () => {
     const user = userEvent.setup()
     renderPage()
@@ -707,26 +765,29 @@ describe('PluginConfigPage 主程序放行规则', () => {
     await user.click(await screen.findByRole('button', { name: /QQ Adapter/ }))
     await user.click(await screen.findByRole('tab', { name: '黑白名单规则' }))
 
-    expect(await screen.findByText('这是 MaiBot 主程序侧规则，与适配器自身名单相互独立。')).toBeInTheDocument()
+    expect(await screen.findByText('群聊规则')).toBeInTheDocument()
+    expect(screen.queryByText('这是 MaiBot 主程序侧规则，与适配器自身名单相互独立。')).not.toBeInTheDocument()
+    expect(screen.queryByText(/适配器自身的白名单仍在/)).not.toBeInTheDocument()
     expect(screen.getByText('全局默认：阅读')).toBeInTheDocument()
     expect(screen.getByText('全局默认：不阅读')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /保存主程序规则/ })).toBeDisabled()
-    expect(screen.queryByRole('button', { name: /^保存$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /保存主程序规则/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /源代码/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重置/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
 
     await user.click(screen.getAllByRole('combobox')[0])
     await user.click(await screen.findByText('阅读'))
     await user.click(screen.getAllByRole('button', { name: '添加列表项' })[0])
-    await user.click(screen.getByRole('button', { name: /保存主程序规则/ }))
 
-    await waitFor(() =>
-      expect(chatApi.updateAdapterHostPolicy).toHaveBeenCalledWith('adapter.qq', {
-        group: { default_action: 'allow', allow_ids: ['new-item'], deny_ids: [] },
-        private: { default_action: 'inherit', allow_ids: [], deny_ids: [] },
-      })
+    await waitFor(
+      () =>
+        expect(chatApi.updateAdapterHostPolicy).toHaveBeenCalledWith('adapter.qq', {
+          group: { default_action: 'allow', allow_ids: ['new-item'], deny_ids: [] },
+          private: { default_action: 'inherit', allow_ids: [], deny_ids: [] },
+        }),
+      { timeout: 6000 }
     )
-    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: '主程序放行规则已保存' }))
+    expect(await screen.findByTestId('host-policy-save-status')).toHaveTextContent('已保存')
   })
 
   it('保存主程序放行规则失败时弹出错误 toast', async () => {
@@ -738,16 +799,18 @@ describe('PluginConfigPage 主程序放行规则', () => {
     await user.click(await screen.findByText('群聊规则'))
     await user.click(screen.getAllByRole('combobox')[0])
     await user.click(await screen.findByText('不阅读'))
-    await user.click(screen.getByRole('button', { name: /保存主程序规则/ }))
 
-    await waitFor(() =>
-      expect(toastMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: '主程序放行规则保存失败',
-          description: '写入失败',
-        })
-      )
+    await waitFor(
+      () =>
+        expect(toastMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: '主程序放行规则保存失败',
+            description: '写入失败',
+          })
+        ),
+      { timeout: 6000 }
     )
+    expect(screen.getByTestId('host-policy-save-status')).toHaveTextContent('保存失败')
   })
 
   it('编辑器返回时保持适配器管理路径', async () => {
@@ -2170,5 +2233,357 @@ describe('PluginConfigPage 列表操作与状态', () => {
     })
     expect(await screen.findByText('正在移除文件')).toBeInTheDocument()
     expect(screen.getByText('55%')).toBeInTheDocument()
+  })
+})
+
+function findOnOpenChangeHandlers(from: Element): Array<(open: boolean) => void> {
+  const fiberKey = Object.keys(from).find((key) => key.startsWith('__reactFiber$'))
+  if (!fiberKey) {
+    return []
+  }
+  type Fiber = {
+    memoizedProps?: { onOpenChange?: unknown }
+    pendingProps?: { onOpenChange?: unknown }
+    return?: Fiber | null
+  }
+  const handlers: Array<(open: boolean) => void> = []
+  let fiber = (from as unknown as Record<string, Fiber | undefined>)[fiberKey]
+  for (let index = 0; index < 50 && fiber; index += 1) {
+    const handler = fiber.memoizedProps?.onOpenChange ?? fiber.pendingProps?.onOpenChange
+    if (typeof handler === 'function' && !handlers.includes(handler as (open: boolean) => void)) {
+      handlers.push(handler as (open: boolean) => void)
+    }
+    fiber = fiber.return ?? undefined
+  }
+  return handlers
+}
+
+describe('PluginConfigPage 覆盖补全', () => {
+  it('详情页在插件 ID 变化时重置 README 与组件缓存', async () => {
+    const plugin = makePlugin('test.emoji', 'Emoji Plugin')
+    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([plugin] as never)
+    vi.mocked(pluginApi.getLocalPluginReadme).mockResolvedValue('# Hello README')
+    vi.mocked(pluginApi.getPluginRuntimeComponents).mockResolvedValue([
+      {
+        name: 'search_tool',
+        description: '搜索工具',
+        enabled: true,
+        plugin_name: 'test.emoji',
+        component_type: 'tool',
+      },
+    ] as never)
+
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /Emoji Plugin/ }))
+    await user.click(await screen.findByRole('tab', { name: '详情' }))
+    expect(await screen.findByText('# Hello README')).toBeInTheDocument()
+    expect(screen.getByText('search_tool')).toBeInTheDocument()
+
+    plugin.id = 'test.emoji.v2'
+    await user.click(screen.getByRole('switch', { name: /禁用插件/ }))
+    await waitFor(() => expect(pluginApi.getPluginConfigBundle).toHaveBeenCalledWith('test.emoji.v2'))
+  })
+
+  it('详情页回退 urls 链接，并渲染无关键词的旧版动作', async () => {
+    const plugin = makePlugin('test.emoji', 'Emoji Plugin')
+    plugin.manifest.homepage_url = undefined
+    plugin.manifest.repository_url = undefined
+    plugin.manifest.urls = {
+      homepage: 'https://home-fallback.example',
+      repository: 'https://repo-fallback.example',
+      documentation: 'https://docs-fallback.example',
+      issues: 'https://issues-fallback.example',
+    }
+    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([plugin] as never)
+    vi.mocked(pluginApi.getPluginRuntimeComponents).mockResolvedValue([
+      {
+        name: 'silent_action',
+        description: '',
+        enabled: true,
+        plugin_name: 'test.emoji',
+        component_type: 'action',
+        parameters_schema: { properties: ['not-an-object'] },
+      },
+    ] as never)
+
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /Emoji Plugin/ }))
+    await user.click(await screen.findByRole('tab', { name: '详情' }))
+
+    expect(await screen.findByRole('link', { name: '主页' })).toHaveAttribute(
+      'href',
+      'https://home-fallback.example'
+    )
+    expect(screen.getByRole('link', { name: '仓库' })).toHaveAttribute(
+      'href',
+      'https://repo-fallback.example'
+    )
+    expect(screen.getByText('silent_action')).toBeInTheDocument()
+    expect(screen.getByText('旧版动作')).toBeInTheDocument()
+    expect(screen.queryByText('触发方式：')).not.toBeInTheDocument()
+  })
+
+  it('未保存弹窗通过关闭按钮走 Dialog onOpenChange', async () => {
+    vi.mocked(pluginApi.getPluginConfigBundle).mockResolvedValue({
+      schema: {
+        plugin_info: { name: 'Emoji Plugin', version: '1.0.0', description: 'desc' },
+        sections: {
+          general: {
+            name: 'general',
+            title: '通用',
+            collapsed: false,
+            order: 0,
+            fields: {
+              title: makeField({ name: 'title', ui_type: 'text', label: '标题', default: 'old' }),
+            },
+          },
+        },
+        layout: { type: 'auto', tabs: [] },
+      },
+      config: { general: { title: 'old' } },
+      rawConfig: 'title = "old"\n',
+    } as never)
+
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /Emoji Plugin/ }))
+    fireEvent.change(await screen.findByDisplayValue('old'), { target: { value: 'draft' } })
+    await user.click(screen.getAllByRole('button')[0])
+    expect(await screen.findByRole('heading', { name: '有未保存的更改' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('heading', { name: '有未保存的更改' })).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue('draft')).toBeInTheDocument()
+  })
+
+  it('点击前往插件市场不会打开编辑器', async () => {
+    const incompatiblePlugin = makePlugin('test.incompatible', 'Incompatible Plugin')
+    incompatiblePlugin.manifest.version = '1.3.2'
+    incompatiblePlugin.manifest.host_application.max_version = '1.0.99'
+    incompatiblePlugin.load_status = 'failed'
+    incompatiblePlugin.load_error =
+      'manifest 校验失败: Host 版本不兼容: 版本 1.1.0 高于最大支持 1.0.99 (当前 Host: 1.1.0)'
+    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([incompatiblePlugin] as never)
+
+    renderPage()
+    const marketplaceLink = await screen.findByRole('link', { name: '前往插件市场' })
+    marketplaceLink.addEventListener('click', (event) => event.preventDefault())
+    fireEvent.click(marketplaceLink)
+    expect(screen.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument()
+    expect(screen.getByText('当前插件版本已不兼容')).toBeInTheDocument()
+  })
+
+  it('更新对话框可通过 onOpenChange 保持打开并用关闭按钮关掉', async () => {
+    const plugin = makePlugin('test.emoji', 'Emoji Plugin')
+    plugin.manifest.repository_url = 'https://example.com/emoji.git'
+    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([plugin] as never)
+    vi.mocked(pluginApi.fetchPluginList).mockResolvedValue([
+      {
+        id: 'test.emoji',
+        manifest: {
+          ...plugin.manifest,
+          version: '2.0.0',
+          repository_url: 'https://example.com/emoji.git',
+        },
+      },
+    ] as never)
+
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: '发现新版本 v2.0.0' }))
+    expect(await screen.findByRole('heading', { name: '确认更新插件' })).toBeInTheDocument()
+
+    const dialog = screen.getByRole('dialog')
+    const onOpenChangeHandlers = findOnOpenChangeHandlers(dialog)
+    expect(onOpenChangeHandlers.length).toBeGreaterThan(0)
+    act(() => {
+      for (const onOpenChange of onOpenChangeHandlers) {
+        onOpenChange(true)
+      }
+    })
+    expect(screen.getByRole('heading', { name: '确认更新插件' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('heading', { name: '确认更新插件' })).not.toBeInTheDocument()
+  })
+
+  it('删除对话框 onOpenChange(true) 保持打开', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: '删除' }))
+    expect(await screen.findByRole('heading', { name: '确认删除插件' })).toBeInTheDocument()
+
+    const dialog = screen.getByRole('dialog')
+    const onOpenChangeHandlers = findOnOpenChangeHandlers(dialog)
+    expect(onOpenChangeHandlers.length).toBeGreaterThan(0)
+    act(() => {
+      for (const onOpenChange of onOpenChangeHandlers) {
+        onOpenChange(true)
+      }
+    })
+    expect(screen.getByRole('heading', { name: '确认删除插件' })).toBeInTheDocument()
+  })
+
+  it('文档面板 pointer 拖拽期间忽略 window 鼠标事件，并拒绝无效拖拽起点', async () => {
+    vi.mocked(pluginApi.getLocalPluginReadme).mockResolvedValue('# 文档 README')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /Emoji Plugin/ }))
+    await user.click(await screen.findByRole('button', { name: /打开文档/ }))
+    expect(await screen.findByText('# 文档 README')).toBeInTheDocument()
+
+    const handle = screen.getByRole('button', { name: '移动插件文档窗口' })
+    const panel = handle.parentElement as HTMLElement
+    const rect = {
+      x: 100,
+      y: 100,
+      left: 100,
+      top: 100,
+      right: 660,
+      bottom: 720,
+      width: 560,
+      height: 620,
+      toJSON: () => ({}),
+    }
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(rect as DOMRect)
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 110, clientY: 110, pointerId: 1 })
+    expect(handle).toHaveClass('cursor-grabbing')
+    fireEvent.mouseMove(window, { clientX: 240, clientY: 190 })
+    fireEvent.mouseUp(window)
+    fireEvent.mouseDown(handle, { button: 1, clientX: 120, clientY: 120 })
+    fireEvent.mouseDown(handle, { button: 0, clientX: 120, clientY: 120 })
+    fireEvent.pointerCancel(handle, { pointerId: 1 })
+    fireEvent.pointerUp(handle, { pointerId: 1 })
+    expect(handle).toHaveClass('cursor-grab')
+
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(undefined as unknown as DOMRect)
+    fireEvent.mouseDown(handle, { button: 0, clientX: 130, clientY: 130 })
+    expect(handle).toHaveClass('cursor-grab')
+
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(rect as DOMRect)
+    fireEvent.mouseDown(handle, { button: 0, clientX: 120, clientY: 120 })
+    expect(handle).toHaveClass('cursor-grabbing')
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+      window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 400, clientY: 400 }))
+    })
+    expect(handle).toHaveClass('cursor-grab')
+  })
+
+  it('文档面板空白 changelog 走远程并展示空态，切回可视化模式', async () => {
+    const plugin = makePlugin('test.emoji', 'Emoji Plugin')
+    plugin.changelog = '   '
+    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([plugin] as never)
+    vi.mocked(pluginApi.getLocalPluginReadme).mockResolvedValue('# r')
+    vi.mocked(pluginApi.getLocalPluginChangelog).mockResolvedValue('')
+    vi.mocked(pluginApi.getPluginConfigBundle).mockResolvedValue({
+      schema: {
+        plugin_info: { name: 'Emoji Plugin', version: '1.0.0', description: 'desc' },
+        sections: {
+          general: {
+            name: 'general',
+            title: '通用',
+            collapsed: false,
+            order: 0,
+            fields: {
+              title: makeField({ name: 'title', ui_type: 'text', label: '标题', default: 'old' }),
+            },
+          },
+        },
+        layout: { type: 'auto', tabs: [] },
+      },
+      config: { general: { title: 'old' } },
+      rawConfig: 'title = "old"\n',
+    } as never)
+
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /Emoji Plugin/ }))
+    await user.click(await screen.findByRole('button', { name: /打开文档/ }))
+    expect(await screen.findByText('# r')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /更新日志/ }))
+    expect(await screen.findByText('暂无更新日志')).toBeInTheDocument()
+    expect(pluginApi.getLocalPluginChangelog).toHaveBeenCalledWith('test.emoji')
+
+    await user.click(await screen.findByRole('button', { name: /源代码/ }))
+    expect(await screen.findByTestId('code-editor')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /可视化/ }))
+    expect(screen.getByDisplayValue('old')).toBeInTheDocument()
+  })
+
+  it('可视化 list 非数组时回退 default，保存中显示转圈', async () => {
+    let resolveSave: (value: unknown) => void = () => undefined
+    vi.mocked(pluginApi.getPluginConfigBundle).mockResolvedValue({
+      schema: {
+        plugin_info: { name: 'Emoji Plugin', version: '1.0.0', description: 'desc' },
+        sections: {
+          general: {
+            name: 'general',
+            title: '通用',
+            collapsed: false,
+            order: 0,
+            fields: {
+              tags: makeField({
+                name: 'tags',
+                ui_type: 'list',
+                label: '标签',
+                item_type: 'string',
+                default: ['kept'],
+              }),
+              title: makeField({ name: 'title', ui_type: 'text', label: '标题', default: 'old' }),
+            },
+          },
+        },
+        layout: { type: 'auto', tabs: [] },
+      },
+      config: { general: { tags: 'not-array', title: 'old' } },
+      rawConfig: '',
+    } as never)
+    vi.mocked(pluginApi.updatePluginConfig).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = (value) => resolve(value as never)
+        })
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /Emoji Plugin/ }))
+    expect(await screen.findByText('标签')).toBeInTheDocument()
+    fireEvent.change(await screen.findByDisplayValue('old'), { target: { value: 'draft' } })
+    await user.click(screen.getByRole('button', { name: /保存/ }))
+    expect(screen.getByRole('button', { name: /保存/ }).querySelector('.animate-spin')).toBeTruthy()
+    resolveSave({ success: true, message: 'ok' })
+    await waitFor(() =>
+      expect(pluginApi.updatePluginConfig).toHaveBeenCalledWith('test.emoji', {
+        general: { tags: 'not-array', title: 'draft' },
+      })
+    )
+  })
+
+  it('版本不兼容且正在检查市场时展示检查中文案', async () => {
+    const incompatiblePlugin = makePlugin('test.incompatible', 'Incompatible Plugin')
+    incompatiblePlugin.manifest.version = '1.3.2'
+    incompatiblePlugin.manifest.host_application.max_version = '1.0.99'
+    incompatiblePlugin.load_status = 'failed'
+    incompatiblePlugin.load_error = 'Host 版本不兼容'
+    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([incompatiblePlugin] as never)
+    vi.mocked(pluginApi.fetchPluginList).mockReturnValue(new Promise(() => {}))
+
+    renderPage()
+    expect(
+      await screen.findByText('已安装 v1.3.2 与当前麦麦版本不兼容，正在检查插件市场更新…')
+    ).toBeInTheDocument()
+  })
+
+  it('future-retro 主题在无插件时渲染空状态条', async () => {
+    themeState.dashboardStyle = 'future-retro'
+    vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([] as never)
+    renderPage()
+    expect(await screen.findByText('暂无已安装的插件')).toBeInTheDocument()
+    expect(screen.getByText('已安装 0 个插件，已启用 0 个，已禁用 0 个，加载中 0 个，启动失败 0 个')).toBeInTheDocument()
   })
 })

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Loader2, Save, ShieldCheck } from 'lucide-react'
-import { useState } from 'react'
+import { AlertCircle, Loader2, Save } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { ListFieldEditor } from '@/components/ListFieldEditor'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -29,11 +29,20 @@ interface AdapterHostPolicyPanelProps {
 }
 
 interface AdapterHostPolicyEditorProps {
-  initialPolicy: AdapterHostPolicy
+  policy: AdapterHostPolicy
   globalDefaults: AdapterPolicyDefaults
-  saving: boolean
-  onSave: (policy: AdapterHostPolicy) => void
+  saveStatus: string | null
+  manualSaveDisabled: boolean
+  onManualSave: () => void
+  onSectionChange: (
+    chatType: ChatStreamType,
+    field: 'default_action' | 'allow_ids' | 'deny_ids',
+    value: AdapterHostDefaultAction | string[]
+  ) => void
 }
+
+/** 编辑停止后自动保存的防抖时长，与主程序配置页保持一致。 */
+export const AUTOSAVE_DELAY_MS = 2000
 
 function clonePolicy(policy: AdapterHostPolicy): AdapterHostPolicy {
   return {
@@ -50,42 +59,41 @@ function clonePolicy(policy: AdapterHostPolicy): AdapterHostPolicy {
   }
 }
 
+function formatSaveTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false })
+}
+
 function AdapterHostPolicyEditor({
-  initialPolicy,
+  policy,
   globalDefaults,
-  saving,
-  onSave,
+  saveStatus,
+  manualSaveDisabled,
+  onManualSave,
+  onSectionChange,
 }: AdapterHostPolicyEditorProps) {
-  const [policy, setPolicy] = useState<AdapterHostPolicy>(() => clonePolicy(initialPolicy))
-  const hasChanges = JSON.stringify(policy) !== JSON.stringify(initialPolicy)
-
-  const updateSection = (
-    chatType: ChatStreamType,
-    field: 'default_action' | 'allow_ids' | 'deny_ids',
-    value: AdapterHostDefaultAction | string[]
-  ) => {
-    setPolicy((current) => ({
-      ...current,
-      [chatType]: {
-        ...current[chatType],
-        [field]: value,
-      },
-    }))
-  }
-
   return (
     <div className="space-y-4">
-      <Alert>
-        <ShieldCheck className="h-4 w-4" />
-        <AlertDescription className="space-y-1">
-          <div className="font-medium">这是 MaiBot 主程序侧规则，与适配器自身名单相互独立。</div>
-          <div>
-            适配器自身的白名单仍在“设置”页管理；消息需要先通过适配器自身规则，再通过这里的主程序规则。
-          </div>
-        </AlertDescription>
-      </Alert>
-
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-muted-foreground text-xs">编辑后 2 秒自动保存</p>
+        <div className="flex items-center gap-2">
+          {saveStatus && (
+            <span className="text-muted-foreground text-xs" data-testid="host-policy-save-status">
+              {saveStatus}
+            </span>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={manualSaveDisabled}
+            onClick={onManualSave}
+          >
+            <Save className="h-4 w-4" />
+            保存
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
         {(['group', 'private'] as const).map((chatType) => {
           const section = policy[chatType]
           const globalAction = globalDefaults[chatType]
@@ -109,7 +117,7 @@ function AdapterHostPolicyEditor({
                   <Select
                     value={section.default_action}
                     onValueChange={(value) =>
-                      updateSection(chatType, 'default_action', value as AdapterHostDefaultAction)
+                      onSectionChange(chatType, 'default_action', value as AdapterHostDefaultAction)
                     }
                   >
                     <SelectTrigger>
@@ -135,7 +143,7 @@ function AdapterHostPolicyEditor({
                   <ListFieldEditor
                     value={section.allow_ids}
                     onChange={(value) =>
-                      updateSection(
+                      onSectionChange(
                         chatType,
                         'allow_ids',
                         value.map((item) => String(item))
@@ -156,7 +164,7 @@ function AdapterHostPolicyEditor({
                   <ListFieldEditor
                     value={section.deny_ids}
                     onChange={(value) =>
-                      updateSection(
+                      onSectionChange(
                         chatType,
                         'deny_ids',
                         value.map((item) => String(item))
@@ -171,17 +179,6 @@ function AdapterHostPolicyEditor({
           )
         })}
       </div>
-
-      <div className="flex justify-end">
-        <Button disabled={!hasChanges || saving} onClick={() => onSave(policy)}>
-          {saving ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
-          )}
-          保存主程序规则
-        </Button>
-      </div>
     </div>
   )
 }
@@ -194,12 +191,30 @@ export function AdapterHostPolicyPanel({ pluginId }: AdapterHostPolicyPanelProps
     queryKey,
     queryFn: () => getAdapterHostPolicy(pluginId),
   })
+  const serverPolicy = policyQuery.data?.policy
+  const serverPolicyText = serverPolicy ? JSON.stringify(serverPolicy) : null
+  // 草稿与保存状态放在面板层：回包只更新内容，不重挂载组件；
+  // 与服务端数据比较一律用内容快照，结构化共享会保留相同内容的旧对象引用。
+  const [policy, setPolicy] = useState<AdapterHostPolicy | null>(() =>
+    serverPolicy ? clonePolicy(serverPolicy) : null
+  )
+  // 保存成功时间按内容记录：草稿内容变化后自动失效，切换插件不会残留过期状态
+  const [lastSaved, setLastSaved] = useState<{ text: string; at: number } | null>(null)
+  const serverSnapshotRef = useRef<string | null>(serverPolicyText)
+  const pendingSaveRef = useRef<AdapterHostPolicy | null>(null)
+  const autosaveTimerRef = useRef<number | null>(null)
+
+  const hasUnsavedChanges =
+    policy !== null && serverPolicyText !== null && JSON.stringify(policy) !== serverPolicyText
+
   const saveMutation = useMutation({
-    mutationFn: (policy: AdapterHostPolicy) => updateAdapterHostPolicy(pluginId, policy),
+    mutationFn: (next: AdapterHostPolicy) => updateAdapterHostPolicy(pluginId, next),
     onSuccess: (response) => {
+      serverSnapshotRef.current = JSON.stringify(response.policy)
+      setPolicy(clonePolicy(response.policy))
+      setLastSaved({ text: JSON.stringify(response.policy), at: Date.now() })
       queryClient.setQueryData(queryKey, response)
       void queryClient.invalidateQueries({ queryKey: ['chat-stream-detail'] })
-      toast({ title: '主程序放行规则已保存' })
     },
     onError: (error) => {
       toast({
@@ -209,6 +224,62 @@ export function AdapterHostPolicyPanel({ pluginId }: AdapterHostPolicyPanelProps
       })
     },
   })
+  const { mutate } = saveMutation
+
+  // 服务端内容变化（切换插件或重新拉取）时重置草稿，实现热重载
+  useEffect(() => {
+    if (serverPolicyText === null || serverPolicy === undefined) {
+      return
+    }
+    if (serverPolicyText === serverSnapshotRef.current) {
+      return
+    }
+    serverSnapshotRef.current = serverPolicyText
+    setPolicy(clonePolicy(serverPolicy))
+  }, [serverPolicy, serverPolicyText])
+
+  // 自动保存：编辑停止后写回后端
+  useEffect(() => {
+    if (!hasUnsavedChanges || !policy) {
+      return
+    }
+    pendingSaveRef.current = policy
+    const timer = window.setTimeout(() => {
+      autosaveTimerRef.current = null
+      pendingSaveRef.current = null
+      mutate(policy)
+    }, AUTOSAVE_DELAY_MS)
+    autosaveTimerRef.current = timer
+    return () => {
+      window.clearTimeout(timer)
+      if (autosaveTimerRef.current === timer) {
+        autosaveTimerRef.current = null
+      }
+    }
+  }, [policy, hasUnsavedChanges, mutate])
+
+  // 切换页签会卸载面板；立即提交尚在防抖期的最新草稿，避免编辑丢失
+  useEffect(
+    () => () => {
+      if (pendingSaveRef.current) {
+        mutate(pendingSaveRef.current)
+        pendingSaveRef.current = null
+      }
+    },
+    [mutate]
+  )
+
+  // 手动保存：取消尚未执行的自动保存，立即写回当前草稿
+  const saveNow = () => {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current)
+      autosaveTimerRef.current = null
+    }
+    pendingSaveRef.current = null
+    if (policy) {
+      mutate(policy)
+    }
+  }
 
   if (policyQuery.isLoading) {
     return (
@@ -219,7 +290,7 @@ export function AdapterHostPolicyPanel({ pluginId }: AdapterHostPolicyPanelProps
     )
   }
 
-  if (policyQuery.isError || !policyQuery.data) {
+  if (policyQuery.isError || !policyQuery.data || !policy) {
     return (
       <Alert variant="destructive">
         <AlertCircle className="h-4 w-4" />
@@ -230,13 +301,36 @@ export function AdapterHostPolicyPanel({ pluginId }: AdapterHostPolicyPanelProps
     )
   }
 
+  const saveStatus = saveMutation.isPending
+    ? '自动保存中'
+    : saveMutation.isError
+      ? '自动保存失败'
+      : hasUnsavedChanges
+        ? '未保存的更改'
+        : lastSaved && lastSaved.text === JSON.stringify(policy)
+          ? `已保存 ${formatSaveTime(lastSaved.at)}`
+          : null
+
   return (
     <AdapterHostPolicyEditor
-      key={JSON.stringify(policyQuery.data.policy)}
-      initialPolicy={policyQuery.data.policy}
+      policy={policy}
       globalDefaults={policyQuery.data.global_defaults}
-      saving={saveMutation.isPending}
-      onSave={(policy) => saveMutation.mutate(policy)}
+      saveStatus={saveStatus}
+      manualSaveDisabled={!hasUnsavedChanges || saveMutation.isPending}
+      onManualSave={saveNow}
+      onSectionChange={(chatType, field, value) =>
+        setPolicy((current) =>
+          current
+            ? {
+                ...current,
+                [chatType]: {
+                  ...current[chatType],
+                  [field]: value,
+                },
+              }
+            : current
+        )
+      }
     />
   )
 }

@@ -150,7 +150,7 @@ describe('useModelFetcher', () => {
     )
   })
 
-  it('模板不支持自动获取时清空列表且不报错', async () => {
+  it('未配置 modelFetcher 的内置模板默认乐观尝试 /models', async () => {
     vi.mocked(fetchProviderModels).mockResolvedValue([{ id: 'claude', name: 'claude' }])
 
     const { result } = renderFetcher(() => ({
@@ -164,11 +164,14 @@ describe('useModelFetcher', () => {
       await result.current.fetchModelsForProvider('anthropic')
     })
 
-    expect(fetchProviderModels).not.toHaveBeenCalled()
-    expect(result.current.availableModels).toEqual([])
+    expect(fetchProviderModels).toHaveBeenCalledTimes(1)
+    expect(result.current.availableModels).toEqual([{ id: 'claude', name: 'claude' }])
     expect(result.current.modelFetchError).toBeNull()
     expect(result.current.matchedTemplate?.display_name).toBe('Anthropic (Claude)')
-    expect(result.current.matchedTemplate?.modelFetcher).toBeUndefined()
+    expect(result.current.matchedTemplate?.modelFetcher).toEqual({
+      endpoint: '/models',
+      parser: 'openai',
+    })
   })
 
   it('缓存未过期时直接复用，过期或强制刷新才重新请求', async () => {

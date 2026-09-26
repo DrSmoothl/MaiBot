@@ -252,14 +252,14 @@ describe('deleteChatStreamPrompt', () => {
 })
 
 describe('updateChatStreamAdapterPolicy', () => {
-  it('以 PUT 提交适配器放行规则并返回最新详情', async () => {
+  it('以 PUT 提交适配器规则并返回最新详情', async () => {
     const payload = { adapter_id: 'ad-1', action: 'allow' as const }
     putMock.mockResolvedValue({ success: true, detail: detailStub })
 
     await expect(updateChatStreamAdapterPolicy('s1', payload)).resolves.toBe(detailStub)
     expect(putMock).toHaveBeenCalledWith('/api/chat/sessions/s1/adapters/policy', {
       body: payload,
-      errorMessage: '保存适配器放行规则失败',
+      errorMessage: '保存适配器规则失败',
     })
   })
 

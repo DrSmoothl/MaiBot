@@ -53,6 +53,11 @@ class UsageRecord:
     prompt_cache_miss_tokens: int = 0
     """输入中缓存未命中的 token 数"""
 
+    prompt_cache_reported: bool = False
+    """供应商本次响应是否上报了 Prompt 缓存用量字段。
+    部分供应商（如 StepFun）只在命中时返回缓存字段，未命中时为 False；
+    统计页据此自动探测模型是否支持 Prompt 缓存，不依赖任何价格配置。"""
+
 
 @dataclass(frozen=True, slots=True)
 class GenerationTrace:
@@ -124,6 +129,10 @@ class APIResponse:
 
     request_wire_payload: Any = field(default=None, repr=False)
     """本次成功请求的最终 wire 载荷，仅用于缓存诊断和可观测性。"""
+
+    request_protocol_hash: str | None = None
+    """图片嵌入客户端计算的协议指纹；自动适配图片嵌入协议时填充，
+    编排器据此透传给上层，其余场景保持 None 并沿用默认指纹算法。"""
 
     @property
     def content(self) -> str | None:
@@ -206,7 +215,8 @@ class APIResponse:
 
 
 UsageTuple = Tuple[int, ...]
-"""统一的使用量元组，顺序为 `(prompt_tokens, completion_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens)`。"""
+"""统一的使用量元组，顺序为 `(prompt_tokens, completion_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, prompt_cache_reported)`。
+ Gemini 等不区分缓存的客户端可缩短元组，末位是否存在由消费方按长度判断。"""
 
 StreamResponseHandler = Callable[
     [Any, asyncio.Event | None],
@@ -299,6 +309,18 @@ class EmbeddingRequest:
 
 
 @dataclass(slots=True)
+class ImageEmbeddingRequest:
+    """统一的图片嵌入请求，原始图片只在进程内传递。"""
+
+    model_info: ModelInfo
+    image_bytes: bytes
+    mime_type: str
+    preprocess_version: str
+    extra_params: Dict[str, Any] = field(default_factory=dict)
+    trace_context: RequestTraceContext | None = None
+
+
+@dataclass(slots=True)
 class AudioTranscriptionRequest:
     """统一的音频转录请求。"""
 
@@ -309,7 +331,7 @@ class AudioTranscriptionRequest:
     trace_context: RequestTraceContext | None = None
 
 
-ClientRequest = ResponseRequest | EmbeddingRequest | AudioTranscriptionRequest
+ClientRequest = ResponseRequest | EmbeddingRequest | ImageEmbeddingRequest | AudioTranscriptionRequest
 """统一客户端请求类型。"""
 
 
@@ -351,6 +373,15 @@ class BaseClient(ABC):
             APIResponse: 嵌入响应。
         """
         raise NotImplementedError("'get_embedding' method should be overridden in subclasses")
+
+    async def get_image_embedding(self, request: ImageEmbeddingRequest) -> APIResponse:
+        """获取图片嵌入；未实现该协议的 Provider 应明确报错。"""
+
+        from src.llm_models.exceptions import ImageEmbeddingUnsupportedError
+
+        raise ImageEmbeddingUnsupportedError(
+            f"Provider 客户端 {type(self).__name__} 未实现图片嵌入协议"
+        )
 
     @abstractmethod
     async def get_audio_transcriptions(self, request: AudioTranscriptionRequest) -> APIResponse:

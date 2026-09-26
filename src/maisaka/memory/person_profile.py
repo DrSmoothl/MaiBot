@@ -242,6 +242,11 @@ async def build_person_profile_injection_messages(
     if not candidates:
         return []
 
+    context_text = "\n".join(
+        str(message.processed_plain_text or "").strip()
+        for message in [anchor_message, *(pending_messages or ())]
+        if str(message.processed_plain_text or "").strip()
+    )[:1000]
     blocks: list[str] = []
     for candidate in candidates:
         try:
@@ -249,6 +254,7 @@ async def build_person_profile_injection_messages(
                 action="query",
                 person_id=candidate.person_id,
                 limit=PROFILE_QUERY_LIMIT,
+                context_text=context_text,
             )
         except Exception as exc:
             logger.debug(f"查询人物画像注入内容失败: person_id={candidate.person_id!r} err={exc}")
@@ -259,7 +265,14 @@ async def build_person_profile_injection_messages(
             logger.debug(f"人物画像注入跳过: person_id={candidate.person_id!r} error={error}")
             continue
 
-        profile_text = build_profile_injection_text(_extract_profile_text(payload))
+        uncertain_candidates = [
+            str(item.get("text", "")) for item in payload.get("uncertain_candidates", []) if isinstance(item, dict)
+        ]
+        profile_text = build_profile_injection_text(
+            _extract_profile_text(payload),
+            uncertain_candidates=uncertain_candidates,
+            include_uncertain_fallback=False,
+        )
         if not profile_text:
             logger.debug(f"人物画像注入跳过空画像: person_id={candidate.person_id!r}")
             continue

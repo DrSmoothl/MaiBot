@@ -70,12 +70,17 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize: () => number }) => ({
     getTotalSize: () => count * estimateSize(),
+    // end 用于「查找上条」按行位置定位视口内首行，与真实虚拟列表语义保持一致
     getVirtualItems: () =>
-      Array.from({ length: count }, (_, index) => ({
-        index,
-        key: index,
-        start: index * estimateSize(),
-      })),
+      Array.from({ length: count }, (_, index) => {
+        const start = index * estimateSize()
+        return {
+          index,
+          key: index,
+          start,
+          end: start + estimateSize(),
+        }
+      }),
     measureElement: virtualizerMocks.measureElement,
     scrollToIndex: virtualizerMocks.scrollToIndex,
   }),
@@ -523,6 +528,59 @@ describe('阶段状态栏与工具条', () => {
     expect(screen.getAllByText('工具调用：3').length).toBeGreaterThan(0)
   })
 
+  it('统计浮层展示上下文分段占比与平均缓存命中率', async () => {
+    const user = userEvent.setup()
+    const timeline = [
+      makeEntry(
+        'planner.finalized',
+        makeFinalized({
+          request: {
+            messages: [],
+            selected_history_count: 4,
+            tool_count: 2,
+            context_sections: [
+              { key: 'messages', chars: 900, count: 4 },
+              { key: 'system_prompt', chars: 100, count: 1 },
+            ],
+          },
+          planner: makePlannerBlock({
+            prompt_tokens: 12000,
+            completion_tokens: 300,
+            prompt_cache_hit_tokens: 800,
+            prompt_cache_miss_tokens: 200,
+          }),
+        })
+      ),
+    ]
+    setupMonitorState({ timeline })
+    render(<MaisakaMonitor />)
+
+    await user.hover(screen.getByText('统计'))
+
+    // 上下文总量取最近一轮真实 prompt token，分段按字符占比换算
+    expect((await screen.findAllByText('上下文容量')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('1.2万 tokens').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('消息').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('90.0%').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('1.1万').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('系统提示词').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('10.0%').length).toBeGreaterThan(0)
+    // 缓存命中率按会话累计命中/未命中 token 计算
+    expect(screen.getAllByText('80%').length).toBeGreaterThan(0)
+  })
+
+  it('无 planner 请求时统计浮层提示暂无上下文数据', async () => {
+    const user = userEvent.setup()
+    setupMonitorState({ timeline: [makeEntry('message.ingested', makeIngested())] })
+    render(<MaisakaMonitor />)
+
+    await user.hover(screen.getByText('统计'))
+
+    expect((await screen.findAllByText('暂无数据')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/尚无 planner 请求数据/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('消息：1').length).toBeGreaterThan(0)
+  })
+
   it('回到底部按钮触发平滑滚动，清空按钮调用 clearTimeline', async () => {
     const user = userEvent.setup()
     const timeline = [
@@ -648,6 +706,98 @@ describe('阶段状态栏与工具条', () => {
 
     expect(virtualizerMocks.scrollToIndex).not.toHaveBeenCalled()
     expect(scrollToSpy).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
+  })
+
+  it('查找上条定位到视口上方最近一条麦麦发送的消息', async () => {
+    const user = userEvent.setup()
+    const timeline = [
+      makeEntry('message.ingested', makeIngested({ content: '第一条' })),
+      makeEntry('message.sent', makeSent({ content: '麦麦的回复', message_id: 'sent-9' })),
+      makeEntry('message.ingested', makeIngested({ content: '第二条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第三条' })),
+    ]
+    setupMonitorState({ timeline })
+    const { container } = render(<MaisakaMonitor />)
+
+    await flushAutoScroll()
+    // 视口停在 300px：第 0/1 行（各 140px）已滚出上方，首行应为 index 2
+    const viewport = findTimelineViewport(container, '第一条')
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 300 })
+    virtualizerMocks.scrollToIndex.mockClear()
+
+    await user.click(screen.getByRole('button', { name: '查找上条' }))
+
+    expect(virtualizerMocks.scrollToIndex).toHaveBeenCalledWith(1, {
+      align: 'center',
+      behavior: 'smooth',
+    })
+    expect(toastMocks.toast).not.toHaveBeenCalled()
+  })
+
+  it('上方没有麦麦消息时查找上条给出提示', async () => {
+    const user = userEvent.setup()
+    const timeline = [
+      makeEntry('message.ingested', makeIngested({ content: '第一条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第二条' })),
+    ]
+    setupMonitorState({ timeline })
+    const { container } = render(<MaisakaMonitor />)
+
+    await flushAutoScroll()
+    const viewport = findTimelineViewport(container, '第一条')
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 300 })
+    virtualizerMocks.scrollToIndex.mockClear()
+
+    await user.click(screen.getByRole('button', { name: '查找上条' }))
+
+    expect(virtualizerMocks.scrollToIndex).not.toHaveBeenCalled()
+    expect(toastMocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '上方没有更多麦麦发送的消息' })
+    )
+  })
+
+  it('查找上条平滑滚动起始帧不重新开启自动跟随', async () => {
+    const user = userEvent.setup()
+    // 6 条各 140px：底部位于 scrollTop 640，首行落在 index 4，上方最近一条麦麦消息在 index 1
+    const timeline = [
+      makeEntry('message.ingested', makeIngested({ content: '第一条' })),
+      makeEntry('message.sent', makeSent({ content: '麦麦的回复', message_id: 'sent-9' })),
+      makeEntry('message.ingested', makeIngested({ content: '第二条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第三条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第四条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第五条' })),
+    ]
+    setupMonitorState({ timeline })
+    const { container } = render(<MaisakaMonitor />)
+
+    await flushAutoScroll()
+    const viewport = findTimelineViewport(container, '第一条')
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 840 })
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 640 })
+    fireEvent.scroll(viewport)
+    await waitFor(() => expect(getBackToBottomIcon()).toHaveClass('text-primary'))
+
+    await user.click(screen.getByRole('button', { name: '查找上条' }))
+    expect(virtualizerMocks.scrollToIndex).toHaveBeenCalledWith(1, {
+      align: 'center',
+      behavior: 'smooth',
+    })
+    expect(getBackToBottomIcon()).not.toHaveClass('text-primary')
+
+    // 平滑滚动起始帧：距底部 20px，仍处于阈值内，不应被当成“用户回到底部”而重新跟随
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 620 })
+    fireEvent.scroll(viewport)
+    expect(getBackToBottomIcon()).not.toHaveClass('text-primary')
+
+    // 离开阈值后解锁，再滚回底部可以正常恢复自动跟随
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 300 })
+    fireEvent.scroll(viewport)
+    expect(getBackToBottomIcon()).not.toHaveClass('text-primary')
+
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 640 })
+    fireEvent.scroll(viewport)
+    await waitFor(() => expect(getBackToBottomIcon()).toHaveClass('text-primary'))
   })
 })
 
@@ -977,7 +1127,7 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('2 个')).toBeInTheDocument()
     expect(screen.getByText('send_message')).toBeInTheDocument()
     expect(screen.getByText('web_search')).toBeInTheDocument()
-    expect(screen.getByText('执行成功')).toBeInTheDocument()
+    expect(screen.queryByText('执行成功')).not.toBeInTheDocument()
     expect(screen.getByText('执行失败')).toBeInTheDocument()
     expect(screen.getByText('300ms')).toBeInTheDocument()
     // 参数内联块与完整 JSON 折叠入口
@@ -1117,8 +1267,8 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('planner 本轮没有文本内容')).toBeInTheDocument()
     expect(screen.getByText('使用工具')).toBeInTheDocument()
     expect(screen.getByText('search_web')).toBeInTheDocument()
-    // 回退条目默认视为执行成功且无耗时
-    expect(screen.getByText('执行成功')).toBeInTheDocument()
+    // 回退条目默认视为执行成功且无耗时，成功状态不额外显示
+    expect(screen.queryByText('执行成功')).not.toBeInTheDocument()
     expect(screen.getByText('正文调用')).toBeInTheDocument()
     expect(screen.getByText('未返回结果摘要。')).toBeInTheDocument()
   })
@@ -1411,3 +1561,96 @@ describe('推理记录跳转', () => {
     expect(screen.queryAllByRole('button', { name: '推理' })).toHaveLength(0)
   })
 })
+
+describe('MaisakaMonitor 额外空态与错误态', () => {
+  it('已发送消息无内容无媒体时显示非文本占位', () => {
+    setupMonitorState({
+      timeline: [makeEntry('message.sent', makeSent({ content: '', speaker_name: '麦麦' }))],
+    })
+    render(<MaisakaMonitor />)
+
+    expect(screen.getByText('[非文本消息]')).toBeInTheDocument()
+    expect(screen.queryByText('[空消息]')).not.toBeInTheDocument()
+  })
+
+  it('阶段名为空时显示未知阶段，未映射的运行状态原样展示', () => {
+    setupMonitorState({
+      selectedSession: 's1',
+      stageStatuses: new Map([
+        ['s1', makeStatus({ stage: '', agentState: 'thinking', detail: '' })],
+      ]),
+    })
+    render(<MaisakaMonitor />)
+
+    expect(screen.getByText('未知阶段')).toBeInTheDocument()
+    expect(screen.getByText('thinking')).toBeInTheDocument()
+  })
+
+  it('选中会话但时间线为空时仍显示推理空态', () => {
+    setupMonitorState({
+      selectedSession: 's1',
+      sessions: new Map([['s1', makeSession()]]),
+      timeline: [],
+    })
+    render(<MaisakaMonitor />)
+
+    expect(screen.getByText('等待 MaiSaka 推理事件…')).toBeInTheDocument()
+    expect(screen.getByText('当前聊天流暂无阶段状态')).toBeInTheDocument()
+  })
+
+  it('默认展示原文件且仅有远程地址时先进入读取中', () => {
+    httpMocks.get.mockReturnValue(new Promise(() => {}))
+    setupMonitorState({
+      timeline: [
+        makeEntry(
+          'message.ingested',
+          makeIngested({
+            content: '',
+            media: [
+              {
+                kind: 'image',
+                hash: 'pending-image',
+                text: '图片描述',
+                url: '/api/webui/system/maisaka-monitor/media/image/pending-image',
+                default_original: true,
+              },
+            ],
+          })
+        ),
+      ],
+    })
+    render(<MaisakaMonitor />)
+
+    expect(screen.getByText('正在读取图片…')).toBeInTheDocument()
+    expect(screen.queryByAltText('图片原文件')).not.toBeInTheDocument()
+  })
+
+  it('原文件图片解码失败时切换为读取失败', () => {
+    setupMonitorState({
+      timeline: [
+        makeEntry(
+          'message.ingested',
+          makeIngested({
+            content: '',
+            media: [
+              {
+                kind: 'emoji',
+                hash: 'broken',
+                text: '损坏表情',
+                url: '',
+                data_url: 'data:image/png;base64,broken',
+                default_original: true,
+              },
+            ],
+          })
+        ),
+      ],
+    })
+    render(<MaisakaMonitor />)
+
+    fireEvent.error(screen.getByAltText('表情包原文件'))
+    expect(screen.getByText('原文件读取失败')).toBeInTheDocument()
+    expect(screen.queryByAltText('表情包原文件')).not.toBeInTheDocument()
+  })
+})
+

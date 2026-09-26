@@ -129,6 +129,7 @@ export function useModelAutoSave(options: UseModelAutoSaveOptions): UseModelAuto
   }, [])
 
   // 清理模型中的 null 值（TOML 不支持 null）。
+  // 缓存价格留空按输入价格解析：0 表示缓存命中免费，与留空是两种含义。
   const cleanModelForSave = useCallback((model: ModelInfo): ModelInfo => {
     const cleaned: ModelInfo = {
       model_identifier: model.model_identifier,
@@ -136,8 +137,8 @@ export function useModelAutoSave(options: UseModelAutoSaveOptions): UseModelAuto
       api_provider: model.api_provider,
       price_in: model.price_in ?? 0,
       price_out: model.price_out ?? 0,
-      cache: model.cache ?? false,
-      cache_price_in: model.cache_price_in ?? 0,
+      cache_price_in: model.cache_price_in ?? model.price_in ?? 0,
+      price_periods: model.price_periods?.map((period) => ({ ...period })),
       visual: model.visual ?? false,
       force_stream_mode: model.force_stream_mode ?? false,
       extra_params: model.extra_params ?? {},

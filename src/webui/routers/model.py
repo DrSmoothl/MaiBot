@@ -4,12 +4,15 @@
 提供从各个 AI 厂商 API 获取可用模型列表的代理接口
 """
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+import io
+import math
 import os
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from PIL import Image
 from pydantic import BaseModel, Field
 
 import httpx
@@ -27,6 +30,7 @@ from src.llm_models.payload_content.tool_option import ToolCall
 from src.llm_models.request_snapshot import format_request_snapshot_log_info
 from src.llm_models.utils_model import LLMOrchestrator, LLMResponseResult
 from src.webui.dependencies import require_auth
+from src.webui.utils.http_client import get_shared_ssl_context
 from src.webui.utils.network_security import validate_public_url
 
 logger = get_logger("webui")
@@ -74,6 +78,16 @@ class ModelTestToolCall(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ModelTestEmbeddingPair(BaseModel):
+    """嵌入对比测试的单组相似度结果。"""
+
+    label: str
+    """对比说明，例如「相近文本」「不同图片」。"""
+
+    similarity: float
+    """两组向量的余弦相似度，保留 4 位小数。"""
+
+
 class ModelTestResponse(BaseModel):
     """单个模型测试响应。"""
 
@@ -89,6 +103,12 @@ class ModelTestResponse(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    test_kind: str = "chat"
+    """测试类型：`chat` / `text_embedding` / `image_embedding`。"""
+    embedding_dimension: int | None = None
+    """嵌入向量维度；仅嵌入测试返回。"""
+    embedding_pairs: List[ModelTestEmbeddingPair] = Field(default_factory=list)
+    """嵌入对比相似度结果；仅嵌入测试返回。"""
 
 
 class _SingleModelTestOrchestrator(LLMOrchestrator):
@@ -98,8 +118,7 @@ class _SingleModelTestOrchestrator(LLMOrchestrator):
         self._model_test_task_config = TaskConfig(
             model_list=[model_name],
             max_tokens=512,
-            temperature=0.0,
-            slow_threshold=30.0,
+            temperature=0.7,
             selection_strategy="sequential",
             hard_timeout=90.0,
         )
@@ -110,7 +129,7 @@ class _SingleModelTestOrchestrator(LLMOrchestrator):
 
 
 @router.get("/client-types")
-async def get_registered_client_types():
+def get_registered_client_types():
     """返回当前主程序与插件已注册的 LLM Provider client_type。"""
     for client_type in MODEL_FETCHER_CONFIG:
         ensure_client_type_loaded(client_type)
@@ -143,9 +162,17 @@ async def test_model_capability(request: ModelTestRequest):
     if model_config is None:
         raise HTTPException(status_code=404, detail=f"未找到模型: {model_name}")
 
-    # 嵌入模型不支持 chat/completions 接口，需改用嵌入接口测试
-    if model_name in _get_embedding_task_model_names():
-        return await _test_embedding_model(model_name)
+    # 嵌入模型不支持 chat/completions 接口，需改用嵌入接口测试：
+    # 除命中嵌入任务配置外，模型名称或标识带 embed 时也按嵌入模型处理，
+    # 避免未挂到任务的视觉向量模型误走聊天测试。
+    model_identifier = str(model_config.get("model_identifier", ""))
+    if (
+        model_name in _get_task_model_names("embedding")
+        or model_name in _get_task_model_names("image_embedding")
+        or _looks_like_embedding_model(model_name)
+        or _looks_like_embedding_model(model_identifier)
+    ):
+        return await _test_embedding_model(model_name, model_identifier)
 
     visual_enabled = bool(model_config.get("visual", False))
     start_time = time.time()
@@ -153,7 +180,6 @@ async def test_model_capability(request: ModelTestRequest):
         orchestrator = _SingleModelTestOrchestrator(model_name=model_name)
         result = await orchestrator.generate_response_with_context_async(
             context_factory=_build_model_test_context_factory(visual_enabled),
-            temperature=0.0,
             max_tokens=512,
             model_name=model_name,
             tools=_build_model_test_tools(),
@@ -300,7 +326,8 @@ async def _fetch_models_from_provider(
             headers["Authorization"] = f"Bearer {client_config.api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # 复用共享 SSLContext，避免每次获取模型列表都重新加载整套 CA 证书（实测约 5s/次）
+        async with httpx.AsyncClient(verify=get_shared_ssl_context(), timeout=30.0) as client:
             response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
             data = response.json()
@@ -384,11 +411,25 @@ def _get_model_config(model_name: str) -> Optional[Dict]:
         return None
 
 
-def _get_embedding_task_model_names() -> Set[str]:
-    """从 model_config.toml 获取嵌入任务配置的模型名称集合。
+def _looks_like_embedding_model(model_name: str) -> bool:
+    """按模型名称或标识判断是否为嵌入模型（包含 embed 即命中）。"""
+    return "embed" in model_name.lower()
+
+
+def _looks_like_image_embedding_model(model_name: str) -> bool:
+    """识别名称或模型标识中的视觉嵌入特征。"""
+    lowered = model_name.lower()
+    return "vision" in lowered or "vl-embedding" in lowered
+
+
+def _get_task_model_names(task_key: str) -> Set[str]:
+    """从 model_config.toml 获取指定任务配置的模型名称集合。
+
+    Args:
+        task_key: 任务配置键名，如 `embedding`、`image_embedding`。
 
     Returns:
-        嵌入任务 model_list 中的模型名称集合，读取失败时返回空集合。
+        任务 model_list 中的模型名称集合，读取失败时返回空集合。
     """
     config_path = os.path.join(CONFIG_DIR, "model_config.toml")
     if not os.path.exists(config_path):
@@ -398,44 +439,152 @@ def _get_embedding_task_model_names() -> Set[str]:
         with open(config_path, "r", encoding="utf-8") as f:
             config_data = tomlkit.load(f)
 
-        task_config = config_data.get("model_task_config", {}).get("embedding", {})
+        task_config = config_data.get("model_task_config", {}).get(task_key, {})
         return {str(name) for name in task_config.get("model_list", [])}
     except Exception as e:
-        logger.error(f"读取嵌入任务配置失败: {e}")
+        logger.error(f"读取任务 '{task_key}' 配置失败: {e}")
         return set()
 
 
-async def _test_embedding_model(model_name: str) -> ModelTestResponse:
-    """对嵌入任务中的模型执行嵌入测试。
+async def _test_embedding_model(model_name: str, model_identifier: str = "") -> ModelTestResponse:
+    """对嵌入模型执行向量嵌入测试。
 
     嵌入模型不支持 chat/completions 接口，直接发对话测试会被服务商拒绝，
-    因此改为调用嵌入接口验证可用性。
+    因此改为调用嵌入接口验证可用性。图片嵌入模型（在 image_embedding 任务
+    中，或名称/标识带 vision、vl-embedding）改发测试图片，验证图片嵌入链路。
     """
+    if (
+        model_name in _get_task_model_names("image_embedding")
+        or _looks_like_image_embedding_model(model_name)
+        or _looks_like_image_embedding_model(model_identifier)
+    ):
+        return await _test_image_embedding_model(model_name)
+    return await _test_text_embedding_model(model_name)
+
+
+_EMBEDDING_TEST_TEXTS = ("今天天气真好", "今日天气十分晴朗", "猫在键盘上散步")
+"""嵌入测试样例文本：前两句语义相近，用于对比相近/无关文本的相似度差异。"""
+
+
+def _build_solid_png(color: Tuple[int, int, int]) -> bytes:
+    """生成指定颜色的纯色 PNG 测试图片。"""
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _cosine_similarity(left: List[float], right: List[float]) -> float:
+    """计算两个嵌入向量的余弦相似度，保留 4 位小数。"""
+    if len(left) != len(right):
+        raise ValueError(f"两次嵌入返回的向量维度不一致: {len(left)} vs {len(right)}")
+    dot_product = sum(a * b for a, b in zip(left, right, strict=True))
+    left_norm = math.sqrt(sum(a * a for a in left))
+    right_norm = math.sqrt(sum(b * b for b in right))
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return round(dot_product / (left_norm * right_norm), 4)
+
+
+async def _test_text_embedding_model(model_name: str) -> ModelTestResponse:
+    """对文本嵌入模型执行嵌入测试，并对比相近/无关文本的相似度。"""
     start_time = time.time()
     try:
         orchestrator = _SingleModelTestOrchestrator(model_name=model_name)
-        result = await orchestrator.get_embedding("MaiBot 模型可用性测试")
-        latency_ms = round((time.time() - start_time) * 1000, 2)
+        embeddings = []
+        for text in _EMBEDDING_TEST_TEXTS:
+            result = await orchestrator.get_embedding(text)
+            embeddings.append(result.embedding)
+        dimension = len(embeddings[0])
         return ModelTestResponse(
             success=True,
-            model_name=result.model_name or model_name,
+            model_name=model_name,
             visual_tested=False,
             tool_call_ok=False,
-            response=f"嵌入向量维度: {len(result.embedding)}",
-            latency_ms=latency_ms,
+            response=f"嵌入向量维度: {dimension}",
+            latency_ms=round((time.time() - start_time) * 1000, 2),
+            test_kind="text_embedding",
+            embedding_dimension=dimension,
+            embedding_pairs=[
+                ModelTestEmbeddingPair(
+                    label=f"相近文本：「{_EMBEDDING_TEST_TEXTS[0]}」×「{_EMBEDDING_TEST_TEXTS[1]}」",
+                    similarity=_cosine_similarity(embeddings[0], embeddings[1]),
+                ),
+                ModelTestEmbeddingPair(
+                    label=f"无关文本：「{_EMBEDDING_TEST_TEXTS[0]}」×「{_EMBEDDING_TEST_TEXTS[2]}」",
+                    similarity=_cosine_similarity(embeddings[0], embeddings[2]),
+                ),
+            ],
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"嵌入模型测试失败: model={model_name}, error={e}", exc_info=True)
-        latency_ms = round((time.time() - start_time) * 1000, 2)
         return ModelTestResponse(
             success=False,
             model_name=model_name,
             visual_tested=False,
             tool_call_ok=False,
-            latency_ms=latency_ms,
+            latency_ms=round((time.time() - start_time) * 1000, 2),
             error=_format_model_test_error(e),
+            test_kind="text_embedding",
+        )
+
+
+async def _test_image_embedding_model(model_name: str) -> ModelTestResponse:
+    """对图片嵌入模型发送测试图片，并对比相同/不同图片的相似度。"""
+    start_time = time.time()
+    try:
+        orchestrator = _SingleModelTestOrchestrator(model_name=model_name)
+        red_png = _build_solid_png((196, 42, 42))
+        blue_png = _build_solid_png((42, 68, 196))
+        red_first = await orchestrator.get_image_embedding(
+            red_png,
+            mime_type="image/png",
+            preprocess_version="webui_model_test_v1",
+        )
+        red_second = await orchestrator.get_image_embedding(
+            red_png,
+            mime_type="image/png",
+            preprocess_version="webui_model_test_v1",
+        )
+        blue = await orchestrator.get_image_embedding(
+            blue_png,
+            mime_type="image/png",
+            preprocess_version="webui_model_test_v1",
+        )
+        dimension = len(red_first.embedding)
+        return ModelTestResponse(
+            success=True,
+            model_name=model_name,
+            visual_tested=False,
+            tool_call_ok=False,
+            response=f"图片嵌入向量维度: {dimension}",
+            latency_ms=round((time.time() - start_time) * 1000, 2),
+            test_kind="image_embedding",
+            embedding_dimension=dimension,
+            embedding_pairs=[
+                ModelTestEmbeddingPair(
+                    label="相同图片（一致性）",
+                    similarity=_cosine_similarity(red_first.embedding, red_second.embedding),
+                ),
+                ModelTestEmbeddingPair(
+                    label="不同图片（区分度）",
+                    similarity=_cosine_similarity(red_first.embedding, blue.embedding),
+                ),
+            ],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"图片嵌入模型测试失败: model={model_name}, error={e}", exc_info=True)
+        return ModelTestResponse(
+            success=False,
+            model_name=model_name,
+            visual_tested=False,
+            tool_call_ok=False,
+            latency_ms=round((time.time() - start_time) * 1000, 2),
+            error=_format_model_test_error(e),
+            test_kind="image_embedding",
         )
 
 
@@ -699,7 +848,10 @@ async def _test_provider_connection(
     # 第一步：测试网络连通性
     try:
         start_time = time.time()
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+        # 复用共享 SSLContext，避免连接测试新建客户端时重新加载整套 CA 证书（实测约 5s/次）
+        async with httpx.AsyncClient(
+            verify=get_shared_ssl_context(), timeout=10.0, follow_redirects=False
+        ) as client:
             # 尝试 GET 请求 base_url（不需要 API Key）
             response = await client.get(base_url)
             latency = (time.time() - start_time) * 1000
@@ -725,7 +877,10 @@ async def _test_provider_connection(
     if api_key:
         try:
             start_time = time.time()
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+            # 复用共享 SSLContext，避免校验 API Key 新建客户端时重新加载整套 CA 证书（实测约 5s/次）
+            async with httpx.AsyncClient(
+                verify=get_shared_ssl_context(), timeout=15.0, follow_redirects=False
+            ) as client:
                 headers = {"Content-Type": "application/json"}
                 params = {}
 

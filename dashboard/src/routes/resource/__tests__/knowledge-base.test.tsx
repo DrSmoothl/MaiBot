@@ -53,14 +53,14 @@ vi.mock('@/components/memory/MemoryDeleteDialog', () => ({
     open: boolean
     preview?: { mode?: string; item_count?: number } | null
     result?: { operation_id?: string } | null
-    onExecute?: () => void
+    onExecute?: (reason: string) => void
     onRestore?: () => void
   }) => (
     open ? (
       <div data-testid="memory-delete-dialog">
         <div>{`preview:${preview?.mode ?? 'none'}:${preview?.item_count ?? 0}`}</div>
         <div>{`result:${result?.operation_id ?? 'none'}`}</div>
-        <button type="button" onClick={onExecute}>执行删除</button>
+        <button type="button" onClick={() => onExecute?.('')}>执行删除</button>
         <button type="button" onClick={onRestore}>执行恢复</button>
       </div>
     ) : null
@@ -236,13 +236,99 @@ function mockImportCompletedWithErrorsDetail(taskId: string): memoryApi.MemoryIm
 }
 
 async function waitForConsoleReady() {
-  await screen.findByRole('tab', { name: '图谱' }, { timeout: 10_000 })
+  await screen.findByRole('tab', { name: '记忆查询' }, { timeout: 10_000 })
 }
 
 async function openMemoryStatusDialog(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: '更多操作' }))
   await user.click(await screen.findByRole('menuitem', { name: '查看记忆状态' }))
   await screen.findByRole('dialog', { name: '记忆状态' })
+}
+
+async function openInspectionMode(
+  user: ReturnType<typeof userEvent.setup>,
+  mode: '内容修正' | '状态维护' | '检索调优',
+) {
+  await user.click(screen.getByRole('tab', { name: '记忆检修' }))
+  await user.click(await screen.findByRole('tab', { name: mode }))
+}
+
+const QUICK_START_KEY = 'memory-quick-start-dismissed'
+
+function runtimeConfig(
+  overrides: Partial<memoryApi.MemoryRuntimeConfigPayload> = {},
+): memoryApi.MemoryRuntimeConfigPayload {
+  return {
+    success: true,
+    config: { plugin: { enabled: true } },
+    data_dir: 'data/plugins/a-dawn.a-memorix',
+    embedding_dimension: 1024,
+    auto_save: true,
+    relation_vectors_enabled: false,
+    runtime_ready: true,
+    embedding_degraded: false,
+    embedding_degraded_reason: '',
+    paragraph_vector_backfill_pending: 0,
+    paragraph_vector_backfill_running: 0,
+    paragraph_vector_backfill_failed: 0,
+    paragraph_vector_backfill_done: 0,
+    ...overrides,
+  }
+}
+
+function emptyRelated(): memoryApi.MemoryRecordRelatedPayload {
+  return {
+    paragraphs: [],
+    entities: [],
+    relations: [],
+    facts: [],
+    episodes: [],
+    profiles: [],
+  }
+}
+
+function recordContext(
+  record: memoryApi.MemoryRecordPayload,
+  overrides: Partial<memoryApi.MemoryRecordContextPayload> = {},
+): memoryApi.MemoryRecordContextPayload {
+  return {
+    success: true,
+    record,
+    related: emptyRelated(),
+    counts: {
+      paragraphs: 0,
+      entities: 0,
+      relations: 0,
+      facts: 0,
+      episodes: 0,
+      profiles: 0,
+    },
+    fact_evidence: [],
+    fact_transitions: [],
+    projection: { graph_jobs: [], graph_pending_count: 0 },
+    available_actions: ['graph', 'correct', 'delete'],
+    ...overrides,
+  }
+}
+
+function mockRecords(record: memoryApi.MemoryRecordPayload, context: memoryApi.MemoryRecordContextPayload) {
+  vi.mocked(memoryApi.searchMemoryRecords).mockResolvedValue({
+    success: true,
+    query: '',
+    types: ['paragraph', 'entity', 'relation', 'fact'],
+    include_inactive: false,
+    limit: 80,
+    count: 1,
+    counts: { [record.type]: 1 },
+    items: [record],
+  })
+  vi.mocked(memoryApi.getMemoryRecordContext).mockResolvedValue(context)
+}
+
+async function closeParagraphDialog(user: ReturnType<typeof userEvent.setup>) {
+  const dialog = await screen.findByRole('dialog', { name: '段落明细' })
+  await user.click(within(dialog).getByRole('button', { name: '关闭' }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '段落明细' })).not.toBeInTheDocument())
 }
 
 describe('KnowledgeBasePage import workflow', () => {
@@ -430,15 +516,6 @@ describe('KnowledgeBasePage import workflow', () => {
         maibot_source_db_default: 'data/maibot.db',
       },
     })
-    vi.mocked(memoryApi.getMemoryImportPathAliases).mockResolvedValue({
-      success: true,
-      path_aliases: {
-        converted: 'data/a-memorix/imports/converted',
-        lpmm: 'data/a-memorix/imports/source/lpmm',
-        maibot: 'data/a-memorix/imports/source/maibot',
-        raw: 'data/a-memorix/imports/source/raw',
-      },
-    })
     vi.mocked(memoryApi.getMemoryImportChatTargets).mockResolvedValue({
       success: true,
       data: [
@@ -587,7 +664,7 @@ describe('KnowledgeBasePage import workflow', () => {
 
     vi.mocked(memoryApi.getMemorySources).mockResolvedValue({
       success: true,
-      items: [{ source: 'demo-1', paragraph_count: 2, relation_count: 1 }],
+      items: [{ source: 'demo-1', source_kind: 'chat_summary', paragraph_count: 2, relation_count: 1 }],
       count: 1,
     })
     vi.mocked(memoryApi.getMemoryDeleteOperations).mockResolvedValue({
@@ -1047,12 +1124,11 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '导入' }))
+    await user.click(screen.getByRole('tab', { name: '导入导出' }))
 
     expect(await screen.findByRole('button', { name: '创建导入任务' })).toBeInTheDocument()
     expect((await screen.findAllByText('import-run-1')).length).toBeGreaterThan(0)
     expect(memoryApi.getMemoryImportSettings).toHaveBeenCalled()
-    expect(memoryApi.getMemoryImportPathAliases).toHaveBeenCalled()
     expect(memoryApi.getMemoryImportTasks).toHaveBeenCalled()
   })
 
@@ -1371,7 +1447,7 @@ describe('KnowledgeBasePage import workflow', () => {
     const { container } = renderPage()
 
     const openImportTab = async () => {
-      await user.click(screen.getByRole('tab', { name: '导入' }))
+      await user.click(screen.getByRole('tab', { name: '导入导出' }))
       await screen.findByRole('button', { name: '创建导入任务' })
     }
 
@@ -1413,12 +1489,14 @@ describe('KnowledgeBasePage import workflow', () => {
     await waitFor(() => expect(memoryApi.createMemoryRawScanImport).toHaveBeenCalledTimes(1))
 
     await openImportTab()
-    await user.click(screen.getByRole('tab', { name: 'LPMM OpenIE' }))
+    await user.click(screen.getByRole('button', { name: '切换导入方式' }))
+    await user.click(screen.getByRole('menuitemradio', { name: /LPMM OpenIE/ }))
     await user.click(screen.getByRole('button', { name: '创建导入任务' }))
     await waitFor(() => expect(memoryApi.createMemoryLpmmOpenieImport).toHaveBeenCalledTimes(1))
 
     await openImportTab()
-    await user.click(screen.getByRole('tab', { name: 'LPMM 转换' }))
+    await user.click(screen.getByRole('button', { name: '切换导入方式' }))
+    await user.click(screen.getByRole('menuitemradio', { name: /LPMM 转换/ }))
     await user.click(screen.getByRole('button', { name: '创建导入任务' }))
     await waitFor(() => expect(memoryApi.createMemoryLpmmConvertImport).toHaveBeenCalledTimes(1))
 
@@ -1440,7 +1518,10 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '导入' }))
+    await user.click(screen.getByRole('tab', { name: '导入导出' }))
+    // 任务详情在弹窗里：先点队列卡片打开
+    await user.click(await screen.findByText('import-run-1'))
+    await screen.findByRole('dialog')
 
     expect(await screen.findByText('alpha.txt')).toBeInTheDocument()
     expect(await screen.findByText('chunk-preview-0')).toBeInTheDocument()
@@ -1469,10 +1550,14 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '导入' }))
+    await user.click(screen.getByRole('tab', { name: '导入导出' }))
 
-    expect((await screen.findAllByText('完成（有错误）')).length).toBeGreaterThan(0)
-    expect(await screen.findByText('成功 9 / 12 分块 · 失败 3')).toBeInTheDocument()
+    await user.click(await screen.findByText('import-run-1'))
+    const failedDialog = await screen.findByRole('dialog')
+
+    expect(within(failedDialog).getByText('完成（有错误）')).toBeInTheDocument()
+    // 任务级进度与文件级明细都会给出分块摘要
+    expect(within(failedDialog).getAllByText('成功 9 / 12 分块 · 失败 3').length).toBeGreaterThan(0)
   }, 20_000)
 
   it('supports cancel and retry actions for selected task', async () => {
@@ -1480,13 +1565,15 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '导入' }))
-    await screen.findByText('任务详情')
+    await user.click(screen.getByRole('tab', { name: '导入导出' }))
+    // 任务详情改为点开队列卡片后的弹窗
+    await user.click(await screen.findByText('import-run-1'))
+    const detailDialog = await screen.findByRole('dialog')
 
-    await user.click(screen.getByRole('button', { name: '取消选中导入任务' }))
+    await user.click(within(detailDialog).getByRole('button', { name: '取消选中导入任务' }))
     await waitFor(() => expect(memoryApi.cancelMemoryImportTask).toHaveBeenCalledWith('import-run-1'))
 
-    await user.click(screen.getByRole('button', { name: '重试选中导入任务' }))
+    await user.click(within(detailDialog).getByRole('button', { name: '重试选中导入任务' }))
     await waitFor(() => expect(memoryApi.retryMemoryImportTask).toHaveBeenCalled())
     const [taskId, retryPayload] = vi.mocked(memoryApi.retryMemoryImportTask).mock.calls[0]
     expect(taskId).toBe('import-run-1')
@@ -1515,7 +1602,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '导入' }))
+    await user.click(screen.getByRole('tab', { name: '导入导出' }))
     await screen.findByText('导入队列')
 
     const initialCalls = vi.mocked(memoryApi.getMemoryImportTasks).mock.calls.length
@@ -1524,7 +1611,7 @@ describe('KnowledgeBasePage import workflow', () => {
       await new Promise((resolve) => setTimeout(resolve, 350))
     })
 
-    expect(screen.getByRole('tab', { name: '图谱' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '导入导出' })).toBeInTheDocument()
     expect(vi.mocked(memoryApi.getMemoryImportTasks).mock.calls.length).toBeGreaterThan(initialCalls)
   }, 20_000)
 
@@ -1533,7 +1620,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('记忆搜索调优')
 
     await user.click(screen.getByRole('button', { name: '开始调优' }))
@@ -1560,7 +1647,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('记忆搜索调优')
 
     expect(screen.getByText('评估并改善记忆搜索效果')).toBeVisible()
@@ -1600,7 +1687,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('记忆搜索调优')
     await user.click(screen.getByRole('button', { name: '开始调优' }))
 
@@ -1622,7 +1709,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('记忆搜索调优')
     await user.click(screen.getByRole('button', { name: '应用推荐结果' }))
 
@@ -1640,7 +1727,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('当前调优结果')
 
     expect(screen.getByText('验证通过，建议应用。')).toBeInTheDocument()
@@ -1669,7 +1756,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('当前调优结果')
 
     expect(screen.getByText('任务状态')).toBeInTheDocument()
@@ -1698,7 +1785,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('当前调优结果')
 
     expect(screen.getAllByText('失败').length).toBeGreaterThan(0)
@@ -1755,7 +1842,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('当前调优结果')
 
     expect(screen.getByText('验证未通过，不建议应用。')).toBeInTheDocument()
@@ -1770,7 +1857,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('记忆搜索调优')
 
     await user.click(screen.getByRole('button', { name: '调优参数' }))
@@ -1794,7 +1881,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('记忆搜索调优')
 
     expect(screen.getByRole('button', { name: '应用推荐结果' })).toBeDisabled()
@@ -1816,7 +1903,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '调优' }))
+    await openInspectionMode(user, '检索调优')
     await screen.findByText('记忆搜索调优')
 
     const applyButton = screen.getByRole('button', { name: '应用推荐结果' })
@@ -1836,8 +1923,8 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '删除' }))
-    await screen.findByText('来源批量删除')
+    await user.click(screen.getByRole('tab', { name: '记忆抹除' }))
+    await screen.findByRole('button', { name: '全选当前结果' })
 
     const sourceCellCandidates = await screen.findAllByText('demo-1')
     const sourceRow = sourceCellCandidates
@@ -1849,11 +1936,11 @@ describe('KnowledgeBasePage import workflow', () => {
     await user.click(within(sourceRow).getByRole('checkbox'))
 
     await user.click(screen.getByRole('button', { name: '预览删除' }))
+    // 预览阶段不带原因，原因在对话框确认执行时才合并进请求
     await waitFor(() =>
       expect(memoryApi.previewMemoryDelete).toHaveBeenCalledWith({
         mode: 'source',
         selector: { sources: ['demo-1'] },
-        reason: 'knowledge_base_source_delete',
         requested_by: 'knowledge_base',
       }),
     )
@@ -1931,6 +2018,7 @@ describe('KnowledgeBasePage import workflow', () => {
     await waitForConsoleReady()
     await user.click(screen.getByRole('tab', { name: '记忆查询' }))
     expect(await screen.findAllByText('待删除段落')).not.toHaveLength(0)
+    await user.click(await screen.findByRole('button', { name: /待删除段落/ }))
     await user.click(await screen.findByRole('button', { name: '删除' }))
 
     await waitFor(() =>
@@ -1944,35 +2032,12 @@ describe('KnowledgeBasePage import workflow', () => {
     expect(await screen.findByTestId('memory-delete-dialog')).toBeInTheDocument()
   }, 20_000)
 
-  it('shows feedback correction history and supports rollback', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '纠错历史' }))
-    await screen.findByText('反馈纠错历史')
-    await screen.findByText('测试用户最喜欢的颜色是什么')
-    await waitFor(() => expect(memoryApi.getMemoryFeedbackCorrection).toHaveBeenCalledWith(11))
-
-    await user.click(screen.getByRole('button', { name: '回退本次纠错' }))
-    const rollbackReason = await screen.findByLabelText('回退原因')
-    await user.type(rollbackReason, '人工确认回退')
-    await user.click(screen.getByRole('button', { name: '确认回退' }))
-
-    await waitFor(() =>
-      expect(memoryApi.rollbackMemoryFeedbackCorrection).toHaveBeenCalledWith(11, {
-        requested_by: 'knowledge_base',
-        reason: '人工确认回退',
-      }),
-    )
-  }, 20_000)
-
   it('shows memory correction entry and submits preview', async () => {
     const user = userEvent.setup()
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await openInspectionMode(user, '内容修正')
     await screen.findByLabelText('修正内容')
     await screen.findByText('correction-plan-1')
     await waitFor(() => expect(memoryApi.getMemoryCorrectionPlan).toHaveBeenCalledWith('correction-plan-1'))
@@ -1997,7 +2062,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await openInspectionMode(user, '内容修正')
     await screen.findByLabelText('修正内容')
 
     await user.type(screen.getByLabelText('修正内容'), '把测试用户的常住城市改为杭州')
@@ -2021,7 +2086,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '记忆修正' }))
+    await openInspectionMode(user, '内容修正')
     await screen.findByText('correction-plan-1')
     await waitFor(() => expect(memoryApi.getMemoryCorrectionPlan).toHaveBeenCalledWith('correction-plan-1'))
 
@@ -2042,34 +2107,13 @@ describe('KnowledgeBasePage import workflow', () => {
     )
   }, 20_000)
 
-  it('renders audit timeline and jumps to an episode target', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-    expect(await screen.findByText('事件列表')).toBeInTheDocument()
-    expect(await screen.findByText('Episode 新增：测试 Episode')).toBeInTheDocument()
-    await waitFor(() =>
-      expect(memoryApi.getMemoryTimeline).toHaveBeenCalledWith(expect.objectContaining({ chatId: 'chat-1' })),
-    )
-
-    await user.click(screen.getByRole('button', { name: '跳转' }))
-    expect(await screen.findByText('Episode 查询')).toBeInTheDocument()
-    await waitFor(() =>
-      expect(memoryApi.getMemoryEpisodes).toHaveBeenCalledWith(expect.objectContaining({
-        source: 'chat_summary:chat-1',
-      })),
-    )
-    await waitFor(() => expect(memoryApi.getMemoryEpisode).toHaveBeenCalledWith('ep-1'))
-  }, 20_000)
-
   it('submits the explicit Episode source attempt budget', async () => {
     const user = userEvent.setup()
     vi.mocked(memoryApi.processMemoryEpisodePending).mockClear()
     renderPage()
 
     await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆检修' }))
     await user.click(screen.getByRole('tab', { name: '情景记忆' }))
     expect(await screen.findByText('已完成')).toBeInTheDocument()
 
@@ -2095,6 +2139,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆检修' }))
     await user.click(screen.getByRole('tab', { name: '情景记忆' }))
     const attemptInput = await screen.findByLabelText('最大尝试次数（含首次）')
     await user.clear(attemptInput)
@@ -2123,6 +2168,7 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
+    await user.click(screen.getByRole('tab', { name: '记忆检修' }))
     await user.click(screen.getByRole('tab', { name: '情景记忆' }))
     await user.click(screen.getByRole('button', { name: '处理来源重建任务' }))
 
@@ -2136,228 +2182,556 @@ describe('KnowledgeBasePage import workflow', () => {
     )
   }, 20_000)
 
-  it('prefers a real chat stream over WebUI local chat in audit timeline', async () => {
-    const user = userEvent.setup()
-    vi.mocked(memoryApi.getMemoryImportChatTargets).mockResolvedValueOnce({
-      success: true,
-      data: [
-        {
-          chat_id: 'webui-chat',
-          chat_name: 'WebUI用户的私聊',
-          platform: 'webui',
-          group_id: null,
-          user_id: 'webui',
-          is_group: false,
-        },
-        {
-          chat_id: 'chat-1',
-          chat_name: '测试群',
-          platform: 'qq',
-          group_id: '10001',
-          user_id: null,
-          is_group: true,
-        },
-      ],
-    })
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-
-    await waitFor(() =>
-      expect(memoryApi.getMemoryTimeline).toHaveBeenCalledWith(expect.objectContaining({ chatId: 'chat-1' })),
-    )
-    expect(memoryApi.getMemoryTimeline).not.toHaveBeenCalledWith(expect.objectContaining({ chatId: 'webui-chat' }))
-  }, 20_000)
-
-  it('jumps from paragraph timeline event to graph paragraph detail', async () => {
-    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
-      success: true,
-      chat: {
-        chat_id: 'chat-1',
-        chat_name: '测试群',
-        platform: 'qq',
-        group_id: '10001',
-        user_id: null,
-        is_group: true,
-      },
-      range: {
-        time_start: 1_710_000_000,
-        time_end: 1_710_003_600,
-        min_time: 1_710_000_000,
-        max_time: 1_710_003_600,
-      },
-      summary: {
-        total: 1,
-        by_type: { paragraph: 1, paragraph_created: 1 },
-      },
-      items: [
-        {
-          event_id: 'paragraph_created:paragraph-jump:1710000100',
-          event_type: 'paragraph_created',
-          category: 'paragraph',
-          occurred_at: 1_710_000_100,
-          chat_id: 'chat-1',
-          chat_name: '测试群',
-          title: '段落新增：跳转段落',
-          summary: '跳转段落摘要',
-          object_count: 1,
-          key_id: 'paragraph-jump',
-          source: 'chat_summary:chat-1',
-          attribution: 'source',
-          metadata: { paragraph_hash: 'paragraph-jump' },
-          jump_target: {
-            tab: 'graph',
-            params: { paragraph_hash: 'paragraph-jump' },
-          },
-        },
-      ],
+  describe('页面壳', () => {
+    afterEach(() => {
+      window.localStorage.removeItem(QUICK_START_KEY)
     })
 
-    const user = userEvent.setup()
-    renderPage()
+    it('reads deep links for records feedback import and legacy tuning', async () => {
+      window.history.replaceState(null, '', '/resource/knowledge-base?tab=records')
+      const recordsView = renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByRole('tab', { name: '记忆查询' })).toHaveAttribute('data-state', 'active')
+      recordsView.unmount()
 
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-    expect(await screen.findByText('段落新增：跳转段落')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '跳转' }))
+      window.history.replaceState(null, '', '/resource/knowledge-base?tab=feedback&task_id=11')
+      const feedbackView = renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByRole('tab', { name: '纠错历史' })).toHaveAttribute('data-state', 'active')
+      expect(await screen.findByPlaceholderText('搜索查询编号 / 会话 / 查询内容 / 原因')).toHaveValue('11')
+      feedbackView.unmount()
 
-    await waitFor(() => {
-      expect(memoryApi.getMemoryGraphParagraphDetail).toHaveBeenCalledWith('paragraph-jump')
+      window.history.replaceState(null, '', '/resource/knowledge-base?tab=import')
+      const importView = renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByRole('tab', { name: '导入导出' })).toHaveAttribute('data-state', 'active')
+      expect(await screen.findByRole('button', { name: '创建导入任务' })).toBeInTheDocument()
+      importView.unmount()
+
+      window.history.replaceState(null, '', '/resource/knowledge-base?tab=tuning&from=abc&time_start=1710000000')
+      const tuningView = renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByRole('tab', { name: '记忆检修' })).toHaveAttribute('data-state', 'active')
+      expect(screen.getByRole('tab', { name: '检索调优' })).toHaveAttribute('data-state', 'active')
+      tuningView.unmount()
+
+      window.history.replaceState(null, '', '/resource/knowledge-base?tab=correction&plan_id=correction-plan-1')
+      const correctionView = renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByRole('tab', { name: '记忆检修' })).toHaveAttribute('data-state', 'active')
+      expect(screen.getByRole('tab', { name: '内容修正' })).toHaveAttribute('data-state', 'active')
+      correctionView.unmount()
+
+      window.history.replaceState(null, '', '/resource/knowledge-base?tab=maintenance&target=rel-1')
+      const maintenanceView = renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByRole('tab', { name: '记忆检修' })).toHaveAttribute('data-state', 'active')
+      expect(screen.getByRole('tab', { name: '状态维护' })).toHaveAttribute('data-state', 'active')
+      expect(await screen.findByLabelText('维护目标')).toHaveValue('rel-1')
+      maintenanceView.unmount()
+
+      // 人物画像已并入记忆查询：旧链接 tab=profiles 落到人物画像切面，并保留 person_id
+      window.history.replaceState(
+        null,
+        '',
+        '/resource/knowledge-base?tab=profiles&person_id=person-legacy-1',
+      )
+      const legacyProfilesView = renderPage()
+      // 定位人物会直接展开画像详情弹窗；弹窗是模态的会隐藏外层标签，
+      // 因此这一步用弹窗作为「页面已就绪」的判据，而不是等标签出现
+      expect(await screen.findByRole('dialog', { name: '画像详情' })).toBeInTheDocument()
+      legacyProfilesView.unmount()
+
+      // 检修子模式同样支持显式 mode=profiles 深链
+      window.history.replaceState(null, '', '/resource/knowledge-base?tab=inspection&mode=profiles')
+      const profilesMaintenanceView = renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByRole('tab', { name: '记忆检修' })).toHaveAttribute('data-state', 'active')
+      expect(screen.getByRole('tab', { name: '画像维护' })).toHaveAttribute('data-state', 'active')
+      expect(await screen.findByText('别名维护')).toBeInTheDocument()
+      profilesMaintenanceView.unmount()
+
+      window.history.replaceState(
+        null,
+        '',
+        '/resource/knowledge-base?tab=not-a-tab&mode=maintenance&target=rel-1',
+      )
+      renderPage()
+      await waitForConsoleReady()
+      // 无效 tab 与旧链接 tab=graph 都回落到记忆查询
+      expect(screen.getByRole('tab', { name: '记忆查询' })).toHaveAttribute('data-state', 'active')
+    }, 20_000)
+
+    it('shows empty runtime status and keeps the console usable', async () => {
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockRejectedValueOnce(new Error('runtime missing'))
+      const user = userEvent.setup()
+      renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      expect(screen.getByText('暂无记忆状态数据，请刷新后重试。')).toBeInTheDocument()
+    }, 20_000)
+
+    it('shows the route fallback while runtime config is still loading', async () => {
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockImplementation(() => new Promise(() => {}))
+      renderPage()
+      expect(await screen.findByRole('status', { name: '加载中' })).toBeInTheDocument()
+      expect(screen.queryByRole('tab', { name: '记忆查询' })).not.toBeInTheDocument()
     })
-    expect(window.location.search).toContain('tab=graph')
-    expect(window.location.search).toContain('paragraph_hash=paragraph-jump')
-  }, 20_000)
 
-  it('jumps from deleted paragraph timeline event to delete search when operation is missing', async () => {
-    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
-      success: true,
-      chat: {
-        chat_id: 'chat-1',
-        chat_name: '测试群',
-        platform: 'qq',
-        group_id: '10001',
-        user_id: null,
-        is_group: true,
-      },
-      range: {
-        time_start: 1_710_000_000,
-        time_end: 1_710_003_600,
-        min_time: 1_710_000_000,
-        max_time: 1_710_003_600,
-      },
-      summary: {
-        total: 1,
-        by_type: { paragraph: 1, paragraph_deleted: 1 },
-      },
-      items: [
-        {
-          event_id: 'paragraph_deleted:paragraph-missing-op:1710000200',
-          event_type: 'paragraph_deleted',
-          category: 'paragraph',
-          occurred_at: 1_710_000_200,
-          chat_id: 'chat-1',
-          chat_name: '测试群',
-          title: '段落删除：缺少操作',
-          summary: '删除段落摘要',
-          object_count: 1,
-          key_id: 'paragraph-missing-op',
-          source: 'chat_summary:chat-1',
-          attribution: 'source',
-          metadata: { paragraph_hash: 'paragraph-missing-op' },
-          jump_target: {
-            tab: 'delete',
-            params: {
-              paragraph_hash: 'paragraph-missing-op',
-              source: 'chat_summary:chat-1',
+    it('covers disabled core-unavailable single-pool and dual-not-ready badges', async () => {
+      const user = userEvent.setup()
+
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce(runtimeConfig({
+        memory_enabled: false,
+        available_channels: [],
+      }))
+      const disabledView = renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      expect(screen.getByText('已停用')).toBeInTheDocument()
+      expect(screen.getByText('记忆功能已由用户配置关闭')).toBeInTheDocument()
+      disabledView.unmount()
+
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce(runtimeConfig({
+        memory_enabled: true,
+        runtime_ready: false,
+      }))
+      const coreView = renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      expect(screen.getByText('核心不可用')).toBeInTheDocument()
+      expect(screen.getByText('元数据库未能完成初始化')).toBeInTheDocument()
+      coreView.unmount()
+
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce(runtimeConfig({
+        vector_pools: {
+          configured_mode: 'triple',
+          effective_mode: 'nope',
+          ready: true,
+          single_pool: { available: true, dimension: 1024, num_vectors: Number.NaN, has_data: false },
+        },
+        vector_pools_ready: undefined,
+        vector_pools_effective_mode: undefined,
+      }))
+      const singleView = renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      expect(screen.getByText('单池')).toBeInTheDocument()
+      expect(screen.getByText('单池向量 0')).toBeInTheDocument()
+      singleView.unmount()
+
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce(runtimeConfig({
+        vector_pools: {
+          configured_mode: 'dual',
+          effective_mode: 'single',
+          ready: false,
+          paragraph_pool: { available: true, dimension: 1024, num_vectors: 1, has_data: true },
+          graph_pool: { available: true, dimension: 1024, num_vectors: 2, has_data: true },
+          auto_migration: { running: false },
+        },
+        vector_pools_ready: false,
+        vector_pools_effective_mode: 'single',
+      }))
+      renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      expect(screen.getByText('双池未就绪')).toBeInTheDocument()
+      expect(screen.getByText('段落 1 · 图谱 2')).toBeInTheDocument()
+    }, 20_000)
+
+    it('covers recovering degraded hours-eta and channel fallback badges', async () => {
+      const user = userEvent.setup()
+
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce(runtimeConfig({
+        vector_health: {
+          state: 'recovering',
+          copy_progress: { processed: 3, total: 10 },
+        },
+      }))
+      const recoveringView = renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      expect(screen.getByText('向量恢复中')).toBeInTheDocument()
+      expect(screen.getByText('可信旧向量复制 3/10')).toBeInTheDocument()
+      expect(screen.getByText('30.0%')).toBeInTheDocument()
+      recoveringView.unmount()
+
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce(runtimeConfig({
+        vector_health: { state: 'degraded' },
+        degraded: true,
+        available_channels: [],
+      }))
+      const degradedView = renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      expect(screen.getByText('向量降级')).toBeInTheDocument()
+      expect(screen.getByText('已切换到稀疏、图谱检索')).toBeInTheDocument()
+      expect(screen.getByText('核心可用，检索通道暂不可用')).toBeInTheDocument()
+      degradedView.unmount()
+
+      vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce(runtimeConfig({
+        relation_vectors_enabled: true,
+        available_channels: ['metadata', 'custom_channel'],
+        vector_pools: {
+          configured_mode: 'dual',
+          effective_mode: 'single',
+          ready: false,
+          auto_migration: {
+            running: true,
+            stage: 'self_check',
+            progress: {
+              total: 10,
+              processed: 1,
+              percent: 10,
+              estimated_remaining_seconds: 3725,
             },
           },
         },
-      ],
-    })
+        vector_pools_ready: false,
+        vector_pools_effective_mode: 'single',
+      }))
+      renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      expect(screen.getByText('关系向量已启用')).toBeInTheDocument()
+      expect(screen.getByText('可用通道：元数据、custom_channel')).toBeInTheDocument()
+      expect(screen.getByText('运行自检 · 1/10 · 预计剩余 1小时2分')).toBeInTheDocument()
+    }, 20_000)
 
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-    expect(await screen.findByText('段落删除：缺少操作')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '跳转' }))
-
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: '删除' })).toHaveAttribute('data-state', 'active')
-    })
-    expect(screen.getByPlaceholderText('搜索 operation / reason / requested_by / source')).toHaveValue('paragraph-missing-op')
-    expect(screen.getByPlaceholderText('搜索 source 名称')).toHaveValue('paragraph-missing-op')
-    expect(window.location.search).toContain('tab=delete')
-    expect(window.location.search).toContain('paragraph_hash=paragraph-missing-op')
-  }, 20_000)
-
-  it('paginates audit timeline events and supports page size presets', async () => {
-    const timelineEvents: memoryApi.MemoryTimelineEventPayload[] = Array.from({ length: 7 }, (_, index) => {
-      const itemNumber = index + 1
-      return {
-        event_id: `paragraph_created:paragraph-${itemNumber}:1710000${itemNumber}`,
-        event_type: 'paragraph_created',
-        category: 'paragraph',
-        occurred_at: 1_710_000_700 - index,
-        chat_id: 'chat-1',
-        chat_name: '测试群',
-        title: `段落新增：第 ${itemNumber} 条`,
-        summary: `分页测试摘要 ${itemNumber}`,
-        object_count: 1,
-        key_id: `paragraph-${itemNumber}`,
-        source: 'chat_summary:chat-1',
-        attribution: 'source',
-        metadata: { paragraph_hash: `paragraph-${itemNumber}` },
-        jump_target: {
-          tab: 'graph',
-          params: {
-            paragraph_hash: `paragraph-${itemNumber}`,
+    it('shows migration progress fallbacks for relations copied and encoded counts', async () => {
+      const user = userEvent.setup()
+      const renderWithProgress = async (progress: Record<string, unknown>, stage = 'relations_done') => {
+        vi.mocked(memoryApi.getMemoryRuntimeConfig).mockResolvedValueOnce(runtimeConfig({
+          vector_pools: {
+            configured_mode: 'dual',
+            effective_mode: 'single',
+            ready: false,
+            auto_migration: {
+              running: true,
+              stage,
+              progress,
+            },
           },
-        },
+          vector_pools_ready: false,
+          vector_pools_effective_mode: 'single',
+        }))
+        const view = renderPage()
+        await waitForConsoleReady()
+        await openMemoryStatusDialog(user)
+        return view
       }
+
+      const relationView = await renderWithProgress({ relation_done: 4, relation_failed: 2 })
+      expect(screen.getByText('关系完成 · 关系 4/2 失败')).toBeInTheDocument()
+      relationView.unmount()
+
+      const mixedView = await renderWithProgress({
+        paragraph_done: 7,
+        paragraph_failed: 0,
+        entity_done: 2,
+        entity_failed: 1,
+      }, 'entities_done')
+      expect(screen.getByText('实体完成 · 段落 7 · 实体 2/1 失败')).toBeInTheDocument()
+      mixedView.unmount()
+
+      const copiedView = await renderWithProgress({ paragraph_migration: { copied: 18 } }, '   ')
+      expect(screen.getByText('迁移中 · 已复制 18')).toBeInTheDocument()
+      copiedView.unmount()
+
+      const encodedView = await renderWithProgress({ entity_migration: { encoded: 9 } }, 'unknown_stage')
+      expect(screen.getByText('unknown_stage · 已编码 9')).toBeInTheDocument()
+      encodedView.unmount()
+    }, 20_000)
+
+    it('dismisses quick start and jumps to import tuning and graph', async () => {
+      const user = userEvent.setup()
+      renderPage()
+      await waitForConsoleReady()
+      expect(screen.getByText('快速开始：先从这两件事入手')).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: /导入或导出资料/ }))
+      expect(screen.getByRole('tab', { name: '导入导出' })).toHaveAttribute('data-state', 'active')
+      expect(window.location.search).toContain('tab=import')
+
+      await user.click(screen.getByRole('button', { name: /检索调优/ }))
+      expect(screen.getByRole('tab', { name: '记忆检修' })).toHaveAttribute('data-state', 'active')
+      expect(screen.getByRole('tab', { name: '检索调优' })).toHaveAttribute('data-state', 'active')
+      expect(window.location.search).toContain('mode=tuning')
+
+      // 图谱入口在右上角省略号，与查看记忆状态并列；标签栏里不再有图谱
+      expect(screen.queryByRole('tab', { name: '图谱' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /打开图谱/ })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '更多操作' }))
+      await user.click(await screen.findByRole('menuitem', { name: '打开图谱' }))
+      expect(window.location.search).toContain('tab=graph')
+
+      await user.click(screen.getByRole('button', { name: '关闭快速开始' }))
+      expect(screen.queryByText('快速开始：先从这两件事入手')).not.toBeInTheDocument()
+      expect(window.localStorage.getItem(QUICK_START_KEY)).toBe('true')
+    }, 20_000)
+
+    it('hides quick start after it was dismissed', async () => {
+      window.localStorage.setItem(QUICK_START_KEY, 'true')
+      renderPage()
+      await waitForConsoleReady()
+      expect(screen.queryByText('快速开始：先从这两件事入手')).not.toBeInTheDocument()
     })
-    vi.mocked(memoryApi.getMemoryTimeline).mockResolvedValue({
-      success: true,
-      chat: {
-        chat_id: 'chat-1',
-        chat_name: '测试群',
-        platform: 'qq',
-        group_id: '10001',
-        user_id: null,
-        is_group: true,
-      },
-      range: {
-        time_start: 1_710_000_000,
-        time_end: 1_710_003_600,
-        min_time: 1_710_000_000,
-        max_time: 1_710_003_600,
-      },
-      summary: {
-        total: timelineEvents.length,
-        by_type: { paragraph: timelineEvents.length, paragraph_created: timelineEvents.length },
-      },
-      items: timelineEvents,
-    })
 
-    const user = userEvent.setup()
-    renderPage()
+    it('refreshes runtime data and runs self-check from the status dialog', async () => {
+      const user = userEvent.setup()
+      renderPage()
+      await waitForConsoleReady()
+      const initialCalls = vi.mocked(memoryApi.getMemoryRuntimeConfig).mock.calls.length
+      await openMemoryStatusDialog(user)
+      await user.click(screen.getByRole('button', { name: '刷新数据' }))
+      await waitFor(() =>
+        expect(vi.mocked(memoryApi.getMemoryRuntimeConfig).mock.calls.length).toBeGreaterThan(initialCalls),
+      )
+      await user.click(screen.getByRole('button', { name: '自检' }))
+      await waitFor(() => expect(memoryApi.refreshMemoryRuntimeSelfCheck).toHaveBeenCalled())
+      await waitFor(() =>
+        expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: '自检通过' })),
+      )
+    }, 20_000)
 
-    await waitForConsoleReady()
-    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
-    expect(await screen.findByText('段落新增：第 1 条')).toBeInTheDocument()
-    expect(screen.getByText('第 1 / 2 页，每页 5 条')).toBeInTheDocument()
-    expect(screen.queryByText('段落新增：第 6 条')).not.toBeInTheDocument()
+    it('cancels vector rebuild from the confirmation dialog', async () => {
+      const user = userEvent.setup()
+      renderPage()
+      await waitForConsoleReady()
+      await openMemoryStatusDialog(user)
+      await user.click(screen.getByRole('button', { name: '重建向量' }))
+      expect(await screen.findByText('重建全部向量')).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '取消' }))
+      await waitFor(() => expect(screen.queryByText('重建全部向量')).not.toBeInTheDocument())
+    }, 20_000)
 
-    await user.click(screen.getByRole('button', { name: '下一页' }))
-    expect(await screen.findByText('段落新增：第 6 条')).toBeInTheDocument()
-    expect(screen.getByText('第 2 / 2 页，每页 5 条')).toBeInTheDocument()
-    expect(screen.queryByText('段落新增：第 1 条')).not.toBeInTheDocument()
+    it('opens the import tab from an empty embedded graph', async () => {
+      vi.mocked(memoryApi.getMemoryGraph).mockResolvedValue({
+        success: true,
+        nodes: [],
+        edges: [],
+        total_nodes: 0,
+        total_edges: 0,
+      })
+      const user = userEvent.setup()
+      renderPage()
+      await waitForConsoleReady()
+      // 图谱已从标签栏移到右上角「更多操作」菜单，需先经菜单进入图谱
+      await user.click(screen.getByRole('button', { name: '更多操作' }))
+      await user.click(await screen.findByRole('menuitem', { name: '打开图谱' }))
+      expect(window.location.search).toContain('tab=graph')
+      // 空图谱给出回控制台的入口，点击后落到导入导出
+      await user.click(await screen.findByRole('button', { name: '前往长期记忆控制台' }))
+      expect(screen.getByRole('tab', { name: '导入导出' })).toHaveAttribute('data-state', 'active')
+      expect(window.location.search).toContain('tab=import')
+    }, 20_000)
 
-    await user.click(screen.getByRole('combobox', { name: '每页显示条数' }))
-    await user.click(await screen.findByRole('option', { name: '10 条' }))
-    expect(await screen.findByText('段落新增：第 7 条')).toBeInTheDocument()
-    expect(screen.getByText('第 1 / 1 页，每页 10 条')).toBeInTheDocument()
-  }, 20_000)
+    it('routes record actions to graph correction maintenance profile and episode', async () => {
+      const paragraph: memoryApi.MemoryRecordPayload = {
+        type: 'paragraph',
+        id: 'paragraph-record-action',
+        title: '可跳转段落',
+        summary: '摘要',
+        source: 'chat_summary:chat-1',
+        status: 'active',
+        metadata: {},
+      }
+      mockRecords(paragraph, recordContext(paragraph, {
+        related: {
+          paragraphs: [paragraph],
+          entities: [],
+          relations: [],
+          facts: [],
+          episodes: [{
+            id: 'ep-action-1',
+            title: '关联情景一',
+            summary: '情景摘要',
+            source: 'chat_summary:chat-1',
+            paragraph_count: 1,
+            event_time_start: 1_710_000_000,
+            event_time_end: 1_710_000_100,
+          }],
+          profiles: [{
+            person_id: 'person-action-1',
+            profile_version: 1,
+            profile_text: '画像文本',
+            source_note: '',
+          }],
+        },
+        counts: {
+          paragraphs: 1,
+          entities: 0,
+          relations: 0,
+          facts: 0,
+          episodes: 1,
+          profiles: 1,
+        },
+        available_actions: ['graph', 'correct', 'reinforce', 'protect', 'profile', 'delete'],
+      }))
+
+      const user = userEvent.setup()
+      renderPage()
+      await waitForConsoleReady()
+      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      expect(await screen.findAllByText('可跳转段落')).not.toHaveLength(0)
+
+      // 记录详情动作都在弹窗内；画像动作可能保持弹窗打开，重开前先按 Escape 关闭
+      const openDetail = async () => {
+        await user.keyboard('{Escape}')
+        await user.click(await screen.findByRole('button', { name: /可跳转段落/ }))
+        await screen.findByRole('button', { name: '修正' })
+      }
+
+      await openDetail()
+      await user.click(screen.getByRole('button', { name: '修正' }))
+      expect(window.location.search).toContain('tab=inspection')
+      expect(window.location.search).toContain('mode=correction')
+      expect(await screen.findByLabelText('修正内容')).toHaveValue('修正以下记忆：可跳转段落')
+
+      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await openDetail()
+      await user.click(screen.getByRole('button', { name: '强化' }))
+      expect(window.location.search).toContain('mode=maintenance')
+      expect(window.location.search).toContain('target=paragraph-record-action')
+      expect(await screen.findByLabelText('维护目标')).toHaveValue('paragraph-record-action')
+
+      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await openDetail()
+      await user.click(screen.getByRole('button', { name: '保护' }))
+      expect(await screen.findByLabelText('维护目标')).toHaveValue('paragraph-record-action')
+
+      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await openDetail()
+      await user.click(screen.getByRole('tab', { name: /情景/ }))
+      await user.click(await screen.findByText('关联情景一'))
+      expect(window.location.search).toContain('tab=inspection')
+      expect(window.location.search).toContain('mode=episodes')
+      expect(window.location.search).toContain('episode_id=ep-action-1')
+
+      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await openDetail()
+      await user.click(screen.getByRole('tab', { name: /画像/ }))
+      await user.click(await screen.findByText('person-action-1'))
+      // 人物画像已并入记忆查询：落到 tab=records 的人物画像切面
+      expect(window.location.search).toContain('tab=records')
+      expect(window.location.search).toContain('view=profiles')
+      expect(window.location.search).toContain('person_id=person-action-1')
+      // 跳到画像会直接展开详情弹窗；先关掉它再继续操作标签
+      expect(await screen.findByRole('dialog', { name: '画像详情' })).toBeInTheDocument()
+      await user.keyboard('{Escape}')
+
+      // 人物画像切面下要靠内部子标签切回文字记录（外层「记忆查询」此时已是激活态）
+      await user.click(screen.getByRole('tab', { name: '文字记录' }))
+      await openDetail()
+      await user.click(screen.getByRole('button', { name: '图谱' }))
+      expect(window.location.search).toContain('tab=graph')
+      expect(window.location.search).toContain('paragraph_hash=paragraph-record-action')
+    }, 20_000)
+
+    it('handles fact correction missing profile and entity delete callbacks', async () => {
+      const fact: memoryApi.MemoryRecordPayload = {
+        type: 'fact',
+        id: 'fact-no-person',
+        title: '无人物事实',
+        summary: '事实摘要',
+        source: '',
+        status: 'active',
+        metadata: {},
+      }
+      mockRecords(fact, recordContext(fact, {
+        available_actions: ['correct', 'profile', 'delete'],
+      }))
+      const user = userEvent.setup()
+      const missingView = renderPage()
+      await waitForConsoleReady()
+      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      expect(await screen.findAllByText('无人物事实')).not.toHaveLength(0)
+      await user.click(await screen.findByRole('button', { name: /无人物事实/ }))
+      await user.click(await screen.findByRole('button', { name: '画像' }))
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: '缺少人物标识' }))
+      await user.click(await screen.findByRole('button', { name: '删除' }))
+      expect(screen.queryByTestId('memory-delete-dialog')).not.toBeInTheDocument()
+      missingView.unmount()
+
+      const personFact: memoryApi.MemoryRecordPayload = {
+        type: 'fact',
+        id: 'fact-with-person',
+        title: '有人物事实',
+        summary: '事实摘要',
+        source: '',
+        status: 'active',
+        metadata: { scope_id: 'person-fact-1' },
+      }
+      mockRecords(personFact, recordContext(personFact, {
+        available_actions: ['correct'],
+      }))
+      const factView = renderPage()
+      await waitForConsoleReady()
+      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await user.click(await screen.findByRole('button', { name: /有人物事实/ }))
+      await user.click(await screen.findByRole('button', { name: '修正' }))
+      expect(await screen.findByLabelText('人物 ID')).toHaveValue('person-fact-1')
+      expect(await screen.findByLabelText('修正内容')).toHaveValue('修正以下记忆：有人物事实')
+      factView.unmount()
+
+      const entity: memoryApi.MemoryRecordPayload = {
+        type: 'entity',
+        id: 'entity-record-1',
+        title: '待删除实体',
+        summary: '实体摘要',
+        source: '',
+        status: 'active',
+        metadata: {},
+      }
+      const relatedParagraph: memoryApi.MemoryRecordPayload = {
+        type: 'paragraph',
+        id: 'related-paragraph-1',
+        title: '关联段落',
+        summary: '',
+        source: '',
+        status: 'active',
+        metadata: {},
+      }
+      mockRecords(entity, recordContext(entity, {
+        related: {
+          ...emptyRelated(),
+          paragraphs: [relatedParagraph],
+        },
+        counts: {
+          paragraphs: 1,
+          entities: 0,
+          relations: 0,
+          facts: 0,
+          episodes: 0,
+          profiles: 0,
+        },
+        available_actions: ['graph', 'delete'],
+      }))
+      renderPage()
+      await waitForConsoleReady()
+      await user.click(screen.getByRole('tab', { name: '记忆查询' }))
+      await user.click(await screen.findByRole('button', { name: /待删除实体/ }))
+      await user.click(await screen.findByRole('button', { name: '删除' }))
+      await waitFor(() =>
+        expect(memoryApi.previewMemoryDelete).toHaveBeenCalledWith({
+          mode: 'entity',
+          selector: { hashes: ['entity-record-1'] },
+          reason: 'knowledge_base_record_delete',
+          requested_by: 'knowledge_base',
+        }),
+      )
+      const dialog = await screen.findByTestId('memory-delete-dialog')
+      expect(dialog).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '执行恢复' }))
+      expect(memoryApi.restoreMemoryDelete).not.toHaveBeenCalled()
+
+      // 详情弹窗随删除动作关闭，重新点开记录继续跳转图谱
+      await user.click(await screen.findByRole('button', { name: /待删除实体/ }))
+      await user.click(await screen.findByRole('button', { name: '图谱' }))
+      expect(window.location.search).toContain('tab=graph')
+      expect(window.location.search).toContain('paragraph_hash=related-paragraph-1')
+      await closeParagraphDialog(user)
+    }, 20_000)
+
+  })
 })

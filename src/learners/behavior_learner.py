@@ -9,7 +9,7 @@ import json
 import re
 
 from src.chat.utils.utils import is_bot_self
-from src.common.data_models.llm_service_data_models import LLMGenerationOptions, LLMResponseResult
+from src.common.data_models.llm_service_data_models import LLMResponseResult
 from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
 from src.config.config import global_config
@@ -712,7 +712,6 @@ class BehaviorLearner:
         try:
             generation_result = await behavior_feedback_model.generate_response_with_context(
                 lambda _client: feedback_messages,
-                options=LLMGenerationOptions(temperature=0.15),
                 session_id=self.session_id,
             )
             response = generation_result.response or ""
@@ -888,7 +887,6 @@ class BehaviorLearner:
             learning_messages = await self._build_multi_learning_messages(pending_messages, prompt)
             generation_result = await behavior_learn_model.generate_response_with_context(
                 lambda _client: learning_messages,
-                options=LLMGenerationOptions(temperature=0.25),
                 session_id=learning_session_id,
             )
             response = generation_result.response or ""
@@ -1122,7 +1120,6 @@ class BehaviorLearner:
             scene_messages = await self._build_scene_analysis_messages(messages, prompt)
             generation_result = await behavior_scene_model.generate_response_with_context(
                 lambda _client: scene_messages,
-                options=LLMGenerationOptions(temperature=0.2),
                 session_id=learning_session_id,
             )
             response = generation_result.response or ""
@@ -1158,7 +1155,6 @@ class BehaviorLearner:
             scene_messages = await self._build_scene_analysis_messages(messages, prompt)
             generation_result = await behavior_scene_model.generate_response_with_context(
                 lambda _client: scene_messages,
-                options=LLMGenerationOptions(temperature=0.2),
                 session_id=learning_session_id,
             )
             response = generation_result.response or ""

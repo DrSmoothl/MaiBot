@@ -19,6 +19,7 @@ from src.llm_models.model_client.base_client import (
     AudioTranscriptionRequest,
     ClientRequest,
     EmbeddingRequest,
+    ImageEmbeddingRequest,
     GenerationAttempt,
     RequestTraceContext,
     ResponseRequest,
@@ -703,6 +704,22 @@ def serialize_embedding_request_snapshot(request: EmbeddingRequest) -> dict[str,
     }
 
 
+def serialize_image_embedding_request_snapshot(request: ImageEmbeddingRequest) -> dict[str, Any]:
+    """序列化图片嵌入请求，只保留可诊断的摘要。"""
+
+    from hashlib import sha256
+
+    return {
+        "byte_size": len(request.image_bytes),
+        "content_sha256": sha256(request.image_bytes).hexdigest(),
+        "extra_params": _json_friendly(dict(request.extra_params)),
+        "mime_type": request.mime_type,
+        "model_info": serialize_model_info_snapshot(request.model_info),
+        "preprocess_version": request.preprocess_version,
+        "request_kind": "image_embedding",
+    }
+
+
 def serialize_audio_request_snapshot(request: AudioTranscriptionRequest) -> dict[str, Any]:
     """序列化音频转写请求。"""
     return {
@@ -741,6 +758,8 @@ def serialize_client_request_snapshot(request: ClientRequest) -> dict[str, Any]:
         return serialize_response_request_snapshot(request)
     if isinstance(request, EmbeddingRequest):
         return serialize_embedding_request_snapshot(request)
+    if isinstance(request, ImageEmbeddingRequest):
+        return serialize_image_embedding_request_snapshot(request)
     return serialize_audio_request_snapshot(request)
 
 
@@ -1210,8 +1229,13 @@ def has_request_snapshot(exception: Exception) -> bool:
     return False
 
 
-def format_request_snapshot_log_info(exception: Exception) -> str:
-    """将异常上的快照信息格式化为日志片段。"""
+def format_request_snapshot_log_info(exception: Exception, *, include_snapshot_path: bool = True) -> str:
+    """将异常上的快照信息格式化为日志片段。
+
+    Args:
+        exception: 携带请求快照信息的异常。
+        include_snapshot_path: 是否输出本地快照路径；模型运行日志默认只需要可重放命令。
+    """
     for candidate in (exception, getattr(exception, "__cause__", None)):
         if candidate is None:
             continue
@@ -1222,10 +1246,10 @@ def format_request_snapshot_log_info(exception: Exception) -> str:
             continue
 
         lines: list[str] = []
-        if snapshot_path:
+        if include_snapshot_path and snapshot_path:
             lines.append(f"调用完整信息（如果需要求助，请发送该文本）: {snapshot_path}")
         if replay_command:
-            lines.append(f"使用以下命令重新请求: {replay_command}")
+            lines.append(f"调用完整信息: {replay_command}")
         if lines:
             return "\n  " + "\n  ".join(lines)
 

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any
+from typing import Any, List, Tuple
 
 from src.common.i18n import t
 
@@ -167,7 +167,7 @@ class APIProvider(ConfigBase):
     """最大重试次数 (单个模型API调用失败, 最多重试的次数)"""
 
     timeout: int = Field(
-        default=60,
+        default=120,
         ge=1,
         json_schema_extra={
             "x-widget": "input",
@@ -177,7 +177,7 @@ class APIProvider(ConfigBase):
     """API调用的超时时长 (超过这个时长, 本次请求将被视为"请求超时", 单位: 秒)"""
 
     retry_interval: int = Field(
-        default=5,
+        default=4,
         ge=1,
         json_schema_extra={
             "x-widget": "input",
@@ -205,6 +205,30 @@ class APIProvider(ConfigBase):
             raise ValueError("当 auth_type=header 时，auth_header_name 不能为空")
         if self.auth_type == OpenAICompatibleAuthType.QUERY and not self.auth_query_name.strip():
             raise ValueError("当 auth_type=query 时，auth_query_name 不能为空")
+        super().model_post_init(context)
+
+
+class ModelPricePeriod(ConfigBase):
+    """每天重复的模型价格时段。"""
+
+    start_time: str = Field(pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+    """开始时间，服务器本地时间 HH:MM，包含该时刻。"""
+
+    end_time: str = Field(pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+    """结束时间，服务器本地时间 HH:MM，不包含该时刻；早于开始时间表示跨午夜。"""
+
+    price_in: float = Field(ge=0, allow_inf_nan=False)
+    """该时段的普通输入价格，单位：元 / M token。"""
+
+    price_out: float = Field(ge=0, allow_inf_nan=False)
+    """该时段的输出价格，单位：元 / M token。"""
+
+    cache_price_in: float = Field(ge=0, allow_inf_nan=False)
+    """该时段的缓存命中输入价格，单位：元 / M token；0 表示缓存命中免费，未命中部分按 price_in 计费。"""
+
+    def model_post_init(self, context: Any = None) -> None:
+        if self.start_time == self.end_time:
+            raise ValueError("价格时段的开始时间和结束时间不能相同")
         super().model_post_init(context)
 
 
@@ -250,11 +274,8 @@ class ModelInfo(ConfigBase):
 
     cache: bool = Field(
         default=False,
-        json_schema_extra={
-            "x-widget": "switch",
-        },
     )
-    """是否启用模型输入缓存计费。开启后命中缓存的输入 token 使用 cache_price_in 计费。"""
+    """遗留兼容字段，不参与任何逻辑：是否按缓存价计费由 cache_price_in 决定，统计页是否展示缓存用量由服务商是否在响应中返回缓存字段自动探测。"""
 
     cache_price_in: float = Field(
         default=0.0,
@@ -264,7 +285,7 @@ class ModelInfo(ConfigBase):
             "step": 0.001,
         },
     )
-    """缓存命中输入价格 (用于API调用统计, 单位：元/ M token)。仅当 cache=true 时使用。"""
+    """缓存命中输入价格 (用于API调用统计, 单位：元/ M token)。0 表示缓存命中免费，未命中部分按 price_in 计费；WebUI 中留空按输入价格解析。"""
 
     price_out: float = Field(
         default=0.0,
@@ -275,6 +296,12 @@ class ModelInfo(ConfigBase):
         },
     )
     """输出价格 (用于API调用统计, 单位：元/ M token) (可选, 若无该字段, 默认值为0)"""
+
+    price_periods: List[ModelPricePeriod] = Field(default_factory=list)
+    """分时价格组合，每天按服务器本地时间重复，以成功请求尝试的开始时间计价。
+    每项包含 start_time、end_time（HH:MM）、price_in、price_out、cache_price_in，价格单位：元 / M token。
+    时段包含开始、不包含结束，支持跨午夜，开始和结束不能相同，时段之间不能重叠。
+    未匹配时段时使用模型默认价格；空列表表示全天使用默认价格。时段的缓存单价为 0 表示缓存命中免费。"""
 
     temperature: float | None = Field(
         default=None,
@@ -339,6 +366,20 @@ class ModelInfo(ConfigBase):
             raise ValueError(t("config.model_name_empty"))
         if not self.api_provider:
             raise ValueError(t("config.model_api_provider_empty"))
+
+        # 将跨午夜的时段拆开，统一检查半开区间是否重叠。
+        intervals: List[Tuple[str, str, int]] = []
+        for index, period in enumerate(self.price_periods, start=1):
+            if period.start_time < period.end_time:
+                intervals.append((period.start_time, period.end_time, index))
+            else:
+                intervals.append((period.start_time, "24:00", index))
+                if period.end_time != "00:00":
+                    intervals.append(("00:00", period.end_time, index))
+        intervals.sort()
+        for previous, current in zip(intervals, intervals[1:], strict=False):
+            if current[0] < previous[1]:
+                raise ValueError(f"价格时段 {previous[2]} 与 {current[2]} 重叠")
         return super().model_post_init(context)
 
 
@@ -364,7 +405,7 @@ class TaskConfig(ConfigBase):
     """任务最大输出token数"""
 
     temperature: float = Field(
-        default=0.3,
+        default=0.7,
         ge=0,
         le=2,
         json_schema_extra={
@@ -373,17 +414,6 @@ class TaskConfig(ConfigBase):
         },
     )
     """模型温度"""
-
-    slow_threshold: float = Field(
-        default=15.0,
-        ge=0,
-        json_schema_extra={
-            "x-widget": "input",
-            "step": 0.1,
-            "advanced": True,
-        },
-    )
-    """超时警告时间（秒），超过此时间会输出警告日志"""
 
     selection_strategy: str = Field(
         default="balance",
@@ -502,3 +532,12 @@ class ModelTaskConfig(ConfigBase):
         },
     )
     """嵌入模型，需要文本嵌入类型的模型，不可使用LLM"""
+
+    image_embedding: TaskConfig = Field(
+        default_factory=TaskConfig,
+        json_schema_extra={
+            "x-widget": "custom",
+            "advanced": True,
+        },
+    )
+    """图片嵌入模型；留空时复用 embedding 任务，所选模型必须实现图片输入到向量的协议"""

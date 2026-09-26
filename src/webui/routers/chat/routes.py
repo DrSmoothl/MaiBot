@@ -116,6 +116,12 @@ class ChatTargetResolveBatchRequest(BaseModel):
     targets: List[ChatTargetResolveItem] = Field(default_factory=list)
 
 
+class SessionAdapterStatusRequest(BaseModel):
+    """批量查询聊天流适配器放行状态的请求。"""
+
+    session_ids: List[str] = Field(default_factory=list)
+
+
 def _datetime_to_timestamp(value: Optional[datetime]) -> Optional[float]:
     """将数据库时间转换为前端更易处理的秒级时间戳。"""
 
@@ -440,7 +446,7 @@ def _is_same_learning_target(rule: Dict[str, Any], chat_session: ChatSession) ->
 
 def _format_frequency(value: float) -> str:
     normalized_value = max(0.0, float(value))
-    return f"{normalized_value:.3f}（{normalized_value * 100:.1f}%）"
+    return f"{normalized_value:.2f}（{normalized_value * 100:.1f}%）"
 
 
 def _talk_rule_to_dict(rule: Any, session_id: str, is_group_chat: bool, now_min: int) -> Optional[Dict[str, Any]]:
@@ -1009,6 +1015,33 @@ def _get_adapter_policy_details(chat_session: ChatSession) -> List[Dict[str, Any
     return sorted(adapter_details, key=lambda item: (not item["routed"], item["plugin_id"], item["gateway_name"]))
 
 
+def _summarize_session_adapter_allowance(chat_session: ChatSession) -> Dict[str, Any]:
+    """汇总单个聊天流是否被适配器放行，供聊天页侧边栏分组展示。"""
+
+    platform = str(chat_session.platform or "").strip().lower()
+    # 只统计同平台适配器，避免其它平台的默认放行结果把阻止结果掩盖掉
+    platform_adapters = [
+        adapter
+        for adapter in _get_adapter_policy_details(chat_session)
+        if str(adapter.get("platform") or "").strip().lower() == platform
+    ]
+    # 正在承载当前聊天流的适配器优先，没有接入记录时退回同平台的全部适配器
+    candidates = [adapter for adapter in platform_adapters if adapter.get("routed")] or platform_adapters
+    if not candidates:
+        # 没有运行中的适配器插件时无法判断放行结果，按主程序默认放行处理
+        return {"allowed": True, "reason": "adapter_unavailable"}
+
+    blocking_policy = next(
+        (adapter["policy"] for adapter in candidates if not adapter["policy"]["allowed"]),
+        None,
+    )
+    return {
+        # 只要还有适配器放行，这个聊天流的消息就仍会被处理
+        "allowed": blocking_policy is None,
+        "reason": blocking_policy["reason"] if blocking_policy else "",
+    }
+
+
 def _get_driver_adapter_identity(driver: Any) -> AdapterIdentity:
     """根据运行中的插件驱动描述构造适配器策略身份。"""
 
@@ -1184,7 +1217,7 @@ def _delete_chat_session_scope(session_id: str) -> Dict[str, Any]:
 
 
 @router.get("/history")
-async def get_chat_history(
+def get_chat_history(
     limit: int = Query(default=50, ge=1, le=200),
     user_id: Optional[str] = Query(default=None),
     group_id: Optional[str] = Query(default=None),
@@ -1202,7 +1235,7 @@ async def get_chat_history(
 
 
 @router.get("/platforms")
-async def get_available_platforms() -> Dict[str, object]:
+def get_available_platforms() -> Dict[str, object]:
     """获取可用平台列表。"""
     try:
         with get_db_session() as session:
@@ -1221,7 +1254,7 @@ async def get_available_platforms() -> Dict[str, object]:
 
 
 @router.get("/persons")
-async def get_persons_by_platform(
+def get_persons_by_platform(
     platform: str = Query(..., description="平台名称"),
     search: Optional[str] = Query(default=None, description="搜索关键词"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -1262,7 +1295,7 @@ async def get_persons_by_platform(
 
 
 @router.get("/sessions")
-async def get_chat_sessions(
+def get_chat_sessions(
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> Dict[str, object]:
     """获取已存在的聊天流列表。"""
@@ -1302,8 +1335,35 @@ async def get_chat_sessions(
     return {"success": True, "sessions": items, "total": len(items)}
 
 
+@router.post("/sessions/adapter-status")
+def get_chat_sessions_adapter_status(request: SessionAdapterStatusRequest) -> Dict[str, object]:
+    """批量获取聊天流的适配器放行状态，供聊天页按放行状态分组。"""
+
+    normalized_session_ids = [
+        session_id
+        for session_id in dict.fromkeys(str(session_id or "").strip() for session_id in request.session_ids)
+        if session_id
+    ][:500]
+    if not normalized_session_ids:
+        return {"success": True, "statuses": {}}
+
+    with get_db_session() as session:
+        chat_sessions = session.exec(
+            select(ChatSession).where(col(ChatSession.session_id).in_(normalized_session_ids))
+        ).all()
+
+    return {
+        "success": True,
+        "statuses": {
+            chat_session.session_id: _summarize_session_adapter_allowance(chat_session)
+            for chat_session in chat_sessions
+            if chat_session.session_id
+        },
+    }
+
+
 @router.get("/resolve-target")
-async def resolve_chat_target(
+def resolve_chat_target(
     platform: str = Query(..., description="平台名称"),
     item_id: str = Query(..., description="群号或用户 ID"),
     rule_type: str = Query(default="group", description="聊天类型：group/private"),
@@ -1317,14 +1377,14 @@ async def resolve_chat_target(
 
 
 @router.post("/resolve-targets")
-async def resolve_chat_targets(request: ChatTargetResolveBatchRequest) -> Dict[str, object]:
+def resolve_chat_targets(request: ChatTargetResolveBatchRequest) -> Dict[str, object]:
     """批量按配置目标解析真实聊天流，用于配置页即时校验。"""
 
     return {"success": True, "results": _resolve_chat_targets(request.targets[:200])}
 
 
 @router.get("/sessions/{session_id}")
-async def get_chat_session_detail(session_id: str) -> Dict[str, object]:
+def get_chat_session_detail(session_id: str) -> Dict[str, object]:
     """获取单个聊天流详情。"""
 
     normalized_session_id = str(session_id or "").strip()
@@ -1343,7 +1403,7 @@ async def get_chat_session_detail(session_id: str) -> Dict[str, object]:
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_chat_session(session_id: str) -> Dict[str, object]:
+def delete_chat_session(session_id: str) -> Dict[str, object]:
     """删除聊天流及所有与该 session_id 直接关联的数据。"""
 
     normalized_session_id = str(session_id or "").strip()
@@ -1471,14 +1531,14 @@ async def update_chat_session_adapter_policy(
 
 
 @router.get("/adapters/policy/defaults")
-async def get_adapter_policy_defaults() -> Dict[str, object]:
+def get_adapter_policy_defaults() -> Dict[str, object]:
     """返回群聊和私聊的适配器全局默认动作。"""
 
     return {"success": True, "defaults": get_adapter_policy_manager().get_default_actions()}
 
 
 @router.put("/adapters/policy/defaults")
-async def update_adapter_policy_defaults(request: AdapterPolicyDefaultsUpdateRequest) -> Dict[str, object]:
+def update_adapter_policy_defaults(request: AdapterPolicyDefaultsUpdateRequest) -> Dict[str, object]:
     """更新群聊和私聊的适配器全局默认动作。"""
 
     manager = get_adapter_policy_manager()
@@ -1490,17 +1550,39 @@ async def update_adapter_policy_defaults(request: AdapterPolicyDefaultsUpdateReq
     return {"success": True, "defaults": manager.get_default_actions()}
 
 
+def _get_plugin_adapter_identity(plugin_id: str) -> Optional[AdapterIdentity]:
+    """按 plugin_id 查找运行中的适配器驱动并返回完整身份。
+
+    面板读写必须使用与运行时求值一致的完整身份（adapter_id、platform、
+    account_id 等），否则会读到/写出与实际生效规则脱靶的条目。
+    """
+
+    for driver in get_platform_io_manager().driver_registry.list():
+        descriptor = driver.descriptor
+        if (descriptor.plugin_id or "") != plugin_id:
+            continue
+        metadata = descriptor.metadata if isinstance(descriptor.metadata, dict) else {}
+        if str(metadata.get("plugin_type") or "").strip().lower() != "adapter":
+            continue
+        return _get_driver_adapter_identity(driver)
+    return None
+
+
 @router.get("/adapters/plugins/{plugin_id}/policy")
-async def get_adapter_plugin_policy(plugin_id: str) -> Dict[str, object]:
+def get_adapter_plugin_policy(plugin_id: str) -> Dict[str, object]:
     """返回指定适配器插件在主程序侧的群聊与私聊规则。"""
 
     normalized_plugin_id = str(plugin_id or "").strip()
     if not normalized_plugin_id:
         raise HTTPException(status_code=400, detail="缺少适配器插件 ID")
 
+    # 优先用运行中驱动的完整身份；未运行时退回 plugin_id 单键做只读展示
+    identity = _get_plugin_adapter_identity(normalized_plugin_id) or AdapterIdentity(
+        plugin_id=normalized_plugin_id
+    )
     manager = get_adapter_policy_manager()
     try:
-        policy = manager.get_adapter_policy(AdapterIdentity(plugin_id=normalized_plugin_id))
+        policy = manager.get_adapter_policy(identity)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -1512,20 +1594,29 @@ async def get_adapter_plugin_policy(plugin_id: str) -> Dict[str, object]:
 
 
 @router.put("/adapters/plugins/{plugin_id}/policy")
-async def update_adapter_plugin_policy(
+def update_adapter_plugin_policy(
     plugin_id: str,
     request: AdapterHostPolicyUpdateRequest,
 ) -> Dict[str, object]:
-    """更新指定适配器插件在主程序侧的群聊与私聊规则。"""
+    """更新指定适配器插件在主程序侧的群聊与私聊规则。
+
+    纯同步文件读写，写成 `def` 由 FastAPI 交给线程池执行，避免自动保存
+    的写入占用 WebUI 事件循环。
+    """
 
     normalized_plugin_id = str(plugin_id or "").strip()
     if not normalized_plugin_id:
         raise HTTPException(status_code=400, detail="缺少适配器插件 ID")
 
+    # 写入必须能确定规则归属；适配器未运行时拒绝而不是猜一个身份静默写出死规则
+    identity = _get_plugin_adapter_identity(normalized_plugin_id)
+    if identity is None:
+        raise HTTPException(status_code=404, detail="适配器当前未运行，无法确定规则归属，请先启动适配器")
+
     manager = get_adapter_policy_manager()
     try:
         manager.set_adapter_policy(
-            AdapterIdentity(plugin_id=normalized_plugin_id),
+            identity,
             request.model_dump(),
         )
     except ValueError as exc:
@@ -1534,7 +1625,7 @@ async def update_adapter_plugin_policy(
         "success": True,
         "plugin_id": normalized_plugin_id,
         "global_defaults": manager.get_default_actions(),
-        "policy": manager.get_adapter_policy(AdapterIdentity(plugin_id=normalized_plugin_id)),
+        "policy": manager.get_adapter_policy(identity),
     }
 
 
@@ -1559,7 +1650,7 @@ async def delete_chat_session_prompt(session_id: str, index: int) -> Dict[str, o
 
 
 @router.delete("/history")
-async def clear_chat_history(
+def clear_chat_history(
     user_id: Optional[str] = Query(default=None),
     group_id: Optional[str] = Query(default=None),
 ) -> Dict[str, object]:
@@ -1576,7 +1667,7 @@ async def clear_chat_history(
 
 
 @router.get("/info")
-async def get_chat_info() -> Dict[str, object]:
+def get_chat_info() -> Dict[str, object]:
     """获取聊天室信息。"""
     return {
         "bot_name": global_config.bot.nickname,

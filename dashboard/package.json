@@ -1,7 +1,7 @@
 {
   "name": "maibot-dashboard",
   "private": true,
-  "version": "1.7.4",
+  "version": "1.7.5",
   "type": "module",
   "main": "./out/main/index.cjs",
   "scripts": {
@@ -163,6 +163,7 @@
     "reactflow": "^11.11.4",
     "recharts": "3.5.1",
     "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "smol-toml": "^1.5.2",

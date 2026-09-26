@@ -1573,12 +1573,32 @@
   box-shadow: none !important;
 }
 
+/* 未选中为描边凹陷方块，选中/半选才填充锈红，避免未选中看起来像已选中 */
 :root[data-dashboard-style='future-retro'] [data-dashboard-checkbox='true'] {
-  border: 0 !important;
+  border: var(--retro-stroke) solid var(--retro-line) !important;
   border-radius: 0 !important;
-  background: var(--retro-rust) !important;
+  background: var(--retro-recessed) !important;
   box-shadow: none !important;
   color: var(--retro-paper) !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-checkbox='true']:is([data-state='checked'], [data-state='indeterminate']) {
+  border-color: var(--retro-rust) !important;
+  background: var(--retro-rust) !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-checkbox='true'][data-state='indeterminate']
+  [data-dashboard-checkbox-indicator='true']::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 3px;
+  background: var(--retro-paper);
+  transform: translate(-50%, -50%);
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-checkbox='true']:focus-visible {
@@ -1953,15 +1973,24 @@
 :root[data-dashboard-style='future-retro']
   [data-dashboard-slider='config']
   [data-dashboard-slider-thumb='true'] {
-  min-width: 2.5rem !important;
-  height: 2rem !important;
+  min-width: 2rem !important;
+  height: 1.75rem !important;
   width: auto !important;
+  padding: 0 0.375rem !important;
+  font-size: 1rem;
 }
 
 :root[data-dashboard-style='future-retro']
   [data-dashboard-slider='config']
   [data-dashboard-slider-value='true'] {
   display: inline !important;
+  font-size: 1rem !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-slider='config']
+  [data-dashboard-slider-value-tail='true'] {
+  font-size: 0.5rem;
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-nav-item='true'] {
@@ -2063,6 +2092,9 @@
   background-image: none !important;
 }
 
+/* 选中态（data-state="active"）的标签触发器不参与半透明底色压平：
+   否则铁锈红选中底色会被这里靠后的同优先级规则覆盖成近透明底，
+   配上纸色文字后几乎不可见。 */
 :root[data-dashboard-style='future-retro']
   [data-dashboard-shell='true']
   :is(
@@ -2070,7 +2102,7 @@
     [class*='bg-background/'],
     [class*='bg-muted/'],
     [class*='bg-popover/']
-  ) {
+  ):not([data-state='active']) {
   background-color: var(--retro-recessed) !important;
 }
 
@@ -2124,6 +2156,14 @@
 :root[data-dashboard-style='future-retro'] .bg-background,
 :root[data-dashboard-style='future-retro'] .bg-popover {
   background-color: transparent;
+}
+
+/* 模型表格操作列固定右缘：retro 主题下 .bg-background 为透明，需用纸面实色遮盖滚动内容。
+   放在 .bg-background 透明规则之后，避免被其覆盖。 */
+:root[data-dashboard-style='future-retro'] [data-model-config-action-cell='true'] {
+  background-color: var(--retro-paper) !important;
+  background-image: var(--retro-paper-brightness-overlay), var(--retro-paper-texture) !important;
+  background-size: auto, var(--retro-paper-texture-size) !important;
 }
 
 :root[data-dashboard-style='future-retro'] .text-muted-foreground {
@@ -2215,6 +2255,16 @@
   width: 0.5rem;
   height: 0.5rem;
   background: var(--retro-paper);
+}
+
+/* 记忆记录行勾选后用锈红描边标出，需压过上面 .border 的统一线色 */
+:root[data-dashboard-style='future-retro'] [data-memory-record-row='true'] {
+  border-radius: 0 !important;
+}
+
+:root[data-dashboard-style='future-retro'] [data-memory-record-row='true'][data-checked='true'] {
+  border-color: var(--retro-rust) !important;
+  background: color-mix(in srgb, var(--retro-rust) 7%, transparent) !important;
 }
 
 /* Card carries Tailwind's border class, so keep its retro frame color after the generic border override. */
@@ -2610,6 +2660,13 @@
   padding-bottom: 0.625rem;
 }
 
+/* 记忆查询结果头部：单行「多选操作 + 计数小字」，收紧纵向留白，
+   让头部高度由控件决定而不是被内边距撑高 */
+.memory-console-density
+  [data-dashboard-card-header='true'][data-memory-records-result-header='true'] {
+  padding: 0.5rem 0.75rem;
+}
+
 .memory-console-density .space-y-4 > :not([hidden]) ~ :not([hidden]),
 .memory-console-density .space-y-5 > :not([hidden]) ~ :not([hidden]),
 .memory-console-density .space-y-6 > :not([hidden]) ~ :not([hidden]),
@@ -2673,6 +2730,13 @@
 
 .memory-console-density [data-dashboard-tabs-trigger='true'] {
   padding: 0.25rem 0.625rem;
+}
+
+/* 记忆控制台标签行：去掉列表纵向内边距，让标签铺满该行高度，
+   与同行右侧 2rem 高的「更多操作」按钮对齐 */
+.memory-console-density [data-memory-console-tab-row='true'] [data-dashboard-tabs-list='true'] {
+  gap: 0.25rem;
+  padding-block: 0;
 }
 
 .memory-console-density th {
@@ -3031,8 +3095,12 @@
     [data-model-config-table-surface='true'] [data-dashboard-table-header='true'],
     [data-model-config-table-surface='true'] [data-dashboard-table-body='true'],
     [data-model-config-table-surface='true'] [data-dashboard-table-row='true'],
-    [data-model-config-table-surface='true'] [data-dashboard-table-head='true'],
-    [data-model-config-table-surface='true'] [data-dashboard-table-cell='true']
+    [data-model-config-table-surface='true'] [data-dashboard-table-head='true']:not(
+      [data-model-config-action-cell='true']
+    ),
+    [data-model-config-table-surface='true'] [data-dashboard-table-cell='true']:not(
+      [data-model-config-action-cell='true']
+    )
   ) {
   background: transparent !important;
   background-color: transparent !important;

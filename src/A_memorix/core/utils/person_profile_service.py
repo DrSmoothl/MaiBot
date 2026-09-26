@@ -120,7 +120,6 @@ class PersonProfileService:
         return {
             "generation_version": PROFILE_GENERATION_VERSION,
             "classification_max_tokens": self._profile_classification_max_tokens(),
-            "classification_temperature": self._profile_classification_temperature(),
             "model": model_signature,
         }
 
@@ -167,14 +166,6 @@ class PersonProfileService:
             return min(32768, max(128, int(raw_value or 1200)))
         except (TypeError, ValueError):
             return 1200
-
-    def _profile_classification_temperature(self) -> float:
-        """读取人物画像证据分类的模型温度。"""
-        raw_value = self._cfg("person_profile.evidence_classification_temperature", 0.1)
-        try:
-            return min(2.0, max(0.0, float(raw_value)))
-        except (TypeError, ValueError):
-            return 0.1
 
     def _build_retriever(self) -> Optional[DualPathRetriever]:
         """按需构建检索器（无依赖时返回 None）。"""
@@ -909,7 +900,7 @@ class PersonProfileService:
                 model,
                 PROFILE_CLASSIFICATION_REQUEST_TYPE,
                 prompt,
-                temperature=self._profile_classification_temperature(),
+                temperature=0.1,
                 max_tokens=self._profile_classification_max_tokens(),
             )
         except Exception as exc:

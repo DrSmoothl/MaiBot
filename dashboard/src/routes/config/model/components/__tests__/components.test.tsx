@@ -131,6 +131,7 @@ describe('ModelTable', () => {
         onEdit={onEdit}
         onDelete={onDelete}
         onTest={onTest}
+        onAdd={vi.fn()}
         onToggleSelection={onToggleSelection}
         onToggleSelectAll={vi.fn()}
         isModelUsed={() => true}
@@ -168,6 +169,7 @@ describe('ModelTable', () => {
       onEdit: vi.fn(),
       onDelete: vi.fn(),
       onTest: vi.fn(),
+      onAdd: vi.fn(),
       onToggleSelection: vi.fn(),
       onToggleSelectAll: vi.fn(),
       isModelUsed: vi.fn(() => false),
@@ -190,6 +192,7 @@ describe('ModelTable', () => {
       onEdit: vi.fn(),
       onDelete: vi.fn(),
       onTest: vi.fn(),
+      onAdd: vi.fn(),
       onToggleSelection: vi.fn(),
       onToggleSelectAll: vi.fn(),
       isModelUsed: vi.fn(() => false),
@@ -297,24 +300,18 @@ describe('TaskConfigCard', () => {
     expect(onChange).toHaveBeenCalledWith('selection_strategy', 'random')
   })
 
-  it('高级超时配置拒绝无效值并接受大于等于一的整数', () => {
+  it('任务硬超时拒绝无效值并接受大于等于一的整数', () => {
     const onChange = vi.fn()
     render(
       <TaskConfigCard
         title="高级任务"
         description="高级参数"
-        taskConfig={{ ...baseTask, slow_threshold: 15, hard_timeout: 240 }}
+        taskConfig={{ ...baseTask, hard_timeout: 240 }}
         modelNames={[]}
         onChange={onChange}
         showAdvancedSettings
       />
     )
-    const threshold = screen.getByDisplayValue('15')
-    fireEvent.change(threshold, { target: { value: '0' } })
-    expect(onChange).not.toHaveBeenCalledWith('slow_threshold', 0)
-    fireEvent.change(threshold, { target: { value: '20' } })
-    expect(onChange).toHaveBeenCalledWith('slow_threshold', 20)
-
     const hardTimeout = screen.getByDisplayValue('240')
     fireEvent.change(hardTimeout, { target: { value: '0' } })
     expect(onChange).not.toHaveBeenCalledWith('hard_timeout', 0)
