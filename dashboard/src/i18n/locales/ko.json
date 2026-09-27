@@ -219,10 +219,6 @@
       "title": "내 스티커"
     },
     "sidebar": {
-      "adapterAllowedGroup": "어댑터 허용",
-      "adapterBlockedGroup": "어댑터 차단",
-      "adapterBlockedHint": "이 채팅은 어댑터 규칙으로 차단되어 麦麦가 새 메시지를 받지 않습니다",
-      "adapterBlockedOverrideHint": "이 채팅은 개별 차단 규칙에 추가되었습니다",
       "closeConversation": "{{label}} 닫기",
       "conversations": "채팅 대화",
       "emptyPreview": "아직 메시지가 없습니다",
@@ -245,6 +241,7 @@
       "saveName": "저장",
       "savingAvatar": "아바타 저장 중",
       "userAvatarAlt": "{{name}}의 아바타",
+      "loadObservedChatsFailed": "채팅 스트림을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.",
       "waitingObservedChats": "채팅 스트림 대기 중…"
     },
     "dialog": {

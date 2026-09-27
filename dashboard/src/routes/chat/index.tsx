@@ -1,3 +1,4 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +10,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { uploadWebuiUserAvatar } from '@/lib/avatar-url'
 import { chatWsClient } from '@/lib/chat-ws-client'
+import { getAllChatStreams } from '@/lib/chat-management-api'
 import {
   maisakaMonitorClient,
   type LlmErrorEvent,
@@ -20,13 +22,12 @@ import {
 } from '@/lib/maisaka-monitor-client'
 import { loadUserEmojiPayload, type UserEmojiItem } from '@/lib/user-emoji-api'
 import { MaisakaMonitor } from '@/routes/monitor/maisaka-monitor'
-import { useMaisakaMonitor } from '@/routes/monitor/use-maisaka-monitor'
+import { useMaisakaMonitor, type SessionInfo } from '@/routes/monitor/use-maisaka-monitor'
 
 import { ChatComposer } from './ChatComposer'
 import { ChatTabBar } from './ChatTabBar'
 import { ChatWorkspaceSidebar } from './ChatWorkspaceSidebar'
 import { MessageList } from './MessageList'
-import { useObservedAdapterStatuses } from './use-observed-adapter-status'
 import type {
   ChatImageAttachment,
   ChatIncomingImage,
@@ -241,12 +242,50 @@ function buildRuntimeStatusFromStage(data: StageStatusEvent): ChatRuntimeStatus 
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
+  const queryClient = useQueryClient()
   const {
     sessions: observedSessions,
     stageStatuses: observedStageStatuses,
     allTimeline,
     setSelectedSession: setSelectedObservedSession,
   } = useMaisakaMonitor()
+
+  const { data: knownChatStreams = [], isError: knownChatStreamsError } = useQuery({
+    queryKey: ['chat-streams', 'all'],
+    queryFn: getAllChatStreams,
+    staleTime: 30_000,
+  })
+  // 监控中新出现的会话可能刚写入数据库，及时刷新已知聊天流列表。
+  const previousObservedSessionIds = useRef(new Set(observedSessions.keys()))
+  useEffect(() => {
+    const currentIds = new Set(observedSessions.keys())
+    const hasNewSession = Array.from(currentIds).some(
+      (sessionId) => !previousObservedSessionIds.current.has(sessionId)
+    )
+    previousObservedSessionIds.current = currentIds
+    if (hasNewSession) {
+      void queryClient.invalidateQueries({ queryKey: ['chat-streams', 'all'] })
+    }
+  }, [observedSessions, queryClient])
+
+  // 数据库中的真实聊天流为列表来源，实时监控事件只更新对应项的活动时间。
+  const knownSessions = useMemo(() => {
+    const sessions = new Map<string, SessionInfo>()
+    for (const chat of knownChatStreams) {
+      const live = observedSessions.get(chat.session_id)
+      sessions.set(chat.session_id, {
+        sessionId: chat.session_id,
+        sessionName: chat.display_name,
+        isGroupChat: chat.chat_type === 'group',
+        groupId: chat.group_id,
+        userId: chat.user_id,
+        platform: chat.platform,
+        lastActivity: Math.max(chat.last_active_at ?? chat.created_at ?? 0, live?.lastActivity ?? 0),
+        eventCount: live?.eventCount ?? 0,
+      })
+    }
+    return sessions
+  }, [knownChatStreams, observedSessions])
 
   // 每个观察聊天流的最新一条消息，用于侧边栏预览（时间线按时间升序，后写覆盖先写）
   const observedLatestMessages = useMemo(() => {
@@ -262,13 +301,6 @@ export function ChatPage() {
     }
     return latestMessages
   }, [allTimeline])
-
-  // 观察聊天流的适配器放行状态，用于侧边栏区分活跃与不活跃聊天
-  const observedSessionIds = useMemo(
-    () => Array.from(observedSessions.keys()),
-    [observedSessions]
-  )
-  const observedAdapterStatuses = useObservedAdapterStatuses(observedSessionIds)
 
   // 默认本地聊天标签页
   const defaultTab: ChatTab = {
@@ -920,8 +952,7 @@ export function ChatPage() {
     [activeTab, activeTabId, addMessageToTab, t, userName]
   )
 
-  // 处理键盘事件
-  // 处理昵称变更（来自侧边栏）
+  // 处理输入区的图片附件
   const handleAddImages = useCallback(
     async (files: FileList) => {
       const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'))
@@ -973,6 +1004,7 @@ export function ChatPage() {
     setSelectedImages((prev) => prev.filter((image) => image.id !== id))
   }, [])
 
+  // 处理输入框左侧设置中的昵称变更
   const handleUpdateUserName = useCallback(
     (newName: string) => {
       const trimmed = newName.trim() || t('chat.userNameFallback')
@@ -1075,7 +1107,7 @@ export function ChatPage() {
 
   // 在页内直接打开观察聊天流的设置弹窗，不再跳转到聊天管理页
   const openObservedSettings = (sessionId: string) => {
-    const info = observedSessions.get(sessionId)
+    const info = knownSessions.get(sessionId)
     setSettingsChat({
       session_id: sessionId,
       display_name: info?.sessionName || sessionId,
@@ -1102,10 +1134,10 @@ export function ChatPage() {
           tabs={tabs}
           activeTabId={activeTabId}
           activeObservedSessionId={activeObservedSessionId}
-          observedSessions={observedSessions}
+          observedSessions={knownSessions}
+          observedSessionsError={knownChatStreamsError}
           observedStageStatuses={observedStageStatuses}
           observedLatestMessages={observedLatestMessages}
-          observedAdapterStatuses={observedAdapterStatuses}
           userId={userId}
           userName={userName}
           userAvatarVersion={userAvatarVersion}
@@ -1115,7 +1147,6 @@ export function ChatPage() {
           onOpenObservedSettings={openObservedSettings}
           onClose={closeTab}
           onUpdateUserAvatar={handleUpdateUserAvatar}
-          onUpdateUserName={handleUpdateUserName}
         />
       </motion.div>
 
@@ -1139,7 +1170,7 @@ export function ChatPage() {
             tabs={tabs}
             activeTabId={activeTabId}
             activeObservedSessionId={activeObservedSessionId}
-            observedSessions={observedSessions}
+            observedSessions={knownSessions}
             userId={userId}
             userName={userName}
             userAvatarVersion={userAvatarVersion}
@@ -1194,6 +1225,8 @@ export function ChatPage() {
               images={selectedImages}
               isConnected={!!activeTab?.isConnected}
               userId={userId}
+              userName={userName}
+              onUpdateUserName={handleUpdateUserName}
             />
           </>
         )}

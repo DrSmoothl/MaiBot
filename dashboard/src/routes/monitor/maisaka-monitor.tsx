@@ -58,6 +58,7 @@ import { cn } from '@/lib/utils'
 
 import type {
   MaisakaContextSection,
+  MaisakaFinalizedToolResult,
   MaisakaMessageMedia,
   MaisakaToolCall,
   MessageIngestedEvent,
@@ -1326,7 +1327,7 @@ function PlannerToolCallsBlock({
 }) {
   const toolCalls = data.planner?.tool_calls ?? []
   const tools = data.tools ?? []
-  const displayTools =
+  const displayTools: MaisakaFinalizedToolResult[] =
     tools.length > 0
       ? tools
       : toolCalls.map((toolCall) => ({

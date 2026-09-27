@@ -12,7 +12,6 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { SessionAdapterStatus } from '@/lib/chat-management-api'
 import type { MaisakaMonitorEvent, StageStatusEvent } from '@/lib/maisaka-monitor-client'
 import type { UserEmojiItem } from '@/lib/user-emoji-api'
 import type { SessionInfo, StageStatusInfo } from '@/routes/monitor/use-maisaka-monitor'
@@ -38,6 +37,8 @@ interface MessageListStubProps {
 }
 
 interface ComposerStubProps {
+  userName: string
+  onUpdateUserName: (name: string) => void
   value: string
   onChange: (value: string) => void
   onAddImages: (files: FileList) => Promise<void> | void
@@ -57,7 +58,6 @@ interface SidebarStubProps {
   observedSessions: Map<string, SessionInfo>
   observedStageStatuses: Map<string, StageStatusInfo>
   observedLatestMessages: Map<string, ObservedMessagePreview>
-  observedAdapterStatuses: Map<string, SessionAdapterStatus>
   userId: string
   userName: string
   isUploadingUserAvatar: boolean
@@ -66,7 +66,6 @@ interface SidebarStubProps {
   onOpenObservedSettings: (sessionId: string) => void
   onClose: (tabId: string) => void
   onUpdateUserAvatar: (file: File) => Promise<void> | void
-  onUpdateUserName: (name: string) => void
 }
 
 interface MonitorStubProps {
@@ -92,6 +91,7 @@ const mocks = vi.hoisted(() => ({
   uploadWebuiUserAvatar: vi.fn(),
   loadUserEmojiPayload: vi.fn(),
   getChatSessionsAdapterStatus: vi.fn(),
+  getAllChatStreams: vi.fn(),
   // 会话消息监听器：tabId -> 监听器列表，由 onSessionMessage 的实现填充
   sessionListeners: new Map<string, Array<(message: Record<string, unknown>) => void>>(),
   connectionListeners: [] as Array<(connected: boolean) => void>,
@@ -178,6 +178,7 @@ vi.mock('@/lib/user-emoji-api', () => ({
 vi.mock('@/lib/chat-management-api', () => ({
   CHAT_ADAPTER_STATUS_QUERY_KEY: 'chat-adapter-status',
   getChatSessionsAdapterStatus: mocks.getChatSessionsAdapterStatus,
+  getAllChatStreams: mocks.getAllChatStreams,
 }))
 
 vi.mock('../MessageList', () => ({
@@ -393,6 +394,7 @@ beforeEach(() => {
   mocks.closeSession.mockResolvedValue(undefined)
   mocks.uploadWebuiUserAvatar.mockResolvedValue(undefined)
   mocks.getChatSessionsAdapterStatus.mockResolvedValue({})
+  mocks.getAllChatStreams.mockResolvedValue([])
   mocks.loadUserEmojiPayload.mockResolvedValue({
     name: '猫猫',
     mime_type: 'image/gif',
@@ -639,6 +641,28 @@ describe('聊天页 ChatPage', () => {
   })
 
   it('从统一侧边栏选择真实聊天流后显示只读观察，切回本地聊天恢复输入区', async () => {
+    mocks.getAllChatStreams.mockResolvedValue([
+      {
+        session_id: 'observed-1',
+        display_name: '测试群(123)',
+        chat_type: 'group',
+        group_id: '123',
+        user_id: null,
+        platform: 'qq',
+        created_at: 1,
+        last_active_at: 9,
+      },
+      {
+        session_id: 'known-only',
+        display_name: '未触发监控的私聊',
+        chat_type: 'private',
+        group_id: null,
+        user_id: 'u2',
+        platform: 'qq',
+        created_at: 2,
+        last_active_at: 2,
+      },
+    ])
     mocks.observedSessions.set('observed-1', {
       sessionId: 'observed-1',
       sessionName: '测试群(123)',
@@ -649,6 +673,10 @@ describe('聊天页 ChatPage', () => {
       eventCount: 4,
     })
     await renderConnectedPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('observed-known-only')).toHaveTextContent('未触发监控的私聊')
+    })
+    expect(sidebarProps().observedSessions.get('observed-1')?.lastActivity).toBe(10)
 
     act(() => sidebarProps().onSelectObserved('observed-1'))
 
@@ -808,11 +836,11 @@ describe('聊天页 ChatPage', () => {
   it('修改昵称：保存到本地并同步 WS，空昵称回退默认值', async () => {
     await renderConnectedPage()
 
-    act(() => sidebarProps().onUpdateUserName(' 新名 '))
+    act(() => composerProps().onUpdateUserName(' 新名 '))
     expect(localStorage.getItem('maibot_webui_user_name')).toBe('新名')
     expect(mocks.updateNickname).toHaveBeenCalledWith('webui-default', '新名')
 
-    act(() => sidebarProps().onUpdateUserName('   '))
+    act(() => composerProps().onUpdateUserName('   '))
     expect(localStorage.getItem('maibot_webui_user_name')).toBe('chat.userNameFallback')
     expect(mocks.updateNickname).toHaveBeenCalledWith('webui-default', 'chat.userNameFallback')
   })
@@ -1778,7 +1806,7 @@ describe('聊天页 ChatPage', () => {
       )
     })
 
-    act(() => sidebarProps().onUpdateUserName('离线改名'))
+    act(() => composerProps().onUpdateUserName('离线改名'))
     expect(localStorage.getItem('maibot_webui_user_name')).toBe('离线改名')
     expect(mocks.updateNickname).not.toHaveBeenCalled()
   })

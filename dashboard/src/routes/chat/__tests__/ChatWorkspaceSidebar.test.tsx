@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
-import type { SessionAdapterStatus } from '@/lib/chat-management-api'
 import type { SessionInfo, StageStatusInfo } from '@/routes/monitor/use-maisaka-monitor'
 
 import { ChatWorkspaceSidebar } from '../ChatWorkspaceSidebar'
@@ -76,7 +75,6 @@ function renderSidebar(overrides: Partial<Parameters<typeof ChatWorkspaceSidebar
     observedSessions: new Map(),
     observedStageStatuses: new Map(),
     observedLatestMessages: new Map<string, ObservedMessagePreview>(),
-    observedAdapterStatuses: new Map<string, SessionAdapterStatus>(),
     userId: 'user-a',
     userName: '人类',
     isUploadingUserAvatar: false,
@@ -85,7 +83,6 @@ function renderSidebar(overrides: Partial<Parameters<typeof ChatWorkspaceSidebar
     onOpenObservedSettings: vi.fn(),
     onClose: vi.fn(),
     onUpdateUserAvatar: vi.fn(async () => {}),
-    onUpdateUserName: vi.fn(),
     ...overrides,
   }
   const view = render(<ChatWorkspaceSidebar {...props} />)
@@ -270,49 +267,6 @@ describe('ChatWorkspaceSidebar', () => {
     expect(screen.getByText('机器人-webui-default')).toBeInTheDocument()
     expect(screen.getByText('群聊A')).toBeInTheDocument()
     expect(screen.queryByText('chat.sidebar.noSearchResults')).not.toBeInTheDocument()
-  })
-
-  it('编辑昵称后按 Enter 提交去除首尾空白', async () => {
-    const user = userEvent.setup()
-    const { props } = renderSidebar()
-
-    // 身份框不再展示「我的身份」标题
-    expect(screen.queryByText('chat.sidebar.profileTitle')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
-    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
-    expect(input).toHaveValue('人类')
-
-    fireEvent.change(input, { target: { value: '  新名字  ' } })
-    fireEvent.keyDown(input, { key: 'Enter' })
-    expect(props.onUpdateUserName).toHaveBeenCalledWith('新名字')
-    // 提交后退出编辑态
-    expect(screen.queryByPlaceholderText('chat.identity.namePlaceholder')).not.toBeInTheDocument()
-  })
-
-  it('空昵称提交时回退默认昵称（点击保存按钮）', async () => {
-    const user = userEvent.setup()
-    const { props } = renderSidebar()
-
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
-    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
-    fireEvent.change(input, { target: { value: '   ' } })
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.saveName' }))
-    expect(props.onUpdateUserName).toHaveBeenCalledWith('chat.userNameFallback')
-  })
-
-  it('按 Escape 取消编辑且不提交昵称', async () => {
-    const user = userEvent.setup()
-    const { props } = renderSidebar()
-
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
-    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
-    fireEvent.change(input, { target: { value: '改了一半' } })
-    fireEvent.keyDown(input, { key: 'Escape' })
-
-    expect(screen.queryByPlaceholderText('chat.identity.namePlaceholder')).not.toBeInTheDocument()
-    expect(props.onUpdateUserName).not.toHaveBeenCalled()
-    // 原昵称保持展示
-    expect(screen.getByText('人类')).toBeInTheDocument()
   })
 
   it('选择头像文件交给回调，上传中禁用入口', () => {

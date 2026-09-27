@@ -236,6 +236,21 @@ export async function getChatStreams(limit = 1000): Promise<ChatStream[]> {
   return result.sessions ?? []
 }
 
+/** 分页读取所有已存在的聊天流，供聊天工作区展示完整列表。 */
+export async function getAllChatStreams(): Promise<ChatStream[]> {
+  const pageSize = 1000
+  const streams: ChatStream[] = []
+
+  for (let offset = 0; ; offset += pageSize) {
+    const result = await backendApi.get<ChatStreamsResponse>('/api/chat/sessions', {
+      query: { limit: pageSize, offset },
+    })
+    const page = result.sessions ?? []
+    streams.push(...page)
+    if (page.length < pageSize) return streams
+  }
+}
+
 /** 聊天流适配器放行状态的查询键：适配器规则变化后按此前缀失效缓存 */
 export const CHAT_ADAPTER_STATUS_QUERY_KEY = 'chat-adapter-status'
 

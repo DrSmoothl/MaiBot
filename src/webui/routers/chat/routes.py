@@ -1297,6 +1297,7 @@ def get_persons_by_platform(
 @router.get("/sessions")
 def get_chat_sessions(
     limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
 ) -> Dict[str, object]:
     """获取已存在的聊天流列表。"""
 
@@ -1307,7 +1308,9 @@ def get_chat_sessions(
                 case((col(ChatSession.last_active_timestamp).is_(None), 1), else_=0),
                 col(ChatSession.last_active_timestamp).desc(),
                 col(ChatSession.created_timestamp).desc(),
+                col(ChatSession.id).desc(),
             )
+            .offset(offset)
             .limit(limit)
         )
         chat_sessions = session.exec(statement).all()
@@ -1337,7 +1340,7 @@ def get_chat_sessions(
 
 @router.post("/sessions/adapter-status")
 def get_chat_sessions_adapter_status(request: SessionAdapterStatusRequest) -> Dict[str, object]:
-    """批量获取聊天流的适配器放行状态，供聊天页按放行状态分组。"""
+    """批量获取聊天流的适配器放行状态。"""
 
     normalized_session_ids = [
         session_id

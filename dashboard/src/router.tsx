@@ -6,7 +6,6 @@ import {
   Outlet,
   redirect,
 } from '@tanstack/react-router'
-import { TanStackRouterDevtools } from '@tanstack/router-devtools'
 import { NotFoundPage } from './routes/404'
 import { Layout } from './components/layout'
 import { RoutePendingFallback } from './components/route-pending-fallback'
@@ -15,12 +14,7 @@ import { RouteErrorBoundary } from './components/error-boundary'
 
 // Root 路由
 const rootRoute = createRootRoute({
-  component: () => (
-    <>
-      <Outlet />
-      {import.meta.env.DEV && <TanStackRouterDevtools />}
-    </>
-  ),
+  component: Outlet,
   beforeLoad: ({ location }) => {
     // 只在目标路由确实是首页时异步鉴权。使用 window.location 会读到导航前的旧路径，
     // 并让离开首页的工作区切换无故进入 pending 状态。

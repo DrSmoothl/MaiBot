@@ -8,6 +8,7 @@ import type { UserEmojiItem } from '@/lib/user-emoji-api'
 import { cn } from '@/lib/utils'
 
 import type { ChatImageAttachment } from './types'
+import { ChatNicknameSettings } from './ChatNicknameSettings'
 import { UserEmojiManager } from './UserEmojiManager'
 
 interface ChatComposerProps {
@@ -21,6 +22,8 @@ interface ChatComposerProps {
   images: ChatImageAttachment[]
   isConnected: boolean
   userId: string
+  userName: string
+  onUpdateUserName: (name: string) => void
 }
 
 /**
@@ -37,6 +40,8 @@ export function ChatComposer({
   images,
   isConnected,
   userId,
+  userName,
+  onUpdateUserName,
 }: ChatComposerProps) {
   const { t } = useTranslation()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -84,6 +89,7 @@ export function ChatComposer({
             !isConnected && 'opacity-70'
           )}
         >
+          <ChatNicknameSettings userName={userName} onUpdateUserName={onUpdateUserName} />
           <input
             ref={fileInputRef}
             className="hidden"
@@ -114,7 +120,7 @@ export function ChatComposer({
           <Textarea
             aria-label={t('chat.input.placeholder')}
             autoResize
-            className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-sm shadow-none focus-visible:ring-0"
+            className="max-h-40 min-h-9 min-w-0 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-sm shadow-none focus-visible:ring-0"
             disabled={!isConnected}
             maxHeight={160}
             minHeight={36}

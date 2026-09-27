@@ -91,11 +91,55 @@ describe('ChatComposer', () => {
       images: [],
       isConnected: true,
       userId: 'user-a',
+      userName: '人类',
+      onUpdateUserName: vi.fn(),
       ...overrides,
     }
     const result = render(<ChatComposer {...props} />)
     return { ...result, props }
   }
+
+  it('编辑昵称后按 Enter 提交去除首尾空白', async () => {
+    const user = userEvent.setup()
+    const { props } = renderComposer()
+
+    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
+    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
+    expect(input).toHaveValue('人类')
+
+    fireEvent.change(input, { target: { value: '  新名字  ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(props.onUpdateUserName).toHaveBeenCalledWith('新名字')
+    // 提交后退出编辑态
+    expect(screen.queryByPlaceholderText('chat.identity.namePlaceholder')).not.toBeInTheDocument()
+  })
+
+  it('空昵称提交时回退默认昵称（点击保存按钮）', async () => {
+    const user = userEvent.setup()
+    const { props } = renderComposer()
+
+    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
+    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
+    fireEvent.change(input, { target: { value: '   ' } })
+    await user.click(screen.getByRole('button', { name: 'chat.sidebar.saveName' }))
+    expect(props.onUpdateUserName).toHaveBeenCalledWith('chat.userNameFallback')
+  })
+
+  it('按 Escape 取消编辑且不提交昵称', async () => {
+    const user = userEvent.setup()
+    const { props } = renderComposer()
+
+    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
+    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
+    fireEvent.change(input, { target: { value: '改了一半' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(screen.queryByPlaceholderText('chat.identity.namePlaceholder')).not.toBeInTheDocument()
+    expect(props.onUpdateUserName).not.toHaveBeenCalled()
+    // 再次打开时仍然使用原昵称
+    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
+    expect(screen.getByPlaceholderText('chat.identity.namePlaceholder')).toHaveValue('人类')
+  })
 
   it('输入文本后点击发送，Enter 发送而 Shift+Enter 保留换行', async () => {
     const user = userEvent.setup()

@@ -14,9 +14,6 @@ const { StubPage } = vi.hoisted(() => ({
   },
 }))
 
-vi.mock('@tanstack/router-devtools', () => ({
-  TanStackRouterDevtools: () => null,
-}))
 vi.mock('@/routes/404', () => ({
   NotFoundPage: () => <div>页面不存在</div>,
 }))
