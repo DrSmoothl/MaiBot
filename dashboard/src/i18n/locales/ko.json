@@ -649,7 +649,7 @@
     "verifyingLabel": "확인 중...",
     "verifyEnter": "확인 후 입장",
     "helpLink": "Token이 없습니다. 어디서 얻을 수 있나요?",
-    "helpTitle": "Access Token 얻는 방법",
+    "helpTitle": "접속 비밀번호",
     "helpDesc": "Access Token은 MaiBot WebUI에 액세스하는 유일한 자격 증명입니다. 다음 방법으로 얻으세요",
     "method1Title": "방법 1: 시작 로그 확인",
     "method1Desc": "MaiBot 시작 시 콘솔에 WebUI Access Token이 표시됩니다.",

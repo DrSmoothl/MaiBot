@@ -703,19 +703,32 @@
   animation: future-retro-gear-rotate 150s linear infinite;
 }
 
+/* 偏移量按齿轮自身尺寸计算，避免竖屏下 vh 偏移大于 vw 尺寸导致齿轮整体移出画面 */
 .auth-retro-gear--primary {
-  left: max(-30rem, -32vw);
-  top: max(-24rem, -34vh);
-  width: min(72vw, 52rem);
+  --auth-gear-size: min(72vw, 52rem);
+  left: calc(var(--auth-gear-size) * -0.5);
+  top: calc(var(--auth-gear-size) * -0.36);
+  width: var(--auth-gear-size);
 }
 
 .auth-retro-gear--secondary {
-  right: max(-28rem, -30vw);
-  bottom: max(-30rem, -42vh);
-  width: min(84vw, 60rem);
+  --auth-gear-size: min(84vw, 60rem);
+  right: calc(var(--auth-gear-size) * -0.45);
+  bottom: calc(var(--auth-gear-size) * -0.4);
+  width: var(--auth-gear-size);
   opacity: 0.22;
   animation-duration: 210s;
   animation-direction: reverse;
+}
+
+@media (max-aspect-ratio: 3/4) {
+  .auth-retro-gear--primary {
+    --auth-gear-size: min(100vw, 52rem);
+  }
+
+  .auth-retro-gear--secondary {
+    --auth-gear-size: min(120vw, 60rem);
+  }
 }
 
 .auth-retro-gear__body {
