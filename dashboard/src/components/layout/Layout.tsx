@@ -55,7 +55,8 @@ export function Layout({ children }: LayoutProps) {
   const announce = useAnnounce()
   const isLogsPath =
     pathname === '/logs' || pathname === '/statistics' || pathname.startsWith('/reasoning-process')
-  const workspaceMode = pathname === '/chat' ? 'chat' : isLogsPath ? 'logs' : 'settings'
+  // 麦麦聊天已并入麦麦设置侧边栏，/chat 属于设置工作区
+  const workspaceMode: WorkspaceMode = isLogsPath ? 'logs' : 'settings'
   const isSettingsWorkspace = workspaceMode === 'settings'
   const showBackToTop = isSettingsWorkspace && pathname !== '/planner-monitor'
 
@@ -142,7 +143,6 @@ export function Layout({ children }: LayoutProps) {
     }
     pathToLabel['/chat'] = t('workspace.chat')
     pathToLabel['/planner-monitor'] = t('sidebar.menu.maisakaMonitor')
-    pathToLabel['/focus'] = t('sidebar.menu.focusCompanion')
     pathToLabel['/logs'] = t('workspace.logs')
     pathToLabel['/reasoning-process'] = t('sidebar.menu.reasoningProcess')
 
@@ -387,11 +387,7 @@ export function Layout({ children }: LayoutProps) {
                   : isSettingsWorkspace
                     ? 'overflow-y-auto overflow-x-hidden overscroll-contain'
                     : 'overflow-hidden',
-                workspaceMode === 'chat'
-                  ? 'bg-transparent'
-                  : pageBg.type === 'none'
-                    ? 'bg-background'
-                    : 'bg-transparent'
+                pageBg.type === 'none' ? 'bg-background' : 'bg-transparent'
               )}
             >
               <motion.div
@@ -402,19 +398,11 @@ export function Layout({ children }: LayoutProps) {
                   isSettingsWorkspace && 'min-h-full',
                   targetWorkspaceWaiting && 'invisible'
                 )}
-                variants={
-                  workspaceMode === 'chat'
-                    ? {
-                        initial: { opacity: 1 },
-                        animate: { opacity: 1 },
-                        exit: { opacity: 1 },
-                      }
-                    : {
-                        initial: { y: '100%' },
-                        animate: { y: 0 },
-                        exit: { y: '100%' },
-                      }
-                }
+                variants={{
+                  initial: { y: '100%' },
+                  animate: { y: 0 },
+                  exit: { y: '100%' },
+                }}
                 initial="initial"
                 animate={pageHidden ? 'exit' : 'animate'}
                 transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}

@@ -1425,6 +1425,13 @@
   background: transparent !important;
 }
 
+/* 顶部工作区标签（麦麦 / 日志）文字较短，左右边距收紧 */
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-workspace-tabs='true']
+  [data-dashboard-tabs-trigger='true'] {
+  padding-inline: 0.7rem !important;
+}
+
 :root[data-dashboard-style='future-retro']
   [data-dashboard-workspace-tabs='true']
   [data-dashboard-tabs-trigger='true'][data-workspace-highlighted='true'] {
@@ -2071,19 +2078,6 @@
   background-color: rgb(255 246 230 / 20%) !important;
   -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
   backdrop-filter: blur(10px) saturate(140%) !important;
-}
-
-:root[data-dashboard-style='future-retro'] [data-focus-companion='true'] .focus-local-glass {
-  background-color: rgb(255 246 230 / 68%);
-  box-shadow: none;
-  -webkit-backdrop-filter: blur(22px) !important;
-  backdrop-filter: blur(22px) !important;
-}
-
-:root[data-dashboard-style='future-retro'] [data-focus-companion='true'] .focus-local-glass-input {
-  background-color: rgb(255 246 230 / 58%);
-  -webkit-backdrop-filter: blur(16px) !important;
-  backdrop-filter: blur(16px) !important;
 }
 
 :root[data-dashboard-style='future-retro']

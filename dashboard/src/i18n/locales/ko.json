@@ -31,7 +31,6 @@
     },
     "menu": {
       "home": "홈",
-      "focusCompanion": "집중 동반",
       "botMainConfig": "봇 메인 설정",
       "aiModelProvider": "AI 모델 공급자",
       "modelManagement": "모델 관리",
@@ -162,9 +161,9 @@
   },
   "workspace": {
     "switcherLabel": "MaiBot 작업 공간 전환",
-    "settings": "麦麦 설정",
+    "settings": "麦麦",
     "chat": "麦麦 채팅",
-    "logs": "麦麦 로그"
+    "logs": "로그"
   },
   "chat": {
     "botNameFallback": "麦麦",
@@ -1025,7 +1024,6 @@
     "items": {
       "home": "홈",
       "homeDesc": "대시보드 개요 보기",
-      "focusCompanionDesc": "MaiBot 몰입형 집중 동반 화면 열기",
       "botConfig": "속 메인 설정",
       "botConfigDesc": "속 핵심 설정 구성",
       "model": "모델 설정",

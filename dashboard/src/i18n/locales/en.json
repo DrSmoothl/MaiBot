@@ -31,7 +31,6 @@
     },
     "menu": {
       "home": "Home",
-      "focusCompanion": "Focus Companion",
       "botMainConfig": "Bot Main Config",
       "aiModelProvider": "AI Model Providers",
       "modelManagement": "Model Management",
@@ -174,9 +173,9 @@
   },
   "workspace": {
     "switcherLabel": "Switch MaiBot workspace",
-    "settings": "Mai Settings",
+    "settings": "Mai",
     "chat": "Mai Chat",
-    "logs": "Mai Logs"
+    "logs": "Logs"
   },
   "chat": {
     "botNameFallback": "Mai",
@@ -1045,7 +1044,6 @@
     "items": {
       "home": "Home",
       "homeDesc": "View dashboard overview",
-      "focusCompanionDesc": "Open MaiBot immersive focus companion",
       "botConfig": "Bot Main Config",
       "botConfigDesc": "Configure bot core settings",
       "model": "Model Config",

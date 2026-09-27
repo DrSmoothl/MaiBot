@@ -43,7 +43,6 @@ vi.mock('@/routes/logs', () => ({
   StatisticsLogViewerPage: StubPage,
 }))
 vi.mock('@/routes/reply-effects', () => ({ ReplyEffectsPage: StubPage }))
-vi.mock('@/routes/focus', () => ({ FocusCompanionPage: StubPage }))
 vi.mock('@/routes/config/bot', () => ({ BotConfigPage: StubPage }))
 vi.mock('@/routes/config/model', () => ({ ModelConfigPage: StubPage }))
 vi.mock('@/routes/config/prompts', () => ({ PromptManagementPage: StubPage }))
@@ -79,14 +78,12 @@ const expectedPaths = [
   '/auth',
   '/setup',
   '/chat/embed',
-  '/focus/embed',
   '/plugins/embed',
   '/plugin-config/embed',
   '/plugin-mirrors/embed',
   '/',
   '/statistics',
   '/reply-effects',
-  '/focus',
   '/config/bot',
   '/config/model',
   '/config/prompts',
@@ -143,7 +140,6 @@ type LazyRouteComponent = {
 
 const embedPaths = [
   '/chat/embed',
-  '/focus/embed',
   '/plugins/embed',
   '/plugin-config/embed',
   '/plugin-mirrors/embed',

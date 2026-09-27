@@ -14,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   pathname: '/',
   electron: false,
   inheritedFrom: 'header',
-  focusCompanion: true,
   language: 'zh-CN',
   t: vi.fn((key: string) => key),
   changeLanguage: vi.fn(),
@@ -194,11 +193,6 @@ vi.mock('@/lib/runtime', () => ({
   isElectron: () => mocks.electron,
 }))
 
-vi.mock('@/lib/settings-manager', () => ({
-  DEFAULT_SETTINGS: { enableFocusCompanion: false },
-  getSetting: () => mocks.focusCompanion,
-}))
-
 function makeProps(
   overrides: Partial<Parameters<typeof Header>[0]> = {}
 ): Parameters<typeof Header>[0] {
@@ -224,7 +218,6 @@ describe('Header', () => {
     mocks.pathname = '/'
     mocks.electron = false
     mocks.inheritedFrom = 'header'
-    mocks.focusCompanion = true
     mocks.language = 'zh-CN'
     mocks.getActiveBackend.mockResolvedValue({ name: '本地后端' })
     mocks.logout.mockResolvedValue(undefined)
@@ -250,10 +243,6 @@ describe('Header', () => {
     expect(screen.getByTestId('background-header')).toBeInTheDocument()
     expect(document.querySelector('[data-dashboard-header="true"]')).toHaveClass('bg-background')
     expect(document.querySelector('[data-dashboard-header="true"]')).not.toHaveClass('bg-card/80')
-    expect(screen.getAllByRole('link', { name: 'sidebar.menu.focusCompanion' })[0]).toHaveAttribute(
-      'href',
-      '/focus'
-    )
 
     fireEvent.click(screen.getByRole('button', { name: 'a11y.closeMenu' }))
     const sidebarModeButton = screen.getByRole('button', {
@@ -278,27 +267,6 @@ describe('Header', () => {
     expect(mocks.changeLanguage).toHaveBeenCalledWith('en')
     expect(mocks.logout).toHaveBeenCalledOnce()
     expect(props.onWorkspaceNavigate).toHaveBeenCalledWith('/chat')
-  })
-
-  it('响应专注陪伴设置事件，并在重置事件后恢复默认隐藏', () => {
-    mocks.focusCompanion = false
-    render(<Header {...makeProps()} />)
-
-    expect(screen.queryAllByRole('link', { name: 'sidebar.menu.focusCompanion' })).toHaveLength(0)
-
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent('maibot-settings-change', {
-          detail: { key: 'enableFocusCompanion', value: true },
-        })
-      )
-    })
-    expect(screen.getAllByRole('link', { name: 'sidebar.menu.focusCompanion' })).not.toHaveLength(0)
-
-    act(() => {
-      window.dispatchEvent(new Event('maibot-settings-reset'))
-    })
-    expect(screen.queryAllByRole('link', { name: 'sidebar.menu.focusCompanion' })).toHaveLength(0)
   })
 
   it('悬浮模式不显示顶栏侧栏按钮，并尊重页面背景继承', () => {
@@ -330,34 +298,6 @@ describe('Header', () => {
   it('搜索状态打开时加载懒加载对话框', async () => {
     render(<Header {...makeProps({ searchOpen: true })} />)
     await waitFor(() => expect(screen.getByText('搜索对话框已打开')).toBeInTheDocument())
-  })
-
-  it('忽略无关设置事件，并在关闭专注陪伴后隐藏入口', () => {
-    render(<Header {...makeProps()} />)
-    expect(screen.getAllByRole('link', { name: 'sidebar.menu.focusCompanion' }).length).toBeGreaterThan(0)
-
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent('maibot-settings-change', {
-          detail: { key: 'theme', value: 'dark' },
-        })
-      )
-    })
-    expect(screen.getAllByRole('link', { name: 'sidebar.menu.focusCompanion' }).length).toBeGreaterThan(0)
-
-    act(() => {
-      window.dispatchEvent(new CustomEvent('maibot-settings-change'))
-    })
-    expect(screen.getAllByRole('link', { name: 'sidebar.menu.focusCompanion' }).length).toBeGreaterThan(0)
-
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent('maibot-settings-change', {
-          detail: { key: 'enableFocusCompanion', value: false },
-        })
-      )
-    })
-    expect(screen.queryAllByRole('link', { name: 'sidebar.menu.focusCompanion' })).toHaveLength(0)
   })
 
   it('当前页为设置且搜索打开时高亮对应顶栏按钮', () => {
@@ -715,8 +655,7 @@ describe('Header', () => {
     expect(document.querySelector('[data-workspace-tab="chat"]')).toHaveClass('px-2.5')
   })
 
-  it('折叠顶栏在非设置工作区隐藏侧栏按钮，专注页与深色更多菜单走对应样式', () => {
-    mocks.pathname = '/focus'
+  it('折叠顶栏在非设置工作区隐藏侧栏按钮，深色更多菜单走对应样式', () => {
     const collapsedProps = makeProps({
       topbarCollapsed: true,
       sidebarOpen: true,
@@ -737,9 +676,6 @@ describe('Header', () => {
       actualTheme: 'dark',
     })
     rerender(<Header {...expandedProps} />)
-    expect(screen.getAllByRole('link', { name: 'sidebar.menu.focusCompanion' })[0]).toHaveClass(
-      'bg-accent'
-    )
 
     fireEvent.click(screen.getAllByRole('button', { name: 'header.switchToLight' })[1])
     expect(mocks.toggleTheme).toHaveBeenCalledWith(
