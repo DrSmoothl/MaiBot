@@ -484,6 +484,56 @@ describe('事件入账', () => {
     expect(view.result.current.allTimeline.map((entry) => entry.timestamp)).toEqual([200, 100])
   })
 
+  it('同一轮 Planner 的过程和完成事件更新原卡片，并保留原时间线位置', async () => {
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule)
+    const plannerData = {
+      session_id: 'session-a',
+      cycle_id: 7,
+      run_id: 'run-a',
+      timestamp: 100,
+      planner: { content: '先调用工具' },
+      tools: [],
+    }
+
+    emitMonitorEvent('planner.progress', { ...plannerData, event_id: 301 })
+    emitMonitorEvent('message.sent', makeMessageData({ event_id: 302, timestamp: 101 }))
+    emitMonitorEvent('planner.progress', {
+      ...plannerData,
+      event_id: 303,
+      timestamp: 102,
+      tools: [{ tool_call_id: 'tool-1', summary: '完成' }],
+    })
+    emitMonitorEvent('planner.finalized', {
+      ...plannerData,
+      event_id: 304,
+      timestamp: 103,
+      tools: [{ tool_call_id: 'tool-1', summary: '完成' }],
+    })
+
+    expect(view.result.current.allTimeline.map((entry) => entry.id)).toEqual(['evt_301', 'evt_302'])
+    expect(view.result.current.allTimeline[0]).toMatchObject({
+      type: 'planner.finalized',
+      data: { event_id: 304, cycle_id: 7 },
+    })
+  })
+
+  it('重启后复用轮次编号时保留新旧两张 Planner 卡片', async () => {
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule)
+    const plannerData = { session_id: 'session-a', cycle_id: 1, timestamp: 100, tools: [] }
+
+    emitMonitorEvent('planner.finalized', { ...plannerData, run_id: 'run-old', event_id: 401 })
+    emitMonitorEvent('planner.progress', {
+      ...plannerData,
+      run_id: 'run-new',
+      event_id: 402,
+      timestamp: 200,
+    })
+
+    expect(view.result.current.allTimeline.map((entry) => entry.id)).toEqual(['evt_401', 'evt_402'])
+  })
+
   it('缺少 session_id 或 timestamp 非数字的事件被丢弃', async () => {
     const hookModule = await importHookModule()
     const view = await mountMonitor(hookModule)

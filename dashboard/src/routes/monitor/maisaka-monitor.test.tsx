@@ -1184,6 +1184,62 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('#2')).toBeInTheDocument()
   })
 
+  it('planner.progress 在工具返回前显示执行中，已返回的工具显示结果', () => {
+    setupMonitorState({
+      timeline: [
+        makeEntry(
+          'planner.progress',
+          makeFinalized({
+            planner: makePlannerBlock({
+              content: '先查询再回复',
+              tool_calls: [
+                { id: 'tc-1', name: 'search_web', arguments: { query: '麦麦' } },
+                { id: 'tc-2', name: 'reply', arguments: {} },
+              ],
+            }),
+            tools: [makeToolResult({ tool_call_id: 'tc-1', tool_name: 'search_web', summary: '找到结果' })],
+            active_tool_call_id: 'tc-2',
+          })
+        ),
+      ],
+    })
+    render(<MaisakaMonitor />)
+
+    expect(screen.getByText('先查询再回复')).toBeInTheDocument()
+    expect(screen.getByText('找到结果')).toBeInTheDocument()
+    expect(screen.getAllByText('执行中').length).toBeGreaterThan(0)
+    expect(screen.queryByText('未返回结果摘要。')).not.toBeInTheDocument()
+  })
+
+  it('tool_search 将搜索词和激活工具列表单独展示', () => {
+    setupMonitorState({
+      timeline: [
+        makeEntry(
+          'planner.finalized',
+          makeFinalized({
+            tools: [
+              makeToolResult({
+                tool_name: 'tool_search',
+                tool_args: { query: 'search_vcpedia_song' },
+                summary:
+                  '- tool_search [推理中调用] [成功]: 已找到 2 个 deferred tools，它们会在后续轮次中加入可用工具列表：\n- search_vcpedia_song（本次新发现）\n- get_vcpedia_lyrics（此前已发现）',
+                matched_tool_names: ['search_vcpedia_song', 'get_vcpedia_lyrics'],
+                newly_discovered_tool_names: ['search_vcpedia_song'],
+              }),
+            ],
+          })
+        ),
+      ],
+    })
+    render(<MaisakaMonitor />)
+
+    expect(screen.getByText('搜索工具：')).toBeInTheDocument()
+    expect(screen.getAllByText('search_vcpedia_song')).toHaveLength(2)
+    expect(screen.getByText('激活工具：')).toBeInTheDocument()
+    expect(screen.getByText('get_vcpedia_lyrics')).toBeInTheDocument()
+    expect(screen.queryByText('执行结果')).not.toBeInTheDocument()
+  })
+
   it('planner.finalized 单独展示 Provider 原生联网搜索摘要', () => {
     setupMonitorState({
       timeline: [
@@ -1696,4 +1752,3 @@ describe('MaisakaMonitor 额外空态与错误态', () => {
     expect(screen.queryByAltText('表情包原文件')).not.toBeInTheDocument()
   })
 })
-

@@ -1131,6 +1131,8 @@ function formatToolValue(value: unknown) {
   return JSON.stringify(value, null, 2)
 }
 
+type DisplayTool = MaisakaFinalizedToolResult & { status?: 'running' | 'pending' }
+
 function ToolArgumentBlock({ name, value }: { name: string; value: unknown }) {
   const formattedValue = formatToolValue(value)
   const inlineValue = formattedValue.replace(/\s+/g, ' ')
@@ -1199,17 +1201,7 @@ function PlannerToolResultCard({
   hideHeader = false,
   onOpenReasoning,
 }: {
-  tool: {
-    duration_ms: number
-    prompt_html_uri?: string
-    success: boolean
-    summary: string
-    tool_args: Record<string, unknown>
-    tool_call_id: string
-    tool_call_source?: string
-    tool_call_source_label?: string
-    tool_name: string
-  }
+  tool: DisplayTool
   index: number
   /** 所有工具来源一致时由卡片右上角统一展示，单条工具不再重复 */
   hideSourceLabel?: boolean
@@ -1218,10 +1210,21 @@ function PlannerToolResultCard({
   onOpenReasoning: (promptHtmlUri: string) => void
 }) {
   const argumentEntries = Object.entries(tool.tool_args ?? {})
-  const statusText = tool.success ? '执行成功' : '执行失败'
+  const statusText =
+    tool.status === 'running'
+      ? '执行中'
+      : tool.status === 'pending'
+        ? '等待执行'
+        : tool.success
+          ? '执行成功'
+          : '执行失败'
   const sourceLabel = getToolCallSourceLabel(tool.tool_call_source, tool.tool_call_source_label)
   const promptHtmlUri = tool.prompt_html_uri?.trim() ?? ''
   const canOpenReasoning = Boolean(promptHtmlUri && parsePromptHtmlReasoningTarget(promptHtmlUri))
+  const isToolSearch = tool.tool_name === 'tool_search'
+  const searchQuery = typeof tool.tool_args?.query === 'string' ? tool.tool_args.query : ''
+  const activatedTools = tool.matched_tool_names
+  const newlyDiscoveredTools = new Set(tool.newly_discovered_tool_names)
 
   if (isWaitTool(tool.tool_name)) {
     if (hideHeader) return null
@@ -1255,7 +1258,12 @@ function PlannerToolResultCard({
           <span className="text-foreground font-mono text-sm font-semibold">
             {tool.tool_name || 'unknown'}
           </span>
-          {!tool.success && (
+          {tool.status && (
+            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+              {statusText}
+            </Badge>
+          )}
+          {!tool.status && !tool.success && (
             <>
               <XCircle className="h-3.5 w-3.5 text-red-500" />
               <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">
@@ -1296,23 +1304,50 @@ function PlannerToolResultCard({
       )}
 
       <div className="space-y-1.5">
-        {argumentEntries.length > 0 && (
+        {isToolSearch && searchQuery && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">搜索工具：</span>
+            <span className="text-foreground font-mono">{searchQuery}</span>
+            {!tool.status && <ToolFullJsonBlock tool={tool} />}
+          </div>
+        )}
+        {!isToolSearch && argumentEntries.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {argumentEntries.map(([name, value]) => (
               <ToolArgumentBlock key={name} name={name} value={value} />
             ))}
-            <ToolFullJsonBlock tool={tool} />
+            {!tool.status && <ToolFullJsonBlock tool={tool} />}
           </div>
         )}
 
-        <div className="flex flex-wrap items-baseline gap-x-1.5">
-          <span className="text-muted-foreground shrink-0 text-[10px] leading-4 font-medium">
-            执行结果
-          </span>
-          <p className="text-muted-foreground min-w-0 flex-1 text-xs leading-4 break-words whitespace-pre-wrap">
-            {tool.summary || '未返回结果摘要。'}
-          </p>
-        </div>
+        {!tool.status && isToolSearch && tool.success && activatedTools ? (
+          <div className="flex flex-wrap items-start gap-x-2 text-xs">
+            <span className="text-muted-foreground shrink-0">激活工具：</span>
+            {activatedTools.length > 0 ? (
+              <div className="flex flex-col gap-0.5">
+                {activatedTools.map((name) => (
+                  <div key={name} className="flex flex-wrap items-center gap-2">
+                    <span className="text-foreground font-mono">{name}</span>
+                    <span className="text-muted-foreground text-[10px]">
+                      {newlyDiscoveredTools.has(name) ? '本次新发现' : '此前已发现'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <span className="text-muted-foreground">未找到匹配工具</span>
+            )}
+          </div>
+        ) : !tool.status && (
+          <div className="flex flex-wrap items-baseline gap-x-1.5">
+            <span className="text-muted-foreground shrink-0 text-[10px] leading-4 font-medium">
+              执行结果
+            </span>
+            <p className="text-muted-foreground min-w-0 flex-1 text-xs leading-4 break-words whitespace-pre-wrap">
+              {tool.summary || '未返回结果摘要。'}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1320,17 +1355,18 @@ function PlannerToolResultCard({
 
 function PlannerToolCallsBlock({
   data,
+  isProgress,
   onOpenReasoning,
 }: {
   data: PlannerFinalizedEvent
+  isProgress: boolean
   onOpenReasoning: (promptHtmlUri: string) => void
 }) {
   const toolCalls = data.planner?.tool_calls ?? []
   const tools = data.tools ?? []
-  const displayTools: MaisakaFinalizedToolResult[] =
-    tools.length > 0
-      ? tools
-      : toolCalls.map((toolCall) => ({
+  const completedTools = new Map(tools.map((tool) => [tool.tool_call_id, tool]))
+  const displayTools: DisplayTool[] = isProgress
+      ? toolCalls.map((toolCall) => completedTools.get(toolCall.id) ?? ({
           tool_call_id: toolCall.id,
           tool_name: toolCall.name,
           tool_args: toolCall.arguments ?? {},
@@ -1339,12 +1375,26 @@ function PlannerToolCallsBlock({
           success: true,
           duration_ms: 0,
           summary: '',
+          status: data.active_tool_call_id === toolCall.id ? 'running' : 'pending',
         }))
+      : tools.length > 0
+        ? tools
+        : toolCalls.map((toolCall) => ({
+            tool_call_id: toolCall.id,
+            tool_name: toolCall.name,
+            tool_args: toolCall.arguments ?? {},
+            tool_call_source: toolCall.source,
+            tool_call_source_label: toolCall.source_label,
+            success: true,
+            duration_ms: 0,
+            summary: '',
+          }))
   const isFinishTool = (toolName?: string) => toolName?.trim().toLowerCase() === 'finish'
   const finishTools = displayTools.filter((tool) => isFinishTool(tool.tool_name))
-  const regularTools = displayTools.filter((tool) => !isFinishTool(tool.tool_name))
+  const regularTools = displayTools.filter((tool) => !isFinishTool(tool.tool_name) || tool.status)
   const plannerStopped =
-    finishTools.length > 0 || data.final_state.end_reason === 'tool_stop_after_execution'
+    finishTools.some((tool) => !tool.status) ||
+    data.final_state.end_reason === 'tool_stop_after_execution'
   const sharedSource = regularTools[0]?.tool_call_source
   const sharedSourceLabel =
     regularTools.length > 0 &&
@@ -1368,7 +1418,7 @@ function PlannerToolCallsBlock({
     return null
   }
 
-  if (regularTools.length <= 0 && finishTools.length > 0) {
+  if (regularTools.length <= 0 && finishTools.length > 0 && plannerStopped) {
     return (
       <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
         <div className="flex items-center gap-2 text-sm">
@@ -1392,7 +1442,12 @@ function PlannerToolCallsBlock({
               ? formatWaitToolText(singleTool?.tool_args)
               : regularTools.map((tool) => tool.tool_name || 'unknown').join('、')}
           </CardTitle>
-          {singleTool && !singleTool.success && (
+          {singleTool?.status && (
+            <Badge variant="secondary" className="px-1.5 text-[10px]">
+              {singleTool.status === 'running' ? '执行中' : '等待执行'}
+            </Badge>
+          )}
+          {singleTool && !singleTool.status && !singleTool.success && (
             <Badge variant="destructive" className="px-1.5 text-[10px]">
               执行失败
             </Badge>
@@ -1689,6 +1744,7 @@ function TimelineEventRenderer({
     case 'planner.response':
       return <PlannerResponseCard data={entry.data as PlannerResponseEvent} />
     case 'planner.finalized':
+    case 'planner.progress':
       if (isPlannerInterrupted(entry.data as PlannerFinalizedEvent)) {
         return <PlannerInterruptedCard data={entry.data as PlannerFinalizedEvent} />
       }
@@ -1704,6 +1760,7 @@ function TimelineEventRenderer({
           <PlannerNativeToolCallsBlock data={entry.data as PlannerFinalizedEvent} />
           <PlannerToolCallsBlock
             data={entry.data as PlannerFinalizedEvent}
+            isProgress={entry.type === 'planner.progress'}
             onOpenReasoning={onOpenReasoning}
           />
         </div>
@@ -1807,7 +1864,7 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
         continue
       }
 
-      if (entry.type === 'planner.response' || entry.type === 'planner.finalized') {
+      if (entry.type === 'planner.response' || entry.type === 'planner.finalized' || entry.type === 'planner.progress') {
         const data = entry.data as PlannerResponseEvent | PlannerFinalizedEvent
         const cycleKey = buildCycleKey(data.session_id, data.cycle_id)
         if (
