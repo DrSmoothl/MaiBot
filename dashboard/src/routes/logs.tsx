@@ -1080,7 +1080,7 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
   }
 
   const renderTabSwitcher = (includeTopbarActions = false, compact = false) => {
-    const labelClassName = includeTopbarActions && compact ? 'sr-only' : undefined
+    const labelClassName = compact ? 'sr-only' : undefined
 
     return (
       <div className="flex min-w-0 items-center gap-2">
@@ -1128,14 +1128,20 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
       className="flex h-full min-h-0 flex-col overflow-hidden"
     >
       {topbarTabsPortal}
+      {/* 移动端：页签单独置顶并只显示图标，避免挤压下方工具栏按钮 */}
+      <div
+        data-log-viewer-mobile-switcher="true"
+        className="flex shrink-0 items-center border-b px-3 py-1 sm:hidden"
+      >
+        {renderTabSwitcher(false, true)}
+      </div>
       <div
         className={cn(
-          'flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-1 lg:px-4',
+          'flex shrink-0 items-center gap-2 border-b px-3 py-1 lg:px-4',
           ((activeTab === 'reasoning' && !reasoningToolbarVisible) || activeTab === 'statistics') &&
-            'sm:hidden'
+            'hidden'
         )}
       >
-        <div className="sm:hidden">{renderTabSwitcher()}</div>
         <div id={toolbarContainerId} className="flex min-w-0 flex-1 justify-end" />
       </div>
       {showSwitchHint && (

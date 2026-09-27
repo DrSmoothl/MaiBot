@@ -928,7 +928,7 @@ function IndexPageContent() {
   const versionsMismatch =
     versionCompatibility?.status !== undefined && versionCompatibility.status !== 'compatible'
   return (
-    <ScrollArea className="h-full">
+    <ScrollArea className="h-full" scrollbars="vertical">
       <div data-home-page="true" className="space-y-2 p-4 sm:space-y-4 sm:p-6">
         {dashboardError && (
           <Card className="border-destructive/50 bg-destructive/5">

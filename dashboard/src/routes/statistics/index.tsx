@@ -279,7 +279,10 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
       <Table className="min-w-[1520px]">
         <TableHeader className="bg-muted/60">
           <TableRow>
-            <TableHead className="bg-muted sticky left-0 z-10 min-w-52 font-semibold">
+            <TableHead
+              data-statistics-sticky-cell="true"
+              className="bg-muted sticky left-0 z-10 min-w-32 font-semibold sm:min-w-52"
+            >
               {t('statisticsPage.table.name')}
             </TableHead>
             <TableHead>{t('statisticsPage.table.requests')}</TableHead>
@@ -301,7 +304,8 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
           {rows.map((row) => (
             <TableRow key={row.name}>
               <TableCell
-                className="bg-card sticky left-0 z-10 max-w-64 truncate font-medium"
+                data-statistics-sticky-cell="true"
+                className="bg-card sticky left-0 z-10 max-w-40 truncate font-medium sm:max-w-64"
                 title={row.name}
               >
                 {row.name}

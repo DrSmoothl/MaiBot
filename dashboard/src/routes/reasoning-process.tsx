@@ -1036,7 +1036,7 @@ export function ReasoningProcessPage({
 
     return (
       <>
-        <div className={cn('relative', inToolbar ? 'w-full sm:w-[140px]' : undefined)}>
+        <div className={cn('relative', inToolbar ? 'w-full sm:w-[140px]' : 'w-24 shrink-0')}>
           <Input
             value={actionFilter}
             onChange={(event) => resetToFirstPage(() => setActionFilter(event.target.value))}
@@ -1048,7 +1048,9 @@ export function ReasoningProcessPage({
         <div
           className={cn(
             'relative',
-            inToolbar ? 'min-w-0 flex-[1_1_220px] sm:max-w-[520px] sm:min-w-[260px]' : undefined
+            inToolbar
+              ? 'min-w-0 flex-[1_1_220px] sm:max-w-[520px] sm:min-w-[260px]'
+              : 'min-w-0 flex-1'
           )}
         >
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
@@ -1056,7 +1058,7 @@ export function ReasoningProcessPage({
             value={search}
             onChange={(event) => resetToFirstPage(() => setSearch(event.target.value))}
             className={cn(controlClassName, 'pl-9')}
-            placeholder="搜索会话、文件名、模型或记录摘要"
+            placeholder={inToolbar ? '搜索会话、文件名、模型或记录摘要' : '搜索会话、模型或摘要'}
           />
         </div>
       </>
@@ -1280,13 +1282,14 @@ export function ReasoningProcessPage({
       ) : (
         <div
           className={cn(
-            'grid min-h-0 flex-1 grid-cols-1 gap-2 transition-[gap,grid-template-columns] duration-300 ease-out lg:gap-3',
+            // 移动端列表与详情纵向堆叠，整体可上下滚动；桌面端各栏各自滚动
+            'grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-x-hidden overflow-y-auto transition-[gap,grid-template-columns] duration-300 ease-out lg:gap-3 lg:overflow-visible',
             replayPanelOpen
-              ? 'lg:grid-cols-[280px_minmax(0,1fr)_420px] xl:grid-cols-[300px_minmax(0,1fr)_460px]'
-              : 'lg:grid-cols-[280px_minmax(0,1fr)]'
+              ? 'lg:grid-cols-[320px_minmax(0,1fr)_420px] xl:grid-cols-[360px_minmax(0,1fr)_460px]'
+              : 'lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)]'
           )}
         >
-          <div className="bg-background flex h-[32vh] min-h-[180px] flex-col overflow-hidden rounded-md border transition-[height,min-height,opacity,transform,border-width] duration-300 ease-out lg:h-auto lg:min-h-0 lg:transition-[opacity,transform,border-width]">
+          <div className="bg-background flex h-[50vh] min-h-[320px] flex-col overflow-hidden rounded-md border transition-[height,min-height,opacity,transform,border-width] duration-300 ease-out lg:h-auto lg:min-h-0 lg:transition-[opacity,transform,border-width]">
             <div className="text-muted-foreground flex h-8 flex-shrink-0 items-center justify-between border-b px-2.5 text-xs">
               <span>{total} 条记录</span>
               <span>
@@ -1300,7 +1303,7 @@ export function ReasoningProcessPage({
                   <div className="min-w-0 flex-1">{renderSessionSelect('sidebarRow')}</div>
                   {renderRefreshButton('toolbar')}
                 </div>
-                {renderBrowsingFilters('sidebar')}
+                <div className="flex items-center gap-2">{renderBrowsingFilters('sidebar')}</div>
               </div>
             )}
             <ScrollArea className="min-h-0 flex-1">
@@ -1414,7 +1417,7 @@ export function ReasoningProcessPage({
             </div>
           </div>
 
-          <div className="bg-background flex min-h-0 flex-col overflow-hidden rounded-md border">
+          <div className="bg-background flex h-[calc(100dvh-7rem)] min-h-[360px] flex-col overflow-hidden rounded-md border lg:h-auto lg:min-h-0">
             {replayPanelOpen ? (
               <ReplayItemEditorColumn
                 selectedTitle={selectedTitle}
@@ -1431,8 +1434,12 @@ export function ReasoningProcessPage({
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <div className="relative min-h-0 flex-1 overflow-hidden">
-                  <ScrollArea className="h-full transition-transform duration-300 ease-out">
-                    <div className="min-h-full">
+                  <ScrollArea
+                    className="h-full transition-transform duration-300 ease-out"
+                    scrollbars="vertical"
+                    viewportClassName="overscroll-auto lg:overscroll-contain"
+                  >
+                    <div className="min-h-full min-w-0">
                       <div className="flex min-h-12 flex-col gap-2 border-b px-3 py-2 sm:min-h-14 sm:px-4 sm:py-3 xl:flex-row xl:items-center xl:justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">{selectedTitle}</div>
