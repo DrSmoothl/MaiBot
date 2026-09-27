@@ -81,6 +81,8 @@ import { RestartOverlay } from '@/components/restart-overlay'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { ExtraParamsDialog } from '@/components/ui/extra-params-dialog'
 import { TaskConfigCard, ModelTable, ModelCardList } from './model/components'
+import { EmbeddingBuildProgress } from './model/components/EmbeddingBuildProgress'
+import { TaskRuntimeSummary } from './model/components/TaskRuntimeSummary'
 import { TASK_CONFIGS } from './model/constants'
 import { useModelTour, useModelFetcher, useModelConfig } from './model/hooks'
 import {
@@ -1085,6 +1087,19 @@ function ModelConfigPageContent() {
                       singleModel={selectedTaskSingleModel}
                       dataTour="task-model-select"
                     />
+                    {selectedTaskField.name === 'embedding' && (
+                      <EmbeddingBuildProgress
+                        selectedEmbeddingModel={taskConfig.embedding?.model_list[0] ?? ''}
+                      />
+                    )}
+                    {(selectedTaskField.name === 'planner' ||
+                      selectedTaskField.name === 'replyer') && (
+                      <TaskRuntimeSummary
+                        taskName={selectedTaskField.name}
+                        modelList={taskConfig[selectedTaskField.name]?.model_list ?? []}
+                        models={models}
+                      />
+                    )}
                   </motion.div>
                 </AnimatePresence>
               </section>
@@ -2356,7 +2371,7 @@ function ModelConfigPageContent() {
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-sm">
                 <p>
-                  <strong className="text-foreground">注意：</strong>更换嵌入模型可能需要一定时间来重建记忆和表达库，此过程完全自动，但是需要在后台耗费一定时间
+                  <strong className="text-foreground">注意：</strong>更换嵌入模型后，表达库会在后台自动补建；记忆向量若提示需要重建，请在长期记忆页处理。
                 </p>
                 <p className="text-foreground font-medium">
                   确定要更换嵌入模型吗？
