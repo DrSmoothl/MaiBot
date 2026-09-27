@@ -868,9 +868,9 @@ class MaisakaReasoningEngine:
 
     @staticmethod
     def _get_planner_content(response: ChatResponse) -> str:
-        """获取 Planner 显式输出、可用于工具上下文的正文。"""
+        """优先使用 Planner 正文，正文为空时使用独立推理内容。"""
 
-        return str(response.content or "").strip()
+        return str(response.content or "").strip() or response.reasoning.strip()
 
     @staticmethod
     def _cycle_end_for_pause_tool(pause_tool_name: Optional[str]) -> CycleEnd:

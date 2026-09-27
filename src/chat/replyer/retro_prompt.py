@@ -73,6 +73,7 @@ class RetroReplyPromptMixin:
             chat_history=chat_history,
             reply_message=reply_message,
             reply_reason=reply_reason,
+            reply_reference=str((reply_tool_args or {}).get("reply_reference") or ""),
             expression_habits=expression_habits,
             reply_requirements=reply_requirements,
             stream_id=stream_id,
@@ -127,6 +128,7 @@ class RetroReplyPromptMixin:
         chat_history: List[LLMContextMessage],
         reply_message: Optional[SessionMessage],
         reply_reason: str,
+        reply_reference: str,
         expression_habits: str,
         reply_requirements: str,
         stream_id: Optional[str],
@@ -134,7 +136,7 @@ class RetroReplyPromptMixin:
         """按旧版的块顺序准备模板占位符内容。"""
 
         session_id = self._resolve_session_id(stream_id)
-        normalized_reason = reply_reason.strip()
+        combined_reference = self._build_reply_reference_message(reply_reason, reply_reference)
         # 旧版按概率用备选表达风格整体替换人设里的表达风格，而不是追加一条风格消息
         reply_style = self._select_temporary_reply_style() or self._select_reply_style()
         return {
@@ -147,7 +149,7 @@ class RetroReplyPromptMixin:
             "dialogue_prompt": self._build_retro_dialogue_block(chat_history),
             "time_block": f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "reply_target_block": self._build_retro_reply_target_block(reply_message),
-            "planner_reasoning": f"你的想法是：{normalized_reason}" if normalized_reason else "",
+            "planner_reasoning": combined_reference,
             "keywords_reaction_prompt": self._build_keyword_reaction_prompt(
                 chat_history=chat_history,
                 reply_message=reply_message,
