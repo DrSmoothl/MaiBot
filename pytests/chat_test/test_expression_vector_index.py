@@ -688,6 +688,77 @@ def test_corrupt_generated_index_is_treated_as_missing(tmp_path) -> None:
     assert vector_index._load_snapshot(index_path) is None
 
 
+def test_history_backfill_progress_counts_current_profile_only(tmp_path, monkeypatch) -> None:
+    """进度只统计当前模型、当前表达内容的向量，旧 profile 不应计入完成量。"""
+
+    from src.config import config as config_module
+
+    current_identity = [("new-model", "new-id", "new-provider")]
+    rows = [
+        (1, "情景一", "表达一", 1, "session", True, "user"),
+        (2, "情景二", "表达二", 1, "session", True, "user"),
+    ]
+    payload = {
+        "embedding_profile": {
+            "model_name": "new-model",
+            "model_identifier": "new-id",
+            "api_provider": "new-provider",
+            "marker": "current-marker",
+            "dimension": 2,
+        },
+        "expressions": [
+            {
+                "id": 1,
+                "embedding_profile_marker": "current-marker",
+                "embedding_dimension": 2,
+                "fingerprint": expression_fingerprint(1, "情景一", "表达一"),
+            },
+            {
+                "id": 2,
+                "embedding_profile_marker": "old-marker",
+                "embedding_dimension": 2,
+                "fingerprint": expression_fingerprint(2, "情景二", "表达二"),
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        config_module,
+        "global_config",
+        SimpleNamespace(expression=SimpleNamespace(expression_selection_mode="vector_intent")),
+    )
+    monkeypatch.setattr(vector_index_module, "_load_index_payload", lambda _path: payload)
+    monkeypatch.setattr(vector_index_module, "_load_expression_rows_snapshot", lambda: rows)
+    monkeypatch.setattr(
+        ExpressionVectorIndex,
+        "_configured_embedding_identity",
+        staticmethod(lambda: tuple(current_identity)),
+    )
+
+    vector_index = ExpressionVectorIndex()
+    progress = vector_index.get_history_backfill_progress(index_path=str(tmp_path / "index.json"))
+    assert progress == {"status": "pending", "completed": 1, "total": 2, "percent": 50.0}
+
+    vector_index._profile_cache = (
+        time.monotonic(),
+        ExpressionEmbeddingProfile(
+            marker="new-space-marker",
+            model_name="new-model",
+            model_identifier="new-id",
+            api_provider="new-provider",
+            dimension=2,
+            revision=2,
+            probe_embeddings=((1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)),
+        ),
+        tuple(current_identity),
+    )
+    progress = vector_index.get_history_backfill_progress(index_path=str(tmp_path / "index.json"))
+    assert progress == {"status": "waiting_profile", "completed": 0, "total": 2, "percent": 0.0}
+
+    current_identity[:] = [("another-model", "another-id", "another-provider")]
+    progress = vector_index.get_history_backfill_progress(index_path=str(tmp_path / "index.json"))
+    assert progress == {"status": "waiting_profile", "completed": 0, "total": 2, "percent": 0.0}
+
+
 @pytest.mark.parametrize("changed_field", ["name", "identifier", "provider"])
 @pytest.mark.asyncio
 async def test_embedding_profile_cache_invalidates_when_model_config_changes(tmp_path, monkeypatch, changed_field) -> None:
