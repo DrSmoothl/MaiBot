@@ -446,9 +446,7 @@
       "retroTextureNone": "None",
       "retroTextureIntensity": "Texture Strength",
       "retroPanelDepth": "Panel Depth",
-      "retroPanelDepthDesc": "Controls the visibility of recessed surfaces and shadows.",
-      "retroStrokeScale": "Stroke Weight",
-      "retroStrokeScaleDesc": "Adjusts the bold outlines used by cards and controls."
+      "retroPanelDepthDesc": "Controls the visibility of recessed surfaces and shadows."
     },
     "security": {
       "currentToken": "Current Access Token",

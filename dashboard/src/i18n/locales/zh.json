@@ -446,9 +446,7 @@
       "retroTextureNone": "无纹理",
       "retroTextureIntensity": "纹理强度",
       "retroPanelDepth": "面板层次",
-      "retroPanelDepthDesc": "控制凹陷区域与阴影的可见程度。",
-      "retroStrokeScale": "描边力度",
-      "retroStrokeScaleDesc": "调节卡片和控件硬朗描边的粗细。"
+      "retroPanelDepthDesc": "控制凹陷区域与阴影的可见程度。"
     },
     "security": {
       "currentToken": "当前 Access Token",

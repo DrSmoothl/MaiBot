@@ -1306,50 +1306,26 @@ export function AppearanceTab() {
             </div>
           </div>
 
-          <div className="mt-3 grid gap-3 lg:grid-cols-2">
-            <div className="bg-card rounded-lg border p-3 sm:p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <Label>{t('settings.appearance.retroPanelDepth')}</Label>
-                  <p className="text-muted-foreground mt-0.5 text-xs">
-                    {t('settings.appearance.retroPanelDepthDesc')}
-                  </p>
-                </div>
-                <span className="text-muted-foreground text-sm">
-                  {futureRetroConfig.panelDepth}%
-                </span>
+          <div className="bg-card mt-3 rounded-lg border p-3 sm:p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <Label>{t('settings.appearance.retroPanelDepth')}</Label>
+                <p className="text-muted-foreground mt-0.5 text-xs">
+                  {t('settings.appearance.retroPanelDepthDesc')}
+                </p>
               </div>
-              <Slider
-                aria-label={t('settings.appearance.retroPanelDepth')}
-                value={[futureRetroConfig.panelDepth]}
-                min={0}
-                max={100}
-                step={1}
-                onValueChange={([panelDepth]) => updateFutureRetroConfig({ panelDepth })}
-              />
+              <span className="text-muted-foreground text-sm">
+                {futureRetroConfig.panelDepth}%
+              </span>
             </div>
-
-            <div className="bg-card rounded-lg border p-3 sm:p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <Label>{t('settings.appearance.retroStrokeScale')}</Label>
-                  <p className="text-muted-foreground mt-0.5 text-xs">
-                    {t('settings.appearance.retroStrokeScaleDesc')}
-                  </p>
-                </div>
-                <span className="text-muted-foreground text-sm">
-                  {futureRetroConfig.strokeScale}%
-                </span>
-              </div>
-              <Slider
-                aria-label={t('settings.appearance.retroStrokeScale')}
-                value={[futureRetroConfig.strokeScale]}
-                min={50}
-                max={100}
-                step={1}
-                onValueChange={([strokeScale]) => updateFutureRetroConfig({ strokeScale })}
-              />
-            </div>
+            <Slider
+              aria-label={t('settings.appearance.retroPanelDepth')}
+              value={[futureRetroConfig.panelDepth]}
+              min={0}
+              max={100}
+              step={1}
+              onValueChange={([panelDepth]) => updateFutureRetroConfig({ panelDepth })}
+            />
           </div>
         </div>
       )}

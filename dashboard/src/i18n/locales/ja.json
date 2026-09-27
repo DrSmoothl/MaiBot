@@ -374,9 +374,7 @@
       "retroTextureNone": "なし",
       "retroTextureIntensity": "テクスチャ強度",
       "retroPanelDepth": "パネルの奥行き",
-      "retroPanelDepthDesc": "くぼみと影の見え方を調整します。",
-      "retroStrokeScale": "線の太さ",
-      "retroStrokeScaleDesc": "カードとコントロールの輪郭線を調整します。"
+      "retroPanelDepthDesc": "くぼみと影の見え方を調整します。"
     },
     "security": {
       "currentToken": "現在のアクセストークン",

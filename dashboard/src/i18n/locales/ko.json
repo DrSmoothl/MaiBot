@@ -426,9 +426,7 @@
       "retroTextureNone": "없음",
       "retroTextureIntensity": "텍스처 강도",
       "retroPanelDepth": "패널 깊이",
-      "retroPanelDepthDesc": "오목한 표면과 그림자의 가시성을 조절합니다.",
-      "retroStrokeScale": "외곽선 굵기",
-      "retroStrokeScaleDesc": "카드와 컨트롤의 외곽선 굵기를 조절합니다."
+      "retroPanelDepthDesc": "오목한 표면과 그림자의 가시성을 조절합니다."
     },
     "security": {
       "currentToken": "현재 액세스 토큰",

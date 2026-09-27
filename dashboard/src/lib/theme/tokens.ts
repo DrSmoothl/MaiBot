@@ -164,7 +164,6 @@ export type FutureRetroStyleConfig = {
   textureStyle: FutureRetroTextureStyle
   textureIntensity: number
   panelDepth: number
-  strokeScale: number
 }
 
 export type DashboardStyleConfig = {
@@ -178,7 +177,6 @@ export const DEFAULT_FUTURE_RETRO_STYLE_CONFIG: FutureRetroStyleConfig = {
   textureStyle: 'fine',
   textureIntensity: 55,
   panelDepth: 100,
-  strokeScale: 100,
 }
 
 export const DEFAULT_DASHBOARD_STYLE_CONFIG: DashboardStyleConfig = {
