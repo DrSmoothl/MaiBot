@@ -23,7 +23,6 @@ import type { MenuIcon, MenuSection } from './types'
 
 const HomeIcon = createStreamlineIcon('allergens-fish-remix', Home)
 const LocalChatIcon = createStreamlineIcon('desktop-chat-remix', MessageCircle)
-const ChatManagementIcon = createStreamlineIcon('chat-two-bubbles-oval-remix', MessageSquare)
 const BotConfigIcon = createStreamlineIcon('page-setting-remix', Settings)
 const ModelIcon = createStreamlineIcon('module-remix', Box)
 const PromptIcon = createStreamlineIcon('script-1-remix', FileText)
@@ -50,7 +49,6 @@ export const menuSections: MenuSection[] = [
         searchDescription: 'search.items.homeDesc',
       },
       { icon: LocalChatIcon, label: 'workspace.chat', path: '/chat' },
-      { icon: ChatManagementIcon, label: 'sidebar.menu.chatManagement', path: '/chat-management' },
     ],
   },
   {

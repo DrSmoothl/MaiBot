@@ -54,7 +54,6 @@
       "logViewer": "Log Viewer",
       "reasoningProcess": "Reasoning Process",
       "maisakaMonitor": "MaiSaka Chat Monitor",
-      "chatManagement": "Chat Management",
       "localChat": "Local Chat",
       "settings": "WebUI Settings"
     }
@@ -1041,7 +1040,7 @@
       "home": "Home",
       "homeDesc": "View dashboard overview",
       "botConfig": "Bot Main Config",
-      "botConfigDesc": "Configure bot core settings",
+      "botConfigDesc": "Configure bot settings and shared groups",
       "model": "Model Config",
       "modelDesc": "Configure model parameters",
       "promptGeneratorDesc": "Generate injectable persona config blocks from text",

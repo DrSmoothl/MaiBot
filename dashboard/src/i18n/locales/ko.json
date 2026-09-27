@@ -54,7 +54,6 @@
       "logViewer": "로그 뷰어",
       "reasoningProcess": "추론 과정",
       "maisakaMonitor": "MaiSaka 채팅 모니터",
-      "chatManagement": "채팅 관리",
       "localChat": "로컬 채팅",
       "settings": "WebUI 설정"
     }
@@ -1021,7 +1020,7 @@
       "home": "홈",
       "homeDesc": "대시보드 개요 보기",
       "botConfig": "속 메인 설정",
-      "botConfigDesc": "속 핵심 설정 구성",
+      "botConfigDesc": "봇 상세 설정과 공유 그룹 구성",
       "model": "모델 설정",
       "modelDesc": "모델 매개변수 구성",
       "promptGeneratorDesc": "문장에서 주입 가능한 페르소나 설정 블록 생성",

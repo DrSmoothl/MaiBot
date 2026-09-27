@@ -39,6 +39,7 @@ interface MessageListStubProps {
 interface ComposerStubProps {
   userName: string
   onUpdateUserName: (name: string) => void
+  onUpdateUserAvatar: (file: File) => Promise<void> | void
   value: string
   onChange: (value: string) => void
   onAddImages: (files: FileList) => Promise<void> | void
@@ -58,14 +59,10 @@ interface SidebarStubProps {
   observedSessions: Map<string, SessionInfo>
   observedStageStatuses: Map<string, StageStatusInfo>
   observedLatestMessages: Map<string, ObservedMessagePreview>
-  userId: string
-  userName: string
-  isUploadingUserAvatar: boolean
   onSwitch: (tabId: string) => void
   onSelectObserved: (sessionId: string) => void
   onOpenObservedSettings: (sessionId: string) => void
   onClose: (tabId: string) => void
-  onUpdateUserAvatar: (file: File) => Promise<void> | void
 }
 
 interface MonitorStubProps {
@@ -852,7 +849,7 @@ describe('聊天页 ChatPage', () => {
     const bigFile = new File(['x'], 'big.png', { type: 'image/png' })
     Object.defineProperty(bigFile, 'size', { value: 5 * 1024 * 1024 + 1 })
     await act(async () => {
-      await sidebarProps().onUpdateUserAvatar(bigFile)
+      await composerProps().onUpdateUserAvatar(bigFile)
     })
     expect(mocks.uploadWebuiUserAvatar).not.toHaveBeenCalled()
     expect(mocks.toast).toHaveBeenCalledWith(
@@ -861,7 +858,7 @@ describe('聊天页 ChatPage', () => {
 
     const okFile = new File(['x'], 'avatar.png', { type: 'image/png' })
     await act(async () => {
-      await sidebarProps().onUpdateUserAvatar(okFile)
+      await composerProps().onUpdateUserAvatar(okFile)
     })
     expect(mocks.uploadWebuiUserAvatar).toHaveBeenCalledWith(USER_ID, okFile)
     expect(Number(localStorage.getItem('maibot_webui_user_avatar_version'))).toBeGreaterThan(0)
@@ -1148,7 +1145,7 @@ describe('聊天页 ChatPage', () => {
     mocks.uploadWebuiUserAvatar.mockRejectedValue(new Error('磁盘满了'))
     const okFile = new File(['x'], 'avatar.png', { type: 'image/png' })
     await act(async () => {
-      await sidebarProps().onUpdateUserAvatar(okFile)
+      await composerProps().onUpdateUserAvatar(okFile)
     })
     expect(mocks.toast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1189,7 +1186,10 @@ describe('聊天页 ChatPage', () => {
       sender: { name: '路人', user_id: 'qq_other' },
       emojis: [{ data_url: 'data:image/gif;base64,EEE' }],
     })
-    expect(screen.getByText('user:')).toHaveAttribute('data-segments', 'emoji:data:image/gif;base64,EEE')
+    expect(screen.getByText('user:')).toHaveAttribute(
+      'data-segments',
+      'emoji:data:image/gif;base64,EEE'
+    )
 
     emitSession('webui-default', { type: 'user_message', content: '无发送者', timestamp: 21 })
     expect(screen.getByText('user:无发送者')).toBeInTheDocument()
@@ -1728,7 +1728,7 @@ describe('聊天页 ChatPage', () => {
 
     const textFile = new File(['x'], 'avatar.txt', { type: 'text/plain' })
     await act(async () => {
-      await sidebarProps().onUpdateUserAvatar(textFile)
+      await composerProps().onUpdateUserAvatar(textFile)
     })
     expect(mocks.uploadWebuiUserAvatar).not.toHaveBeenCalled()
     expect(mocks.toast).toHaveBeenCalledWith(
@@ -1738,7 +1738,7 @@ describe('聊天页 ChatPage', () => {
     mocks.uploadWebuiUserAvatar.mockRejectedValue('not-an-error')
     const okFile = new File(['x'], 'avatar.png', { type: 'image/png' })
     await act(async () => {
-      await sidebarProps().onUpdateUserAvatar(okFile)
+      await composerProps().onUpdateUserAvatar(okFile)
     })
     expect(mocks.toast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1751,7 +1751,7 @@ describe('聊天页 ChatPage', () => {
     mocks.uploadWebuiUserAvatar.mockResolvedValue(undefined)
     const noTypeFile = new File(['x'], 'avatar.bin', { type: '' })
     await act(async () => {
-      await sidebarProps().onUpdateUserAvatar(noTypeFile)
+      await composerProps().onUpdateUserAvatar(noTypeFile)
     })
     expect(mocks.uploadWebuiUserAvatar).toHaveBeenCalledWith(USER_ID, noTypeFile)
   })
@@ -1762,10 +1762,7 @@ describe('聊天页 ChatPage', () => {
     await renderConnectedPage()
 
     await waitFor(() => {
-      expect(console.error).toHaveBeenCalledWith(
-        '[Chat] 订阅 MaiSaka 状态失败:',
-        expect.any(Error)
-      )
+      expect(console.error).toHaveBeenCalledWith('[Chat] 订阅 MaiSaka 状态失败:', expect.any(Error))
     })
     expect(screen.getByTestId('tab-webui-default')).toHaveAttribute('data-connected', 'true')
   })
@@ -1838,5 +1835,3 @@ describe('聊天页 ChatPage', () => {
     expect(screen.getByTestId('composer')).toHaveAttribute('data-images', '')
   })
 })
-
-

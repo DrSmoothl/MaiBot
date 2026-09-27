@@ -92,6 +92,8 @@ describe('ChatComposer', () => {
       isConnected: true,
       userId: 'user-a',
       userName: '人类',
+      isUploadingUserAvatar: false,
+      onUpdateUserAvatar: vi.fn(async () => {}),
       onUpdateUserName: vi.fn(),
       ...overrides,
     }
@@ -375,9 +377,7 @@ describe('ChatTabBar', () => {
       screen.getByRole('button', { name: /^测试观察群chat\.sidebar\.observedBadge/ })
     )
     expect(onSelectObserved).toHaveBeenCalledWith('observed-a')
-    await user.click(
-      screen.getByRole('button', { name: 'chat.sidebar.openSettings:测试观察群' })
-    )
+    await user.click(screen.getByRole('button', { name: 'chat.sidebar.openSettings:测试观察群' }))
     expect(onOpenObservedSettings).toHaveBeenCalledWith('observed-a')
     expect(screen.getByLabelText('chat.sidebar.observedBadge')).toBeInTheDocument()
   })

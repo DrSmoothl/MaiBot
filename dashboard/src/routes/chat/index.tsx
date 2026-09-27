@@ -280,7 +280,10 @@ export function ChatPage() {
         groupId: chat.group_id,
         userId: chat.user_id,
         platform: chat.platform,
-        lastActivity: Math.max(chat.last_active_at ?? chat.created_at ?? 0, live?.lastActivity ?? 0),
+        lastActivity: Math.max(
+          chat.last_active_at ?? chat.created_at ?? 0,
+          live?.lastActivity ?? 0
+        ),
         eventCount: live?.eventCount ?? 0,
       })
     }
@@ -1138,15 +1141,10 @@ export function ChatPage() {
           observedSessionsError={knownChatStreamsError}
           observedStageStatuses={observedStageStatuses}
           observedLatestMessages={observedLatestMessages}
-          userId={userId}
-          userName={userName}
-          userAvatarVersion={userAvatarVersion}
-          isUploadingUserAvatar={isUploadingUserAvatar}
           onSwitch={switchTab}
           onSelectObserved={selectObservedSession}
           onOpenObservedSettings={openObservedSettings}
           onClose={closeTab}
-          onUpdateUserAvatar={handleUpdateUserAvatar}
         />
       </motion.div>
 
@@ -1226,6 +1224,9 @@ export function ChatPage() {
               isConnected={!!activeTab?.isConnected}
               userId={userId}
               userName={userName}
+              userAvatarVersion={userAvatarVersion}
+              isUploadingUserAvatar={isUploadingUserAvatar}
+              onUpdateUserAvatar={handleUpdateUserAvatar}
               onUpdateUserName={handleUpdateUserName}
             />
           </>

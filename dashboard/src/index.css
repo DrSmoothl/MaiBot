@@ -3013,15 +3013,6 @@
   }
 }
 
-@keyframes chat-management-text-scroll {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(calc(var(--scroll-container-width) - 100%));
-  }
-}
-
 @media (min-width: 1024px) {
   [data-home-summary-cards='true'][data-home-row-sizing='custom'] {
     grid-template-rows: var(--home-card-grid-rows);

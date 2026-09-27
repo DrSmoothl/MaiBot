@@ -54,7 +54,6 @@
       "logViewer": "ログビューア",
       "reasoningProcess": "推論プロセス",
       "maisakaMonitor": "MaiSaka チャット監視",
-      "chatManagement": "チャット管理",
       "localChat": "ローカルチャット",
       "settings": "WebUI 設定"
     }
@@ -974,7 +973,7 @@
       "home": "ホーム",
       "homeDesc": "ダッシュボード概要を表示",
       "botConfig": "ボットメイン設定",
-      "botConfigDesc": "ボットのコア設定を構成",
+      "botConfigDesc": "ボットの詳細設定と共有グループを設定",
       "model": "モデル設定",
       "modelDesc": "モデルパラメーターを設定",
       "promptGeneratorDesc": "文章から注入可能な人格設定ブロックを生成",

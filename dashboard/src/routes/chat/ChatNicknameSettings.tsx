@@ -1,4 +1,4 @@
-import { Settings } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -10,9 +10,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 export function ChatNicknameSettings({
   userName,
   onUpdateUserName,
+  trigger,
 }: {
   userName: string
   onUpdateUserName: (name: string) => void
+  trigger: ReactNode
 }) {
   const { t } = useTranslation()
   const inputId = useId()
@@ -33,16 +35,7 @@ export function ChatNicknameSettings({
       }}
     >
       <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-9 w-9 shrink-0 rounded-full"
-          aria-label={t('chat.sidebar.editName')}
-          title={t('chat.sidebar.editName')}
-        >
-          <Settings className="h-4 w-4" />
-        </Button>
+        {trigger}
       </PopoverTrigger>
       <PopoverContent side="top" align="start" className="w-64 space-y-3">
         <Label htmlFor={inputId}>{t('chat.identity.editName')}</Label>

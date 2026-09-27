@@ -54,7 +54,6 @@
       "logViewer": "日志查看器",
       "reasoningProcess": "推理过程",
       "maisakaMonitor": "麦麦观察",
-      "chatManagement": "聊天管理",
       "localChat": "本地聊天室",
       "settings": "WEBUI设置"
     }
@@ -1040,7 +1039,7 @@
       "home": "首页",
       "homeDesc": "查看仪表板概览",
       "botConfig": "麦麦设置",
-      "botConfigDesc": "配置麦麦的核心设置",
+      "botConfigDesc": "配置麦麦的详细设置和共享组",
       "model": "麦麦模型配置",
       "modelDesc": "配置模型参数",
       "promptGeneratorDesc": "将文段或人设生成可注入配置的人设块",

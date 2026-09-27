@@ -3354,9 +3354,9 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
         <div className="flex shrink-0 items-center gap-2">
           {isSharedMemoryGroup && (
             <Button asChild size="sm" variant="outline" className="h-8">
-              <a href="/chat-management?view=groups&kind=memory">
+              <a href="/config/bot?mode=groups&kind=memory">
                 <ExternalLink className="h-3.5 w-3.5" />
-                聊天管理
+                共享组设置
               </a>
             </Button>
           )}
