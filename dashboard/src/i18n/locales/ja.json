@@ -74,7 +74,13 @@
     },
     "tabs": { "trends": "データグラフ", "metrics": "指標トレンド" },
     "sections": { "breakdowns": "分類統計", "distributions": "データ分布" },
-    "breakdowns": { "models": "モデル別", "modules": "モジュール別", "requestTypes": "リクエスト種別", "chats": "チャットメッセージ" },
+    "breakdowns": {
+      "taskGroups": "タスクグループ別",
+      "models": "モデル別",
+      "modules": "モジュール別",
+      "requestTypes": "リクエスト種別",
+      "chats": "チャットメッセージ"
+    },
     "summary": {
       "onlineTime": "総稼働時間", "messages": "総メッセージ数", "replies": "総返信数", "requests": "総リクエスト数",
       "tokens": "総Token数", "inputTokens": "入力Token", "outputTokens": "出力Token", "cacheHitRate": "Promptキャッシュヒット率",

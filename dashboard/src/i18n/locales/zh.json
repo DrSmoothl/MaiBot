@@ -92,6 +92,7 @@
       "distributions": "数据分布图表"
     },
     "breakdowns": {
+      "taskGroups": "按任务组",
       "models": "按模型",
       "modules": "按模块",
       "requestTypes": "按请求类型",

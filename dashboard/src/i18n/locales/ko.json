@@ -83,6 +83,7 @@
     "tabs": { "trends": "데이터 차트", "metrics": "지표 추이" },
     "sections": { "breakdowns": "분류 통계", "distributions": "데이터 분포" },
     "breakdowns": {
+      "taskGroups": "작업 그룹별",
       "models": "모델별",
       "modules": "모듈별",
       "requestTypes": "요청 유형별",

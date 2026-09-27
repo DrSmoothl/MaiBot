@@ -380,6 +380,7 @@ function DetailTables({ period, locale }: { period: DetailedStatisticsPeriod; lo
         <Tabs defaultValue="models">
           <TabsList className="border-border/70 bg-muted/40 mb-4 h-auto w-full justify-start overflow-x-auto rounded-md border p-1">
             <TabsTrigger value="models">{t('statisticsPage.breakdowns.models')}</TabsTrigger>
+            <TabsTrigger value="taskGroups">{t('statisticsPage.breakdowns.taskGroups')}</TabsTrigger>
             <TabsTrigger value="modules">{t('statisticsPage.breakdowns.modules')}</TabsTrigger>
             <TabsTrigger value="requestTypes">
               {t('statisticsPage.breakdowns.requestTypes')}
@@ -388,6 +389,9 @@ function DetailTables({ period, locale }: { period: DetailedStatisticsPeriod; lo
           </TabsList>
           <TabsContent value="models" className="mt-0">
             <BreakdownTable rows={period.models} locale={locale} />
+          </TabsContent>
+          <TabsContent value="taskGroups" className="mt-0">
+            <BreakdownTable rows={period.task_groups} locale={locale} />
           </TabsContent>
           <TabsContent value="modules" className="mt-0">
             <BreakdownTable rows={period.modules} locale={locale} />

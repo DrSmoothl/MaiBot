@@ -92,6 +92,7 @@
       "distributions": "Distributions"
     },
     "breakdowns": {
+      "taskGroups": "By task group",
       "models": "By model",
       "modules": "By module",
       "requestTypes": "By request type",

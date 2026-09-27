@@ -534,12 +534,11 @@ function MonitorStatusActions({
           <TooltipTrigger asChild>
             <div
               className={cn(
-                'group bg-background/60 text-muted-foreground flex h-6 shrink-0 items-center gap-1 rounded-md border px-1.5 transition-[color,background-color,outline-color]',
-                // hover / 浮层展开时高亮：填充色、描边与文字色同用；部分主题会用 !important 固定
-                // 背景、文字、边框与阴影，此时由 outline 与图标色保证高亮仍然可见
-                'hover:bg-accent hover:outline-primary/50 hover:outline-2',
-                'data-[state=delayed-open]:bg-accent data-[state=delayed-open]:outline-primary/50 data-[state=delayed-open]:outline-2',
-                'data-[state=instant-open]:bg-accent data-[state=instant-open]:outline-primary/50 data-[state=instant-open]:outline-2'
+                'group bg-background/60 text-muted-foreground flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors',
+                // hover / 浮层展开时通过填充色与文字色高亮；主题固定背景色时仍保留图标色反馈。
+                'hover:bg-accent',
+                'data-[state=delayed-open]:bg-accent',
+                'data-[state=instant-open]:bg-accent'
               )}
             >
               <Activity className="group-hover:text-primary h-3 w-3 transition-colors" />
@@ -557,27 +556,27 @@ function MonitorStatusActions({
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 shrink-0 px-2 text-[11px]"
+          className="h-6 shrink-0 border-0! px-2 text-[11px]"
           onClick={onFindPreviousBotMessage}
           title="查找上条麦麦消息"
         >
           <ChevronUp className="mr-1 h-3 w-3" />
-          查找上条
+          上条
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 shrink-0 px-2 text-[11px]"
+          className="h-6 shrink-0 border-0! px-2 text-[11px]"
           onClick={onScrollToBottom}
           title="回到底部"
         >
           <ChevronDown className={cn('mr-1 h-3 w-3', autoScroll && 'text-primary')} />
-          回到底部
+          底部
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 shrink-0"
+          className="h-6 w-6 shrink-0 border-0!"
           onClick={onClearTimeline}
           title="清空"
           aria-label="清空"
@@ -610,7 +609,7 @@ function StageStatusPanel({
 
   if (!status) {
     return (
-      <div className="bg-muted/30 mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md border px-2 py-1">
+      <div className="bg-muted/30 mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
         {actions}
         <div className="text-muted-foreground shrink-0 text-xs whitespace-nowrap">
           当前聊天流暂无阶段状态
@@ -620,22 +619,22 @@ function StageStatusPanel({
   }
 
   return (
-    <div className="bg-background mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md border px-2 py-1">
+    <div className="bg-background mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
       {actions}
       <div className="flex shrink-0 items-center gap-1.5">
-        <Badge variant="default" className="gap-1 px-1.5 text-[10px]">
+        <Badge variant="default" className="gap-1 border-0! px-1.5 text-[10px]">
           <Activity className="h-2.5 w-2.5" />
           {status.stage || '未知阶段'}
         </Badge>
         {status.roundText && (
-          <Badge variant="secondary" className="px-1.5 text-[10px]">
+          <Badge variant="secondary" className="border-0! px-1.5 text-[10px]">
             {status.roundText}
           </Badge>
         )}
         {agentStateLabel && (
           <Badge
             variant={status.agentState === 'running' ? 'default' : 'outline'}
-            className="px-1.5 text-[10px]"
+            className="border-0! px-1.5 text-[10px]"
           >
             {agentStateLabel}
           </Badge>
