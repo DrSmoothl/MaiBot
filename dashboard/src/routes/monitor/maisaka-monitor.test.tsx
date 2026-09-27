@@ -68,22 +68,36 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@tanstack/react-virtual', () => ({
-  useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize: () => number }) => ({
-    getTotalSize: () => count * estimateSize(),
+  useVirtualizer: ({
+    count,
+    estimateSize,
+    getItemKey,
+  }: {
+    count: number
+    estimateSize: () => number
+    getItemKey?: (index: number) => string | number
+  }) => {
     // end 用于「查找上条」按行位置定位视口内首行，与真实虚拟列表语义保持一致
-    getVirtualItems: () =>
+    const buildItems = () =>
       Array.from({ length: count }, (_, index) => {
         const start = index * estimateSize()
         return {
           index,
-          key: index,
+          key: getItemKey ? getItemKey(index) : index,
           start,
           end: start + estimateSize(),
         }
-      }),
-    measureElement: virtualizerMocks.measureElement,
-    scrollToIndex: virtualizerMocks.scrollToIndex,
-  }),
+      })
+    return {
+      getTotalSize: () => count * estimateSize(),
+      getVirtualItems: buildItems,
+      get measurementsCache() {
+        return buildItems()
+      },
+      measureElement: virtualizerMocks.measureElement,
+      scrollToIndex: virtualizerMocks.scrollToIndex,
+    }
+  },
 }))
 
 vi.mock('@/hooks/use-toast', () => ({
@@ -665,6 +679,35 @@ describe('阶段状态栏与工具条', () => {
     expect(getBackToBottomIcon()).not.toHaveClass('text-primary')
   })
 
+  it('远离底部时时间线头部被裁剪，保持锚点条目位置不动', async () => {
+    const timeline = [
+      makeEntry('message.ingested', makeIngested({ content: '第一条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第二条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第三条' })),
+    ]
+    setupMonitorState({ timeline })
+    const { container, rerender } = render(<MaisakaMonitor />)
+
+    await flushAutoScroll()
+    const viewport = findTimelineViewport(container, '第一条')
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, writable: true, value: 150 })
+    fireEvent.scroll(viewport)
+    await waitFor(() => expect(getBackToBottomIcon()).not.toHaveClass('text-primary'))
+
+    // 第一条被裁剪后，原先位于 140 的第二条上移到 0，滚动位置应同步减去 140
+    setupMonitorState({
+      timeline: [
+        ...timeline.slice(1),
+        makeEntry('message.ingested', makeIngested({ content: '第四条' })),
+      ],
+    })
+    rerender(<MaisakaMonitor />)
+
+    expect(viewport.scrollTop).toBe(10)
+  })
+
   it('位于底部时收到新消息继续自动滚动', async () => {
     const timeline = [
       makeEntry('message.ingested', makeIngested({ content: '第一条' })),
@@ -830,9 +873,9 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('回复 李四')).toBeInTheDocument()
     expect(screen.getByText('#m-9')).toBeInTheDocument()
     expect(screen.getByText('原始消息')).toBeInTheDocument()
-    // 发送方为空时回退显示“麦麦”，并带“已发送”徽章
+    // 发送方为空时回退显示“麦麦”，不再显示“已发送”徽章
     expect(screen.getByText('麦麦')).toBeInTheDocument()
-    expect(screen.getByText('已发送')).toBeInTheDocument()
+    expect(screen.queryByText('已发送')).not.toBeInTheDocument()
     expect(screen.getByText('收到！')).toBeInTheDocument()
     // 空回复预览显示回退文案，且不渲染消息 ID
     expect(screen.getByText('回复 未知用户')).toBeInTheDocument()
