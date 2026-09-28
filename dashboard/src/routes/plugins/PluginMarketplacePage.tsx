@@ -1023,68 +1023,74 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
               />
             </div>
 
-            {/* 类型筛选 */}
-            <Select value={pluginTypeFilter} onValueChange={setPluginTypeFilter}>
-              <SelectTrigger
-                aria-label="类型筛选"
-                title="类型筛选"
-                className="w-full justify-center gap-1 px-2 sm:w-12"
+            {/* 移动端筛选与排序同一行；桌面端展开为父级 flex 项 */}
+            <div className="flex items-center gap-2 sm:contents">
+              {/* 类型筛选 */}
+              <Select value={pluginTypeFilter} onValueChange={setPluginTypeFilter}>
+                <SelectTrigger
+                  aria-label="类型筛选"
+                  title="类型筛选"
+                  className="min-w-0 flex-1 justify-center gap-1 px-2 sm:w-12 sm:flex-none"
+                >
+                  <Filter className="h-4 w-4" />
+                  <span className="sr-only">
+                    <SelectValue placeholder="选择类型" />
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部类型</SelectItem>
+                  {PLUGIN_TYPE_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* 排序 */}
+              <Select
+                value={marketplaceSortBy}
+                onValueChange={(value) => setMarketplaceSortBy(value as MarketplaceSortKey)}
               >
-                <Filter className="h-4 w-4" />
-                <span className="sr-only">
-                  <SelectValue placeholder="选择类型" />
-                </span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部类型</SelectItem>
-                {PLUGIN_TYPE_OPTIONS.map(option => (
-                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <SelectTrigger
+                  aria-label="排序"
+                  title="排序"
+                  className="min-w-0 flex-1 justify-center gap-1 px-2 sm:w-12 sm:flex-none"
+                >
+                  <ArrowUpDown className="h-4 w-4" />
+                  <span className="sr-only">
+                    <SelectValue placeholder="排序" />
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">推荐排序</SelectItem>
+                  <SelectItem value="latest">最新上架</SelectItem>
+                  <SelectItem value="downloads">下载最多</SelectItem>
+                  <SelectItem value="likes">点赞最多</SelectItem>
+                  <SelectItem value="rating">评分最高</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            {/* 排序 */}
-            <Select
-              value={marketplaceSortBy}
-              onValueChange={(value) => setMarketplaceSortBy(value as MarketplaceSortKey)}
-            >
-              <SelectTrigger
-                aria-label="排序"
-                title="排序"
-                className="w-full justify-center gap-1 px-2 sm:w-12"
+            {/* 移动端插件数量与设置同一行 */}
+            <div className="flex items-center justify-between gap-2 sm:contents">
+              <Badge
+                variant="outline"
+                data-plugin-market-count-badge="true"
+                className="h-9 border-input bg-transparent px-3 text-sm font-normal"
               >
-                <ArrowUpDown className="h-4 w-4" />
-                <span className="sr-only">
-                  <SelectValue placeholder="排序" />
-                </span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">推荐排序</SelectItem>
-                <SelectItem value="latest">最新上架</SelectItem>
-                <SelectItem value="downloads">下载最多</SelectItem>
-                <SelectItem value="likes">点赞最多</SelectItem>
-                <SelectItem value="rating">评分最高</SelectItem>
-              </SelectContent>
-            </Select>
+                全部插件 {getFilteredPluginCount()}
+              </Badge>
 
-            <Badge
-              variant="outline"
-              data-plugin-market-count-badge="true"
-              className="h-9 border-input bg-transparent px-3 text-sm font-normal"
-            >
-              全部插件 {getFilteredPluginCount()}
-            </Badge>
-
-            <Button
-              type="button"
-              variant="ghost"
-              data-plugin-market-settings-button="true"
-              className="w-full bg-transparent shadow-none hover:bg-transparent sm:ml-auto sm:w-auto"
-              onClick={() => navigate({ to: settingsRoute })}
-            >
-              <Settings2 className="h-4 w-4 mr-2" />
-              设置
-            </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                data-plugin-market-settings-button="true"
+                className="bg-transparent shadow-none hover:bg-transparent sm:ml-auto"
+                onClick={() => navigate({ to: settingsRoute })}
+              >
+                <Settings2 className="h-4 w-4 mr-2" />
+                设置
+              </Button>
+            </div>
 
             {/* 兼容性筛选 */}
             <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:min-w-fit sm:flex-col sm:items-center sm:justify-center sm:gap-1">

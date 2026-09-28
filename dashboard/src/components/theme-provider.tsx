@@ -79,7 +79,6 @@ export function ThemeProvider({
     root.dataset.retroTextureStyle = futureRetroConfig.textureStyle
     root.style.setProperty('--retro-paper-warmth', `${futureRetroConfig.paperWarmth}%`)
     root.style.setProperty('--retro-panel-depth', String(futureRetroConfig.panelDepth / 100))
-    root.style.setProperty('--retro-stroke-scale', String(futureRetroConfig.strokeScale / 100))
     root.style.setProperty(
       '--retro-configured-paper-texture',
       buildFutureRetroTexture(
@@ -89,7 +88,7 @@ export function ThemeProvider({
       )
     )
     const textureSize = {
-      fine: '180px 180px',
+      fine: '220px 220px',
       coarse: '260px 260px',
       'dot-grid': '24px 24px',
       ruled: '40px 28px',

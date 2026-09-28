@@ -68,22 +68,36 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@tanstack/react-virtual', () => ({
-  useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize: () => number }) => ({
-    getTotalSize: () => count * estimateSize(),
+  useVirtualizer: ({
+    count,
+    estimateSize,
+    getItemKey,
+  }: {
+    count: number
+    estimateSize: () => number
+    getItemKey?: (index: number) => string | number
+  }) => {
     // end 用于「查找上条」按行位置定位视口内首行，与真实虚拟列表语义保持一致
-    getVirtualItems: () =>
+    const buildItems = () =>
       Array.from({ length: count }, (_, index) => {
         const start = index * estimateSize()
         return {
           index,
-          key: index,
+          key: getItemKey ? getItemKey(index) : index,
           start,
           end: start + estimateSize(),
         }
-      }),
-    measureElement: virtualizerMocks.measureElement,
-    scrollToIndex: virtualizerMocks.scrollToIndex,
-  }),
+      })
+    return {
+      getTotalSize: () => count * estimateSize(),
+      getVirtualItems: buildItems,
+      get measurementsCache() {
+        return buildItems()
+      },
+      measureElement: virtualizerMocks.measureElement,
+      scrollToIndex: virtualizerMocks.scrollToIndex,
+    }
+  },
 }))
 
 vi.mock('@/hooks/use-toast', () => ({
@@ -665,6 +679,35 @@ describe('阶段状态栏与工具条', () => {
     expect(getBackToBottomIcon()).not.toHaveClass('text-primary')
   })
 
+  it('远离底部时时间线头部被裁剪，保持锚点条目位置不动', async () => {
+    const timeline = [
+      makeEntry('message.ingested', makeIngested({ content: '第一条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第二条' })),
+      makeEntry('message.ingested', makeIngested({ content: '第三条' })),
+    ]
+    setupMonitorState({ timeline })
+    const { container, rerender } = render(<MaisakaMonitor />)
+
+    await flushAutoScroll()
+    const viewport = findTimelineViewport(container, '第一条')
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, writable: true, value: 150 })
+    fireEvent.scroll(viewport)
+    await waitFor(() => expect(getBackToBottomIcon()).not.toHaveClass('text-primary'))
+
+    // 第一条被裁剪后，原先位于 140 的第二条上移到 0，滚动位置应同步减去 140
+    setupMonitorState({
+      timeline: [
+        ...timeline.slice(1),
+        makeEntry('message.ingested', makeIngested({ content: '第四条' })),
+      ],
+    })
+    rerender(<MaisakaMonitor />)
+
+    expect(viewport.scrollTop).toBe(10)
+  })
+
   it('位于底部时收到新消息继续自动滚动', async () => {
     const timeline = [
       makeEntry('message.ingested', makeIngested({ content: '第一条' })),
@@ -830,9 +873,9 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('回复 李四')).toBeInTheDocument()
     expect(screen.getByText('#m-9')).toBeInTheDocument()
     expect(screen.getByText('原始消息')).toBeInTheDocument()
-    // 发送方为空时回退显示“麦麦”，并带“已发送”徽章
+    // 发送方为空时回退显示“麦麦”，不再显示“已发送”徽章
     expect(screen.getByText('麦麦')).toBeInTheDocument()
-    expect(screen.getByText('已发送')).toBeInTheDocument()
+    expect(screen.queryByText('已发送')).not.toBeInTheDocument()
     expect(screen.getByText('收到！')).toBeInTheDocument()
     // 空回复预览显示回退文案，且不渲染消息 ID
     expect(screen.getByText('回复 未知用户')).toBeInTheDocument()
@@ -1139,6 +1182,62 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('未返回结果摘要。')).toBeInTheDocument()
     expect(screen.getByText('#1')).toBeInTheDocument()
     expect(screen.getByText('#2')).toBeInTheDocument()
+  })
+
+  it('planner.progress 在工具返回前显示执行中，已返回的工具显示结果', () => {
+    setupMonitorState({
+      timeline: [
+        makeEntry(
+          'planner.progress',
+          makeFinalized({
+            planner: makePlannerBlock({
+              content: '先查询再回复',
+              tool_calls: [
+                { id: 'tc-1', name: 'search_web', arguments: { query: '麦麦' } },
+                { id: 'tc-2', name: 'reply', arguments: {} },
+              ],
+            }),
+            tools: [makeToolResult({ tool_call_id: 'tc-1', tool_name: 'search_web', summary: '找到结果' })],
+            active_tool_call_id: 'tc-2',
+          })
+        ),
+      ],
+    })
+    render(<MaisakaMonitor />)
+
+    expect(screen.getByText('先查询再回复')).toBeInTheDocument()
+    expect(screen.getByText('找到结果')).toBeInTheDocument()
+    expect(screen.getAllByText('执行中').length).toBeGreaterThan(0)
+    expect(screen.queryByText('未返回结果摘要。')).not.toBeInTheDocument()
+  })
+
+  it('tool_search 将搜索词和激活工具列表单独展示', () => {
+    setupMonitorState({
+      timeline: [
+        makeEntry(
+          'planner.finalized',
+          makeFinalized({
+            tools: [
+              makeToolResult({
+                tool_name: 'tool_search',
+                tool_args: { query: 'search_vcpedia_song' },
+                summary:
+                  '- tool_search [推理中调用] [成功]: 已找到 2 个 deferred tools，它们会在后续轮次中加入可用工具列表：\n- search_vcpedia_song（本次新发现）\n- get_vcpedia_lyrics（此前已发现）',
+                matched_tool_names: ['search_vcpedia_song', 'get_vcpedia_lyrics'],
+                newly_discovered_tool_names: ['search_vcpedia_song'],
+              }),
+            ],
+          })
+        ),
+      ],
+    })
+    render(<MaisakaMonitor />)
+
+    expect(screen.getByText('搜索工具：')).toBeInTheDocument()
+    expect(screen.getAllByText('search_vcpedia_song')).toHaveLength(2)
+    expect(screen.getByText('激活工具：')).toBeInTheDocument()
+    expect(screen.getByText('get_vcpedia_lyrics')).toBeInTheDocument()
+    expect(screen.queryByText('执行结果')).not.toBeInTheDocument()
   })
 
   it('planner.finalized 单独展示 Provider 原生联网搜索摘要', () => {
@@ -1653,4 +1752,3 @@ describe('MaisakaMonitor 额外空态与错误态', () => {
     expect(screen.queryByAltText('表情包原文件')).not.toBeInTheDocument()
   })
 })
-

@@ -81,6 +81,8 @@ import { RestartOverlay } from '@/components/restart-overlay'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { ExtraParamsDialog } from '@/components/ui/extra-params-dialog'
 import { TaskConfigCard, ModelTable, ModelCardList } from './model/components'
+import { EmbeddingBuildProgress } from './model/components/EmbeddingBuildProgress'
+import { TaskRuntimeSummary } from './model/components/TaskRuntimeSummary'
 import { TASK_CONFIGS } from './model/constants'
 import { useModelTour, useModelFetcher, useModelConfig } from './model/hooks'
 import {
@@ -1085,6 +1087,19 @@ function ModelConfigPageContent() {
                       singleModel={selectedTaskSingleModel}
                       dataTour="task-model-select"
                     />
+                    {selectedTaskField.name === 'embedding' && (
+                      <EmbeddingBuildProgress
+                        selectedEmbeddingModel={taskConfig.embedding?.model_list[0] ?? ''}
+                      />
+                    )}
+                    {(selectedTaskField.name === 'planner' ||
+                      selectedTaskField.name === 'replyer') && (
+                      <TaskRuntimeSummary
+                        taskName={selectedTaskField.name}
+                        modelList={taskConfig[selectedTaskField.name]?.model_list ?? []}
+                        models={models}
+                      />
+                    )}
                   </motion.div>
                 </AnimatePresence>
               </section>
@@ -2352,20 +2367,12 @@ function ModelConfigPageContent() {
       <AlertDialog open={embeddingWarning.isOpen} onOpenChange={embeddingWarning.setOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-              更换嵌入模型警告
-            </AlertDialogTitle>
+            <AlertDialogTitle className="sr-only">更换嵌入模型警告</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-sm">
                 <p>
-                  <strong className="text-foreground">注意：</strong>更换嵌入模型可能会影响知识库的匹配精度！
+                  <strong className="text-foreground">注意：</strong>更换嵌入模型后，表达库会在后台自动补建；记忆向量若提示需要重建，请在长期记忆页处理。
                 </p>
-                <ul className="space-y-2 ml-4 list-disc text-muted-foreground">
-                  <li>不同的嵌入模型会产生不同的向量表示</li>
-                  <li>这可能导致现有知识库的检索结果不准确</li>
-                  <li>建议更换嵌入模型后重新生成所有知识库的向量</li>
-                </ul>
                 <p className="text-foreground font-medium">
                   确定要更换嵌入模型吗？
                 </p>
@@ -2375,7 +2382,7 @@ function ModelConfigPageContent() {
           <AlertDialogFooter>
             <AlertDialogCancel onClick={embeddingWarning.cancel}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={embeddingWarning.confirm}
+              onClick={() => void embeddingWarning.confirm()}
               className="bg-amber-600 hover:bg-amber-700"
             >
               确认更换

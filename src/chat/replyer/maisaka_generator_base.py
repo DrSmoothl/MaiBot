@@ -574,16 +574,16 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
     @staticmethod
     def _build_reply_reference_lines(reply_reason: str, reply_reference: str) -> List[str]:
-        """构建 replyer 的信息参考块，优先使用显式参考信息。"""
+        """将 Planner 内容和 reply 工具参考信息直接合并。"""
 
-        normalized_reply_reference = reply_reference.strip()
-        if normalized_reply_reference:
-            return [normalized_reply_reference]
-
+        reference_lines: List[str] = []
         normalized_reply_reason = reply_reason.strip()
         if normalized_reply_reason:
-            return [f"当前思考：\n{normalized_reply_reason}"]
-        return []
+            reference_lines.append(normalized_reply_reason)
+        normalized_reply_reference = reply_reference.strip()
+        if normalized_reply_reference:
+            reference_lines.append(normalized_reply_reference)
+        return reference_lines
 
     @classmethod
     def _build_reply_reference_message(cls, reply_reason: str, reply_reference: str) -> str:

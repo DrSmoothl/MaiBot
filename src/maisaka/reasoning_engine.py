@@ -88,7 +88,7 @@ from src.maisaka.memory.mid_term import (
     is_mid_term_memory_reference_message,
 )
 from src.maisaka.monitor.events import (
-    emit_planner_finalized,
+    emit_planner_snapshot,
 )
 from src.maisaka.memory.person_profile import build_person_profile_injection_messages
 from src.maisaka.context.planner_messages import build_planner_user_prefix_from_session_message
@@ -676,6 +676,8 @@ class MaisakaReasoningEngine:
 
         self._last_reasoning_content = planner_content
         self._runtime._chat_history.extend(response.raw_messages)
+        first_tool_call_id = response.tool_calls[0].call_id if response.tool_calls else ""
+        await self._emit_planner_progress(cycle_detail, state, [], first_tool_call_id)
 
         if response.tool_calls:
             planner_no_tool_count = 0
@@ -689,6 +691,8 @@ class MaisakaReasoningEngine:
             ) = await self._handle_tool_calls(
                 response.tool_calls,
                 planner_content,
+                cycle_detail,
+                state,
             )
             cycle_detail.time_records["tool_calls"] = time.time() - tool_started_at
             state.tool_result_summaries = tool_result_summaries
@@ -707,6 +711,40 @@ class MaisakaReasoningEngine:
         state.tool_result_summaries = []
         state.tool_monitor_results = []
         return planner_no_tool_count, should_end_after_no_tool
+
+    async def _emit_planner_progress(
+        self,
+        cycle_detail: CycleDetail,
+        state: CycleRuntimeState,
+        tools: list[dict[str, Any]],
+        active_tool_call_id: str = "",
+    ) -> None:
+        """在工具执行前及每个工具结束后推送当前 Planner 快照。"""
+
+        response = state.response
+        assert response is not None
+        await emit_planner_snapshot(
+            event_type="planner.progress",
+            session_id=self._runtime.session_id,
+            cycle_id=cycle_detail.cycle_id,
+            planner_request_messages=None,
+            planner_selected_history_count=None,
+            planner_tool_count=None,
+            planner_content=response.content,
+            planner_tool_calls=response.tool_calls,
+            planner_native_tool_calls=response.native_tool_calls,
+            planner_prompt_tokens=response.prompt_tokens,
+            planner_completion_tokens=response.completion_tokens,
+            planner_total_tokens=response.total_tokens,
+            planner_duration_ms=state.planner_duration_ms,
+            planner_prompt_html_uri=response.prompt_html_uri,
+            planner_prompt_cache_hit_tokens=response.prompt_cache_hit_tokens,
+            planner_prompt_cache_miss_tokens=response.prompt_cache_miss_tokens,
+            planner_context_sections=None,
+            tools=tools,
+            active_tool_call_id=active_tool_call_id,
+            run_id=self._runtime._monitor_run_id,
+        )
 
     async def _run_planner_request(
         self,
@@ -830,9 +868,9 @@ class MaisakaReasoningEngine:
 
     @staticmethod
     def _get_planner_content(response: ChatResponse) -> str:
-        """获取 Planner 显式输出、可用于工具上下文的正文。"""
+        """优先使用 Planner 正文，正文为空时使用独立推理内容。"""
 
-        return str(response.content or "").strip()
+        return str(response.content or "").strip() or response.reasoning.strip()
 
     @staticmethod
     def _cycle_end_for_pause_tool(pause_tool_name: Optional[str]) -> CycleEnd:
@@ -992,9 +1030,11 @@ class MaisakaReasoningEngine:
             planner_prompt_section=response.prompt_section if response is not None else None,
             planner_extra_lines=state.planner_extra_lines,
         )
-        await emit_planner_finalized(
+        await emit_planner_snapshot(
+            event_type="planner.finalized",
             session_id=self._runtime.session_id,
             cycle_id=cycle_detail.cycle_id,
+            run_id=self._runtime._monitor_run_id,
             planner_request_messages=response.request_messages if response is not None else None,
             planner_selected_history_count=response.selected_history_count if response is not None else None,
             planner_tool_count=response.tool_count if response is not None else None,
@@ -2020,6 +2060,11 @@ class MaisakaReasoningEngine:
             "card": normalized_card,
             "sub_cards": normalized_sub_cards,
         }
+        if tool_call.func_name == "tool_search" and result.success:
+            structured_content = result.structured_content
+            assert isinstance(structured_content, dict)
+            tool_monitor_result["matched_tool_names"] = structured_content["matched_tool_names"]
+            tool_monitor_result["newly_discovered_tool_names"] = structured_content["newly_discovered_tool_names"]
         prompt_html_uri = str(result.metadata.get("prompt_html_uri") or "").strip()
         if not prompt_html_uri and isinstance(normalized_detail, dict):
             prompt_html_uri = str(normalized_detail.get("prompt_html_uri") or "").strip()
@@ -2055,6 +2100,8 @@ class MaisakaReasoningEngine:
         self,
         tool_calls: list[ToolCall],
         latest_thought: str,
+        cycle_detail: CycleDetail,
+        state: CycleRuntimeState,
     ) -> tuple[bool, str, list[str], list[dict[str, Any]]]:
         """执行一批统一工具调用。
 
@@ -2093,6 +2140,8 @@ class MaisakaReasoningEngine:
                     duration_ms=0.0,
                     tool_spec=None,
                 )
+                next_call_id = tool_calls[tool_index].call_id if tool_index < total_tool_count else ""
+                await self._emit_planner_progress(cycle_detail, state, tool_monitor_results, next_call_id)
             return False, "", tool_result_summaries, tool_monitor_results
 
         execution_context = self._build_tool_execution_context(latest_thought)
@@ -2135,6 +2184,8 @@ class MaisakaReasoningEngine:
                 duration_ms=tool_duration_ms,
                 tool_spec=tool_spec_map.get(invocation.tool_name),
             )
+            next_call_id = tool_calls[tool_index].call_id if tool_index < total_tool_count else ""
+            await self._emit_planner_progress(cycle_detail, state, tool_monitor_results, next_call_id)
 
             if not result.success and tool_call.func_name == "reply":
                 logger.warning(f"{self._runtime.log_prefix} 回复工具未生成可见消息，将继续下一轮循环")

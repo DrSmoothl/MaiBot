@@ -15,7 +15,7 @@ from sqlalchemy import case, func
 from sqlmodel import col, delete, select
 
 from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
-from src.chat.replyer.expression_vector_index import normalize_text, resolve_project_path
+from src.chat.replyer.expression_vector_index import expression_vector_index, normalize_text, resolve_project_path
 from src.common.database.database import get_db_session
 from src.common.database.database_model import ChatSession, Expression, Messages, ModifiedBy
 from src.common.logger import get_logger
@@ -1097,6 +1097,15 @@ def read_expression_vector_index_payload() -> tuple[Path, Optional[dict[str, Any
     if not isinstance(payload, dict):
         raise ValueError(f"表达向量索引格式异常: {index_path}")
     return index_path, payload
+
+
+@router.get("/vector-build-progress")
+def get_expression_vector_build_progress() -> dict[str, Any]:
+    """读取表达向量补建进度；同步文件和数据库扫描交由 FastAPI 线程池执行。"""
+
+    return expression_vector_index.get_history_backfill_progress(
+        index_path=global_config.expression.expression_vector_index_path,
+    )
 
 
 def expression_cluster_member_to_response(raw_member: dict[str, Any]) -> ExpressionClusterMemberResponse:

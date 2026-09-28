@@ -642,8 +642,12 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
           className="flex-row flex-wrap items-center space-y-0 gap-x-3 gap-y-1 border-b"
           aria-label="记忆多选操作"
         >
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <label
+            htmlFor="memory-record-select-all"
+            className="flex cursor-pointer items-center gap-2 text-sm"
+          >
             <Checkbox
+              id="memory-record-select-all"
               aria-label="全选当前结果"
               checked={allChecked ? true : checkedRecords.length > 0 ? 'indeterminate' : false}
               disabled={!records.length || searchQuery.isFetching}
@@ -722,8 +726,12 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
                       checked && 'border-primary bg-primary/5'
                     )}
                   >
-                    <label className="flex shrink-0 cursor-pointer items-start py-3 pr-1 pl-3">
+                    <label
+                      htmlFor={`memory-record-select-${key}`}
+                      className="flex shrink-0 cursor-pointer items-start py-3 pr-1 pl-3"
+                    >
                       <Checkbox
+                        id={`memory-record-select-${key}`}
                         aria-label={`选择${RECORD_LABELS[record.type]}：${record.title || record.id}`}
                         checked={checked}
                         onCheckedChange={(next) =>

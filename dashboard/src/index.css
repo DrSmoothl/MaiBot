@@ -703,19 +703,32 @@
   animation: future-retro-gear-rotate 150s linear infinite;
 }
 
+/* 偏移量按齿轮自身尺寸计算，避免竖屏下 vh 偏移大于 vw 尺寸导致齿轮整体移出画面 */
 .auth-retro-gear--primary {
-  left: max(-30rem, -32vw);
-  top: max(-24rem, -34vh);
-  width: min(72vw, 52rem);
+  --auth-gear-size: min(72vw, 52rem);
+  left: calc(var(--auth-gear-size) * -0.5);
+  top: calc(var(--auth-gear-size) * -0.36);
+  width: var(--auth-gear-size);
 }
 
 .auth-retro-gear--secondary {
-  right: max(-28rem, -30vw);
-  bottom: max(-30rem, -42vh);
-  width: min(84vw, 60rem);
+  --auth-gear-size: min(84vw, 60rem);
+  right: calc(var(--auth-gear-size) * -0.45);
+  bottom: calc(var(--auth-gear-size) * -0.4);
+  width: var(--auth-gear-size);
   opacity: 0.22;
   animation-duration: 210s;
   animation-direction: reverse;
+}
+
+@media (max-aspect-ratio: 3/4) {
+  .auth-retro-gear--primary {
+    --auth-gear-size: min(100vw, 52rem);
+  }
+
+  .auth-retro-gear--secondary {
+    --auth-gear-size: min(120vw, 60rem);
+  }
 }
 
 .auth-retro-gear__body {
@@ -1065,6 +1078,76 @@
 :root[data-dashboard-style='future-retro'] [data-dashboard-card='true'] > * {
   position: relative;
   z-index: 1;
+}
+
+/* 聊天监控里的推理卡片：去掉外框与装饰，只保留内容。
+   :root:root 提高优先级，压过未来复古主题对卡片边框的 !important 规则。 */
+:root:root [data-maisaka-trace-card='true'][data-dashboard-card='true'] {
+  border-width: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* 用户发言气泡：无框线，深色底纹 */
+:root:root [data-maisaka-user-bubble='true'] {
+  border-width: 0 !important;
+  box-shadow: none !important;
+}
+
+:root:root[data-dashboard-style='future-retro'] [data-maisaka-user-bubble='true'] {
+  border-radius: 2px !important;
+  background-color: color-mix(in srgb, var(--retro-ink) 9%, transparent) !important;
+}
+
+/* 推理与推理、推理与消息之间的细横线（由时间线行统一绘制） */
+:root[data-dashboard-style='future-retro'] [data-maisaka-timeline-divider='true'] {
+  border-color: color-mix(in srgb, var(--retro-line) 45%, transparent) !important;
+}
+
+:root[data-dashboard-style='future-retro']
+  [data-maisaka-trace-card='true'][data-dashboard-card='true']::before,
+:root[data-dashboard-style='future-retro']
+  [data-maisaka-trace-card='true'][data-dashboard-card='true']::after {
+  display: none !important;
+  content: none !important;
+}
+
+[data-maisaka-trace-card='true'] > [data-dashboard-card-header='true'] {
+  padding-block: 0.5rem !important;
+  padding-inline: 0 !important;
+}
+
+/* 推理、工具等卡片的字号整体小一号。 */
+[data-maisaka-trace-card='true'] .text-sm {
+  font-size: 0.75rem !important;
+  line-height: 1.125rem !important;
+}
+
+[data-maisaka-trace-card='true'] .text-xs {
+  font-size: 0.6875rem !important;
+  line-height: 1rem !important;
+}
+
+[data-maisaka-trace-card='true'] .text-\[11px\] {
+  font-size: 0.625rem !important;
+}
+
+[data-maisaka-trace-card='true'] .text-\[10px\] {
+  font-size: 0.5625rem !important;
+}
+
+/* 卡片标题行里的徽章与按钮统一高度，且不带外框。 */
+:root:root
+  [data-maisaka-trace-meta='true']
+  > :is([data-dashboard-badge='true'], [data-dashboard-button='true']) {
+  box-sizing: border-box !important;
+  height: 1.375rem !important;
+  min-height: 1.375rem !important;
+  padding-block: 0 !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+  line-height: 1 !important;
 }
 
 [data-maibot-status-glow='true'] {
@@ -1423,6 +1506,13 @@
   [data-dashboard-workspace-tabs='true']
   [data-dashboard-tabs-trigger='true'][data-state='active'] {
   background: transparent !important;
+}
+
+/* 顶部工作区标签（麦麦 / 日志）文字较短，左右边距收紧 */
+:root[data-dashboard-style='future-retro']
+  [data-dashboard-workspace-tabs='true']
+  [data-dashboard-tabs-trigger='true'] {
+  padding-inline: 0.7rem !important;
 }
 
 :root[data-dashboard-style='future-retro']
@@ -2073,19 +2163,6 @@
   backdrop-filter: blur(10px) saturate(140%) !important;
 }
 
-:root[data-dashboard-style='future-retro'] [data-focus-companion='true'] .focus-local-glass {
-  background-color: rgb(255 246 230 / 68%);
-  box-shadow: none;
-  -webkit-backdrop-filter: blur(22px) !important;
-  backdrop-filter: blur(22px) !important;
-}
-
-:root[data-dashboard-style='future-retro'] [data-focus-companion='true'] .focus-local-glass-input {
-  background-color: rgb(255 246 230 / 58%);
-  -webkit-backdrop-filter: blur(16px) !important;
-  backdrop-filter: blur(16px) !important;
-}
-
 :root[data-dashboard-style='future-retro']
   [data-dashboard-shell='true']
   :is([class*='bg-gradient-'], [class*='from-'], [class*='via-'], [class*='to-']) {
@@ -2158,9 +2235,10 @@
   background-color: transparent;
 }
 
-/* 模型表格操作列固定右缘：retro 主题下 .bg-background 为透明，需用纸面实色遮盖滚动内容。
+/* 模型表格操作列固定右缘、统计表名称列固定左缘：retro 主题下 .bg-background 为透明，需用纸面实色遮盖滚动内容。
    放在 .bg-background 透明规则之后，避免被其覆盖。 */
-:root[data-dashboard-style='future-retro'] [data-model-config-action-cell='true'] {
+:root[data-dashboard-style='future-retro'] [data-model-config-action-cell='true'],
+:root[data-dashboard-style='future-retro'] [data-statistics-sticky-cell='true'] {
   background-color: var(--retro-paper) !important;
   background-image: var(--retro-paper-brightness-overlay), var(--retro-paper-texture) !important;
   background-size: auto, var(--retro-paper-texture-size) !important;
@@ -2932,15 +3010,6 @@
   /* 鼠标设备：保留原有 hover 效果，无需额外处理 */
   .touch-device-only {
     display: none;
-  }
-}
-
-@keyframes chat-management-text-scroll {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(calc(var(--scroll-container-width) - 100%));
   }
 }
 

@@ -4,7 +4,7 @@
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 import asyncio
 import json
 import time
@@ -228,6 +228,11 @@ def _serialize_tool_results(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             serialized_tool["prompt_html_uri"] = prompt_html_uri
         if detail is not None:
             serialized_tool["detail"] = _normalize_payload_value(detail)
+        if serialized_tool["tool_name"] == "tool_search" and serialized_tool["success"]:
+            serialized_tool["matched_tool_names"] = _normalize_payload_value(tool["matched_tool_names"])
+            serialized_tool["newly_discovered_tool_names"] = _normalize_payload_value(
+                tool["newly_discovered_tool_names"]
+            )
         serialized_tools.append(serialized_tool)
     return serialized_tools
 
@@ -554,10 +559,12 @@ async def emit_message_updated(
     })
 
 
-async def emit_planner_finalized(
+async def emit_planner_snapshot(
     *,
+    event_type: Literal["planner.progress", "planner.finalized"],
     session_id: str,
     cycle_id: int,
+    run_id: str,
     planner_request_messages: Optional[List[Any]],
     planner_selected_history_count: Optional[int],
     planner_tool_count: Optional[int],
@@ -578,12 +585,14 @@ async def emit_planner_finalized(
     planner_interrupted: bool = False,
     end_reason: str = "",
     end_detail: str = "",
+    active_tool_call_id: str = "",
 ) -> None:
-    """广播一轮 planner 结束后的最终聚合事件。"""
+    """广播 Planner 过程或结束时的快照。"""
 
-    await _broadcast("planner.finalized", {
+    await _broadcast(event_type, {
         "session_id": session_id,
         "cycle_id": cycle_id,
+        "run_id": run_id,
         "timestamp": time.time(),
         "request": _serialize_request_block(
             planner_request_messages,
@@ -604,6 +613,7 @@ async def emit_planner_finalized(
             planner_prompt_cache_miss_tokens,
         ),
         "tools": _serialize_tool_results(list(tools or [])),
+        "active_tool_call_id": active_tool_call_id,
         "interrupted": planner_interrupted,
         "final_state": {
             "time_records": _normalize_payload_value(time_records or {}),

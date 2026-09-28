@@ -31,7 +31,6 @@
     },
     "menu": {
       "home": "首页",
-      "focusCompanion": "专注陪伴",
       "botMainConfig": "麦麦设置",
       "aiModelProvider": "模型厂商设置",
       "modelManagement": "模型管理",
@@ -55,7 +54,6 @@
       "logViewer": "日志查看器",
       "reasoningProcess": "推理过程",
       "maisakaMonitor": "麦麦观察",
-      "chatManagement": "聊天管理",
       "localChat": "本地聊天室",
       "settings": "WEBUI设置"
     }
@@ -93,6 +91,7 @@
       "distributions": "数据分布图表"
     },
     "breakdowns": {
+      "taskGroups": "按任务组",
       "models": "按模型",
       "modules": "按模块",
       "requestTypes": "按请求类型",
@@ -174,9 +173,9 @@
   },
   "workspace": {
     "switcherLabel": "切换麦麦工作区",
-    "settings": "麦麦设置",
+    "settings": "麦麦",
     "chat": "麦麦聊天",
-    "logs": "麦麦日志"
+    "logs": "日志"
   },
   "chat": {
     "botNameFallback": "麦麦",
@@ -233,10 +232,6 @@
       "title": "我的表情包"
     },
     "sidebar": {
-      "adapterAllowedGroup": "适配器允许",
-      "adapterBlockedGroup": "适配器不允许",
-      "adapterBlockedHint": "该聊天被适配器规则阻止，麦麦不会接收这里的新消息",
-      "adapterBlockedOverrideHint": "该聊天已被单独加入阻止规则",
       "closeConversation": "关闭 {{label}}",
       "conversations": "聊天会话",
       "emptyPreview": "暂无消息",
@@ -259,6 +254,7 @@
       "saveName": "保存",
       "savingAvatar": "正在保存头像",
       "userAvatarAlt": "{{name}} 的头像",
+      "loadObservedChatsFailed": "加载聊天流失败，请刷新重试",
       "waitingObservedChats": "等待聊天流…"
     },
     "dialog": {
@@ -447,9 +443,7 @@
       "retroTextureNone": "无纹理",
       "retroTextureIntensity": "纹理强度",
       "retroPanelDepth": "面板层次",
-      "retroPanelDepthDesc": "控制凹陷区域与阴影的可见程度。",
-      "retroStrokeScale": "描边力度",
-      "retroStrokeScaleDesc": "调节卡片和控件硬朗描边的粗细。"
+      "retroPanelDepthDesc": "控制凹陷区域与阴影的可见程度。"
     },
     "security": {
       "currentToken": "当前 Access Token",
@@ -660,19 +654,19 @@
     "title": "登录",
     "description": "请输入访问令牌以继续",
     "tokenLabel": "Access Token",
-    "tokenPlaceholder": "请输入 Access Token",
+    "tokenPlaceholder": "请输入 访问密码",
     "loginButton": "登录",
     "loggingIn": "登录中...",
     "loginFailed": "登录失败",
     "loginSuccess": "登录成功",
     "checkingAuth": "正在检查登录状态...",
     "welcome": "欢迎使用 MaiBot",
-    "accessDesc": "请输入您的 Access Token 以继续访问系统",
-    "tokenRequired": "请输入 Access Token",
+    "accessDesc": "输入访问密码以进入 MaiBot",
+    "tokenRequired": "请输入访问密码",
     "verifyingLabel": "验证中...",
     "verifyEnter": "验证并进入",
-    "helpLink": "我没有 Token，我该去哪里获得 Token？",
-    "helpTitle": "如何获取 Access Token",
+    "helpLink": "我没有密码，我该去哪里获得密码？",
+    "helpTitle": "访问密码",
     "helpDesc": "Access Token 是访问 MaiBot WebUI 的唯一凭证，请按以下方式获取",
     "method1Title": "方式一：查看启动日志",
     "method1Desc": "在 MaiBot 启动时，控制台会显示 WebUI Access Token。",
@@ -1044,9 +1038,8 @@
     "items": {
       "home": "首页",
       "homeDesc": "查看仪表板概览",
-      "focusCompanionDesc": "打开麦麦沉浸专注陪伴",
       "botConfig": "麦麦设置",
-      "botConfigDesc": "配置麦麦的核心设置",
+      "botConfigDesc": "配置麦麦的详细设置和共享组",
       "model": "麦麦模型配置",
       "modelDesc": "配置模型参数",
       "promptGeneratorDesc": "将文段或人设生成可注入配置的人设块",

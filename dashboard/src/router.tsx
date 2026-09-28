@@ -6,7 +6,6 @@ import {
   Outlet,
   redirect,
 } from '@tanstack/react-router'
-import { TanStackRouterDevtools } from '@tanstack/router-devtools'
 import { NotFoundPage } from './routes/404'
 import { Layout } from './components/layout'
 import { RoutePendingFallback } from './components/route-pending-fallback'
@@ -15,12 +14,7 @@ import { RouteErrorBoundary } from './components/error-boundary'
 
 // Root 路由
 const rootRoute = createRootRoute({
-  component: () => (
-    <>
-      <Outlet />
-      {import.meta.env.DEV && <TanStackRouterDevtools />}
-    </>
-  ),
+  component: Outlet,
   beforeLoad: ({ location }) => {
     // 只在目标路由确实是首页时异步鉴权。使用 window.location 会读到导航前的旧路径，
     // 并让离开首页的工作区切换无故进入 pending 状态。
@@ -80,13 +74,6 @@ const replyEffectsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/reply-effects',
   component: lazyRouteComponent(() => import('./routes/reply-effects'), 'ReplyEffectsPage'),
-})
-
-// 沉浸专注陪伴路由
-const focusCompanionRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: '/focus',
-  component: lazyRouteComponent(() => import('./routes/focus'), 'FocusCompanionPage'),
 })
 
 // 配置路由 - 麦麦主程序配置
@@ -224,13 +211,6 @@ const chatEmbedRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/chat/embed'), 'ChatEmbedPage'),
 })
 
-// 外部程序嵌入用专注陪伴路由，不挂载 dashboard 顶栏和侧边栏
-const focusCompanionEmbedRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/focus/embed',
-  component: lazyRouteComponent(() => import('./routes/focus'), 'FocusCompanionPage'),
-})
-
 // 外部程序嵌入用插件市场路由，不挂载 dashboard 顶栏和侧边栏
 const pluginsEmbedRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -365,7 +345,6 @@ const routeTree = rootRoute.addChildren([
   authRoute,
   setupRoute,
   chatEmbedRoute,
-  focusCompanionEmbedRoute,
   pluginsEmbedRoute,
   pluginConfigEmbedRoute,
   pluginMirrorsEmbedRoute,
@@ -373,7 +352,6 @@ const routeTree = rootRoute.addChildren([
     indexRoute,
     statisticsRoute,
     replyEffectsRoute,
-    focusCompanionRoute,
     botConfigRoute,
     modelConfigRoute,
     promptManagementRoute,

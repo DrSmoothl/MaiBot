@@ -279,7 +279,10 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
       <Table className="min-w-[1520px]">
         <TableHeader className="bg-muted/60">
           <TableRow>
-            <TableHead className="bg-muted sticky left-0 z-10 min-w-52 font-semibold">
+            <TableHead
+              data-statistics-sticky-cell="true"
+              className="bg-muted sticky left-0 z-10 min-w-32 font-semibold sm:min-w-52"
+            >
               {t('statisticsPage.table.name')}
             </TableHead>
             <TableHead>{t('statisticsPage.table.requests')}</TableHead>
@@ -301,7 +304,8 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
           {rows.map((row) => (
             <TableRow key={row.name}>
               <TableCell
-                className="bg-card sticky left-0 z-10 max-w-64 truncate font-medium"
+                data-statistics-sticky-cell="true"
+                className="bg-card sticky left-0 z-10 max-w-40 truncate font-medium sm:max-w-64"
                 title={row.name}
               >
                 {row.name}
@@ -376,6 +380,7 @@ function DetailTables({ period, locale }: { period: DetailedStatisticsPeriod; lo
         <Tabs defaultValue="models">
           <TabsList className="border-border/70 bg-muted/40 mb-4 h-auto w-full justify-start overflow-x-auto rounded-md border p-1">
             <TabsTrigger value="models">{t('statisticsPage.breakdowns.models')}</TabsTrigger>
+            <TabsTrigger value="taskGroups">{t('statisticsPage.breakdowns.taskGroups')}</TabsTrigger>
             <TabsTrigger value="modules">{t('statisticsPage.breakdowns.modules')}</TabsTrigger>
             <TabsTrigger value="requestTypes">
               {t('statisticsPage.breakdowns.requestTypes')}
@@ -384,6 +389,9 @@ function DetailTables({ period, locale }: { period: DetailedStatisticsPeriod; lo
           </TabsList>
           <TabsContent value="models" className="mt-0">
             <BreakdownTable rows={period.models} locale={locale} />
+          </TabsContent>
+          <TabsContent value="taskGroups" className="mt-0">
+            <BreakdownTable rows={period.task_groups} locale={locale} />
           </TabsContent>
           <TabsContent value="modules" className="mt-0">
             <BreakdownTable rows={period.modules} locale={locale} />

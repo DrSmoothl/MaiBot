@@ -31,7 +31,6 @@
     },
     "menu": {
       "home": "홈",
-      "focusCompanion": "집중 동반",
       "botMainConfig": "봇 메인 설정",
       "aiModelProvider": "AI 모델 공급자",
       "modelManagement": "모델 관리",
@@ -55,7 +54,6 @@
       "logViewer": "로그 뷰어",
       "reasoningProcess": "추론 과정",
       "maisakaMonitor": "MaiSaka 채팅 모니터",
-      "chatManagement": "채팅 관리",
       "localChat": "로컬 채팅",
       "settings": "WebUI 설정"
     }
@@ -84,6 +82,7 @@
     "tabs": { "trends": "데이터 차트", "metrics": "지표 추이" },
     "sections": { "breakdowns": "분류 통계", "distributions": "데이터 분포" },
     "breakdowns": {
+      "taskGroups": "작업 그룹별",
       "models": "모델별",
       "modules": "모듈별",
       "requestTypes": "요청 유형별",
@@ -162,9 +161,9 @@
   },
   "workspace": {
     "switcherLabel": "MaiBot 작업 공간 전환",
-    "settings": "麦麦 설정",
+    "settings": "麦麦",
     "chat": "麦麦 채팅",
-    "logs": "麦麦 로그"
+    "logs": "로그"
   },
   "chat": {
     "botNameFallback": "麦麦",
@@ -219,10 +218,6 @@
       "title": "내 스티커"
     },
     "sidebar": {
-      "adapterAllowedGroup": "어댑터 허용",
-      "adapterBlockedGroup": "어댑터 차단",
-      "adapterBlockedHint": "이 채팅은 어댑터 규칙으로 차단되어 麦麦가 새 메시지를 받지 않습니다",
-      "adapterBlockedOverrideHint": "이 채팅은 개별 차단 규칙에 추가되었습니다",
       "closeConversation": "{{label}} 닫기",
       "conversations": "채팅 대화",
       "emptyPreview": "아직 메시지가 없습니다",
@@ -245,6 +240,7 @@
       "saveName": "저장",
       "savingAvatar": "아바타 저장 중",
       "userAvatarAlt": "{{name}}의 아바타",
+      "loadObservedChatsFailed": "채팅 스트림을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.",
       "waitingObservedChats": "채팅 스트림 대기 중…"
     },
     "dialog": {
@@ -427,9 +423,7 @@
       "retroTextureNone": "없음",
       "retroTextureIntensity": "텍스처 강도",
       "retroPanelDepth": "패널 깊이",
-      "retroPanelDepthDesc": "오목한 표면과 그림자의 가시성을 조절합니다.",
-      "retroStrokeScale": "외곽선 굵기",
-      "retroStrokeScaleDesc": "카드와 컨트롤의 외곽선 굵기를 조절합니다."
+      "retroPanelDepthDesc": "오목한 표면과 그림자의 가시성을 조절합니다."
     },
     "security": {
       "currentToken": "현재 액세스 토큰",
@@ -652,7 +646,7 @@
     "verifyingLabel": "확인 중...",
     "verifyEnter": "확인 후 입장",
     "helpLink": "Token이 없습니다. 어디서 얻을 수 있나요?",
-    "helpTitle": "Access Token 얻는 방법",
+    "helpTitle": "접속 비밀번호",
     "helpDesc": "Access Token은 MaiBot WebUI에 액세스하는 유일한 자격 증명입니다. 다음 방법으로 얻으세요",
     "method1Title": "방법 1: 시작 로그 확인",
     "method1Desc": "MaiBot 시작 시 콘솔에 WebUI Access Token이 표시됩니다.",
@@ -1025,9 +1019,8 @@
     "items": {
       "home": "홈",
       "homeDesc": "대시보드 개요 보기",
-      "focusCompanionDesc": "MaiBot 몰입형 집중 동반 화면 열기",
       "botConfig": "속 메인 설정",
-      "botConfigDesc": "속 핵심 설정 구성",
+      "botConfigDesc": "봇 상세 설정과 공유 그룹 구성",
       "model": "모델 설정",
       "modelDesc": "모델 매개변수 구성",
       "promptGeneratorDesc": "문장에서 주입 가능한 페르소나 설정 블록 생성",

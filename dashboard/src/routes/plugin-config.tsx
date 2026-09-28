@@ -401,7 +401,7 @@ function SectionRenderer({ sectionName, section, config, onChange }: SectionRend
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <Card>
         <CollapsibleTrigger asChild>
-          <CardHeader className="hover:bg-muted/50 cursor-pointer gap-0.5 px-4! py-2! transition-colors sm:px-4! sm:py-2!">
+          <CardHeader className="hover:bg-muted/50 cursor-pointer space-y-0 gap-0.5 px-4! py-1.5! transition-colors sm:px-4! sm:py-1.5!">
             <div className="flex items-center">
               <div className="flex min-w-0 items-center gap-2">
                 {isOpen ? (

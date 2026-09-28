@@ -1459,9 +1459,9 @@ describe('complexFieldHooks', () => {
       )
 
       expect(screen.getByText('暂无共享记忆组，点击上方按钮添加后可直接选择群聊或私聊。')).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: '聊天管理' })).toHaveAttribute(
+      expect(screen.getByRole('link', { name: '共享组设置' })).toHaveAttribute(
         'href',
-        '/chat-management?view=groups&kind=memory',
+        '/config/bot?mode=groups&kind=memory',
       )
       await waitFor(() => {
         expect(consoleError).toHaveBeenCalled()

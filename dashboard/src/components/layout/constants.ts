@@ -8,6 +8,7 @@ import {
   HardDrive,
   Hash,
   Home,
+  MessageCircle,
   MessageSquare,
   Puzzle,
   Settings,
@@ -21,7 +22,7 @@ import { createStreamlineIcon } from '@/components/ui/streamline-menu-icon'
 import type { MenuIcon, MenuSection } from './types'
 
 const HomeIcon = createStreamlineIcon('allergens-fish-remix', Home)
-const ChatManagementIcon = createStreamlineIcon('chat-two-bubbles-oval-remix', MessageSquare)
+const LocalChatIcon = createStreamlineIcon('desktop-chat-remix', MessageCircle)
 const BotConfigIcon = createStreamlineIcon('page-setting-remix', Settings)
 const ModelIcon = createStreamlineIcon('module-remix', Box)
 const PromptIcon = createStreamlineIcon('script-1-remix', FileText)
@@ -47,7 +48,7 @@ export const menuSections: MenuSection[] = [
         path: '/',
         searchDescription: 'search.items.homeDesc',
       },
-      { icon: ChatManagementIcon, label: 'sidebar.menu.chatManagement', path: '/chat-management' },
+      { icon: LocalChatIcon, label: 'workspace.chat', path: '/chat' },
     ],
   },
   {
