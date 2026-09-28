@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
 
 import {
   AlertCircle,
@@ -8,6 +8,7 @@ import {
   ExternalLink,
   EyeOff,
   GripVertical,
+  Pencil,
   Plus,
   RotateCcw,
   Trash2,
@@ -97,7 +98,7 @@ type GroupScopeKind = 'chat' | 'global' | 'platform' | 'target'
 
 const DEFAULT_LEARNING_PLATFORM = 'qq'
 const PLATFORM_ACCOUNT_ROW_GRID_CLASS =
-  'grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,5.5rem)_minmax(0,8.5rem)_2.5rem] md:grid-cols-[minmax(0,6rem)_minmax(0,9.5rem)_2.5rem]'
+  'grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,5.5rem)_minmax(0,8.5rem)_5rem] md:grid-cols-[minmax(0,6rem)_minmax(0,9.5rem)_5rem]'
 
 const LEARNING_ITEM_FALLBACK_SCHEMA: ConfigSchema = {
   className: 'LearningItem',
@@ -2551,6 +2552,60 @@ const formatPlatformAccount = (row: PlatformAccountRow): string => {
   return `${platform}:${account}`
 }
 
+const isPlatformAccountComplete = (platform: string, account: string) =>
+  platform.trim() !== '' && account.trim() !== ''
+
+interface ManualAccountCardProps {
+  account: string
+  badge?: ReactNode
+  deleteLabel?: string
+  editLabel: string
+  platform: string
+  onEdit: () => void
+  onDelete?: () => void
+}
+
+/** 手动填写的平台账号卡片，展示格式与适配器已发现账号一致。 */
+const ManualAccountCard = ({
+  account,
+  badge,
+  deleteLabel,
+  editLabel,
+  platform,
+  onEdit,
+  onDelete,
+}: ManualAccountCardProps) => (
+  <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <span className="font-medium">{platform}</span>
+      <span className="font-mono text-sm">{account}</span>
+      {badge}
+    </div>
+    <div className="flex shrink-0 items-center gap-1">
+      <button
+        type="button"
+        className="text-muted-foreground/45 hover:text-foreground focus-visible:ring-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        aria-label={editLabel}
+        title={editLabel}
+        onClick={onEdit}
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      {onDelete && deleteLabel && (
+        <button
+          type="button"
+          className="text-muted-foreground/45 hover:text-destructive focus-visible:ring-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+          aria-label={deleteLabel}
+          title={deleteLabel}
+          onClick={onDelete}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  </div>
+)
+
 interface StringListHookOptions {
   addLabel: string
   emptyText: string
@@ -2822,6 +2877,8 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
   const [mutatingAccountId, setMutatingAccountId] = useState<number | null>(null)
   const [disabledAccountsOpen, setDisabledAccountsOpen] = useState(false)
   const [fallbackAccountsOpen, setFallbackAccountsOpen] = useState(false)
+  // 当前处于编辑态的条目：'primary' 表示主账号，`row-${index}` 表示备用账号行
+  const [activeEditorKey, setActiveEditorKey] = useState<string | null>(null)
   const primaryPlatform = typeof value === 'string' ? value : ''
   const qqAccountValue = parentValues?.qq_account
   const qqAccount =
@@ -2830,6 +2887,20 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
       : ''
   const platforms = normalizePlatformAccounts(parentValues?.platforms)
   const rows = platforms.map(parsePlatformAccount)
+  const primaryAccountComplete = isPlatformAccountComplete(primaryPlatform, qqAccount)
+
+  const renderEditorConfirmButton = (enabled: boolean) => (
+    <button
+      type="button"
+      disabled={!enabled}
+      className="text-muted-foreground/45 hover:text-primary focus-visible:ring-ring inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+      aria-label="完成编辑"
+      title="完成编辑"
+      onClick={() => setActiveEditorKey(null)}
+    >
+      <Check className="h-4 w-4" />
+    </button>
+  )
   const activeDiscoveredAccounts = discoveredAccounts.filter((account) => !account.disabled)
   const disabledDiscoveredAccounts = discoveredAccounts.filter((account) => account.disabled)
 
@@ -2870,10 +2941,12 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
 
   const addRow = () => {
     updateRows([...rows, { platform: '', account: '' }])
+    setActiveEditorKey(`row-${rows.length}`)
   }
 
   const removeRow = (rowIndex: number) => {
     updateRows(rows.filter((_, index) => index !== rowIndex))
+    setActiveEditorKey(null)
   }
 
   const updateRow = (rowIndex: number, patch: Partial<PlatformAccountRow>) => {
@@ -3004,68 +3077,103 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
 
       {fallbackAccountsOpen && (
         <div className="space-y-2">
-          <div className={PLATFORM_ACCOUNT_ROW_GRID_CLASS}>
-            <div className="min-w-0 space-y-1">
-              <Label className="text-xs">平台</Label>
-              <Input
-                className="min-w-0"
-                value={primaryPlatform}
-                placeholder="qq"
-                onChange={(event) => onChange?.(event.target.value)}
-              />
+          {activeEditorKey === 'primary' || !primaryAccountComplete ? (
+            <div className={PLATFORM_ACCOUNT_ROW_GRID_CLASS}>
+              <div className="min-w-0 space-y-1">
+                <Label className="text-xs">平台</Label>
+                <Input
+                  className="min-w-0"
+                  value={primaryPlatform}
+                  placeholder="qq"
+                  onChange={(event) => onChange?.(event.target.value)}
+                />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <Label className="text-xs">账号</Label>
+                <Input
+                  className="min-w-0 font-mono"
+                  value={qqAccount}
+                  placeholder="2814567326"
+                  onChange={(event) => onParentChange?.('qq_account', event.target.value)}
+                />
+              </div>
+              <div className="flex shrink-0 items-end justify-end gap-1">
+                <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                  主
+                </span>
+                {renderEditorConfirmButton(primaryAccountComplete)}
+              </div>
             </div>
-            <div className="min-w-0 space-y-1">
-              <Label className="text-xs">账号</Label>
-              <Input
-                className="min-w-0 font-mono"
-                value={qqAccount}
-                placeholder="2814567326"
-                onChange={(event) => onParentChange?.('qq_account', event.target.value)}
-              />
-            </div>
-            <div className="flex shrink-0 items-end justify-end">
-              <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
-                主
-              </span>
-            </div>
-          </div>
+          ) : (
+            <ManualAccountCard
+              account={qqAccount}
+              badge={
+                <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                  主
+                </span>
+              }
+              deleteLabel="删除主账号"
+              editLabel="编辑主账号"
+              platform={primaryPlatform}
+              onEdit={() => setActiveEditorKey('primary')}
+              onDelete={() => {
+                onChange?.('')
+                onParentChange?.('qq_account', '')
+                setActiveEditorKey(null)
+              }}
+            />
+          )}
 
-        {rows.map((row, rowIndex) => (
-          <div
-            key={rowIndex}
-            className={PLATFORM_ACCOUNT_ROW_GRID_CLASS}
-          >
-            <div className="min-w-0 space-y-1">
-              <Label className="text-xs">平台</Label>
-              <Input
-                className="min-w-0"
-                value={row.platform}
-                placeholder="wx"
-                onChange={(event) => updateRow(rowIndex, { platform: event.target.value })}
+          {rows.map((row, rowIndex) => {
+            const editorKey = `row-${rowIndex}`
+            const rowComplete = isPlatformAccountComplete(row.platform, row.account)
+            // 平台或账号未填全的行保持编辑态，避免展示出空白卡片
+            const rowEditing = activeEditorKey === editorKey || !rowComplete
+            return rowEditing ? (
+              <div key={editorKey} className={PLATFORM_ACCOUNT_ROW_GRID_CLASS}>
+                <div className="min-w-0 space-y-1">
+                  <Label className="text-xs">平台</Label>
+                  <Input
+                    className="min-w-0"
+                    value={row.platform}
+                    placeholder="wx"
+                    onChange={(event) => updateRow(rowIndex, { platform: event.target.value })}
+                  />
+                </div>
+                <div className="min-w-0 space-y-1">
+                  <Label className="text-xs">账号</Label>
+                  <Input
+                    className="min-w-0 font-mono"
+                    value={row.account}
+                    placeholder="114514"
+                    onChange={(event) => updateRow(rowIndex, { account: event.target.value })}
+                  />
+                </div>
+                <div className="flex shrink-0 items-end justify-end gap-1">
+                  {renderEditorConfirmButton(rowComplete)}
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`删除备用平台 ${rowIndex + 1}`}
+                    onClick={() => removeRow(rowIndex)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <ManualAccountCard
+                key={editorKey}
+                account={row.account}
+                deleteLabel={`删除备用平台 ${rowIndex + 1}`}
+                editLabel={`编辑备用平台 ${rowIndex + 1}`}
+                platform={row.platform}
+                onEdit={() => setActiveEditorKey(editorKey)}
+                onDelete={() => removeRow(rowIndex)}
               />
-            </div>
-            <div className="min-w-0 space-y-1">
-              <Label className="text-xs">账号</Label>
-              <Input
-                className="min-w-0 font-mono"
-                value={row.account}
-                placeholder="114514"
-                onChange={(event) => updateRow(rowIndex, { account: event.target.value })}
-              />
-            </div>
-            <div className="flex shrink-0 items-end justify-end">
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label={`删除其他平台 ${rowIndex + 1}`}
-                onClick={() => removeRow(rowIndex)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        ))}
+            )
+          })}
         </div>
       )}
     </div>

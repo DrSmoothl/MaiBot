@@ -291,8 +291,9 @@ describe('custom bot config hooks', () => {
     expect(screen.queryByRole('button', { name: '添加平台' })).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '备用平台账号' }))
-    expect(screen.getByDisplayValue('fallback-qq')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('fallback-wx')).toBeInTheDocument()
+    expect(screen.getByText('fallback-qq')).toBeInTheDocument()
+    expect(screen.getByText('fallback-wx')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑主账号' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加平台' })).toBeInTheDocument()
 
     expect(screen.queryByText(/禁用只影响/)).not.toBeInTheDocument()

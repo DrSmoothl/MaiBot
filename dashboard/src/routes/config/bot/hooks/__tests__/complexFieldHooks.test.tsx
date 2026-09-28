@@ -1908,18 +1908,22 @@ describe('complexFieldHooks', () => {
       expect(await screen.findByText('尚未收到适配器上报的账号。')).toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: '备用平台账号' }))
+
+      // 主账号信息完整时以卡片展示，点击编辑后才出现输入框
+      await user.click(screen.getByLabelText('编辑主账号'))
       fireEvent.change(screen.getByPlaceholderText('qq'), { target: { value: 'telegram' } })
       expect(onChange).toHaveBeenCalledWith('telegram')
       fireEvent.change(screen.getByPlaceholderText('2814567326'), { target: { value: '999' } })
       expect(onParentChange).toHaveBeenCalledWith('qq_account', '999')
 
+      await user.click(screen.getByLabelText('编辑备用平台 1'))
       fireEvent.change(screen.getByDisplayValue('wx'), { target: { value: 'kook' } })
       expect(onParentChange).toHaveBeenCalledWith('platforms', ['kook:abc', ''])
 
       await user.click(screen.getByLabelText('添加平台'))
       expect(onParentChange).toHaveBeenCalledWith('platforms', ['wx:abc', '', ''])
 
-      await user.click(screen.getByLabelText('删除其他平台 1'))
+      await user.click(screen.getByLabelText('删除备用平台 1'))
       expect(onParentChange).toHaveBeenCalledWith('platforms', [''])
     })
 
