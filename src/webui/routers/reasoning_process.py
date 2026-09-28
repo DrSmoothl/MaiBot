@@ -323,6 +323,42 @@ class ChatActiveContextResponse(BaseModel):
     jargon: list[ChatActiveJargonEntry] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
     runtime_active: bool = False
+    replyer_timestamp: int | None = None
+
+
+def _latest_replyer_expressions(session_id: str) -> tuple[list[str], int | None]:
+    """读取当前聊天流最近一次 Replyer 请求实际注入的表达习惯。"""
+
+    from src.maisaka.display.preview_path_utils import build_preview_chat_dir_name
+
+    replyer_dir = PROMPT_LOG_ROOT / "replyer" / build_preview_chat_dir_name(session_id)
+    if not replyer_dir.is_dir():
+        return [], None
+    for snapshot in sorted(replyer_dir.glob("*.json"), key=lambda path: path.stem, reverse=True):
+        if not snapshot.stem.isdigit():
+            continue
+        try:
+            payload = json.loads(snapshot.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(payload, dict) or not isinstance(payload.get("request_items"), list):
+            continue
+        expressions: list[str] = []
+        for item in payload["request_items"]:
+            if not isinstance(item, dict) or not isinstance(item.get("parts"), list):
+                continue
+            for part in item["parts"]:
+                if not isinstance(part, dict) or not isinstance(part.get("text"), str):
+                    continue
+                text = part["text"].strip()
+                if text.startswith("【表达习惯参考"):
+                    expressions.extend(
+                        line.removeprefix("- ").strip()
+                        for line in text.splitlines()[1:]
+                        if line.strip()
+                    )
+        return expressions, int(snapshot.stem)
+    return [], None
 
 
 @router.get("/active-context", response_model=ChatActiveContextResponse)
@@ -330,7 +366,6 @@ def get_chat_active_context(session_id: str = Query(..., min_length=1)):
     """读取运行中聊天流保留的回想、黑话，以及可用表达方式。"""
 
     from src.chat.heart_flow.heartflow_manager import heartflow_manager
-    from src.chat.replyer.maisaka_expression_selector import maisaka_expression_selector
     from src.maisaka.context.messages import ReferenceMessage, ReferenceMessageType
     from src.maisaka.memory.mid_term import is_mid_term_memory_message
 
@@ -345,10 +380,7 @@ def get_chat_active_context(session_id: str = Query(..., min_length=1)):
         if isinstance(message, ReferenceMessage) and message.reference_type == ReferenceMessageType.JARGON:
             for name, meaning in message.jargon_entries:
                 jargon_by_name[name] = meaning
-    expression_candidates = maisaka_expression_selector.list_available_expressions(session_id) if runtime is not None else []
-    expressions = [
-        f"情景：{candidate['situation']}\n风格：{candidate['style']}" for candidate in expression_candidates
-    ]
+    expressions, replyer_timestamp = _latest_replyer_expressions(session_id) if runtime is not None else ([], None)
     tool_names = list(runtime._chat_loop_service._active_tool_names) if runtime is not None else []
 
     return ChatActiveContextResponse(
@@ -359,6 +391,7 @@ def get_chat_active_context(session_id: str = Query(..., min_length=1)):
         ],
         tools=tool_names,
         runtime_active=runtime is not None,
+        replyer_timestamp=replyer_timestamp,
     )
 
 

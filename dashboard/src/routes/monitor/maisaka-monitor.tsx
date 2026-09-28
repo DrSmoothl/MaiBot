@@ -530,6 +530,7 @@ interface ChatActiveContext {
   jargon: { name: string; meaning: string }[]
   tools: string[]
   runtime_active: boolean
+  replyer_timestamp: number | null
 }
 
 function ActiveContextPopover({ sessionId }: { sessionId: string | null }) {
@@ -569,7 +570,7 @@ function ActiveContextPopover({ sessionId }: { sessionId: string | null }) {
   const sections = context
     ? [
         { title: '回想记忆', items: context.memory, emptyText: '当前聊天流尚未生成回想' },
-        { title: '可用表达方式', items: context.expressions, emptyText: '当前聊天流没有可用表达方式' },
+        { title: '表达方式', items: context.expressions, emptyText: '最近一次 Replyer 请求中未使用' },
         { title: '黑话', items: context.jargon.map((entry) => entry.name), emptyText: '当前上下文没有黑话参考' },
         { title: '激活的工具', items: context.tools, emptyText: '当前尚未激活工具' },
       ]
@@ -598,7 +599,7 @@ function ActiveContextPopover({ sessionId }: { sessionId: string | null }) {
                         <TooltipTrigger asChild>
                           <span tabIndex={0} className="bg-muted/50 cursor-help rounded px-2 py-1 text-xs">{item}</span>
                         </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-sm whitespace-pre-wrap break-words text-xs">
+                        <TooltipContent side="top" className="z-[70] max-w-sm whitespace-pre-wrap break-words text-xs">
                           {context.jargon.find((entry) => entry.name === item)?.meaning || '暂无释义'}
                         </TooltipContent>
                       </Tooltip>
@@ -609,6 +610,9 @@ function ActiveContextPopover({ sessionId }: { sessionId: string | null }) {
                 )) : <p className="text-muted-foreground text-xs">{section.emptyText}</p>}
               </section>
             ))}
+            <p className="text-muted-foreground text-[11px]">
+              表达方式来自最近一次 Replyer 请求：{context.replyer_timestamp ? new Date(context.replyer_timestamp).toLocaleString() : '无记录'}
+            </p>
           </div>
         )}
       </PopoverContent>

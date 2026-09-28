@@ -40,6 +40,22 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..
 # 配置主程序日志格式
 logger = get_logger("chat")
 
+# 内置 /clear 命令在命令管理中的 ID
+CLEAR_COMMAND_ID = "core.clear"
+
+
+def is_command_disabled(command_id: str) -> bool:
+    """判断命令是否在命令管理页被停用。
+
+    Args:
+        command_id: 命令完整 ID，格式为 ``plugin_id.command_name``，内置命令为 ``core.clear``。
+
+    Returns:
+        bool: 命令是否已被停用。
+    """
+
+    return command_id in global_config.plugin.disabled_commands
+
 
 def register_chat_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
     """注册聊天消息主链内置 Hook 规格。
@@ -272,6 +288,10 @@ class ChatBot:
                     logger.info("用户禁用的命令，跳过处理")
                     return False, None, True
 
+                if is_command_disabled(f"{plugin_name}.{command_name}"):
+                    logger.info(f"命令 {plugin_name}.{command_name} 已在命令管理中停用，按普通消息处理")
+                    return False, None, True
+
                 if command_info.permission == "operator" and not has_command_permission(
                     f"{plugin_name}.{command_name}",
                     message.platform,
@@ -284,11 +304,12 @@ class ChatBot:
                         message.message_info.additional_config,
                     ),
                 ):
-                    from src.services.send_service import text_to_stream
-
                     self._mark_command_message(message, intercept_message_level=1)
                     await self._store_intercepted_command_message(message)
-                    await text_to_stream("你没有权限使用此命令。", message.session_id, storage_message=False)
+                    if not global_config.plugin.silent_permission_denied:
+                        from src.services.send_service import text_to_stream
+
+                        await text_to_stream("你没有权限使用此命令。", message.session_id, storage_message=False)
                     return True, "没有权限", False
 
                 message.is_command = True
@@ -381,13 +402,15 @@ class ChatBot:
         if message_is_local_operator:
             if command_text == CLEAR_CONTEXT_COMMAND or command_text.startswith(f"{CLEAR_CONTEXT_COMMAND} "):
                 return True
-        elif global_config.debug.enable_clear_context_command and is_clear_context_command(command_text):
+        elif is_clear_context_command(command_text) and not is_command_disabled(CLEAR_COMMAND_ID):
             return True
 
         command_result = component_query_service.find_command_by_text(command_text)
         if command_result is None:
             return False
         _, _, command_info = command_result
+        if is_command_disabled(f"{command_info.plugin_name}.{command_info.name}"):
+            return False
         return not (
             message.session_id
             and command_info.name in global_announcement_manager.get_disabled_chat_commands(message.session_id)
@@ -400,7 +423,8 @@ class ChatBot:
             message.platform,
             message.message_info.additional_config,
         )
-        if not global_config.debug.enable_clear_context_command and not message_is_local_operator:
+        # 本地调试终端始终可用 /clear；普通用户侧由命令管理的启用开关决定。
+        if not message_is_local_operator and is_command_disabled(CLEAR_COMMAND_ID):
             return False
 
         command_text = (message.processed_plain_text or "").strip()
@@ -419,11 +443,12 @@ class ChatBot:
             global_config.plugin.command_permissions,
             local_operator=message_is_local_operator,
         ):
-            from src.services.send_service import text_to_stream
-
             self._mark_command_message(message, intercept_message_level=1)
             await self._store_intercepted_command_message(message)
-            await text_to_stream("你没有权限使用此命令。", message.session_id, storage_message=False)
+            if not global_config.plugin.silent_permission_denied:
+                from src.services.send_service import text_to_stream
+
+                await text_to_stream("你没有权限使用此命令。", message.session_id, storage_message=False)
             return True
 
         from src.services.send_service import text_to_stream
@@ -515,11 +540,12 @@ class ChatBot:
             self._mark_command_message(message, intercept_message_level=1)
             await self._store_intercepted_command_message(message)
 
-            await text_to_stream(
-                "你没有权限使用适配器管理命令。",
-                message.session_id,
-                storage_message=False,
-            )
+            if not global_config.plugin.silent_permission_denied:
+                await text_to_stream(
+                    "你没有权限使用适配器管理命令。",
+                    message.session_id,
+                    storage_message=False,
+                )
             logger.warning(
                 f"已拒绝未授权的适配器管理指令: "
                 f"platform={message.platform} user_id={message.message_info.user_info.user_id} command={command}"

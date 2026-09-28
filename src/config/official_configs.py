@@ -5042,19 +5042,6 @@ class DebugConfig(ConfigBase):
     )
     """在日志或界面中显示麦麦的思考过程。"""
 
-    enable_clear_context_command: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "启用 /clear 指令",
-                "en_US": "Enable /clear command",
-                "ja_JP": "/clear コマンドを有効化",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """允许使用 /clear 清空当前聊天流的 Maisaka 短期历史上下文。"""
-
     enable_reply_effect_tracking: bool = Field(
         default=False,
         json_schema_extra={
@@ -5929,11 +5916,30 @@ class PluginConfig(ConfigBase):
     )
     """允许用聊天命令管理插件的用户，格式如 qq:123456789。"""
 
+    silent_permission_denied: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "不显示无权限提示",
+                "en_US": "Hide permission denied notice",
+                "ja_JP": "権限なし通知を非表示",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """开启后，用户执行无权限命令时不再发送提示消息，仅静默拦截并记录日志。"""
+
     command_permissions: Dict[str, CommandPermissionConfig] = Field(
         default_factory=dict,
         json_schema_extra={"hidden": True},
     )
     """受保护命令按用户和真实聊天流配置的额外放行规则。"""
+
+    disabled_commands: List[str] = Field(
+        default_factory=list,
+        json_schema_extra={"hidden": True},
+    )
+    """在命令管理中停用的命令 ID 列表（格式为 plugin_id.command_name，内置命令为 core.clear）。"""
 
 
 class PluginRuntimeRenderConfig(ConfigBase):
