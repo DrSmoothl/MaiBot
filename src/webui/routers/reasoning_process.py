@@ -310,6 +310,58 @@ class ReasoningPromptContentResponse(BaseModel):
     message_avatars: dict[str, ReasoningPromptMessageAvatar] = Field(default_factory=dict)
 
 
+class ChatActiveJargonEntry(BaseModel):
+    name: str
+    meaning: str
+
+
+class ChatActiveContextResponse(BaseModel):
+    """当前运行聊天流的上下文与工具概览。"""
+
+    memory: list[str] = Field(default_factory=list)
+    expressions: list[str] = Field(default_factory=list)
+    jargon: list[ChatActiveJargonEntry] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    runtime_active: bool = False
+
+
+@router.get("/active-context", response_model=ChatActiveContextResponse)
+def get_chat_active_context(session_id: str = Query(..., min_length=1)):
+    """读取运行中聊天流保留的回想、黑话，以及可用表达方式。"""
+
+    from src.chat.heart_flow.heartflow_manager import heartflow_manager
+    from src.chat.replyer.maisaka_expression_selector import maisaka_expression_selector
+    from src.maisaka.context.messages import ReferenceMessage, ReferenceMessageType
+    from src.maisaka.memory.mid_term import is_mid_term_memory_message
+
+    chat_manager = _get_chat_manager()
+    if chat_manager.get_existing_session_by_session_id(session_id) is None:
+        raise HTTPException(status_code=404, detail="聊天流不存在")
+    runtime = heartflow_manager.heartflow_chat_list.get(session_id)
+    history = list(runtime._chat_history) if runtime is not None else []
+    memory = [message.visible_text for message in history if is_mid_term_memory_message(message)]
+    jargon_by_name: dict[str, str] = {}
+    for message in history:
+        if isinstance(message, ReferenceMessage) and message.reference_type == ReferenceMessageType.JARGON:
+            for name, meaning in message.jargon_entries:
+                jargon_by_name[name] = meaning
+    expression_candidates = maisaka_expression_selector.list_available_expressions(session_id) if runtime is not None else []
+    expressions = [
+        f"情景：{candidate['situation']}\n风格：{candidate['style']}" for candidate in expression_candidates
+    ]
+    tool_names = list(runtime._chat_loop_service._active_tool_names) if runtime is not None else []
+
+    return ChatActiveContextResponse(
+        memory=memory,
+        expressions=expressions,
+        jargon=[
+            ChatActiveJargonEntry(name=name, meaning=meaning) for name, meaning in jargon_by_name.items()
+        ],
+        tools=tool_names,
+        runtime_active=runtime is not None,
+    )
+
+
 class ReasoningReplayRequest(BaseModel):
     """推理过程重放请求。"""
 

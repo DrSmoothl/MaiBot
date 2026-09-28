@@ -58,7 +58,7 @@ export function Layout({ children }: LayoutProps) {
   // 麦麦聊天已并入麦麦设置侧边栏，/chat 属于设置工作区
   const workspaceMode: WorkspaceMode = isLogsPath ? 'logs' : 'settings'
   const isSettingsWorkspace = workspaceMode === 'settings'
-  const showBackToTop = isSettingsWorkspace && pathname !== '/planner-monitor'
+  const showBackToTop = isSettingsWorkspace && pathname !== '/chat' && pathname !== '/planner-monitor'
 
   const [sidebarOpen, setSidebarOpen] = useState(() => loadStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true))
   const [skipSidebarResizeAnimation, setSkipSidebarResizeAnimation] = useState(false)

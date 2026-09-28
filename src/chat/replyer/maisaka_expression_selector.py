@@ -136,6 +136,13 @@ class MaisakaExpressionSelector:
             )
         return all_candidates
 
+    def list_available_expressions(self, session_id: str) -> List[dict[str, Any]]:
+        """列出当前聊天流允许使用的表达方式，供运行状态展示。"""
+
+        if not self._can_use_expressions(session_id):
+            return []
+        return self._load_all_expression_candidates(session_id)
+
     def _sample_legacy_expression_candidates(self, all_candidates: List[dict[str, Any]]) -> List[dict[str, Any]]:
         if len(all_candidates) < 10:
             return []

@@ -635,6 +635,7 @@ class MaisakaChatLoopService:
         self._extra_tools: List[ToolOption] = []
         self._interrupt_flag: asyncio.Event | None = None
         self._tool_registry: ToolRegistry | None = None
+        self._active_tool_names: tuple[str, ...] = ()
         self._custom_chat_system_prompt = chat_system_prompt
         self._prompt_load_lock = asyncio.Lock()
         self._llm_chat_clients: dict[str, LLMServiceClient] = {}
@@ -1122,6 +1123,10 @@ class MaisakaChatLoopService:
                 tool_provider_by_name.get(resolve_tool_definition_name(definition), "")
                 for definition in all_tools
             ]
+        if request_kind == "planner":
+            self._active_tool_names = tuple(
+                name for definition in all_tools if (name := resolve_tool_definition_name(definition))
+            )
 
         context_sections = measure_request_sections(
             built_messages,
@@ -1206,7 +1211,6 @@ class MaisakaChatLoopService:
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
         }
-
         prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
             built_messages,
             category=self._resolve_prompt_preview_category(request_kind),
