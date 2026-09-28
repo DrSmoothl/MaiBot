@@ -200,9 +200,9 @@ def get_tool_spec() -> ToolSpec:
             "default": [],
         }
         properties["attach_emoji"] = {
-            "type": "string",
-            "description": "可选。随本次回复附加一个表情包，填写情绪或表情描述。",
-            "default": "",
+            "type": "integer",
+            "minimum": 1,
+            "description": "可选。从 show_emoji_list 的拼图选择一个表情包，填写图片序号，在文字后单独发送。",
         }
         properties["attach_at"] = {
             "type": "array",
