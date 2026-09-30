@@ -100,6 +100,7 @@ let activeConsumerCount = 0
 let monitorSubscriptionStarted = false
 let monitorSubscriptionPromise: Promise<void> | null = null
 let monitorUnsubscribe: (() => Promise<void>) | null = null
+let monitorConnectionUnsubscribe: (() => void) | null = null
 let monitorInitialSyncPending = false
 const storeListeners = new Set<() => void>()
 let persistSnapshotTimer: ReturnType<typeof setTimeout> | null = null
@@ -694,6 +695,19 @@ function handleMonitorEvent(event: MaisakaMonitorEvent) {
   notifyStoreListeners()
 }
 
+// connected 跟随底层连接实时变化；订阅失败（如后端尚未就绪）后，连接恢复时自动补订阅
+function handleMonitorConnectionChange(connected: boolean) {
+  if (connected && !monitorSubscriptionStarted && shouldKeepMonitorActive()) {
+    ensureMonitorSubscription()
+  }
+
+  const nextConnected = connected && monitorSubscriptionStarted
+  if (cachedConnected !== nextConnected) {
+    cachedConnected = nextConnected
+    notifyStoreListeners()
+  }
+}
+
 function ensureMonitorSubscription() {
   if (monitorSubscriptionStarted || monitorSubscriptionPromise !== null) {
     return
@@ -722,12 +736,20 @@ function ensureMonitorSubscription() {
     .finally(() => {
       monitorSubscriptionPromise = null
     })
+
+  // 须在 monitorSubscriptionPromise 赋值后注册：注册时会立即回调一次当前状态
+  monitorConnectionUnsubscribe ??= maisakaMonitorClient.onConnectionChange(
+    handleMonitorConnectionChange
+  )
 }
 
 function stopMonitorSubscriptionIfIdle() {
   if (shouldKeepMonitorActive()) {
     return
   }
+
+  monitorConnectionUnsubscribe?.()
+  monitorConnectionUnsubscribe = null
 
   if (monitorUnsubscribe) {
     const unsub = monitorUnsubscribe

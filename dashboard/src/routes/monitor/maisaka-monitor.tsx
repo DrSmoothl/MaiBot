@@ -597,7 +597,7 @@ function ActiveContextPopover({ sessionId }: { sessionId: string | null }) {
                     {section.items.map((item) => (
                       <Tooltip key={item}>
                         <TooltipTrigger asChild>
-                          <span tabIndex={0} className="bg-muted/50 cursor-help rounded px-2 py-1 text-xs">{item}</span>
+                          <button type="button" className="bg-muted/50 cursor-help rounded px-2 py-1 text-xs">{item}</button>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="z-[70] max-w-sm whitespace-pre-wrap break-words text-xs">
                           {context.jargon.find((entry) => entry.name === item)?.meaning || '暂无释义'}

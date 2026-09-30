@@ -29,6 +29,7 @@ const LAST_EVENT_ID_STORAGE_KEY = 'maisaka-monitor-last-event-id'
 
 // 监控客户端单例 mock：捕获 subscribe 传入的事件处理器以便测试中手动派发事件
 const clientMocks = vi.hoisted(() => ({
+  onConnectionChange: vi.fn(),
   setInitialReplayCursor: vi.fn(),
   subscribe: vi.fn(),
   updateReplayCursor: vi.fn(),
@@ -138,6 +139,8 @@ function makeStageData(overrides: Record<string, unknown> = {}): Record<string, 
 
 let capturedHandler: MaisakaEventListener | null = null
 let unsubscribeMock: Mock<() => Promise<void>>
+let connectionListener: ((connected: boolean) => void) | null = null
+let connectionUnsubscribeMock: Mock<() => void>
 let fakeStores: FakeStores
 let fakeDb: FakeDb
 
@@ -164,6 +167,14 @@ async function mountMonitor(hookModule: MonitorHookModule, completeInitialSync =
   return view
 }
 
+/** 在 act 内模拟底层 WebSocket 连接状态变化 */
+function emitConnectionChange(connected: boolean) {
+  expect(connectionListener).not.toBeNull()
+  act(() => {
+    connectionListener?.(connected)
+  })
+}
+
 /** 在 act 内把事件派发给被捕获的监控事件处理器 */
 function emitMonitorEvent(type: MaisakaMonitorEvent['type'], data: Record<string, unknown>) {
   expect(capturedHandler).not.toBeNull()
@@ -183,6 +194,15 @@ beforeEach(() => {
   clientMocks.subscribe.mockImplementation(async (listener: MaisakaEventListener) => {
     capturedHandler = listener
     return unsubscribeMock
+  })
+
+  connectionListener = null
+  connectionUnsubscribeMock = vi.fn()
+  clientMocks.onConnectionChange.mockImplementation((listener: (connected: boolean) => void) => {
+    connectionListener = listener
+    // 与真实客户端一致：注册时立即回调当前连接状态
+    listener(true)
+    return connectionUnsubscribeMock
   })
 
   fakeStores = createFakeStores()
@@ -401,6 +421,45 @@ describe('订阅生命周期', () => {
 
     expect(unsubscribeMock).toHaveBeenCalledTimes(1)
     expect(view.result.current.connected).toBe(false)
+  })
+
+  it('connected 跟随底层连接断开与恢复', async () => {
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule)
+    expect(view.result.current.connected).toBe(true)
+
+    emitConnectionChange(false)
+    expect(view.result.current.connected).toBe(false)
+
+    emitConnectionChange(true)
+    expect(view.result.current.connected).toBe(true)
+    // 已有订阅由底层客户端在重连时自行恢复，不重复订阅
+    expect(clientMocks.subscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('订阅失败后，连接恢复时自动补订阅', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    clientMocks.subscribe.mockRejectedValueOnce(new Error('后端尚未就绪'))
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule, false)
+    expect(view.result.current.connected).toBe(false)
+
+    emitConnectionChange(true)
+    await act(async () => {})
+    emitMonitorEvent('stage.snapshot', { entries: [], timestamp: 100 })
+
+    expect(clientMocks.subscribe).toHaveBeenCalledTimes(2)
+    expect(view.result.current.connected).toBe(true)
+  })
+
+  it('最后一个消费者卸载时停止监听连接状态，之后的连接恢复不再订阅', async () => {
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule)
+    view.unmount()
+
+    expect(connectionUnsubscribeMock).toHaveBeenCalledTimes(1)
+    connectionListener?.(true)
+    expect(clientMocks.subscribe).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -1387,9 +1446,7 @@ describe('快照边界与内存裁剪', () => {
       expect.objectContaining({ message_id: 'msg-late' }),
       expect.objectContaining({ message_id: 'msg-later' }),
     ])
-    expect(view.result.current.allTimeline[0].id < view.result.current.allTimeline[1].id).toBe(
-      true
-    )
+    expect(view.result.current.allTimeline[0].id < view.result.current.allTimeline[1].id).toBe(true)
   })
 })
 
@@ -1456,4 +1513,3 @@ describe('订阅进行中的共享与 SSR 短路', () => {
     }
   })
 })
-
