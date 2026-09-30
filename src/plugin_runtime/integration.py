@@ -127,6 +127,8 @@ class PluginRuntimeManager(
         self._blocked_plugin_reasons: Dict[str, str] = {}
         self._config_reload_callback: Callable[[Sequence[str]], Awaitable[None]] = self._handle_main_config_reload
         self._config_reload_callback_registered: bool = False
+        self._pending_config_broadcast_scopes: Set[str] = set()
+        self._config_broadcast_task: Optional[asyncio.Task[None]] = None
         self._hook_spec_registry: HookSpecRegistry = HookSpecRegistry()
         self._builtin_hook_specs_registered: bool = False
         self._hook_dispatcher: HookDispatcher = HookDispatcher(
@@ -702,6 +704,15 @@ class PluginRuntimeManager(
         if self._config_reload_callback_registered:
             config_manager.unregister_reload_callback(self._config_reload_callback)
             self._config_reload_callback_registered = False
+        broadcast_task = self._config_broadcast_task
+        if broadcast_task is not None and not broadcast_task.done():
+            broadcast_task.cancel()
+            try:
+                await broadcast_task
+            except asyncio.CancelledError:
+                pass
+        self._config_broadcast_task = None
+        self._pending_config_broadcast_scopes.clear()
         if is_shutdown_requested():
             await self._hook_dispatcher.stop()
 
@@ -1273,6 +1284,9 @@ class PluginRuntimeManager(
     async def _handle_main_config_reload(self, changed_scopes: Sequence[str]) -> None:
         """处理 bot/model 主配置热重载广播。
 
+        广播在后台任务中执行，不阻塞热重载触发方（如 WebUI 保存请求）；
+        连续多次热重载会合并发送，且发送时才序列化配置快照，插件拿到的是最新配置。
+
         Args:
             changed_scopes: 本次热重载命中的配置范围列表。
         """
@@ -1281,10 +1295,30 @@ class PluginRuntimeManager(
             return
 
         normalized_scopes = self._normalize_config_reload_scopes(changed_scopes)
-        if "bot" in normalized_scopes:
-            await self._broadcast_config_reload("bot", config_manager.get_global_config().model_dump(mode="json"))
-        if "model" in normalized_scopes:
-            await self._broadcast_config_reload("model", config_manager.get_model_config().model_dump(mode="json"))
+        if not normalized_scopes:
+            return
+        self._pending_config_broadcast_scopes.update(normalized_scopes)
+        if self._config_broadcast_task is None or self._config_broadcast_task.done():
+            self._config_broadcast_task = asyncio.create_task(
+                self._drain_config_broadcasts(), name="plugin-runtime-config-broadcast"
+            )
+
+    async def _drain_config_broadcasts(self) -> None:
+        """逐个发送待广播的配置热重载，期间新增的范围在下一轮继续发送。"""
+
+        while self._pending_config_broadcast_scopes:
+            scope = sorted(self._pending_config_broadcast_scopes)[0]
+            self._pending_config_broadcast_scopes.discard(scope)
+            try:
+                if scope == "bot":
+                    config_data = config_manager.get_global_config().model_dump(mode="json")
+                else:
+                    config_data = config_manager.get_model_config().model_dump(mode="json")
+                await self._broadcast_config_reload(scope, config_data)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error(f"配置热重载广播发送失败 (scope={scope}): {exc}", exc_info=True)
 
     # ─── 事件桥接 ──────────────────────────────────────────────
 
