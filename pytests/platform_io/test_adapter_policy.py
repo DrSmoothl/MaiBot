@@ -294,3 +294,24 @@ def test_adapter_policy_chat_override_writes_into_existing_best_match(tmp_path: 
     blocked = manager.evaluate(_make_runtime_identity(), chat_type="group", target_id="10001")
     assert blocked.allowed is False
     assert blocked.reason == "matched_deny_override"
+
+
+def test_adapter_policy_lists_plugin_entries_for_account_switch(tmp_path: Path) -> None:
+    policy_path = tmp_path / "adapter_policy.toml"
+    policy_path.write_text(LAYERED_POLICY_TOML, encoding="utf-8")
+    manager = AdapterPolicyManager(policy_path)
+
+    # 换号后新身份没有专属条目，但旧账号的条目仍留在配置里；面板需要两者信息
+    changed_account = AdapterIdentity(
+        adapter_id="gateway:maibot-team.snowluma-adapter:snowluma_gateway",
+        plugin_id="maibot-team.snowluma-adapter",
+        gateway_name="snowluma_gateway",
+        platform="qq",
+        account_id="9999999999",
+    )
+    assert manager.has_adapter_policy_entry(changed_account) is False
+    assert manager.has_adapter_policy_entry(_make_runtime_identity()) is True
+    entries = manager.list_plugin_entries("maibot-team.snowluma-adapter")
+    assert len(entries) == 1
+    assert entries[0]["account_id"] == "2814567326"
+    assert entries[0]["platform"] == "qq"

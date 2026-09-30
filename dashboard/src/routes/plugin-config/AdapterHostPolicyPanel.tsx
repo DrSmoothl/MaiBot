@@ -18,6 +18,8 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { getAdapterHostPolicy, updateAdapterHostPolicy } from '@/lib/chat-management-api'
 import type {
+  AdapterAccountEntry,
+  AdapterActiveIdentity,
   AdapterHostDefaultAction,
   AdapterHostPolicy,
   AdapterPolicyDefaults,
@@ -31,6 +33,9 @@ interface AdapterHostPolicyPanelProps {
 interface AdapterHostPolicyEditorProps {
   policy: AdapterHostPolicy
   globalDefaults: AdapterPolicyDefaults
+  activeIdentity: AdapterActiveIdentity | null | undefined
+  hasEntry: boolean | undefined
+  accountEntries: AdapterAccountEntry[] | undefined
   saveStatus: string | null
   manualSaveDisabled: boolean
   onManualSave: () => void
@@ -66,16 +71,37 @@ function formatSaveTime(timestamp: number): string {
 function AdapterHostPolicyEditor({
   policy,
   globalDefaults,
+  activeIdentity,
+  hasEntry,
+  accountEntries,
   saveStatus,
   manualSaveDisabled,
   onManualSave,
   onSectionChange,
 }: AdapterHostPolicyEditorProps) {
+  // 当前账号之外的条目：换账号登录后旧条目保留在配置中但不再生效
+  // 同一账号可能在多个网关下各有条目，按账号 ID 去重
+  const staleAccounts = [
+    ...new Set(
+      (accountEntries ?? [])
+        .map((entry) => entry.account_id)
+        .filter((id) => id && id !== (activeIdentity?.account_id ?? ''))
+    ),
+  ]
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-muted-foreground text-xs">编辑后 2 秒自动保存</p>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary" data-testid="active-account-badge">
+            当前账号 ID：{activeIdentity?.account_id || '未获取'}
+          </Badge>
+          {hasEntry === false && (
+            <Badge variant="outline">无专属规则，按全局默认生效</Badge>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-muted-foreground text-xs">编辑后 2 秒自动保存</p>
           {saveStatus && (
             <span className="text-muted-foreground text-xs" data-testid="host-policy-save-status">
               {saveStatus}
@@ -93,6 +119,15 @@ function AdapterHostPolicyEditor({
           </Button>
         </div>
       </div>
+      {hasEntry === false && staleAccounts.length > 0 && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            规则按账号 ID 区分：当前账号（{activeIdentity?.account_id || '未知'}）还没有专属规则，以下编辑保存后将为其新建；历史账号
+            {staleAccounts.map((id) => ` ${id}`).join('、')} 的规则保留在配置中，但对当前账号不再生效。
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
         {(['group', 'private'] as const).map((chatType) => {
           const section = policy[chatType]
@@ -190,6 +225,8 @@ export function AdapterHostPolicyPanel({ pluginId }: AdapterHostPolicyPanelProps
   const policyQuery = useQuery({
     queryKey,
     queryFn: () => getAdapterHostPolicy(pluginId),
+    // 适配器换账号登录后当前激活身份会变化，定期拉取保证面板展示的规则归属不脱靶
+    refetchInterval: 30_000,
   })
   const serverPolicy = policyQuery.data?.policy
   const serverPolicyText = serverPolicy ? JSON.stringify(serverPolicy) : null
@@ -315,6 +352,9 @@ export function AdapterHostPolicyPanel({ pluginId }: AdapterHostPolicyPanelProps
     <AdapterHostPolicyEditor
       policy={policy}
       globalDefaults={policyQuery.data.global_defaults}
+      activeIdentity={policyQuery.data.active_identity}
+      hasEntry={policyQuery.data.has_entry}
+      accountEntries={policyQuery.data.account_entries}
       saveStatus={saveStatus}
       manualSaveDisabled={!hasUnsavedChanges || saveMutation.isPending}
       onManualSave={saveNow}

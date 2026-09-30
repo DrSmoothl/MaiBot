@@ -434,3 +434,107 @@ describe('AdapterHostPolicyPanel', () => {
     )
   })
 })
+
+describe('适配器账号身份展示', () => {
+  it('显示当前激活账号 ID，并在换号后提示历史账号条目不再生效', async () => {
+    vi.mocked(getAdapterHostPolicy).mockResolvedValue(
+      {
+        ...makeResponse('adapter.qq'),
+        active_identity: {
+          adapter_id: 'gateway:adapter.qq:gw',
+          plugin_id: 'adapter.qq',
+          gateway_name: 'gw',
+          platform: 'qq',
+          account_id: '9999999999',
+          scope: null,
+        },
+        has_entry: false,
+        account_entries: [
+          {
+            adapter_id: 'gateway:adapter.qq:gw',
+            account_id: '2814567326',
+            platform: 'qq',
+            gateway_name: 'gw',
+            scope: '',
+            rules: { group: { default_action: 'block', allow_ids: ['10001'], deny_ids: [] } },
+          },
+        ],
+      } as never
+    )
+
+    renderPanel('adapter.qq')
+
+    expect(await screen.findByTestId('active-account-badge')).toHaveTextContent('当前账号 ID：9999999999')
+    expect(await screen.findByText(/2814567326 的规则保留在配置中/)).toBeInTheDocument()
+    expect(screen.getByText('无专属规则，按全局默认生效')).toBeInTheDocument()
+  })
+
+  it('已有专属规则的账号不显示换号提示', async () => {
+    vi.mocked(getAdapterHostPolicy).mockResolvedValue(
+      {
+        ...makeResponse('adapter.qq'),
+        active_identity: {
+          adapter_id: 'gateway:adapter.qq:gw',
+          plugin_id: 'adapter.qq',
+          gateway_name: 'gw',
+          platform: 'qq',
+          account_id: '2814567326',
+          scope: null,
+        },
+        has_entry: true,
+        account_entries: [
+          {
+            adapter_id: 'gateway:adapter.qq:gw',
+            account_id: '2814567326',
+            platform: 'qq',
+            gateway_name: 'gw',
+            scope: '',
+            rules: {},
+          },
+        ],
+      } as never
+    )
+
+    renderPanel('adapter.qq')
+
+    await screen.findByTestId('active-account-badge')
+    expect(screen.getByTestId('active-account-badge')).toHaveTextContent('当前账号 ID：2814567326')
+    expect(screen.queryByText(/不再生效/)).not.toBeInTheDocument()
+  })
+})
+
+describe('历史账号条目去重', () => {
+  it('同一历史账号在多个网关下有条目时只提示一次', async () => {
+    const staleEntry = {
+      adapter_id: 'gateway:adapter.qq:gw',
+      account_id: '2814567326',
+      platform: 'qq',
+      gateway_name: 'gw',
+      scope: '',
+      rules: {},
+    }
+    vi.mocked(getAdapterHostPolicy).mockResolvedValue(
+      {
+        ...makeResponse('adapter.qq'),
+        active_identity: {
+          adapter_id: 'gateway:adapter.qq:gw',
+          plugin_id: 'adapter.qq',
+          gateway_name: 'gw',
+          platform: 'qq',
+          account_id: '9999999999',
+          scope: null,
+        },
+        has_entry: false,
+        account_entries: [
+          staleEntry,
+          { ...staleEntry, adapter_id: 'gateway:adapter.qq:gw2', gateway_name: 'gw2' },
+        ],
+      } as never
+    )
+
+    renderPanel('adapter.qq')
+
+    const alert = await screen.findByText(/的规则保留在配置中/)
+    expect(alert.textContent?.match(/2814567326/g)).toHaveLength(1)
+  })
+})
