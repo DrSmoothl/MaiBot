@@ -28,6 +28,7 @@ from src.common.i18n import get_locale
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils
 from src.config.config import global_config
+from src.maisaka.context.message_id_alias import to_display_message_id
 from src.config.model_configs import ModelInfo
 from src.config.official_configs import build_personality_emotion_suffix
 from src.core.types import ActionInfo
@@ -173,7 +174,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         user_info = reply_message.message_info.user_info
         sender_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
         bot_name = global_config.bot.nickname.strip() or sender_name
-        target_message_id = reply_message.message_id.strip() if reply_message.message_id else "未知"
+        target_message_id = to_display_message_id(reply_message.message_id) if reply_message.message_id else "未知"
         # target_time = reply_message.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         quote_ids = extract_quote_ids_from_message_sequence(reply_message.raw_message)
         target_content = self._normalize_content(self._build_target_message_content(reply_message), limit=300)
@@ -210,7 +211,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             f"你想要回复的消息是 {sender_name} 发送的 msg_id为 {target_message_id} 的消息，你这次要回复的就是这条目标消息，不要把其他历史消息当成当前回复对象。",
         ]
         if quote_ids:
-            target_lines.append(f"- quote={','.join(quote_ids)}")
+            target_lines.append(f"- quote={','.join(to_display_message_id(quote_id) for quote_id in quote_ids)}")
         target_lines.extend(
             [
                 f"- 发言内容：{target_content}",
@@ -327,11 +328,11 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
         target_message = self._find_message_by_id(chat_history, reply_message, message_id)
         if target_message is None:
-            return f"msg_id={message_id} 的第 {image_index + 1} 张图片"
+            return f"msg_id={to_display_message_id(message_id)} 的第 {image_index + 1} 张图片"
 
         user_info = target_message.message_info.user_info
         sender_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
-        return f"{sender_name} 的消息 msg_id={message_id} 中的第 {image_index + 1} 张图片"
+        return f"{sender_name} 的消息 msg_id={to_display_message_id(message_id)} 中的第 {image_index + 1} 张图片"
 
     def _format_attachment_at_target(
         self,
@@ -353,7 +354,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             return f"@{target_name}".strip()
         if user_id:
             return f"@{user_id}"
-        return f"msg_id={message_id} 的发送者"
+        return f"msg_id={to_display_message_id(message_id)} 的发送者"
 
     def _build_reply_attachment_prompt(
         self,

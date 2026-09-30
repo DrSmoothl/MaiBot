@@ -27,6 +27,7 @@ from src.config.config import global_config
 from src.core.tooling import ToolExecutionResult
 from src.maisaka.context.message_adapter import format_speaker_content
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
+from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import SessionBackedMessage
 from src.maisaka.context.planner_messages import (
     build_planner_prefix,
@@ -315,7 +316,7 @@ class BuiltinToolRuntimeContext:
 
         target_message = self.runtime.find_source_message_by_id(target_message_id)
         if target_message is None:
-            raise ValueError(f"无法解析 at 目标消息：msg_id={target_message_id}")
+            raise ValueError(f"无法解析 at 目标消息：msg_id={to_display_message_id(target_message_id)}")
 
         user_info = target_message.message_info.user_info
         return AtComponent(

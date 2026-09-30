@@ -6,6 +6,7 @@ from typing import Any, Optional
 from src.common.data_models.message_component_data_model import ImageComponent, MessageSequence
 from src.common.logger import get_logger
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
+from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import SessionBackedMessage
 from src.services import send_service
 
@@ -78,7 +79,7 @@ async def _load_readable_images(
     """确保图片组件已经加载二进制数据。"""
 
     if not images:
-        return [], f"目标消息中没有可读取的图片：msg_id={source_id}"
+        return [], f"目标消息中没有可读取的图片：msg_id={to_display_message_id(source_id)}"
 
     for image in images:
         if image.binary_data:
@@ -90,7 +91,7 @@ async def _load_readable_images(
 
     readable_images = [image for image in images if image.binary_data]
     if not readable_images:
-        return [], f"目标消息中的图片数据不可读取：msg_id={source_id}"
+        return [], f"目标消息中的图片数据不可读取：msg_id={to_display_message_id(source_id)}"
     return readable_images, None
 
 
@@ -110,7 +111,7 @@ async def _collect_message_images(
 
     target_message = tool_ctx.runtime.find_source_message_by_id(target_message_id)
     if target_message is None:
-        return [], f"没有找到消息：msg_id={target_message_id}"
+        return [], f"没有找到消息：msg_id={to_display_message_id(target_message_id)}"
 
     images = _collect_images_from_sequence(getattr(target_message, "raw_message", None))
     return await _load_readable_images(tool_ctx, images, target_message_id)
@@ -160,7 +161,7 @@ async def handle_tool(
         )
 
     image_base64 = b64encode(images[image_index].binary_data).decode("utf-8")
-    source_label = f"{target_message_id} 的第 {image_index} 张图片"
+    source_label = f"{to_display_message_id(target_message_id)} 的第 {image_index} 张图片"
     success = await send_service.image_to_stream(
         image_base64=image_base64,
         stream_id=tool_ctx.runtime.session_id,

@@ -12,6 +12,7 @@ from src.common.logger import get_logger
 from src.config import config as config_module
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.maisaka.context.message_adapter import build_visible_text_from_sequence, parse_speaker_content
+from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import LLMContextMessage, SessionBackedMessage
 from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
 from src.services import send_service
@@ -364,7 +365,7 @@ async def handle_tool(
     if target_message is None:
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            f"未找到要回复的目标消息，msg_id={target_message_id}",
+            f"未找到要回复的目标消息，msg_id={to_display_message_id(target_message_id)}",
         )
 
     try:

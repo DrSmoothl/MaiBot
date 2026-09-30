@@ -1552,7 +1552,7 @@ class MaisakaReasoningEngine:
 
         return ToolInvocation(
             tool_name=tool_call.func_name,
-            arguments=dict(tool_call.args or {}),
+            arguments=self._runtime.expand_message_id_aliases(dict(tool_call.args or {})),
             call_id=tool_call.call_id,
             session_id=self._runtime.session_id,
             stream_id=self._runtime.session_id,
