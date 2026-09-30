@@ -712,7 +712,7 @@ async def _save_chat_talk_frequency_rule(
     reply_timing_config["talk_value_rules"] = rules
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=["chat.reply_timing"]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -755,7 +755,7 @@ async def _delete_chat_talk_frequency_rule(chat_session: ChatSession, rule_time:
     reply_timing_config["talk_value_rules"] = next_rules
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=["chat.reply_timing"]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -821,7 +821,7 @@ async def _save_chat_learning_rule(chat_session: ChatSession, kind: str, request
         config_section["enable_behavior_learning"] = True
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=[section_name]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -878,7 +878,7 @@ async def _save_chat_prompt_rule(
     reply_style_config["chat_prompts"] = prompts
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=["chat.reply_style"]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -914,7 +914,7 @@ async def _delete_chat_prompt_rule(chat_session: ChatSession, prompt_index: int)
     reply_style_config["chat_prompts"] = prompts
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=["chat.reply_style"]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 

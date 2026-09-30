@@ -92,7 +92,8 @@ class MCPService:
 
         from src.config.config import config_manager
 
-        config_manager.register_reload_callback(self.on_config_reload)
+        # MCP 连接仅在重建时读取 mcp 配置节，其余配置节变更无需重建
+        config_manager.register_reload_callback(self.on_config_reload, sections=("mcp",))
         self._reload_callback_registered = True
 
     async def on_config_reload(self, changed_scopes: Sequence[str] | None = None) -> None:

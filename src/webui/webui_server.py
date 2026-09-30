@@ -59,7 +59,8 @@ class WebUIServer:
         if config_manager is None:
             return
 
-        config_manager.register_reload_callback(self.reload_app)
+        # WebUI 应用仅在创建时固化 webui 配置节（anti_crawler_mode），其余配置节变更无需重建
+        config_manager.register_reload_callback(self.reload_app, sections=("webui",))
         self._reload_callback_registered = True
 
     def _maybe_unregister_reload_callback(self) -> None:
@@ -308,7 +309,8 @@ class ThreadedWebUIServer:
         if config_manager is None:
             return
 
-        config_manager.register_reload_callback(self.reload_app)
+        # WebUI 应用仅在创建时固化 webui 配置节（anti_crawler_mode），其余配置节变更无需重建
+        config_manager.register_reload_callback(self.reload_app, sections=("webui",))
         self._reload_callback_registered = True
 
     def _maybe_unregister_reload_callback(self) -> None:
