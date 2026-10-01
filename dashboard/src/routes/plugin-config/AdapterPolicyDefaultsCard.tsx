@@ -43,8 +43,8 @@ export function AdapterPolicyDefaultsCard() {
     <section className="space-y-3 rounded-md border p-4" aria-label="适配器全局默认策略">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="font-medium">麦麦默认策略</h2>
-          <p className="text-muted-foreground text-xs">没设置额外规则时的策略</p>
+          <h2 className="font-medium">全局默认规则</h2>
+          <p className="text-muted-foreground text-xs">所有适配器的默认规则</p>
         </div>
         {defaultsQuery.isError ? (
           <p className="text-destructive text-sm">默认策略加载失败</p>
@@ -71,7 +71,7 @@ export function AdapterPolicyDefaultsCard() {
                         disabled={!action || defaultsMutation.isPending}
                         onClick={() => saveDefaultPolicy(chatType, option)}
                       >
-                        {option === 'allow' ? '放行' : '拒绝'}
+                        {option === 'allow' ? '接收消息' : '不接收'}
                       </Button>
                     ))}
                   </div>

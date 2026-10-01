@@ -1115,6 +1115,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
   const { i18n } = useTranslation()
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
   const [documentPanelOpen, setDocumentPanelOpen] = useState(false)
+  const [hostPolicyToolbar, setHostPolicyToolbar] = useState<HTMLDivElement | null>(null)
 
   const {
     editMode,
@@ -1312,11 +1313,15 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
         value={pluginPageTab}
         onValueChange={(value) => setPluginPageTab(value as 'settings' | 'host-policy' | 'details')}
       >
-        <TabsList>
-          <TabsTrigger value="settings">设置</TabsTrigger>
-          {showHostPolicy && <TabsTrigger value="host-policy">黑白名单规则</TabsTrigger>}
-          <TabsTrigger value="details">详情</TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-center gap-3">
+          <TabsList>
+            <TabsTrigger value="settings">设置</TabsTrigger>
+            {showHostPolicy && <TabsTrigger value="host-policy">黑白名单规则</TabsTrigger>}
+            <TabsTrigger value="details">详情</TabsTrigger>
+          </TabsList>
+          {/* 黑白名单页的账号与保存工具栏渲染到页签同一行，节省纵向空间 */}
+          {showHostPolicy && <div ref={setHostPolicyToolbar} className="min-w-0 flex-1" />}
+        </div>
         <TabsContent value="settings" className="mt-4">
           {/* 源代码模式 */}
           {editMode === 'source' && (
@@ -1401,7 +1406,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
         </TabsContent>
         {showHostPolicy && (
           <TabsContent value="host-policy" className="mt-4">
-            <AdapterHostPolicyPanel pluginId={plugin.id} />
+            <AdapterHostPolicyPanel pluginId={plugin.id} toolbarContainer={hostPolicyToolbar} />
           </TabsContent>
         )}
         <TabsContent value="details" className="mt-4">

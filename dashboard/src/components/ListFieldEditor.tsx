@@ -90,6 +90,8 @@ export interface ListFieldEditorProps {
   disabled?: boolean
   /** 新项的占位符文字 */
   placeholder?: string
+  /** 列表为空时的提示文字 */
+  emptyText?: string
 }
 
 // ============ 可排序项组件 ============
@@ -408,6 +410,7 @@ export function ListFieldEditor({
   maxItems,
   disabled,
   placeholder,
+  emptyText = '暂无数据，点击下方按钮添加',
 }: ListFieldEditorProps) {
   // 确保 value 是数组
   const items: unknown[] = useMemo(() => {
@@ -530,7 +533,7 @@ export function ListFieldEditor({
       {items.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center border border-dashed rounded-md">
           <AlertCircle className="h-4 w-4" />
-          <span>暂无数据，点击下方按钮添加</span>
+          <span>{emptyText}</span>
         </div>
       ) : (
         <DndContext
