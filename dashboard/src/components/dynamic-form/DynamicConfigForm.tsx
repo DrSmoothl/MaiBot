@@ -27,6 +27,8 @@ export interface DynamicConfigFormProps {
   level?: number
   advancedVisible?: boolean
   sectionColumns?: 1 | 2
+  /** 按完整配置路径，为顶层配置节添加前置内容。 */
+  sectionLeadingContent?: Record<string, React.ReactNode>
 }
 
 function buildFieldPath(basePath: string, fieldName: string) {
@@ -104,6 +106,7 @@ function PromptGeneratorEntryCard() {
 }
 
 function DynamicConfigSection({
+  leadingContent,
   advancedVisible,
   basePath,
   children,
@@ -126,6 +129,7 @@ function DynamicConfigSection({
   level: number
   nestedSchema: ConfigSchema
   onChange: (field: string, value: unknown) => void
+  leadingContent?: React.ReactNode
   sectionKey: string
   sectionTitle: string
   values: Record<string, unknown>
@@ -168,6 +172,7 @@ function DynamicConfigSection({
         <CardContent id={contentId} className="pt-3">
           {children ?? (
             <div className="space-y-3">
+              {leadingContent}
               <DynamicConfigForm
                 schema={nestedSchema}
                 values={values}
@@ -284,6 +289,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
   level = 0,
   advancedVisible,
   sectionColumns = 1,
+  sectionLeadingContent,
 }) => {
   const resolvedAdvancedVisible = advancedVisible ?? false
 
@@ -650,6 +656,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
                 level={level + 1}
                 sectionKey={key}
                 sectionTitle={sectionTitle}
+                leadingContent={sectionLeadingContent?.[nestedFieldPath]}
               />
             )
           }

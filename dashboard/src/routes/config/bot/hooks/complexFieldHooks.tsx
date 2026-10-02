@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
-  EyeOff,
   GripVertical,
   Pencil,
   Plus,
@@ -51,6 +50,7 @@ import { getChatStreams, resolveChatTargets, type ChatStream, type ChatTargetRes
 import { formatChatDisplayName } from '@/lib/chat-display'
 import { getBotConfigCached } from '@/lib/config-api'
 import {
+  deleteDiscoveredBotAccount,
   getDiscoveredBotAccounts,
   setDiscoveredBotAccountDisabled,
   type BotPlatformAccount,
@@ -2920,6 +2920,19 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
     void loadDiscoveredAccounts()
   }, [])
 
+  const deleteDiscoveredAccount = async (account: BotPlatformAccount) => {
+    setMutatingAccountId(account.id)
+    setAccountsError('')
+    try {
+      await deleteDiscoveredBotAccount(account.id)
+      setDiscoveredAccounts((current) => current.filter((item) => item.id !== account.id))
+    } catch (error) {
+      setAccountsError(error instanceof Error ? error.message : '删除适配器账号失败')
+    } finally {
+      setMutatingAccountId(null)
+    }
+  }
+
   const toggleDiscoveredAccount = async (account: BotPlatformAccount) => {
     setMutatingAccountId(account.id)
     setAccountsError('')
@@ -2985,11 +2998,11 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
                   type="button"
                   disabled={mutatingAccountId === account.id}
                   className="text-muted-foreground/45 hover:text-destructive focus-visible:ring-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                  aria-label="排除身份"
-                  title="排除身份"
-                  onClick={() => void toggleDiscoveredAccount(account)}
+                  aria-label="删除账号"
+                  title="删除账号记录（适配器再次上报时会重新发现）"
+                  onClick={() => void deleteDiscoveredAccount(account)}
                 >
-                  <EyeOff className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))}

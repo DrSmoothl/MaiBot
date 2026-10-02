@@ -46,6 +46,7 @@ vi.mock('@/lib/config-api', () => ({
 
 vi.mock('@/lib/bot-accounts-api', () => ({
   getDiscoveredBotAccounts: vi.fn(),
+  deleteDiscoveredBotAccount: vi.fn(),
   setDiscoveredBotAccountDisabled: vi.fn(),
 }))
 
@@ -1927,7 +1928,7 @@ describe('complexFieldHooks', () => {
       expect(onParentChange).toHaveBeenCalledWith('platforms', [''])
     })
 
-    it('禁用适配器账号失败时展示错误，离线账号显示离线', async () => {
+    it('删除适配器账号失败时展示错误，离线账号显示离线', async () => {
       vi.mocked(botAccountsApi.getDiscoveredBotAccounts).mockResolvedValue([
         {
           id: 8,
@@ -1944,7 +1945,7 @@ describe('complexFieldHooks', () => {
           online: false,
         },
       ])
-      vi.mocked(botAccountsApi.setDiscoveredBotAccountDisabled).mockRejectedValue(new Error('更新失败'))
+      vi.mocked(botAccountsApi.deleteDiscoveredBotAccount).mockRejectedValue(new Error('更新失败'))
 
       render(
         <BotPlatformAccountsHook
@@ -1959,7 +1960,7 @@ describe('complexFieldHooks', () => {
 
       expect(await screen.findByText('离线')).toBeInTheDocument()
       expect(screen.getByText(/入站消息/)).toBeInTheDocument()
-      await userEvent.click(screen.getByRole('button', { name: '排除身份' }))
+      await userEvent.click(screen.getByRole('button', { name: '删除账号' }))
       expect(await screen.findByText('更新失败')).toBeInTheDocument()
     })
 
@@ -2106,10 +2107,10 @@ describe('complexFieldHooks', () => {
         expect(botAccountsApi.setDiscoveredBotAccountDisabled).toHaveBeenCalledWith(4, false)
       })
 
-      vi.mocked(botAccountsApi.setDiscoveredBotAccountDisabled).mockRejectedValueOnce('boom')
-      const excludeButtons = screen.getAllByRole('button', { name: '排除身份' })
+      vi.mocked(botAccountsApi.deleteDiscoveredBotAccount).mockRejectedValueOnce('boom')
+      const excludeButtons = screen.getAllByRole('button', { name: '删除账号' })
       await user.click(excludeButtons[excludeButtons.length - 1])
-      expect(await screen.findByText('更新适配器账号失败')).toBeInTheDocument()
+      expect(await screen.findByText('删除适配器账号失败')).toBeInTheDocument()
 
       vi.mocked(botAccountsApi.getDiscoveredBotAccounts).mockRejectedValueOnce(new Error('网络错误'))
       rerender(

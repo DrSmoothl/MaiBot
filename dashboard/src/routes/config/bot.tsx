@@ -66,7 +66,6 @@ import {
   BehaviorGroupsHook,
   BehaviorFocusGroupsHook,
   BehaviorLearningListHook,
-  BotPlatformAccountsHook,
   ChatPromptsHook,
   ChatTalkValueRulesHook,
   ExpressionGroupsHook,
@@ -390,7 +389,7 @@ function BotConfigPageContent() {
 
   useEffect(() => {
     const hookEntries = [
-      ['bot.platform', BotPlatformAccountsHook, 'replace'],
+      ['bot.platform', HiddenFieldHook, 'hidden'],
       ['bot.alias_names', AliasNamesHook],
       ['bot.qq_account', HiddenFieldHook, 'hidden'],
       ['bot.platforms', HiddenFieldHook, 'hidden'],
@@ -994,6 +993,39 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     setHasUnsavedChanges(true)
   }
 
+  const identityFieldNames = new Set(['nickname', 'alias_names'])
+  const botSchema = configSchema.nested.bot
+  const identitySchema: ConfigSchema | null = botSchema ? {
+    ...botSchema,
+    fields: botSchema.fields
+      .filter((field) => identityFieldNames.has(field.name))
+      .map((field) => ({ ...field, advanced: false })),
+    nested: {},
+  } : null
+  const sectionLeadingContent = identitySchema ? {
+    personality: (
+      <DynamicConfigForm
+        schema={identitySchema}
+        values={sectionValues.bot ?? {}}
+        onChange={(field, value) => updateSectionValueByPath('bot', [field], value)}
+        basePath="bot"
+        hooks={fieldHooks}
+        advancedVisible={advancedVisible}
+      />
+    ),
+  } : undefined
+
+  // 仅调整展示归属，昵称与别名仍通过原 bot 配置节读写。
+  const getDisplaySectionSchema = (sectionName: string, schema: ConfigSchema): ConfigSchema => {
+    if (sectionName === 'bot' && configSchema.nested?.personality) {
+      return { ...schema, fields: schema.fields.filter((field) => !identityFieldNames.has(field.name)) }
+    }
+    if (sectionName === 'personality') {
+      return { ...schema, uiLabel: '身份与人格' }
+    }
+    return schema
+  }
+
   const getSubtabLabel = (schema: ConfigSchema, fallback: string) => {
     return schema.uiSubLabel || schema.uiLabel || schema.classDoc || fallback
   }
@@ -1063,6 +1095,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
           hooks={fieldHooks}
           advancedVisible={advancedVisible}
           sectionColumns={2}
+          sectionLeadingContent={sectionLeadingContent}
         />
       )
     }
@@ -1263,7 +1296,10 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
   const renderTabContent = (tab: TabGroup) => {
     const tabNestedEntries = tab.sections
-      .map((sectionName) => [sectionName, configSchema.nested?.[sectionName]] as const)
+      .map((sectionName) => {
+        const schema = configSchema.nested?.[sectionName]
+        return [sectionName, schema ? getDisplaySectionSchema(sectionName, schema) : undefined] as const
+      })
       .filter((entry): entry is readonly [string, ConfigSchema] => Boolean(entry[1]))
 
     if (tabNestedEntries.length === 0) {
@@ -1300,6 +1336,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
         hooks={fieldHooks}
         advancedVisible={advancedVisible}
         sectionColumns={2}
+        sectionLeadingContent={sectionLeadingContent}
       />
     )
   }
