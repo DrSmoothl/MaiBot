@@ -48,7 +48,6 @@ from src.maisaka.context.messages import (
 from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
 from src.maisaka.display.stage_status_board import remove_stage_status, update_stage_status
 from src.maisaka.focus import MaisakaFocusRuntimeMixin, focus_mode_manager
-from src.maisaka.mode_policy import is_reply_necessity_trigger_enabled
 from src.maisaka.monitor.events import (
     emit_message_ingested,
     emit_message_sent,
@@ -60,11 +59,10 @@ from src.maisaka.monitor.message_payload import (
     build_monitor_message_media,
     build_monitor_reply_preview,
 )
-from src.maisaka.idle_backoff import IdleBackoffController
 from src.maisaka.reply_effect import ReplyEffectTracker
 from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
 from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids, message_id_from_context_message
-from src.maisaka.turn_scheduler import MessageTurnScheduler
+from src.maisaka.turn_trigger import IdleBackoffController, MessageTurnScheduler
 from src.mcp_module.provider import MCPToolProvider
 from src.mcp_module.service import get_mcp_service
 from src.plugin_runtime.tool_provider import PluginToolProvider
@@ -1132,8 +1130,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         effective_frequency = min(1.0, self._get_effective_reply_frequency())
         if effective_frequency <= 0:
             return 0
-        if is_reply_necessity_trigger_enabled():
-            return max(1, int(ceil(1.0 / (effective_frequency * effective_frequency))))
         return max(1, int(ceil(1.0 / effective_frequency)))
 
     def _get_pending_message_count(self) -> int:
@@ -1742,6 +1738,11 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             self.discovered_tool_names.add(normalized_name)
             newly_discovered_tool_names.append(normalized_name)
         return newly_discovered_tool_names
+
+    def record_planner_reply(self) -> None:
+        """记录 Planner 成功调用了一次 reply，一次调用拆成多条消息发送也只计一次。"""
+
+        self._message_turn_scheduler.record_reply()
 
     def _has_pending_messages(self) -> bool:
         return self._last_processed_index < len(self.message_cache)

@@ -577,6 +577,7 @@ async def handle_tool(
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
     reply_metadata["sent_message_ids"] = sent_message_ids
     reply_metadata["send_results"] = send_results
+    tool_ctx.runtime.record_planner_reply()
     track_reply_effect = getattr(tool_ctx.runtime, "track_reply_effect", None)
     if track_reply_effect is not None:
         await track_reply_effect(

@@ -169,3 +169,32 @@ def test_behavior_style_upgrade_does_not_create_missing_personality_section():
 
     assert result.migrated is False
     assert "personality" not in result.data
+
+
+def test_removed_reply_necessity_trigger_mode_upgrade_hook():
+    config_data = {"chat": {"reply_timing": {"reply_trigger_mode": "reply_necessity"}}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.14.53",
+        new_ver="8.14.54",
+    )
+
+    assert result.migrated is True
+    assert result.data["chat"]["reply_timing"]["reply_trigger_mode"] == "dynamic"
+    assert result.reason == "8.14.54:chat.reply_timing.reply_trigger_mode"
+
+
+def test_removed_reply_necessity_trigger_mode_hook_preserves_frequency_mode():
+    config_data = {"chat": {"reply_timing": {"reply_trigger_mode": "frequency"}}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.14.53",
+        new_ver="8.14.54",
+    )
+
+    assert result.migrated is False
+    assert result.data["chat"]["reply_timing"]["reply_trigger_mode"] == "frequency"

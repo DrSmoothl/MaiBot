@@ -22,12 +22,12 @@ OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
 
 REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS = {
     "frequency": "按照新消息数量决定思考",
-    "reply_necessity": "综合新消息数量、内容、过往发言决定思考",
+    "dynamic": "估计每批消息的回复可能性并动态调整门槛，让回复次数贴近回复频率",
 }
 
 REPLY_TRIGGER_MODE_OPTION_LABELS = {
     "frequency": "频率触发",
-    "reply_necessity": "必要性触发",
+    "dynamic": "动态触发",
 }
 
 EMOTION_TRAIT_OPTION_LABELS = {
@@ -596,7 +596,7 @@ class ChatReplyTimingConfig(ConfigBase):
     )
     """开启后，被 @ 时会尽量回复。"""
 
-    reply_trigger_mode: Literal["frequency", "reply_necessity"] = Field(
+    reply_trigger_mode: Literal["frequency", "dynamic"] = Field(
         default="frequency",
         json_schema_extra={
             "label": {

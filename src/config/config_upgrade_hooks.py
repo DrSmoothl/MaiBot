@@ -427,6 +427,18 @@ def _migrate_removed_expression_selection_mode(data: dict[str, Any]) -> list[str
     return ["expression.expression_selection_mode"]
 
 
+def _migrate_removed_reply_necessity_trigger_mode(data: dict[str, Any]) -> list[str]:
+    """8.14.54: 将已移除的 reply_necessity 回复触发模式迁移为 dynamic。"""
+
+    chat = _as_dict(data.get("chat"))
+    reply_timing = _as_dict(chat.get("reply_timing")) if chat is not None else None
+    if reply_timing is None or reply_timing.get("reply_trigger_mode") != "reply_necessity":
+        return []
+
+    reply_timing["reply_trigger_mode"] = "dynamic"
+    return ["chat.reply_timing.reply_trigger_mode"]
+
+
 BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
     ConfigUpgradeHook(
         target_version="8.10.11",
@@ -472,6 +484,11 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.14.40",
         config_names=("bot_config.toml",),
         migrate=_migrate_removed_expression_selection_mode,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.14.54",
+        config_names=("bot_config.toml",),
+        migrate=_migrate_removed_reply_necessity_trigger_mode,
     ),
 )
 MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = ()
