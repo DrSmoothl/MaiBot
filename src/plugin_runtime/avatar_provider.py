@@ -20,13 +20,15 @@ async def query_adapter_avatar(
 
     broker = get_platform_io_manager()
     route = RouteKey(platform=platform, account_id=account_id, scope=scope)
-    drivers = broker.resolve_drivers(route)
+    # legacy/local 发送驱动没有插件 API，不能让它们遮蔽账号级头像提供方。
+    drivers = [driver for driver in broker.resolve_drivers(route) if driver.descriptor.plugin_id]
     if not drivers:
         # 无平台级发送绑定时，仍允许仅接收的适配器提供头像。
         drivers = [
             driver
             for driver in broker.driver_registry.list(platform=platform)
-            if (not account_id or driver.descriptor.account_id == account_id)
+            if driver.descriptor.plugin_id
+            and (not account_id or driver.descriptor.account_id == account_id)
             and (not scope or driver.descriptor.scope == scope)
         ]
         plugin_ids = {driver.descriptor.plugin_id for driver in drivers if driver.descriptor.plugin_id}

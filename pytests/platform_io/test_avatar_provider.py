@@ -4,7 +4,8 @@ import sys
 
 import pytest
 
-from src.platform_io import PlatformIOManager, RouteBinding
+from src.platform_io import PlatformIOManager, RouteBinding, RouteKey
+from src.platform_io.drivers.legacy_driver import LegacyPlatformDriver
 from src.platform_io.drivers.plugin_driver import PluginPlatformDriver
 from src.plugin_runtime import avatar_provider
 from src.plugin_runtime.host.api_registry import APIRegistry
@@ -85,3 +86,25 @@ async def test_provider_failure_is_not_reported_as_absent(provider):
     provider[2].return_value = SimpleNamespace(error={"message": "connection failed"}, payload={})
     with pytest.raises(RuntimeError, match="connection failed"):
         await avatar_provider.query_adapter_avatar("custom", "person", "user", account_id="1")
+
+
+@pytest.mark.asyncio
+async def test_legacy_send_driver_does_not_hide_account_scoped_avatar_provider(provider):
+    broker = provider[0]
+    add_adapter(provider, "adapter", "1")
+    legacy = LegacyPlatformDriver(driver_id="legacy.send.custom", platform="custom", account_id="1")
+    broker.register_driver(legacy)
+    # 模拟实际启用的旧发送链：平台级查询命中 legacy，插件只绑定账号级路由。
+    broker._legacy_send_drivers["custom"] = legacy
+    assert broker.resolve_drivers(RouteKey(platform="custom")) == [legacy]
+    result = await avatar_provider.query_adapter_avatar("custom", "person", "user")
+    assert result["status"] == "available"
+    assert provider[2].await_args.kwargs["plugin_id"] == "adapter"
+
+    # legacy 存在时也不能绕过多适配器归属检查。
+    add_adapter(provider, "second", "2")
+    with pytest.raises(ValueError, match="多个适配器"):
+        await avatar_provider.query_adapter_avatar("custom", "person", "user")
+    result = await avatar_provider.query_adapter_avatar("custom", "person", "user", account_id="2")
+    assert result["status"] == "available"
+    assert provider[2].await_args.kwargs["plugin_id"] == "second"
