@@ -33,9 +33,13 @@ describe('menuSections 菜单结构', () => {
     }
   })
 
-  it('所有菜单项 label 均为 sidebar.menu 命名空间的 i18n key', () => {
+  it('菜单项使用侧栏文案，聊天入口复用工作区文案', () => {
     for (const item of allItems) {
-      expect(item.label).toMatch(/^sidebar\.menu\./)
+      if (item.path === '/chat') {
+        expect(item.label).toBe('workspace.chat')
+      } else {
+        expect(item.label).toMatch(/^sidebar\.menu\./)
+      }
     }
   })
 

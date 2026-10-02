@@ -310,6 +310,7 @@ export function AuthPage() {
                 <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" strokeWidth={2} fill="none" />
                 <Input
                   id="token"
+                  aria-label="Access Token"
                   type="password"
                   placeholder={t('auth.tokenPlaceholder')}
                   value={token}

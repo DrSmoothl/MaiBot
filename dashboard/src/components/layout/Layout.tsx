@@ -227,7 +227,7 @@ export function Layout({ children }: LayoutProps) {
 
     setMobileMenuOpen(false)
     setSkipSidebarResizeAnimation(false)
-    setWorkspaceTransitionTarget(to === '/chat' ? 'chat' : to === '/logs' ? 'logs' : 'settings')
+    setWorkspaceTransitionTarget(to === '/logs' ? 'logs' : 'settings')
 
     const enterWorkspace = () => {
       void router.navigate({ to }).catch(() => {

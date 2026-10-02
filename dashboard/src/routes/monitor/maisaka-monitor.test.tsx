@@ -329,7 +329,7 @@ function findTimelineViewport(container: HTMLElement, markerText: string): HTMLD
 
 /** 定位“回到底部”按钮内的箭头图标（autoScroll 开启时带 text-primary 高亮） */
 function getBackToBottomIcon(): SVGElement {
-  const icon = screen.getByRole('button', { name: '回到底部' }).querySelector('svg')
+  const icon = screen.getByRole('button', { name: '底部' }).querySelector('svg')
   if (!icon) throw new Error('未找到回到底部按钮图标')
   return icon
 }
@@ -609,7 +609,7 @@ describe('阶段状态栏与工具条', () => {
     await flushAutoScroll()
     virtualizerMocks.scrollToIndex.mockClear()
 
-    await user.click(screen.getByRole('button', { name: '回到底部' }))
+    await user.click(screen.getByRole('button', { name: '底部' }))
     expect(virtualizerMocks.scrollToIndex).toHaveBeenCalledWith(2, {
       align: 'end',
       behavior: 'smooth',
@@ -641,7 +641,7 @@ describe('阶段状态栏与工具条', () => {
     await waitFor(() => expect(getBackToBottomIcon()).not.toHaveClass('text-primary'))
 
     virtualizerMocks.scrollToIndex.mockClear()
-    await user.click(screen.getByRole('button', { name: '回到底部' }))
+    await user.click(screen.getByRole('button', { name: '底部' }))
     expect(virtualizerMocks.scrollToIndex).toHaveBeenCalledWith(1, {
       align: 'end',
       behavior: 'smooth',
@@ -745,7 +745,7 @@ describe('阶段状态栏与工具条', () => {
 
     await flushAutoScroll()
     scrollToSpy.mockClear()
-    await user.click(screen.getByRole('button', { name: '回到底部' }))
+    await user.click(screen.getByRole('button', { name: '底部' }))
 
     expect(virtualizerMocks.scrollToIndex).not.toHaveBeenCalled()
     expect(scrollToSpy).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
@@ -768,7 +768,7 @@ describe('阶段状态栏与工具条', () => {
     Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 300 })
     virtualizerMocks.scrollToIndex.mockClear()
 
-    await user.click(screen.getByRole('button', { name: '查找上条' }))
+    await user.click(screen.getByRole('button', { name: '上条' }))
 
     expect(virtualizerMocks.scrollToIndex).toHaveBeenCalledWith(1, {
       align: 'center',
@@ -791,7 +791,7 @@ describe('阶段状态栏与工具条', () => {
     Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 300 })
     virtualizerMocks.scrollToIndex.mockClear()
 
-    await user.click(screen.getByRole('button', { name: '查找上条' }))
+    await user.click(screen.getByRole('button', { name: '上条' }))
 
     expect(virtualizerMocks.scrollToIndex).not.toHaveBeenCalled()
     expect(toastMocks.toast).toHaveBeenCalledWith(
@@ -821,7 +821,7 @@ describe('阶段状态栏与工具条', () => {
     fireEvent.scroll(viewport)
     await waitFor(() => expect(getBackToBottomIcon()).toHaveClass('text-primary'))
 
-    await user.click(screen.getByRole('button', { name: '查找上条' }))
+    await user.click(screen.getByRole('button', { name: '上条' }))
     expect(virtualizerMocks.scrollToIndex).toHaveBeenCalledWith(1, {
       align: 'center',
       behavior: 'smooth',
@@ -1166,7 +1166,7 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('10+5 tokens')).toBeInTheDocument()
 
     // 工具执行结果卡片
-    expect(screen.getByText('使用工具')).toBeInTheDocument()
+    expect(screen.getByText('send_message、web_search')).toBeInTheDocument()
     expect(screen.getByText('2 个')).toBeInTheDocument()
     expect(screen.getByText('send_message')).toBeInTheDocument()
     expect(screen.getByText('web_search')).toBeInTheDocument()
@@ -1302,10 +1302,9 @@ describe('时间线事件卡片', () => {
     // 两张卡都提示回合结束（finish 工具名大小写不敏感）
     expect(screen.getAllByText('本轮思考暂时结束')).toHaveLength(2)
     expect(screen.getAllByText('等待新的消息。')).toHaveLength(2)
-    // 只有混合工具的卡片渲染“使用工具”，且计数只统计非 finish 工具
-    expect(screen.getByText('使用工具')).toBeInTheDocument()
-    expect(screen.getByText('1 个')).toBeInTheDocument()
+    // 混合工具卡片以非 finish 工具名为标题；单工具不重复显示数量。
     expect(screen.getByText('web_search')).toBeInTheDocument()
+    expect(screen.queryByText('1 个')).not.toBeInTheDocument()
     expect(screen.getByText('找到了结果')).toBeInTheDocument()
   })
 
@@ -1364,7 +1363,6 @@ describe('时间线事件卡片', () => {
     render(<MaisakaMonitor />)
 
     expect(screen.getByText('planner 本轮没有文本内容')).toBeInTheDocument()
-    expect(screen.getByText('使用工具')).toBeInTheDocument()
     expect(screen.getByText('search_web')).toBeInTheDocument()
     // 回退条目默认视为执行成功且无耗时，成功状态不额外显示
     expect(screen.queryByText('执行成功')).not.toBeInTheDocument()

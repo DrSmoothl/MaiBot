@@ -1,4 +1,4 @@
-import { isRedirect } from '@tanstack/react-router'
+import { isRedirect, Outlet } from '@tanstack/react-router'
 import { cleanup, render, screen } from '@testing-library/react'
 import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -286,11 +286,8 @@ describe('router 路由表', () => {
     }
   })
 
-  it('根组件在 DEV 下返回带 Outlet 的有效元素', () => {
-    const RootComponent = router.routeTree.options.component as (() => ReactNode) | undefined
-    expect(typeof RootComponent).toBe('function')
-    const element = RootComponent!()
-    expect(isValidElement(element)).toBe(true)
+  it('根组件直接使用 Outlet，兼容 React memo 组件', () => {
+    expect(router.routeTree.options.component).toBe(Outlet)
   })
 
   it('protected 布局组件返回包了 Layout 的有效元素', () => {

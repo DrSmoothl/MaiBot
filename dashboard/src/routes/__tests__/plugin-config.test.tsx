@@ -149,6 +149,7 @@ vi.mock('@/components/plugin-stats', () => ({
 }))
 vi.mock('@/lib/chat-management-api', () => ({
   CHAT_ADAPTER_STATUS_QUERY_KEY: 'chat-adapter-status',
+  getAllChatStreams: async () => [],
   getAdapterHostPolicy: vi.fn(),
   getAdapterPolicyDefaults: vi.fn(),
   updateAdapterHostPolicy: vi.fn(),
@@ -768,8 +769,8 @@ describe('PluginConfigPage 主程序放行规则', () => {
     expect(await screen.findByText('群聊规则')).toBeInTheDocument()
     expect(screen.queryByText('这是 MaiBot 主程序侧规则，与适配器自身名单相互独立。')).not.toBeInTheDocument()
     expect(screen.queryByText(/适配器自身的白名单仍在/)).not.toBeInTheDocument()
-    expect(screen.getByText('全局默认：接收所有消息')).toBeInTheDocument()
-    expect(screen.getByText('全局默认：默认不接收消息')).toBeInTheDocument()
+    expect(screen.getByTestId('mode-hint:group')).toHaveTextContent('黑名单模式')
+    expect(screen.getByTestId('mode-hint:private')).toHaveTextContent('白名单模式')
     expect(screen.queryByRole('button', { name: /保存主程序规则/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /源代码/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重置/ })).not.toBeInTheDocument()

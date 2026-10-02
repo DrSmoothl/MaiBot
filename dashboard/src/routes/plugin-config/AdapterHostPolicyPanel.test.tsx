@@ -14,6 +14,7 @@ const { toastMock } = vi.hoisted(() => ({ toastMock: vi.fn() }))
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
 
 vi.mock('@/lib/chat-management-api', () => ({
+  getAllChatStreams: async () => [],
   getAdapterHostPolicy: vi.fn(),
   updateAdapterHostPolicy: vi.fn(),
 }))
