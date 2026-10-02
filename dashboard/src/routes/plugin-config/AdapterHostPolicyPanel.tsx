@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Loader2, Save } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { AlertCircle, Loader2, Save, UsersRound } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { ListFieldEditor } from '@/components/ListFieldEditor'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,7 +18,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { getAdapterHostPolicy, updateAdapterHostPolicy } from '@/lib/chat-management-api'
+import { useResolvedAvatarUrl } from '@/lib/avatar-url'
+import { getAdapterHostPolicy, getAllChatStreams, updateAdapterHostPolicy } from '@/lib/chat-management-api'
 import type {
   AdapterAccountEntry,
   AdapterActiveIdentity,
@@ -72,6 +74,30 @@ function formatSaveTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false })
 }
 
+function GroupIdentity({
+  groupId,
+  name,
+  identity,
+}: {
+  groupId: string
+  name?: string
+  identity: AdapterActiveIdentity
+}) {
+  const avatarUrl = useResolvedAvatarUrl(identity.platform, groupId, 'group', undefined, {
+    accountId: identity.account_id,
+    scope: identity.scope,
+  })
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <Avatar className="h-7 w-7">
+        <AvatarImage src={avatarUrl} alt={name || groupId} />
+        <AvatarFallback><UsersRound className="h-4 w-4 text-muted-foreground" /></AvatarFallback>
+      </Avatar>
+      {name && <span className="truncate text-sm" title={name}>{name}</span>}
+    </div>
+  )
+}
+
 function AdapterHostPolicyEditor({
   policy,
   globalDefaults,
@@ -84,6 +110,32 @@ function AdapterHostPolicyEditor({
   toolbarContainer,
   onSectionChange,
 }: AdapterHostPolicyEditorProps) {
+  const streamsQuery = useQuery({
+    queryKey: ['chat-streams', 'all'],
+    queryFn: getAllChatStreams,
+    enabled: Boolean(activeIdentity?.platform && (policy.group.allow_ids.length || policy.group.deny_ids.length)),
+    staleTime: 60_000,
+  })
+  const groupNames = useMemo(() => {
+    const names = new Map<string, string>()
+    if (!activeIdentity) return names
+    for (const stream of streamsQuery.data ?? []) {
+      if (stream.platform !== activeIdentity.platform || !stream.group_id || !stream.group_name?.trim()) continue
+      // 同一群有多个聊天流时，优先使用当前账号和连接记录的真实群名称。
+      if (!names.has(stream.group_id) || (
+        stream.account_id === activeIdentity.account_id && stream.scope === activeIdentity.scope
+      )) names.set(stream.group_id, stream.group_name.trim())
+    }
+    return names
+  }, [streamsQuery.data, activeIdentity])
+  const renderGroupIdentity = (value: unknown) => {
+    if (!activeIdentity || typeof value !== 'string') return null
+    const trimmedId = value.trim()
+    const platformPrefix = `${activeIdentity.platform}:`
+    const groupId = trimmedId.startsWith(platformPrefix) ? trimmedId.slice(platformPrefix.length) : trimmedId
+    if (!groupId || groupId.includes('*') || groupId.includes(':')) return null
+    return <GroupIdentity groupId={groupId} name={groupNames.get(groupId)} identity={activeIdentity} />
+  }
   // 当前账号之外的条目：换账号登录后旧条目保留在配置中但不再生效
   // 同一账号可能在多个网关下各有条目，按账号 ID 去重
   const staleAccounts = [
@@ -215,6 +267,7 @@ function AdapterHostPolicyEditor({
                     itemType="string"
                     emptyText="空列表"
                     placeholder={chatType === 'group' ? '输入接收消息的群号' : '输入接收消息的用户 ID'}
+                    renderItemSuffix={chatType === 'group' ? renderGroupIdentity : undefined}
                   />
                 </div>
 
@@ -244,6 +297,7 @@ function AdapterHostPolicyEditor({
                     itemType="string"
                     emptyText="空列表"
                     placeholder={chatType === 'group' ? '输入不接收消息的群号' : '输入不接收消息的用户 ID'}
+                    renderItemSuffix={chatType === 'group' ? renderGroupIdentity : undefined}
                   />
                 </div>
               </CardContent>
