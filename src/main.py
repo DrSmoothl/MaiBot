@@ -224,6 +224,7 @@ class MainSystem:
                 run_image_path_maintenance_background,
                 should_schedule_image_path_maintenance_background,
             )
+            from src.webui.routers.data_transfer import periodic_transfer_temp_cleanup
 
             # 在独立线程中巡检推理图片，空闲时也能清理旧版本遗留的孤立缓存。
             PromptPreviewLogger.start()
@@ -235,6 +236,7 @@ class MainSystem:
                 emoji_manager.periodic_emoji_maintenance(),
                 periodic_emoji_cache_cleanup(),
                 periodic_image_cache_cleanup(),
+                periodic_transfer_temp_cleanup(),
                 self.app.run(),
                 self.server.run(),
             ]
