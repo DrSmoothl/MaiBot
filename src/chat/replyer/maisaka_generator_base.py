@@ -28,6 +28,7 @@ from src.common.i18n import get_locale
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils
 from src.config.config import global_config
+from src.maisaka.context.message_id_alias import to_display_message_id
 from src.config.model_configs import ModelInfo
 from src.config.official_configs import build_personality_emotion_suffix
 from src.core.types import ActionInfo
@@ -58,6 +59,7 @@ from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.plugin_runtime.hook_payloads import deserialize_prompt_items, serialize_prompt_items
 
 from .maisaka_expression_selector import maisaka_expression_selector
+from .retro_prompt import RetroReplyPromptMixin
 
 logger = get_logger("replyer")
 
@@ -75,7 +77,7 @@ class MaisakaReplyContext:
     selected_expressions: List[Dict[str, Any]] = field(default_factory=list)
 
 
-class BaseMaisakaReplyGenerator:
+class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
     """Maisaka replyer 的共享实现。"""
 
     def __init__(
@@ -172,7 +174,7 @@ class BaseMaisakaReplyGenerator:
         user_info = reply_message.message_info.user_info
         sender_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
         bot_name = global_config.bot.nickname.strip() or sender_name
-        target_message_id = reply_message.message_id.strip() if reply_message.message_id else "未知"
+        target_message_id = to_display_message_id(reply_message.message_id) if reply_message.message_id else "未知"
         # target_time = reply_message.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         quote_ids = extract_quote_ids_from_message_sequence(reply_message.raw_message)
         target_content = self._normalize_content(self._build_target_message_content(reply_message), limit=300)
@@ -209,7 +211,7 @@ class BaseMaisakaReplyGenerator:
             f"你想要回复的消息是 {sender_name} 发送的 msg_id为 {target_message_id} 的消息，你这次要回复的就是这条目标消息，不要把其他历史消息当成当前回复对象。",
         ]
         if quote_ids:
-            target_lines.append(f"- quote={','.join(quote_ids)}")
+            target_lines.append(f"- quote={','.join(to_display_message_id(quote_id) for quote_id in quote_ids)}")
         target_lines.extend(
             [
                 f"- 发言内容：{target_content}",
@@ -326,11 +328,11 @@ class BaseMaisakaReplyGenerator:
 
         target_message = self._find_message_by_id(chat_history, reply_message, message_id)
         if target_message is None:
-            return f"msg_id={message_id} 的第 {image_index + 1} 张图片"
+            return f"msg_id={to_display_message_id(message_id)} 的第 {image_index + 1} 张图片"
 
         user_info = target_message.message_info.user_info
         sender_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
-        return f"{sender_name} 的消息 msg_id={message_id} 中的第 {image_index + 1} 张图片"
+        return f"{sender_name} 的消息 msg_id={to_display_message_id(message_id)} 中的第 {image_index + 1} 张图片"
 
     def _format_attachment_at_target(
         self,
@@ -352,7 +354,7 @@ class BaseMaisakaReplyGenerator:
             return f"@{target_name}".strip()
         if user_id:
             return f"@{user_id}"
-        return f"msg_id={message_id} 的发送者"
+        return f"msg_id={to_display_message_id(message_id)} 的发送者"
 
     def _build_reply_attachment_prompt(
         self,
@@ -385,7 +387,7 @@ class BaseMaisakaReplyGenerator:
 
         raw_emoji = str(reply_tool_args.get("attach_emoji") or "").strip()
         if raw_emoji:
-            lines.append(f"除了当前你输出的回复，你还会（由另一个模型控制）发送一个 {raw_emoji} 表情包。")
+            lines.append(f"当前文字回复后还会单独发送已选中的第 {raw_emoji} 号表情包，无需在正文中输出序号。")
 
         return "\n".join(lines)
 
@@ -573,16 +575,16 @@ class BaseMaisakaReplyGenerator:
 
     @staticmethod
     def _build_reply_reference_lines(reply_reason: str, reply_reference: str) -> List[str]:
-        """构建 replyer 的信息参考块，优先使用显式参考信息。"""
+        """将 Planner 内容和 reply 工具参考信息直接合并。"""
 
-        normalized_reply_reference = reply_reference.strip()
-        if normalized_reply_reference:
-            return [normalized_reply_reference]
-
+        reference_lines: List[str] = []
         normalized_reply_reason = reply_reason.strip()
         if normalized_reply_reason:
-            return [f"当前思考：\n{normalized_reply_reason}"]
-        return []
+            reference_lines.append(normalized_reply_reason)
+        normalized_reply_reference = reply_reference.strip()
+        if normalized_reply_reference:
+            reference_lines.append(normalized_reply_reference)
+        return reference_lines
 
     @classmethod
     def _build_reply_reference_message(cls, reply_reason: str, reply_reference: str) -> str:
@@ -644,6 +646,9 @@ class BaseMaisakaReplyGenerator:
         normalized_reply_style = reply_style.strip()
         if not normalized_reply_style:
             return ""
+        if normalized_reply_style not in style_messages:
+            logger.warning(f"reply 工具返回了未知的回复风格 {normalized_reply_style!r}，按默认「正常回复」处理")
+            return style_messages["正常回复"]
         return style_messages[normalized_reply_style]
 
     def _build_history_messages(
@@ -691,7 +696,21 @@ class BaseMaisakaReplyGenerator:
         stream_id: Optional[str] = None,
         enable_visual_message: bool = False,
         reply_tool_args: Optional[Dict[str, Any]] = None,
+        think_level: int = 1,
     ) -> List[ContextItem]:
+        # 复古模式把所有回复指令集中到一份完整模板里，整段作为一条 user 消息发送
+        if global_config.experimental.replyer_retro_prompt:
+            return self._build_retro_request_messages(
+                chat_history=chat_history,
+                reply_message=reply_message,
+                reply_reason=reply_reason,
+                expression_habits=expression_habits,
+                reply_requirements=reply_requirements,
+                stream_id=stream_id,
+                think_level=think_level,
+                reply_tool_args=reply_tool_args,
+            )
+
         items: List[ContextItem] = []
         keywords_reaction_prompt = self._build_keyword_reaction_prompt(
             chat_history=chat_history,
@@ -1012,7 +1031,6 @@ class BaseMaisakaReplyGenerator:
         del from_plugin
         del log_reply
         del reply_time_point
-        del think_level
         del unknown_words
 
         result = ReplyGenerationResult()
@@ -1123,6 +1141,7 @@ class BaseMaisakaReplyGenerator:
                     reply_requirements=active_reply_requirements,
                     stream_id=stream_id,
                     reply_tool_args=active_reply_tool_args,
+                    think_level=think_level,
                 )
             except Exception as exc:
                 import traceback
@@ -1162,6 +1181,7 @@ class BaseMaisakaReplyGenerator:
                     stream_id=stream_id,
                     enable_visual_message=self._resolve_enable_visual_message(model_info),
                     reply_tool_args=dict(reply_tool_args_for_attempt),
+                    think_level=think_level,
                 )
                 request_messages = await self._invoke_before_model_request_hook(
                     request_messages=built_request_messages,

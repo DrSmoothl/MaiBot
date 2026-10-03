@@ -24,6 +24,7 @@ export interface MaimaiVersion {
  * 已安装插件信息
  */
 export interface InstalledPlugin {
+  release?: { version: string; commit: string; pinned: boolean } | null
   id: string
   manifest: {
     manifest_version: number
@@ -53,7 +54,7 @@ export interface InstalledPlugin {
   enabled?: boolean
   disabled?: boolean
   loaded?: boolean
-  load_status?: 'success' | 'failed' | 'inactive' | 'disabled' | 'unknown' | 'loading'
+  load_status?: 'success' | 'failed' | 'inactive' | 'disabled' | 'offline' | 'unknown' | 'loading'
   load_error?: string
   circuit_status?: {
     state: 'open' | 'half_open'

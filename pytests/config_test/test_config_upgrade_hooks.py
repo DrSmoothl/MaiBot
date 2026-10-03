@@ -3,6 +3,35 @@ from src.config.config_upgrade_hooks import apply_config_upgrade_hooks
 from src.config.official_configs import PersonalityConfig
 
 
+def test_removed_expression_selection_mode_upgrade_hook():
+    config_data = {"expression": {"expression_selection_mode": "vector"}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.14.39",
+        new_ver="8.14.40",
+    )
+
+    assert result.migrated is True
+    assert result.data["expression"]["expression_selection_mode"] == "vector_intent"
+    assert result.reason == "8.14.40:expression.expression_selection_mode"
+
+
+def test_removed_expression_selection_mode_hook_preserves_supported_modes():
+    config_data = {"expression": {"expression_selection_mode": "legacy"}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.14.39",
+        new_ver="8.14.40",
+    )
+
+    assert result.migrated is False
+    assert result.data["expression"]["expression_selection_mode"] == "legacy"
+
+
 def test_split_chat_config_sections_upgrade_hook():
     config_data = {
         "chat": {
@@ -140,3 +169,32 @@ def test_behavior_style_upgrade_does_not_create_missing_personality_section():
 
     assert result.migrated is False
     assert "personality" not in result.data
+
+
+def test_removed_reply_necessity_trigger_mode_upgrade_hook():
+    config_data = {"chat": {"reply_timing": {"reply_trigger_mode": "reply_necessity"}}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.14.53",
+        new_ver="8.14.54",
+    )
+
+    assert result.migrated is True
+    assert result.data["chat"]["reply_timing"]["reply_trigger_mode"] == "dynamic"
+    assert result.reason == "8.14.54:chat.reply_timing.reply_trigger_mode"
+
+
+def test_removed_reply_necessity_trigger_mode_hook_preserves_frequency_mode():
+    config_data = {"chat": {"reply_timing": {"reply_trigger_mode": "frequency"}}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.14.53",
+        new_ver="8.14.54",
+    )
+
+    assert result.migrated is False
+    assert result.data["chat"]["reply_timing"]["reply_trigger_mode"] == "frequency"

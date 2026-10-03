@@ -146,10 +146,6 @@ function normalizeStyleConfig(value: unknown): DashboardStyleConfig {
         futureRetro.panelDepth,
         DEFAULT_FUTURE_RETRO_STYLE_CONFIG.panelDepth
       ),
-      strokeScale: clampPercent(
-        futureRetro.strokeScale,
-        DEFAULT_FUTURE_RETRO_STYLE_CONFIG.strokeScale
-      ),
     },
   }
 }

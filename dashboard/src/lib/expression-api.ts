@@ -38,6 +38,19 @@ import type {
 
 const API_BASE = '/api/webui/expression'
 
+export interface ExpressionVectorBuildProgress {
+  status: 'disabled' | 'unconfigured' | 'waiting_profile' | 'pending' | 'running' | 'completed'
+  completed: number
+  total: number
+  percent: number
+}
+
+export function getExpressionVectorBuildProgress(): Promise<ExpressionVectorBuildProgress> {
+  return backendApi.get<ExpressionVectorBuildProgress>(`${API_BASE}/vector-build-progress`, {
+    errorMessage: '获取表达库构建进度失败',
+  })
+}
+
 /**
  * 获取聊天列表
  */

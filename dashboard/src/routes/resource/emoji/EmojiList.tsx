@@ -154,24 +154,10 @@ export function EmojiList({
               <span className="absolute bottom-1 right-1 rounded border bg-background/90 px-1 py-0 text-[10px] font-mono text-muted-foreground backdrop-blur">
                 {emoji.usage_count}次
               </span>
-            </div>
 
-            {/* 底部信息和操作 */}
-            <div
-              className={`border-t bg-card ${cardSize === 'small' ? 'p-1' : 'p-2'}`}
-            >
-              <p
-                className={`text-xs text-muted-foreground break-all ${
-                  cardSize === 'small' ? 'min-h-4 line-clamp-1' : 'min-h-8 line-clamp-2'
-                }`}
-                title={emoji.description || '暂无描述'}
-              >
-                {emoji.description?.trim() || '暂无描述'}
-              </p>
-
-              {/* 操作按钮 - 悬停时显示 */}
+              {/* 操作按钮 - 悬停时悬浮在图片下方，不占用额外竖向空间 */}
               <div
-                className={`mt-1 flex justify-center opacity-0 transition-opacity group-hover:opacity-100 ${
+                className={`absolute inset-x-0 bottom-0 z-20 flex items-center justify-center bg-background/80 py-1 opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 ${
                   cardSize === 'small' ? 'flex-nowrap gap-0.5' : 'gap-1'
                 }`}
               >
@@ -252,6 +238,20 @@ export function EmojiList({
                   <Trash2 className="h-3 w-3" />
                 </Button>
               </div>
+            </div>
+
+            {/* 底部信息 */}
+            <div
+              className={`border-t bg-card ${cardSize === 'small' ? 'p-1' : 'p-2'}`}
+            >
+              <p
+                className={`text-xs text-muted-foreground break-all ${
+                  cardSize === 'small' ? 'min-h-4 line-clamp-1' : 'min-h-8 line-clamp-2'
+                }`}
+                title={emoji.description || '暂无描述'}
+              >
+                {emoji.description?.trim() || '暂无描述'}
+              </p>
             </div>
           </div>
         ))}

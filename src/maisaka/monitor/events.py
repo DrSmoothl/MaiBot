@@ -4,12 +4,14 @@
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 import asyncio
 import json
 import time
+import weakref
 
 from src.common.logger import get_logger
+from src.maisaka.context.usage import ContextSectionUsage
 from src.maisaka.display.display_utils import format_tool_call_for_display
 
 logger = get_logger("maisaka_monitor")
@@ -17,6 +19,20 @@ logger = get_logger("maisaka_monitor")
 MONITOR_DOMAIN = "maisaka_monitor"
 MONITOR_TOPIC = "main"
 NON_PERSISTED_EVENTS = {"stage.status", "stage.removed", "stage.snapshot"}
+
+# asyncio.Lock 绑定事件循环，按循环分别持有，循环销毁后自动回收
+_broadcast_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = weakref.WeakKeyDictionary()
+
+
+def _get_broadcast_lock() -> asyncio.Lock:
+    """获取当前事件循环的广播锁。"""
+
+    loop = asyncio.get_running_loop()
+    lock = _broadcast_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _broadcast_locks[loop] = lock
+    return lock
 
 
 def _normalize_payload_value(value: Any) -> Any:
@@ -215,6 +231,7 @@ def _serialize_tool_results(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "tool_call_source": str(tool.get("tool_call_source", "")),
             "tool_call_source_label": str(tool.get("tool_call_source_label", "")),
             "success": bool(tool.get("success", False)),
+            "stop_after_execution": bool(tool.get("stop_after_execution", False)),
             "duration_ms": float(tool.get("duration_ms", 0.0) or 0.0),
             "summary": str(tool.get("summary", "")),
         }
@@ -226,6 +243,11 @@ def _serialize_tool_results(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             serialized_tool["prompt_html_uri"] = prompt_html_uri
         if detail is not None:
             serialized_tool["detail"] = _normalize_payload_value(detail)
+        if serialized_tool["tool_name"] == "tool_search" and serialized_tool["success"]:
+            serialized_tool["matched_tool_names"] = _normalize_payload_value(tool["matched_tool_names"])
+            serialized_tool["newly_discovered_tool_names"] = _normalize_payload_value(
+                tool["newly_discovered_tool_names"]
+            )
         serialized_tools.append(serialized_tool)
     return serialized_tools
 
@@ -262,10 +284,20 @@ def _serialize_native_tool_calls(tool_calls: List[Any]) -> List[Dict[str, Any]]:
     return serialized_calls
 
 
+def _serialize_context_sections(sections: Optional[List[ContextSectionUsage]]) -> List[Dict[str, Any]]:
+    """标准化提示词分段用量列表。"""
+
+    return [
+        {"key": section.key, "chars": int(section.chars), "count": int(section.count)}
+        for section in list(sections or [])
+    ]
+
+
 def _serialize_request_block(
     messages: Optional[List[Any]],
     selected_history_count: Optional[int],
     tool_count: Optional[int],
+    context_sections: Optional[List[ContextSectionUsage]] = None,
 ) -> Optional[Dict[str, Any]]:
     """标准化请求区块。"""
 
@@ -276,6 +308,7 @@ def _serialize_request_block(
         "messages": _serialize_messages(list(messages or [])),
         "selected_history_count": int(selected_history_count or 0),
         "tool_count": int(tool_count or 0),
+        "context_sections": _serialize_context_sections(context_sections),
     }
 
 
@@ -288,6 +321,8 @@ def _serialize_planner_block(
     total_tokens: Optional[int],
     duration_ms: Optional[float],
     prompt_html_uri: Optional[str] = None,
+    prompt_cache_hit_tokens: Optional[int] = None,
+    prompt_cache_miss_tokens: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """标准化 planner 结果区块。"""
 
@@ -310,6 +345,8 @@ def _serialize_planner_block(
         "prompt_tokens": int(prompt_tokens or 0),
         "completion_tokens": int(completion_tokens or 0),
         "total_tokens": int(total_tokens or 0),
+        "prompt_cache_hit_tokens": int(prompt_cache_hit_tokens or 0),
+        "prompt_cache_miss_tokens": int(prompt_cache_miss_tokens or 0),
         "duration_ms": float(duration_ms or 0.0),
         "prompt_html_uri": str(prompt_html_uri or ""),
     }
@@ -322,17 +359,20 @@ async def _broadcast(event: str, data: Dict[str, Any]) -> None:
         from src.webui.routers.websocket.manager import websocket_manager
 
         data = _enrich_session_identity(data)
-        broadcast_data = data
-        if event not in NON_PERSISTED_EVENTS:
-            from src.maisaka.monitor.event_store import record_monitor_event
+        # 写库分配 event_id 与广播须在同一临界区内完成，保证前端按 event_id 递增收到事件；
+        # 否则并发广播可能乱序，前端补发游标越过尚未送达的事件，断线重连后该事件永久丢失。
+        async with _get_broadcast_lock():
+            broadcast_data = data
+            if event not in NON_PERSISTED_EVENTS:
+                from src.maisaka.monitor.event_store import record_monitor_event
 
-            broadcast_data = await asyncio.to_thread(record_monitor_event, event, data)
-        await websocket_manager.broadcast_to_topic(
-            domain=MONITOR_DOMAIN,
-            topic=MONITOR_TOPIC,
-            event=event,
-            data=broadcast_data,
-        )
+                broadcast_data = await asyncio.to_thread(record_monitor_event, event, data)
+            await websocket_manager.broadcast_to_topic(
+                domain=MONITOR_DOMAIN,
+                topic=MONITOR_TOPIC,
+                event=event,
+                data=broadcast_data,
+            )
     except Exception as exc:
         logger.warning(f"MaiSaka 监控事件广播失败: {exc}", exc_info=True)
 
@@ -537,10 +577,12 @@ async def emit_message_updated(
     })
 
 
-async def emit_planner_finalized(
+async def emit_planner_snapshot(
     *,
+    event_type: Literal["planner.progress", "planner.finalized"],
     session_id: str,
     cycle_id: int,
+    run_id: str,
     planner_request_messages: Optional[List[Any]],
     planner_selected_history_count: Optional[int],
     planner_tool_count: Optional[int],
@@ -552,23 +594,29 @@ async def emit_planner_finalized(
     planner_total_tokens: Optional[int],
     planner_duration_ms: Optional[float],
     planner_prompt_html_uri: Optional[str] = None,
+    planner_prompt_cache_hit_tokens: Optional[int] = None,
+    planner_prompt_cache_miss_tokens: Optional[int] = None,
+    planner_context_sections: Optional[List[ContextSectionUsage]] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
     time_records: Optional[Dict[str, float]] = None,
     agent_state: str = "",
     planner_interrupted: bool = False,
     end_reason: str = "",
     end_detail: str = "",
+    active_tool_call_id: str = "",
 ) -> None:
-    """广播一轮 planner 结束后的最终聚合事件。"""
+    """广播 Planner 过程或结束时的快照。"""
 
-    await _broadcast("planner.finalized", {
+    await _broadcast(event_type, {
         "session_id": session_id,
         "cycle_id": cycle_id,
+        "run_id": run_id,
         "timestamp": time.time(),
         "request": _serialize_request_block(
             planner_request_messages,
             planner_selected_history_count,
             planner_tool_count,
+            planner_context_sections,
         ),
         "planner": _serialize_planner_block(
             planner_content,
@@ -579,8 +627,11 @@ async def emit_planner_finalized(
             planner_total_tokens,
             planner_duration_ms,
             planner_prompt_html_uri,
+            planner_prompt_cache_hit_tokens,
+            planner_prompt_cache_miss_tokens,
         ),
         "tools": _serialize_tool_results(list(tools or [])),
+        "active_tool_call_id": active_tool_call_id,
         "interrupted": planner_interrupted,
         "final_state": {
             "time_records": _normalize_payload_value(time_records or {}),

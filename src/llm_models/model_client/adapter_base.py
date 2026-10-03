@@ -12,6 +12,7 @@ from .base_client import (
     AudioTranscriptionRequest,
     BaseClient,
     EmbeddingRequest,
+    ImageEmbeddingRequest,
     ResponseRequest,
     UsageRecord,
     UsageTuple,
@@ -128,6 +129,12 @@ class AdapterClient(BaseClient, ABC, Generic[RawStreamT, RawResponseT]):
         response, usage_record = await self._execute_embedding_request(request)
         return self._attach_usage_record(response, request.model_info, usage_record)
 
+    async def get_image_embedding(self, request: ImageEmbeddingRequest) -> APIResponse:
+        """获取图片嵌入，调用 Provider 显式实现的图片协议。"""
+
+        response, usage_record = await self._execute_image_embedding_request(request)
+        return self._attach_usage_record(response, request.model_info, usage_record)
+
     async def get_audio_transcriptions(self, request: AudioTranscriptionRequest) -> APIResponse:
         """获取音频转录。
 
@@ -191,6 +198,7 @@ class AdapterClient(BaseClient, ABC, Generic[RawStreamT, RawResponseT]):
             total_tokens=usage_record[2],
             prompt_cache_hit_tokens=usage_record[3] if len(usage_record) > 3 else 0,
             prompt_cache_miss_tokens=usage_record[4] if len(usage_record) > 4 else 0,
+            prompt_cache_reported=bool(usage_record[5]) if len(usage_record) > 5 else False,
         )
 
     def _attach_usage_record(
@@ -276,6 +284,18 @@ class AdapterClient(BaseClient, ABC, Generic[RawStreamT, RawResponseT]):
             Tuple[APIResponse, UsageTuple | None]: 统一响应对象与可选使用量信息。
         """
         raise NotImplementedError
+
+    async def _execute_image_embedding_request(
+        self,
+        request: ImageEmbeddingRequest,
+    ) -> Tuple[APIResponse, UsageTuple | None]:
+        """执行图片嵌入请求；默认实现直接说明协议不受支持。"""
+
+        from src.llm_models.exceptions import ImageEmbeddingUnsupportedError
+
+        raise ImageEmbeddingUnsupportedError(
+            f"Provider 客户端 {type(self).__name__} 未实现图片嵌入协议"
+        )
 
     @abstractmethod
     async def _execute_audio_transcription_request(

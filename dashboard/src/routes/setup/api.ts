@@ -2,6 +2,7 @@
 
 import { authApi, backendApi } from '@/lib/http'
 import { PROVIDER_TEMPLATES } from '@/routes/config/providerTemplates'
+import type { ModelPricePeriod } from '@/routes/config/model/types'
 
 import type {
   ApiProviderSetupConfig,
@@ -15,8 +16,8 @@ interface ModelInfo {
   name: string
   api_provider: string
   price_in?: number
-  cache?: boolean
   cache_price_in?: number
+  price_periods?: ModelPricePeriod[]
   price_out?: number
   force_stream_mode?: boolean
   visual?: boolean
@@ -37,7 +38,6 @@ interface TaskConfig {
   model_list?: string[]
   max_tokens?: number
   temperature?: number
-  slow_threshold?: number
   selection_strategy?: string
 }
 
@@ -204,7 +204,6 @@ function createBasicModel(
 ): ModelInfo {
   return {
     price_in: 0,
-    cache: false,
     cache_price_in: 0,
     price_out: 0,
     force_stream_mode: false,

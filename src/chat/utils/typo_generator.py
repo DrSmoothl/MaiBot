@@ -4,15 +4,18 @@
 
 from collections import defaultdict
 from pathlib import Path
-from pypinyin import Style, pinyin
+from typing import Dict, List, Optional
 
 import itertools
-import jieba
 import json
 import math
 import os
 import random
 import time
+
+from pypinyin import Style, pinyin
+
+import jieba
 
 from src.common.logger import get_logger
 
@@ -22,11 +25,11 @@ logger = get_logger("typo_gen")
 # （拼音表需要约 2 万次 pypinyin 调用，字频表需读取 370KB JSON），
 # 因此全进程只构建一次，所有 ChineseTypoGenerator 实例共享只读数据，
 # 避免每次回复都重复构建导致事件循环卡顿数百毫秒
-_shared_pinyin_dict: dict[str, list[str]] | None = None
-_shared_char_frequency: dict[str, float] | None = None
+_shared_pinyin_dict: Optional[Dict[str, List[str]]] = None
+_shared_char_frequency: Optional[Dict[str, float]] = None
 
 
-def _get_shared_pinyin_dict() -> dict[str, list[str]]:
+def _get_shared_pinyin_dict() -> Dict[str, List[str]]:
     """获取进程级共享的拼音-汉字映射表（懒加载，仅构建一次）。"""
 
     global _shared_pinyin_dict
@@ -36,7 +39,7 @@ def _get_shared_pinyin_dict() -> dict[str, list[str]]:
     return _shared_pinyin_dict
 
 
-def _get_shared_char_frequency() -> dict[str, float]:
+def _get_shared_char_frequency() -> Dict[str, float]:
     """获取进程级共享的字频表（懒加载，仅构建一次）。"""
 
     global _shared_char_frequency
@@ -71,7 +74,7 @@ class ChineseTypoGenerator:
         self.char_frequency = _get_shared_char_frequency()
 
     @staticmethod
-    def _load_or_create_char_frequency():
+    def _load_or_create_char_frequency() -> Dict[str, float]:
         """
         加载或创建汉字频率字典
         """

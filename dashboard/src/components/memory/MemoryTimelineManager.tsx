@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
-  CalendarClock,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  GitBranch,
   RefreshCw,
-  Search,
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -23,7 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Slider } from '@/components/ui/slider'
 import { useToast } from '@/hooks/use-toast'
 import { formatChatDisplayName } from '@/lib/chat-display'
 import {
@@ -47,7 +43,8 @@ interface MemoryTimelineManagerProps {
   onJump: (target: MemoryTimelineJumpTargetPayload) => void
 }
 
-const TIMELINE_FETCH_LIMIT = 500
+// 单次拉取量；页面按 5/10/20 条分页展示，200 已足够回溯，避免撑满后端扫描上限
+const TIMELINE_FETCH_LIMIT = 200
 const DEFAULT_TIMELINE_PAGE_SIZE = 5
 const TIMELINE_PAGE_SIZE_OPTIONS = [5, 10, 20]
 
@@ -155,14 +152,6 @@ function getEventTypeLabel(type: string): string {
   return labels[type] ?? type
 }
 
-function normalizeRange(minTime: number, maxTime: number, start?: number, end?: number): [number, number] {
-  const safeMin = Math.floor(minTime)
-  const safeMax = Math.max(safeMin + 60, Math.floor(maxTime))
-  const nextStart = Math.min(Math.max(Math.floor(start ?? safeMin), safeMin), safeMax)
-  const nextEnd = Math.min(Math.max(Math.floor(end ?? safeMax), nextStart), safeMax)
-  return [nextStart, nextEnd]
-}
-
 function getVisiblePageNumbers(currentPage: number, totalPages: number): number[] {
   if (totalPages <= 5) {
     return Array.from({ length: totalPages }, (_, index) => index + 1)
@@ -183,10 +172,6 @@ export function MemoryTimelineManager({
   const [typeFilter, setTypeFilter] = useState<TimelineTypeFilter>('all')
   const [timeStart, setTimeStart] = useState<number | undefined>(initialTimeStart)
   const [timeEnd, setTimeEnd] = useState<number | undefined>(initialTimeEnd)
-  const [rangeBounds, setRangeBounds] = useState<[number, number]>(() => {
-    const now = Math.floor(Date.now() / 1000)
-    return [now - 7 * 24 * 3600, now]
-  })
   const [payload, setPayload] = useState<MemoryTimelinePayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
@@ -194,15 +179,6 @@ export function MemoryTimelineManager({
   const initialAppliedRef = useRef(false)
   const latestRequestRef = useRef(0)
 
-  const selectedChat = useMemo(
-    () => chatTargets.find((item) => item.chat_id === chatId) ?? null,
-    [chatId, chatTargets],
-  )
-  const sliderValue = useMemo(
-    () => normalizeRange(rangeBounds[0], rangeBounds[1], timeStart, timeEnd),
-    [rangeBounds, timeEnd, timeStart],
-  )
-  const [sliderDraft, setSliderDraft] = useState<[number, number]>(sliderValue)
   const filteredTypes = useMemo(() => (typeFilter === 'all' ? [] : [typeFilter]), [typeFilter])
 
   useEffect(() => {
@@ -250,11 +226,6 @@ export function MemoryTimelineManager({
         return
       }
       setPayload(nextPayload)
-      const minTime = nextPayload.range.min_time
-      const maxTime = nextPayload.range.max_time
-      if (typeof minTime === 'number' && typeof maxTime === 'number') {
-        setRangeBounds(normalizeRange(minTime, maxTime))
-      }
     } catch (error) {
       if (requestId !== latestRequestRef.current) {
         return
@@ -281,21 +252,6 @@ export function MemoryTimelineManager({
     setTimeEnd(end)
   }, [])
 
-  const handleSliderChange = useCallback((value: number[]) => {
-    if (value.length < 2) {
-      return
-    }
-    setSliderDraft(normalizeRange(rangeBounds[0], rangeBounds[1], value[0], value[1]))
-  }, [rangeBounds])
-
-  const handleSliderCommit = useCallback((value: number[]) => {
-    if (value.length < 2) {
-      return
-    }
-    setTimeStart(Math.floor(value[0]))
-    setTimeEnd(Math.floor(value[1]))
-  }, [])
-
   const handlePageSizeChange = useCallback((value: string) => {
     setPageSize(Number(value))
     setCurrentPage(1)
@@ -314,25 +270,14 @@ export function MemoryTimelineManager({
   }, [payload])
 
   useEffect(() => {
-    setSliderDraft(sliderValue)
-  }, [sliderValue])
-
-  useEffect(() => {
     setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages))
   }, [totalPages])
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CalendarClock className="h-4 w-4" />
-              审计范围
-            </CardTitle>
-            <CardDescription>选择真实聊天流与时间窗口，核对长期记忆对象的变动记录。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <Card className="w-full">
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1.5fr)_minmax(12rem,0.5fr)]">
             <div className="space-y-2">
               <Label>聊天流</Label>
               <Select value={chatId} onValueChange={setChatId}>
@@ -347,58 +292,6 @@ export function MemoryTimelineManager({
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-3">
-              {[
-                { value: '24h' as const, label: '最近 24 小时' },
-                { value: '7d' as const, label: '最近 7 天' },
-                { value: '30d' as const, label: '最近 30 天' },
-              ].map((item) => (
-                <Button key={item.value} type="button" variant="outline" onClick={() => applyQuickRange(item.value)}>
-                  {item.label}
-                </Button>
-              ))}
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="timeline-time-start">开始时间</Label>
-                <Input
-                  id="timeline-time-start"
-                  type="datetime-local"
-                  value={toDatetimeLocal(timeStart)}
-                  onChange={(event) => setTimeStart(fromDatetimeLocal(event.target.value))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="timeline-time-end">结束时间</Label>
-                <Input
-                  id="timeline-time-end"
-                  type="datetime-local"
-                  value={toDatetimeLocal(timeEnd)}
-                  onChange={(event) => setTimeEnd(fromDatetimeLocal(event.target.value))}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3 rounded-lg border p-3">
-              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span>{formatMemoryTime(rangeBounds[0])}</span>
-                <span>{formatMemoryTime(rangeBounds[1])}</span>
-              </div>
-              <Slider
-                min={rangeBounds[0]}
-                max={rangeBounds[1]}
-                step={60}
-                value={sliderDraft}
-                onValueChange={handleSliderChange}
-                onValueCommit={handleSliderCommit}
-              />
-              <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                <span>窗口开始：{formatMemoryTime(sliderDraft[0])}</span>
-                <span>窗口结束：{formatMemoryTime(sliderDraft[1])}</span>
-              </div>
             </div>
 
             <div className="space-y-2">
@@ -416,47 +309,48 @@ export function MemoryTimelineManager({
                 </SelectContent>
               </Select>
             </div>
+          </div>
 
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+            <div className="space-y-2">
+              <Label htmlFor="timeline-time-start">开始时间</Label>
+              <Input
+                id="timeline-time-start"
+                type="datetime-local"
+                value={toDatetimeLocal(timeStart)}
+                onChange={(event) => setTimeStart(fromDatetimeLocal(event.target.value))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="timeline-time-end">结束时间</Label>
+              <Input
+                id="timeline-time-end"
+                type="datetime-local"
+                value={toDatetimeLocal(timeEnd)}
+                onChange={(event) => setTimeEnd(fromDatetimeLocal(event.target.value))}
+              />
+            </div>
             <Button onClick={() => void loadTimeline()} disabled={loading || !chatId}>
               <RefreshCw className={cn('mr-2 h-4 w-4', loading && 'animate-spin')} />
               刷新时间线
             </Button>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <GitBranch className="h-4 w-4" />
-              变动摘要
-            </CardTitle>
-            <CardDescription>
-              {selectedChat
-                ? formatChatDisplayName(selectedChat.chat_name, selectedChat.account_id)
-                : '未选择聊天流'} · {payload?.summary.total ?? 0} 条事件
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {TYPE_FILTERS.filter((item) => item.value !== 'all').map((item) => (
-                <div key={item.value} className="rounded-lg border p-3">
-                  <div className="text-xs text-muted-foreground">{item.label}</div>
-                  <div className="mt-1 text-2xl font-semibold">{payload?.summary.by_type[item.value] ?? 0}</div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {[
+              { value: '24h' as const, label: '最近 24 小时' },
+              { value: '7d' as const, label: '最近 7 天' },
+              { value: '30d' as const, label: '最近 30 天' },
+            ].map((item) => (
+              <Button key={item.value} type="button" variant="outline" onClick={() => applyQuickRange(item.value)}>
+                {item.label}
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-4 w-4" />
-            事件列表
-          </CardTitle>
-          <CardDescription>按时间倒序分页展示长期记忆审计事件。</CardDescription>
-        </CardHeader>
         <CardContent className="space-y-4">
           {events.length > 0 ? (
             <>

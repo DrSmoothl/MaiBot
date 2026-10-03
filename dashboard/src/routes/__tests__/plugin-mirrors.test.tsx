@@ -109,32 +109,6 @@ describe('PluginMirrorsPage 特征化', () => {
     expect(backendApi.get).toHaveBeenCalledTimes(2)
   })
 
-  it('「仅显示当前版本」默认开启，切换后把 false 写入 localStorage', async () => {
-    const user = userEvent.setup()
-    await renderPage()
-
-    const compatSwitch = screen.getByRole('switch', { name: '仅显示当前版本' })
-    expect(compatSwitch).toHaveAttribute('aria-checked', 'true')
-    // 挂载时 useEffect 已回写当前值
-    expect(localStorage.getItem('plugins-market-compatible-only')).toBe('true')
-
-    await user.click(compatSwitch)
-    expect(compatSwitch).toHaveAttribute('aria-checked', 'false')
-    await waitFor(() =>
-      expect(localStorage.getItem('plugins-market-compatible-only')).toBe('false')
-    )
-  })
-
-  it('localStorage 为 false 时「仅显示当前版本」初始为关闭', async () => {
-    localStorage.setItem('plugins-market-compatible-only', 'false')
-    await renderPage()
-
-    expect(screen.getByRole('switch', { name: '仅显示当前版本' })).toHaveAttribute(
-      'aria-checked',
-      'false'
-    )
-  })
-
   it('返回按钮默认导航到 /plugins', async () => {
     const user = userEvent.setup()
     await renderPage()
@@ -191,9 +165,9 @@ describe('PluginMirrorsPage 特征化', () => {
     const user = userEvent.setup()
     await renderPage()
 
-    // switch 顺序：仅显示当前版本 → 桌面表格行 → 移动端卡片
+    // switch 顺序：桌面表格行 → 移动端卡片
     const switches = screen.getAllByRole('switch')
-    await user.click(switches[1])
+    await user.click(switches[0])
 
     await waitFor(() =>
       expect(backendApi.put).toHaveBeenCalledWith('/api/webui/plugins/mirrors/official', {

@@ -600,6 +600,7 @@ class ReferenceMessage(LLMContextMessage):
     remaining_uses_value: Optional[int] = 1
     display_prefix: str = "[参考消息]"
     context_item_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    jargon_entries: tuple[tuple[str, str], ...] = ()
 
     @property
     def role(self) -> str:

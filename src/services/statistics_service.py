@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, NamedTuple
 
 import asyncio
 
@@ -715,6 +715,7 @@ def fetch_model_usage_since(
                     col(ModelUsage.prompt_cache_miss_tokens),
                     col(ModelUsage.cost),
                     col(ModelUsage.time_cost),
+                    col(ModelUsage.task_name),
                 )
                 .where(
                     col(ModelUsage.timestamp) >= query_start_time,
@@ -743,6 +744,7 @@ def fetch_model_usage_since(
                 "prompt_cache_miss_tokens": record[11],
                 "cost": record[12],
                 "time_cost": record[13],
+                "task_name": record[14],
             }
 
         last_id = int(records[-1][0])
@@ -760,12 +762,14 @@ def fetch_model_duration_aggregates_since(query_start_time: datetime) -> list[di
                 func.count().label("request_count"),
                 func.sum(col(ModelUsage.time_cost)).label("time_cost_sum"),
                 func.sum(col(ModelUsage.time_cost) * col(ModelUsage.time_cost)).label("time_cost_sq_sum"),
+                col(ModelUsage.task_name),
             )
             .where(
                 col(ModelUsage.timestamp) >= query_start_time,
                 col(ModelUsage.time_cost) > 0,
             )
             .group_by(
+                col(ModelUsage.task_name),
                 col(ModelUsage.request_type),
                 col(ModelUsage.model_api_provider_name),
                 col(ModelUsage.model_assign_name),
@@ -783,16 +787,40 @@ def fetch_model_duration_aggregates_since(query_start_time: datetime) -> list[di
             "count": int(record[4] or 0),
             "sum": float(record[5] or 0.0),
             "sum_sq": float(record[6] or 0.0),
+            "task_name": record[7],
         }
         for record in records
     ]
 
 
-def fetch_messages_since(query_start_time: datetime) -> list[Messages]:
-    """获取指定时间之后的消息记录。"""
+class StatisticsMessageRow(NamedTuple):
+    """统计任务所需的消息行投影。
+
+    仅保留统计实际使用的 6 个字段：整实体 select(Messages) 会在消息量达到
+    数十万条时把全部列（含 raw_content 二进制与 additional_config 长文本）
+    物化为 ORM 实例，造成内存暴增。
+    """
+
+    timestamp: datetime
+    platform: str
+    user_id: str
+    group_id: str | None
+    group_name: str | None
+    user_nickname: str | None
+
+
+def fetch_messages_since(query_start_time: datetime) -> list[StatisticsMessageRow]:
+    """获取指定时间之后的消息记录，仅投影统计所需字段以避免整实体加载的内存峰值。"""
     with get_db_session(auto_commit=False) as session:
-        statement = select(Messages).where(col(Messages.timestamp) >= query_start_time)
-        return list(session.exec(statement).all())
+        statement = select(
+            col(Messages.timestamp),
+            col(Messages.platform),
+            col(Messages.user_id),
+            col(Messages.group_id),
+            col(Messages.group_name),
+            col(Messages.user_nickname),
+        ).where(col(Messages.timestamp) >= query_start_time)
+        return [StatisticsMessageRow(*row) for row in session.exec(statement).all()]
 
 
 def fetch_tool_records_since(query_start_time: datetime) -> list[ToolRecord]:

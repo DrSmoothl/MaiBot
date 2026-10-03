@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { backendApi } from '@/lib/http'
@@ -39,8 +39,6 @@ interface MirrorConfig {
   updated_at?: string
 }
 
-const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
-
 interface PluginMirrorsPageProps {
   embedded?: boolean
 }
@@ -53,9 +51,6 @@ export function PluginMirrorsPage({ embedded = false }: PluginMirrorsPageProps) 
   const [editingMirror, setEditingMirror] = useState<MirrorConfig | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [showCompatibleOnly, setShowCompatibleOnly] = useState(
-    () => localStorage.getItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY) !== 'false'
-  )
 
   // 琛ㄥ崟鐘舵€?
   const [formData, setFormData] = useState({
@@ -81,10 +76,6 @@ export function PluginMirrorsPage({ embedded = false }: PluginMirrorsPageProps) 
   // 任何写操作成功后，整体失效镜像源列表
   const invalidateMirrors = () =>
     queryClient.invalidateQueries({ queryKey: ['plugin-mirrors'] })
-
-  useEffect(() => {
-    localStorage.setItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY, String(showCompatibleOnly))
-  }, [showCompatibleOnly])
 
   // 添加镜像源（失败由全局 mutation 错误 toast 呈现）
   const addMutation = useMutation({
@@ -246,7 +237,7 @@ export function PluginMirrorsPage({ embedded = false }: PluginMirrorsPageProps) 
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold">插件商店设置</h1>
               <p className="text-sm text-muted-foreground mt-1">
-                管理插件市场筛选偏好和插件安装镜像源
+                管理插件安装镜像源
               </p>
             </div>
           </div>
@@ -255,24 +246,6 @@ export function PluginMirrorsPage({ embedded = false }: PluginMirrorsPageProps) 
             添加镜像源
           </Button>
         </div>
-
-        <Card className="p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
-              <Label htmlFor="plugin-market-compatible-only" className="text-sm font-medium">
-                仅显示当前版本
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                在插件市场默认隐藏不兼容当前麦麦版本的插件
-              </p>
-            </div>
-            <Switch
-              id="plugin-market-compatible-only"
-              checked={showCompatibleOnly}
-              onCheckedChange={setShowCompatibleOnly}
-            />
-          </div>
-        </Card>
 
         {/* 加载状态 */}
         {loading ? (

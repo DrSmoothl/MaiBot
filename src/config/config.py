@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import hashlib
 import inspect
 from datetime import datetime
 from pathlib import Path
@@ -66,13 +67,27 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.14.36"
-MODEL_CONFIG_VERSION: str = "1.17.6"
+CONFIG_VERSION: str = "8.14.54"
+MODEL_CONFIG_VERSION: str = "1.17.13"
 
 logger = get_logger("config")
 
 T = TypeVar("T", bound="ConfigBase")
 ConfigReloadCallback = Callable[[Sequence[str]], object] | Callable[[], object]
+
+
+class _ReloadCallbackRegistration:
+    """热重载回调注册项。
+
+    sections 为 None 表示不关心具体配置节，任何热重载都会通知；
+    指定节名（如 ``("webui",)``）时，仅当变更命中所声明的配置节才通知。
+    """
+
+    __slots__ = ("callback", "sections")
+
+    def __init__(self, callback: ConfigReloadCallback, sections: tuple[str, ...] | None) -> None:
+        self.callback = callback
+        self.sections = sections
 
 
 class Config(ConfigBase):
@@ -248,12 +263,13 @@ class ConfigManager:
         self.global_config: Config | None = None
         self.model_config: ModelConfig | None = None
         self._reload_lock: asyncio.Lock = asyncio.Lock()
-        self._reload_callbacks: list[ConfigReloadCallback] = []
+        self._reload_callbacks: list[_ReloadCallbackRegistration] = []
         self._file_watcher: FileWatcher | None = None
         self._file_watcher_subscription_id: str | None = None
         self._hot_reload_min_interval_s: float = 1.0
         self._hot_reload_timeout_s: float = 20.0
         self._last_hot_reload_monotonic: float = 0.0
+        self._config_file_fingerprints: dict[str, str] = {}
         self.reload_revision: int = 0
 
     def initialize(self):
@@ -268,6 +284,7 @@ class ConfigManager:
         )
         if global_updated or model_updated:
             logger.info("配置已自动升级，将继续使用更新后的配置启动")
+        self._update_config_file_fingerprints(("bot", "model"))
         self._warn_if_vlm_not_configured(self.model_config)
         logger.info(t("config.loaded"))
 
@@ -299,15 +316,25 @@ class ConfigManager:
             raise RuntimeError(t("config.model_not_initialized"))
         return self.model_config
 
-    def register_reload_callback(self, callback: ConfigReloadCallback) -> None:
+    def register_reload_callback(
+        self,
+        callback: ConfigReloadCallback,
+        sections: Sequence[str] | None = None,
+    ) -> None:
         """注册配置热重载回调。
 
         Args:
             callback: 配置热重载回调。允许无参回调，也允许接收
                 ``Sequence[str]`` 类型的变更范围列表。
+            sections: 回调关心的 bot 配置节名，如 ``("webui",)``、
+                ``("a_memorix",)``，支持点号分隔的子节（如
+                ``("chat.reply_timing",)``），按前缀匹配。为 None 时
+                不区分配置节，任何热重载都会通知。
         """
 
-        self._reload_callbacks.append(callback)
+        self._reload_callbacks.append(
+            _ReloadCallbackRegistration(callback, self._normalize_changed_sections(sections) or None)
+        )
 
     def unregister_reload_callback(self, callback: ConfigReloadCallback) -> None:
         """注销配置热重载回调。
@@ -316,10 +343,9 @@ class ConfigManager:
             callback: 先前注册过的回调对象。
         """
 
-        try:
-            self._reload_callbacks.remove(callback)
-        except ValueError:
-            return
+        self._reload_callbacks = [
+            registration for registration in self._reload_callbacks if registration.callback != callback
+        ]
 
     @staticmethod
     def _normalize_changed_scopes(changed_scopes: Sequence[str] | None) -> tuple[str, ...]:
@@ -363,6 +389,123 @@ class ConfigManager:
             if file_name == "model_config.toml" and "model" not in changed_scopes:
                 changed_scopes.append("model")
         return tuple(changed_scopes)
+
+    @staticmethod
+    def _normalize_changed_sections(sections: Sequence[str] | None) -> tuple[str, ...]:
+        """规范化配置节名列表。
+
+        Args:
+            sections: 原始配置节名列表。
+
+        Returns:
+            tuple[str, ...]: 规范化为小写点号路径的去重元组。
+        """
+
+        if sections is None:
+            return ()
+        normalized: list[str] = []
+        for section in sections:
+            parts = [part for part in str(section or "").strip().lower().split(".") if part]
+            if not parts:
+                continue
+            dotted = ".".join(parts)
+            if dotted not in normalized:
+                normalized.append(dotted)
+        return tuple(normalized)
+
+    @staticmethod
+    def _section_matches(declared: str, changed: str) -> bool:
+        """判断两个配置节是否命中：按点号分段后，任一方为另一方的前缀即命中。"""
+
+        declared_parts = declared.split(".")
+        changed_parts = changed.split(".")
+        common_length = min(len(declared_parts), len(changed_parts))
+        return declared_parts[:common_length] == changed_parts[:common_length]
+
+    @staticmethod
+    def _diff_bot_config_sections(old_config: "Config", new_config: "Config") -> tuple[str, ...] | None:
+        """对比新旧 bot 配置，返回发生变化的顶层配置节名。
+
+        Returns:
+            tuple[str, ...] | None: 变化的顶层配置节名元组；对比失败时
+                返回 None，调用方应按"变更节未知"保守处理。
+        """
+
+        try:
+            old_data = old_config.model_dump(mode="json")
+            new_data = new_config.model_dump(mode="json")
+        except Exception:
+            logger.warning("对比新旧 bot 配置差异失败，热重载将按变更节未知处理", exc_info=True)
+            return None
+        return tuple(
+            section for section in type(new_config).model_fields if old_data.get(section) != new_data.get(section)
+        )
+
+    def _is_registration_interested(
+        self,
+        registration: _ReloadCallbackRegistration,
+        changed_scopes: Sequence[str],
+        changed_sections: tuple[str, ...] | None,
+    ) -> bool:
+        """判断回调注册项是否命中本次热重载。
+
+        Args:
+            registration: 回调注册项。
+            changed_scopes: 本次热重载命中的配置范围。
+            changed_sections: 本次变更的 bot 配置节名，None 表示未知。
+
+        Returns:
+            bool: 是否应通知该回调。
+        """
+
+        if registration.sections is None:
+            return True
+        # 注册的节都属于 bot 配置，model 范围的重载无需通知
+        if "bot" not in changed_scopes:
+            return False
+        # 变更节未知时保守通知，避免漏掉固化了配置的组件
+        if changed_sections is None:
+            return True
+        return any(
+            self._section_matches(declared, changed)
+            for declared in registration.sections
+            for changed in changed_sections
+        )
+
+    def _get_config_file_path(self, scope: str) -> Path:
+        """返回指定配置范围对应的文件路径。"""
+
+        if scope == "bot":
+            return self.bot_config_path
+        if scope == "model":
+            return self.model_config_path
+        raise ValueError(f"未知配置范围: {scope}")
+
+    @staticmethod
+    def _get_config_file_fingerprint(path: Path) -> str:
+        """计算配置文件内容指纹，用于过滤已同步到运行时的重复文件事件。"""
+
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _update_config_file_fingerprints(self, scopes: Sequence[str]) -> None:
+        """记录已成功加载到运行时的配置文件内容指纹。"""
+
+        for scope in scopes:
+            self._config_file_fingerprints[scope] = self._get_config_file_fingerprint(
+                self._get_config_file_path(scope)
+            )
+
+    def _config_files_match_loaded_fingerprints(self, scopes: Sequence[str]) -> bool:
+        """判断指定配置文件是否与当前运行时已加载内容一致。"""
+
+        for scope in scopes:
+            loaded_fingerprint = self._config_file_fingerprints.get(scope)
+            if loaded_fingerprint is None:
+                return False
+            current_fingerprint = self._get_config_file_fingerprint(self._get_config_file_path(scope))
+            if current_fingerprint != loaded_fingerprint:
+                return False
+        return True
 
     @staticmethod
     def _callback_accepts_scopes(callback: ConfigReloadCallback) -> bool:
@@ -412,11 +555,21 @@ class ConfigManager:
         if asyncio.iscoroutine(result):
             await result
 
-    async def reload_config(self, changed_scopes: Sequence[str] | None = None) -> bool:
+    async def reload_config(
+        self,
+        changed_scopes: Sequence[str] | None = None,
+        *,
+        skip_if_unchanged: bool = False,
+        changed_sections: Sequence[str] | None = None,
+    ) -> bool:
         """重新加载主配置和模型配置。
 
         Args:
             changed_scopes: 本次触发热重载的配置范围。
+            skip_if_unchanged: 配置文件内容与已加载内容一致时，跳过重复重载。
+            changed_sections: 本次变更的 bot 配置节名（如
+                ``["chat.reply_timing"]``），用于按节过滤回调通知；为
+                None 时按新旧配置差异自动推断。
 
         Returns:
             bool: 是否重载成功。
@@ -428,6 +581,10 @@ class ConfigManager:
             return True
 
         async with self._reload_lock:
+            if skip_if_unchanged and self._config_files_match_loaded_fingerprints(normalized_scopes):
+                logger.debug("配置文件内容未变化，跳过重复热重载")
+                return True
+            previous_global_config = self.global_config
             try:
                 global_config_new = self.global_config
                 model_config_new = self.model_config
@@ -455,12 +612,22 @@ class ConfigManager:
 
             self.global_config = global_config_new
             self.model_config = model_config_new
+            self._update_config_file_fingerprints(normalized_scopes)
             self.reload_revision += 1
             logger.info(t("config.hot_reload_completed"))
 
-            for callback in list(self._reload_callbacks):
+            # 未显式给出变更节时，按新旧配置差异自动推断，供回调按节过滤
+            sections_for_dispatch = self._normalize_changed_sections(changed_sections) or None
+            if sections_for_dispatch is None and "bot" in normalized_scopes and previous_global_config is not None:
+                sections_for_dispatch = self._diff_bot_config_sections(previous_global_config, global_config_new)
+            if sections_for_dispatch is not None:
+                logger.debug(f"配置热重载命中的配置节: {list(sections_for_dispatch)}")
+
+            for registration in list(self._reload_callbacks):
+                if not self._is_registration_interested(registration, normalized_scopes, sections_for_dispatch):
+                    continue
                 try:
-                    await self._invoke_reload_callback(callback, normalized_scopes)
+                    await self._invoke_reload_callback(registration.callback, normalized_scopes)
                 except Exception as exc:
                     logger.warning(t("config.reload_callback_failed", error=exc))
             return True
@@ -513,6 +680,12 @@ class ConfigManager:
 
         if not changes:
             return
+        changed_scopes = self._resolve_changed_scopes(changes)
+        if not changed_scopes:
+            return
+        if self._config_files_match_loaded_fingerprints(changed_scopes):
+            logger.debug("配置文件内容未变化，跳过重复热重载")
+            return
         now_monotonic = asyncio.get_running_loop().time()
         if now_monotonic - self._last_hot_reload_monotonic < self._hot_reload_min_interval_s:
             logger.debug(t("config.reload_skipped_too_frequent"))
@@ -520,9 +693,8 @@ class ConfigManager:
         self._last_hot_reload_monotonic = now_monotonic
         logger.info(t("config.file_change_detected"))
         try:
-            changed_scopes = self._resolve_changed_scopes(changes)
             await asyncio.wait_for(
-                self.reload_config(changed_scopes=changed_scopes),
+                self.reload_config(changed_scopes=changed_scopes, skip_if_unchanged=True),
                 timeout=self._hot_reload_timeout_s,
             )
         except asyncio.TimeoutError:
@@ -599,6 +771,7 @@ def load_config_from_file(
         config_data, a_memorix_migration_applied = _migrate_legacy_a_memorix_config(config_data)
         if a_memorix_migration_applied:
             legacy_config_migration_reasons.append("a_memorix_legacy_config")
+    if config_class is Config:
         config_data = _normalize_loaded_bot_config_dict(config_data)
     hook_result = apply_config_upgrade_hooks(config_data, config_path.name, old_ver, new_ver)
     upgrade_hook_applied = hook_result.migrated

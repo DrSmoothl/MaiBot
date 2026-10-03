@@ -476,8 +476,10 @@ class PluginMessageUtils:
         if group_info_dict := message_info_dict.get("group_info"):
             group_id = group_info_dict.get("group_id")
             group_name = group_info_dict.get("group_name")
-            if not isinstance(group_id, str) or not isinstance(group_name, str) or not group_id or not group_name:
-                raise ValueError("消息字典中 'group_info' 字段缺少有效的 'group_id' 或 'group_name'")
+            # 群名允许为空（适配器拿不到真实群名时的显式「未知」语义），
+            # 空值不会被写入会话，聊天流保留已记录的名称。
+            if not isinstance(group_id, str) or not isinstance(group_name, str) or not group_id:
+                raise ValueError("消息字典中 'group_info' 字段缺少有效的 'group_id'")
             group_info = GroupInfo(group_id=group_id, group_name=group_name)
         else:
             group_info = None

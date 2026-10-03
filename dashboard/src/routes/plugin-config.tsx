@@ -77,6 +77,7 @@ import type {
 import { PluginIcon } from './plugins/PluginIcon'
 import { getPluginType, getPluginTypeLabel } from './plugins/types'
 import { AdapterHostPolicyPanel } from './plugin-config/AdapterHostPolicyPanel'
+import { AdapterPolicyDefaultsCard } from './plugin-config/AdapterPolicyDefaultsCard'
 import { getNestedRecord, getPluginMarketplaceRoutePath, isAdapterManagementPath } from './plugin-config/utils'
 import { usePluginList } from './plugin-config/hooks/usePluginList'
 import { usePluginLifecycle } from './plugin-config/hooks/usePluginLifecycle'
@@ -400,7 +401,7 @@ function SectionRenderer({ sectionName, section, config, onChange }: SectionRend
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <Card>
         <CollapsibleTrigger asChild>
-          <CardHeader className="hover:bg-muted/50 cursor-pointer gap-0.5 px-4! py-2! transition-colors sm:px-4! sm:py-2!">
+          <CardHeader className="hover:bg-muted/50 cursor-pointer space-y-0 gap-0.5 px-4! py-1.5! transition-colors sm:px-4! sm:py-1.5!">
             <div className="flex items-center">
               <div className="flex min-w-0 items-center gap-2">
                 {isOpen ? (
@@ -1114,6 +1115,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
   const { i18n } = useTranslation()
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
   const [documentPanelOpen, setDocumentPanelOpen] = useState(false)
+  const [hostPolicyToolbar, setHostPolicyToolbar] = useState<HTMLDivElement | null>(null)
 
   const {
     editMode,
@@ -1311,11 +1313,15 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
         value={pluginPageTab}
         onValueChange={(value) => setPluginPageTab(value as 'settings' | 'host-policy' | 'details')}
       >
-        <TabsList>
-          <TabsTrigger value="settings">设置</TabsTrigger>
-          {showHostPolicy && <TabsTrigger value="host-policy">主程序放行规则</TabsTrigger>}
-          <TabsTrigger value="details">详情</TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-center gap-3">
+          <TabsList>
+            <TabsTrigger value="settings">设置</TabsTrigger>
+            {showHostPolicy && <TabsTrigger value="host-policy">黑白名单规则</TabsTrigger>}
+            <TabsTrigger value="details">详情</TabsTrigger>
+          </TabsList>
+          {/* 黑白名单页的账号与保存工具栏渲染到页签同一行，节省纵向空间 */}
+          {showHostPolicy && <div ref={setHostPolicyToolbar} className="min-w-0 flex-1" />}
+        </div>
         <TabsContent value="settings" className="mt-4">
           {/* 源代码模式 */}
           {editMode === 'source' && (
@@ -1400,7 +1406,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
         </TabsContent>
         {showHostPolicy && (
           <TabsContent value="host-policy" className="mt-4">
-            <AdapterHostPolicyPanel pluginId={plugin.id} />
+            <AdapterHostPolicyPanel pluginId={plugin.id} toolbarContainer={hostPolicyToolbar} />
           </TabsContent>
         )}
         <TabsContent value="details" className="mt-4">
@@ -1724,6 +1730,9 @@ function PluginConfigPageContent() {
             </div>
           </div>
         )}
+
+        {/* 适配器全局默认策略（位于插件加载情况下方） */}
+        {adapterManagement && <AdapterPolicyDefaultsCard />}
 
         {/* 插件列表 */}
         {loading ? (

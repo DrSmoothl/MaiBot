@@ -8,14 +8,12 @@ import {
   Globe,
   LogOut,
   Menu,
-  MessageSquare,
   Moon,
   MoreHorizontal,
   Search,
   Settings,
   SlidersHorizontal,
   Sun,
-  TimerReset,
 } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
 import { lazy, Suspense, type ComponentType, useEffect, useRef, useState } from 'react'
@@ -28,7 +26,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -39,7 +36,6 @@ import { toggleThemeWithTransition } from '@/components/use-theme'
 import { useBackground } from '@/hooks/use-background'
 import { logout } from '@/lib/auth'
 import { isElectron } from '@/lib/runtime'
-import { DEFAULT_SETTINGS, getSetting } from '@/lib/settings-manager'
 import { cn } from '@/lib/utils'
 
 import type { WorkspaceMode } from './types'
@@ -69,7 +65,6 @@ const WORKSPACE_TABS: Array<{
   labelKey: string
 }> = [
   { value: 'settings', to: '/', icon: SlidersHorizontal, labelKey: 'workspace.settings' },
-  { value: 'chat', to: '/chat', icon: MessageSquare, labelKey: 'workspace.chat' },
   { value: 'logs', to: '/logs', icon: FileText, labelKey: 'workspace.logs' },
 ]
 
@@ -111,7 +106,6 @@ export function Header({
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const [backendManagerOpen, setBackendManagerOpen] = useState(false)
   const [activeBackendName, setActiveBackendName] = useState<string>('')
-  const [focusCompanionEnabled, setFocusCompanionEnabled] = useState(() => getSetting('enableFocusCompanion'))
   const [workspaceTabsCompact, setWorkspaceTabsCompact] = useState(false)
   const [hoveredWorkspace, setHoveredWorkspace] = useState<WorkspaceMode | null>(null)
   const [workspaceHoverLocked, setWorkspaceHoverLocked] = useState(false)
@@ -151,25 +145,6 @@ export function Header({
     setWorkspaceHoverLocked(false)
   }
 
-  useEffect(() => {
-    const handleSettingsChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ key?: string; value?: unknown }>).detail
-      if (detail?.key === 'enableFocusCompanion') {
-        setFocusCompanionEnabled(Boolean(detail.value))
-      }
-    }
-
-    const handleSettingsReset = () => {
-      setFocusCompanionEnabled(DEFAULT_SETTINGS.enableFocusCompanion)
-    }
-
-    window.addEventListener('maibot-settings-change', handleSettingsChange)
-    window.addEventListener('maibot-settings-reset', handleSettingsReset)
-    return () => {
-      window.removeEventListener('maibot-settings-change', handleSettingsChange)
-      window.removeEventListener('maibot-settings-reset', handleSettingsReset)
-    }
-  }, [])
 
   useEffect(() => {
     if (workspaceMode !== 'logs') {
@@ -282,11 +257,11 @@ export function Header({
       data-dashboard-header="true"
       data-dashboard-header-collapsed={topbarCollapsed ? 'true' : undefined}
       initial={false}
-      animate={{ height: topbarCollapsed ? 16 : 48, marginBottom: 0 }}
+      animate={{ height: topbarCollapsed ? 16 : 42, marginBottom: 0 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       className={cn(
         'sticky top-0 isolate z-30 min-w-0 overflow-visible',
-        topbarCollapsed ? 'h-4' : 'flex h-12 flex-col border-b px-3 backdrop-blur-md sm:px-4',
+        topbarCollapsed ? 'h-4' : 'flex h-[42px] flex-col border-b px-3 backdrop-blur-md sm:px-4',
         topbarCollapsed || inheritsPageBackground ? 'bg-transparent' : 'bg-background'
       )}
     >
@@ -397,7 +372,7 @@ export function Header({
                 {WORKSPACE_TABS.map(({ value, icon: Icon, labelKey }) => (
                   <div
                     key={value}
-                    className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap"
+                    className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium whitespace-nowrap"
                   >
                     <Icon className="h-3.5 w-3.5" />
                     <span className="font-sans text-base font-semibold tracking-wider uppercase">
@@ -443,7 +418,7 @@ export function Header({
                           (hoveredWorkspace ?? workspaceMode) === value
                           ? 'text-primary-foreground'
                           : 'text-muted-foreground',
-                        workspaceTabsCompact ? 'px-2' : 'px-2.5'
+                        workspaceTabsCompact ? 'px-1.5' : 'px-2'
                       )}
                     >
                       <Link
@@ -504,23 +479,6 @@ export function Header({
                   ))}
                 </TabsList>
               </Tabs>
-            {focusCompanionEnabled && (
-              <>
-                <div className="bg-border hidden h-6 w-px sm:block" />
-                <Button
-                  asChild
-                  variant="ghost"
-                  size="icon"
-                  className={cn(pathname === '/focus' && 'bg-accent text-accent-foreground')}
-                  title={t('sidebar.menu.focusCompanion')}
-                  aria-label={t('sidebar.menu.focusCompanion')}
-                >
-                  <Link to="/focus">
-                    <TimerReset className="h-4 w-4" />
-                  </Link>
-                </Button>
-              </>
-            )}
             <Button
               asChild
               variant="ghost"
@@ -755,17 +713,6 @@ export function Header({
                     ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-                {focusCompanionEnabled && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild className="cursor-pointer gap-2">
-                      <Link to="/focus">
-                        <TimerReset className="h-4 w-4" />
-                        {t('sidebar.menu.focusCompanion')}
-                      </Link>
-                    </DropdownMenuItem>
-                  </>
-                )}
                 <DropdownMenuItem onClick={handleLogout} className="cursor-pointer gap-2">
                   <LogOut className="h-4 w-4" />
                   {t('header.logoutLabel')}

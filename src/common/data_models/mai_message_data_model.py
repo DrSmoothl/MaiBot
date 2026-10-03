@@ -67,8 +67,9 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
         obj = cls(message_id=db_record.message_id, timestamp=db_record.timestamp, platform=db_record.platform)
 
         user_info = UserInfo(db_record.user_id, db_record.user_nickname, db_record.user_cardname)
-        if db_record.group_id and db_record.group_name:
-            group_info = GroupInfo(db_record.group_id, db_record.group_name)
+        # 部分平台（如 QQ 官方机器人）不提供群名，群名为空不能让群消息退化成私聊。
+        if db_record.group_id:
+            group_info = GroupInfo(db_record.group_id, db_record.group_name or "")
         else:
             group_info = None
 

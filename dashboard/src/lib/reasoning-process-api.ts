@@ -175,11 +175,20 @@ export type ReasoningReplayRequest = {
   max_tokens?: number | null
 }
 
+// 后端 /replay 的 attempt 是 serialize_generation_attempt 的精简结构（仅元数据与 error），
+// 不保证携带 attempt 级的 request_items/tool_definitions/output_items 等渲染字段。
+export type ReasoningReplayWireAttempt = Partial<GenerationAttemptSnapshot> & Record<string, unknown>
+
+// normalizeReplayResult 规范化后的重放结果：attempt 字段已补齐默认值，可安全渲染。
+export type NormalizedReplayResult = Omit<ReasoningReplayResponse, 'generation_attempts'> & {
+  generation_attempts: GenerationAttemptSnapshot[]
+}
+
 export type ReasoningReplayResponse = {
   schema_version: 6
   success: boolean
   output_items: ContextItemSnapshot[]
-  generation_attempts: GenerationAttemptSnapshot[]
+  generation_attempts: ReasoningReplayWireAttempt[]
   model_name: string
   prompt_tokens: number
   completion_tokens: number

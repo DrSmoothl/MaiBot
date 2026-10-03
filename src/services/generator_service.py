@@ -13,7 +13,7 @@ from rich.traceback import install
 from src.chat.message_receive.chat_manager import BotChatSession
 from src.chat.replyer.maisaka_generator import MaisakaReplyGenerator
 from src.chat.replyer.replyer_manager import replyer_manager
-from src.chat.utils.utils import process_llm_response
+from src.chat.utils.utils import process_llm_response_segments_async
 from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.common.logger import get_logger
 from src.core.types import ActionInfo
@@ -72,7 +72,7 @@ def _extract_unknown_words(action_data: Optional[Dict[str, Any]]) -> Optional[Li
     return cleaned_words or None
 
 
-def _build_message_sequence(
+async def _build_message_sequence(
     content: Optional[str],
     *,
     enable_splitter: bool,
@@ -81,7 +81,12 @@ def _build_message_sequence(
     if not content:
         return None, []
 
-    processed_output = process_llm_response(content, enable_splitter, enable_chinese_typo)
+    processed_segments = await process_llm_response_segments_async(
+        content,
+        enable_splitter=enable_splitter,
+        enable_chinese_typo=enable_chinese_typo,
+    )
+    processed_output = [segment.text for segment in processed_segments]
     return MessageSequence(components=[TextComponent(text) for text in processed_output]), processed_output
 
 
@@ -142,7 +147,7 @@ async def generate_reply(
         if not success:
             logger.warning("[GeneratorService] 回复生成失败")
             return False, None
-        reply_set, processed_output = _build_message_sequence(
+        reply_set, processed_output = await _build_message_sequence(
             llm_response.content,
             enable_splitter=enable_splitter,
             enable_chinese_typo=enable_chinese_typo,

@@ -31,7 +31,6 @@
     },
     "menu": {
       "home": "홈",
-      "focusCompanion": "집중 동반",
       "botMainConfig": "봇 메인 설정",
       "aiModelProvider": "AI 모델 공급자",
       "modelManagement": "모델 관리",
@@ -47,7 +46,7 @@
       "pluginMarket": "플러그인 마켓",
       "configTemplate": "설정 템플릿",
       "pluginConfig": "플러그인 관리",
-      "adapterManagement": "어댑터 관리",
+      "adapterManagement": "어댑터 설정",
       "mcpSettings": "MCP 설정",
       "dataTransfer": "데이터 관리",
       "statistics": "상세 통계 데이터",
@@ -55,7 +54,6 @@
       "logViewer": "로그 뷰어",
       "reasoningProcess": "추론 과정",
       "maisakaMonitor": "MaiSaka 채팅 모니터",
-      "chatManagement": "채팅 관리",
       "localChat": "로컬 채팅",
       "settings": "WebUI 설정"
     }
@@ -67,42 +65,105 @@
     "periodRange": "통계 기간: {{start}}부터 {{end}}까지",
     "empty": "이 기간에는 데이터가 없습니다",
     "actions": { "refresh": "새로고침", "openHtml": "HTML 버전 열기" },
-    "error": { "title": "상세 통계를 불러오지 못했습니다", "description": "잠시 후 다시 시도해 주세요" },
+    "error": {
+      "title": "상세 통계를 불러오지 못했습니다",
+      "description": "잠시 후 다시 시도해 주세요"
+    },
     "periods": {
-      "all_time": "배포 이후", "last_30_days": "최근 30일", "last_7_days": "최근 7일", "last_3_days": "최근 3일",
-      "last_24_hours": "최근 1일", "last_3_hours": "최근 3시간", "last_hour": "최근 1시간", "last_15_minutes": "최근 15분"
+      "all_time": "배포 이후",
+      "last_30_days": "최근 30일",
+      "last_7_days": "최근 7일",
+      "last_3_days": "최근 3일",
+      "last_24_hours": "최근 1일",
+      "last_3_hours": "최근 3시간",
+      "last_hour": "최근 1시간",
+      "last_15_minutes": "최근 15분"
     },
     "tabs": { "trends": "데이터 차트", "metrics": "지표 추이" },
     "sections": { "breakdowns": "분류 통계", "distributions": "데이터 분포" },
-    "breakdowns": { "models": "모델별", "modules": "모듈별", "requestTypes": "요청 유형별", "chats": "채팅 메시지" },
+    "breakdowns": {
+      "taskGroups": "작업 그룹별",
+      "models": "모델별",
+      "modules": "모듈별",
+      "requestTypes": "요청 유형별",
+      "chats": "채팅 메시지"
+    },
     "summary": {
-      "onlineTime": "총 온라인 시간", "messages": "총 메시지 수", "replies": "총 답변 수", "requests": "총 요청 수",
-      "tokens": "총 Token 수", "inputTokens": "입력 Token", "outputTokens": "출력 Token", "cacheHitRate": "Prompt 캐시 적중률",
-      "cacheHitTokens": "캐시 적중 Token", "cacheMissTokens": "캐시 미적중 Token", "totalCost": "총 비용",
-      "costPerMessages": "비용/메시지", "costPerReceivedMessages": "비용/수신 메시지", "costPerReplies": "비용/답변",
-      "costPerHour": "비용/시간", "tokensPerHour": "Token/시간"
+      "onlineTime": "총 온라인 시간",
+      "messages": "총 메시지 수",
+      "replies": "총 답변 수",
+      "requests": "총 요청 수",
+      "tokens": "총 Token 수",
+      "inputTokens": "입력 Token",
+      "outputTokens": "출력 Token",
+      "cacheHitRate": "Prompt 캐시 적중률",
+      "cacheHitTokens": "캐시 적중 Token",
+      "cacheMissTokens": "캐시 미적중 Token",
+      "totalCost": "총 비용",
+      "costPerMessages": "비용/메시지",
+      "costPerReceivedMessages": "비용/수신 메시지",
+      "costPerReplies": "비용/답변",
+      "costPerHour": "비용/시간",
+      "tokensPerHour": "Token/시간"
     },
     "units": { "per100": "100개당", "perHour": "시간당" },
     "table": {
-      "name": "이름", "requests": "호출 횟수", "inputTokens": "입력 Token", "outputTokens": "출력 Token", "totalTokens": "총 Token",
-      "cacheHitTokens": "캐시 적중 Token", "cacheMissTokens": "캐시 미적중 Token", "cacheHitRate": "캐시 적중률", "cost": "누적 비용",
-      "avgTime": "평균 시간", "stdTime": "시간 표준편차", "callsPerReply": "답변당 호출 수", "tokensPerReply": "답변당 Token",
-      "tokensPerCall": "호출당 Token", "chat": "연락처/그룹", "messages": "메시지 수"
+      "name": "이름",
+      "requests": "호출 횟수",
+      "inputTokens": "입력 Token",
+      "outputTokens": "출력 Token",
+      "totalTokens": "총 Token",
+      "cacheHitTokens": "캐시 적중 Token",
+      "cacheMissTokens": "캐시 미적중 Token",
+      "cacheHitRate": "캐시 적중률",
+      "cost": "누적 비용",
+      "avgTime": "평균 시간",
+      "stdTime": "시간 표준편차",
+      "callsPerReply": "답변당 호출 수",
+      "tokensPerReply": "답변당 Token",
+      "tokensPerCall": "호출당 Token",
+      "chat": "연락처/그룹",
+      "messages": "메시지 수"
     },
     "distributions": {
-      "ownerCosts": "호출 소스 비용 분포", "modelCosts": "모델 비용 분포", "moduleCosts": "모듈 비용 분포",
-      "requestTypeCosts": "요청 유형 비용 분포", "chatMessages": "채팅 메시지 분포", "chatCosts": "채팅 스트림 비용 분포"
+      "ownerCosts": "호출 소스 비용 분포",
+      "modelCosts": "모델 비용 분포",
+      "moduleCosts": "모듈 비용 분포",
+      "requestTypeCosts": "요청 유형 비용 분포",
+      "chatMessages": "채팅 메시지 분포",
+      "chatCosts": "채팅 스트림 비용 분포"
     },
-    "charts": { "timeRange": "시간 범위", "timeScale": "시간 척도", "toggleSeries": "{{name}} 표시 전환" },
-    "ranges": { "6h": "6시간", "12h": "12시간", "24h": "24시간", "48h": "48시간", "7d": "7일", "30d": "30일" },
-    "trends": { "totalCost": "총 비용 추이", "moduleCosts": "모듈별 비용 추이", "modelCosts": "모델별 비용 추이", "chatMessages": "채팅별 메시지 추이" },
-    "metrics": { "costPerMessages": "메시지당 비용 추이", "costPerHour": "시간당 비용 추이", "tokensPerHour": "시간당 Token 추이", "costPerReplies": "답변당 비용 추이" }
+    "charts": {
+      "timeRange": "시간 범위",
+      "timeScale": "시간 척도",
+      "toggleSeries": "{{name}} 표시 전환"
+    },
+    "ranges": {
+      "6h": "6시간",
+      "12h": "12시간",
+      "24h": "24시간",
+      "48h": "48시간",
+      "7d": "7일",
+      "30d": "30일"
+    },
+    "trends": {
+      "totalCost": "총 비용 추이",
+      "moduleCosts": "모듈별 비용 추이",
+      "modelCosts": "모델별 비용 추이",
+      "chatMessages": "채팅별 메시지 추이"
+    },
+    "metrics": {
+      "costPerMessages": "메시지당 비용 추이",
+      "costPerHour": "시간당 비용 추이",
+      "tokensPerHour": "시간당 Token 추이",
+      "costPerReplies": "답변당 비용 추이"
+    }
   },
   "workspace": {
     "switcherLabel": "MaiBot 작업 공간 전환",
-    "settings": "麦麦 설정",
+    "settings": "麦麦",
     "chat": "麦麦 채팅",
-    "logs": "麦麦 로그"
+    "logs": "로그"
   },
   "chat": {
     "botNameFallback": "麦麦",
@@ -161,18 +222,26 @@
       "conversations": "채팅 대화",
       "emptyPreview": "아직 메시지가 없습니다",
       "identityHint": "로컬 채팅 신분",
+      "myChats": "麦麦와 채팅",
+      "noSearchResults": "일치하는 채팅이 없습니다",
       "newVirtual": "새 가상 신분 대화",
+      "observedAvatarAlt": "{{name}}의 아바타",
+      "observedBadge": "관찰",
+      "observedChats": "麦麦의 채팅 스트림",
+      "openSettings": "{{name}}의 채팅 설정 열기",
       "online": "온라인",
+      "searchPlaceholder": "채팅 검색…",
       "offline": "오프라인",
       "subtitle": "대화 {{count}}개",
       "title": "채팅",
       "virtualBadge": "가상",
-      "profileTitle": "내 신분",
       "editAvatar": "아바타 변경",
       "editName": "닉네임 편집",
       "saveName": "저장",
       "savingAvatar": "아바타 저장 중",
-      "userAvatarAlt": "{{name}}의 아바타"
+      "userAvatarAlt": "{{name}}의 아바타",
+      "loadObservedChatsFailed": "채팅 스트림을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.",
+      "waitingObservedChats": "채팅 스트림 대기 중…"
     },
     "dialog": {
       "create": "대화 만들기",
@@ -354,9 +423,7 @@
       "retroTextureNone": "없음",
       "retroTextureIntensity": "텍스처 강도",
       "retroPanelDepth": "패널 깊이",
-      "retroPanelDepthDesc": "오목한 표면과 그림자의 가시성을 조절합니다.",
-      "retroStrokeScale": "외곽선 굵기",
-      "retroStrokeScaleDesc": "카드와 컨트롤의 외곽선 굵기를 조절합니다."
+      "retroPanelDepthDesc": "오목한 표면과 그림자의 가시성을 조절합니다."
     },
     "security": {
       "currentToken": "현재 액세스 토큰",
@@ -579,7 +646,7 @@
     "verifyingLabel": "확인 중...",
     "verifyEnter": "확인 후 입장",
     "helpLink": "Token이 없습니다. 어디서 얻을 수 있나요?",
-    "helpTitle": "Access Token 얻는 방법",
+    "helpTitle": "접속 비밀번호",
     "helpDesc": "Access Token은 MaiBot WebUI에 액세스하는 유일한 자격 증명입니다. 다음 방법으로 얻으세요",
     "method1Title": "방법 1: 시작 로그 확인",
     "method1Desc": "MaiBot 시작 시 콘솔에 WebUI Access Token이 표시됩니다.",
@@ -952,9 +1019,8 @@
     "items": {
       "home": "홈",
       "homeDesc": "대시보드 개요 보기",
-      "focusCompanionDesc": "MaiBot 몰입형 집중 동반 화면 열기",
       "botConfig": "속 메인 설정",
-      "botConfigDesc": "속 핵심 설정 구성",
+      "botConfigDesc": "봇 상세 설정과 공유 그룹 구성",
       "model": "모델 설정",
       "modelDesc": "모델 매개변수 구성",
       "promptGeneratorDesc": "문장에서 주입 가능한 페르소나 설정 블록 생성",
@@ -986,12 +1052,45 @@
     "navigatedTo": "{{page}}으로 이동했습니다"
   },
   "memory": {
+    "records": {
+      "status": {
+        "active": "활성",
+        "inactive": "비활성",
+        "deleted": "삭제됨",
+        "conflicted": "충돌 있음",
+        "superseded": "대체됨",
+        "retracted": "철회됨"
+      },
+      "evidenceType": {
+        "paragraph": "문단",
+        "relation": "관계",
+        "entity": "엔터티",
+        "fact": "사실",
+        "episode": "에피소드",
+        "profile": "인물 프로필",
+        "manual": "수동",
+        "unknown": "알 수 없음"
+      },
+      "evidenceStance": {
+        "support": "지지",
+        "refute": "반박"
+      },
+      "graphJobStatus": {
+        "pending": "대기 중",
+        "running": "처리 중",
+        "failed": "실패",
+        "completed": "완료",
+        "cancelled": "취소됨"
+      }
+    },
     "tuning": {
       "task": {
         "title": "튜닝 작업",
         "description": "검색 매개변수 평가"
       },
       "form": {
+        "parameters": "튜닝 매개변수",
+        "parametersDescription": "이 설정은 다음 튜닝 작업에만 적용됩니다. 일반적으로 기본값을 그대로 사용하면 됩니다.",
         "strategy": "튜닝 전략",
         "objective": "최적화 목표",
         "intensity": "평가 깊이",
@@ -1353,6 +1452,16 @@
       "hitTokens": "적중 Token",
       "missTokens": "미적중 Token",
       "eligibleTokens": "통계 대상 {{value}} Token"
+    },
+    "news": {
+      "title": "뉴스",
+      "description": "서버의 최신 소식",
+      "refresh": "뉴스 새로고침",
+      "retry": "다시 불러오기",
+      "open": "뉴스 상세 열기",
+      "openLink": "원문 링크 열기",
+      "pinned": "고정됨",
+      "empty": "아직 뉴스가 없습니다"
     },
     "storage": {
       "title": "저장소 사용량",

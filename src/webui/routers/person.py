@@ -143,12 +143,13 @@ def person_to_response(person: PersonInfo) -> PersonInfoResponse:
 
 
 @router.get("/list", response_model=PersonListResponse)
-async def get_person_list(
+def get_person_list(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     is_known: Optional[bool] = Query(None, description="是否已认识筛选"),
     platform: Optional[str] = Query(None, description="平台筛选"),
+    user_id: Optional[str] = Query(None, description="平台用户 ID 精确筛选"),
 ) -> PersonListResponse:
     """获取人物信息列表。
 
@@ -158,6 +159,7 @@ async def get_person_list(
         search: 搜索关键词，用于匹配人物名称、昵称和用户 ID。
         is_known: 是否已认识筛选条件。
         platform: 平台筛选条件。
+        user_id: 平台用户 ID 精确筛选条件。
 
     Returns:
         PersonListResponse: 分页后的人物信息列表。
@@ -181,6 +183,8 @@ async def get_person_list(
         # 平台过滤
         if platform:
             statement = statement.where(col(PersonInfo.platform) == platform)
+        if user_id:
+            statement = statement.where(col(PersonInfo.user_id) == user_id)
 
         # 排序：最后更新时间倒序（NULL 值放在最后）
         # Peewee 不支持 nulls_last，使用 CASE WHEN 来实现
@@ -206,6 +210,8 @@ async def get_person_list(
                 count_statement = count_statement.where(col(PersonInfo.is_known) == is_known)
             if platform:
                 count_statement = count_statement.where(col(PersonInfo.platform) == platform)
+            if user_id:
+                count_statement = count_statement.where(col(PersonInfo.user_id) == user_id)
             total = len(session.exec(count_statement).all())
             data = [person_to_response(person) for person in persons]
 
@@ -219,7 +225,7 @@ async def get_person_list(
 
 
 @router.get("/{person_id}", response_model=PersonDetailResponse)
-async def get_person_detail(person_id: str) -> PersonDetailResponse:
+def get_person_detail(person_id: str) -> PersonDetailResponse:
     """获取人物详细信息。
 
     Args:
@@ -248,7 +254,7 @@ async def get_person_detail(person_id: str) -> PersonDetailResponse:
 
 
 @router.patch("/{person_id}", response_model=PersonUpdateResponse)
-async def update_person(
+def update_person(
     person_id: str,
     request: PersonUpdateRequest,
 ) -> PersonUpdateResponse:
@@ -302,7 +308,7 @@ async def update_person(
 
 
 @router.delete("/{person_id}", response_model=PersonDeleteResponse)
-async def delete_person(person_id: str) -> PersonDeleteResponse:
+def delete_person(person_id: str) -> PersonDeleteResponse:
     """删除人物信息。
 
     Args:
@@ -336,7 +342,7 @@ async def delete_person(person_id: str) -> PersonDeleteResponse:
 
 
 @router.get("/stats/summary")
-async def get_person_stats() -> Dict[str, Any]:
+def get_person_stats() -> Dict[str, Any]:
     """获取人物信息统计数据。
 
     Returns:
@@ -365,7 +371,7 @@ async def get_person_stats() -> Dict[str, Any]:
 
 
 @router.post("/batch/delete", response_model=BatchDeleteResponse)
-async def batch_delete_persons(
+def batch_delete_persons(
     request: BatchDeleteRequest,
 ) -> BatchDeleteResponse:
     """批量删除人物信息。

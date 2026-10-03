@@ -426,7 +426,8 @@ def _extract_usage_record(response: GenerateContentResponse) -> Optional[UsageTu
         getattr(usage_metadata, "thoughts_token_count", 0) or 0
     )
     total_tokens = getattr(usage_metadata, "total_token_count", 0) or 0
-    return prompt_tokens, completion_tokens, total_tokens
+    # Gemini 不参与 Prompt 缓存用量探测，末位恒为未上报
+    return prompt_tokens, completion_tokens, total_tokens, False
 
 
 def _extract_finish_reason(response: GenerateContentResponse | None) -> str | None:

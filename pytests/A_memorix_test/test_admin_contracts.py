@@ -31,11 +31,17 @@ class _DispatchKernel:
     async def memory_feedback_admin(self, *, action: str, **kwargs: Any) -> dict[str, Any]:
         return self._record("memory_feedback_admin", action, kwargs)
 
+    async def memory_fact_admin(self, *, action: str, **kwargs: Any) -> dict[str, Any]:
+        return self._record("memory_fact_admin", action, kwargs)
+
     async def memory_runtime_admin(self, *, action: str, **kwargs: Any) -> dict[str, Any]:
         return self._record("memory_runtime_admin", action, kwargs)
 
     async def memory_import_admin(self, *, action: str, **kwargs: Any) -> dict[str, Any]:
         return self._record("memory_import_admin", action, kwargs)
+
+    async def memory_bundle_admin(self, *, action: str, **kwargs: Any) -> dict[str, Any]:
+        return self._record("memory_bundle_admin", action, kwargs)
 
     async def memory_tuning_admin(self, *, action: str, **kwargs: Any) -> dict[str, Any]:
         return self._record("memory_tuning_admin", action, kwargs)
@@ -104,10 +110,14 @@ def test_fuzzy_modify_admin_uses_correction_action_set() -> None:
         ("memory_source_admin", "list"),
         ("memory_episode_admin", "status"),
         ("memory_episode_admin", "process_sources"),
+        ("memory_episode_admin", "discard_migration_backfill"),
         ("memory_profile_admin", "query"),
+        ("memory_profile_admin", "set_aliases"),
         ("memory_feedback_admin", "list"),
+        ("memory_fact_admin", "create"),
         ("memory_runtime_admin", "get_config"),
         ("memory_import_admin", "settings"),
+        ("memory_bundle_admin", "list"),
         ("memory_tuning_admin", "settings"),
         ("memory_v5_admin", "status"),
         ("memory_delete_admin", "preview"),

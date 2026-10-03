@@ -31,6 +31,7 @@ from src.llm_models.payload_content.context_item import (
     UserMessageItem,
     get_item_text,
 )
+from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import (
     ComplexSessionMessage,
     LLMContextMessage,
@@ -566,7 +567,7 @@ def _build_summary_planner_prefix(
     message_id: str,
 ) -> str:
     return (
-        f'<message msg_id="{escape(message_id, quote=True)}" '
+        f'<message msg_id="{escape(to_display_message_id(message_id), quote=True)}" '
         f'time="{escape(timestamp.strftime("%H:%M:%S"), quote=True)}">\n'
     )
 

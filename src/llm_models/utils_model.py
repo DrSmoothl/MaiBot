@@ -4,12 +4,15 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 import asyncio
+import hashlib
 import inspect
+import json
 import random
 import re
 import time
 import traceback
 
+from openai import APITimeoutError
 from rich.traceback import install
 
 from src.common.logger import get_logger
@@ -37,11 +40,12 @@ from src.llm_models.model_client.base_client import (
     ClientRequest,
     EmbeddingRequest,
     GenerationAttempt,
+    ImageEmbeddingRequest,
     RequestTraceContext,
     ResponseRequest,
     client_registry,
 )
-from src.llm_models.generation_diagnostics import sanitize_diagnostic_url, sanitize_generation_diagnostic
+from src.llm_models.generation_diagnostics import sanitize_diagnostic_url
 from src.llm_models.request_snapshot import (
     attach_request_snapshot,
     format_request_snapshot_log_info,
@@ -63,7 +67,7 @@ from src.llm_models.utils import compress_messages, llm_usage_recorder
 
 install(extra_lines=3)
 
-logger = get_logger("model_utils")
+logger = get_logger("llm_models")
 
 DATA_URI_LIMIT_PATTERN = re.compile(
     r"Exceeded limit on max bytes per data-uri item\s*:\s*(?P<limit>\d+)",
@@ -76,6 +80,8 @@ EMPTY_TASK_FALLBACKS = {
     "learner": "utils",
     "mid_memory": "planner",
 }
+EMBEDDING_TASK_NAMES = {"embedding", "image_embedding"}
+"""嵌入类任务：向量空间必须保持一致，因此忽略配置里的选择策略，始终按配置顺序取第一个可用模型"""
 
 
 class RequestType(Enum):
@@ -83,6 +89,7 @@ class RequestType(Enum):
 
     RESPONSE = "response"
     EMBEDDING = "embedding"
+    IMAGE_EMBEDDING = "image_embedding"
     AUDIO = "audio"
 
 
@@ -92,6 +99,7 @@ class LLMExecutionResult:
 
     api_response: APIResponse
     model_info: ModelInfo
+    request_started_at: datetime
 
 
 class LLMOrchestrator:
@@ -113,6 +121,8 @@ class LLMOrchestrator:
             model: (0, 0, 0) for model in self.model_for_task.model_list
         }
         """模型使用量记录，用于进行负载均衡，对应为(total_tokens, penalty, usage_penalty)，惩罚值是为了能在某个模型请求不给力或正在被使用的时候进行调整"""
+        self._explicit_model_usage: Dict[str, Tuple[int, int, int]] = {}
+        """显式指定但不在任务 model_list 中的模型使用量；与 model_usage 分开存放，避免刷新时丢失且不参与自动选择"""
 
     def _resolve_effective_session_id(self, session_id: str = "") -> str:
         """解析本次请求用于统计归属的聊天流 ID。"""
@@ -141,6 +151,8 @@ class LLMOrchestrator:
                 fallback_task_config = getattr(model_task_config, fallback_task_name, None)
                 if isinstance(fallback_task_config, TaskConfig):
                     return fallback_task_config
+            if self.task_name == "image_embedding":
+                raise ValueError("图片嵌入任务未配置模型，请在 image_embedding 中指定支持图片嵌入的模型")
         return task_config
 
     def _refresh_task_config(self) -> TaskConfig:
@@ -153,23 +165,29 @@ class LLMOrchestrator:
         if latest is not self.model_for_task:
             self.model_for_task = latest
         if list(self.model_usage.keys()) != latest.model_list:
-            self.model_usage = {model: self.model_usage.get(model, (0, 0, 0)) for model in latest.model_list}
+            # 不在新列表中的模型可能仍有进行中的请求，移入显式模型记录而不是丢弃
+            merged_usage = {**self._explicit_model_usage, **self.model_usage}
+            self.model_usage = {model: merged_usage.get(model, (0, 0, 0)) for model in latest.model_list}
+            self._explicit_model_usage = {
+                model: usage for model, usage in merged_usage.items() if model not in self.model_usage
+            }
         return self.model_for_task
 
-    def _check_slow_request(self, time_cost: float, model_name: str) -> None:
-        """检查请求是否过慢并输出警告日志。
-
-        Args:
-            time_cost: 请求耗时（秒）。
-            model_name: 使用的模型名称。
-        """
-        threshold = self.model_for_task.slow_threshold
-        if time_cost > threshold:
-            request_type_display = self.request_type or "未知任务"
-            logger.warning(
-                f"LLM请求耗时过长: {request_type_display} 使用模型 {model_name} 耗时 {time_cost:.1f}s（阈值: {threshold}s），请考虑使用更快的模型\n"
-                f"  如果你认为该警告出现得过于频繁，请调整model_config.toml中对应任务的slow_threshold至符合你实际情况的合理值"
-            )
+    def _adjust_model_usage(
+        self,
+        model_name: str,
+        tokens_delta: int = 0,
+        penalty_delta: int = 0,
+        usage_penalty_delta: int = 0,
+    ) -> None:
+        """更新指定模型的使用量记录。"""
+        usage_store = self.model_usage if model_name in self.model_usage else self._explicit_model_usage
+        total_tokens, penalty, usage_penalty = usage_store[model_name]
+        usage_store[model_name] = (
+            total_tokens + tokens_delta,
+            penalty + penalty_delta,
+            usage_penalty + usage_penalty_delta,
+        )
 
     @staticmethod
     def _can_retry_with_compressed_images(
@@ -348,9 +366,10 @@ class LLMOrchestrator:
         response = execution_result.api_response
         model_info = execution_result.model_info
         time_cost = time.time() - start_time
-        self._check_slow_request(time_cost, model_info.name)
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -438,10 +457,11 @@ class LLMOrchestrator:
         model_info = execution_result.model_info
 
         logger.debug(f"LLM请求总耗时: {time.time() - start_time}")
-        logger.debug(f"LLM生成内容: {response}")
 
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -503,11 +523,11 @@ class LLMOrchestrator:
 
         time_cost = time.time() - start_time
         logger.debug(f"LLM请求总耗时: {time_cost}")
-        logger.debug(f"LLM生成内容: {response}")
 
-        self._check_slow_request(time_cost, model_info.name)
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -541,7 +561,9 @@ class LLMOrchestrator:
         model_info = execution_result.model_info
         embedding = response.embedding
         if usage := response.usage:
-            llm_usage_recorder.record_usage_to_database(
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
                 model_info=model_info,
                 model_usage=usage,
                 user_id="system",
@@ -559,6 +581,66 @@ class LLMOrchestrator:
             api_provider=model_info.api_provider,
         )
 
+    async def get_image_embedding(
+        self,
+        image_bytes: bytes,
+        *,
+        mime_type: str,
+        preprocess_version: str,
+        session_id: str = "",
+    ) -> LLMEmbeddingResult:
+        """通过专用图片协议生成嵌入向量。"""
+
+        self._refresh_task_config()
+        start_time = time.time()
+        execution_result = await self._execute_request(
+            request_type=RequestType.IMAGE_EMBEDDING,
+            image_bytes=bytes(image_bytes),
+            image_mime_type=mime_type,
+            image_preprocess_version=preprocess_version,
+            session_id=session_id,
+        )
+        response = execution_result.api_response
+        model_info = execution_result.model_info
+        if not response.embedding:
+            raise RuntimeError("图片嵌入模型没有返回向量")
+        if usage := response.usage:
+            await asyncio.to_thread(
+                llm_usage_recorder.record_usage_to_database,
+                request_started_at=execution_result.request_started_at,
+                model_info=model_info,
+                model_usage=usage,
+                user_id="system",
+                request_type=self.request_type,
+                task_name=self.task_name,
+                session_id=self._resolve_effective_session_id(session_id),
+                time_cost=time.time() - start_time,
+            )
+        # 原生图片嵌入协议分支由客户端提供精确指纹；其余场景沿用默认算法，
+        # 避免旧模板/插件路径的既有图片索引失效
+        protocol_hash = response.request_protocol_hash
+        if not protocol_hash:
+            protocol_hash = hashlib.sha256(
+                json.dumps(
+                    {
+                        "input": model_info.extra_params.get("image_embedding_input", "{data_uri}"),
+                        "body": model_info.extra_params.get("image_embedding_body"),
+                        "task": model_info.extra_params.get("task"),
+                        "dimensions": model_info.extra_params.get("dimensions"),
+                    },
+                    sort_keys=True,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        return LLMEmbeddingResult(
+            embedding=response.embedding,
+            model_name=model_info.name,
+            model_identifier=model_info.model_identifier,
+            api_provider=model_info.api_provider,
+            request_protocol_hash=protocol_hash,
+        )
+
     def _resolve_effective_temperature(
         self,
         model_info: ModelInfo,
@@ -573,6 +655,8 @@ class LLMOrchestrator:
         Returns:
             Optional[float]: 最终生效的温度参数。
         """
+        if not model_info.send_temperature:
+            return None
         if temperature is not None:
             return temperature
         if model_info.temperature is not None:
@@ -693,6 +777,25 @@ class LLMOrchestrator:
             trace_context=trace_context,
         )
 
+    @staticmethod
+    def _build_image_embedding_request(
+        model_info: ModelInfo,
+        image_bytes: bytes,
+        mime_type: str,
+        preprocess_version: str,
+        trace_context: RequestTraceContext,
+    ) -> ImageEmbeddingRequest:
+        """构建只在进程内携带原始图片的嵌入请求。"""
+
+        return ImageEmbeddingRequest(
+            model_info=model_info,
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            preprocess_version=preprocess_version,
+            extra_params=dict(model_info.extra_params),
+            trace_context=trace_context,
+        )
+
     def _build_client_request(
         self,
         request_type: RequestType,
@@ -706,6 +809,9 @@ class LLMOrchestrator:
         temperature: Optional[float],
         max_tokens: Optional[int],
         embedding_input: str | None,
+        image_bytes: bytes | None,
+        image_mime_type: str | None,
+        image_preprocess_version: str | None,
         audio_base64: str | None,
         trace_context: RequestTraceContext,
     ) -> ClientRequest:
@@ -752,6 +858,16 @@ class LLMOrchestrator:
                 embedding_input=embedding_input,
                 trace_context=trace_context,
             )
+        if request_type == RequestType.IMAGE_EMBEDDING:
+            if image_bytes is None or not image_mime_type or not image_preprocess_version:
+                raise ValueError("图片嵌入请求缺少图片、MIME 类型或预处理版本")
+            return self._build_image_embedding_request(
+                model_info=model_info,
+                image_bytes=image_bytes,
+                mime_type=image_mime_type,
+                preprocess_version=image_preprocess_version,
+                trace_context=trace_context,
+            )
         if request_type == RequestType.AUDIO:
             if audio_base64 is None:
                 raise ValueError("音频 Base64 不能为空")
@@ -787,16 +903,23 @@ class LLMOrchestrator:
             if exclude_models and requested_model_name in exclude_models:
                 raise RuntimeError(f"指定模型 '{requested_model_name}' 已在本次请求中尝试失败")
             TempMethodsLLMUtils.get_model_info_by_name(requested_model_name)
-            if requested_model_name not in self.model_usage:
-                self.model_usage[requested_model_name] = (0, 0, 0)
-            available_models = {requested_model_name: self.model_usage.get(requested_model_name, (0, 0, 0))}
+            if requested_model_name in self.model_usage:
+                requested_usage = self.model_usage[requested_model_name]
+            else:
+                requested_usage = self._explicit_model_usage.setdefault(requested_model_name, (0, 0, 0))
+            available_models = {requested_model_name: requested_usage}
 
         if not available_models:
             raise RuntimeError("没有可用的模型可供选择。所有模型均已尝试失败。")
 
         ensure_configured_clients_loaded()
 
-        strategy = self.model_for_task.selection_strategy.strip().lower()
+        if self.task_name in EMBEDDING_TASK_NAMES:
+            # 嵌入模型的向量空间必须保持一致，多模型间随机或均衡切换会污染向量库，
+            # 因此这里忽略配置的选择策略，强行按配置顺序优先选择。
+            strategy = "sequential"
+        else:
+            strategy = self.model_for_task.selection_strategy.strip().lower()
 
         if requested_model_name:
             selected_model_name = requested_model_name
@@ -826,8 +949,7 @@ class LLMOrchestrator:
         api_provider = TempMethodsLLMUtils.get_provider_by_name(model_info.api_provider)
         client = client_registry.get_client_class_instance(api_provider)
         logger.debug(f"选择请求模型: {model_info.name} (策略: {strategy})")
-        total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
-        self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty + 1)
+        self._adjust_model_usage(model_info.name, usage_penalty_delta=1)
         return model_info, api_provider, client
 
     def _record_success_generation_attempt(
@@ -843,32 +965,12 @@ class LLMOrchestrator:
         if trace_context is None:
             return
         started_timestamp = trace_context.current_attempt_started_at or time.time()
-        internal_request = serialize_client_request_snapshot(request)
-        raw_tool_definitions = internal_request.get("tool_options")
-        tool_definitions = tuple(
-            dict(item)
-            for item in raw_tool_definitions
-            if isinstance(item, dict)
-        ) if isinstance(raw_tool_definitions, list) else ()
-        request_parameters = {
-            key: value
-            for key, value in internal_request.items()
-            if key
-            not in {
-                "audio_base64",
-                "context_items",
-                "embedding_input",
-                "model_info",
-                "request_kind",
-                "tool_options",
-            }
-        }
         operation = {
             ResponseRequest: "response",
             EmbeddingRequest: "embedding",
+            ImageEmbeddingRequest: "image_embedding",
             AudioTranscriptionRequest: "audio_transcription",
         }[type(request)]
-        request_items = tuple(request.context_items) if isinstance(request, ResponseRequest) else ()
         attempt_number = trace_context.attempt or len(trace_context.generation_attempts) + 1
         attempt = GenerationAttempt(
             attempt_id=f"{trace_context.request_id}:{attempt_number}",
@@ -885,15 +987,6 @@ class LLMOrchestrator:
             client_type=api_provider.client_type,
             operation=operation,
             wire_protocol=response.wire_protocol or api_provider.client_type,
-            request_items=request_items,
-            tool_definitions=tool_definitions,
-            request_parameters=sanitize_generation_diagnostic(request_parameters),
-            wire_request=sanitize_generation_diagnostic(response.request_wire_payload),
-            wire_response=sanitize_generation_diagnostic(
-                response.provider_response if response.provider_response is not None else response.raw_data
-            ),
-            output_items=response.output_items,
-            trace=response.generation_trace,
         )
         trace_context.generation_attempts.append(attempt)
         response.generation_attempts = tuple(trace_context.generation_attempts)
@@ -953,6 +1046,8 @@ class LLMOrchestrator:
                     response = await client.get_response(active_request)
                 elif isinstance(active_request, EmbeddingRequest):
                     response = await client.get_embedding(active_request)
+                elif isinstance(active_request, ImageEmbeddingRequest):
+                    response = await client.get_image_embedding(active_request)
                 else:
                     response = await client.get_audio_transcriptions(active_request)
                 self._record_success_generation_attempt(
@@ -995,18 +1090,37 @@ class LLMOrchestrator:
 
                 retry_remain -= 1
                 task_display = self.request_type or "未知任务"
-                if retry_remain <= 0:
-                    logger.error(
-                        f"任务 '{task_display}' 的模型 '{model_info.name}' 在网络错误重试用尽后仍然失败。{original_error_info}"
+                if isinstance(e.__cause__, APITimeoutError):
+                    replay_command = getattr(e, "request_snapshot_replay_command", "")
+                    timeout_log = (
+                        f"任务 '{task_display}' 的模型 '{model_info.name}' 遇到错误: 网络连接超时\n"
+                        f"  底层异常: {type(e.__cause__).__name__} | {e.__cause__} | "
+                        f"最大超时时间：{api_provider.timeout}s | 重试次数: {max_attempts - retry_remain - 1} | "
+                        f"剩余重试次数: {retry_remain}"
                     )
-                    raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
+                    if replay_command:
+                        timeout_log += f"\n  调用完整信息: {replay_command}"
+                    timeout_log += (
+                        "\n  如此类型错误过多，请尝试调整模型配置中对应 API Provider 的 timeout 值"
+                        "\n  其他可能原因: 网络波动、DNS 故障、连接超时、防火墙限制或代理问题"
+                    )
+                    if retry_remain <= 0:
+                        logger.error(timeout_log)
+                        raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
+                    logger.warning(timeout_log)
+                else:
+                    if retry_remain <= 0:
+                        logger.error(
+                            f"任务 '{task_display}' 的模型 '{model_info.name}' 在网络错误重试用尽后仍然失败。{original_error_info}"
+                        )
+                        raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
 
-                logger.warning(
-                    f"任务 '{task_display}' 的模型 '{model_info.name}' 遇到网络错误(可重试): {str(e)}{original_error_info}\n"
-                    f"  常见原因: 如请求的API正常但APITimeoutError类型错误过多，请尝试调整模型配置中对应API Provider的timeout值\n"
-                    f"  其它可能原因: 网络波动、DNS 故障、连接超时、防火墙限制或代理问题\n"
-                    f"  剩余重试次数: {retry_remain}"
-                )
+                    logger.warning(
+                        f"任务 '{task_display}' 的模型 '{model_info.name}' 遇到网络错误(可重试): {str(e)}{original_error_info}\n"
+                        f"  常见原因: 如请求的API正常但APITimeoutError类型错误过多，请尝试调整模型配置中对应API Provider的timeout值\n"
+                        f"  其它可能原因: 网络波动、DNS 故障、连接超时、防火墙限制或代理问题\n"
+                        f"  剩余重试次数: {retry_remain}"
+                    )
                 self._schedule_llm_retry_event(
                     model_name=model_info.name,
                     attempt=max_attempts - retry_remain + 1,
@@ -1178,6 +1292,9 @@ class LLMOrchestrator:
         max_tokens: Optional[int] = None,
         model_name: Optional[str] = None,
         embedding_input: str | None = None,
+        image_bytes: bytes | None = None,
+        image_mime_type: str | None = None,
+        image_preprocess_version: str | None = None,
         audio_base64: str | None = None,
         interrupt_flag: asyncio.Event | None = None,
         session_id: str = "",
@@ -1241,6 +1358,9 @@ class LLMOrchestrator:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     embedding_input=embedding_input,
+                    image_bytes=image_bytes,
+                    image_mime_type=image_mime_type,
+                    image_preprocess_version=image_preprocess_version,
                     audio_base64=audio_base64,
                     trace_context=trace_context,
                 )
@@ -1257,15 +1377,16 @@ class LLMOrchestrator:
                 )
                 if self.request_type.startswith("maisaka."):
                     logger.debug(f"LLMOrchestrator[{self.request_type}] 模型 model={model_info.name} 已返回 API 响应")
-                total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
-                if response_usage := response.usage:
-                    total_tokens += response_usage.total_tokens
-                self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty - 1)
-                return LLMExecutionResult(api_response=response, model_info=model_info)
+                response_tokens = response.usage.total_tokens if response.usage else 0
+                self._adjust_model_usage(model_info.name, tokens_delta=response_tokens, usage_penalty_delta=-1)
+                return LLMExecutionResult(
+                    api_response=response,
+                    model_info=model_info,
+                    request_started_at=datetime.fromtimestamp(trace_context.current_attempt_started_at),
+                )
 
             except ReqAbortException as e:
-                total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
-                self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty - 1)
+                self._adjust_model_usage(model_info.name, usage_penalty_delta=-1)
                 if self.request_type.startswith("maisaka."):
                     logger.debug(
                         f"LLMOrchestrator[{self.request_type}] 模型 model={model_info.name} 的请求已被外部信号中断"
@@ -1287,8 +1408,7 @@ class LLMOrchestrator:
                     )
                     attach_request_snapshot(last_exception, snapshot_path)
                 logger.warning(f"模型 '{model_info.name}' 尝试失败，切换到下一个模型。原因: {e}")
-                total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
-                self.model_usage[model_info.name] = (total_tokens, penalty + 1, usage_penalty - 1)
+                self._adjust_model_usage(model_info.name, penalty_delta=1, usage_penalty_delta=-1)
                 failed_models_this_request.add(model_info.name)
                 if model_index < max_attempts - 1:
                     update_failed_request_attempt(last_exception, status="switching_model")
@@ -1351,7 +1471,7 @@ class LLMOrchestrator:
         if e.__cause__:
             detail_lines.append(f"底层异常: {type(e.__cause__).__name__} | {e.__cause__}")
 
-        snapshot_info = format_request_snapshot_log_info(e)
+        snapshot_info = format_request_snapshot_log_info(e, include_snapshot_path=False)
         if detail_lines or snapshot_info:
             detail_text = "\n  " + "\n  ".join(detail_lines) if detail_lines else ""
             return f"{detail_text}{snapshot_info}"
@@ -1429,7 +1549,6 @@ class LLMRequest(LLMOrchestrator):
             tuple(task_config.model_list),
             task_config.max_tokens,
             task_config.temperature,
-            task_config.slow_threshold,
             task_config.selection_strategy,
             task_config.hard_timeout,
         )

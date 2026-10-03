@@ -100,6 +100,7 @@ let activeConsumerCount = 0
 let monitorSubscriptionStarted = false
 let monitorSubscriptionPromise: Promise<void> | null = null
 let monitorUnsubscribe: (() => Promise<void>) | null = null
+let monitorConnectionUnsubscribe: (() => void) | null = null
 let monitorInitialSyncPending = false
 const storeListeners = new Set<() => void>()
 let persistSnapshotTimer: ReturnType<typeof setTimeout> | null = null
@@ -251,7 +252,10 @@ async function loadMonitorSnapshot() {
       db.get('meta', 'lastEventId'),
     ])
 
-    cachedTimeline = timelineRecords.slice(-MAX_TIMELINE_ENTRIES).map(toTimelineEntry)
+    cachedTimeline = timelineRecords
+      .map(toTimelineEntry)
+      .sort(compareTimelineEntries)
+      .slice(-MAX_TIMELINE_ENTRIES)
     cachedSeenEventIds = new Set(
       cachedTimeline
         .map((entry) => entry.eventId)
@@ -420,6 +424,17 @@ function getTimelineEntrySequence(entry: TimelineEntry) {
 }
 
 function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry) {
+  // 事件号代表实际广播/写入顺序，优先于消息自身时间戳。
+  // message.sent 的 timestamp 是原始消息时间，可能早于 Planner 和工具事件。
+  if (a.eventId !== undefined && b.eventId !== undefined && a.eventId !== b.eventId) {
+    return a.eventId - b.eventId
+  }
+  if (a.eventId !== undefined && b.eventId === undefined) {
+    return -1
+  }
+  if (a.eventId === undefined && b.eventId !== undefined) {
+    return 1
+  }
   if (a.timestamp !== b.timestamp) {
     return a.timestamp - b.timestamp
   }
@@ -637,6 +652,29 @@ function handleMonitorEvent(event: MaisakaMonitorEvent) {
     return
   }
 
+  if (event.type === 'planner.progress' || event.type === 'planner.finalized') {
+    const cycleId = dataRecord.cycle_id
+    const runId = dataRecord.run_id
+    const existing = cachedTimeline.find(
+      (entry) =>
+        typeof runId === 'string' &&
+        runId.length > 0 &&
+        (entry.type === 'planner.progress' || entry.type === 'planner.finalized') &&
+        entry.sessionId === sessionId &&
+        (entry.data as unknown as Record<string, unknown>).cycle_id === cycleId &&
+        (entry.data as unknown as Record<string, unknown>).run_id === runId
+    )
+    if (existing) {
+      // 保留首次出现的位置，让正在执行的工具在原卡片内更新。
+      const updated: TimelineEntry = { ...existing, type: event.type, data: event.data }
+      cachedTimeline = cachedTimeline.map((entry) => (entry.id === existing.id ? updated : entry))
+      updateSessionInfo(event, sessionId, timestamp)
+      schedulePersistUpdatedTimelineEntry(existing.id, sessionId)
+      notifyStoreListeners()
+      return
+    }
+  }
+
   const entry: TimelineEntry = {
     id: eventId ? `evt_${eventId}` : `evt_${++entryCounter}_${Date.now()}`,
     eventId: eventId ?? undefined,
@@ -655,6 +693,19 @@ function handleMonitorEvent(event: MaisakaMonitorEvent) {
 
   schedulePersistMonitorSnapshot(entry, sessionId)
   notifyStoreListeners()
+}
+
+// connected 跟随底层连接实时变化；订阅失败（如后端尚未就绪）后，连接恢复时自动补订阅
+function handleMonitorConnectionChange(connected: boolean) {
+  if (connected && !monitorSubscriptionStarted && shouldKeepMonitorActive()) {
+    ensureMonitorSubscription()
+  }
+
+  const nextConnected = connected && monitorSubscriptionStarted
+  if (cachedConnected !== nextConnected) {
+    cachedConnected = nextConnected
+    notifyStoreListeners()
+  }
 }
 
 function ensureMonitorSubscription() {
@@ -685,12 +736,20 @@ function ensureMonitorSubscription() {
     .finally(() => {
       monitorSubscriptionPromise = null
     })
+
+  // 须在 monitorSubscriptionPromise 赋值后注册：注册时会立即回调一次当前状态
+  monitorConnectionUnsubscribe ??= maisakaMonitorClient.onConnectionChange(
+    handleMonitorConnectionChange
+  )
 }
 
 function stopMonitorSubscriptionIfIdle() {
   if (shouldKeepMonitorActive()) {
     return
   }
+
+  monitorConnectionUnsubscribe?.()
+  monitorConnectionUnsubscribe = null
 
   if (monitorUnsubscribe) {
     const unsub = monitorUnsubscribe
