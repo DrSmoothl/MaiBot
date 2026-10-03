@@ -1,6 +1,7 @@
 import { Link, useMatchRoute } from '@tanstack/react-router'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useCallback, useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
@@ -147,6 +148,9 @@ export function NavItem({
       setFlyoutRect(null)
       onMobileMenuClose()
     },
+    onKeyDown: (event: KeyboardEvent<HTMLAnchorElement>) => {
+      if (event.key === 'Escape') setFlyoutRect(null)
+    },
   } as const
 
   const renderLink = (expanded = false) => {
@@ -208,9 +212,6 @@ export function NavItem({
         if (!itemRef.current?.contains(event.relatedTarget) && !flyoutRef.current?.contains(event.relatedTarget)) {
           setFlyoutRect(null)
         }
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') setFlyoutRect(null)
       }}
     >
       {renderLink()}
