@@ -46,6 +46,8 @@ import { logout } from '@/lib/auth'
 import { isElectron } from '@/lib/runtime'
 import { ThemeProviderContext } from '@/lib/theme-context'
 import { cn } from '@/lib/utils'
+import { extensionIcons, extensionPath, extensionWorkspace } from '@/lib/plugin-webui'
+import type { WebUIExtension } from '@/lib/plugin-webui'
 
 import type { WorkspaceMode } from './types'
 
@@ -69,7 +71,7 @@ const SearchDialog = lazy(() =>
 
 const WORKSPACE_TABS: Array<{
   value: WorkspaceMode
-  to: '/' | '/chat' | '/logs'
+  to: string
   icon: ComponentType<{ className?: string }>
   labelKey: string
 }> = [
@@ -78,6 +80,7 @@ const WORKSPACE_TABS: Array<{
 ]
 
 interface HeaderProps {
+  extensions?: WebUIExtension[]
   sidebarOpen: boolean
   mobileMenuOpen: boolean
   searchOpen: boolean
@@ -87,7 +90,7 @@ interface HeaderProps {
   onSearchOpenChange: (open: boolean) => void
   onThemeChange: (theme: 'light' | 'dark' | 'system') => void
   onTopbarToggle: () => void
-  onWorkspaceNavigate: (to: '/' | '/chat' | '/logs') => void
+  onWorkspaceNavigate: (to: string) => void
   topbarCollapsed: boolean
   workspaceMode: WorkspaceMode
 }
@@ -95,6 +98,7 @@ interface HeaderProps {
 type HeaderActionId = 'search' | 'docs' | 'language' | 'theme' | 'logout'
 
 export function Header({
+  extensions = [],
   sidebarOpen,
   mobileMenuOpen,
   searchOpen,
@@ -109,6 +113,28 @@ export function Header({
   workspaceMode,
 }: HeaderProps) {
   const { t, i18n: i18nInstance } = useTranslation()
+  const pluginTabs = extensions.flatMap((extension) => {
+    const page = extension.pages.find((page) => page.placement === 'workspace')
+    return page
+      ? [
+          {
+            value: extensionWorkspace(extension.plugin_id),
+            to: extensionPath(extension.plugin_id, page.id),
+            icon: extensionIcons[page.icon],
+            labelKey: extension.workspace_title ?? extension.plugin_id,
+            literal: true,
+          },
+        ]
+      : []
+  })
+  // 顶栏最多直接展示一个插件工作区，其余收进“更多”；当前工作区保持可见。
+  const visiblePluginTab = pluginTabs.find((tab) => tab.value === workspaceMode) ?? pluginTabs[0]
+  const workspaceTabs = [
+    ...WORKSPACE_TABS.map((tab) => ({ ...tab, literal: false })),
+    ...(visiblePluginTab ? [visiblePluginTab] : []),
+  ]
+  const overflowTabs = pluginTabs.filter((tab) => tab !== visiblePluginTab)
+  const workspaceTabsKey = workspaceTabs.map((tab) => `${tab.value}:${tab.labelKey}`).join('|')
   const { themeConfig } = useContext(ThemeProviderContext)
   // 千禧风格的顶栏要放得下键帽，比其它风格高一截；高度由动画驱动，所以在这里按风格取值。
   const expandedTopbarHeight = themeConfig.dashboardStyle === 'millennium' ? 70 : 42
@@ -219,7 +245,7 @@ export function Header({
       window.removeEventListener('resize', updateCompactState)
       resizeObserver.disconnect()
     }
-  }, [workspaceMode])
+  }, [workspaceMode, workspaceTabsKey])
 
   const handleLogout = async () => {
     await logout()
@@ -293,7 +319,7 @@ export function Header({
               title={t('header.switchSidebarToHover')}
               className={cn(
                 'group absolute top-1/2 left-0 z-20 hidden h-5 w-7 -translate-y-1/2 items-center justify-center focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none lg:flex',
-                workspaceMode !== 'settings' && 'lg:hidden'
+                workspaceMode === 'logs' && 'lg:hidden'
               )}
             >
               <ChevronLeft
@@ -339,7 +365,7 @@ export function Header({
               aria-expanded={mobileMenuOpen}
               className={cn(
                 'hover:bg-accent rounded-lg p-2 lg:hidden',
-                workspaceMode !== 'settings' && 'hidden'
+                workspaceMode === 'logs' && 'hidden'
               )}
             >
               <Menu className="h-5 w-5" />
@@ -356,7 +382,7 @@ export function Header({
                 title={t('header.switchSidebarToHover')}
                 className={cn(
                   'group absolute top-1/2 left-0 z-20 hidden h-14 w-7 -translate-y-1/2 items-center justify-center focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none lg:flex',
-                  workspaceMode !== 'settings' && 'lg:hidden'
+                  workspaceMode === 'logs' && 'lg:hidden'
                 )}
               >
                 <ChevronLeft
@@ -378,14 +404,14 @@ export function Header({
                 aria-hidden="true"
                 className="pointer-events-none invisible absolute top-0 left-0 inline-flex h-9 items-center justify-center gap-0.5 rounded-lg p-1"
               >
-                {WORKSPACE_TABS.map(({ value, icon: Icon, labelKey }) => (
+                {workspaceTabs.map(({ value, icon: Icon, labelKey, literal }) => (
                   <div
                     key={value}
                     className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium whitespace-nowrap"
                   >
                     <Icon className="h-3.5 w-3.5" />
                     <span className="font-sans text-base font-semibold tracking-wider uppercase">
-                      {t(labelKey)}
+                      {literal ? labelKey : t(labelKey)}
                     </span>
                   </div>
                 ))}
@@ -410,7 +436,7 @@ export function Header({
                     }, WORKSPACE_HOVER_LEAVE_DELAY_MS)
                   }}
                 >
-                  {WORKSPACE_TABS.map(({ value, to, icon: Icon, labelKey }) => (
+                  {workspaceTabs.map(({ value, to, icon: Icon, labelKey, literal }) => (
                     <TabsTrigger
                       key={value}
                       asChild
@@ -432,6 +458,7 @@ export function Header({
                     >
                       <Link
                         to={to}
+                        title={literal ? labelKey : t(labelKey)}
                         onPointerEnter={() => {
                           if (!workspaceHoverLocked) {
                             if (workspaceHoverTimerRef.current !== null) {
@@ -481,14 +508,34 @@ export function Header({
                             !workspaceTabsCompact && 'sm:inline'
                           )}
                         >
-                          {t(labelKey)}
+                          {literal ? labelKey : t(labelKey)}
                         </span>
                       </Link>
                     </TabsTrigger>
                   ))}
                 </TabsList>
               </Tabs>
-            {/* 后端切换按钮（仅 Electron） */}
+              {overflowTabs.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" aria-label={t('pluginWebUI.more')}>
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {overflowTabs.map((tab) => (
+                      <DropdownMenuItem
+                        key={tab.value}
+                        onSelect={() => onWorkspaceNavigate(tab.to)}
+                      >
+                        <tab.icon className="mr-2 h-4 w-4" />
+                        {tab.labelKey}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              {/* 后端切换按钮（仅 Electron） */}
             {isElectron() && (
               <>
                 <Button

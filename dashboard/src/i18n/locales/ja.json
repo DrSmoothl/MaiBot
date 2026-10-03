@@ -1,4 +1,25 @@
 {
+  "pluginWebUI": {
+    "extensions": "プラグイン拡張",
+    "manage": "プラグインページの管理",
+    "more": "その他のプラグインワークスペース",
+    "refresh": "更新",
+    "loading": "読み込み中…",
+    "empty": "データがありません",
+    "previous": "前へ",
+    "next": "次へ",
+    "completed": "操作が完了しました",
+    "confirmTitle": "プラグイン操作の確認",
+    "cancel": "キャンセル",
+    "confirm": "確認",
+    "unavailable": "このページは停止中または非表示です。",
+    "invalidData": "プラグインのデータがコンポーネント定義と一致しません。",
+    "providedBy": "{{plugin}} が提供",
+    "show": "{{plugin}} のページを表示",
+    "moveUp": "上へ",
+    "moveDown": "下へ",
+    "preferencesHint": "表示と順序の設定は現在のブラウザーに保存され、バックエンドの権限は変更しません。"
+  },
   "header": {
     "collapseSidebar": "サイドバーを折りたたむ",
     "expandSidebar": "サイドバーを展開する",

@@ -1049,6 +1049,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
   const basicChatPromptFieldNames = new Set(['group_chat_prompt', 'private_chat_prompts'])
   const botSchema = configSchema.nested.bot
   const replyStyleSchema = configSchema.nested.chat?.nested?.reply_style
+  const hasPersonalitySchema = Boolean(configSchema.nested.personality)
   const identitySchema: ConfigSchema | null = botSchema ? {
     ...botSchema,
     fields: botSchema.fields
@@ -1119,7 +1120,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             uiLabel: '聊天流prompt',
             uiSubLabel: '聊天流prompt',
             uiAdvanced: true,
-            fields: configSchema.nested.personality
+            fields: hasPersonalitySchema
               ? replyStyleSchema.fields.filter((field) => !basicChatPromptFieldNames.has(field.name))
               : replyStyleSchema.fields,
           },

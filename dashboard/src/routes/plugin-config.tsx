@@ -66,6 +66,7 @@ import { RestartOverlay } from '@/components/restart-overlay'
 import { getLocalPluginChangelog, getLocalPluginReadme, getPluginRuntimeComponents } from '@/lib/plugin-api'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
 import { PluginStats } from '@/components/plugin-stats'
+import { PluginWebUIManagerPanel } from '@/components/plugin-webui-manager'
 import type {
   InstalledPlugin,
   ConfigFieldSchema,
@@ -1988,6 +1989,8 @@ function PluginConfigPageContent() {
             ))}
           </div>
         )}
+
+        {!adapterManagement && <PluginWebUIManagerPanel />}
 
         <Dialog
           open={loadFailureDetailPlugin !== null}

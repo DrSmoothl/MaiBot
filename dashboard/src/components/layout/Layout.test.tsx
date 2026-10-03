@@ -108,7 +108,11 @@ vi.mock('@/components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => children,
 }))
 vi.mock('@/components/use-theme', () => ({
-  useTheme: () => ({ setTheme: vi.fn(), theme: layoutMocks.theme }),
+  useTheme: () => ({ setTheme: vi.fn(), theme: layoutMocks.theme, themeConfig: { dashboardStyle: 'default' } }),
+}))
+vi.mock('@/lib/plugin-webui', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/plugin-webui')>(),
+  usePluginWebUI: () => ({ extensions: [], loading: false, error: null, preferences: { hidden: [], order: [] } }),
 }))
 vi.mock('@/hooks/use-auth', () => ({
   useAuthGuard: () => ({ checking: layoutMocks.checking }),

@@ -2266,3 +2266,376 @@
   height: 2.875rem !important;
   width: 2.875rem !important;
 }
+
+/* ---------- 首页模块的标题条：通栏、带刻线，和设计稿一致 ---------- */
+
+/* 标题条横跨整张卡片，下面是一道刻线（暗线 + 亮线），再往下才是屏幕 */
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  :is(
+    [data-home-card-id='builtin:bot-status'],
+    [data-home-card-id='builtin:quick-actions'],
+    [data-home-card-id='builtin:storage'],
+    [data-home-card-id='builtin:stats-overview']
+  )
+  [data-dashboard-card='true']::before {
+  background-position:
+    right 14px top 10px;
+  border-bottom: 2px solid var(--mil-lo);
+  box-shadow: 0 2px 0 var(--mil-hi);
+  margin: -7px -7px 10px;
+  padding: 9px 14px 8px;
+}
+
+:root[data-dashboard-style='millennium'] [data-home-page='true'] [data-dashboard-card-header='true'] {
+  border-bottom: 2px solid var(--mil-lo);
+  box-shadow: 0 2px 0 var(--mil-hi);
+  margin: -7px -7px 10px;
+  min-height: 2rem;
+  padding: 3px 8px 3px 14px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-dashboard-card-header='true']
+  [data-dashboard-card-title='true'] {
+  font-size: 0.75rem;
+}
+
+/* 标题条右侧的切换键跟着上移到新的标题条里 */
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  :is([data-home-card-id='builtin:storage'], [data-home-card-id='builtin:stats-overview'])
+  [data-dashboard-card-content='true']
+  > .absolute {
+  right: 2px;
+  top: -2.625rem;
+}
+
+/* 屏幕两侧多留一点机壳 */
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-dashboard-card='true']
+  > [data-dashboard-card-content='true'] {
+  margin-left: 5px;
+  margin-right: 5px;
+}
+
+/* 标题条变高后，存储卡片的屏幕内边距再收一档 */
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-card-id='builtin:storage']
+  [data-dashboard-card-content='true'].p-4 {
+  padding: 0.375rem 0.75rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-card-id='builtin:storage']
+  [data-home-storage-details='true'] {
+  row-gap: 0.25rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-card-id='builtin:storage']
+  [data-dashboard-card-content='true']
+  .text-2xl {
+  font-size: 1.125rem;
+  line-height: 1.1;
+}
+
+/* ---------- 首页版本号：悬停时浮成一颗小键帽，提示这里可以点 ---------- */
+
+:root[data-dashboard-style='millennium'] [data-home-page='true'] [data-home-version-button='true'] {
+  cursor: pointer;
+  margin: -4px -8px;
+  padding: 4px 8px 6px;
+  transition:
+    background-color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 60ms ease-out;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-version-button='true']:is(:hover, :focus-visible) {
+  background-color: var(--mil-key);
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -4px 0 var(--mil-key-side);
+  color: var(--mil-ink);
+  outline: none;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-version-button='true']:is(:hover, :focus-visible)
+  span {
+  opacity: 1;
+}
+
+:root[data-dashboard-style='millennium'] [data-home-page='true'] [data-home-version-button='true']:active {
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -2px 0 var(--mil-key-side);
+  transform: translateY(2px);
+}
+
+/* ---------- 标题条里的小切换键：收矮一档，在标题条里上下居中 ---------- */
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  .inline-flex.items-center
+  > button.whitespace-nowrap.transition-colors {
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -4px 0 var(--mil-key-side);
+  line-height: 1;
+  min-height: 1.375rem;
+  padding: 0 0.5rem 2px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  .inline-flex.items-center
+  > button.whitespace-nowrap.transition-colors.text-primary {
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 2px 0 var(--mil-on-side);
+  padding: 2px 0.5rem 0;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-card-id='builtin:storage']
+  [data-dashboard-card-content='true']
+  > button.absolute
+  > span:not([aria-hidden]) {
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -4px 0 var(--mil-key-side);
+  line-height: 1.25rem;
+  min-height: 1.375rem;
+  padding: 0 0.5rem 2px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-card-id='builtin:storage']
+  [data-dashboard-card-content='true']
+  > button.absolute
+  > span.text-primary {
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 2px 0 var(--mil-on-side);
+  padding: 2px 0.5rem 0;
+}
+
+/* 补出来的标题条里，切换键是绝对定位的：算到标题条正中 */
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  :is([data-home-card-id='builtin:storage'], [data-home-card-id='builtin:stats-overview'])
+  [data-dashboard-card-content='true']
+  > .absolute {
+  right: 2px;
+  top: -39.5px;
+}
+
+/* 自带标题的卡片：标题条里的内容垂直居中 */
+:root[data-dashboard-style='millennium'] [data-home-page='true'] [data-dashboard-card-header='true'] {
+  align-items: center;
+  padding-bottom: 4px;
+  padding-top: 4px;
+}
+
+/* ---------- 一言：凸起的模块里嵌一条屏幕，右边一颗编辑键 ---------- */
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true'] {
+  background-color: var(--mil-panel) !important;
+  background-image: var(--mil-speck) !important;
+  background-size: 5px 5px;
+  border: 2px solid var(--mil-line) !important;
+  box-shadow:
+    inset 2px 2px 0 var(--mil-hi),
+    inset -2px -2px 0 var(--mil-lo),
+    0 5px 0 var(--mil-drop) !important;
+  box-sizing: border-box;
+  color: var(--mil-ink) !important;
+  gap: 0.75rem;
+  height: calc(100% - 5px);
+  padding: 10px 12px 12px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-hitokoto='true']
+  > div:first-child {
+  align-items: center;
+  align-self: stretch;
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-sunk);
+  display: flex;
+  margin: 4px;
+  padding: 0 1rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true']
+  p {
+  color: var(--mil-screen-ink) !important;
+  font-size: 1.125rem !important;
+  font-style: normal !important;
+  font-weight: 700 !important;
+  width: 100%;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true']
+  [data-home-hitokoto-edit='true'] {
+  background-color: var(--mil-key);
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink) !important;
+  height: 2.875rem;
+  padding-bottom: 5px;
+  width: 2.875rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true']
+  [data-home-hitokoto-edit='true']:hover {
+  background-color: var(--mil-key-hover);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true']
+  [data-home-hitokoto-edit='true']
+  svg {
+  color: var(--mil-ink) !important;
+  height: 1.125rem;
+  width: 1.125rem;
+}
+
+/* ---------- 一言：收得更轻一些，不抢首页的视线 ---------- */
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true'] {
+  box-shadow:
+    inset 2px 2px 0 var(--mil-hi),
+    inset -2px -2px 0 var(--mil-lo),
+    0 2px 0 var(--mil-lo) !important;
+  gap: 0.5rem;
+  height: calc(100% - 2px);
+  padding: 6px 8px 7px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-hitokoto='true']
+  > div:first-child {
+  box-shadow:
+    inset 2px 2px 0 var(--mil-screen-shade),
+    -1px -1px 0 1px var(--mil-lo),
+    1px 1px 0 1px var(--mil-hi);
+  margin: 2px;
+  padding: 0 0.875rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true']
+  p {
+  font-size: 1rem !important;
+  font-weight: 500 !important;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true']
+  [data-home-hitokoto-edit='true'] {
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -5px 0 var(--mil-key-side),
+    inset 4px 4px 0 var(--mil-key-hi);
+  height: 2.5rem;
+  padding-bottom: 4px;
+  width: 2.5rem;
+}
+
+/* ---------- 标题条里的小切换键：文字在键面上下居中，不贴上沿 ---------- */
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  .inline-flex.items-center
+  > button.whitespace-nowrap.transition-colors,
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-card-id='builtin:storage']
+  [data-dashboard-card-content='true']
+  > button.absolute
+  > span:not([aria-hidden]) {
+  align-items: center;
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -4px 0 var(--mil-key-side);
+  display: inline-flex;
+  font-size: 0.6875rem;
+  height: 1.375rem;
+  line-height: 1;
+  min-height: 0;
+  padding: 3px 0.5rem 4px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  .inline-flex.items-center
+  > button.whitespace-nowrap.transition-colors.text-primary,
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-card-id='builtin:storage']
+  [data-dashboard-card-content='true']
+  > button.absolute
+  > span.text-primary {
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 3px 0 var(--mil-on-side);
+  padding: 5px 0.5rem 2px;
+}
+
+/* 一言外层包裹元素不再画投影：投影只由模块自己那条 2 像素浅色厚度负责，
+   否则外层的深色投影会隔着一条缝出现在模块下面 */
+:root[data-dashboard-style='millennium']
+  [data-home-summary-cards='true']
+  [data-home-card-id='builtin:hitokoto'][data-home-card-id][data-home-card-style][data-home-card-variant='separator'][data-home-card-variant] {
+  box-shadow: none !important;
+}
+
+/* 一言的底部厚度和其它卡片统一 */
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true'] {
+  box-shadow:
+    inset 2px 2px 0 var(--mil-hi),
+    inset -2px -2px 0 var(--mil-lo),
+    0 5px 0 var(--mil-drop) !important;
+  height: calc(100% - 5px);
+}

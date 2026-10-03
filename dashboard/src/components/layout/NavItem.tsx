@@ -27,7 +27,7 @@ export function NavItem({
   const matchRoute = useMatchRoute()
   const isActive = item.external ? false : matchRoute({ to: item.path })
   const Icon = item.icon
-  const label = t(item.label)
+  const label = item.literalLabel ? item.label : t(item.label)
   const prefersReducedMotion = useReducedMotion()
   const flyoutTransition = {
     duration: prefersReducedMotion ? 0 : 0.22,

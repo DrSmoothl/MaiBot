@@ -56,6 +56,20 @@ const protectedRoute = createRoute({
   errorComponent: ({ error }) => <RouteErrorBoundary error={error} />,
 })
 
+const pluginWebUIRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/extensions/$pluginId/$pageId',
+  component: lazyRouteComponent(() => import('./routes/plugin-webui'), 'PluginWebUIPage'),
+})
+
+const pluginWebUIManagerRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/extensions',
+  beforeLoad: () => {
+    throw redirect({ to: '/plugin-config', hash: 'webui-extensions', replace: true })
+  },
+})
+
 // 首页路由
 const indexRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -359,6 +373,8 @@ const routeTree = rootRoute.addChildren([
   pluginConfigEmbedRoute,
   pluginMirrorsEmbedRoute,
   protectedRoute.addChildren([
+    pluginWebUIRoute,
+    pluginWebUIManagerRoute,
     indexRoute,
     statisticsRoute,
     replyEffectsRoute,

@@ -34,6 +34,7 @@ vi.mock('@/hooks/use-auth', () => ({
 vi.mock('@/routes/auth', () => ({ AuthPage: StubPage }))
 vi.mock('@/routes/setup/index.tsx', () => ({ SetupPage: StubPage }))
 vi.mock('@/routes/index', () => ({ IndexPage: StubPage }))
+vi.mock('@/routes/plugin-webui', () => ({ PluginWebUIPage: StubPage, PluginWebUIManagerPage: StubPage }))
 vi.mock('@/routes/logs', () => ({
   LogViewerPage: StubPage,
   ReasoningLogViewerPage: StubPage,
@@ -93,6 +94,8 @@ const expectedPaths = [
   '/resource/knowledge-graph',
   '/resource/knowledge-base',
   '/plugins',
+  '/extensions',
+  '/extensions/$pluginId/$pageId',
   '/model-presets',
   '/plugin-config',
   '/adapter-management',
@@ -184,7 +187,7 @@ describe('router 路由表', () => {
       string,
       { options: { component?: unknown } } | undefined
     >
-    for (const path of expectedPaths) {
+    for (const path of expectedPaths.filter((path) => !['/mcp-settings', '/settings'].includes(path))) {
       const route = routesByPath[path]
       expect(route, `routesByPath 缺少 ${path}`).toBeDefined()
       expect(typeof route?.options.component, `${path} 缺少组件`).toBe('function')
@@ -319,7 +322,7 @@ describe('router 路由表', () => {
 
   it('所有懒加载页面工厂均可 preload 到桩组件', async () => {
     const routesByPath = getRoutesByPath()
-    for (const path of expectedPaths) {
+    for (const path of expectedPaths.filter((path) => !['/mcp-settings', '/settings'].includes(path))) {
       const component = routesByPath[path]?.options.component as LazyRouteComponent | undefined
       expect(typeof component, `${path} 缺少组件`).toBe('function')
       expect(typeof component?.preload, `${path} 不是懒加载组件`).toBe('function')

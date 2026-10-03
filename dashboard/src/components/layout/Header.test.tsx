@@ -10,6 +10,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Header } from './Header'
+import type { WebUIExtension } from '@/lib/plugin-webui'
 
 const mocks = vi.hoisted(() => ({
   pathname: '/',
@@ -220,6 +221,27 @@ function makeProps(
 }
 
 describe('Header', () => {
+  it('插件顶部标签保留原始标题并通过宿主工作区切换导航', () => {
+    const extension: WebUIExtension = { plugin_id: 'test.plugin', workspace_title: '消息统计', pages: [{
+      id: 'overview', title: '概览', description: '', placement: 'workspace', icon: 'chart', queries: {}, actions: {}, content: [],
+    }] }
+    const props = makeProps({ extensions: [extension] })
+    render(<Header {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: '消息统计' }))
+    expect(props.onWorkspaceNavigate).toHaveBeenCalledWith('/extensions/test.plugin/overview')
+    expect(mocks.t).not.toHaveBeenCalledWith('消息统计')
+  })
+
+  it('当前插件工作区保持可见，其余插件收进更多菜单', () => {
+    const extensions: WebUIExtension[] = ['first', 'second'].map((plugin_id) => ({ plugin_id, workspace_title: plugin_id, pages: [{
+      id: 'overview', title: 'Overview', description: '', placement: 'workspace', icon: 'puzzle', queries: {}, actions: {}, content: [],
+    }] }))
+    render(<Header {...makeProps({ extensions, workspaceMode: 'plugin:second' })} />)
+    expect(screen.getByRole('tab', { name: 'second' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'first' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'pluginWebUI.more' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'a11y.closeMenu' })).not.toHaveClass('hidden')
+  })
   beforeEach(() => {
     mocks.pathname = '/'
     mocks.electron = false
@@ -306,14 +328,11 @@ describe('Header', () => {
     await waitFor(() => expect(screen.getByText('搜索对话框已打开')).toBeInTheDocument())
   })
 
-  it('当前页为设置且搜索打开时高亮对应顶栏按钮', () => {
+  it('搜索打开时高亮对应顶栏按钮', () => {
     mocks.pathname = '/settings'
     const { rerender } = render(<Header {...makeProps({ searchOpen: false })} />)
 
-    expect(document.querySelector('[data-header-action-highlighted="true"]')).toHaveAttribute(
-      'aria-label',
-      'sidebar.menu.settings'
-    )
+    expect(document.querySelector('[data-header-action-highlighted="true"]')).toBeNull()
 
     rerender(<Header {...makeProps({ searchOpen: true })} />)
     expect(document.querySelector('[data-header-action-highlighted="true"]')).toHaveAttribute(
@@ -396,7 +415,7 @@ describe('Header', () => {
     expect(props.onWorkspaceNavigate).not.toHaveBeenCalled()
   })
 
-  it('悬停工作区会抢占设置高亮，离开延迟后恢复，锁定后不再跟随悬停', () => {
+  it('悬停工作区会抢占当前标签高亮，离开延迟后恢复，锁定后不再跟随悬停', () => {
     vi.useFakeTimers()
     mocks.pathname = '/settings'
     const props = makeProps({ workspaceMode: 'settings' })
@@ -404,7 +423,7 @@ describe('Header', () => {
 
     const logsTab = screen.getByRole('tab', { name: 'workspace.logs' })
     const settingsTab = screen.getByRole('tab', { name: 'workspace.settings' })
-    const settingsLink = screen.getByRole('link', { name: 'sidebar.menu.settings' })
+    const settingsLink = settingsTab
     const tabs = document.querySelector('[data-dashboard-workspace-tabs="true"]') as HTMLElement
 
     expect(settingsLink.querySelector('[data-layout-id="topbar-selection-pill"]')).toBeInTheDocument()
@@ -609,7 +628,7 @@ describe('Header', () => {
     })
   })
 
-  it('顶栏按钮悬停定时器可被再次进入打断，并触发设置/语言/文档等剩余回调', () => {
+  it('顶栏按钮悬停定时器可被再次进入打断，并触发工作区/语言/文档等剩余回调', () => {
     vi.useFakeTimers()
     const props = makeProps()
     render(<Header {...props} />)
@@ -619,7 +638,7 @@ describe('Header', () => {
     const languageButton = screen.getByRole('button', { name: 'header.switchLanguage' })
     const themeButton = screen.getAllByRole('button', { name: 'header.switchToLight' })[0]
     const logoutButton = screen.getByRole('button', { name: 'header.logout' })
-    const settingsLink = screen.getByRole('link', { name: 'sidebar.menu.settings' })
+    const settingsLink = screen.getByRole('tab', { name: 'workspace.settings' })
 
     fireEvent.pointerEnter(searchButton)
     fireEvent.pointerLeave(searchButton)
@@ -637,7 +656,7 @@ describe('Header', () => {
     fireEvent.click(settingsLink)
     fireEvent.click(screen.getAllByRole('button', { name: 'English' })[1])
 
-    expect(settingsLink).toHaveAttribute('href', '/settings')
+    expect(settingsLink).toHaveAttribute('href', '/')
     expect(mocks.changeLanguage).toHaveBeenCalledWith('en')
 
     act(() => {

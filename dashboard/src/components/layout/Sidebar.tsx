@@ -11,8 +11,10 @@ import { cn } from '@/lib/utils'
 import { LogoArea } from './LogoArea'
 import { NavItem } from './NavItem'
 import { useMenuSections } from './use-menu-sections'
+import type { MenuSection } from './types'
 
 interface SidebarProps {
+  menuSections?: MenuSection[]
   sidebarOpen: boolean
   mobileMenuOpen: boolean
   topbarCollapsed?: boolean
@@ -24,6 +26,7 @@ const SIDEBAR_HOVER_EXPAND_DELAY_MS = 180
 const SIDEBAR_COLLAPSE_TRANSITION_MS = 220
 
 export function Sidebar({
+  menuSections: suppliedMenuSections,
   sidebarOpen,
   mobileMenuOpen,
   topbarCollapsed = false,
@@ -35,7 +38,8 @@ export function Sidebar({
   const isMillennium = themeConfig.dashboardStyle === 'millennium'
   const { config: sidebarBg, inheritedFrom } = useBackground('sidebar')
   const inheritsPageBackground = inheritedFrom === 'page'
-  const menuSections = useMenuSections()
+  const builtInMenuSections = useMenuSections()
+  const menuSections = suppliedMenuSections ?? builtInMenuSections
   const [hoverExpanded, setHoverExpanded] = useState(false)
   const [fixTransitionActive, setFixTransitionActive] = useState(false)
   const [collapseTransitionActive, setCollapseTransitionActive] = useState(false)
@@ -144,11 +148,7 @@ export function Sidebar({
             }}
             className="text-muted-foreground/55 hover:text-primary focus-visible:ring-ring absolute right-4 bottom-3 z-20 hidden h-7 w-7 items-center justify-center border-0 bg-transparent p-0 shadow-none transition-colors focus-visible:ring-2 focus-visible:outline-none lg:flex"
           >
-            <ChevronRight
-              aria-hidden="true"
-              className="h-5 w-5"
-              strokeWidth={2.25}
-            />
+            <ChevronRight aria-hidden="true" className="h-5 w-5" strokeWidth={2.25} />
           </button>
         )}
       </div>
@@ -188,7 +188,8 @@ export function Sidebar({
                     'mb-[var(--layout-sidebar-section-title-margin-bottom)]',
                     'transition-opacity duration-[220ms] motion-reduce:transition-none',
                     !isMillennium && !sidebarRevealed && 'lg:opacity-0',
-                    !isMillennium && !sidebarRevealed &&
+                    !isMillennium &&
+                      !sidebarRevealed &&
                       'lg:mb-[var(--layout-sidebar-section-title-margin-bottom-collapsed)]'
                   )}
                 >
@@ -201,10 +202,10 @@ export function Sidebar({
                     }
                     className={cn(
                       'text-muted-foreground/60 text-sm font-semibold tracking-wider whitespace-nowrap uppercase',
-                      isMillennium && 'lg:whitespace-normal lg:break-words lg:normal-case'
+                      isMillennium && 'lg:break-words lg:whitespace-normal lg:normal-case'
                     )}
                   >
-                    {t(section.title)}
+                    {section.literalTitle ? section.title : t(section.title)}
                   </h3>
                 </div>
 

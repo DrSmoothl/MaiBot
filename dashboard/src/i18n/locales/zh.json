@@ -1,4 +1,25 @@
 {
+  "pluginWebUI": {
+    "extensions": "插件扩展",
+    "manage": "管理插件页面",
+    "more": "更多插件工作区",
+    "refresh": "刷新",
+    "loading": "加载中…",
+    "empty": "暂无数据",
+    "previous": "上一页",
+    "next": "下一页",
+    "completed": "操作已完成",
+    "confirmTitle": "确认插件操作",
+    "cancel": "取消",
+    "confirm": "确认",
+    "unavailable": "页面已下线或已隐藏。",
+    "invalidData": "插件返回的数据与组件声明不一致。",
+    "providedBy": "由插件 {{plugin}} 提供",
+    "show": "显示 {{plugin}} 页面",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "preferencesHint": "显示和排序偏好仅保存在当前浏览器，不改变插件的后端权限。"
+  },
   "header": {
     "collapseSidebar": "收起侧边栏",
     "expandSidebar": "展开侧边栏",

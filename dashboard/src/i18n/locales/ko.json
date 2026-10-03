@@ -1,4 +1,25 @@
 {
+  "pluginWebUI": {
+    "extensions": "플러그인 확장",
+    "manage": "플러그인 페이지 관리",
+    "more": "다른 플러그인 작업 공간",
+    "refresh": "새로 고침",
+    "loading": "로딩 중…",
+    "empty": "데이터 없음",
+    "previous": "이전",
+    "next": "다음",
+    "completed": "작업 완료",
+    "confirmTitle": "플러그인 작업 확인",
+    "cancel": "취소",
+    "confirm": "확인",
+    "unavailable": "이 페이지는 오프라인이거나 숨겨져 있습니다.",
+    "invalidData": "플러그인 데이터가 구성 요소 선언과 일치하지 않습니다.",
+    "providedBy": "{{plugin}}에서 제공",
+    "show": "{{plugin}} 페이지 표시",
+    "moveUp": "위로",
+    "moveDown": "아래로",
+    "preferencesHint": "표시 및 순서 설정은 현재 브라우저에 저장되며 백엔드 권한을 변경하지 않습니다."
+  },
   "header": {
     "collapseSidebar": "사이드바 접기",
     "expandSidebar": "사이드바 펼치기",
