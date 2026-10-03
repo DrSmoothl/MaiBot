@@ -29,6 +29,10 @@ export interface DynamicConfigFormProps {
   sectionColumns?: 1 | 2
   /** 按完整配置路径，为顶层配置节添加前置内容。 */
   sectionLeadingContent?: Record<string, React.ReactNode>
+  /** 按完整配置路径，为顶层配置节添加末尾内容。 */
+  sectionTrailingContent?: Record<string, React.ReactNode>
+  /** 按完整配置路径，在字段后插入内容。 */
+  fieldTrailingContent?: Record<string, React.ReactNode>
 }
 
 function buildFieldPath(basePath: string, fieldName: string) {
@@ -107,6 +111,8 @@ function PromptGeneratorEntryCard() {
 
 function DynamicConfigSection({
   leadingContent,
+  trailingContent,
+  fieldTrailingContent,
   advancedVisible,
   basePath,
   children,
@@ -130,6 +136,8 @@ function DynamicConfigSection({
   nestedSchema: ConfigSchema
   onChange: (field: string, value: unknown) => void
   leadingContent?: React.ReactNode
+  trailingContent?: React.ReactNode
+  fieldTrailingContent?: Record<string, React.ReactNode>
   sectionKey: string
   sectionTitle: string
   values: Record<string, unknown>
@@ -182,8 +190,10 @@ function DynamicConfigSection({
                 level={level}
                 advancedVisible={advancedVisible}
                 sectionColumns={1}
+                fieldTrailingContent={fieldTrailingContent}
               />
               {sectionKey === 'personality' && <PromptGeneratorEntryCard />}
+              {trailingContent}
             </div>
           )}
         </CardContent>
@@ -290,6 +300,8 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
   advancedVisible,
   sectionColumns = 1,
   sectionLeadingContent,
+  sectionTrailingContent,
+  fieldTrailingContent,
 }) => {
   const resolvedAdvancedVisible = advancedVisible ?? false
 
@@ -469,6 +481,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
     <>
       {rows.map((row) => {
         const rowKey = row[0]['x-row']
+        const isBotIdentityRow = rowKey === 'bot-identity'
         const isVisualImageCompressionRow = rowKey === 'visual-image-compression'
 
         return row.length > 1 ? (
@@ -477,7 +490,9 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
               data-config-row={rowKey}
               className={cn(
                 "grid min-w-0 items-stretch gap-3 py-0.5",
-                isVisualImageCompressionRow
+                isBotIdentityRow
+                  ? "grid-cols-[minmax(0,1fr)_auto]"
+                  : isVisualImageCompressionRow
                   ? "grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.1fr)] items-center"
                   : "md:grid-cols-2 xl:grid-cols-3",
               )}
@@ -487,7 +502,9 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
                   key={field.name}
                   className={cn(
                     "flex min-w-0 items-stretch",
-                    isVisualImageCompressionRow
+                    isBotIdentityRow
+                      ? ""
+                      : isVisualImageCompressionRow
                       ? fieldIndex > 0 && "md:border-l md:border-border/50 md:pl-3"
                       : horizontalSeparatorClassName,
                   )}
@@ -509,6 +526,15 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
         <React.Fragment key={row.map((field) => field.name).join('|')}>
           {index > 0 && <Separator className="my-1.5 bg-border/50" />}
           {renderRows([row])}
+          {row.map((field) => {
+            const fieldPath = buildFieldPath(basePath, field.name)
+            const trailingContent = fieldTrailingContent?.[fieldPath]
+            return trailingContent ? (
+              <div key={fieldPath} className="mt-3">
+                {trailingContent}
+              </div>
+            ) : null
+          })}
         </React.Fragment>
       ))}
     </>
@@ -657,6 +683,8 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
                 sectionKey={key}
                 sectionTitle={sectionTitle}
                 leadingContent={sectionLeadingContent?.[nestedFieldPath]}
+                trailingContent={sectionTrailingContent?.[nestedFieldPath]}
+                fieldTrailingContent={fieldTrailingContent}
               />
             )
           }

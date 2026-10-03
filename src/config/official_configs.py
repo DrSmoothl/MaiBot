@@ -9,12 +9,6 @@ RULE_TYPE_OPTION_DESCRIPTIONS = {
     "private": "私聊聊天流，item_id 填用户 ID",
 }
 
-VISUAL_MODE_OPTION_DESCRIPTIONS = {
-    "auto": "根据模型信息自动选择文本或多模态模式",
-    "text": "纯文本模式，不向模型发送视觉输入",
-    "multimodal": "多模态模式，会向模型发送视觉输入",
-}
-
 OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
     "compress": "压缩图片并继续处理",
     "discard": "丢弃超过最大大小的图片组件",
@@ -345,42 +339,8 @@ class VisualConfig(ConfigBase):
     __ui_label__ = "视觉"
     __ui_order__ = 60
 
-    planner_mode: Literal["text", "multimodal", "auto"] = Field(
-        default="auto",
-        json_schema_extra={
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-option-descriptions": VISUAL_MODE_OPTION_DESCRIPTIONS,
-            "x-row": "visual-modes",
-            "label": {
-                "zh_CN": "规划阶段视觉模式",
-                "en_US": "Planner vision mode",
-                "ja_JP": "プランナー視覚モード",
-            },
-        },
-    )
-    """控制规划阶段是否把图片内容直接发送给 planner 模型。auto 会根据模型是否支持视觉自动选择；text 始终只使用文字和图片识别结果；multimodal 会强制使用多模态输入。"""
-
-    replyer_mode: Literal["text", "multimodal", "auto"] = Field(
-        default="auto",
-        json_schema_extra={
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-option-descriptions": VISUAL_MODE_OPTION_DESCRIPTIONS,
-            "x-row": "visual-modes",
-            "label": {
-                "zh_CN": "回复生成视觉模式",
-                "en_US": "Replyer vision mode",
-                "ja_JP": "返信生成視覚モード",
-            },
-        },
-    )
-    """控制回复生成阶段是否把图片内容直接发送给 replyer 模型。auto 会根据模型是否支持视觉自动选择；text 始终只使用文字和图片识别结果；multimodal 会强制使用多模态输入。"""
-
     max_image_num: int = Field(
-        default=128,
+        default=64,
         ge=0,
         json_schema_extra={
             "advanced": True,
@@ -395,7 +355,7 @@ class VisualConfig(ConfigBase):
     """一次多模态请求最多带多少张图，太大可能更慢更贵。"""
 
     wait_image_recognize_max_time: float = Field(
-        default=10,
+        default=32,
         ge=0,
         json_schema_extra={
             "x-widget": "input",
@@ -426,7 +386,7 @@ class VisualConfig(ConfigBase):
     """收到太大的图片时，是否自动压缩或丢弃。"""
 
     max_image_size_mb: float = Field(
-        default=30.0,
+        default=16.0,
         ge=0,
         json_schema_extra={
             "x-widget": "input",
@@ -4052,12 +4012,12 @@ class ExpressionConfig(ConfigBase):
     __ui_sub_label__ = "表达"
 
     expression_checked_only: bool = Field(
-        default=True,
+        default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "使用精选表达",
-                "en_US": "Use curated expressions",
-                "ja_JP": "厳選した表現を使用",
+                "zh_CN": "仅使用精选表达",
+                "en_US": "Use only curated expressions",
+                "ja_JP": "厳選した表現のみを使用",
             },
             "x-widget": "switch",
             "x-row": "expression-learning-switches",
@@ -4079,28 +4039,20 @@ class ExpressionConfig(ConfigBase):
     )
     """写入表达方式前先让 AI 检查，减少学到奇怪内容。"""
 
-    expression_selection_mode: Literal["legacy", "vector_intent"] = Field(
-        default="legacy",
+    use_vector_expression: bool = Field(
+        default=True,
         json_schema_extra={
             "label": {
-                "zh_CN": "表达使用方式",
-                "en_US": "Expression usage mode",
-                "ja_JP": "表現の使用方法",
+                "zh_CN": "使用向量表达",
+                "en_US": "Use vector expressions",
+                "ja_JP": "ベクトル表現を使用",
             },
-            "x-widget": "select",
+            "x-widget": "switch",
+            "x-row": "expression-learning-switches",
             "advanced": False,
-            "options": ["legacy", "vector_intent"],
-            "x-option-labels": {
-                "legacy": "随手",
-                "vector_intent": "超级精细",
-            },
-            "x-option-descriptions": {
-                "legacy": "使用 LLM 进行选择，效果一般",
-                "vector_intent": "使用特殊构建的回复方式加上嵌入模型进行选择，效果非常好（需要配置嵌入模型）",
-            },
         },
     )
-    """表达方式的使用策略：legacy 随手抽取候选，vector_intent 使用表达意图与嵌入召回。"""
+    """开启后使用表达意图与嵌入召回，需要配置嵌入模型；关闭时使用随手候选。"""
 
     expression_vector_index_path: str = Field(
         default="data/expression_selection/expression_vector_index.json",

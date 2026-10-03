@@ -250,11 +250,14 @@
 /* JetBrains Mono 字体 - 用于代码编辑器 */
 @keyframes config-tab-enter {
   from {
+    max-width: 0;
+    padding-inline: 0;
     opacity: 0;
-    transform: translateX(-0.5rem);
+    transform: translateX(-0.75rem);
   }
 
   to {
+    max-width: 16rem;
     opacity: 1;
     transform: translateX(0);
   }

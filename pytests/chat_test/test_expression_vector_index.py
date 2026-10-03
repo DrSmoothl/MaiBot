@@ -599,8 +599,8 @@ async def test_history_backfill_uses_uniform_upserts_then_finalizes_after_empty_
 
     monkeypatch.setattr(
         global_config.expression,
-        "expression_selection_mode",
-        "vector_intent",
+        "use_vector_expression",
+        True,
     )
     monkeypatch.setattr(vector_index, "get_current_embedding_profile", fake_get_current_embedding_profile)
     monkeypatch.setattr(vector_index, "_load_history_backfill_items", fake_load_history_backfill_items)
@@ -661,7 +661,7 @@ async def test_history_backfill_continues_when_locked_recheck_finds_new_item(
     async def fake_finalize_bootstrap_if_ready(**_kwargs):
         return next(finalize_results)
 
-    monkeypatch.setattr(global_config.expression, "expression_selection_mode", "vector_intent")
+    monkeypatch.setattr(global_config.expression, "use_vector_expression", True)
     monkeypatch.setattr(vector_index, "get_current_embedding_profile", fake_get_current_embedding_profile)
     monkeypatch.setattr(vector_index, "_load_history_backfill_items", fake_load_history_backfill_items)
     monkeypatch.setattr(vector_index, "upsert_expressions", fake_upsert_expressions)
@@ -724,7 +724,7 @@ def test_history_backfill_progress_counts_current_profile_only(tmp_path, monkeyp
     monkeypatch.setattr(
         config_module,
         "global_config",
-        SimpleNamespace(expression=SimpleNamespace(expression_selection_mode="vector_intent")),
+        SimpleNamespace(expression=SimpleNamespace(use_vector_expression=True)),
     )
     monkeypatch.setattr(vector_index_module, "_load_index_payload", lambda _path: payload)
     monkeypatch.setattr(vector_index_module, "_load_expression_rows_snapshot", lambda: rows)

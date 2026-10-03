@@ -254,7 +254,7 @@ class MaisakaExpressionSelector:
 
     @staticmethod
     def _use_vector_candidate_pool() -> bool:
-        return global_config.expression.expression_selection_mode == "vector_intent"
+        return global_config.expression.use_vector_expression
 
     @staticmethod
     def _has_embedding_model_configured() -> bool:

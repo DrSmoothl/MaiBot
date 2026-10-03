@@ -57,7 +57,7 @@ def _normalize_reply_arguments(raw_arguments: dict[str, Any]) -> tuple[dict[str,
 
 
 def _use_expression_intent() -> bool:
-    return config_module.global_config.expression.expression_selection_mode == "vector_intent"
+    return config_module.global_config.expression.use_vector_expression
 
 
 def _require_hook_bool(raw_value: Any, option_name: str) -> bool:

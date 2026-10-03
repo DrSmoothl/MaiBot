@@ -63,8 +63,6 @@ def build_retro_generator(*, is_group_session: bool) -> BaseMaisakaReplyGenerato
     generator = object.__new__(BaseMaisakaReplyGenerator)
     generator.chat_stream = SimpleNamespace(session_id="session-1", is_group_session=is_group_session)
     generator._load_prompt = load_prompt
-    generator._enable_visual_message = False
-    generator._replyer_mode = "text"
     return generator
 
 

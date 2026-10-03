@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import random
 import re
@@ -87,15 +87,11 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         request_type: str = "maisaka.replyer",
         llm_client_cls: Any,
         load_prompt_func: Callable[..., str],
-        enable_visual_message: Optional[bool],
-        replyer_mode: Literal["text", "multimodal", "auto"],
     ) -> None:
         self.chat_stream = chat_stream
         self.request_type = request_type
         self._llm_client_cls = llm_client_cls
         self._load_prompt = load_prompt_func
-        self._enable_visual_message = enable_visual_message
-        self._replyer_mode = replyer_mode
         self.express_model = llm_client_cls(
             task_name="replyer",
             request_type=request_type,
@@ -818,16 +814,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             return request_messages
 
     def _resolve_enable_visual_message(self, model_info: Optional[ModelInfo] = None) -> bool:
-        if self._enable_visual_message is not None:
-            return self._enable_visual_message
-        if self._replyer_mode == "multimodal":
-            if model_info is not None and not model_info.visual:
-                raise ValueError(
-                    f"replyer_mode=multimodal，但模型 '{model_info.name}' 未开启 visual，无法使用多模态 replyer"
-                )
-            return True
-        if self._replyer_mode == "text":
-            return False
+        """根据本次实际选中的回复模型，自动决定是否发送图片。"""
         return bool(model_info.visual) if model_info is not None else False
 
     def _resolve_session_id(self, stream_id: Optional[str]) -> str:

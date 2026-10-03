@@ -2608,6 +2608,7 @@ const ManualAccountCard = ({
 
 interface StringListHookOptions {
   addLabel: string
+  borderless?: boolean
   emptyText: string
   label: string
   multiline?: boolean
@@ -2657,10 +2658,11 @@ function createStringListHook(options: StringListHookOptions): FieldHookComponen
             {items.map((item, itemIndex) => (
               <div
                 key={itemIndex}
-                className="grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_2.5rem]"
+                className={`grid gap-2 sm:grid-cols-[minmax(0,1fr)_2.5rem]${options.borderless ? '' : ' rounded-md border bg-muted/20 p-3'}`}
               >
                 <InputComponent
                   value={item}
+                  aria-label={`${options.label} ${itemIndex + 1}`}
                   placeholder={options.placeholder}
                   onChange={(event) => updateItem(itemIndex, event.target.value)}
                   {...(options.multiline ? { rows: 2 } : {})}
@@ -2685,12 +2687,40 @@ function createStringListHook(options: StringListHookOptions): FieldHookComponen
   }
 }
 
-export const AliasNamesHook = createStringListHook({
+const AliasNamesEditor = createStringListHook({
   addLabel: '添加别名',
+  borderless: true,
   emptyText: '暂无别名。',
   label: '别名',
   placeholder: '小麦',
 })
+
+export const AliasNamesHook: FieldHookComponent = (props) => {
+  const aliasCount = Array.isArray(props.value) ? props.value.length : 0
+
+  return (
+    <div className="space-y-1.5">
+      <Label className={fieldTitleClassName(props.schema, 'block text-[15px] leading-6')}>
+        别名
+      </Label>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button type="button" variant="outline" className="flex w-full items-center gap-2">
+            {aliasCount > 0 ? `${aliasCount} 个别名` : '添加别名'}
+            <ChevronDown className="h-4 w-4 shrink-0" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          className="max-h-[min(24rem,var(--radix-popover-content-available-height))] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto"
+          aria-label="别名列表"
+        >
+          <AliasNamesEditor {...props} />
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}
 
 export const MultipleReplyStyleHook = createStringListHook({
   addLabel: '添加表达风格',
