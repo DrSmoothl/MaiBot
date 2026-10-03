@@ -1007,22 +1007,6 @@ export function KnowledgeBasePage() {
                 <DialogDescription>查看长期记忆运行状态、向量配置和数据目录。</DialogDescription>
               </DialogHeader>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {runtimeConfig?.vector_rebuild_required ? (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => void memoryRuntime.openVectorRebuildDialog()}
-                    disabled={memoryRuntime.vectorRebuilding}
-                  >
-                    <RotateCcw
-                      className={cn(
-                        'mr-2 h-4 w-4',
-                        memoryRuntime.vectorRebuilding && 'animate-spin'
-                      )}
-                    />
-                    重建向量
-                  </Button>
-                ) : null}
                 <Button variant="outline" size="sm" onClick={() => void loadPage()}>
                   <RefreshCw className="mr-2 h-4 w-4" />
                   刷新数据
@@ -1205,13 +1189,31 @@ export function KnowledgeBasePage() {
 
               {/* 「更多操作」省略号与标签同一行：self-stretch 让标签撑满该行，
                   h-8 定住行高，标签高度随之与按钮对齐 */}
+              {runtimeConfig?.vector_rebuild_required ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="ml-auto"
+                  title={runtimeConfig.vector_rebuild_message}
+                  onClick={() => void memoryRuntime.openVectorRebuildDialog()}
+                  disabled={memoryRuntime.vectorRebuilding}
+                >
+                  <RotateCcw
+                    className={cn(
+                      'mr-2 h-4 w-4',
+                      memoryRuntime.vectorRebuilding && 'animate-spin'
+                    )}
+                  />
+                  重建向量
+                </Button>
+              ) : null}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="ml-auto h-8 w-8"
+                    className={cn('h-8 w-8', !runtimeConfig?.vector_rebuild_required && 'ml-auto')}
                     aria-label="更多操作"
                     title="更多操作"
                   >

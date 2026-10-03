@@ -62,7 +62,23 @@ export default defineConfig({
     dedupe: ['@codemirror/state', '@codemirror/view'],
   },
   optimizeDeps: {
-    include: ['react', 'react-dom'],
+    // 设置页及其懒加载编辑器在启动时预构建，避免首次访问时重新优化依赖，
+    // 使正在加载的模块请求因依赖版本变化返回 504 Outdated Optimize Dep。
+    include: [
+      'react',
+      'react-dom',
+      '@radix-ui/react-accordion',
+      '@codemirror/lang-css',
+      '@codemirror/lang-json',
+      '@codemirror/lang-python',
+      '@codemirror/language',
+      '@codemirror/legacy-modes/mode/toml',
+      '@codemirror/lint',
+      '@codemirror/state',
+      '@codemirror/theme-one-dark',
+      '@codemirror/view',
+      '@uiw/react-codemirror',
+    ],
   },
   build: {
     // 让 Rollup 按实际依赖关系分包，避免手动拆分的 Router/Radix 包互相导入，
