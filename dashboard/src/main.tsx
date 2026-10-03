@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 
 import './index.css'
+import './styles/millennium.css'
 import './i18n'
 import { ElectronShell } from './components/electron/electron-shell'
 import { AnnouncerProvider } from './components/ui/announcer'

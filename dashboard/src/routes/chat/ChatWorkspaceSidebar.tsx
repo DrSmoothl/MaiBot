@@ -61,6 +61,8 @@ function ConversationItem({
 
   return (
     <div
+      data-chat-sidebar-item="true"
+      data-active={active ? 'true' : 'false'}
       className={cn(
         'group relative flex w-full min-w-0 items-center gap-1 rounded-xl pr-1 transition-colors',
         active
@@ -154,6 +156,8 @@ function ObservedConversationItem({
       : messagePreview
   return (
     <div
+      data-chat-sidebar-item="true"
+      data-active={active ? 'true' : 'false'}
       className={cn(
         'group relative flex w-full min-w-0 items-center gap-1 rounded-xl pr-1 transition-colors',
         active
@@ -266,6 +270,7 @@ export function ChatWorkspaceSidebar({
 
   return (
     <aside
+      data-chat-workspace-sidebar="true"
       className={cn(
         'bg-card/90 supports-backdrop-filter:bg-card/70 flex h-full shrink-0 flex-col border-r backdrop-blur',
         'w-60 xl:w-64',
@@ -290,22 +295,25 @@ export function ChatWorkspaceSidebar({
         </div>
       </div>
 
-      {/* 会话列表 */}
-      <ScrollArea
-        className="min-h-0 flex-1"
-        contentClassName="!block w-full min-w-0"
-        scrollbars="vertical"
-        viewportClassName="[&>div]:!block [&>div]:!min-w-0 [&>div]:w-full"
+      {/* 会话列表：「与麦麦聊天」固定在上方，其余聊天流在下方独立滚动 */}
+      <nav
+        aria-label={t('chat.sidebar.conversations')}
+        data-chat-sidebar-list="true"
+        className="flex min-h-0 flex-1 flex-col"
       >
-        <nav aria-label={t('chat.sidebar.conversations')} className="p-2">
-          {showLocalSection && (
-            <section aria-labelledby="chat-sidebar-local-heading" className="space-y-0.5">
-              <h2
-                id="chat-sidebar-local-heading"
-                className="text-muted-foreground px-2.5 pt-0.5 pb-1 text-[11px] font-medium tracking-wide"
-              >
-                {t('chat.sidebar.myChats')}
-              </h2>
+        {showLocalSection && (
+          <section
+            aria-labelledby="chat-sidebar-local-heading"
+            data-chat-sidebar-section="local"
+            className="mx-2 mt-2 shrink-0"
+          >
+            <h2
+              id="chat-sidebar-local-heading"
+              className="text-muted-foreground px-2.5 pt-0.5 pb-1 text-[11px] font-medium tracking-wide"
+            >
+              {t('chat.sidebar.myChats')}
+            </h2>
+            <div data-chat-sidebar-screen="true" className="space-y-0.5">
               {filteredTabs.map((tab) => (
                 <ConversationItem
                   key={tab.id}
@@ -315,51 +323,64 @@ export function ChatWorkspaceSidebar({
                   onClose={onClose}
                 />
               ))}
-            </section>
-          )}
+            </div>
+          </section>
+        )}
 
-          {showObservedSection && (
-            <section
-              aria-labelledby="chat-sidebar-observed-heading"
-              className={cn('space-y-0.5 pt-2', showLocalSection && 'border-border mt-2 border-t')}
+        {showObservedSection && (
+          <section
+            aria-labelledby="chat-sidebar-observed-heading"
+            data-chat-sidebar-section="observed"
+            className={cn(
+              'mx-2 flex min-h-0 flex-1 flex-col pt-2',
+              showLocalSection && 'border-border mt-2 border-t'
+            )}
+          >
+            <h2
+              id="chat-sidebar-observed-heading"
+              className="text-muted-foreground px-2.5 pt-0.5 pb-1 text-[11px] font-medium tracking-wide"
             >
-              <h2
-                id="chat-sidebar-observed-heading"
-                className="text-muted-foreground px-2.5 pt-0.5 pb-1 text-[11px] font-medium tracking-wide"
-              >
-                {t('chat.sidebar.observedChats')}
-              </h2>
-              {observedSessionsError ? (
-                <p className="text-destructive px-2.5 py-2 text-xs">
-                  {t('chat.sidebar.loadObservedChatsFailed')}
-                </p>
-              ) : filteredObservedSessions.length === 0 ? (
-                <p className="text-muted-foreground px-2.5 py-2 text-xs">
-                  {t('chat.sidebar.waitingObservedChats')}
-                </p>
-              ) : (
-                filteredObservedSessions.map((session) => (
-                  <ObservedConversationItem
-                    key={session.sessionId}
-                    session={session}
-                    status={observedStageStatuses.get(session.sessionId)}
-                    latestMessage={observedLatestMessages.get(session.sessionId)}
-                    active={activeObservedSessionId === session.sessionId}
-                    onSelect={onSelectObserved}
-                    onOpenSettings={onOpenObservedSettings}
-                  />
-                ))
-              )}
-            </section>
-          )}
+              {t('chat.sidebar.observedChats')}
+            </h2>
+            <ScrollArea
+              className="min-h-0 flex-1"
+              contentClassName="!block w-full min-w-0"
+              scrollbars="vertical"
+              viewportClassName="[&>div]:!block [&>div]:!min-w-0 [&>div]:w-full"
+            >
+              <div data-chat-sidebar-screen="true" className="space-y-0.5 pb-2">
+                {observedSessionsError ? (
+                  <p className="text-destructive px-2.5 py-2 text-xs">
+                    {t('chat.sidebar.loadObservedChatsFailed')}
+                  </p>
+                ) : filteredObservedSessions.length === 0 ? (
+                  <p className="text-muted-foreground px-2.5 py-2 text-xs">
+                    {t('chat.sidebar.waitingObservedChats')}
+                  </p>
+                ) : (
+                  filteredObservedSessions.map((session) => (
+                    <ObservedConversationItem
+                      key={session.sessionId}
+                      session={session}
+                      status={observedStageStatuses.get(session.sessionId)}
+                      latestMessage={observedLatestMessages.get(session.sessionId)}
+                      active={activeObservedSessionId === session.sessionId}
+                      onSelect={onSelectObserved}
+                      onOpenSettings={onOpenObservedSettings}
+                    />
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </section>
+        )}
 
-          {showNoResults && (
-            <p className="text-muted-foreground px-2.5 py-2 text-xs">
-              {t('chat.sidebar.noSearchResults')}
-            </p>
-          )}
-        </nav>
-      </ScrollArea>
+        {showNoResults && (
+          <p className="text-muted-foreground px-4.5 py-2 text-xs">
+            {t('chat.sidebar.noSearchResults')}
+          </p>
+        )}
+      </nav>
     </aside>
   )
 }

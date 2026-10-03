@@ -22,12 +22,23 @@ type ThemeProviderProps = {
   storageKey?: string
 }
 
-function dashboardStyleToConfigValue(style: DashboardStyle): 0 | 1 {
-  return style === 'future-retro' ? 1 : 0
+type WebUIStyleConfigValue = 0 | 1 | 2
+
+// bot_config 的 webui.webui_style 用整数保存界面风格：0 原版、1 未来复古、2 千禧。
+const DASHBOARD_STYLE_CONFIG_VALUES: Record<DashboardStyle, WebUIStyleConfigValue> = {
+  modern: 0,
+  'future-retro': 1,
+  millennium: 2,
+}
+
+function dashboardStyleToConfigValue(style: DashboardStyle): WebUIStyleConfigValue {
+  return DASHBOARD_STYLE_CONFIG_VALUES[style]
 }
 
 function configValueToDashboardStyle(value: unknown): DashboardStyle {
-  return Number(value) === 1 ? 'future-retro' : 'modern'
+  const configValue = Number(value)
+  if (configValue === 2) return 'millennium'
+  return configValue === 1 ? 'future-retro' : 'modern'
 }
 
 function shouldSyncRemoteWebUIStyle(): boolean {
@@ -44,7 +55,7 @@ export function ThemeProvider({
   })
   const [themeConfig, setThemeConfig] = useState<UserThemeConfig>(() => loadThemeConfig())
   const [systemThemeTick, setSystemThemeTick] = useState(0)
-  const pendingWebUIStyleRef = useRef<0 | 1 | null>(null)
+  const pendingWebUIStyleRef = useRef<WebUIStyleConfigValue | null>(null)
 
   const resolvedTheme = useMemo<'dark' | 'light'>(() => {
     void systemThemeTick

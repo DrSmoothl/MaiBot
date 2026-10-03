@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
   Download,
+  Keyboard,
   Monitor,
   Moon,
   RotateCcw,
@@ -92,6 +93,12 @@ const dashboardStyleOptions: Array<{
     label: '未来复古',
     description: '使用一键包外壳同款纸面颗粒、硬朗描边和切角面板。',
     icon: ScanLine,
+  },
+  {
+    value: 'millennium',
+    label: '千禧',
+    description: '米黄塑料机壳、键帽按钮和下沉屏幕，夜间模式是关灯后的炭灰机壳。',
+    icon: Keyboard,
   },
 ]
 
@@ -553,7 +560,7 @@ export function AppearanceTab() {
       {/* 界面风格 */}
       <div>
         <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">界面风格</h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
           {dashboardStyleOptions.map((option) => {
             const Icon = option.icon
             const selected = themeConfig.dashboardStyle === option.value
@@ -1330,7 +1337,7 @@ export function AppearanceTab() {
         </div>
       )}
 
-      {dashboardStyle !== 'future-retro' && (
+      {dashboardStyle === 'modern' && (
         <div>
           <div className="mb-3 flex items-center justify-between sm:mb-4">
             <div>
@@ -1415,7 +1422,7 @@ export function AppearanceTab() {
       </div>
 
       {/* 主题导入/导出 */}
-      {dashboardStyle !== 'future-retro' && (
+      {dashboardStyle === 'modern' && (
         <div>
           <h3 className="mb-3 text-base font-semibold sm:mb-4 sm:text-lg">
             {t('settings.appearance.importExportTheme')}

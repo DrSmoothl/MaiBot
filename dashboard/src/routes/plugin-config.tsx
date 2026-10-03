@@ -82,6 +82,7 @@ import { getNestedRecord, getPluginMarketplaceRoutePath, isAdapterManagementPath
 import { usePluginList } from './plugin-config/hooks/usePluginList'
 import { usePluginLifecycle } from './plugin-config/hooks/usePluginLifecycle'
 import { usePluginConfigEditor } from './plugin-config/hooks/usePluginConfigEditor'
+import { MCPExtensionList, MCPSettingsPage } from './mcp-settings'
 
 // 字段渲染组件
 interface FieldRendererProps {
@@ -1499,6 +1500,7 @@ function PluginConfigPageContent() {
   const { themeConfig } = useTheme()
   const { triggerRestart, isRestarting } = useRestart()
   const adapterManagement = isAdapterManagementPath()
+  const [editingMCP, setEditingMCP] = useState(false)
 
   const {
     plugins,
@@ -1512,7 +1514,6 @@ function PluginConfigPageContent() {
     setSearchQuery,
     showUpdateOnly,
     setShowUpdateOnly,
-    visiblePlugins,
     visiblePluginGroups,
     actingPluginId,
     setActingPluginId,
@@ -1566,8 +1567,19 @@ function PluginConfigPageContent() {
   const isModernDashboardStyle = themeConfig.dashboardStyle === 'modern'
   const isFutureRetroDashboardStyle = themeConfig.dashboardStyle === 'future-retro'
   const [loadFailureDetailPlugin, setLoadFailureDetailPlugin] = useState<InstalledPlugin | null>(null)
+  const extensionGroups = [
+    ...visiblePluginGroups.filter((group) => group.key !== 'disabled'),
+    ...(!adapterManagement && !showUpdateOnly
+      ? [{ key: 'mcp', label: 'MCP 服务', dotClassName: '', plugins: [] }]
+      : []),
+    ...visiblePluginGroups.filter((group) => group.key === 'disabled'),
+  ]
 
-  // 如果选中了插件，显示配置编辑器
+  // 按扩展类型进入各自的配置编辑器。
+  if (editingMCP && !adapterManagement) {
+    return <MCPSettingsPage onBack={() => setEditingMCP(false)} />
+  }
+
   if (selectedPlugin) {
     return (
       <>
@@ -1594,7 +1606,7 @@ function PluginConfigPageContent() {
           <div className="relative min-w-0 flex-1 basis-0 sm:basis-72">
             <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
             <Input
-              placeholder="搜索插件..."
+              placeholder="搜索插件或 MCP 服务..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
@@ -1739,7 +1751,7 @@ function PluginConfigPageContent() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="text-muted-foreground h-8 w-8 animate-spin" />
           </div>
-        ) : visiblePlugins.length === 0 ? (
+        ) : extensionGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center space-y-4 py-12">
             <Package className="text-muted-foreground/50 h-16 w-16" />
             <div className="space-y-2 text-center">
@@ -1761,7 +1773,9 @@ function PluginConfigPageContent() {
           </div>
         ) : (
           <div className="space-y-4">
-            {visiblePluginGroups.map((group) => (
+            {extensionGroups.map((group) => group.key === 'mcp' ? (
+              <MCPExtensionList key="mcp" searchQuery={searchQuery} onEdit={() => setEditingMCP(true)} />
+            ) : (
               <section key={group.key} aria-labelledby={`plugin-list-group-${group.key}`}>
                 <div className="text-muted-foreground flex items-center gap-2 border-b px-2 pb-1.5 text-xs font-medium">
                   <span className={`h-2 w-2 rounded-full ${group.dotClassName}`} aria-hidden="true" />

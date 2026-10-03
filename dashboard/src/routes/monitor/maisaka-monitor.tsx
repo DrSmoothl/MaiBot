@@ -726,7 +726,7 @@ function StageStatusPanel({
 
   if (!status) {
     return (
-      <div className="bg-muted/30 mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
+      <div data-maisaka-toolbar="true" className="bg-muted/30 mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
         {actions}
         <div className="text-muted-foreground shrink-0 text-xs whitespace-nowrap">
           当前聊天流暂无阶段状态
@@ -736,7 +736,7 @@ function StageStatusPanel({
   }
 
   return (
-    <div className="bg-background mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
+    <div data-maisaka-toolbar="true" className="bg-background mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
       {actions}
       <div className="flex shrink-0 items-center gap-1.5">
         <Badge variant="default" className="gap-1 border-0! px-1.5 text-[10px]">

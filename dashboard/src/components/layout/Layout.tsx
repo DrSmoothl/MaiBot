@@ -70,7 +70,8 @@ export function Layout({ children }: LayoutProps) {
   const workspaceTransitionTimerRef = useRef<number | null>(null)
   const shellStateRef = useRef({ sidebarOpen, topbarCollapsed })
   const immersiveRestoreRef = useRef<{ sidebarOpen: boolean; topbarCollapsed: boolean } | null>(null)
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, themeConfig } = useTheme()
+  const effectiveSidebarOpen = themeConfig.dashboardStyle !== 'millennium' && sidebarOpen
   const menuSections = useMenuSections()
 
   useEffect(() => {
@@ -304,7 +305,7 @@ export function Layout({ children }: LayoutProps) {
               style={{
                 width: sidebarExiting
                   ? 0
-                  : sidebarOpen
+                  : effectiveSidebarOpen
                     ? 'var(--layout-sidebar-width)'
                     : 'var(--layout-sidebar-collapsed-width)',
               }}
@@ -316,8 +317,9 @@ export function Layout({ children }: LayoutProps) {
                 transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
               >
                 <Sidebar
-                  sidebarOpen={sidebarOpen}
+                  sidebarOpen={effectiveSidebarOpen}
                   mobileMenuOpen={mobileMenuOpen}
+                  topbarCollapsed={topbarCollapsed}
                   onMobileMenuClose={() => setMobileMenuOpen(false)}
                   onSidebarFix={handleSidebarFix}
                 />
@@ -329,8 +331,9 @@ export function Layout({ children }: LayoutProps) {
           {isSettingsWorkspace && (
             <div className="lg:hidden">
               <Sidebar
-                sidebarOpen={sidebarOpen}
+                sidebarOpen={effectiveSidebarOpen}
                 mobileMenuOpen={mobileMenuOpen}
+                topbarCollapsed={topbarCollapsed}
                 onMobileMenuClose={() => setMobileMenuOpen(false)}
                 onSidebarFix={handleSidebarFix}
               />
@@ -361,7 +364,7 @@ export function Layout({ children }: LayoutProps) {
 
             {/* Topbar */}
             <Header
-              sidebarOpen={sidebarOpen}
+              sidebarOpen={effectiveSidebarOpen}
               mobileMenuOpen={mobileMenuOpen}
               searchOpen={searchOpen}
               actualTheme={actualTheme}

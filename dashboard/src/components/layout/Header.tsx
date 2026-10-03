@@ -1,8 +1,9 @@
-import { Link, useRouterState } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import {
   BookOpen,
   Check,
   ChevronLeft,
+  ChevronsUp,
   Database,
   FileText,
   Globe,
@@ -11,12 +12,19 @@ import {
   Moon,
   MoreHorizontal,
   Search,
-  Settings,
   SlidersHorizontal,
   Sun,
 } from 'lucide-react'
 import { LayoutGroup, motion } from 'motion/react'
-import { lazy, Suspense, type ComponentType, useEffect, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  type ComponentType,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { BackgroundLayer } from '@/components/background-layer'
@@ -36,6 +44,7 @@ import { toggleThemeWithTransition } from '@/components/use-theme'
 import { useBackground } from '@/hooks/use-background'
 import { logout } from '@/lib/auth'
 import { isElectron } from '@/lib/runtime'
+import { ThemeProviderContext } from '@/lib/theme-context'
 import { cn } from '@/lib/utils'
 
 import type { WorkspaceMode } from './types'
@@ -83,7 +92,7 @@ interface HeaderProps {
   workspaceMode: WorkspaceMode
 }
 
-type HeaderActionId = 'settings' | 'search' | 'docs' | 'language' | 'theme' | 'logout'
+type HeaderActionId = 'search' | 'docs' | 'language' | 'theme' | 'logout'
 
 export function Header({
   sidebarOpen,
@@ -100,10 +109,12 @@ export function Header({
   workspaceMode,
 }: HeaderProps) {
   const { t, i18n: i18nInstance } = useTranslation()
+  const { themeConfig } = useContext(ThemeProviderContext)
+  // 千禧风格的顶栏要放得下键帽，比其它风格高一截；高度由动画驱动，所以在这里按风格取值。
+  const expandedTopbarHeight = themeConfig.dashboardStyle === 'millennium' ? 70 : 42
   const currentLang = i18nInstance.language || 'zh'
   const { config: headerBg, inheritedFrom } = useBackground('header')
   const inheritsPageBackground = inheritedFrom === 'page'
-  const pathname = useRouterState({ select: (state) => state.location.pathname })
   const [backendManagerOpen, setBackendManagerOpen] = useState(false)
   const [activeBackendName, setActiveBackendName] = useState<string>('')
   const [workspaceTabsCompact, setWorkspaceTabsCompact] = useState(false)
@@ -218,9 +229,7 @@ export function Header({
     ? 'language'
     : searchOpen
       ? 'search'
-      : pathname === '/settings'
-        ? 'settings'
-        : null
+      : null
   const highlightedHeaderAction =
     hoveredWorkspace === null ? (hoveredHeaderAction ?? activeHeaderAction) : null
 
@@ -257,7 +266,7 @@ export function Header({
       data-dashboard-header="true"
       data-dashboard-header-collapsed={topbarCollapsed ? 'true' : undefined}
       initial={false}
-      animate={{ height: topbarCollapsed ? 16 : 42, marginBottom: 0 }}
+      animate={{ height: topbarCollapsed ? 16 : expandedTopbarHeight, marginBottom: 0 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       className={cn(
         'sticky top-0 isolate z-30 min-w-0 overflow-visible',
@@ -479,28 +488,6 @@ export function Header({
                   ))}
                 </TabsList>
               </Tabs>
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              data-dashboard-header-action="true"
-              data-header-action-highlighted={
-                highlightedHeaderAction === 'settings' ? 'true' : 'false'
-              }
-              className="relative isolate border-0 bg-transparent shadow-none"
-              title={t('sidebar.menu.settings')}
-              aria-label={t('sidebar.menu.settings')}
-            >
-              <Link
-                to="/settings"
-                onPointerEnter={() => handleHeaderActionEnter('settings')}
-                onPointerLeave={handleHeaderActionLeave}
-                onClick={() => setHoveredHeaderAction('settings')}
-              >
-                {renderHeaderActionPill('settings')}
-                <Settings className="h-4 w-4" />
-              </Link>
-            </Button>
             {/* 后端切换按钮（仅 Electron） */}
             {isElectron() && (
               <>
@@ -638,6 +625,24 @@ export function Header({
                 <Moon className="h-5 w-5" />
               )}
             </Button>
+
+            {/* 千禧风格用一颗键帽收起顶栏，取代顶栏下沿的滑条 */}
+            {themeConfig.dashboardStyle === 'millennium' && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onTopbarToggle}
+                title={t('header.collapseTopbar')}
+                aria-label={t('header.collapseTopbar')}
+                aria-expanded={!topbarCollapsed}
+                data-dashboard-header-action="true"
+                data-dashboard-topbar-collapse-key="true"
+                data-header-action-highlighted="false"
+                className="relative isolate hidden border-0 bg-transparent shadow-none sm:inline-flex"
+              >
+                <ChevronsUp className="h-5 w-5" />
+              </Button>
+            )}
 
             {/* 分隔线 */}
             <div className="bg-border hidden h-6 w-px sm:block" />

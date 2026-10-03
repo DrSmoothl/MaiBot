@@ -5301,7 +5301,7 @@ class WebUIConfig(ConfigBase):
     webui_style: int = Field(
         default=1,
         ge=0,
-        le=1,
+        le=2,
         json_schema_extra={
             "label": {
                 "zh_CN": "界面风格",
@@ -5313,7 +5313,7 @@ class WebUIConfig(ConfigBase):
             "x-input-width": "8rem",
         },
     )
-    """界面风格编号；0 为旧风格，1 为未来复古风格。"""
+    """界面风格编号；0 为旧风格，1 为未来复古风格，2 为千禧风格。"""
 
     anti_crawler_mode: Literal["false", "strict", "loose", "basic"] = Field(
         default="basic",

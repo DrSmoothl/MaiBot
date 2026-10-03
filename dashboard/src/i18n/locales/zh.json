@@ -23,9 +23,9 @@
   "sidebar": {
     "groups": {
       "overview": "概览",
-      "botConfig": "麦麦配置编辑",
-      "botResources": "麦麦资源管理",
-      "extensionsMonitor": "扩展与集成",
+      "botConfig": "配置管理",
+      "botResources": "资源管理",
+      "extensionsMonitor": "扩展集成",
       "advancedTools": "高级工具",
       "system": "系统"
     },
@@ -45,7 +45,7 @@
       "knowledgeBase": "长期记忆",
       "pluginMarket": "插件市场",
       "configTemplate": "配置模板市场",
-      "pluginConfig": "插件管理",
+      "pluginConfig": "插件扩展",
       "adapterManagement": "适配器设置",
       "mcpSettings": "MCP 设置",
       "dataTransfer": "数据管理",
