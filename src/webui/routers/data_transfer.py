@@ -32,7 +32,10 @@ _EXPORT_DIRS: dict[str, Path] = {
 _REQUIRED_EXPORT_PARTS = ("config", "data")
 _OPTIONAL_EXPORT_PARTS = ("plugins", "logs")
 _ALLOWED_IMPORT_PARTS = set(_EXPORT_DIRS)
-_EXCLUDED_EXPORT_PATHS = {"data/.a_memorix_runtime_writer.lock"}
+_EXCLUDED_EXPORT_PATHS = {
+    "data/.a_memorix_runtime_writer.lock",
+    "data/a-memorix/.a_memorix_runtime_writer.lock",
+}
 _TRANSFER_TEMP_DIR = Path(tempfile.gettempdir()) / "maibot_webui_transfer"
 _CHUNK_SIZE = 1024 * 1024
 
@@ -212,16 +215,20 @@ def _update_progress(job: _TransferJob) -> None:
 
 def _write_archive_file(archive: zipfile.ZipFile, file_path: Path, archive_name: str, job: _TransferJob) -> int:
     written_bytes = 0
-    with file_path.open("rb") as source_file, archive.open(archive_name, "w") as target_file:
-        while True:
-            _raise_if_cancelled(job)
-            chunk = source_file.read(_CHUNK_SIZE)
-            if not chunk:
-                break
-            target_file.write(chunk)
-            written_bytes += len(chunk)
-            job.processed_bytes += len(chunk)
-            _update_progress(job)
+    try:
+        with file_path.open("rb") as source_file, archive.open(archive_name, "w") as target_file:
+            while True:
+                _raise_if_cancelled(job)
+                chunk = source_file.read(_CHUNK_SIZE)
+                if not chunk:
+                    break
+                target_file.write(chunk)
+                written_bytes += len(chunk)
+                job.processed_bytes += len(chunk)
+                _update_progress(job)
+    except OSError as exc:
+        # Windows 字节区域锁可能直到 read 时才报错，补齐路径以便准确定位。
+        raise OSError(exc.errno, f"导出文件失败 ({archive_name}): {exc.strerror}", str(file_path)) from exc
     return written_bytes
 
 
