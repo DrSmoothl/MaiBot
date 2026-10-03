@@ -71,8 +71,8 @@ function Stats({ stats }: { stats?: MemoryImageStatsPayload }) {
     ['待绑定描述', stats?.pending_unbound_description_count ?? 0],
   ]
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+    <div className="min-w-0 flex-1 space-y-2">
+      <div className="flex min-h-8 flex-wrap items-center gap-x-5 gap-y-1 text-sm">
         {primaryItems.map(([label, value]) => (
           <span key={label} className="flex items-baseline gap-1.5">
             <span className="text-muted-foreground">{label}</span>
@@ -247,14 +247,20 @@ export function ImagesTab() {
   return (
     <TabsContent value="images" className="space-y-4">
       <Card>
-        <CardHeader className="border-b pb-3 sm:flex-row sm:justify-end">
-          <Button variant="outline" size="sm" onClick={() => void loadPage()} disabled={loading}>
-            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-            刷新
-          </Button>
-        </CardHeader>
         <CardContent className="pt-4 sm:pt-5">
-          <Stats stats={status?.stats} />
+          <div className="flex items-start gap-4">
+            <Stats stats={status?.stats} />
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={() => void loadPage()}
+              disabled={loading}
+            >
+              <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+              刷新
+            </Button>
+          </div>
           {(status?.status === 'error' || status?.status === 'unavailable') && (
             <Alert variant="destructive" className="mt-3">
               <AlertDescription>

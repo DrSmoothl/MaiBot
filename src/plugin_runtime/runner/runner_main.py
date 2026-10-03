@@ -76,6 +76,7 @@ from src.plugin_runtime.runner.log_handler import RunnerIPCLogHandler
 from src.plugin_runtime.runner.plugin_paths import PluginPaths, build_plugin_paths
 from src.plugin_runtime.runner.plugin_loader import PluginCandidate, PluginLoader, PluginMeta
 from src.plugin_runtime.runner.rpc_client import RPCClient
+from src.plugin_runtime.webui_schema import load_webui_extension
 
 logger = get_logger("plugin_runtime.runner.main")
 
@@ -1402,8 +1403,15 @@ class PluginRunner:
             )
             return False
 
+        try:
+            webui = await asyncio.to_thread(load_webui_extension, meta.plugin_dir)
+        except (OSError, ValueError) as exc:
+            logger.error(f"插件 {meta.plugin_id} WebUI 声明无效: {exc}")
+            return False
+
         reg_payload = RegisterPluginPayload(
             plugin_id=meta.plugin_id,
+            webui=webui,
             plugin_version=meta.version,
             plugin_type=meta.plugin_type,
             components=components,

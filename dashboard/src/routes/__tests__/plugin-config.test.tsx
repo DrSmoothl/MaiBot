@@ -149,6 +149,7 @@ vi.mock('@/components/plugin-stats', () => ({
 }))
 vi.mock('@/lib/chat-management-api', () => ({
   CHAT_ADAPTER_STATUS_QUERY_KEY: 'chat-adapter-status',
+  getAllChatStreams: async () => [],
   getAdapterHostPolicy: vi.fn(),
   getAdapterPolicyDefaults: vi.fn(),
   updateAdapterHostPolicy: vi.fn(),
@@ -659,7 +660,7 @@ describe('PluginConfigPage 主程序放行规则', () => {
     expect(within(defaults).getByText('私聊')).toBeInTheDocument()
     const groupRow = within(defaults).getByText('群聊').parentElement as HTMLElement
     const privateRow = within(defaults).getByText('私聊').parentElement as HTMLElement
-    await user.click(within(groupRow).getByRole('button', { name: '拒绝' }))
+    await user.click(within(groupRow).getByRole('button', { name: '不接收' }))
     await waitFor(() =>
       expect(chatApi.updateAdapterPolicyDefaults).toHaveBeenCalledWith(
         { group: 'block', private: 'block' },
@@ -670,7 +671,7 @@ describe('PluginConfigPage 主程序放行规则', () => {
       expect(toastMock).toHaveBeenCalledWith({ title: '适配器默认策略已保存' })
     )
 
-    await user.click(within(privateRow).getByRole('button', { name: '放行' }))
+    await user.click(within(privateRow).getByRole('button', { name: '接收消息' }))
     await waitFor(() =>
       expect(chatApi.updateAdapterPolicyDefaults).toHaveBeenLastCalledWith(
         { group: 'block', private: 'allow' },
@@ -692,7 +693,7 @@ describe('PluginConfigPage 主程序放行规则', () => {
     renderPage()
     const defaults = await screen.findByRole('region', { name: '适配器全局默认策略' })
     const groupRow = within(defaults).getByText('群聊').parentElement as HTMLElement
-    await user.click(within(groupRow).getByRole('button', { name: '拒绝' }))
+    await user.click(within(groupRow).getByRole('button', { name: '不接收' }))
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith({
         title: '适配器默认策略保存失败',
@@ -768,15 +769,15 @@ describe('PluginConfigPage 主程序放行规则', () => {
     expect(await screen.findByText('群聊规则')).toBeInTheDocument()
     expect(screen.queryByText('这是 MaiBot 主程序侧规则，与适配器自身名单相互独立。')).not.toBeInTheDocument()
     expect(screen.queryByText(/适配器自身的白名单仍在/)).not.toBeInTheDocument()
-    expect(screen.getByText('全局默认：阅读')).toBeInTheDocument()
-    expect(screen.getByText('全局默认：不阅读')).toBeInTheDocument()
+    expect(screen.getByTestId('mode-hint:group')).toHaveTextContent('黑名单模式')
+    expect(screen.getByTestId('mode-hint:private')).toHaveTextContent('白名单模式')
     expect(screen.queryByRole('button', { name: /保存主程序规则/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /源代码/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重置/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
 
     await user.click(screen.getAllByRole('combobox')[0])
-    await user.click(await screen.findByText('阅读'))
+    await user.click(await screen.findByText('接收所有消息'))
     await user.click(screen.getAllByRole('button', { name: '添加列表项' })[0])
 
     await waitFor(
@@ -798,7 +799,7 @@ describe('PluginConfigPage 主程序放行规则', () => {
     await user.click(await screen.findByRole('tab', { name: '黑白名单规则' }))
     await user.click(await screen.findByText('群聊规则'))
     await user.click(screen.getAllByRole('combobox')[0])
-    await user.click(await screen.findByText('不阅读'))
+    await user.click(await screen.findByText('默认不接收消息'))
 
     await waitFor(
       () =>

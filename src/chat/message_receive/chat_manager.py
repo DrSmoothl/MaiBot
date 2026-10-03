@@ -210,6 +210,7 @@ class ChatManager:
         group_info = message.message_info.group_info
         user_info = message.message_info.user_info
         if group_info is not None:
+            # 群名为空表示适配器未知（显式语义），不覆盖聊天流已记录的名称
             group_name = self._normalize_identity_text(group_info.group_name)
             if group_name and session.group_name != group_name:
                 session.group_name = group_name

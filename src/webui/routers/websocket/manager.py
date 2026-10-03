@@ -7,6 +7,7 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
 import asyncio
+import json
 
 from src.common.logger import get_logger
 
@@ -73,11 +74,26 @@ class UnifiedWebSocketManager:
                 message = await connection.send_queue.get()
                 if message is None:
                     return
-                await connection.websocket.send_json(message)
+                try:
+                    text = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
+                except (TypeError, ValueError) as exc:
+                    # 单条消息无法序列化只丢弃该条，不能拖垮整条连接
+                    logger.error(
+                        f"统一 WebSocket 消息序列化失败，已丢弃: connection={connection.connection_id}, error={exc}"
+                    )
+                    continue
+                await connection.websocket.send_text(text)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.error(f"统一 WebSocket 发送失败: connection={connection.connection_id}, error={exc}")
+            # 发送协程退出后连接已无法下行，主动关闭让浏览器立即感知并重连，而不是等心跳超时
+            try:
+                await self._close_websocket(connection)
+            except Exception as close_exc:
+                logger.debug(
+                    f"发送失败后关闭统一 WebSocket 时出现异常: connection={connection.connection_id}, error={close_exc}"
+                )
 
     async def connect(self, connection_id: str, websocket: WebSocket) -> WebSocketConnection:
         """注册一个新的物理 WebSocket 连接。

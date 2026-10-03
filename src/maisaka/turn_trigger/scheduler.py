@@ -1,12 +1,12 @@
 """Maisaka 消息触发调度。"""
 
-from typing import Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from src.chat.message_receive.message import SessionMessage
 from src.common.logger import get_logger
 from src.maisaka.focus import focus_mode_manager
-from src.maisaka.mode_policy import is_reply_necessity_trigger_enabled
-from src.maisaka.turn_gates import FrequencyThresholdTurnGate, ReplyNecessityTurnGate
+from src.maisaka.mode_policy import is_dynamic_reply_trigger_enabled
+
+from .gates import DynamicReplyTurnGate, FrequencyThresholdTurnGate
 
 if TYPE_CHECKING:
     from src.maisaka.runtime import MaisakaHeartFlowChatting
@@ -19,46 +19,13 @@ class MessageTurnScheduler:
 
     def __init__(self, runtime: "MaisakaHeartFlowChatting") -> None:
         self._runtime = runtime
-        self._reply_necessity_gate = ReplyNecessityTurnGate(runtime)
+        self._dynamic_reply_gate = DynamicReplyTurnGate(runtime)
         self._frequency_threshold_gate = FrequencyThresholdTurnGate(runtime)
 
-    def score_reply_necessity(
-        self,
-        *,
-        pending_messages: Sequence[SessionMessage],
-        trigger_threshold: int,
-    ) -> tuple[int, str]:
-        """按当前 runtime 快照为待处理消息计算回复必要性评分。"""
+    def record_reply(self) -> None:
+        """记录 Planner 实际调用了一次 reply，供动态门控统计回复次数。"""
 
-        score_result = self._reply_necessity_gate.score(
-            pending_messages=pending_messages,
-            trigger_threshold=trigger_threshold,
-        )
-        return score_result.score, score_result.detail
-
-    def should_trigger_by_reply_necessity(
-        self,
-        *,
-        pending_messages: Sequence[SessionMessage],
-        trigger_threshold: int,
-        formatted_frequency: str,
-        pending_count: int,
-    ) -> bool:
-        """判断新 Maisaka 是否应基于回复必要性进入 Planner。"""
-
-        result = self._reply_necessity_gate.evaluate(
-            pending_messages=pending_messages,
-            trigger_threshold=trigger_threshold,
-        )
-        decision_label = "进入Planner" if result.should_trigger else "等待更多消息"
-        schedule_detail = (
-            f"[频率: {formatted_frequency}]"
-            f"[{pending_count}/{trigger_threshold} 消息 | 压力: {result.pressure_score}]"
-        )
-        logger.info(
-            f"{self._runtime.log_prefix}{schedule_detail}[{result.detail}][{decision_label}]"
-        )
-        return result.should_trigger
+        self._dynamic_reply_gate.record_reply()
 
     def schedule_message_turn(self) -> None:
         runtime = self._runtime
@@ -96,6 +63,8 @@ class MessageTurnScheduler:
             return
 
         if runtime._has_forced_turn_trigger():
+            # @ 强制触发的回复同样占用动态门控的回复额度
+            self._dynamic_reply_gate.record_forced_turn(runtime.message_cache[runtime._last_processed_index :])
             logger.info(
                 f"{runtime.log_prefix} 回复频率调度: 频率={formatted_frequency} "
                 f"pending={pending_count} 判定=强制触发"
@@ -108,13 +77,16 @@ class MessageTurnScheduler:
 
         trigger_threshold = runtime._get_message_trigger_threshold()
         schedule_detail = f"[频率: {formatted_frequency}][{pending_count}/{trigger_threshold} 消息]"
-        if is_reply_necessity_trigger_enabled():
-            if self.should_trigger_by_reply_necessity(
+        if is_dynamic_reply_trigger_enabled():
+            dynamic_result = self._dynamic_reply_gate.evaluate(
                 pending_messages=runtime.message_cache[runtime._last_processed_index :],
-                trigger_threshold=trigger_threshold,
-                formatted_frequency=formatted_frequency,
-                pending_count=pending_count,
-            ):
+                frequency=effective_frequency,
+            )
+            logger.info(
+                f"{runtime.log_prefix} 回复频率调度: [频率: {formatted_frequency}][{pending_count} 消息] "
+                f"{dynamic_result.detail}"
+            )
+            if dynamic_result.should_trigger:
                 runtime._enqueue_message_turn()
             return
 

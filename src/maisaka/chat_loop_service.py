@@ -64,6 +64,7 @@ from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.focus import focus_mode_manager
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
+from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
 PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
@@ -634,6 +635,7 @@ class MaisakaChatLoopService:
         self._extra_tools: List[ToolOption] = []
         self._interrupt_flag: asyncio.Event | None = None
         self._tool_registry: ToolRegistry | None = None
+        self._active_tool_names: tuple[str, ...] = ()
         self._custom_chat_system_prompt = chat_system_prompt
         self._prompt_load_lock = asyncio.Lock()
         self._llm_chat_clients: dict[str, LLMServiceClient] = {}
@@ -1012,6 +1014,10 @@ class MaisakaChatLoopService:
         """
 
         enable_visual_message = self._resolve_enable_visual_message(request_kind)
+        # 拼图仅在调用工具时追加；不因后续图片增加而替换历史图片、破坏 KV 缓存前缀。
+        preserved_image_item_ids = {
+            message.item.meta.item_id for message in chat_history if isinstance(message, EmojiCandidateMessage)
+        }
         selected_history, selection_reason = self.select_llm_context_messages(
             chat_history,
             request_kind=request_kind,
@@ -1034,6 +1040,7 @@ class MaisakaChatLoopService:
             built_messages = limit_latest_images_in_messages(
                 built_messages,
                 max_image_num=global_config.visual.max_image_num,
+                preserved_item_ids=preserved_image_item_ids,
             )
 
         def context_factory(_client: BaseClient) -> List[ContextItem]:
@@ -1106,6 +1113,7 @@ class MaisakaChatLoopService:
             built_messages = limit_latest_images_in_messages(
                 built_messages,
                 max_image_num=global_config.visual.max_image_num,
+                preserved_item_ids=preserved_image_item_ids,
             )
         raw_tool_definitions = before_request_kwargs.get("tool_definitions")
         if isinstance(raw_tool_definitions, list):
@@ -1115,6 +1123,10 @@ class MaisakaChatLoopService:
                 tool_provider_by_name.get(resolve_tool_definition_name(definition), "")
                 for definition in all_tools
             ]
+        if request_kind == "planner":
+            self._active_tool_names = tuple(
+                name for definition in all_tools if (name := resolve_tool_definition_name(definition))
+            )
 
         context_sections = measure_request_sections(
             built_messages,
@@ -1199,7 +1211,6 @@ class MaisakaChatLoopService:
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
         }
-
         prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
             built_messages,
             category=self._resolve_prompt_preview_category(request_kind),

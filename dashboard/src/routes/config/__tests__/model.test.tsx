@@ -46,6 +46,7 @@ vi.mock('../model/hooks', async (importActual) => {
 })
 
 vi.mock('@/lib/config-api', () => ({
+  getBotConfigCached: async () => ({ visual: { planner_mode: 'auto', replyer_mode: 'auto' } }),
   createModelConfigVersion: vi.fn(),
   deleteModelConfigVersion: vi.fn(),
   getModelConfigCached: vi.fn(),

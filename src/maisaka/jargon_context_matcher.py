@@ -101,6 +101,7 @@ def build_jargon_reference_message(
         reference_type=ReferenceMessageType.JARGON,
         remaining_uses_value=None,
         display_prefix="[黑话参考]",
+        jargon_entries=tuple((match.content, match.meaning) for match in matched_jargons),
     )
 
 

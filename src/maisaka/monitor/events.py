@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 import asyncio
 import json
 import time
+import weakref
 
 from src.common.logger import get_logger
 from src.maisaka.context.usage import ContextSectionUsage
@@ -18,6 +19,20 @@ logger = get_logger("maisaka_monitor")
 MONITOR_DOMAIN = "maisaka_monitor"
 MONITOR_TOPIC = "main"
 NON_PERSISTED_EVENTS = {"stage.status", "stage.removed", "stage.snapshot"}
+
+# asyncio.Lock 绑定事件循环，按循环分别持有，循环销毁后自动回收
+_broadcast_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = weakref.WeakKeyDictionary()
+
+
+def _get_broadcast_lock() -> asyncio.Lock:
+    """获取当前事件循环的广播锁。"""
+
+    loop = asyncio.get_running_loop()
+    lock = _broadcast_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _broadcast_locks[loop] = lock
+    return lock
 
 
 def _normalize_payload_value(value: Any) -> Any:
@@ -344,17 +359,20 @@ async def _broadcast(event: str, data: Dict[str, Any]) -> None:
         from src.webui.routers.websocket.manager import websocket_manager
 
         data = _enrich_session_identity(data)
-        broadcast_data = data
-        if event not in NON_PERSISTED_EVENTS:
-            from src.maisaka.monitor.event_store import record_monitor_event
+        # 写库分配 event_id 与广播须在同一临界区内完成，保证前端按 event_id 递增收到事件；
+        # 否则并发广播可能乱序，前端补发游标越过尚未送达的事件，断线重连后该事件永久丢失。
+        async with _get_broadcast_lock():
+            broadcast_data = data
+            if event not in NON_PERSISTED_EVENTS:
+                from src.maisaka.monitor.event_store import record_monitor_event
 
-            broadcast_data = await asyncio.to_thread(record_monitor_event, event, data)
-        await websocket_manager.broadcast_to_topic(
-            domain=MONITOR_DOMAIN,
-            topic=MONITOR_TOPIC,
-            event=event,
-            data=broadcast_data,
-        )
+                broadcast_data = await asyncio.to_thread(record_monitor_event, event, data)
+            await websocket_manager.broadcast_to_topic(
+                domain=MONITOR_DOMAIN,
+                topic=MONITOR_TOPIC,
+                event=event,
+                data=broadcast_data,
+            )
     except Exception as exc:
         logger.warning(f"MaiSaka 监控事件广播失败: {exc}", exc_info=True)
 

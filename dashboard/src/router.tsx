@@ -56,6 +56,20 @@ const protectedRoute = createRoute({
   errorComponent: ({ error }) => <RouteErrorBoundary error={error} />,
 })
 
+const pluginWebUIRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/extensions/$pluginId/$pageId',
+  component: lazyRouteComponent(() => import('./routes/plugin-webui'), 'PluginWebUIPage'),
+})
+
+const pluginWebUIManagerRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/extensions',
+  beforeLoad: () => {
+    throw redirect({ to: '/plugin-config', hash: 'webui-extensions', replace: true })
+  },
+})
+
 // 首页路由
 const indexRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -279,11 +293,13 @@ const pluginMirrorsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/plugin-mirrors'), 'PluginMirrorsPage'),
 })
 
-// 设置页路由
+// 旧 MCP 地址统一进入插件扩展。
 const mcpSettingsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/mcp-settings',
-  component: lazyRouteComponent(() => import('./routes/mcp-settings'), 'MCPSettingsPage'),
+  beforeLoad: () => {
+    throw redirect({ to: '/plugin-config' })
+  },
 })
 
 // 数据迁移与备份路由
@@ -296,7 +312,15 @@ const dataTransferRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/settings',
-  component: lazyRouteComponent(() => import('./routes/settings/index.tsx'), 'SettingsPage'),
+  beforeLoad: ({ location }) => {
+    const params = new URLSearchParams(location.searchStr)
+    params.set('mode', 'webui')
+    // 兼容旧书签中的页签参数和 hash。
+    if (!params.has('tab') && location.hash) {
+      params.set('tab', location.hash.replace(/^#/, ''))
+    }
+    throw redirect({ href: `/config/bot?${params.toString()}`, replace: true })
+  },
 })
 
 // 配置模板市场路由
@@ -349,6 +373,8 @@ const routeTree = rootRoute.addChildren([
   pluginConfigEmbedRoute,
   pluginMirrorsEmbedRoute,
   protectedRoute.addChildren([
+    pluginWebUIRoute,
+    pluginWebUIManagerRoute,
     indexRoute,
     statisticsRoute,
     replyEffectsRoute,

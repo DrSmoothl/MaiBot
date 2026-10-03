@@ -70,6 +70,7 @@ from src.plugin_runtime.protocol.envelope import (
 from src.plugin_runtime.protocol.codec import MsgPackCodec
 from src.plugin_runtime.protocol.errors import ErrorCode, RPCError
 from src.plugin_runtime.transport.factory import create_transport_server
+from src.plugin_runtime.webui_schema import WebUIExtension
 from src.services.bot_account_service import (
     BOT_ACCOUNT_SOURCE_INBOUND,
     BOT_ACCOUNT_SOURCE_READY,
@@ -1093,6 +1094,20 @@ class PluginRunnerSupervisor:
 
         component_declarations = [component.model_dump() for component in payload.components]
         runtime_components, api_components = self._split_component_declarations(component_declarations)
+        if payload.webui is not None:
+            # WebUI 只能绑定本次注册中明确存在的静态 API，不能借短名解析到其它插件。
+            declared_apis = {
+                (component["name"], str(component["metadata"].get("version", "1")))
+                for component in api_components
+                if component["metadata"].get("enabled", True) and not component["metadata"].get("dynamic", False)
+            }
+            for page in payload.webui.pages:
+                for binding in [*page.queries.values(), *page.actions.values()]:
+                    if (binding.api, binding.version) not in declared_apis:
+                        return envelope.make_error_response(
+                            ErrorCode.E_BAD_PAYLOAD.value,
+                            f"WebUI 页面 {page.id} 引用了未注册的静态 API: {binding.api}@{binding.version}",
+                        )
         should_sync_llm_providers = bool(payload.llm_providers) or payload.plugin_id in self._registered_plugins
         if should_sync_llm_providers:
             from src.llm_models.model_client.base_client import client_registry
@@ -1208,6 +1223,14 @@ class PluginRunnerSupervisor:
                 "removed_registration": removed_registration,
             }
         )
+
+    def get_webui_extensions(self) -> Dict[str, WebUIExtension]:
+        """读取当前已注册插件的 WebUI 声明；卸载和重载沿用注册表生命周期。"""
+        return {
+            registration.plugin_id: registration.webui
+            for registration in list(self._registered_plugins.values())
+            if registration.webui is not None
+        }
 
     @staticmethod
     def _is_api_component(component: Dict[str, Any]) -> bool:

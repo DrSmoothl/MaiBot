@@ -253,8 +253,6 @@ async function openInspectionMode(
   await user.click(await screen.findByRole('tab', { name: mode }))
 }
 
-const QUICK_START_KEY = 'memory-quick-start-dismissed'
-
 function runtimeConfig(
   overrides: Partial<memoryApi.MemoryRuntimeConfigPayload> = {},
 ): memoryApi.MemoryRuntimeConfigPayload {
@@ -2183,10 +2181,6 @@ describe('KnowledgeBasePage import workflow', () => {
   }, 20_000)
 
   describe('页面壳', () => {
-    afterEach(() => {
-      window.localStorage.removeItem(QUICK_START_KEY)
-    })
-
     it('reads deep links for records feedback import and legacy tuning', async () => {
       window.history.replaceState(null, '', '/resource/knowledge-base?tab=records')
       const recordsView = renderPage()
@@ -2443,20 +2437,10 @@ describe('KnowledgeBasePage import workflow', () => {
       encodedView.unmount()
     }, 20_000)
 
-    it('dismisses quick start and jumps to import tuning and graph', async () => {
+    it('opens graph from the more actions menu', async () => {
       const user = userEvent.setup()
       renderPage()
       await waitForConsoleReady()
-      expect(screen.getByText('快速开始：先从这两件事入手')).toBeInTheDocument()
-
-      await user.click(screen.getByRole('button', { name: /导入或导出资料/ }))
-      expect(screen.getByRole('tab', { name: '导入导出' })).toHaveAttribute('data-state', 'active')
-      expect(window.location.search).toContain('tab=import')
-
-      await user.click(screen.getByRole('button', { name: /检索调优/ }))
-      expect(screen.getByRole('tab', { name: '记忆检修' })).toHaveAttribute('data-state', 'active')
-      expect(screen.getByRole('tab', { name: '检索调优' })).toHaveAttribute('data-state', 'active')
-      expect(window.location.search).toContain('mode=tuning')
 
       // 图谱入口在右上角省略号，与查看记忆状态并列；标签栏里不再有图谱
       expect(screen.queryByRole('tab', { name: '图谱' })).not.toBeInTheDocument()
@@ -2464,18 +2448,7 @@ describe('KnowledgeBasePage import workflow', () => {
       await user.click(screen.getByRole('button', { name: '更多操作' }))
       await user.click(await screen.findByRole('menuitem', { name: '打开图谱' }))
       expect(window.location.search).toContain('tab=graph')
-
-      await user.click(screen.getByRole('button', { name: '关闭快速开始' }))
-      expect(screen.queryByText('快速开始：先从这两件事入手')).not.toBeInTheDocument()
-      expect(window.localStorage.getItem(QUICK_START_KEY)).toBe('true')
     }, 20_000)
-
-    it('hides quick start after it was dismissed', async () => {
-      window.localStorage.setItem(QUICK_START_KEY, 'true')
-      renderPage()
-      await waitForConsoleReady()
-      expect(screen.queryByText('快速开始：先从这两件事入手')).not.toBeInTheDocument()
-    })
 
     it('refreshes runtime data and runs self-check from the status dialog', async () => {
       const user = userEvent.setup()

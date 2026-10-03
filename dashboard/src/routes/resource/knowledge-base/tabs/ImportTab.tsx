@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -215,6 +215,7 @@ export interface ImportTabProps {
 }
 
 export function ImportTab({ queue, form }: ImportTabProps) {
+  const uploadInputRef = useRef<HTMLInputElement>(null)
   const {
     refreshImportQueue,
     runningImportTasks,
@@ -734,14 +735,38 @@ export function ImportTab({ queue, form }: ImportTabProps) {
                       </div>
                       <div className="space-y-1">
                         <Label>文件选择</Label>
-                        <Input
+                        <input
+                          ref={uploadInputRef}
                           type="file"
+                          className="hidden"
+                          aria-label="文件选择"
                           multiple
                           accept=".txt,.md,.json"
                           onChange={(event) =>
                             setUploadFiles(Array.from(event.target.files ?? []))
                           }
                         />
+                        <div className="flex items-start gap-3">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="shrink-0"
+                            onClick={() => uploadInputRef.current?.click()}
+                          >
+                            选择文件
+                          </Button>
+                          <div
+                            role="status"
+                            data-dashboard-input="true"
+                            className="border-input bg-background min-h-9 min-w-0 flex-1 rounded-md border px-3 py-2 text-sm break-words"
+                          >
+                            {uploadFiles.length > 0 ? (
+                              uploadFiles.map((file) => file.name).join('、')
+                            ) : (
+                              <span className="text-muted-foreground">未选择文件</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                     <div className="text-xs text-muted-foreground">

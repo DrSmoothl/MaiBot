@@ -48,6 +48,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -514,17 +515,117 @@ function MonitorStatsPanel({ stats }: { stats: MonitorStats }) {
 
 interface StageStatusPanelProps {
   autoScroll: boolean
+  sessionId: string | null
   onClearTimeline: () => void
   onFindPreviousBotMessage: () => void
+  onScrollToTop: () => void
   onScrollToBottom: () => void
   stats: MonitorStats
   status?: StageStatusInfo
 }
 
+interface ChatActiveContext {
+  memory: string[]
+  expressions: string[]
+  jargon: { name: string; meaning: string }[]
+  tools: string[]
+  runtime_active: boolean
+  replyer_timestamp: number | null
+}
+
+function ActiveContextPopover({ sessionId }: { sessionId: string | null }) {
+  const [open, setOpen] = useState(false)
+  const [context, setContext] = useState<ChatActiveContext | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    if (!open || !sessionId) return
+    const controller = new AbortController()
+    const load = () => {
+      backendApi
+        .get<ChatActiveContext>('/api/webui/reasoning-process/active-context', {
+          query: { session_id: sessionId },
+          signal: controller.signal,
+        })
+        .then((result) => {
+          if (!controller.signal.aborted) {
+            setContext(result)
+            setError(false)
+          }
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setError(true)
+        })
+    }
+    setContext(null)
+    setError(false)
+    load()
+    const timer = window.setInterval(load, 10000)
+    return () => {
+      controller.abort()
+      window.clearInterval(timer)
+    }
+  }, [open, sessionId])
+
+  const sections = context
+    ? [
+        { title: '回想记忆', items: context.memory, emptyText: '当前聊天流尚未生成回想' },
+        { title: '表达方式', items: context.expressions, emptyText: '最近一次 Replyer 请求中未使用' },
+        { title: '黑话', items: context.jargon.map((entry) => entry.name), emptyText: '当前上下文没有黑话参考' },
+        { title: '激活的工具', items: context.tools, emptyText: '当前尚未激活工具' },
+      ]
+    : []
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-6 shrink-0 border-0! px-2 text-[11px]" disabled={!sessionId}>
+          <Brain className="mr-1 h-3 w-3" />
+          当前上下文
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" side="bottom" className="max-h-[min(70vh,640px)] w-[min(90vw,480px)] overflow-y-auto p-4">
+        <div className="mb-2 text-sm font-semibold">当前运行的聊天流</div>
+        {error ? <p className="text-muted-foreground text-xs">读取上下文失败</p> : !context ? <p className="text-muted-foreground text-xs">正在读取…</p> : (
+          <div className="space-y-3">
+            {!context.runtime_active && <p className="text-muted-foreground text-xs">当前聊天流未运行</p>}
+            {sections.map((section) => (
+              <section key={section.title}>
+                <h3 className="mb-1 text-xs font-semibold">{section.title} · {section.items.length}</h3>
+                {section.items.length ? section.title === '黑话' ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {section.items.map((item) => (
+                      <Tooltip key={item}>
+                        <TooltipTrigger asChild>
+                          <button type="button" className="bg-muted/50 cursor-help rounded px-2 py-1 text-xs">{item}</button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="z-[70] max-w-sm whitespace-pre-wrap break-words text-xs">
+                          {context.jargon.find((entry) => entry.name === item)?.meaning || '暂无释义'}
+                        </TooltipContent>
+                      </Tooltip>
+                    ))}
+                  </div>
+                ) : section.items.map((item, index) => (
+                  <pre key={`${section.title}-${index}`} className="bg-muted/50 mb-1 whitespace-pre-wrap break-words rounded p-2 font-sans text-xs">{item}</pre>
+                )) : <p className="text-muted-foreground text-xs">{section.emptyText}</p>}
+              </section>
+            ))}
+            <p className="text-muted-foreground text-[11px]">
+              表达方式来自最近一次 Replyer 请求：{context.replyer_timestamp ? new Date(context.replyer_timestamp).toLocaleString() : '无记录'}
+            </p>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function MonitorStatusActions({
   autoScroll,
+  sessionId,
   onClearTimeline,
   onFindPreviousBotMessage,
+  onScrollToTop,
   onScrollToBottom,
   stats,
 }: Omit<StageStatusPanelProps, 'status'>) {
@@ -553,7 +654,18 @@ function MonitorStatusActions({
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
+      <ActiveContextPopover sessionId={sessionId} />
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 shrink-0 border-0! px-2 text-[11px]"
+          onClick={onScrollToTop}
+          title="回到顶部"
+        >
+          <ChevronUp className="mr-1 h-3 w-3" />
+          顶部
+        </Button>
         <Button
           variant="ghost"
           size="sm"
@@ -591,8 +703,10 @@ function MonitorStatusActions({
 
 function StageStatusPanel({
   autoScroll,
+  sessionId,
   onClearTimeline,
   onFindPreviousBotMessage,
+  onScrollToTop,
   onScrollToBottom,
   stats,
   status,
@@ -601,8 +715,10 @@ function StageStatusPanel({
   const actions = (
     <MonitorStatusActions
       autoScroll={autoScroll}
+      sessionId={sessionId}
       onClearTimeline={onClearTimeline}
       onFindPreviousBotMessage={onFindPreviousBotMessage}
+      onScrollToTop={onScrollToTop}
       onScrollToBottom={onScrollToBottom}
       stats={stats}
     />
@@ -610,7 +726,7 @@ function StageStatusPanel({
 
   if (!status) {
     return (
-      <div className="bg-muted/30 mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
+      <div data-maisaka-toolbar="true" className="bg-muted/30 mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
         {actions}
         <div className="text-muted-foreground shrink-0 text-xs whitespace-nowrap">
           当前聊天流暂无阶段状态
@@ -620,7 +736,7 @@ function StageStatusPanel({
   }
 
   return (
-    <div className="bg-background mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
+    <div data-maisaka-toolbar="true" className="bg-background mb-1.5 flex min-w-0 items-center gap-2 overflow-x-auto rounded-md px-2 py-1">
       {actions}
       <div className="flex shrink-0 items-center gap-1.5">
         <Badge variant="default" className="gap-1 border-0! px-1.5 text-[10px]">
@@ -2002,6 +2118,16 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
     [scrollViewport, timelineVirtualizer, visibleTimelineEntries.length]
   )
 
+  const scrollToTop = useCallback(() => {
+    setAutoScroll(false)
+    revealScrollLockRef.current = true
+    if (visibleTimelineEntries.length > 0) {
+      timelineVirtualizer.scrollToIndex(0, { align: 'start', behavior: 'smooth' })
+    } else {
+      scrollViewport?.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }, [scrollViewport, timelineVirtualizer, visibleTimelineEntries.length])
+
   // 自动滚动到底部
   useEffect(() => {
     if (autoScroll) {
@@ -2195,8 +2321,10 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
         {/* 时间线 */}
         <StageStatusPanel
           autoScroll={autoScroll}
+          sessionId={selectedSession}
           onClearTimeline={clearTimeline}
           onFindPreviousBotMessage={handleFindPreviousBotMessage}
+          onScrollToTop={scrollToTop}
           onScrollToBottom={() => scrollToBottom('smooth')}
           stats={stats}
           status={selectedStageStatus}

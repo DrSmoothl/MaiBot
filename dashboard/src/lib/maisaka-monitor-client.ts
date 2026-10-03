@@ -418,9 +418,15 @@ class MaisakaMonitorClient {
       this.deferredUnsubTimer = null
     }
 
-    const createdSubscription = await this.ensureSubscribed()
-    if (!createdSubscription) {
-      await this.replayFromCursor()
+    try {
+      const createdSubscription = await this.ensureSubscribed()
+      if (!createdSubscription) {
+        await this.replayFromCursor()
+      }
+    } catch (error) {
+      // 订阅失败时调用方拿不到退订函数，必须在这里回收监听器
+      this.listeners.delete(listenerId)
+      throw error
     }
 
     return async () => {
@@ -436,6 +442,10 @@ class MaisakaMonitorClient {
         }, 200)
       }
     }
+  }
+
+  onConnectionChange(listener: (connected: boolean) => void): () => void {
+    return unifiedWsClient.onConnectionChange(listener)
   }
 }
 

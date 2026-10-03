@@ -121,6 +121,8 @@ class LLMOrchestrator:
             model: (0, 0, 0) for model in self.model_for_task.model_list
         }
         """模型使用量记录，用于进行负载均衡，对应为(total_tokens, penalty, usage_penalty)，惩罚值是为了能在某个模型请求不给力或正在被使用的时候进行调整"""
+        self._explicit_model_usage: Dict[str, Tuple[int, int, int]] = {}
+        """显式指定但不在任务 model_list 中的模型使用量；与 model_usage 分开存放，避免刷新时丢失且不参与自动选择"""
 
     def _resolve_effective_session_id(self, session_id: str = "") -> str:
         """解析本次请求用于统计归属的聊天流 ID。"""
@@ -163,8 +165,29 @@ class LLMOrchestrator:
         if latest is not self.model_for_task:
             self.model_for_task = latest
         if list(self.model_usage.keys()) != latest.model_list:
-            self.model_usage = {model: self.model_usage.get(model, (0, 0, 0)) for model in latest.model_list}
+            # 不在新列表中的模型可能仍有进行中的请求，移入显式模型记录而不是丢弃
+            merged_usage = {**self._explicit_model_usage, **self.model_usage}
+            self.model_usage = {model: merged_usage.get(model, (0, 0, 0)) for model in latest.model_list}
+            self._explicit_model_usage = {
+                model: usage for model, usage in merged_usage.items() if model not in self.model_usage
+            }
         return self.model_for_task
+
+    def _adjust_model_usage(
+        self,
+        model_name: str,
+        tokens_delta: int = 0,
+        penalty_delta: int = 0,
+        usage_penalty_delta: int = 0,
+    ) -> None:
+        """更新指定模型的使用量记录。"""
+        usage_store = self.model_usage if model_name in self.model_usage else self._explicit_model_usage
+        total_tokens, penalty, usage_penalty = usage_store[model_name]
+        usage_store[model_name] = (
+            total_tokens + tokens_delta,
+            penalty + penalty_delta,
+            usage_penalty + usage_penalty_delta,
+        )
 
     @staticmethod
     def _can_retry_with_compressed_images(
@@ -880,9 +903,11 @@ class LLMOrchestrator:
             if exclude_models and requested_model_name in exclude_models:
                 raise RuntimeError(f"指定模型 '{requested_model_name}' 已在本次请求中尝试失败")
             TempMethodsLLMUtils.get_model_info_by_name(requested_model_name)
-            if requested_model_name not in self.model_usage:
-                self.model_usage[requested_model_name] = (0, 0, 0)
-            available_models = {requested_model_name: self.model_usage.get(requested_model_name, (0, 0, 0))}
+            if requested_model_name in self.model_usage:
+                requested_usage = self.model_usage[requested_model_name]
+            else:
+                requested_usage = self._explicit_model_usage.setdefault(requested_model_name, (0, 0, 0))
+            available_models = {requested_model_name: requested_usage}
 
         if not available_models:
             raise RuntimeError("没有可用的模型可供选择。所有模型均已尝试失败。")
@@ -924,8 +949,7 @@ class LLMOrchestrator:
         api_provider = TempMethodsLLMUtils.get_provider_by_name(model_info.api_provider)
         client = client_registry.get_client_class_instance(api_provider)
         logger.debug(f"选择请求模型: {model_info.name} (策略: {strategy})")
-        total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
-        self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty + 1)
+        self._adjust_model_usage(model_info.name, usage_penalty_delta=1)
         return model_info, api_provider, client
 
     def _record_success_generation_attempt(
@@ -1353,10 +1377,8 @@ class LLMOrchestrator:
                 )
                 if self.request_type.startswith("maisaka."):
                     logger.debug(f"LLMOrchestrator[{self.request_type}] 模型 model={model_info.name} 已返回 API 响应")
-                total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
-                if response_usage := response.usage:
-                    total_tokens += response_usage.total_tokens
-                self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty - 1)
+                response_tokens = response.usage.total_tokens if response.usage else 0
+                self._adjust_model_usage(model_info.name, tokens_delta=response_tokens, usage_penalty_delta=-1)
                 return LLMExecutionResult(
                     api_response=response,
                     model_info=model_info,
@@ -1364,8 +1386,7 @@ class LLMOrchestrator:
                 )
 
             except ReqAbortException as e:
-                total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
-                self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty - 1)
+                self._adjust_model_usage(model_info.name, usage_penalty_delta=-1)
                 if self.request_type.startswith("maisaka."):
                     logger.debug(
                         f"LLMOrchestrator[{self.request_type}] 模型 model={model_info.name} 的请求已被外部信号中断"
@@ -1387,8 +1408,7 @@ class LLMOrchestrator:
                     )
                     attach_request_snapshot(last_exception, snapshot_path)
                 logger.warning(f"模型 '{model_info.name}' 尝试失败，切换到下一个模型。原因: {e}")
-                total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
-                self.model_usage[model_info.name] = (total_tokens, penalty + 1, usage_penalty - 1)
+                self._adjust_model_usage(model_info.name, penalty_delta=1, usage_penalty_delta=-1)
                 failed_models_this_request.add(model_info.name)
                 if model_index < max_attempts - 1:
                     update_failed_request_attempt(last_exception, status="switching_model")

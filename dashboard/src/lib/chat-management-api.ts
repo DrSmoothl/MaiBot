@@ -136,11 +136,34 @@ interface SessionAdapterStatusResponse {
   statuses?: Record<string, SessionAdapterStatus>
 }
 
+/** 适配器当前激活身份（换账号登录后 account_id 实时变化） */
+export interface AdapterActiveIdentity {
+  adapter_id: string
+  plugin_id: string
+  gateway_name: string
+  platform: string
+  account_id: string | null
+  scope: string | null
+}
+
+/** 同一插件名下某账号的规则条目摘要（旧账号条目换号后不再生效但保留在配置中） */
+export interface AdapterAccountEntry {
+  adapter_id: string
+  account_id: string
+  platform: string
+  gateway_name: string
+  scope: string
+  rules: Partial<Record<ChatStreamType, AdapterHostPolicySection>>
+}
+
 interface AdapterHostPolicyResponse {
   success: boolean
   plugin_id: string
   global_defaults: AdapterPolicyDefaults
   policy: AdapterHostPolicy
+  active_identity?: AdapterActiveIdentity | null
+  has_entry?: boolean
+  account_entries?: AdapterAccountEntry[]
 }
 
 export interface ChatStreamDetail {

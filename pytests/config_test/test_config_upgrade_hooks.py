@@ -32,6 +32,32 @@ def test_removed_expression_selection_mode_hook_preserves_supported_modes():
     assert result.data["expression"]["expression_selection_mode"] == "legacy"
 
 
+def test_expression_defaults_reset_once_and_remove_old_mode():
+    config_data = {
+        "expression": {
+            "expression_checked_only": True,
+            "expression_self_reflect": True,
+            "expression_selection_mode": "legacy",
+        },
+    }
+    result = apply_config_upgrade_hooks(config_data, "bot_config.toml", "8.14.57", "8.14.58")
+
+    assert result.migrated is True
+    assert result.data["expression"] == {
+        "expression_checked_only": False,
+        "expression_self_reflect": True,
+        "use_vector_expression": True,
+    }
+
+    # 跨版本只重置一次，用户随后设置的开关不能在同版本加载时被覆盖。
+    result.data["expression"]["expression_checked_only"] = True
+    result.data["expression"]["use_vector_expression"] = False
+    reloaded = apply_config_upgrade_hooks(result.data, "bot_config.toml", "8.14.58", "8.14.58")
+    assert reloaded.migrated is False
+    assert reloaded.data["expression"]["expression_checked_only"] is True
+    assert reloaded.data["expression"]["use_vector_expression"] is False
+
+
 def test_split_chat_config_sections_upgrade_hook():
     config_data = {
         "chat": {
@@ -169,3 +195,32 @@ def test_behavior_style_upgrade_does_not_create_missing_personality_section():
 
     assert result.migrated is False
     assert "personality" not in result.data
+
+
+def test_removed_reply_necessity_trigger_mode_upgrade_hook():
+    config_data = {"chat": {"reply_timing": {"reply_trigger_mode": "reply_necessity"}}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.14.53",
+        new_ver="8.14.54",
+    )
+
+    assert result.migrated is True
+    assert result.data["chat"]["reply_timing"]["reply_trigger_mode"] == "dynamic"
+    assert result.reason == "8.14.54:chat.reply_timing.reply_trigger_mode"
+
+
+def test_removed_reply_necessity_trigger_mode_hook_preserves_frequency_mode():
+    config_data = {"chat": {"reply_timing": {"reply_trigger_mode": "frequency"}}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.14.53",
+        new_ver="8.14.54",
+    )
+
+    assert result.migrated is False
+    assert result.data["chat"]["reply_timing"]["reply_trigger_mode"] == "frequency"

@@ -10,9 +10,6 @@ import {
   MoreHorizontal,
   RefreshCw,
   RotateCcw,
-  SlidersHorizontal,
-  Upload,
-  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -78,7 +75,6 @@ import { ProfileSearchPanel } from './knowledge-base/tabs/ProfileSearchPanel'
 import { TuningTab } from './knowledge-base/tabs/TuningTab'
 import { KnowledgeGraphPage } from './knowledge-graph'
 
-const MEMORY_QUICK_START_DISMISSED_KEY = 'memory-quick-start-dismissed'
 type MemoryConsoleTab =
   | 'records'
   | 'images'
@@ -512,12 +508,6 @@ export function KnowledgeBasePage() {
   const deepLinkRef = useRef<KnowledgeBaseDeepLinkState>(readKnowledgeBaseDeepLink())
   const [activeTab, setActiveTab] = useState<MemoryConsoleTab>(deepLinkRef.current.tab)
   const [runtimeStatusDialogOpen, setRuntimeStatusDialogOpen] = useState(false)
-  const [quickStartVisible, setQuickStartVisible] = useState(() => {
-    if (typeof window === 'undefined') {
-      return true
-    }
-    return window.localStorage.getItem(MEMORY_QUICK_START_DISMISSED_KEY) !== 'true'
-  })
   const [visitedMemoryTabs, setVisitedMemoryTabs] = useState<Set<MemoryConsoleTab>>(
     () => new Set<MemoryConsoleTab>([deepLinkRef.current.tab])
   )
@@ -983,11 +973,6 @@ export function KnowledgeBasePage() {
     ]
   }, [runtimeConfig])
 
-  const dismissQuickStart = useCallback(() => {
-    window.localStorage.setItem(MEMORY_QUICK_START_DISMISSED_KEY, 'true')
-    setQuickStartVisible(false)
-  }, [])
-
   const shouldRenderMemoryTab = (tab: MemoryConsoleTab) =>
     activeTab === tab || visitedMemoryTabs.has(tab)
   const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
@@ -1022,22 +1007,6 @@ export function KnowledgeBasePage() {
                 <DialogDescription>查看长期记忆运行状态、向量配置和数据目录。</DialogDescription>
               </DialogHeader>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {runtimeConfig?.vector_rebuild_required ? (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => void memoryRuntime.openVectorRebuildDialog()}
-                    disabled={memoryRuntime.vectorRebuilding}
-                  >
-                    <RotateCcw
-                      className={cn(
-                        'mr-2 h-4 w-4',
-                        memoryRuntime.vectorRebuilding && 'animate-spin'
-                      )}
-                    />
-                    重建向量
-                  </Button>
-                ) : null}
                 <Button variant="outline" size="sm" onClick={() => void loadPage()}>
                   <RefreshCw className="mr-2 h-4 w-4" />
                   刷新数据
@@ -1162,70 +1131,6 @@ export function KnowledgeBasePage() {
             </DialogContent>
           </Dialog>
 
-          {/* 快速开始 Hero —— 给新用户明确的"先做什么" */}
-          {quickStartVisible && (
-            <AccentPanel
-              showRetroStripes={false}
-              className="border-primary/20 from-primary/10 via-primary/5 relative overflow-hidden rounded-xl border bg-gradient-to-br to-transparent shadow-sm"
-              contentClassName="p-4 pr-11"
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-foreground absolute top-3 right-3 h-7 w-7"
-                onClick={dismissQuickStart}
-                aria-label="关闭快速开始"
-                title="关闭快速开始"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="space-y-1.5 lg:max-w-sm">
-                  <h2 className="text-lg leading-tight font-semibold">快速开始：先从这两件事入手</h2>
-                  <p className="text-muted-foreground text-sm">
-                    不知道该做什么？挑一个最常用的入口，下面的标签页里有更详细的设置。
-                  </p>
-                </div>
-                <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-2xl">
-                  <button
-                    type="button"
-                    onClick={() => switchMemoryTab('import')}
-                    className="group border-border/70 bg-background/80 hover:border-primary/50 hover:bg-background flex items-start gap-2 rounded-lg border p-3 text-left transition hover:shadow-md"
-                  >
-                    <div className="bg-primary/10 text-primary flex-none rounded-lg p-2 transition-transform group-hover:scale-105">
-                      <Upload className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold">导入或导出资料</div>
-                      <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-                        写入资料，或迁移可分享记忆包
-                      </div>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInspectionMode('tuning')
-                      switchMemoryTab('inspection', { mode: 'tuning' })
-                    }}
-                    className="group border-border/70 bg-background/80 hover:border-primary/50 hover:bg-background flex items-start gap-2 rounded-lg border p-3 text-left transition hover:shadow-md"
-                  >
-                    <div className="flex-none rounded-lg bg-amber-500/10 p-2 text-amber-500 transition-transform group-hover:scale-105">
-                      <SlidersHorizontal className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold">检索调优</div>
-                      <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-                        让回忆变得更准、更聪明
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </AccentPanel>
-          )}
-
           <Tabs
             value={activeTab}
             onValueChange={(value) => switchMemoryTab(value as MemoryConsoleTab)}
@@ -1284,13 +1189,31 @@ export function KnowledgeBasePage() {
 
               {/* 「更多操作」省略号与标签同一行：self-stretch 让标签撑满该行，
                   h-8 定住行高，标签高度随之与按钮对齐 */}
+              {runtimeConfig?.vector_rebuild_required ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="ml-auto"
+                  title={runtimeConfig.vector_rebuild_message}
+                  onClick={() => void memoryRuntime.openVectorRebuildDialog()}
+                  disabled={memoryRuntime.vectorRebuilding}
+                >
+                  <RotateCcw
+                    className={cn(
+                      'mr-2 h-4 w-4',
+                      memoryRuntime.vectorRebuilding && 'animate-spin'
+                    )}
+                  />
+                  重建向量
+                </Button>
+              ) : null}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="ml-auto h-8 w-8"
+                    className={cn('h-8 w-8', !runtimeConfig?.vector_rebuild_required && 'ml-auto')}
                     aria-label="更多操作"
                     title="更多操作"
                   >

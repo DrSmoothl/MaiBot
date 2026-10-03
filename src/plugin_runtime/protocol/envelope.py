@@ -12,6 +12,8 @@ import time
 
 from pydantic import BaseModel, Field
 
+from src.plugin_runtime.webui_schema import WebUIExtension
+
 
 # ====== 协议常量 ======
 PROTOCOL_VERSION = "1.0.0"
@@ -223,6 +225,8 @@ class RegisterPluginPayload(BaseModel):
 
     plugin_id: str = Field(description="插件 ID")
     """插件 ID"""
+    webui: Optional[WebUIExtension] = None
+    """可选的声明式 WebUI 扩展，随插件注册和卸载同步。"""
     plugin_version: str = Field(default="1.0.0", description="插件版本")
     """插件版本"""
     plugin_type: str = Field(default="extension", description="插件类型")

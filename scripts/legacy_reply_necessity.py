@@ -1,4 +1,4 @@
-"""Maisaka 回复必要性评分规则。"""
+"""已从主程序移除的回复必要性评分规则，仅供离线脚本与动态回复门控做对比。"""
 
 from dataclasses import dataclass
 from math import log1p

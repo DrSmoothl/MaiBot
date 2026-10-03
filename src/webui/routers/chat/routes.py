@@ -36,7 +36,14 @@ from src.common.utils.utils_config import (
     JargonConfigUtils,
 )
 from src.config.config import BOT_CONFIG_PATH, config_manager, global_config
-from src.platform_io import AdapterIdentity, DriverKind, RouteKey, get_adapter_policy_manager, get_platform_io_manager
+from src.platform_io import (
+    AdapterIdentity,
+    AdapterPolicyManager,
+    DriverKind,
+    RouteKey,
+    get_adapter_policy_manager,
+    get_platform_io_manager,
+)
 from src.webui.dependencies import require_auth
 from src.webui.utils.toml_utils import save_toml_with_format
 
@@ -712,7 +719,7 @@ async def _save_chat_talk_frequency_rule(
     reply_timing_config["talk_value_rules"] = rules
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=["chat.reply_timing"]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -755,7 +762,7 @@ async def _delete_chat_talk_frequency_rule(chat_session: ChatSession, rule_time:
     reply_timing_config["talk_value_rules"] = next_rules
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=["chat.reply_timing"]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -821,7 +828,7 @@ async def _save_chat_learning_rule(chat_session: ChatSession, kind: str, request
         config_section["enable_behavior_learning"] = True
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=[section_name]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -878,7 +885,7 @@ async def _save_chat_prompt_rule(
     reply_style_config["chat_prompts"] = prompts
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=["chat.reply_style"]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -914,7 +921,7 @@ async def _delete_chat_prompt_rule(chat_session: ChatSession, prompt_index: int)
     reply_style_config["chat_prompts"] = prompts
     save_toml_with_format(config_data, str(config_path))
 
-    if not await config_manager.reload_config(changed_scopes=["bot"]):
+    if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=["chat.reply_style"]):
         raise HTTPException(status_code=500, detail="配置已写入，但热重载失败")
 
 
@@ -1571,6 +1578,32 @@ def _get_plugin_adapter_identity(plugin_id: str) -> Optional[AdapterIdentity]:
     return None
 
 
+def _build_adapter_account_status(
+    manager: AdapterPolicyManager,
+    plugin_id: str,
+    identity: AdapterIdentity,
+    active_identity: Optional[AdapterIdentity],
+) -> Dict[str, object]:
+    """返回当前激活身份与规则归属信息，供面板区分专属规则、默认继承与历史账号条目。"""
+
+    return {
+        "active_identity": (
+            {
+                "adapter_id": active_identity.adapter_id,
+                "plugin_id": active_identity.plugin_id,
+                "gateway_name": active_identity.gateway_name,
+                "platform": active_identity.platform,
+                "account_id": active_identity.account_id,
+                "scope": active_identity.scope,
+            }
+            if active_identity is not None
+            else None
+        ),
+        "has_entry": manager.has_adapter_policy_entry(identity),
+        "account_entries": manager.list_plugin_entries(plugin_id),
+    }
+
+
 @router.get("/adapters/plugins/{plugin_id}/policy")
 def get_adapter_plugin_policy(plugin_id: str) -> Dict[str, object]:
     """返回指定适配器插件在主程序侧的群聊与私聊规则。"""
@@ -1580,9 +1613,8 @@ def get_adapter_plugin_policy(plugin_id: str) -> Dict[str, object]:
         raise HTTPException(status_code=400, detail="缺少适配器插件 ID")
 
     # 优先用运行中驱动的完整身份；未运行时退回 plugin_id 单键做只读展示
-    identity = _get_plugin_adapter_identity(normalized_plugin_id) or AdapterIdentity(
-        plugin_id=normalized_plugin_id
-    )
+    running_identity = _get_plugin_adapter_identity(normalized_plugin_id)
+    identity = running_identity or AdapterIdentity(plugin_id=normalized_plugin_id)
     manager = get_adapter_policy_manager()
     try:
         policy = manager.get_adapter_policy(identity)
@@ -1593,6 +1625,8 @@ def get_adapter_plugin_policy(plugin_id: str) -> Dict[str, object]:
         "plugin_id": normalized_plugin_id,
         "global_defaults": manager.get_default_actions(),
         "policy": policy,
+        # 当前激活身份换账号登录后实时变化
+        **_build_adapter_account_status(manager, normalized_plugin_id, identity, running_identity),
     }
 
 
@@ -1629,6 +1663,7 @@ def update_adapter_plugin_policy(
         "plugin_id": normalized_plugin_id,
         "global_defaults": manager.get_default_actions(),
         "policy": manager.get_adapter_policy(identity),
+        **_build_adapter_account_status(manager, normalized_plugin_id, identity, identity),
     }
 
 

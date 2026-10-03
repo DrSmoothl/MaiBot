@@ -1,4 +1,25 @@
 {
+  "pluginWebUI": {
+    "extensions": "插件扩展",
+    "manage": "管理插件页面",
+    "more": "更多插件工作区",
+    "refresh": "刷新",
+    "loading": "加载中…",
+    "empty": "暂无数据",
+    "previous": "上一页",
+    "next": "下一页",
+    "completed": "操作已完成",
+    "confirmTitle": "确认插件操作",
+    "cancel": "取消",
+    "confirm": "确认",
+    "unavailable": "页面已下线或已隐藏。",
+    "invalidData": "插件返回的数据与组件声明不一致。",
+    "providedBy": "由插件 {{plugin}} 提供",
+    "show": "显示 {{plugin}} 页面",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "preferencesHint": "显示和排序偏好仅保存在当前浏览器，不改变插件的后端权限。"
+  },
   "header": {
     "collapseSidebar": "收起侧边栏",
     "expandSidebar": "展开侧边栏",
@@ -23,9 +44,9 @@
   "sidebar": {
     "groups": {
       "overview": "概览",
-      "botConfig": "麦麦配置编辑",
-      "botResources": "麦麦资源管理",
-      "extensionsMonitor": "扩展与集成",
+      "botConfig": "配置管理",
+      "botResources": "资源管理",
+      "extensionsMonitor": "扩展集成",
       "advancedTools": "高级工具",
       "system": "系统"
     },
@@ -45,7 +66,7 @@
       "knowledgeBase": "长期记忆",
       "pluginMarket": "插件市场",
       "configTemplate": "配置模板市场",
-      "pluginConfig": "插件管理",
+      "pluginConfig": "插件扩展",
       "adapterManagement": "适配器设置",
       "mcpSettings": "MCP 设置",
       "dataTransfer": "数据管理",

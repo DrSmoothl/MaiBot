@@ -8,7 +8,7 @@ import {
   Network,
   Timer,
 } from 'lucide-react'
-import { useEffect } from 'react'
+import { useContext, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Bar,
@@ -36,6 +36,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ZoomableChart } from '@/components/ui/zoomable-chart'
+import { ThemeProviderContext } from '@/lib/theme-context'
 import { cn } from '@/lib/utils'
 
 import { useDashboardData } from './hooks/useDashboardData'
@@ -423,6 +424,14 @@ function ChartCard({ kind }: { kind: 'requests' | 'cost' | 'tokens' }) {
   const { t, i18n } = useTranslation()
   const state = useStatisticsCardData()
   const locale = i18n.resolvedLanguage || i18n.language
+  // 千禧风格把绘图区画成一块深色示波屏：坐标和图例留在屏幕外的机壳上，
+  // 网格是实线，折线走阶梯，不画坐标轴线。
+  const isMillennium = useContext(ThemeProviderContext).themeConfig.dashboardStyle === 'millennium'
+  const gridProps = isMillennium
+    ? { stroke: 'var(--mil-scope-grid)', strokeWidth: 2, fill: 'var(--mil-scope)' }
+    : { strokeDasharray: '3 3', stroke: 'hsl(var(--color-muted-foreground) / 0.2)' }
+  const axisLineProps = isMillennium ? { axisLine: false, tickLine: false } : {}
+  const guideAlign = isMillennium ? 'bottom' : 'top'
   const metadata = {
     requests: {
       title: t('home.charts.requestTrend'),
@@ -444,13 +453,16 @@ function ChartCard({ kind }: { kind: 'requests' | 'cost' | 'tokens' }) {
         const chartData = selectChartTimeSeries(data, state.timeRange)
         const chartGuide = (
           <ChartLegend
-            verticalAlign="top"
+            verticalAlign={guideAlign}
             height={28}
             content={
               <ChartLegendContent
                 data-home-chart-guide="true"
-                verticalAlign="top"
-                className="justify-start px-2 pb-2 text-[11px]"
+                verticalAlign={guideAlign}
+                className={cn(
+                  'justify-start px-2 text-[11px]',
+                  isMillennium ? 'pt-1' : 'pb-2'
+                )}
               />
             }
           />
@@ -466,13 +478,11 @@ function ChartCard({ kind }: { kind: 'requests' | 'cost' | 'tokens' }) {
                     : tokenChartConfig
               }
               className="aspect-auto h-full min-h-[240px] w-full"
+              data-chart-plot-screen={isMillennium ? 'true' : undefined}
             >
               {kind === 'requests' ? (
                 <LineChart data={chartData}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(var(--color-muted-foreground) / 0.2)"
-                  />
+                  <CartesianGrid {...gridProps} />
                   <XAxis
                     dataKey="timestamp"
                     tickFormatter={(value) => formatChartTimeAxis(value, locale, state.timeRange)}
@@ -481,10 +491,12 @@ function ChartCard({ kind }: { kind: 'requests' | 'cost' | 'tokens' }) {
                     height={60}
                     stroke="hsl(var(--color-muted-foreground))"
                     tick={{ fill: 'hsl(var(--color-muted-foreground))' }}
+                    {...axisLineProps}
                   />
                   <YAxis
                     stroke="hsl(var(--color-muted-foreground))"
                     tick={{ fill: 'hsl(var(--color-muted-foreground))' }}
+                    {...axisLineProps}
                   />
                   <ChartTooltip
                     content={
@@ -495,20 +507,17 @@ function ChartCard({ kind }: { kind: 'requests' | 'cost' | 'tokens' }) {
                   />
                   {chartGuide}
                   <Line
-                    type="monotone"
+                    type={isMillennium ? 'stepAfter' : 'monotone'}
                     dataKey="requests"
                     stroke="var(--color-requests)"
-                    strokeWidth={2}
+                    strokeWidth={isMillennium ? 3 : 2}
                     dot={false}
                     isAnimationActive={false}
                   />
                 </LineChart>
               ) : kind === 'cost' ? (
                 <BarChart data={chartData}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(var(--color-muted-foreground) / 0.2)"
-                  />
+                  <CartesianGrid {...gridProps} />
                   <XAxis
                     dataKey="timestamp"
                     tickFormatter={(value) => formatChartTimeAxis(value, locale, state.timeRange)}
@@ -517,10 +526,12 @@ function ChartCard({ kind }: { kind: 'requests' | 'cost' | 'tokens' }) {
                     height={60}
                     stroke="hsl(var(--color-muted-foreground))"
                     tick={{ fill: 'hsl(var(--color-muted-foreground))' }}
+                    {...axisLineProps}
                   />
                   <YAxis
                     stroke="hsl(var(--color-muted-foreground))"
                     tick={{ fill: 'hsl(var(--color-muted-foreground))' }}
+                    {...axisLineProps}
                   />
                   <ChartTooltip
                     content={
@@ -534,10 +545,7 @@ function ChartCard({ kind }: { kind: 'requests' | 'cost' | 'tokens' }) {
                 </BarChart>
               ) : (
                 <BarChart data={chartData}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(var(--color-muted-foreground) / 0.2)"
-                  />
+                  <CartesianGrid {...gridProps} />
                   <XAxis
                     dataKey="timestamp"
                     tickFormatter={(value) => formatChartTimeAxis(value, locale, state.timeRange)}
@@ -546,11 +554,13 @@ function ChartCard({ kind }: { kind: 'requests' | 'cost' | 'tokens' }) {
                     height={60}
                     stroke="hsl(var(--color-muted-foreground))"
                     tick={{ fill: 'hsl(var(--color-muted-foreground))' }}
+                    {...axisLineProps}
                   />
                   <YAxis
                     tickFormatter={(value) => formatTokenAxis(Number(value), locale)}
                     stroke="hsl(var(--color-muted-foreground))"
                     tick={{ fill: 'hsl(var(--color-muted-foreground))' }}
+                    {...axisLineProps}
                   />
                   <ChartTooltip
                     content={

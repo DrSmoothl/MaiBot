@@ -1160,7 +1160,7 @@ class ExpressionVectorIndex:
 
         from src.config.config import global_config
 
-        if global_config.expression.expression_selection_mode != "vector_intent":
+        if not global_config.expression.use_vector_expression:
             return {"status": "disabled", "completed": 0, "total": 0, "percent": 0.0}
 
         configured_identity = self._configured_embedding_identity()
@@ -2701,7 +2701,7 @@ class ExpressionVectorIndex:
         while True:
             from src.config.config import global_config
 
-            if global_config.expression.expression_selection_mode != "vector_intent":
+            if not global_config.expression.use_vector_expression:
                 logger.info("表达向量历史补建已停止：当前表达选择模式不是向量模式")
                 return
 

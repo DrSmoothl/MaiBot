@@ -4,16 +4,20 @@ import { useTranslation } from 'react-i18next'
 
 import { BackgroundLayer } from '@/components/background-layer'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { useTheme } from '@/components/use-theme'
 import { useBackground } from '@/hooks/use-background'
 import { cn } from '@/lib/utils'
 
 import { LogoArea } from './LogoArea'
 import { NavItem } from './NavItem'
 import { useMenuSections } from './use-menu-sections'
+import type { MenuSection } from './types'
 
 interface SidebarProps {
+  menuSections?: MenuSection[]
   sidebarOpen: boolean
   mobileMenuOpen: boolean
+  topbarCollapsed?: boolean
   onMobileMenuClose: () => void
   onSidebarFix: () => void
 }
@@ -22,22 +26,27 @@ const SIDEBAR_HOVER_EXPAND_DELAY_MS = 180
 const SIDEBAR_COLLAPSE_TRANSITION_MS = 220
 
 export function Sidebar({
+  menuSections: suppliedMenuSections,
   sidebarOpen,
   mobileMenuOpen,
+  topbarCollapsed = false,
   onMobileMenuClose,
   onSidebarFix,
 }: SidebarProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const { themeConfig } = useTheme()
+  const isMillennium = themeConfig.dashboardStyle === 'millennium'
   const { config: sidebarBg, inheritedFrom } = useBackground('sidebar')
   const inheritsPageBackground = inheritedFrom === 'page'
-  const menuSections = useMenuSections()
+  const builtInMenuSections = useMenuSections()
+  const menuSections = suppliedMenuSections ?? builtInMenuSections
   const [hoverExpanded, setHoverExpanded] = useState(false)
   const [fixTransitionActive, setFixTransitionActive] = useState(false)
   const [collapseTransitionActive, setCollapseTransitionActive] = useState(false)
   const hoverExpandTimerRef = useRef<number | null>(null)
   const collapseTransitionTimerRef = useRef<number | null>(null)
-  const sidebarRevealed = sidebarOpen || hoverExpanded || fixTransitionActive
-  const visuallyOpen = sidebarRevealed || collapseTransitionActive
+  const sidebarRevealed = !isMillennium && (sidebarOpen || hoverExpanded || fixTransitionActive)
+  const visuallyOpen = sidebarRevealed || (!isMillennium && collapseTransitionActive)
 
   const cancelHoverExpand = useCallback(() => {
     if (hoverExpandTimerRef.current !== null) {
@@ -60,7 +69,7 @@ export function Sidebar({
   }
 
   useEffect(() => {
-    if (sidebarOpen) {
+    if (sidebarOpen || isMillennium) {
       cancelHoverExpand()
       cancelCollapseTransition()
     }
@@ -68,18 +77,19 @@ export function Sidebar({
       cancelHoverExpand()
       cancelCollapseTransition()
     }
-  }, [cancelCollapseTransition, cancelHoverExpand, sidebarOpen])
+  }, [cancelCollapseTransition, cancelHoverExpand, isMillennium, sidebarOpen])
 
   return (
     <aside
       data-dashboard-sidebar="true"
+      data-dashboard-sidebar-topbar-collapsed={isMillennium && topbarCollapsed ? 'true' : undefined}
       data-dashboard-sidebar-hover-expanded={hoverExpanded ? 'true' : undefined}
       data-dashboard-sidebar-mobile-open={mobileMenuOpen ? 'true' : 'false'}
       data-dashboard-sidebar-mode={sidebarOpen ? 'fixed' : 'hover'}
       data-dashboard-sidebar-fix-transition={fixTransitionActive ? 'true' : undefined}
       data-dashboard-sidebar-visually-open={visuallyOpen ? 'true' : 'false'}
       onPointerEnter={(event) => {
-        if (!sidebarOpen && event.pointerType === 'mouse') {
+        if (!isMillennium && !sidebarOpen && event.pointerType === 'mouse') {
           cancelHoverExpand()
           cancelCollapseTransition()
           setCollapseTransitionActive(false)
@@ -125,7 +135,7 @@ export function Sidebar({
       {/* Logo 区域 */}
       <div className="relative z-10">
         <LogoArea sidebarOpen={sidebarRevealed} />
-        {!sidebarOpen && hoverExpanded && (
+        {!isMillennium && !sidebarOpen && hoverExpanded && (
           <button
             type="button"
             data-dashboard-sidebar-fix-switch="true"
@@ -138,11 +148,7 @@ export function Sidebar({
             }}
             className="text-muted-foreground/55 hover:text-primary focus-visible:ring-ring absolute right-4 bottom-3 z-20 hidden h-7 w-7 items-center justify-center border-0 bg-transparent p-0 shadow-none transition-colors focus-visible:ring-2 focus-visible:outline-none lg:flex"
           >
-            <ChevronRight
-              aria-hidden="true"
-              className="h-5 w-5"
-              strokeWidth={2.25}
-            />
+            <ChevronRight aria-hidden="true" className="h-5 w-5" strokeWidth={2.25} />
           </button>
         )}
       </div>
@@ -172,24 +178,34 @@ export function Sidebar({
           >
             {menuSections.map((section, sectionIndex) => (
               <li key={section.title}>
-                {/* 块标题 - 移动端始终可见，桌面端根据 sidebarOpen 切换 */}
+                {/* 块标题 - 移动端始终可见，千禧桌面端以小字常驻，其它风格根据 sidebarOpen 切换 */}
                 <div
                   className={cn(
                     'h-[var(--layout-sidebar-section-title-height)] px-[var(--layout-sidebar-nav-item-padding-x)]',
+                    isMillennium && 'lg:h-auto lg:px-0 lg:text-center',
                     section.title === 'sidebar.groups.overview' && 'hidden',
                     // 移动端始终显示，桌面端根据状态切换
                     'mb-[var(--layout-sidebar-section-title-margin-bottom)]',
                     'transition-opacity duration-[220ms] motion-reduce:transition-none',
-                    !sidebarRevealed && 'lg:opacity-0',
-                    !sidebarRevealed &&
+                    !isMillennium && !sidebarRevealed && 'lg:opacity-0',
+                    !isMillennium &&
+                      !sidebarRevealed &&
                       'lg:mb-[var(--layout-sidebar-section-title-margin-bottom-collapsed)]'
                   )}
                 >
                   <h3
                     data-dashboard-sidebar-section-title="true"
-                    className="text-muted-foreground/60 text-sm font-semibold tracking-wider whitespace-nowrap uppercase"
+                    data-dashboard-sidebar-title-stacked={
+                      isMillennium && (i18n.resolvedLanguage || i18n.language).startsWith('zh')
+                        ? 'true'
+                        : undefined
+                    }
+                    className={cn(
+                      'text-muted-foreground/60 text-sm font-semibold tracking-wider whitespace-nowrap uppercase',
+                      isMillennium && 'lg:break-words lg:whitespace-normal lg:normal-case'
+                    )}
                   >
-                    {t(section.title)}
+                    {section.literalTitle ? section.title : t(section.title)}
                   </h3>
                 </div>
 
@@ -212,6 +228,7 @@ export function Sidebar({
                       key={item.path}
                       item={item}
                       sidebarOpen={sidebarRevealed}
+                      expandOnHover={isMillennium}
                       onMobileMenuClose={onMobileMenuClose}
                     />
                   ))}

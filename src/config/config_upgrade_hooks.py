@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List
 
 from .official_configs import ChatConfig
 
@@ -427,6 +427,33 @@ def _migrate_removed_expression_selection_mode(data: dict[str, Any]) -> list[str
     return ["expression.expression_selection_mode"]
 
 
+def _reset_expression_defaults(data: Dict[str, Any]) -> List[str]:
+    """8.14.58: 重置精选限制，移除旧表达模式并默认启用向量表达。"""
+
+    reasons: List[str] = []
+    if set_nested_config_value(data, ("expression", "expression_checked_only"), False):
+        reasons.append("expression.expression_checked_only")
+    if set_nested_config_value(data, ("expression", "use_vector_expression"), True, force=False):
+        reasons.append("expression.use_vector_expression")
+    expression = data["expression"]
+    if "expression_selection_mode" in expression:
+        del expression["expression_selection_mode"]
+        reasons.append("expression.expression_selection_mode")
+    return reasons
+
+
+def _migrate_removed_reply_necessity_trigger_mode(data: dict[str, Any]) -> list[str]:
+    """8.14.54: 将已移除的 reply_necessity 回复触发模式迁移为 dynamic。"""
+
+    chat = _as_dict(data.get("chat"))
+    reply_timing = _as_dict(chat.get("reply_timing")) if chat is not None else None
+    if reply_timing is None or reply_timing.get("reply_trigger_mode") != "reply_necessity":
+        return []
+
+    reply_timing["reply_trigger_mode"] = "dynamic"
+    return ["chat.reply_timing.reply_trigger_mode"]
+
+
 BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
     ConfigUpgradeHook(
         target_version="8.10.11",
@@ -472,6 +499,16 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.14.40",
         config_names=("bot_config.toml",),
         migrate=_migrate_removed_expression_selection_mode,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.14.54",
+        config_names=("bot_config.toml",),
+        migrate=_migrate_removed_reply_necessity_trigger_mode,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.14.58",
+        config_names=("bot_config.toml",),
+        migrate=_reset_expression_defaults,
     ),
 )
 MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = ()

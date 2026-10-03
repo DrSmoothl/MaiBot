@@ -18,6 +18,20 @@ logger = get_logger("plugin_runtime.integration")
 
 
 class RuntimeDataCapabilityMixin:
+    async def _cap_chat_get_avatar(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """查询独立头像资源；不把图片字节或缓存路径放入消息。"""
+        from src.platform_io.avatar import avatar_service
+
+        result = await avatar_service.get_avatar(
+            platform=args["platform"],
+            target_id=args["target_id"],
+            target_type=args.get("target_type", "user"),
+            account_id=args.get("account_id", ""),
+            scope=args.get("scope", ""),
+            force_refresh=args.get("force_refresh", False),
+        )
+        return {"success": True, "avatar": result.to_dict()}
+
     @staticmethod
     def _serialize_emoji_payload(emoji: "MaiEmoji") -> Optional[Dict[str, str]]:
         from src.common.utils.image_path import resolve_stored_image_path

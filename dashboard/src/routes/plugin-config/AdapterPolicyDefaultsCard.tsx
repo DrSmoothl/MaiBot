@@ -9,6 +9,8 @@ import {
   type AdapterPolicyDefaults,
 } from '@/lib/chat-management-api'
 
+import { AdapterAccountsPanel } from './AdapterAccountsPanel'
+
 export function AdapterPolicyDefaultsCard() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -40,46 +42,49 @@ export function AdapterPolicyDefaultsCard() {
   }
 
   return (
-    <section className="space-y-3 rounded-md border p-4" aria-label="适配器全局默认策略">
+    <section className="py-2" aria-label="适配器全局默认策略">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="font-medium">麦麦默认策略</h2>
-          <p className="text-muted-foreground text-xs">没设置额外规则时的策略</p>
+          <h2 className="font-medium">全局默认规则</h2>
+          <p className="text-muted-foreground text-xs">所有适配器的默认规则</p>
         </div>
-        {defaultsQuery.isError ? (
-          <p className="text-destructive text-sm">默认策略加载失败</p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-            {(['group', 'private'] as const).map((chatType) => {
-              const action = defaultsQuery.data?.[chatType]
-              return (
-                <div key={chatType} className="flex items-center gap-2">
-                  <span className="text-sm">{chatType === 'group' ? '群聊' : '私聊'}</span>
-                  <div className="flex gap-1">
-                    {(['allow', 'block'] as const).map((option) => (
-                      <Button
-                        key={option}
-                        type="button"
-                        size="sm"
-                        variant={
-                          action === option
-                            ? option === 'allow'
-                              ? 'secondary'
-                              : 'destructive'
-                            : 'outline'
-                        }
-                        disabled={!action || defaultsMutation.isPending}
-                        onClick={() => saveDefaultPolicy(chatType, option)}
-                      >
-                        {option === 'allow' ? '放行' : '拒绝'}
-                      </Button>
-                    ))}
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+          {defaultsQuery.isError ? (
+            <p className="text-destructive text-sm">默认策略加载失败</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+              {(['group', 'private'] as const).map((chatType) => {
+                const action = defaultsQuery.data?.[chatType]
+                return (
+                  <div key={chatType} className="flex items-center gap-2">
+                    <span className="text-sm">{chatType === 'group' ? '群聊' : '私聊'}</span>
+                    <div className="flex gap-1">
+                      {(['allow', 'block'] as const).map((option) => (
+                        <Button
+                          key={option}
+                          type="button"
+                          size="sm"
+                          variant={
+                            action === option
+                              ? option === 'allow'
+                                ? 'secondary'
+                                : 'destructive'
+                              : 'outline'
+                          }
+                          disabled={!action || defaultsMutation.isPending}
+                          onClick={() => saveDefaultPolicy(chatType, option)}
+                        >
+                          {option === 'allow' ? '接收消息' : '不接收'}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+                )
+              })}
+            </div>
+          )}
+          <AdapterAccountsPanel />
+        </div>
       </div>
     </section>
   )

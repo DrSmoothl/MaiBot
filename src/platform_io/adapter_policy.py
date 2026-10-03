@@ -162,6 +162,54 @@ class AdapterPolicyManager:
             }
         return result
 
+    def has_adapter_policy_entry(self, identity: AdapterIdentity) -> bool:
+        """判断当前身份是否命中已有规则条目（供面板区分「专属规则」与「默认继承」）。"""
+
+        policy_data = self._load_policy_data()
+        return self._find_display_adapter_policy(policy_data.get("adapters"), identity) is not None
+
+    def list_plugin_entries(self, plugin_id: str) -> List[Dict[str, Any]]:
+        """列出某插件名下全部规则条目的身份摘要。
+
+        适配器换账号登录后旧账号条目不再生效但保留在配置中；
+        面板据此展示各账号的规则归属，避免把旧条目误读为当前生效规则。
+        """
+
+        normalized_plugin_id = str(plugin_id or "").strip()
+        if not normalized_plugin_id:
+            return []
+        policy_data = self._load_policy_data()
+        adapters = policy_data.get("adapters")
+        if not isinstance(adapters, list):
+            return []
+        entries: List[Dict[str, Any]] = []
+        for item in adapters:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("plugin_id") or "").strip() != normalized_plugin_id:
+                continue
+            chat_summary: Dict[str, Any] = {}
+            for chat_type in sorted(_SUPPORTED_CHAT_TYPES):
+                typed_policy = self._resolve_typed_policy(item, chat_type)
+                if typed_policy is None:
+                    continue
+                chat_summary[chat_type] = {
+                    "default_action": str(typed_policy.get("default_action") or "inherit"),
+                    "allow_ids": self._normalize_id_list(typed_policy.get("allow_ids")),
+                    "deny_ids": self._normalize_id_list(typed_policy.get("deny_ids")),
+                }
+            entries.append(
+                {
+                    "adapter_id": str(item.get("adapter_id") or ""),
+                    "account_id": str(item.get("account_id") or ""),
+                    "platform": str(item.get("platform") or ""),
+                    "gateway_name": str(item.get("gateway_name") or ""),
+                    "scope": str(item.get("scope") or ""),
+                    "rules": chat_summary,
+                }
+            )
+        return entries
+
     def set_adapter_policy(
         self,
         identity: AdapterIdentity,
