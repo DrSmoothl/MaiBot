@@ -12,8 +12,8 @@ class _FixedTypoGenerator:
     def __init__(self, **_kwargs: object) -> None:
         pass
 
-    def create_typo_sentence(self, _sentence: str) -> tuple[str, str]:
-        return "今田见", "天"
+    def create_typo_sentence(self, sentence: str) -> tuple[str, str]:
+        return sentence.replace("今天见", "今田见"), "天"
 
 
 @pytest.mark.asyncio
@@ -40,8 +40,8 @@ async def test_disabled_typo_skips_construction(monkeypatch, mode, config_enable
 
 @pytest.mark.asyncio
 async def test_llm_split_preserves_typo_correction_metadata(monkeypatch) -> None:
-    async def split_with_llm(_text):
-        return [("今天见", "，")]
+    async def split_with_llm(text):
+        return [(text, "")]
 
     monkeypatch.setattr(chat_utils, "split_text_with_llm", split_with_llm)
     monkeypatch.setattr(chat_utils, "ChineseTypoGenerator", _FixedTypoGenerator)
@@ -57,7 +57,7 @@ async def test_llm_split_preserves_typo_correction_metadata(monkeypatch) -> None
     segments = await chat_utils.process_llm_response_segments_async("今天见，")
 
     assert segments == [
-        ProcessedResponseSegment("今田见", separator="，"),
+        ProcessedResponseSegment("今田见，"),
         ProcessedResponseSegment("天", quote_previous=True),
     ]
 
