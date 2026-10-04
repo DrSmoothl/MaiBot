@@ -38,6 +38,10 @@ export function NavItem({
   const flyoutRef = useRef<HTMLDivElement>(null)
   const [flyoutRect, setFlyoutRect] = useState<DOMRect | null>(null)
   const [flyoutMounted, setFlyoutMounted] = useState(false)
+  // 原位按钮和悬浮按钮是两份 DOM。浮层可能在「按下」和「抬起」之间才盖上来（或刚好收走），
+  // 这时两次事件落在不同元素上，浏览器不会派发 click。用这两个标记识别这种情况并补一次点击。
+  const pressStartedRef = useRef(false)
+  const clickDeliveredRef = useRef(false)
 
   const handleFlyoutScroll = useCallback(() => {
     const node = flyoutRef.current
@@ -145,6 +149,7 @@ export function NavItem({
     },
     className: linkClassName,
     onClick: () => {
+      clickDeliveredRef.current = true
       setFlyoutRect(null)
       onMobileMenuClose()
     },
@@ -207,6 +212,34 @@ export function NavItem({
         if (event.pointerType === 'mouse') openFlyout()
       }}
       onPointerLeave={() => setFlyoutRect(null)}
+      onPointerDown={(event) => {
+        const onNavLink = (event.target as Element).closest('[data-dashboard-nav-item]') !== null
+        pressStartedRef.current = event.button === 0 && onNavLink
+        clickDeliveredRef.current = false
+      }}
+      onPointerUp={(event) => {
+        if (!pressStartedRef.current) return
+        pressStartedRef.current = false
+        // 带修饰键的点击（新标签页打开等）交给浏览器默认行为，不代为触发。
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+          return
+        }
+        const releasedLink = (event.target as Element).closest<HTMLElement>(
+          '[data-dashboard-nav-item]'
+        )
+        if (!releasedLink) return
+        window.setTimeout(() => {
+          if (clickDeliveredRef.current) return
+          // 正常情况下 click 已经在这之前送达；没送达说明按下和抬起落在了两份按钮上。
+          const link = releasedLink.isConnected
+            ? releasedLink
+            : (itemRef.current?.firstElementChild as HTMLElement | null)
+          link?.click()
+        }, 0)
+      }}
+      onPointerCancel={() => {
+        pressStartedRef.current = false
+      }}
       onFocus={openFlyout}
       onBlur={(event) => {
         if (!itemRef.current?.contains(event.relatedTarget) && !flyoutRef.current?.contains(event.relatedTarget)) {

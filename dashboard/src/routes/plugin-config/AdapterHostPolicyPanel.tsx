@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Loader2, Save, UsersRound } from 'lucide-react'
+import { AlertCircle, Info, Loader2, Save, UsersRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { ListFieldEditor } from '@/components/ListFieldEditor'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -68,6 +68,16 @@ function clonePolicy(policy: AdapterHostPolicy): AdapterHostPolicy {
       deny_ids: [...policy.private.deny_ids],
     },
   }
+}
+
+function normalizePolicy(policy: AdapterHostPolicy): AdapterHostPolicy {
+  const normalized = clonePolicy(policy)
+  for (const chatType of ['group', 'private'] as const) {
+    for (const field of ['allow_ids', 'deny_ids'] as const) {
+      normalized[chatType][field] = [...new Set(policy[chatType][field].map((id) => id.trim()).filter(Boolean))]
+    }
+  }
+  return normalized
 }
 
 function formatSaveTime(timestamp: number): string {
@@ -319,10 +329,13 @@ export function AdapterHostPolicyPanel({
   const policyQuery = useQuery({
     queryKey,
     queryFn: () => getAdapterHostPolicy(pluginId),
-    // 适配器换账号登录后当前激活身份会变化，定期拉取保证面板展示的规则归属不脱靶
-    refetchInterval: 30_000,
+    // 未连接时频繁检查，连接成功后自动显示规则；连接后定期同步账号与规则归属。
+    refetchInterval: (query) => query.state.data?.active_identity ? 30_000 : 3_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
   })
   const serverPolicy = policyQuery.data?.policy
+  const hasActiveIdentity = Boolean(policyQuery.data?.active_identity)
   const serverPolicyText = serverPolicy ? JSON.stringify(serverPolicy) : null
   // 草稿与保存状态放在面板层：回包只更新内容，不重挂载组件；
   // 与服务端数据比较一律用内容快照，结构化共享会保留相同内容的旧对象引用。
@@ -334,15 +347,17 @@ export function AdapterHostPolicyPanel({
   const serverSnapshotRef = useRef<string | null>(serverPolicyText)
   const pendingSaveRef = useRef<AdapterHostPolicy | null>(null)
   const autosaveTimerRef = useRef<number | null>(null)
+  // 空白行只属于编辑草稿；保存与脏状态比较使用和后端一致的有效规则。
+  const policyText = policy ? JSON.stringify(normalizePolicy(policy)) : null
 
   const hasUnsavedChanges =
-    policy !== null && serverPolicyText !== null && JSON.stringify(policy) !== serverPolicyText
+    policyText !== null && serverPolicyText !== null && policyText !== serverPolicyText
 
   const saveMutation = useMutation({
-    mutationFn: (next: AdapterHostPolicy) => updateAdapterHostPolicy(pluginId, next),
+    mutationFn: (next: AdapterHostPolicy) => updateAdapterHostPolicy(pluginId, normalizePolicy(next)),
     onSuccess: (response) => {
       serverSnapshotRef.current = JSON.stringify(response.policy)
-      setPolicy(clonePolicy(response.policy))
+      // 保存回包只更新服务端快照，保留空白输入框和请求期间产生的新编辑。
       setLastSaved({ text: JSON.stringify(response.policy), at: Date.now() })
       queryClient.setQueryData(queryKey, response)
       void queryClient.invalidateQueries({ queryKey: ['chat-stream-detail'] })
@@ -371,10 +386,20 @@ export function AdapterHostPolicyPanel({
 
   // 自动保存：编辑停止后写回后端
   useEffect(() => {
+    // 适配器断开后不能确定规则归属，取消尚未提交的草稿保存。
+    if (!hasActiveIdentity) {
+      pendingSaveRef.current = null
+      return
+    }
     if (!hasUnsavedChanges || !policy) {
+      pendingSaveRef.current = null
       return
     }
     pendingSaveRef.current = policy
+    // 等当前保存结束再提交最新草稿，避免并发回包打乱规则顺序。
+    if (saveMutation.isPending) {
+      return
+    }
     const timer = window.setTimeout(() => {
       autosaveTimerRef.current = null
       pendingSaveRef.current = null
@@ -387,7 +412,7 @@ export function AdapterHostPolicyPanel({
         autosaveTimerRef.current = null
       }
     }
-  }, [policy, hasUnsavedChanges, mutate])
+  }, [policy, hasUnsavedChanges, hasActiveIdentity, saveMutation.isPending, mutate])
 
   // 切换页签会卸载面板；立即提交尚在防抖期的最新草稿，避免编辑丢失
   useEffect(
@@ -407,7 +432,7 @@ export function AdapterHostPolicyPanel({
       autosaveTimerRef.current = null
     }
     pendingSaveRef.current = null
-    if (policy) {
+    if (policy && hasActiveIdentity) {
       mutate(policy)
     }
   }
@@ -432,13 +457,25 @@ export function AdapterHostPolicyPanel({
     )
   }
 
+  if (!hasActiveIdentity) {
+    return (
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertTitle>适配器未连接上对应平台</AlertTitle>
+        <AlertDescription>
+          需要正确填写适配器的相关连接配置，连接上对应平台后，可以设置黑白名单对应规则。
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
   const saveStatus = saveMutation.isPending
     ? '自动保存中'
     : saveMutation.isError
       ? '自动保存失败'
       : hasUnsavedChanges
         ? '未保存的更改'
-        : lastSaved && lastSaved.text === JSON.stringify(policy)
+        : lastSaved && lastSaved.text === policyText
           ? `已保存 ${formatSaveTime(lastSaved.at)}`
           : null
 

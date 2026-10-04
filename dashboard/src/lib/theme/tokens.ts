@@ -541,7 +541,7 @@ export const futureRetroDarkTokens: Partial<ThemeTokens> = {
 
 const millenniumBaseTypography = {
   'font-family-base':
-    '"Pixelify Sans", "Fusion Pixel 12px Proportional SC", "Zpix", "Noto Sans SC", "Microsoft YaHei UI", system-ui, sans-serif',
+    'var(--mil-font-pixel), system-ui, sans-serif',
   'font-family-code': '"JetBrains Mono", "Cascadia Mono", Consolas, monospace',
   'font-weight-normal': 500,
   'font-weight-medium': 700,

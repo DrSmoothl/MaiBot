@@ -1,12 +1,33 @@
-/* 英文和数字用 Pixelify Sans 像素字（OFL 协议，见 public/fonts/PixelifySans-OFL.txt）。
-   只覆盖拉丁字符，中文落到后面的黑体。 */
+/* Jersey 20 像素字（OFL 协议，见 public/fonts/Jersey20-OFL.txt）。
+   只覆盖拉丁字符，中文落到 --mil-font-zh。
+   这款字同字号下比中文矮一截，用 size-adjust 放大到和中文视觉等高。 */
 @font-face {
-  font-family: 'Pixelify Sans';
-  src: url('/fonts/PixelifySans-Variable.ttf') format('truetype');
-  font-weight: 400 700;
+  font-family: 'Jersey 20';
+  src: url('/fonts/Jersey20-Regular.ttf') format('truetype');
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
+  size-adjust: 118%;
   unicode-range: U+0000-024F, U+2000-206F, U+20A0-20CF, U+2190-21FF;
+}
+
+/* 备选像素字（均为 OFL 协议，见 public/fonts/*-OFL.txt）：
+   Departure Mono 只含拉丁字符；Ark Pixel 12px 简体中文裁成 GB2312 常用字 + 中文标点。 */
+@font-face {
+  font-family: 'Departure Mono';
+  src: url('/fonts/DepartureMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Ark Pixel 12px SC';
+  src: url('/fonts/ArkPixel12-ZhHans.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+3000-9FFF, U+FF00-FFEF;
 }
 
 /* 千禧风格（data-dashboard-style='millennium'）
@@ -818,11 +839,61 @@
 /* ---------- 滚动条 ---------- */
 
 :root[data-dashboard-style='millennium'] [data-dashboard-scrollbar-thumb='true'] {
-  background-color: var(--mil-drop);
+  background-color: var(--mil-key);
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: var(--mil-bevel);
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-scrollbar='true'] {
+  background-color: var(--mil-shell);
+  border-radius: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-scrollbar='true'][data-orientation='vertical'] {
+  width: 14px;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-scrollbar='true'][data-orientation='horizontal'] {
+  height: 14px;
 }
 
 :root[data-dashboard-style='millennium'] * {
   scrollbar-color: var(--mil-drop) transparent;
+}
+
+/* Chromium 设置 scrollbar-color 后会忽略原生滑块的形状样式，
+   使用 WebKit 绘制路径实现方角和塑料按键边框；其他浏览器保留标准配色。 */
+@supports selector(::-webkit-scrollbar) {
+  :root[data-dashboard-style='millennium'] * {
+    scrollbar-color: auto;
+  }
+
+  :root[data-dashboard-style='millennium'] *::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+  }
+
+  :root[data-dashboard-style='millennium'] *::-webkit-scrollbar-track {
+    background: var(--mil-shell);
+    border-radius: 0;
+    box-shadow: inset 2px 2px 0 var(--mil-lo);
+  }
+
+  :root[data-dashboard-style='millennium'] *::-webkit-scrollbar-thumb {
+    background: var(--mil-key);
+    border: 2px solid var(--mil-line);
+    border-radius: 0;
+    box-shadow: var(--mil-bevel);
+  }
+
+  :root[data-dashboard-style='millennium'] *::-webkit-scrollbar-thumb:hover {
+    background: var(--mil-key-hover);
+  }
+
+  :root[data-dashboard-style='millennium'] *::-webkit-scrollbar-corner {
+    background: var(--mil-shell);
+  }
 }
 
 /* ---------- 图表：深色示波屏，浅色描线 ---------- */
@@ -1891,6 +1962,13 @@
   margin-top: 0;
 }
 
+/* 聊天流列表的滚动条浮在内容上方，每行右侧让出它的宽度，免得盖住设置按钮 */
+:root[data-dashboard-style='millennium']
+  [data-chat-sidebar-section='observed']
+  [data-chat-sidebar-item='true'] {
+  padding-right: 16px;
+}
+
 :root[data-dashboard-style='millennium']
   [data-chat-sidebar-screen='true']
   > [data-chat-sidebar-item='true']:last-child {
@@ -2153,8 +2231,20 @@
 
 /* 正文和小字用普通黑体保证可读；像素字留给铭牌、大标题、首页的大数字和丝印标题 */
 :root[data-dashboard-style='millennium'] {
-  --mil-font-pixel:
-    'Pixelify Sans', 'Fusion Pixel 12px Proportional SC', 'Zpix', 'Noto Sans SC',
+  --mil-font-en: 'Departure Mono';
+  --mil-font-zh:
+    'Fusion Pixel 12px Proportional SC', 'Zpix', 'Noto Sans SC', 'Microsoft YaHei UI', sans-serif;
+  --mil-font-pixel: var(--mil-font-en), var(--mil-font-zh);
+}
+
+/* 设置 → 外观里可切换：英文/数字 html[data-millennium-font]，中文 html[data-millennium-cjk-font] */
+:root[data-dashboard-style='millennium'][data-millennium-font='jersey'] {
+  --mil-font-en: 'Jersey 20';
+}
+
+:root[data-dashboard-style='millennium'][data-millennium-cjk-font='ark'] {
+  --mil-font-zh:
+    'Ark Pixel 12px SC', 'Fusion Pixel 12px Proportional SC', 'Zpix', 'Noto Sans SC',
     'Microsoft YaHei UI', sans-serif;
 }
 
@@ -2638,4 +2728,323 @@
     inset -2px -2px 0 var(--mil-lo),
     0 5px 0 var(--mil-drop) !important;
   height: calc(100% - 5px);
+}
+
+/* ---------- 图标：统一成方头、直角的线条 ---------- */
+
+/* 侧栏等处用项目自带的直角图标集；其余线条图标（lucide）把圆头圆角改成方头直角并加粗一档，
+   两者笔画观感一致，和键帽、像素字更搭 */
+:root[data-dashboard-style='millennium'] svg.lucide {
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  stroke-width: 2.25;
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide.animate-spin {
+  stroke-linecap: butt;
+}
+
+/* ---------- 排版修正 ---------- */
+
+/* 行高为 1 且会截断的大数字：像素字的字形比行框高，上下会被裁掉一点，给足行高 */
+:root[data-dashboard-style='millennium'] .truncate.leading-none {
+  line-height: 1.12;
+}
+
+/* 一言的文字沿用界面字体（通用规则会把它强制成系统无衬线体） */
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true'],
+:root[data-dashboard-style='millennium']
+  [data-dashboard-shell='true']
+  [data-home-card-style]
+  [data-home-hitokoto='true']
+  p {
+  font-family: var(--mil-font-pixel) !important;
+}
+
+/* 首页大数字：不被上下挤压，字号让一点给行高 */
+:root[data-dashboard-style='millennium'] [data-home-summary-primary='true'] .text-3xl {
+  flex-shrink: 0;
+  font-size: 2rem;
+}
+
+/* 状态屏：卡片变窄时运行时长换到下一行，不和「活动」叠在一起 */
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-maibot-runtime-status='true']
+  > div {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+/* 待审核数量角标：用界面的珊瑚橙，直角 */
+:root[data-dashboard-style='millennium'] [data-dashboard-shell] .bg-orange-500 {
+  background-color: var(--mil-hot);
+  color: var(--mil-hot-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-home-summary-primary='true'] .text-3xl {
+  font-size: 1.875rem;
+  margin-top: 2px;
+}
+
+:root[data-dashboard-style='millennium'] [data-home-summary-primary='true'] > .text-xs {
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+
+/* 多行输入框的高度是脚本按内容算的，边框每加 1 像素就会多出一点滚动：
+   这里边框保持 1 像素，第二个像素用内阴影补 */
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true'] textarea {
+  border-width: 1px;
+  box-shadow:
+    inset 0 0 0 1px var(--mil-line),
+    var(--mil-sunk);
+}
+
+/* ---------- 千禧图标：把形状偏圆的常用图标换成方头直角的画法 ---------- */
+
+/* 图标组件遍布各处，这里用遮罩在样式层统一替换：隐藏原来的线条，
+   用当前文字色填充一个按新路径裁出的形状，颜色、尺寸都跟随原图标。 */
+:root[data-dashboard-style='millennium'] svg.lucide:is(
+    .lucide-settings,
+    .lucide-settings-2,
+    .lucide-cog,
+    .lucide-search,
+    .lucide-globe,
+    .lucide-earth,
+    .lucide-languages,
+    .lucide-moon,
+    .lucide-sun,
+    .lucide-circle-alert,
+    .lucide-alert-circle,
+    .lucide-info,
+    .lucide-circle-check,
+    .lucide-check-circle,
+    .lucide-circle-check-big,
+    .lucide-check-circle-2,
+    .lucide-circle-x,
+    .lucide-x-circle,
+    .lucide-circle-help,
+    .lucide-help-circle,
+    .lucide-circle-question-mark,
+    .lucide-refresh-cw,
+    .lucide-refresh-ccw,
+    .lucide-rotate-ccw,
+    .lucide-rotate-cw,
+    .lucide-clock,
+    .lucide-timer,
+    .lucide-eye,
+    .lucide-eye-off,
+    .lucide-message-circle,
+    .lucide-message-square,
+    .lucide-user,
+    .lucide-circle-user,
+    .lucide-user-circle,
+    .lucide-circle-user-round,
+    .lucide-user-circle-2,
+    .lucide-user-round,
+    .lucide-users,
+    .lucide-users-round,
+    .lucide-bot,
+    .lucide-brain,
+    .lucide-cpu,
+    .lucide-smile,
+    .lucide-pencil,
+    .lucide-pen,
+    .lucide-pen-line,
+    .lucide-square-pen,
+    .lucide-edit,
+    .lucide-edit-2,
+    .lucide-edit-3,
+    .lucide-pencil-line,
+    .lucide-database,
+    .lucide-ellipsis,
+    .lucide-more-horizontal,
+    .lucide-circle-plus,
+    .lucide-plus-circle,
+    .lucide-power,
+    .lucide-gauge
+  ) {
+  -webkit-mask: var(--mil-icon) center / 100% 100% no-repeat;
+  background-color: currentColor;
+  mask: var(--mil-icon) center / 100% 100% no-repeat;
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(
+    .lucide-settings,
+    .lucide-settings-2,
+    .lucide-cog,
+    .lucide-search,
+    .lucide-globe,
+    .lucide-earth,
+    .lucide-languages,
+    .lucide-moon,
+    .lucide-sun,
+    .lucide-circle-alert,
+    .lucide-alert-circle,
+    .lucide-info,
+    .lucide-circle-check,
+    .lucide-check-circle,
+    .lucide-circle-check-big,
+    .lucide-check-circle-2,
+    .lucide-circle-x,
+    .lucide-x-circle,
+    .lucide-circle-help,
+    .lucide-help-circle,
+    .lucide-circle-question-mark,
+    .lucide-refresh-cw,
+    .lucide-refresh-ccw,
+    .lucide-rotate-ccw,
+    .lucide-rotate-cw,
+    .lucide-clock,
+    .lucide-timer,
+    .lucide-eye,
+    .lucide-eye-off,
+    .lucide-message-circle,
+    .lucide-message-square,
+    .lucide-user,
+    .lucide-circle-user,
+    .lucide-user-circle,
+    .lucide-circle-user-round,
+    .lucide-user-circle-2,
+    .lucide-user-round,
+    .lucide-users,
+    .lucide-users-round,
+    .lucide-bot,
+    .lucide-brain,
+    .lucide-cpu,
+    .lucide-smile,
+    .lucide-pencil,
+    .lucide-pen,
+    .lucide-pen-line,
+    .lucide-square-pen,
+    .lucide-edit,
+    .lucide-edit-2,
+    .lucide-edit-3,
+    .lucide-pencil-line,
+    .lucide-database,
+    .lucide-ellipsis,
+    .lucide-more-horizontal,
+    .lucide-circle-plus,
+    .lucide-plus-circle,
+    .lucide-power,
+    .lucide-gauge
+  )
+  > * {
+  display: none;
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-settings, .lucide-settings-2, .lucide-cog) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M9 9h6v6H9zM12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2 2M16.5 16.5l2 2M18.5 5.5l-2 2M7.5 16.5l-2 2'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-search) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h11v11H4zM15 15l6 6'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-globe, .lucide-earth, .lucide-languages) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M12 3v4M4 7h16M16 8L5 20M8 11l11 9'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-moon) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10z'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-sun) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M9 9h6v6H9zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-alert, .lucide-alert-circle) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM12 8v5M12 16v1'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-info) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM12 11v6M12 7v1'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-check, .lucide-check-circle, .lucide-circle-check-big, .lucide-check-circle-2) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM8 12l3 3 5-6'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-x, .lucide-x-circle) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM9 9l6 6M15 9l-6 6'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-help, .lucide-help-circle, .lucide-circle-question-mark) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM9 9h6v3h-3v2M12 17v1'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-refresh-cw, .lucide-refresh-ccw) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 11V6h13M14 3l3 3-3 3M20 13v5H7M10 21l-3-3 3-3'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-rotate-ccw) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M8 4L4 8l4 4M4 8h16v12H6'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-rotate-cw) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M16 4l4 4-4 4M20 8H4v12h14'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-clock, .lucide-timer) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM12 8v5h4'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-eye) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M2 12l5-5h10l5 5-5 5H7zM10 10h4v4h-4z'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-eye-off) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M2 12l5-5h10l5 5-5 5H7zM4 3l16 18'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-message-circle, .lucide-message-square) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v12H10l-4 4v-4H4z'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-user, .lucide-circle-user, .lucide-user-circle, .lucide-circle-user-round, .lucide-user-circle-2, .lucide-user-round) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M9 4h6v6H9zM5 20v-6h14v6'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-users, .lucide-users-round) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M6 5h5v5H6zM3 20v-6h11v6M16 6h3v4h-3M17 14h4v6'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-bot) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M5 9h14v10H5zM12 9V5M10 5h4M9 13v2M15 13v2M2 13v3M22 13v3'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-brain, .lucide-cpu) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M7 7h10v10H7zM10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-smile) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM9 9v2M15 9v2M8 15h8'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-pencil, .lucide-pen, .lucide-pen-line, .lucide-square-pen, .lucide-edit, .lucide-edit-2, .lucide-edit-3, .lucide-pencil-line) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 20h4L20 8l-4-4L4 16z'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-database) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M5 4h14v5H5zM5 9v5h14V9M5 14v6h14v-6M8 6.5h1M8 11.5h1M8 17h1'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-ellipsis, .lucide-more-horizontal) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M5 12h1M12 12h1M19 12h1'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-plus, .lucide-plus-circle) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM12 8v8M8 12h8'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-power) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M12 3v9M7 6H5v14h14V6h-2'/%3E%3C/svg%3E");
+}
+
+:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-gauge) {
+  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 18V8h16v10M12 18l4-6'/%3E%3C/svg%3E");
 }

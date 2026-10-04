@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowUpDown, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import { ArrowUpDown, Plus, Search, Trash2, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
@@ -50,6 +50,9 @@ import { EmojiCacheMaintenancePanel } from './EmojiCacheMaintenancePanel'
 import { EmojiDetailDialog, EmojiEditDialog, EmojiUploadDialog } from './EmojiDialogs'
 import { EmojiList } from './EmojiList'
 
+// 页面可见时每 10 秒同步后台收录和使用状态，离开页面后停止轮询。
+const EMOJI_REFRESH_INTERVAL = 10_000
+
 // 表情包筛选项：状态 / 格式 / 排序字段 / 排序方向
 interface EmojiFilters {
   status: EmojiStatus | 'all'
@@ -77,6 +80,7 @@ export function EmojiManagementPage() {
     getId: (emoji) => emoji.id,
     initialFilters: { status: 'adopted', format: 'all', sortBy: 'register_time', sortOrder: 'desc' },
     searchDebounceMs: 300,
+    queryOptions: { refetchInterval: EMOJI_REFRESH_INTERVAL },
     queryFn: async ({ page, pageSize, search, filters }) => {
       const result = await getEmojiList({
         page,
@@ -102,6 +106,7 @@ export function EmojiManagementPage() {
   const statsQuery = useQuery({
     queryKey: ['emoji', 'stats'],
     queryFn: getEmojiStats,
+    refetchInterval: EMOJI_REFRESH_INTERVAL,
   })
   const stats: EmojiStats | null = statsQuery.data?.data ?? null
 
@@ -233,7 +238,7 @@ export function EmojiManagementPage() {
           {/* 筛选和排序 */}
           <Card>
             <CardHeader className="space-y-3">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid items-end gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto_5rem_auto]">
                 <div className="space-y-2">
                   <Label htmlFor="emoji-search">搜索 tag</Label>
                   <div className="relative">
@@ -329,82 +334,41 @@ export function EmojiManagementPage() {
                     </Select>
                   </div>
                 )}
-              </div>
-
-              <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-3">
-                  {list.selectedCount > 0 && (
-                    <span className="text-muted-foreground text-sm">
-                      已选择 {list.selectedCount} 个表情包
-                    </span>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-9 items-center gap-1 border-2 px-1.5">
-                      {[
-                        { value: 'small' as const, label: '小', sizeClassName: 'h-3 w-3' },
-                        { value: 'medium' as const, label: '中', sizeClassName: 'h-4 w-4' },
-                        { value: 'large' as const, label: '大', sizeClassName: 'h-5 w-5' },
-                      ].map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => setCardSize(option.value)}
-                          className={`flex h-7 w-7 items-center justify-center transition-colors ${
-                            cardSize === option.value
-                              ? 'bg-primary text-primary-foreground'
-                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                          }`}
-                          aria-label={`${option.label}卡片`}
-                          title={`${option.label}卡片`}
-                        >
-                          <span className={`${option.sizeClassName} bg-current`} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => list.refetch()}
-                    disabled={list.isFetching}
-                    aria-label="刷新"
-                    title="刷新"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${list.isFetching ? 'animate-spin' : ''}`} />
-                  </Button>
-
-                  <Button size="sm" onClick={() => setUploadDialogOpen(true)} className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    新增
-                  </Button>
-
-                  {list.selectedCount > 0 && (
-                    <>
-                      <Button variant="outline" size="sm" onClick={() => list.clearSelection()}>
-                        取消选择
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => setBatchDeleteDialogOpen(true)}
+                <div className="space-y-2">
+                  <Label>卡片大小</Label>
+                  <div className="flex h-9 items-center gap-1 border-2 px-1.5">
+                    {[
+                      { value: 'small' as const, label: '小', sizeClassName: 'h-3 w-3' },
+                      { value: 'medium' as const, label: '中', sizeClassName: 'h-4 w-4' },
+                      { value: 'large' as const, label: '大', sizeClassName: 'h-5 w-5' },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setCardSize(option.value)}
+                        className={`flex h-7 w-7 items-center justify-center transition-colors ${
+                          cardSize === option.value
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        }`}
+                        aria-label={`${option.label}卡片`}
+                        title={`${option.label}卡片`}
                       >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        批量删除
-                      </Button>
-                    </>
-                  )}
+                        <span className={`${option.sizeClassName} bg-current`} />
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 sm:ml-auto">
-                  <Label htmlFor="emoji-page-size" className="text-sm whitespace-nowrap">
+                <div className="space-y-2">
+                  <Label htmlFor="emoji-page-size">
                     每页显示
                   </Label>
                   <Select
                     value={pageSize.toString()}
                     onValueChange={(value) => list.setPageSize(parseInt(value))}
                   >
-                    <SelectTrigger id="emoji-page-size" className="w-20">
+                    <SelectTrigger id="emoji-page-size" className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -415,7 +379,30 @@ export function EmojiManagementPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <Button onClick={() => setUploadDialogOpen(true)} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  新增
+                </Button>
               </div>
+
+              {list.selectedCount > 0 && (
+                <div className="flex flex-wrap items-center gap-3 border-t pt-4">
+                  <span className="text-muted-foreground text-sm">
+                    已选择 {list.selectedCount} 个表情包
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => list.clearSelection()}>
+                    取消选择
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setBatchDeleteDialogOpen(true)}
+                  >
+                    <Trash2 className="mr-1 h-4 w-4" />
+                    批量删除
+                  </Button>
+                </div>
+              )}
             </CardHeader>
           </Card>
 
