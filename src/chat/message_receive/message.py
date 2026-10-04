@@ -371,6 +371,7 @@ class SessionMessage(MaiMessage):
             if bot_nickname:
                 component.target_user_nickname = bot_nickname
                 component.target_user_cardname = bot_nickname
+                component.uses_configured_bot_nickname = True
                 return f"@{bot_nickname}"
 
         from src.common.utils.utils_person import PersonUtils
