@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { DraftNumberInput } from '@/components/ui/draft-number-input'
 import { Input } from '@/components/ui/input'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
@@ -45,6 +46,8 @@ import {
   Save,
   RotateCcw,
   Loader2,
+  MoreHorizontal,
+  FileArchive,
   Search,
   ArrowLeft,
   Info,
@@ -76,6 +79,7 @@ import type {
   PluginRuntimeComponentType,
 } from '@/lib/plugin-api'
 import { PluginIcon } from './plugins/PluginIcon'
+import { ZipInstallDialog } from './plugins/ZipInstallDialog'
 import { getPluginType, getPluginTypeLabel } from './plugins/types'
 import { AdapterHostPolicyPanel } from './plugin-config/AdapterHostPolicyPanel'
 import { AdapterPolicyDefaultsCard } from './plugin-config/AdapterPolicyDefaultsCard'
@@ -1502,6 +1506,7 @@ function PluginConfigPageContent() {
   const { triggerRestart, isRestarting } = useRestart()
   const adapterManagement = isAdapterManagementPath()
   const [editingMCP, setEditingMCP] = useState(false)
+  const [zipInstallOpen, setZipInstallOpen] = useState(false)
 
   const {
     plugins,
@@ -1637,17 +1642,23 @@ function PluginConfigPageContent() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 shrink-0 px-2 sm:px-3"
-            onClick={() => triggerRestart()}
-            disabled={isRestarting}
-            title="重启麦麦"
-          >
-            <RotateCw className={`h-4 w-4 ${isRestarting ? 'animate-spin' : ''} sm:mr-2`} />
-            <span className="hidden sm:inline">重启麦麦</span>
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="shrink-0" aria-label="更多操作" title="更多操作">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setZipInstallOpen(true)} disabled={isRestarting}>
+                <FileArchive className="mr-2 h-4 w-4" />从 ZIP 安装插件
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => triggerRestart()} disabled={isRestarting}>
+                <RotateCw className={`mr-2 h-4 w-4 ${isRestarting ? 'animate-spin' : ''}`} />重启麦麦
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <ZipInstallDialog open={zipInstallOpen} onOpenChange={setZipInstallOpen} onInstalled={loadPlugins} />
         </div>
         )}
 

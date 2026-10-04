@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Protocol, Tuple
+from urllib.parse import urlsplit
 import asyncio
 import re
 import time
@@ -212,10 +213,14 @@ class AISearchDocumentStore:
         """解析官方站点提供的 `llms-full.txt` 文档包。"""
 
         documents: List[OfficialDocument] = []
-        pattern = re.compile(r"(?:\A|\n)---\s*\nurl:\s*(/[^\n]+)\n---\s*\n")
+        pattern = re.compile(
+            r"(?:\A|\n)---[^\S\n]*\nurl:[^\S\n]*(?P<quote>['\"]?)"
+            r"(?P<url>(?:https?://|/)[^\s'\"]+)(?P=quote)[^\S\n]*\n---[^\S\n]*\n"
+        )
         matches = list(pattern.finditer(bundle))
         for index, match in enumerate(matches):
-            path = match.group(1).strip()
+            # 文档包同时支持相对路径和带引号的完整 URL，统一用路径作为检索与读取 ID。
+            path = urlsplit(match.group("url")).path
             content_end = matches[index + 1].start() if index + 1 < len(matches) else len(bundle)
             content = bundle[match.end() : content_end].strip()
             title_match = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)

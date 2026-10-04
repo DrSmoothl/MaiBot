@@ -12,6 +12,7 @@ from .releases import router as releases_router
 from .runtime_routes import router as runtime_router
 from .stats_proxy import router as stats_proxy_router
 from .webui_extensions import router as webui_extensions_router
+from .zip_install import router as zip_install_router
 
 router = APIRouter(prefix="/plugins", tags=["插件管理"])
 router.include_router(catalog_router)
@@ -23,6 +24,7 @@ router.include_router(config_router)
 router.include_router(runtime_router)
 router.include_router(stats_proxy_router)
 router.include_router(webui_extensions_router)
+router.include_router(zip_install_router)
 
 set_update_progress_callback(update_progress)
 
