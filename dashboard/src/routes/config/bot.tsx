@@ -700,8 +700,8 @@ function BotConfigPageContent() {
             {/* 按钮组 - 桌面端靠右 */}
             <div className="flex w-full min-w-0 flex-wrap gap-2 sm:w-auto sm:flex-shrink-0 sm:justify-end">
               {editMode === 'detail' && activeConfigTab !== 'bot' && (
-                <label className="flex h-9 shrink-0 cursor-pointer items-center gap-2 self-center px-2 text-sm font-semibold">
-                  <Switch checked={advancedVisible} onCheckedChange={setAdvancedVisible} aria-label="高级设置" />
+                <label htmlFor="advanced-settings" className="flex h-9 shrink-0 cursor-pointer items-center gap-2 self-center px-2 text-sm font-semibold">
+                  <Switch id="advanced-settings" checked={advancedVisible} onCheckedChange={setAdvancedVisible} aria-label="高级设置" />
                   高级设置
                 </label>
               )}
