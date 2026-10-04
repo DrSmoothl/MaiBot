@@ -1852,9 +1852,11 @@ function PluginConfigPageContent() {
                         <h3 className="min-w-0 text-sm leading-snug font-medium break-words sm:truncate sm:text-base">
                           {plugin.manifest.name}
                         </h3>
-                        <Badge variant="outline" className="flex-shrink-0 text-xs">
-                          {getPluginTypeLabel(plugin)}
-                        </Badge>
+                        {!adapterManagement && (
+                          <Badge variant="outline" className="flex-shrink-0 text-xs">
+                            {getPluginTypeLabel(plugin)}
+                          </Badge>
+                        )}
                         {statusMeta.showsBadge !== false && (
                           <Badge
                             variant="outline"

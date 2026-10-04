@@ -36,6 +36,8 @@ import {
   updatePlugin,
   checkPluginInstalled,
   fetchPluginList,
+  getCachedPluginList,
+  fetchPluginDetail,
   getInstalledPluginVersion,
   getInstalledPlugins,
   type InstalledPlugin,
@@ -319,11 +321,17 @@ export function PluginDetailPage({
   const pluginQuery = useQuery({
     queryKey: ['plugin-detail', pluginId],
     enabled: !!pluginId,
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
+      // 从兼容列表进入详情时直接获取该插件，避免先补下载全部插件列表。
+      const cachedPlugin = getCachedPluginList(true)?.find(
+        (p) => p.id === pluginId || p.marketplace_id === pluginId
+      )
+      if (cachedPlugin?.market_data_source === 'service') return fetchPluginDetail(cachedPlugin)
       const list = await fetchPluginList()
       const foundPlugin = list.find((p) => p.id === pluginId || p.marketplace_id === pluginId)
       if (foundPlugin) {
-        return foundPlugin
+        return foundPlugin.market_data_source === 'service' ? fetchPluginDetail(foundPlugin) : foundPlugin
       }
 
       const installed = await getInstalledPlugins()

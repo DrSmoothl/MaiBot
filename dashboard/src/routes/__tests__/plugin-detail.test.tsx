@@ -36,6 +36,7 @@ vi.mock('@/lib/plugin-api', () => ({
   checkGitStatus: vi.fn(),
   checkPluginInstalled: vi.fn(),
   fetchPluginList: vi.fn(),
+  getCachedPluginList: vi.fn(),
   getInstalledPluginVersion: vi.fn(),
   getInstalledPlugins: vi.fn(),
   getMaimaiVersion: vi.fn(),

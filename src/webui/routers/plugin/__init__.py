@@ -6,6 +6,7 @@ from .catalog import router as catalog_router
 from .config_routes import router as config_router
 from .icon_routes import router as icon_router
 from .management import router as management_router
+from .marketplace import router as marketplace_router
 from .progress import get_progress_router, update_progress
 from .releases import router as releases_router
 from .runtime_routes import router as runtime_router
@@ -15,6 +16,7 @@ from .webui_extensions import router as webui_extensions_router
 router = APIRouter(prefix="/plugins", tags=["插件管理"])
 router.include_router(catalog_router)
 router.include_router(management_router)
+router.include_router(marketplace_router)
 router.include_router(releases_router)
 router.include_router(icon_router)
 router.include_router(config_router)
