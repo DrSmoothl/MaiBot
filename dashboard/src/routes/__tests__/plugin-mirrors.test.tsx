@@ -66,7 +66,9 @@ function iconButton(iconClassFragment: string, index = 0): HTMLButtonElement {
 
 beforeEach(() => {
   localStorage.clear()
-  vi.mocked(backendApi.get).mockResolvedValue({ mirrors: [makeMirror()] } as never)
+  vi.mocked(backendApi.get).mockImplementation(async (path) =>
+    (path.endsWith('/source') ? { use_github: false } : { mirrors: [makeMirror()] }) as never
+  )
   vi.mocked(backendApi.post).mockResolvedValue({} as never)
   vi.mocked(backendApi.put).mockResolvedValue({} as never)
   vi.mocked(backendApi.delete).mockResolvedValue({} as never)
@@ -96,17 +98,21 @@ describe('PluginMirrorsPage 特征化', () => {
   })
 
   it('列表加载失败时展示错误信息，点击重新加载会重新请求', async () => {
-    vi.mocked(backendApi.get).mockRejectedValueOnce(new Error('后端不可用'))
+    vi.mocked(backendApi.get).mockImplementation(async (path) => {
+      if (path.endsWith('/source')) return { use_github: false } as never
+      throw new Error('后端不可用')
+    })
     const user = userEvent.setup()
     render(<PluginMirrorsPage />, { wrapper: makeWrapper() })
 
     expect(await screen.findByText('加载失败')).toBeInTheDocument()
     expect(screen.getByText('后端不可用')).toBeInTheDocument()
 
-    // 重新加载后（beforeEach 里的默认 resolved mock 生效）渲染出列表
+    // 重新加载只刷新镜像清单，不重新请求数据源设置。
+    vi.mocked(backendApi.get).mockResolvedValue({ mirrors: [makeMirror()] } as never)
     await user.click(screen.getByRole('button', { name: '重新加载' }))
     expect(await screen.findAllByText('官方镜像源')).not.toHaveLength(0)
-    expect(backendApi.get).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(backendApi.get).mock.calls.filter(([path]) => path === '/api/webui/plugins/mirrors')).toHaveLength(2)
   })
 
   it('返回按钮默认导航到 /plugins', async () => {
@@ -158,16 +164,16 @@ describe('PluginMirrorsPage 特征化', () => {
     await waitFor(() =>
       expect(screen.queryByText('添加新的 Git 镜像源配置')).not.toBeInTheDocument()
     )
-    await waitFor(() => expect(backendApi.get).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(vi.mocked(backendApi.get).mock.calls.filter(([path]) => path === '/api/webui/plugins/mirrors')).toHaveLength(2))
   })
 
   it('切换镜像源启用状态调用 PUT 取反 enabled', async () => {
     const user = userEvent.setup()
     await renderPage()
 
-    // switch 顺序：桌面表格行 → 移动端卡片
+    // switch 顺序：市场数据源 → 桌面表格行 → 移动端卡片
     const switches = screen.getAllByRole('switch')
-    await user.click(switches[0])
+    await user.click(switches[1])
 
     await waitFor(() =>
       expect(backendApi.put).toHaveBeenCalledWith('/api/webui/plugins/mirrors/official', {

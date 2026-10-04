@@ -342,7 +342,7 @@ describe('ImportTab', () => {
 
     const submit = screen.getByRole('button', { name: '创建导入任务' })
     expect(submit).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('请选择资料类别')
+    expect(screen.getByText('请选择资料类别', { selector: '[role="status"]' })).toHaveAttribute('role', 'status')
     expect(screen.getByRole('combobox', { name: '资料类别' })).toHaveAttribute('aria-invalid', 'true')
 
     await user.click(screen.getByRole('combobox', { name: '资料类别' }))

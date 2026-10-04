@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Dict, Mapping, Sequence
 
 import base64
 import binascii
@@ -978,16 +978,19 @@ def _build_display_path(file_path: Path) -> str:
         return resolved_path.as_posix()
 
 
-def _write_snapshot(snapshot_path: Path, payload: dict[str, Any]) -> None:
+def _write_snapshot(
+    snapshot_path: Path, payload: dict[str, Any], *, image_assets: Dict[Path, bytes] | None = None
+) -> None:
     """原子更新单个逻辑请求的失败记录。"""
 
     payload["metadata"]["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    temporary_path = snapshot_path.with_suffix(".json.tmp")
-    temporary_path.write_text(
+    from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
+
+    PromptPreviewLogger.write_record_file(
+        snapshot_path,
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
+        image_assets if image_assets is not None else {},
     )
-    temporary_path.replace(snapshot_path)
 
 
 def build_replay_command(snapshot_path: Path) -> str:
@@ -1030,98 +1033,102 @@ def save_failed_request_snapshot(
     trace_context: RequestTraceContext | None = None,
 ) -> Path | None:
     """保存或追加一次逻辑请求的失败尝试。"""
-    try:
-        active_trace_context = trace_context or RequestTraceContext()
-        generation_attempt = record_failed_generation_attempt(
-            api_provider=api_provider,
-            client_type=client_type,
-            error=error,
-            model_info=model_info,
-            operation=operation,
-            trace_context=active_trace_context,
-        )
-        error.generation_trace_context = active_trace_context
-        error.request_snapshot_attempt = generation_attempt.provider_attempt
-        snapshot_path = (
-            Path(active_trace_context.snapshot_path).resolve()
-            if active_trace_context.snapshot_path
-            else _build_snapshot_path(active_trace_context)
-        )
-        active_trace_context.snapshot_path = str(snapshot_path)
+    from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
 
-        if snapshot_path.is_file():
-            snapshot_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-            if "request_items" not in snapshot_payload:
-                snapshot_payload["schema_version"] = SNAPSHOT_VERSION
-                snapshot_payload["presentation"] = {"output_title": "输出 Items"}
-                snapshot_payload["request_items"] = _build_structured_items(internal_request)
-                snapshot_payload["output_items"] = []
-                snapshot_payload.pop("messages", None)
-                snapshot_payload.pop("output", None)
-        else:
-            request_kind = str(internal_request.get("request_kind") or "request")
-            created_at = datetime.fromtimestamp(active_trace_context.started_at).isoformat(timespec="seconds")
-            snapshot_payload = {
-                "schema_version": SNAPSHOT_VERSION,
-                "request": {
-                    "kind": request_kind,
-                    "operation": operation,
-                    "request_type": active_trace_context.request_type,
-                    "task_name": active_trace_context.task_name,
-                },
-                "metadata": {
+    try:
+        with PromptPreviewLogger.collect_image_assets() as image_assets:
+            active_trace_context = trace_context or RequestTraceContext()
+            generation_attempt = record_failed_generation_attempt(
+                api_provider=api_provider,
+                client_type=client_type,
+                error=error,
+                model_info=model_info,
+                operation=operation,
+                trace_context=active_trace_context,
+            )
+            error.generation_trace_context = active_trace_context
+            error.request_snapshot_attempt = generation_attempt.provider_attempt
+            snapshot_path = (
+                Path(active_trace_context.snapshot_path).resolve()
+                if active_trace_context.snapshot_path
+                else _build_snapshot_path(active_trace_context)
+            )
+            active_trace_context.snapshot_path = str(snapshot_path)
+
+            if snapshot_path.is_file():
+                snapshot_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                if "request_items" not in snapshot_payload:
+                    snapshot_payload["schema_version"] = SNAPSHOT_VERSION
+                    snapshot_payload["presentation"] = {"output_title": "输出 Items"}
+                    snapshot_payload["request_items"] = _build_structured_items(internal_request)
+                    snapshot_payload["output_items"] = []
+                    snapshot_payload.pop("messages", None)
+                    snapshot_payload.pop("output", None)
+            else:
+                request_kind = str(internal_request.get("request_kind") or "request")
+                created_at = datetime.fromtimestamp(active_trace_context.started_at).isoformat(timespec="seconds")
+                snapshot_payload = {
+                    "schema_version": SNAPSHOT_VERSION,
+                    "request": {
+                        "kind": request_kind,
+                        "operation": operation,
+                        "request_type": active_trace_context.request_type,
+                        "task_name": active_trace_context.task_name,
+                    },
+                    "metadata": {
+                        "client_type": client_type,
+                        "created_at": created_at,
+                        "model_name": model_info.name,
+                        "provider_name": api_provider.name,
+                        "request_id": active_trace_context.request_id,
+                        "session_id": active_trace_context.session_id,
+                        "status": "retrying",
+                        "updated_at": created_at,
+                    },
+                    "presentation": {"output_title": "输出 Items"},
+                    "request_items": _build_structured_items(internal_request),
+                    "output_items": [],
+                    "tool_definitions": internal_request.get("tool_options") or [],
+                    "request_parameters": _build_request_parameters(internal_request),
+                    "model_info": serialize_model_info_snapshot(model_info),
+                    "api_provider": serialize_api_provider_snapshot(api_provider),
+                    "generation_attempts": [],
+                    "replay": {
+                        "command": build_replay_command(snapshot_path),
+                        "file_uri": snapshot_path.as_uri(),
+                        "script_path": str(REPLAY_SCRIPT_PATH),
+                    },
+                }
+
+            attempt_number = generation_attempt.provider_attempt
+            attempt_payload = serialize_generation_attempt(generation_attempt)
+            attempts = snapshot_payload.setdefault("generation_attempts", [])
+            snapshot_payload.pop("attempts", None)
+            snapshot_payload.pop("provider_request", None)
+            existing_attempt = next(
+                (
+                    item
+                    for item in attempts
+                    if item.get("provider_attempt") == attempt_number
+                    and item.get("model") == model_info.model_identifier
+                ),
+                None,
+            )
+            if existing_attempt is None:
+                attempts.append(attempt_payload)
+            else:
+                existing_attempt.update(attempt_payload)
+            snapshot_payload["metadata"].update(
+                {
                     "client_type": client_type,
-                    "created_at": created_at,
                     "model_name": model_info.name,
                     "provider_name": api_provider.name,
-                    "request_id": active_trace_context.request_id,
-                    "session_id": active_trace_context.session_id,
                     "status": "retrying",
-                    "updated_at": created_at,
-                },
-                "presentation": {"output_title": "输出 Items"},
-                "request_items": _build_structured_items(internal_request),
-                "output_items": [],
-                "tool_definitions": internal_request.get("tool_options") or [],
-                "request_parameters": _build_request_parameters(internal_request),
-                "model_info": serialize_model_info_snapshot(model_info),
-                "api_provider": serialize_api_provider_snapshot(api_provider),
-                "generation_attempts": [],
-                "replay": {
-                    "command": build_replay_command(snapshot_path),
-                    "file_uri": snapshot_path.as_uri(),
-                    "script_path": str(REPLAY_SCRIPT_PATH),
-                },
-            }
-
-        attempt_number = generation_attempt.provider_attempt
-        attempt_payload = serialize_generation_attempt(generation_attempt)
-        attempts = snapshot_payload.setdefault("generation_attempts", [])
-        snapshot_payload.pop("attempts", None)
-        snapshot_payload.pop("provider_request", None)
-        existing_attempt = next(
-            (
-                item
-                for item in attempts
-                if item.get("provider_attempt") == attempt_number and item.get("model") == model_info.model_identifier
-            ),
-            None,
-        )
-        if existing_attempt is None:
-            attempts.append(attempt_payload)
-        else:
-            existing_attempt.update(attempt_payload)
-        snapshot_payload["metadata"].update(
-            {
-                "client_type": client_type,
-                "model_name": model_info.name,
-                "provider_name": api_provider.name,
-                "status": "retrying",
-            }
-        )
-        _write_snapshot(snapshot_path, snapshot_payload)
-        _trim_llm_request_snapshots()
-        return snapshot_path
+                }
+            )
+            _write_snapshot(snapshot_path, snapshot_payload, image_assets=image_assets)
+            _trim_llm_request_snapshots()
+            return snapshot_path
     except Exception:
         logger.exception("保存 LLM 失败请求快照时发生异常")
         return None

@@ -78,7 +78,9 @@ def describe_market_list(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @router.get("/marketplace")
-async def get_marketplace(compatible_only: bool = False, maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
+async def get_marketplace(
+    compatible_only: bool = False, maibot_session: Optional[str] = Cookie(None)
+) -> Dict[str, Any]:
     require_plugin_token(maibot_session)
     if await asyncio.to_thread(use_github_market_data):
         return {"source": "github"}

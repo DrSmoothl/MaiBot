@@ -254,9 +254,12 @@ describe('complexFieldHooks', () => {
         <AliasNamesHook fieldPath="bot.alias_names" onChange={onChange} schema={fieldSchema} value={[]} />,
       )
 
-      expect(screen.getByText('暂无别名。')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '添加别名' })).toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: '添加别名' }))
+      const editor = screen.getByRole('dialog', { name: '别名列表' })
+      expect(within(editor).getByText('暂无别名。')).toBeInTheDocument()
+      await user.click(within(editor).getByRole('button', { name: '添加别名' }))
       expect(onChange).toHaveBeenLastCalledWith([''])
 
       rerender(
@@ -2002,8 +2005,11 @@ describe('complexFieldHooks', () => {
       render(
         <AliasNamesHook fieldPath="bot.alias_names" onChange={onChange} schema={fieldSchema} value={null} />,
       )
-      expect(screen.getByText('暂无别名。')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '添加别名' })).toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: '添加别名' }))
+      const editor = screen.getByRole('dialog', { name: '别名列表' })
+      expect(within(editor).getByText('暂无别名。')).toBeInTheDocument()
+      await user.click(within(editor).getByRole('button', { name: '添加别名' }))
       expect(onChange).toHaveBeenLastCalledWith([''])
 
       cleanup()

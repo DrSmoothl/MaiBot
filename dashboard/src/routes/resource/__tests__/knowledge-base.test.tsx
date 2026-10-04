@@ -1425,7 +1425,6 @@ describe('KnowledgeBasePage import workflow', () => {
     renderPage()
 
     await waitForConsoleReady()
-    await openMemoryStatusDialog(user)
     await user.click(screen.getByRole('button', { name: '重建向量' }))
     await waitFor(() =>
       expect(memoryApi.rebuildMemoryRuntimeVectors).toHaveBeenCalledWith({ dry_run: true }),
@@ -1452,9 +1451,9 @@ describe('KnowledgeBasePage import workflow', () => {
     await waitForConsoleReady()
     await openImportTab()
     const createButton = screen.getByRole('button', { name: '创建导入任务' })
-    expect(createButton).toBeDisabled()
+    expect(createButton).toBeEnabled()
     expect(screen.queryByText('公共参数')).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('请选择资料类别')
+    expect(screen.queryByText('请选择资料类别')).not.toBeInTheDocument()
     await user.click(screen.getByRole('combobox', { name: '资料类别' }))
     await user.click(screen.getByRole('option', { name: '叙事资料' }))
     expect(createButton).toBeEnabled()
@@ -1578,7 +1577,7 @@ describe('KnowledgeBasePage import workflow', () => {
     expect(retryPayload).toMatchObject({
       overrides: {
         llm_enabled: true,
-        strategy_override: 'auto',
+        strategy_override: 'narrative',
       },
     })
   }, 20_000)
@@ -2471,7 +2470,6 @@ describe('KnowledgeBasePage import workflow', () => {
       const user = userEvent.setup()
       renderPage()
       await waitForConsoleReady()
-      await openMemoryStatusDialog(user)
       await user.click(screen.getByRole('button', { name: '重建向量' }))
       expect(await screen.findByText('重建全部向量')).toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: '取消' }))

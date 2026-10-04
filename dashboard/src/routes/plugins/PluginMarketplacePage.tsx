@@ -464,10 +464,15 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
           const bundledStats = Object.fromEntries(marketResult.data
             .filter((plugin) => plugin.marketplace_stats)
             .map((plugin) => [plugin.id, plugin.marketplace_stats!]))
-          const statsSummary = marketResult.data.some((plugin) => plugin.market_data_source === 'service')
-            ? bundledStats
-            : await getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
-          setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
+          // 统计是附加信息；请求失败时明确记录错误，保留已经加载的市场清单。
+          try {
+            const statsSummary = marketResult.data.some((plugin) => plugin.market_data_source === 'service')
+              ? bundledStats
+              : await getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
+            setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
+          } catch (error) {
+            console.warn('刷新插件统计失败:', error)
+          }
         } finally {
           if (!isUnmounted) {
             setLoading(false)
