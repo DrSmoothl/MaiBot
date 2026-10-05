@@ -94,6 +94,15 @@ const replyEffectsRoute = createRoute({
 const botConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/bot',
+  beforeLoad: ({ location }) => {
+    const params = new URLSearchParams(location.searchStr)
+    if (params.get('mode') !== 'webui') return
+    params.delete('mode')
+    const search = params.size ? `?${params.toString()}` : ''
+    // 兼容此前内嵌 WebUI 设置的链接，保留页签参数和 hash。
+    const hash = location.hash ? `#${location.hash.replace(/^#/, '')}` : ''
+    throw redirect({ href: `/settings${search}${hash}`, replace: true })
+  },
   component: lazyRouteComponent(() => import('./routes/config/bot'), 'BotConfigPage'),
 })
 
@@ -109,13 +118,6 @@ const promptManagementRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/prompts',
   component: lazyRouteComponent(() => import('./routes/config/prompts'), 'PromptManagementPage'),
-})
-
-// 配置路由 - 人设生成器（测试功能）
-const promptGeneratorRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: '/config/prompt-generator',
-  component: lazyRouteComponent(() => import('./routes/prompt-generator'), 'PromptGeneratorPage'),
 })
 
 // 资源管理路由 - 表情包管理
@@ -312,15 +314,7 @@ const dataTransferRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/settings',
-  beforeLoad: ({ location }) => {
-    const params = new URLSearchParams(location.searchStr)
-    params.set('mode', 'webui')
-    // 兼容旧书签中的页签参数和 hash。
-    if (!params.has('tab') && location.hash) {
-      params.set('tab', location.hash.replace(/^#/, ''))
-    }
-    throw redirect({ href: `/config/bot?${params.toString()}`, replace: true })
-  },
+  component: lazyRouteComponent(() => import('./routes/settings/index.tsx'), 'SettingsPage'),
 })
 
 // 配置模板市场路由
@@ -381,7 +375,6 @@ const routeTree = rootRoute.addChildren([
     botConfigRoute,
     modelConfigRoute,
     promptManagementRoute,
-    promptGeneratorRoute,
     emojiManagementRoute,
     expressionManagementRoute,
     jargonManagementRoute,

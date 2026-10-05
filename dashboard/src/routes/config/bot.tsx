@@ -1,4 +1,4 @@
-import { Fragment, lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import {
   Check,
@@ -11,7 +11,6 @@ import {
   PinOff,
   RefreshCw,
   Save,
-  Settings,
   ShieldCheck,
   SlidersHorizontal,
   UsersRound,
@@ -90,12 +89,8 @@ import { CommandPermissions } from './bot/CommandPermissions'
 import { GlobalLearningSettings } from './bot/GlobalLearningSettings'
 import { MemorySwitchGuard, MemorySwitchProvider } from './bot/MemorySwitchGuard'
 
-const WebUISettings = lazy(() =>
-  import('@/routes/settings').then((module) => ({ default: module.SettingsPage }))
-)
-
 type ConfigSectionData = Record<string, unknown>
-type BotSettingsMode = 'groups' | 'detail' | 'commands' | 'source' | 'webui'
+type BotSettingsMode = 'groups' | 'detail' | 'commands' | 'source'
 // ==================== 常量定义 ====================
 /** Toast 显示前的延迟时间 (毫秒) */
 const TOAST_DISPLAY_DELAY = 500
@@ -210,13 +205,13 @@ function BotConfigPageContent() {
   const searchFieldPath = useMemo(() => getConfigSearchField(routeSearch), [routeSearch])
   const lastRouteSearchRef = useRef<string | null>(null)
 
-  // 同页链接可定位共享组或 WebUI 设置；未保存的配置完成后再切换。
+  // 同页链接可定位共享组或命令管理；未保存的配置完成后再切换。
   useEffect(() => {
     if (lastRouteSearchRef.current === routeSearch) return
     const mode = new URLSearchParams(routeSearch).get('mode')
     if (hasUnsavedChanges) return
     lastRouteSearchRef.current = routeSearch
-    if (mode === 'groups' || mode === 'webui' || mode === 'commands') {
+    if (mode === 'groups' || mode === 'commands') {
       setEditMode(mode)
     } else {
       setEditMode('detail')
@@ -537,7 +532,6 @@ function BotConfigPageContent() {
     const nextSearch = params.size ? `?${params.toString()}` : ''
     lastRouteSearchRef.current = nextSearch
     await navigate({ href: `/config/bot${nextSearch}`, replace: true })
-    if (mode === 'webui') return
     if (mode === 'source') {
       await loadSourceCode()
     } else {
@@ -762,9 +756,9 @@ function BotConfigPageContent() {
               <Tabs
                 value={editMode}
                 onValueChange={(v) => handleModeChange(v as BotSettingsMode)}
-                className="w-full min-w-0 sm:w-96"
+                className="w-full min-w-0 sm:w-64"
               >
-                <TabsList data-config-bot-mode-tabs="true" className="grid h-9 w-full grid-cols-3">
+                <TabsList data-config-bot-mode-tabs="true" className="grid h-9 w-full grid-cols-2">
                   <TabsTrigger value="detail" className="px-2 text-sm">
                     <SlidersHorizontal className="mr-1 h-4 w-4" />
                     详细设置
@@ -773,79 +767,65 @@ function BotConfigPageContent() {
                     <ShieldCheck className="mr-1 h-4 w-4" />
                     命令管理
                   </TabsTrigger>
-                  <TabsTrigger value="webui" className="px-2 text-sm">
-                    <Settings className="mr-1 h-4 w-4" />
-                    WebUI 设置
-                  </TabsTrigger>
                 </TabsList>
               </Tabs>
-              {editMode !== 'webui' && (
-                <>
+              <Button
+                onClick={handleReloadFromFile}
+                disabled={saving || autoSaving || isRestarting}
+                size="sm"
+                variant="outline"
+                className="h-9 w-9 flex-none px-0"
+                aria-label="刷新"
+                title="刷新"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button
-                    onClick={handleReloadFromFile}
-                    disabled={saving || autoSaving || isRestarting}
+                    type="button"
                     size="sm"
                     variant="outline"
                     className="h-9 w-9 flex-none px-0"
-                    aria-label="刷新"
-                    title="刷新"
+                    aria-label="更多设置"
+                    title="更多设置"
                   >
-                    <RefreshCw className="h-4 w-4" />
+                    <MoreHorizontal className="h-4 w-4" />
                   </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-9 w-9 flex-none px-0"
-                        aria-label="更多设置"
-                        title="更多设置"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-44">
-                      <DropdownMenuItem
-                        disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting}
-                        onSelect={() => void (editMode === 'source' ? saveSourceCode() : saveConfig())}
-                      >
-                        <Save className="mr-2 h-4 w-4" />
-                        手动保存
-                        <span className="text-muted-foreground ml-auto text-xs">
-                          {saving
-                            ? '保存中'
-                            : autoSaving
-                              ? '自动保存中'
-                              : !hasUnsavedChanges
-                                ? '已保存'
-                                : ''}
-                        </span>
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={() => void handleModeChange('groups')}>
-                        <UsersRound className="mr-2 h-4 w-4" />
-                        共享组设置
-                        {editMode === 'groups' && <Check className="ml-auto h-4 w-4" />}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => void handleModeChange('source')}>
-                        <Code2 className="mr-2 h-4 w-4" />
-                        源文件编辑
-                        {editMode === 'source' && <Check className="ml-auto h-4 w-4" />}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </>
-              )}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuItem
+                    disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting}
+                    onSelect={() => void (editMode === 'source' ? saveSourceCode() : saveConfig())}
+                  >
+                    <Save className="mr-2 h-4 w-4" />
+                    手动保存
+                    <span className="text-muted-foreground ml-auto text-xs">
+                      {saving
+                        ? '保存中'
+                        : autoSaving
+                          ? '自动保存中'
+                          : !hasUnsavedChanges
+                            ? '已保存'
+                            : ''}
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => void handleModeChange('groups')}>
+                    <UsersRound className="mr-2 h-4 w-4" />
+                    共享组设置
+                    {editMode === 'groups' && <Check className="ml-auto h-4 w-4" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void handleModeChange('source')}>
+                    <Code2 className="mr-2 h-4 w-4" />
+                    源文件编辑
+                    {editMode === 'source' && <Check className="ml-auto h-4 w-4" />}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
-
-        {editMode === 'webui' && (
-          <Suspense fallback={<ThinkingIllustration size="lg" />}>
-            <WebUISettings />
-          </Suspense>
-        )}
 
         {/* 源代码模式 */}
         {editMode === 'source' && (
