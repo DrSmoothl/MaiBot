@@ -3,10 +3,11 @@
 from collections import deque
 from datetime import datetime
 from math import ceil
-from typing import Any, Literal, Optional, Sequence
+from typing import Any, Dict, Literal, Optional, Sequence
 import asyncio
 import json
 import time
+import uuid
 
 from src.chat.heart_flow.heartFC_utils import CycleDetail
 from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
@@ -35,6 +36,7 @@ from src.maisaka.builtin_tool.provider import MaisakaBuiltinToolProvider
 from src.maisaka.context.clear_context import select_messages_after_latest_clear_marker
 from src.maisaka.context.history import drop_leading_orphan_tool_results
 from src.maisaka.context.message_adapter import parse_speaker_content
+from src.maisaka.context.message_id_alias import build_alias_map, expand_message_id_aliases
 from src.maisaka.context.messages import (
     LLMContextMessage,
     ModelOutputContextMessage,
@@ -46,7 +48,6 @@ from src.maisaka.context.messages import (
 from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
 from src.maisaka.display.stage_status_board import remove_stage_status, update_stage_status
 from src.maisaka.focus import MaisakaFocusRuntimeMixin, focus_mode_manager
-from src.maisaka.mode_policy import is_reply_necessity_trigger_enabled
 from src.maisaka.monitor.events import (
     emit_message_ingested,
     emit_message_sent,
@@ -58,11 +59,10 @@ from src.maisaka.monitor.message_payload import (
     build_monitor_message_media,
     build_monitor_reply_preview,
 )
-from src.maisaka.idle_backoff import IdleBackoffController
 from src.maisaka.reply_effect import ReplyEffectTracker
 from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
 from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids, message_id_from_context_message
-from src.maisaka.turn_scheduler import MessageTurnScheduler
+from src.maisaka.turn_trigger import IdleBackoffController, MessageTurnScheduler
 from src.mcp_module.provider import MCPToolProvider
 from src.mcp_module.service import get_mcp_service
 from src.plugin_runtime.tool_provider import PluginToolProvider
@@ -158,7 +158,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             is_group_chat=self.chat_stream.is_group_session,
         )
         self._chat_history: list[LLMContextMessage] = []
-        self.history_loop: list[CycleDetail] = []
 
         # Keep all original messages for batching and later learning.
         self.message_cache: list[SessionMessage] = []
@@ -172,6 +171,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._current_cycle_detail: Optional[CycleDetail] = None
         self._running = False
         self._cycle_counter = 0
+        self._monitor_run_id = uuid.uuid4().hex
         self._internal_loop_task: Optional[asyncio.Task] = None
         self._message_turn_scheduled = False
         self._deferred_message_turn_task: Optional[asyncio.Task[None]] = None
@@ -369,6 +369,79 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         """返回启动时最多回灌的真实消息数量。"""
 
         return max(1, ceil(self._max_context_size * CONTEXT_RESTORE_FILL_RATIO))
+
+    async def restore_proactive_user_context(self) -> int:
+        """主动回合前确保上下文含有可回复的真实用户消息。
+
+        主动任务触发于长期静默的聊天流，运行时历史中可能没有任何带
+        msg_id 的用户消息，Planner 唯一的文本出口 reply 会因缺少引用
+        目标而无法发言。此处复用启动恢复的取数与转换链路，从消息库
+        回填最近的用户消息作为可引用目标。返回本次回填的消息条数。
+        """
+
+        if any(
+            isinstance(message, SessionBackedMessage) and message.source_kind == "user" and message.message_id
+            for message in self._chat_history
+        ):
+            return 0
+
+        try:
+            recent_messages = await asyncio.to_thread(
+                find_messages,
+                session_id=self.session_id,
+                limit=self._get_context_restore_limit(),
+                limit_mode="latest",
+                filter_bot=True,
+            )
+            # 会话流发生分裂迁移时，历史消息仍挂在旧 session_id 下，
+            # 此时按平台目标（群号或用户号）回退查询，保证仍能取到历史。
+            if not recent_messages:
+                if self.chat_stream.is_group_session:
+                    recent_messages = await asyncio.to_thread(
+                        find_messages,
+                        platform=self.chat_stream.platform,
+                        group_id=self.chat_stream.group_id,
+                        limit=self._get_context_restore_limit(),
+                        limit_mode="latest",
+                        filter_bot=True,
+                    )
+                else:
+                    recent_messages = await asyncio.to_thread(
+                        find_messages,
+                        platform=self.chat_stream.platform,
+                        user_id=self.chat_stream.user_id,
+                        limit=self._get_context_restore_limit(),
+                        limit_mode="latest",
+                        filter_bot=True,
+                    )
+        except Exception as exc:
+            logger.warning(f"{self.log_prefix} 主动回合回填用户消息失败: {exc}", exc_info=True)
+            return 0
+
+        recent_messages = select_messages_after_latest_clear_marker(recent_messages)
+        existing_message_ids = {
+            message.message_id
+            for message in self._chat_history
+            if isinstance(message, SessionBackedMessage) and message.message_id
+        }
+        restored_history: list[LLMContextMessage] = []
+        for message in recent_messages:
+            if message.is_notify or message.message_id in existing_message_ids:
+                continue
+            history_message = await self._reasoning_engine._build_history_message(message, source_kind="user")
+            if history_message is not None:
+                restored_history.append(history_message)
+
+        if not restored_history:
+            return 0
+
+        insert_index = next(
+            (index for index, message in enumerate(self._chat_history) if isinstance(message, SessionBackedMessage)),
+            len(self._chat_history),
+        )
+        self._chat_history[insert_index:insert_index] = restored_history
+        logger.info(f"{self.log_prefix} 主动回合已回填用户消息 {len(restored_history)} 条，作为可回复引用目标")
+        return len(restored_history)
 
     @staticmethod
     def _build_context_restore_reference_message(
@@ -1057,8 +1130,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         effective_frequency = min(1.0, self._get_effective_reply_frequency())
         if effective_frequency <= 0:
             return 0
-        if is_reply_necessity_trigger_enabled():
-            return max(1, int(ceil(1.0 / (effective_frequency * effective_frequency))))
         return max(1, int(ceil(1.0 / effective_frequency)))
 
     def _get_pending_message_count(self) -> int:
@@ -1134,6 +1205,13 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return original_message
 
         return None
+
+    def expand_message_id_aliases(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """把工具参数中模型可见的消息 ID 别名换回原始消息 ID；别名冲突时取最新的消息。"""
+        alias_map = build_alias_map(
+            getattr(history_message, "message_id", "") for history_message in reversed(self._chat_history)
+        )
+        return expand_message_id_aliases(arguments, alias_map)
 
     def _prune_processed_message_cache(self) -> None:
         """裁剪 runtime 已经消费过的旧消息。"""
@@ -1337,7 +1415,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
     def _should_run_expression_vector_history_backfill() -> bool:
         """判断是否需要启动表达向量历史补建任务。"""
 
-        return global_config.expression.expression_selection_mode in {"vector", "vector_intent"}
+        return global_config.expression.use_vector_expression
 
     def _ensure_expression_vector_history_backfill_running(self) -> None:
         """在向量表达模式下拉起全局历史表达向量补建任务。"""
@@ -1660,6 +1738,11 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             self.discovered_tool_names.add(normalized_name)
             newly_discovered_tool_names.append(normalized_name)
         return newly_discovered_tool_names
+
+    def record_planner_reply(self) -> None:
+        """记录 Planner 成功调用了一次 reply，一次调用拆成多条消息发送也只计一次。"""
+
+        self._message_turn_scheduler.record_reply()
 
     def _has_pending_messages(self) -> bool:
         return self._last_processed_index < len(self.message_cache)

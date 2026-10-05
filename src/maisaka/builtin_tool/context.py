@@ -1,4 +1,4 @@
-﻿"""Maisaka 内置工具执行上下文。"""
+"""Maisaka 内置工具执行上下文。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
-from src.chat.utils.utils import ProcessedResponseSegment, process_llm_response, process_llm_response_segments
+import asyncio
+
+from src.chat.utils.utils import (
+    ProcessedResponseSegment,
+    process_llm_response,
+    process_llm_response_segments,
+    process_llm_response_segments_async,
+)
 from src.common.data_models.message_component_data_model import (
     AtComponent,
     EmojiComponent,
@@ -19,6 +26,8 @@ from src.common.logger import get_logger
 from src.config.config import global_config
 from src.core.tooling import ToolExecutionResult
 from src.maisaka.context.message_adapter import format_speaker_content
+from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
+from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import SessionBackedMessage
 from src.maisaka.context.planner_messages import (
     build_planner_prefix,
@@ -210,12 +219,27 @@ class BuiltinToolRuntimeContext:
     ) -> List[PostProcessedReplyMessage]:
         """将 replyer 输出处理为带发送提示的组件序列。"""
 
-        return self.post_process_reply_message_items(
+        if skip_post_process:
+            return [
+                PostProcessedReplyMessage(
+                    sequence=MessageSequence([TextComponent(reply_text.strip())]),
+                    quote_previous=False,
+                )
+            ]
+
+        segments = await process_llm_response_segments_async(
             reply_text,
-            skip_post_process=skip_post_process,
             enable_splitter=enable_splitter,
             enable_chinese_typo=enable_chinese_typo,
         )
+        return [
+            PostProcessedReplyMessage(
+                sequence=MessageSequence([TextComponent(segment.text.strip())]),
+                quote_previous=segment.quote_previous,
+            )
+            for segment in segments
+            if segment.text.strip()
+        ]
 
     def post_process_reply_message_items(
         self,
@@ -292,7 +316,7 @@ class BuiltinToolRuntimeContext:
 
         target_message = self.runtime.find_source_message_by_id(target_message_id)
         if target_message is None:
-            raise ValueError(f"无法解析 at 目标消息：msg_id={target_message_id}")
+            raise ValueError(f"无法解析 at 目标消息：msg_id={to_display_message_id(target_message_id)}")
 
         user_info = target_message.message_info.user_info
         return AtComponent(
@@ -337,23 +361,31 @@ class BuiltinToolRuntimeContext:
             binary_data=image.binary_data,
         )
 
-    async def _resolve_emoji_attachment(self, raw_emotion: Any) -> EmojiComponent:
+    async def _resolve_emoji_attachment(self, raw_index: Any) -> EmojiComponent:
         """把 attach_emoji 参数解析为表情包组件。"""
 
         from src.common.utils.image_path import resolve_stored_image_path
         from src.emoji_system.emoji_manager import emoji_manager
 
-        requested_emotion = str(raw_emotion or "").strip()
-        selected_emoji = await emoji_manager.get_emoji_for_emotion(requested_emotion)
+        if type(raw_index) is not int or raw_index < 1:
+            raise ValueError("attach_emoji 必须填写 show_emoji_list 拼图中的正整数序号。")
+        emoji_hash = next(
+            (
+                message.emoji_hashes[raw_index]
+                for message in self.runtime._chat_history
+                if isinstance(message, EmojiCandidateMessage) and raw_index in message.emoji_hashes
+            ),
+            None,
+        )
+        if emoji_hash is None:
+            raise ValueError(f"表情包序号 {raw_index} 不在当前历史中，请先调用 show_emoji_list。")
+        selected_emoji = emoji_manager.get_emoji_by_hash(emoji_hash)
         if selected_emoji is None:
-            available_emojis = list(emoji_manager.emojis)
-            if not available_emojis:
-                raise ValueError("当前表情包库中没有可用表情。")
-            selected_emoji = min(available_emojis, key=lambda item: int(getattr(item, "query_count", 0) or 0))
+            raise ValueError(f"表情包序号 {raw_index} 对应的表情已不可用，请重新调用 show_emoji_list。")
 
         emoji_path = resolve_stored_image_path(selected_emoji.full_path)
-        emoji_bytes = emoji_path.read_bytes()
-        emoji_manager.update_emoji_usage(selected_emoji)
+        emoji_bytes = await asyncio.to_thread(emoji_path.read_bytes)
+        await asyncio.to_thread(emoji_manager.update_emoji_usage, selected_emoji)
         return EmojiComponent(
             binary_hash=selected_emoji.file_hash,
             content=selected_emoji.description.strip() or "[表情包]",
@@ -420,14 +452,19 @@ class BuiltinToolRuntimeContext:
             for raw_attachment in self._normalize_attachment_list(attachment_args.get("attach_pic"), "attach_pic")
         ]
         raw_emoji = attachment_args.get("attach_emoji")
-        emoji_components = [await self._resolve_emoji_attachment(raw_emoji)] if str(raw_emoji or "").strip() else []
+        emoji_components = [await self._resolve_emoji_attachment(raw_emoji)] if raw_emoji is not None else []
 
         if not at_components and not image_components and not emoji_components:
             return items
 
-        items[0].sequence.components = at_components + items[0].sequence.components
+        at_prefix_components = []
+        for at_component in at_components:
+            at_prefix_components.extend([at_component, TextComponent(" ")])
+
+        items[0].sequence.components = at_prefix_components + items[0].sequence.components
         items[-1].sequence.components.extend(image_components)
-        items[-1].sequence.components.extend(emoji_components)
+        if emoji_components:
+            items.append(PostProcessedReplyMessage(sequence=MessageSequence(emoji_components)))
         return items
 
     def get_runtime_manager(self) -> Any:

@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 import hashlib
 import json
+import os
 
 from rich.console import Group, RenderableType
 from rich.panel import Panel
@@ -95,8 +96,10 @@ def _select_webui_local_host(hosts: Any) -> str:
 
 
 def _resolve_prompt_preview_route_target(file_path: Path) -> PromptPreviewRouteTarget | None:
+    # 预览目录与预览文件路径都已是绝对路径，这里只做字符串规范化，
+    # 不做 realpath：Windows 上 realpath 需要访问文件系统，开销远高于路径计算。
     try:
-        relative_path = file_path.resolve().relative_to(PromptPreviewLogger._BASE_DIR.resolve())
+        relative_path = Path(os.path.abspath(file_path)).relative_to(PromptPreviewLogger._BASE_DIR)
     except ValueError:
         return None
 
@@ -145,6 +148,7 @@ class PromptPreviewAccess:
     record_uri: str
     preview_web_uri: str
     reasoning_web_uri: str | None
+    payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -278,7 +282,6 @@ class PromptCLIVisualizer:
     @staticmethod
     def _build_image_cache_path(image_format: str, image_bytes: bytes) -> Path:
         image_format = PromptCLIVisualizer._normalize_image_format(image_format) or "bin"
-        DATA_PROMPT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(image_bytes).hexdigest()
         return DATA_PROMPT_IMAGE_DIR / f"{digest}.{image_format}"
 
@@ -294,7 +297,7 @@ class PromptCLIVisualizer:
 
     @staticmethod
     def _build_image_file_link(image_format: str, image_base64: str) -> tuple[str, Path] | None:
-        """优先返回已有 data 图片路径；不存在时落盘到 prompt 图片缓存。"""
+        """优先返回已有 data 图片路径；不存在时登记后台落盘的 prompt 图片。"""
         normalized_format = PromptCLIVisualizer._normalize_image_format(image_format) or "bin"
         try:
             image_bytes = b64decode(image_base64)
@@ -306,11 +309,7 @@ class PromptCLIVisualizer:
             return build_file_uri(official_path), official_path
 
         path = PromptCLIVisualizer._build_image_cache_path(normalized_format, image_bytes)
-        if not path.exists():
-            try:
-                path.write_bytes(image_bytes)
-            except Exception:
-                return None
+        PromptPreviewLogger.add_image_asset(path, image_bytes)
         return build_file_uri(path), path
 
     @staticmethod
@@ -918,6 +917,7 @@ class PromptCLIVisualizer:
             record_link_text="点击打开 JSON 记录",
         )
         return PromptPreviewAccess(
+            payload=payload,
             body=body,
             record_path=record_path,
             record_uri=build_file_uri(record_path),
@@ -939,25 +939,27 @@ class PromptCLIVisualizer:
         output_items: Sequence[Any] = (),
         metadata: Mapping[str, Any] | None = None,
         generation_attempts: Sequence[GenerationAttemptInput] = (),
+        keep_base64: bool | None = None,
     ) -> PromptPreviewAccess:
         """保存 Prompt 预览文件，并返回 CLI 展示入口与浏览器可打开的 URI。"""
 
-        keep_json_base64 = cls._should_keep_prompt_preview_json_base64()
-        return cls._save_structured_preview_access(
-            chat_id=chat_id,
-            category=category,
-            payload=cls._build_structured_preview_payload(
-                request_items,
-                request_kind=request_kind,
-                selection_reason=selection_reason,
-                tool_definitions=tool_definitions,
-                output_title=output_title,
-                output_items=output_items,
-                metadata=metadata,
-                generation_attempts=generation_attempts,
-                keep_base64=keep_json_base64,
-            ),
-        )
+        with PromptPreviewLogger.collect_image_assets():
+            keep_json_base64 = cls._should_keep_prompt_preview_json_base64() if keep_base64 is None else keep_base64
+            return cls._save_structured_preview_access(
+                chat_id=chat_id,
+                category=category,
+                payload=cls._build_structured_preview_payload(
+                    request_items,
+                    request_kind=request_kind,
+                    selection_reason=selection_reason,
+                    tool_definitions=tool_definitions,
+                    output_title=output_title,
+                    output_items=output_items,
+                    metadata=metadata,
+                    generation_attempts=generation_attempts,
+                    keep_base64=keep_json_base64,
+                ),
+            )
 
     @classmethod
     def build_prompt_access_panel(
@@ -1075,24 +1077,25 @@ class PromptCLIVisualizer:
     ) -> PromptPreviewAccess:
         """保存文本型 Prompt 预览文件，并返回对应访问入口。"""
 
-        keep_json_base64 = cls._should_keep_prompt_preview_json_base64()
-        return cls._save_structured_preview_access(
-            chat_id=chat_id,
-            category=category,
-            payload=cls._build_structured_preview_payload(
-                [
-                    UserMessageItem(
-                        meta=ContextItemMeta.create(),
-                        parts=(ContextTextPart(content),),
-                    )
-                ],
-                request_kind=request_kind,
-                selection_reason=subtitle,
-                tool_definitions=None,
-                output_title=output_title,
-                output_items=output_items,
-                metadata=metadata,
-                generation_attempts=generation_attempts,
-                keep_base64=keep_json_base64,
-            ),
-        )
+        with PromptPreviewLogger.collect_image_assets():
+            keep_json_base64 = cls._should_keep_prompt_preview_json_base64()
+            return cls._save_structured_preview_access(
+                chat_id=chat_id,
+                category=category,
+                payload=cls._build_structured_preview_payload(
+                    [
+                        UserMessageItem(
+                            meta=ContextItemMeta.create(),
+                            parts=(ContextTextPart(content),),
+                        )
+                    ],
+                    request_kind=request_kind,
+                    selection_reason=subtitle,
+                    tool_definitions=None,
+                    output_title=output_title,
+                    output_items=output_items,
+                    metadata=metadata,
+                    generation_attempts=generation_attempts,
+                    keep_base64=keep_json_base64,
+                ),
+            )

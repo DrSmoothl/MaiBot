@@ -219,7 +219,8 @@ def drop_unanswered_tool_calls(
         for message in chat_history
         if _get_logical_turn_id(message) not in invalid_turn_ids
         and not (
-            isinstance(message, ModelOutputContextMessage) and message.output_item.meta.item_id in unanswered_item_ids
+            isinstance(message, ModelOutputContextMessage)
+            and message.output_item.meta.item_id in unanswered_item_ids
         )
     ]
     return filtered_history, len(unanswered_messages)
@@ -252,7 +253,11 @@ def drop_invalid_tool_turns(
     if not invalid_turn_ids:
         return chat_history, 0
 
-    filtered_history = [message for message in chat_history if _get_logical_turn_id(message) not in invalid_turn_ids]
+    filtered_history = [
+        message
+        for message in chat_history
+        if _get_logical_turn_id(message) not in invalid_turn_ids
+    ]
     return filtered_history, len(chat_history) - len(filtered_history)
 
 
@@ -355,14 +360,16 @@ def normalize_tool_result_order(
                 output_indexes.append(cursor)
             cursor += 1
 
-        output_messages = [
-            cast(ModelOutputContextMessage, chat_history[output_index]) for output_index in output_indexes
-        ]
+        output_messages = [cast(ModelOutputContextMessage, chat_history[output_index]) for output_index in output_indexes]
         for output_index, output_message in zip(output_indexes, output_messages, strict=True):
             consumed_indexes.add(output_index)
             normalized_history.append(output_message)
 
-        tool_calls = [tool_call for output_message in output_messages for tool_call in output_message.tool_calls]
+        tool_calls = [
+            tool_call
+            for output_message in output_messages
+            for tool_call in output_message.tool_calls
+        ]
         appended_tool_result_count = 0
         for tool_call in tool_calls:
             tool_call_id = str(tool_call.call_id or "").strip()

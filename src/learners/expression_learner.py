@@ -10,7 +10,7 @@ from sqlmodel import select
 from src.chat.replyer.expression_vector_index import ExpressionVectorIndexUpsertItem, expression_vector_index
 from src.chat.utils.utils import is_bot_self
 from src.common.data_models.expression_data_model import MaiExpression
-from src.common.data_models.llm_service_data_models import LLMGenerationOptions, LLMResponseResult
+from src.common.data_models.llm_service_data_models import LLMResponseResult
 from src.common.database.database import get_db_session
 from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
@@ -393,7 +393,6 @@ class ExpressionLearner:
             learning_messages = await self._build_multi_learning_messages(pending_messages, prompt)
             generation_result = await express_learn_model.generate_response_with_context(
                 lambda _client: learning_messages,
-                options=LLMGenerationOptions(temperature=0.3),
                 session_id=learning_session_id,
             )
             self._log_learning_context_preview(
@@ -725,7 +724,7 @@ class ExpressionLearner:
 
     @staticmethod
     def _should_sync_expression_vector_index() -> bool:
-        return global_config.expression.expression_selection_mode in {"vector", "vector_intent"}
+        return global_config.expression.use_vector_expression
 
     async def _sync_expression_vector_index_batch(self, expressions: Sequence[MaiExpression]) -> None:
         """表达学习批次写库成功后，同步维护表达向量索引并重聚类。"""
@@ -901,9 +900,7 @@ class ExpressionLearner:
             "只输出概括内容。"
         )
         try:
-            summary_result = await summary_model.generate_response(
-                prompt, options=LLMGenerationOptions(temperature=0.2), session_id=session_id
-            )
+            summary_result = await summary_model.generate_response(prompt, session_id=session_id)
             summary = summary_result.response
             if summary := summary.strip():
                 return summary

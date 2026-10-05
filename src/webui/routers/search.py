@@ -32,7 +32,6 @@ logger = get_logger("webui.ai_search")
 
 router = APIRouter(prefix="/search", tags=["Search"], dependencies=[Depends(require_auth)])
 
-AI_SEARCH_TIMEOUT_SECONDS = 45.0
 AI_SEARCH_CACHE_TTL_SECONDS = 300.0
 AI_SEARCH_CACHE_MAX_ENTRIES = 128
 
@@ -179,21 +178,7 @@ async def _execute_ai_search_request(
         return cached_response
 
     try:
-        generation_result, model_output = await asyncio.wait_for(
-            run_ai_search_agent(request, record_progress),
-            timeout=AI_SEARCH_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError as exc:
-        _log_ai_search_record(
-            request=request,
-            search_id=search_id,
-            started_at=started_at,
-            status="timeout",
-            progress=progress,
-            error=str(exc),
-        )
-        logger.warning("WebUI AI 搜索超时", search_id=search_id)
-        raise HTTPException(status_code=504, detail="AI 搜索超时，请稍后重试") from exc
+        generation_result, model_output = await run_ai_search_agent(request, record_progress)
     except asyncio.CancelledError:
         _log_ai_search_record(
             request=request,
@@ -322,7 +307,7 @@ async def _stream_ai_search_events(request: AISearchRequest) -> AsyncIterator[st
 
 
 @router.post("/ai/stream")
-async def stream_search_with_ai(request: AISearchRequest) -> StreamingResponse:
+def stream_search_with_ai(request: AISearchRequest) -> StreamingResponse:
     """流式返回 AI 搜索的操作过程与最终结果。"""
 
     return StreamingResponse(

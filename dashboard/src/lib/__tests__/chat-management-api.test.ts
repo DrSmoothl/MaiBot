@@ -6,6 +6,7 @@ import {
   deleteChatStream,
   deleteChatStreamPrompt,
   deleteChatStreamTalkFrequency,
+  getAllChatStreams,
   getChatStreamDetail,
   getChatStreams,
   resolveChatTarget,
@@ -71,6 +72,24 @@ describe('getChatStreams', () => {
     getMock.mockResolvedValue({ success: true })
 
     await expect(getChatStreams()).resolves.toEqual([])
+  })
+})
+
+describe('getAllChatStreams', () => {
+  it('分批读取超过单页上限的全部聊天流', async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) => ({ session_id: `s${index}` }))
+    const lastPage = [{ session_id: 's1000' }]
+    getMock
+      .mockResolvedValueOnce({ success: true, sessions: firstPage })
+      .mockResolvedValueOnce({ success: true, sessions: lastPage })
+
+    await expect(getAllChatStreams()).resolves.toEqual([...firstPage, ...lastPage])
+    expect(getMock).toHaveBeenNthCalledWith(1, '/api/chat/sessions', {
+      query: { limit: 1000, offset: 0 },
+    })
+    expect(getMock).toHaveBeenNthCalledWith(2, '/api/chat/sessions', {
+      query: { limit: 1000, offset: 1000 },
+    })
   })
 })
 
@@ -252,14 +271,14 @@ describe('deleteChatStreamPrompt', () => {
 })
 
 describe('updateChatStreamAdapterPolicy', () => {
-  it('以 PUT 提交适配器放行规则并返回最新详情', async () => {
+  it('以 PUT 提交适配器规则并返回最新详情', async () => {
     const payload = { adapter_id: 'ad-1', action: 'allow' as const }
     putMock.mockResolvedValue({ success: true, detail: detailStub })
 
     await expect(updateChatStreamAdapterPolicy('s1', payload)).resolves.toBe(detailStub)
     expect(putMock).toHaveBeenCalledWith('/api/chat/sessions/s1/adapters/policy', {
       body: payload,
-      errorMessage: '保存适配器放行规则失败',
+      errorMessage: '保存适配器规则失败',
     })
   })
 

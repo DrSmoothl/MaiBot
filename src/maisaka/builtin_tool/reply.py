@@ -1,6 +1,8 @@
 ﻿"""reply 内置工具。"""
 
 from typing import Any, Optional
+
+import json
 import traceback
 
 from src.chat.replyer.replyer_manager import replyer_manager
@@ -10,6 +12,7 @@ from src.common.logger import get_logger
 from src.config import config as config_module
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.maisaka.context.message_adapter import build_visible_text_from_sequence, parse_speaker_content
+from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import LLMContextMessage, SessionBackedMessage
 from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
 from src.services import send_service
@@ -26,8 +29,35 @@ _DUPLICATE_TARGET_REPLY_REMINDER_TEMPLATE = (
 )
 
 
+def _normalize_reply_arguments(raw_arguments: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """兼容模型把 reply 参数重复包裹在 arguments 字段中的情况。"""
+
+    if set(raw_arguments) != {"arguments"}:
+        return raw_arguments, ""
+
+    wrapped_arguments = raw_arguments["arguments"]
+    if not isinstance(wrapped_arguments, str):
+        return raw_arguments, (
+            "reply 工具参数结构错误：顶层 `arguments` 应为包含 reply 参数的 JSON 字符串，"
+            f"实际类型为 {type(wrapped_arguments).__name__}。"
+        )
+
+    try:
+        parsed_arguments = json.loads(wrapped_arguments)
+    except json.JSONDecodeError as exc:
+        return raw_arguments, f"reply 工具参数结构错误：顶层 `arguments` 不是有效的 JSON 对象：{exc.msg}。"
+
+    if not isinstance(parsed_arguments, dict):
+        return raw_arguments, (
+            "reply 工具参数结构错误：顶层 `arguments` 必须解析为 JSON 对象，"
+            f"实际解析结果为 {type(parsed_arguments).__name__}。"
+        )
+
+    return parsed_arguments, ""
+
+
 def _use_expression_intent() -> bool:
-    return config_module.global_config.expression.expression_selection_mode == "vector_intent"
+    return config_module.global_config.expression.use_vector_expression
 
 
 def _require_hook_bool(raw_value: Any, option_name: str) -> bool:
@@ -171,9 +201,9 @@ def get_tool_spec() -> ToolSpec:
             "default": [],
         }
         properties["attach_emoji"] = {
-            "type": "string",
-            "description": "可选。随本次回复附加一个表情包，填写情绪或表情描述。",
-            "default": "",
+            "type": "integer",
+            "minimum": 1,
+            "description": "可选。从 show_emoji_list 的拼图选择一个表情包，填写图片序号，在文字后单独发送。",
         }
         properties["attach_at"] = {
             "type": "array",
@@ -299,7 +329,16 @@ async def handle_tool(
 ) -> ToolExecutionResult:
     """执行 reply 内置工具。"""
 
-    invocation_arguments = dict(invocation.arguments or {})
+    raw_invocation_arguments = dict(invocation.arguments or {})
+    invocation_arguments, argument_structure_error = _normalize_reply_arguments(raw_invocation_arguments)
+    if argument_structure_error:
+        return tool_ctx.build_failure_result(invocation.tool_name, argument_structure_error)
+    if invocation_arguments != raw_invocation_arguments:
+        logger.warning(
+            f"{tool_ctx.runtime.log_prefix} 检测到 reply 工具参数被重复包裹，已自动解包: "
+            f"调用编号={invocation.call_id}"
+        )
+    # 工具上下文的 reasoning 是兼容字段，由 Planner 可见正文填充，不包含 Provider 原生 reasoning。
     latest_thought = context.reasoning if context is not None else invocation.reasoning
     target_message_id = str(invocation_arguments.get("msg_id") or "").strip()
     set_quote = bool(invocation_arguments.get("set_quote", True))
@@ -327,7 +366,7 @@ async def handle_tool(
     if target_message is None:
         return tool_ctx.build_failure_result(
             invocation.tool_name,
-            f"未找到要回复的目标消息，msg_id={target_message_id}",
+            f"未找到要回复的目标消息，msg_id={to_display_message_id(target_message_id)}",
         )
 
     try:
@@ -358,7 +397,7 @@ async def handle_tool(
     try:
         tool_ctx.runtime._update_stage_status("Replyer", "生成可见回复")
         success, reply_result = await replyer.generate_reply_with_context(
-            reply_reason=latest_thought,
+            reply_reason="" if str(reply_tool_args.get("reply_reference") or "").strip() else latest_thought,
             stream_id=tool_ctx.runtime.session_id,
             reply_message=target_message,
             chat_history=replyer_chat_history,
@@ -539,6 +578,7 @@ async def handle_tool(
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
     reply_metadata["sent_message_ids"] = sent_message_ids
     reply_metadata["send_results"] = send_results
+    tool_ctx.runtime.record_planner_reply()
     track_reply_effect = getattr(tool_ctx.runtime, "track_reply_effect", None)
     if track_reply_effect is not None:
         await track_reply_effect(

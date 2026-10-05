@@ -1,4 +1,25 @@
 {
+  "pluginWebUI": {
+    "extensions": "プラグイン拡張",
+    "manage": "プラグインページの管理",
+    "more": "その他のプラグインワークスペース",
+    "refresh": "更新",
+    "loading": "読み込み中…",
+    "empty": "データがありません",
+    "previous": "前へ",
+    "next": "次へ",
+    "completed": "操作が完了しました",
+    "confirmTitle": "プラグイン操作の確認",
+    "cancel": "キャンセル",
+    "confirm": "確認",
+    "unavailable": "このページは停止中または非表示です。",
+    "invalidData": "プラグインのデータがコンポーネント定義と一致しません。",
+    "providedBy": "{{plugin}} が提供",
+    "show": "{{plugin}} のページを表示",
+    "moveUp": "上へ",
+    "moveDown": "下へ",
+    "preferencesHint": "表示と順序の設定は現在のブラウザーに保存され、バックエンドの権限は変更しません。"
+  },
   "header": {
     "collapseSidebar": "サイドバーを折りたたむ",
     "expandSidebar": "サイドバーを展開する",
@@ -9,7 +30,7 @@
     "toggleConnection": "バックエンド接続を切り替える",
     "viewAnnualSummary": "年間サマリーを表示",
     "annualSummary": "2025 年間サマリー",
-    "searchPlaceholder": "検索...",
+    "searchPlaceholder": "知りたいことを何でも麦麦に聞いてみよう",
     "viewDocs": "MaiBot ドキュメントを表示",
     "docs": "MaiBot ドキュメント",
     "switchToLight": "ライトモードに切り替える",
@@ -31,12 +52,10 @@
     },
     "menu": {
       "home": "ホーム",
-      "focusCompanion": "集中コンパニオン",
       "botMainConfig": "ボットメイン設定",
       "aiModelProvider": "AIモデルプロバイダー",
       "modelManagement": "モデル管理",
       "promptManagement": "Prompt管理",
-      "promptGenerator": "人格生成器（テスト機能）",
       "emojiManagement": "絵文字管理",
       "expressionManagement": "表現管理",
       "slangManagement": "スラング管理",
@@ -46,8 +65,8 @@
       "knowledgeBase": "長期記憶",
       "pluginMarket": "プラグインマーケット",
       "configTemplate": "設定テンプレート",
-      "pluginConfig": "プラグイン管理",
-      "adapterManagement": "アダプター管理",
+      "pluginConfig": "プラグイン拡張",
+      "adapterManagement": "アダプター設定",
       "mcpSettings": "MCP 設定",
       "dataTransfer": "データ管理",
       "statistics": "詳細統計データ",
@@ -55,7 +74,6 @@
       "logViewer": "ログビューア",
       "reasoningProcess": "推論プロセス",
       "maisakaMonitor": "MaiSaka チャット監視",
-      "chatManagement": "チャット管理",
       "localChat": "ローカルチャット",
       "settings": "WebUI 設定"
     }
@@ -75,7 +93,13 @@
     },
     "tabs": { "trends": "データグラフ", "metrics": "指標トレンド" },
     "sections": { "breakdowns": "分類統計", "distributions": "データ分布" },
-    "breakdowns": { "models": "モデル別", "modules": "モジュール別", "requestTypes": "リクエスト種別", "chats": "チャットメッセージ" },
+    "breakdowns": {
+      "taskGroups": "タスクグループ別",
+      "models": "モデル別",
+      "modules": "モジュール別",
+      "requestTypes": "リクエスト種別",
+      "chats": "チャットメッセージ"
+    },
     "summary": {
       "onlineTime": "総稼働時間", "messages": "総メッセージ数", "replies": "総返信数", "requests": "総リクエスト数",
       "tokens": "総Token数", "inputTokens": "入力Token", "outputTokens": "出力Token", "cacheHitRate": "Promptキャッシュヒット率",
@@ -102,9 +126,9 @@
   },
   "workspace": {
     "switcherLabel": "麦麦ワークスペースを切り替え",
-    "settings": "麦麦設定",
+    "settings": "麦麦",
     "chat": "麦麦チャット",
-    "logs": "麦麦ログ"
+    "logs": "ログ"
   },
   "chat": {
     "botNameFallback": "麦麦",
@@ -165,18 +189,26 @@
       "conversations": "チャット会話",
       "emptyPreview": "まだメッセージはありません",
       "identityHint": "ローカルチャット身份",
+      "myChats": "麦麦とのチャット",
+      "noSearchResults": "一致するチャットがありません",
       "newVirtual": "仮想身份チャットを作成",
+      "observedAvatarAlt": "{{name}}のアバター",
+      "observedBadge": "観察",
+      "observedChats": "麦麦のチャットストリーム",
+      "openSettings": "{{name}}のチャット設定を開く",
       "online": "オンライン",
+      "searchPlaceholder": "チャットを検索…",
       "offline": "オフライン",
       "subtitle": "{{count}} 件の会話",
       "title": "チャット",
       "virtualBadge": "仮想",
-      "profileTitle": "自分の身份",
       "editAvatar": "アバターを変更",
       "editName": "ニックネームを編集",
       "saveName": "保存",
       "savingAvatar": "アバターを保存中",
-      "userAvatarAlt": "{{name}}のアバター"
+      "userAvatarAlt": "{{name}}のアバター",
+      "loadObservedChatsFailed": "チャットストリームを読み込めませんでした。更新して再試行してください。",
+      "waitingObservedChats": "チャットストリームを待機中…"
     },
     "dialog": {
       "create": "会話を作成",
@@ -364,9 +396,7 @@
       "retroTextureNone": "なし",
       "retroTextureIntensity": "テクスチャ強度",
       "retroPanelDepth": "パネルの奥行き",
-      "retroPanelDepthDesc": "くぼみと影の見え方を調整します。",
-      "retroStrokeScale": "線の太さ",
-      "retroStrokeScaleDesc": "カードとコントロールの輪郭線を調整します。"
+      "retroPanelDepthDesc": "くぼみと影の見え方を調整します。"
     },
     "security": {
       "currentToken": "現在のアクセストークン",
@@ -577,19 +607,19 @@
     "title": "ログイン",
     "description": "続行するにはアクセストークンを入力してください",
     "tokenLabel": "アクセストークン",
-    "tokenPlaceholder": "アクセストークンを入力",
+    "tokenPlaceholder": "アクセスパスワードを入力",
     "loginButton": "ログイン",
     "loggingIn": "ログイン中...",
     "loginFailed": "ログイン失敗",
     "loginSuccess": "ログイン成功",
     "checkingAuth": "ログイン状態を確認中...",
     "welcome": "MaiBot へようこそ",
-    "accessDesc": "システムにアクセスするためにアクセストークンを入力してください",
+    "accessDesc": "MaiBot に入るにはアクセスパスワードを入力してください",
     "tokenRequired": "アクセストークンを入力してください",
     "verifyingLabel": "検証中...",
     "verifyEnter": "検証して入る",
     "helpLink": "Token がありません。どこで取得できますか？",
-    "helpTitle": "Access Token の取得方法",
+    "helpTitle": "アクセスパスワード",
     "helpDesc": "Access Token は MaiBot WebUI にアクセスする唯一の証明情報です。次の方法で取得してください",
     "method1Title": "方法１：起動ログを確認",
     "method1Desc": "MaiBot 起動時にコンソールに WebUI Access Token が表示されます。",
@@ -962,12 +992,10 @@
     "items": {
       "home": "ホーム",
       "homeDesc": "ダッシュボード概要を表示",
-      "focusCompanionDesc": "MaiBot の没入型集中コンパニオンを開く",
       "botConfig": "ボットメイン設定",
-      "botConfigDesc": "ボットのコア設定を構成",
+      "botConfigDesc": "ボットの詳細設定と共有グループを設定",
       "model": "モデル設定",
       "modelDesc": "モデルパラメーターを設定",
-      "promptGeneratorDesc": "文章から注入可能な人格設定ブロックを生成",
       "emoji": "絵文字管理",
       "emojiDesc": "ボットの絵文字を管理",
       "expression": "表現管理",
@@ -996,12 +1024,45 @@
     "navigatedTo": "{{page}} に移動しました"
   },
   "memory": {
+    "records": {
+      "status": {
+        "active": "有効",
+        "inactive": "無効",
+        "deleted": "削除済み",
+        "conflicted": "競合あり",
+        "superseded": "置換済み",
+        "retracted": "撤回済み"
+      },
+      "evidenceType": {
+        "paragraph": "メモリ段落",
+        "relation": "関係",
+        "entity": "エンティティ",
+        "fact": "事実",
+        "episode": "エピソード",
+        "profile": "人物プロファイル",
+        "manual": "手動",
+        "unknown": "不明"
+      },
+      "evidenceStance": {
+        "support": "裏付け",
+        "refute": "反証"
+      },
+      "graphJobStatus": {
+        "pending": "処理待ち",
+        "running": "処理中",
+        "failed": "失敗",
+        "completed": "完了",
+        "cancelled": "キャンセル済み"
+      }
+    },
     "tuning": {
       "task": {
         "title": "調整タスク",
         "description": "検索パラメータ評価"
       },
       "form": {
+        "parameters": "調整パラメータ",
+        "parametersDescription": "これらの設定は次の調整タスクにのみ適用されます。通常は既定値のままで問題ありません。",
         "strategy": "調整方針",
         "objective": "最適化目標",
         "intensity": "評価の深さ",
@@ -1266,6 +1327,11 @@
       "restarting": "再起動中...",
       "expressionReview": "表現レビュー",
       "viewLogs": "ログを見る",
+      "chat": "麦麦とチャット",
+      "docs": "ドキュメントへ",
+      "replyerLogs": "返信ログ",
+      "plannerLogs": "計画ログ",
+      "reasoningLogs": "推論ログ",
       "pluginManage": "プラグイン管理",
       "systemSettings": "WebUI 設定",
       "pluginConfig": "プラグイン設定",
@@ -1285,6 +1351,12 @@
         "restart": "MaiBot 本体プロセスを再起動",
         "expressionReview": "表現学習レビューのダイアログを開く",
         "viewLogs": "WebUI ログを表示",
+        "chat": "麦麦チャットを開く",
+        "docs": "麦麦のドキュメントを開く",
+        "replyerLogs": "返信段階の推論記録を表示",
+        "plannerLogs": "計画段階の推論記録を表示",
+        "reasoningLogs": "推論ログを開く",
+        "configSection": "本体設定 / {{section}}を開く",
         "pluginManage": "プラグインマーケットと管理ページを開く",
         "systemSettings": "WebUI 設定を開く",
         "pluginConfig": "インストール済みプラグインの設定ページを開く",
@@ -1363,6 +1435,16 @@
       "hitTokens": "ヒットToken",
       "missTokens": "未ヒットToken",
       "eligibleTokens": "集計対象 {{value}} Token"
+    },
+    "news": {
+      "title": "ニュース",
+      "description": "サーバーからの最新ニュース",
+      "refresh": "ニュースを更新",
+      "retry": "再読み込み",
+      "open": "ニュースの詳細を開く",
+      "openLink": "原文リンクを開く",
+      "pinned": "ピン留め",
+      "empty": "ニュースはまだありません"
     },
     "storage": {
       "title": "ストレージ使用量",

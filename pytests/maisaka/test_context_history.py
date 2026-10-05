@@ -1,7 +1,9 @@
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
+from src.common.data_models.llm_service_data_models import LLMResponseResult
 from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.llm_models.payload_content.context_item import (
     AssistantMessageItem,
@@ -26,6 +28,8 @@ from src.maisaka.context.post_processor import (
     _trim_history_to_context_target,
 )
 from src.maisaka.chat_loop_service import MaisakaChatLoopService
+from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
+from src.plugin_runtime.hook_payloads import serialize_prompt_items
 
 
 def _meta(item_id: str, logical_turn_id: str = "turn-1") -> ContextItemMeta:
@@ -76,7 +80,9 @@ def test_normalize_tool_result_order_keeps_parallel_calls_together() -> None:
     first_result = _result("call-1")
     second_result = _result("call-2")
 
-    normalized, moved_count = normalize_tool_result_order([first_call, second_call, second_result, first_result])
+    normalized, moved_count = normalize_tool_result_order(
+        [first_call, second_call, second_result, first_result]
+    )
 
     assert normalized == [first_call, second_call, first_result, second_result]
     assert moved_count == 2
@@ -100,7 +106,9 @@ def test_drop_unanswered_parallel_call_removes_entire_tool_turn() -> None:
     )
     result = _result("call-1")
 
-    filtered, removed_count = drop_unanswered_tool_calls([reasoning, answered_call, unanswered_call, assistant, result])
+    filtered, removed_count = drop_unanswered_tool_calls(
+        [reasoning, answered_call, unanswered_call, assistant, result]
+    )
 
     assert removed_count == 1
     assert filtered == []
@@ -170,7 +178,7 @@ def test_context_selection_restores_user_anchor_before_tool_turn() -> None:
         max_context_size=1,
         enable_visual_message=False,
     )
-    request_items = MaisakaChatLoopService(chat_system_prompt="system")._build_request_messages(
+    request_items, _ = MaisakaChatLoopService(chat_system_prompt="system")._build_request_messages(
         selected,
         enable_visual_message=False,
     )
@@ -200,7 +208,7 @@ def test_context_selection_restores_one_user_anchor_for_parallel_calls() -> None
         max_context_size=1,
         enable_visual_message=False,
     )
-    request_items = MaisakaChatLoopService(chat_system_prompt="system")._build_request_messages(
+    request_items, _ = MaisakaChatLoopService(chat_system_prompt="system")._build_request_messages(
         selected,
         enable_visual_message=False,
     )
@@ -237,7 +245,7 @@ def test_context_selection_keeps_tool_turn_anchors_across_window_boundaries(
         max_context_size=max_context_size,
         enable_visual_message=False,
     )
-    request_items = MaisakaChatLoopService(chat_system_prompt="system")._build_request_messages(
+    request_items, _ = MaisakaChatLoopService(chat_system_prompt="system")._build_request_messages(
         selected,
         enable_visual_message=False,
     )
@@ -248,19 +256,6 @@ def test_context_selection_keeps_tool_turn_anchors_across_window_boundaries(
     )
 
 
-def test_history_trimming_removes_user_anchor_and_tool_turn_atomically() -> None:
-    trigger = _user("触发工具调用")
-    call = _call("call-item", "call-1")
-    result = _result("call-1")
-    trailing = _user("最新消息")
-    history = [trigger, call, result, trailing]
-
-    removed = _trim_history_to_context_target(history, target_context_count=2)
-
-    assert removed == [trigger, call, result]
-    assert history == [trailing]
-
-
 def test_request_rejects_function_call_history_without_user_anchor() -> None:
     service = MaisakaChatLoopService(chat_system_prompt="system")
 
@@ -269,6 +264,71 @@ def test_request_rejects_function_call_history_without_user_anchor() -> None:
             [_call("call-item", "call-1"), _result("call-1")],
             enable_visual_message=False,
         )
+
+
+@pytest.mark.asyncio
+async def test_before_request_hook_items_without_user_anchor_are_ignored(monkeypatch) -> None:
+    captured_requests: list[list] = []
+
+    class FakeLLMClient:
+        async def generate_response_with_context(self, context_factory, options) -> LLMResponseResult:
+            del options
+            captured_requests.append(list(context_factory(None)))
+            return LLMResponseResult.from_portable_output(response="好的", model_name="test-model")
+
+    class UnanchoredToolTurnRuntimeManager:
+        async def invoke_hook(self, hook_name: str, **kwargs: object) -> SimpleNamespace:
+            if hook_name == "maisaka.planner.before_request":
+                items = list(kwargs["items"])
+                tool_turn_items = serialize_prompt_items(
+                    [
+                        _call("call-item", "call-1").output_item,
+                        FunctionCallOutputItem(
+                            meta=_meta("output-item"),
+                            call_id="call-1",
+                            output="result:call-1",
+                            tool_name="lookup",
+                        ),
+                    ]
+                )
+                kwargs["items"] = [items[0], *tool_turn_items]
+            return SimpleNamespace(kwargs=kwargs)
+
+    service = MaisakaChatLoopService(chat_system_prompt="system")
+    monkeypatch.setattr(service, "_get_llm_chat_client", lambda request_kind: FakeLLMClient())
+    monkeypatch.setattr(
+        MaisakaChatLoopService,
+        "_get_runtime_manager",
+        staticmethod(lambda: UnanchoredToolTurnRuntimeManager()),
+    )
+    monkeypatch.setattr(
+        PromptCLIVisualizer,
+        "build_prompt_section_result",
+        staticmethod(
+            lambda *args, **kwargs: SimpleNamespace(
+                panel=None,
+                preview_access=SimpleNamespace(preview_web_uri=""),
+            )
+        ),
+    )
+
+    await service.chat_loop_step([_user("最新消息")], tool_definitions=[])
+
+    assert len(captured_requests) == 1
+    assert not any(isinstance(item, FunctionCallItem) for item in captured_requests[0])
+
+
+def test_history_trimming_keeps_user_and_following_tool_turn_together() -> None:
+    trigger = _user("触发工具调用")
+    call = _call("call-item", "call-1")
+    result = _result("call-1")
+    latest = _user("最新消息")
+    history = [trigger, call, result, latest]
+
+    removed = _trim_history_to_context_target(history, target_context_count=2)
+
+    assert removed == [trigger, call, result]
+    assert history == [latest]
 
 
 def test_history_protocol_removes_both_turns_when_call_and_output_turns_mismatch() -> None:

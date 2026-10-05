@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from rich.traceback import install
 
@@ -54,6 +54,7 @@ class MainSystem:
         self.server: Server | None = None
         self.webui_server: ThreadedWebUIServer | None = None  # 独立线程中的 WebUI 服务器
         self._message_handlers_registered = False
+        self.watchdog_task: Optional[asyncio.Task[None]] = None
 
     def _ensure_message_server(self) -> None:
         """按需初始化消息 API，避免阻塞主启动链路的早期阶段。"""
@@ -200,6 +201,11 @@ class MainSystem:
         await async_task_manager.add_task(TelemetryHeartBeatTask())
         await async_task_manager.add_task(TelemetryStatsUploadTask())
 
+        # 主循环卡顿看门狗；WebUI 循环另有一份，挂在 WebUI 服务器启动处。
+        from src.common.event_loop_watchdog import start_watchdog
+
+        self.watchdog_task = start_watchdog("main")
+
         try:
             init_time = int(1000 * (time.time() - init_start_time))
             logger.info(t("startup.initialization_completed_cycles", init_time=init_time))
@@ -213,11 +219,15 @@ class MainSystem:
             from src.chat.image_system.image_cache_cleanup import periodic_image_cache_cleanup
             from src.emoji_system.emoji_cache_cleanup import periodic_emoji_cache_cleanup
             from src.emoji_system.emoji_manager import emoji_manager
+            from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
             from src.services.image_path_maintenance_service import (
                 run_image_path_maintenance_background,
                 should_schedule_image_path_maintenance_background,
             )
+            from src.webui.routers.data_transfer import periodic_transfer_temp_cleanup
 
+            # 在独立线程中巡检推理图片，空闲时也能清理旧版本遗留的孤立缓存。
+            PromptPreviewLogger.start()
             self._register_message_handlers()
             if self.app is None or self.server is None:
                 raise RuntimeError("消息服务未初始化")
@@ -226,6 +236,7 @@ class MainSystem:
                 emoji_manager.periodic_emoji_maintenance(),
                 periodic_emoji_cache_cleanup(),
                 periodic_image_cache_cleanup(),
+                periodic_transfer_temp_cleanup(),
                 self.app.run(),
                 self.server.run(),
             ]
@@ -257,13 +268,18 @@ async def main() -> None:
     finally:
         if system.webui_server:
             await system.webui_server.shutdown()
+        if system.watchdog_task is not None:
+            system.watchdog_task.cancel()
+            system.watchdog_task = None
         from src.A_memorix.host_service import a_memorix_host_service
+        from src.chat.image_system.image_manager import image_manager
         from src.emoji_system.emoji_manager import emoji_manager
         from src.mcp_module.service import get_mcp_service
         from src.plugin_runtime.integration import get_plugin_runtime_manager
         from src.services.memory_flow_service import memory_automation_service
 
         emoji_manager.shutdown()
+        await image_manager.shutdown()
         await memory_automation_service.shutdown()
         await a_memorix_host_service.stop()
         await get_plugin_runtime_manager().bridge_event("on_stop")

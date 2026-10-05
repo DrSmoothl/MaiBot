@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
 
 import {
   AlertCircle,
@@ -6,8 +6,8 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
-  EyeOff,
   GripVertical,
+  Pencil,
   Plus,
   RotateCcw,
   Trash2,
@@ -50,6 +50,7 @@ import { getChatStreams, resolveChatTargets, type ChatStream, type ChatTargetRes
 import { formatChatDisplayName } from '@/lib/chat-display'
 import { getBotConfigCached } from '@/lib/config-api'
 import {
+  deleteDiscoveredBotAccount,
   getDiscoveredBotAccounts,
   setDiscoveredBotAccountDisabled,
   type BotPlatformAccount,
@@ -97,7 +98,7 @@ type GroupScopeKind = 'chat' | 'global' | 'platform' | 'target'
 
 const DEFAULT_LEARNING_PLATFORM = 'qq'
 const PLATFORM_ACCOUNT_ROW_GRID_CLASS =
-  'grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,5.5rem)_minmax(0,8.5rem)_2.5rem] md:grid-cols-[minmax(0,6rem)_minmax(0,9.5rem)_2.5rem]'
+  'grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,5.5rem)_minmax(0,8.5rem)_5rem] md:grid-cols-[minmax(0,6rem)_minmax(0,9.5rem)_5rem]'
 
 const LEARNING_ITEM_FALLBACK_SCHEMA: ConfigSchema = {
   className: 'LearningItem',
@@ -2551,8 +2552,63 @@ const formatPlatformAccount = (row: PlatformAccountRow): string => {
   return `${platform}:${account}`
 }
 
+const isPlatformAccountComplete = (platform: string, account: string) =>
+  platform.trim() !== '' && account.trim() !== ''
+
+interface ManualAccountCardProps {
+  account: string
+  badge?: ReactNode
+  deleteLabel?: string
+  editLabel: string
+  platform: string
+  onEdit: () => void
+  onDelete?: () => void
+}
+
+/** 手动填写的平台账号卡片，展示格式与适配器已发现账号一致。 */
+const ManualAccountCard = ({
+  account,
+  badge,
+  deleteLabel,
+  editLabel,
+  platform,
+  onEdit,
+  onDelete,
+}: ManualAccountCardProps) => (
+  <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <span className="font-medium">{platform}</span>
+      <span className="font-mono text-sm">{account}</span>
+      {badge}
+    </div>
+    <div className="flex shrink-0 items-center gap-1">
+      <button
+        type="button"
+        className="text-muted-foreground/45 hover:text-foreground focus-visible:ring-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        aria-label={editLabel}
+        title={editLabel}
+        onClick={onEdit}
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      {onDelete && deleteLabel && (
+        <button
+          type="button"
+          className="text-muted-foreground/45 hover:text-destructive focus-visible:ring-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+          aria-label={deleteLabel}
+          title={deleteLabel}
+          onClick={onDelete}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  </div>
+)
+
 interface StringListHookOptions {
   addLabel: string
+  borderless?: boolean
   emptyText: string
   label: string
   multiline?: boolean
@@ -2602,10 +2658,11 @@ function createStringListHook(options: StringListHookOptions): FieldHookComponen
             {items.map((item, itemIndex) => (
               <div
                 key={itemIndex}
-                className="grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_2.5rem]"
+                className={`grid gap-2 sm:grid-cols-[minmax(0,1fr)_2.5rem]${options.borderless ? '' : ' rounded-md border bg-muted/20 p-3'}`}
               >
                 <InputComponent
                   value={item}
+                  aria-label={`${options.label} ${itemIndex + 1}`}
                   placeholder={options.placeholder}
                   onChange={(event) => updateItem(itemIndex, event.target.value)}
                   {...(options.multiline ? { rows: 2 } : {})}
@@ -2630,12 +2687,40 @@ function createStringListHook(options: StringListHookOptions): FieldHookComponen
   }
 }
 
-export const AliasNamesHook = createStringListHook({
+const AliasNamesEditor = createStringListHook({
   addLabel: '添加别名',
+  borderless: true,
   emptyText: '暂无别名。',
   label: '别名',
   placeholder: '小麦',
 })
+
+export const AliasNamesHook: FieldHookComponent = (props) => {
+  const aliasCount = Array.isArray(props.value) ? props.value.length : 0
+
+  return (
+    <div className="space-y-1.5">
+      <Label className={fieldTitleClassName(props.schema, 'block text-[15px] leading-6')}>
+        别名
+      </Label>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button type="button" variant="outline" className="flex w-full items-center gap-2">
+            {aliasCount > 0 ? `${aliasCount} 个别名` : '添加别名'}
+            <ChevronDown className="h-4 w-4 shrink-0" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          className="max-h-[min(24rem,var(--radix-popover-content-available-height))] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto"
+          aria-label="别名列表"
+        >
+          <AliasNamesEditor {...props} />
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}
 
 export const MultipleReplyStyleHook = createStringListHook({
   addLabel: '添加表达风格',
@@ -2822,6 +2907,8 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
   const [mutatingAccountId, setMutatingAccountId] = useState<number | null>(null)
   const [disabledAccountsOpen, setDisabledAccountsOpen] = useState(false)
   const [fallbackAccountsOpen, setFallbackAccountsOpen] = useState(false)
+  // 当前处于编辑态的条目：'primary' 表示主账号，`row-${index}` 表示备用账号行
+  const [activeEditorKey, setActiveEditorKey] = useState<string | null>(null)
   const primaryPlatform = typeof value === 'string' ? value : ''
   const qqAccountValue = parentValues?.qq_account
   const qqAccount =
@@ -2830,6 +2917,20 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
       : ''
   const platforms = normalizePlatformAccounts(parentValues?.platforms)
   const rows = platforms.map(parsePlatformAccount)
+  const primaryAccountComplete = isPlatformAccountComplete(primaryPlatform, qqAccount)
+
+  const renderEditorConfirmButton = (enabled: boolean) => (
+    <button
+      type="button"
+      disabled={!enabled}
+      className="text-muted-foreground/45 hover:text-primary focus-visible:ring-ring inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+      aria-label="完成编辑"
+      title="完成编辑"
+      onClick={() => setActiveEditorKey(null)}
+    >
+      <Check className="h-4 w-4" />
+    </button>
+  )
   const activeDiscoveredAccounts = discoveredAccounts.filter((account) => !account.disabled)
   const disabledDiscoveredAccounts = discoveredAccounts.filter((account) => account.disabled)
 
@@ -2848,6 +2949,19 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
   useEffect(() => {
     void loadDiscoveredAccounts()
   }, [])
+
+  const deleteDiscoveredAccount = async (account: BotPlatformAccount) => {
+    setMutatingAccountId(account.id)
+    setAccountsError('')
+    try {
+      await deleteDiscoveredBotAccount(account.id)
+      setDiscoveredAccounts((current) => current.filter((item) => item.id !== account.id))
+    } catch (error) {
+      setAccountsError(error instanceof Error ? error.message : '删除适配器账号失败')
+    } finally {
+      setMutatingAccountId(null)
+    }
+  }
 
   const toggleDiscoveredAccount = async (account: BotPlatformAccount) => {
     setMutatingAccountId(account.id)
@@ -2870,10 +2984,12 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
 
   const addRow = () => {
     updateRows([...rows, { platform: '', account: '' }])
+    setActiveEditorKey(`row-${rows.length}`)
   }
 
   const removeRow = (rowIndex: number) => {
     updateRows(rows.filter((_, index) => index !== rowIndex))
+    setActiveEditorKey(null)
   }
 
   const updateRow = (rowIndex: number, patch: Partial<PlatformAccountRow>) => {
@@ -2912,11 +3028,11 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
                   type="button"
                   disabled={mutatingAccountId === account.id}
                   className="text-muted-foreground/45 hover:text-destructive focus-visible:ring-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                  aria-label="排除身份"
-                  title="排除身份"
-                  onClick={() => void toggleDiscoveredAccount(account)}
+                  aria-label="删除账号"
+                  title="删除账号记录（适配器再次上报时会重新发现）"
+                  onClick={() => void deleteDiscoveredAccount(account)}
                 >
-                  <EyeOff className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))}
@@ -3004,68 +3120,103 @@ export const BotPlatformAccountsHook: FieldHookComponent = ({
 
       {fallbackAccountsOpen && (
         <div className="space-y-2">
-          <div className={PLATFORM_ACCOUNT_ROW_GRID_CLASS}>
-            <div className="min-w-0 space-y-1">
-              <Label className="text-xs">平台</Label>
-              <Input
-                className="min-w-0"
-                value={primaryPlatform}
-                placeholder="qq"
-                onChange={(event) => onChange?.(event.target.value)}
-              />
+          {activeEditorKey === 'primary' || !primaryAccountComplete ? (
+            <div className={PLATFORM_ACCOUNT_ROW_GRID_CLASS}>
+              <div className="min-w-0 space-y-1">
+                <Label className="text-xs">平台</Label>
+                <Input
+                  className="min-w-0"
+                  value={primaryPlatform}
+                  placeholder="qq"
+                  onChange={(event) => onChange?.(event.target.value)}
+                />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <Label className="text-xs">账号</Label>
+                <Input
+                  className="min-w-0 font-mono"
+                  value={qqAccount}
+                  placeholder="2814567326"
+                  onChange={(event) => onParentChange?.('qq_account', event.target.value)}
+                />
+              </div>
+              <div className="flex shrink-0 items-end justify-end gap-1">
+                <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                  主
+                </span>
+                {renderEditorConfirmButton(primaryAccountComplete)}
+              </div>
             </div>
-            <div className="min-w-0 space-y-1">
-              <Label className="text-xs">账号</Label>
-              <Input
-                className="min-w-0 font-mono"
-                value={qqAccount}
-                placeholder="2814567326"
-                onChange={(event) => onParentChange?.('qq_account', event.target.value)}
-              />
-            </div>
-            <div className="flex shrink-0 items-end justify-end">
-              <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
-                主
-              </span>
-            </div>
-          </div>
+          ) : (
+            <ManualAccountCard
+              account={qqAccount}
+              badge={
+                <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                  主
+                </span>
+              }
+              deleteLabel="删除主账号"
+              editLabel="编辑主账号"
+              platform={primaryPlatform}
+              onEdit={() => setActiveEditorKey('primary')}
+              onDelete={() => {
+                onChange?.('')
+                onParentChange?.('qq_account', '')
+                setActiveEditorKey(null)
+              }}
+            />
+          )}
 
-        {rows.map((row, rowIndex) => (
-          <div
-            key={rowIndex}
-            className={PLATFORM_ACCOUNT_ROW_GRID_CLASS}
-          >
-            <div className="min-w-0 space-y-1">
-              <Label className="text-xs">平台</Label>
-              <Input
-                className="min-w-0"
-                value={row.platform}
-                placeholder="wx"
-                onChange={(event) => updateRow(rowIndex, { platform: event.target.value })}
+          {rows.map((row, rowIndex) => {
+            const editorKey = `row-${rowIndex}`
+            const rowComplete = isPlatformAccountComplete(row.platform, row.account)
+            // 平台或账号未填全的行保持编辑态，避免展示出空白卡片
+            const rowEditing = activeEditorKey === editorKey || !rowComplete
+            return rowEditing ? (
+              <div key={editorKey} className={PLATFORM_ACCOUNT_ROW_GRID_CLASS}>
+                <div className="min-w-0 space-y-1">
+                  <Label className="text-xs">平台</Label>
+                  <Input
+                    className="min-w-0"
+                    value={row.platform}
+                    placeholder="wx"
+                    onChange={(event) => updateRow(rowIndex, { platform: event.target.value })}
+                  />
+                </div>
+                <div className="min-w-0 space-y-1">
+                  <Label className="text-xs">账号</Label>
+                  <Input
+                    className="min-w-0 font-mono"
+                    value={row.account}
+                    placeholder="114514"
+                    onChange={(event) => updateRow(rowIndex, { account: event.target.value })}
+                  />
+                </div>
+                <div className="flex shrink-0 items-end justify-end gap-1">
+                  {renderEditorConfirmButton(rowComplete)}
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`删除备用平台 ${rowIndex + 1}`}
+                    onClick={() => removeRow(rowIndex)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <ManualAccountCard
+                key={editorKey}
+                account={row.account}
+                deleteLabel={`删除备用平台 ${rowIndex + 1}`}
+                editLabel={`编辑备用平台 ${rowIndex + 1}`}
+                platform={row.platform}
+                onEdit={() => setActiveEditorKey(editorKey)}
+                onDelete={() => removeRow(rowIndex)}
               />
-            </div>
-            <div className="min-w-0 space-y-1">
-              <Label className="text-xs">账号</Label>
-              <Input
-                className="min-w-0 font-mono"
-                value={row.account}
-                placeholder="114514"
-                onChange={(event) => updateRow(rowIndex, { account: event.target.value })}
-              />
-            </div>
-            <div className="flex shrink-0 items-end justify-end">
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label={`删除其他平台 ${rowIndex + 1}`}
-                onClick={() => removeRow(rowIndex)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -3354,9 +3505,9 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, 
         <div className="flex shrink-0 items-center gap-2">
           {isSharedMemoryGroup && (
             <Button asChild size="sm" variant="outline" className="h-8">
-              <a href="/chat-management?view=groups&kind=memory">
+              <a href="/config/bot?mode=groups&kind=memory">
                 <ExternalLink className="h-3.5 w-3.5" />
-                聊天管理
+                共享组设置
               </a>
             </Button>
           )}

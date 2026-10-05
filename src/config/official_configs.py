@@ -9,12 +9,6 @@ RULE_TYPE_OPTION_DESCRIPTIONS = {
     "private": "私聊聊天流，item_id 填用户 ID",
 }
 
-VISUAL_MODE_OPTION_DESCRIPTIONS = {
-    "auto": "根据模型信息自动选择文本或多模态模式",
-    "text": "纯文本模式，不向模型发送视觉输入",
-    "multimodal": "多模态模式，会向模型发送视觉输入",
-}
-
 OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
     "compress": "压缩图片并继续处理",
     "discard": "丢弃超过最大大小的图片组件",
@@ -22,12 +16,12 @@ OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
 
 REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS = {
     "frequency": "按照新消息数量决定思考",
-    "reply_necessity": "综合新消息数量、内容、过往发言决定思考",
+    "dynamic": "估计每批消息的回复可能性并动态调整门槛，让回复次数贴近回复频率",
 }
 
 REPLY_TRIGGER_MODE_OPTION_LABELS = {
     "frequency": "频率触发",
-    "reply_necessity": "必要性触发",
+    "dynamic": "动态触发",
 }
 
 EMOTION_TRAIT_OPTION_LABELS = {
@@ -345,42 +339,8 @@ class VisualConfig(ConfigBase):
     __ui_label__ = "视觉"
     __ui_order__ = 60
 
-    planner_mode: Literal["text", "multimodal", "auto"] = Field(
-        default="auto",
-        json_schema_extra={
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-option-descriptions": VISUAL_MODE_OPTION_DESCRIPTIONS,
-            "x-row": "visual-modes",
-            "label": {
-                "zh_CN": "规划阶段视觉模式",
-                "en_US": "Planner vision mode",
-                "ja_JP": "プランナー視覚モード",
-            },
-        },
-    )
-    """控制规划阶段是否把图片内容直接发送给 planner 模型。auto 会根据模型是否支持视觉自动选择；text 始终只使用文字和图片识别结果；multimodal 会强制使用多模态输入。"""
-
-    replyer_mode: Literal["text", "multimodal", "auto"] = Field(
-        default="auto",
-        json_schema_extra={
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-option-descriptions": VISUAL_MODE_OPTION_DESCRIPTIONS,
-            "x-row": "visual-modes",
-            "label": {
-                "zh_CN": "回复生成视觉模式",
-                "en_US": "Replyer vision mode",
-                "ja_JP": "返信生成視覚モード",
-            },
-        },
-    )
-    """控制回复生成阶段是否把图片内容直接发送给 replyer 模型。auto 会根据模型是否支持视觉自动选择；text 始终只使用文字和图片识别结果；multimodal 会强制使用多模态输入。"""
-
     max_image_num: int = Field(
-        default=128,
+        default=64,
         ge=0,
         json_schema_extra={
             "advanced": True,
@@ -395,7 +355,7 @@ class VisualConfig(ConfigBase):
     """一次多模态请求最多带多少张图，太大可能更慢更贵。"""
 
     wait_image_recognize_max_time: float = Field(
-        default=10,
+        default=32,
         ge=0,
         json_schema_extra={
             "x-widget": "input",
@@ -426,7 +386,7 @@ class VisualConfig(ConfigBase):
     """收到太大的图片时，是否自动压缩或丢弃。"""
 
     max_image_size_mb: float = Field(
-        default=30.0,
+        default=16.0,
         ge=0,
         json_schema_extra={
             "x-widget": "input",
@@ -596,7 +556,7 @@ class ChatReplyTimingConfig(ConfigBase):
     )
     """开启后，被 @ 时会尽量回复。"""
 
-    reply_trigger_mode: Literal["frequency", "reply_necessity"] = Field(
+    reply_trigger_mode: Literal["frequency", "dynamic"] = Field(
         default="frequency",
         json_schema_extra={
             "label": {
@@ -1007,6 +967,19 @@ class ExperimentalConfig(ConfigBase):
         },
     )
     """开启后，reply 动作可通过 attach_pic、attach_emoji、attach_at 参数附加图片、表情包或 at。"""
+
+    replyer_retro_prompt: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "复古回复提示词",
+                "en_US": "Retro reply prompt",
+                "ja_JP": "レトロ返信プロンプト",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
 
     emotion_trait: Literal["rational_calm", "neutral", "sentimental"] = Field(
         default="neutral",
@@ -1792,6 +1765,99 @@ class AMemorixStorageConfig(ConfigBase):
         },
     )
     """数据目录"""
+
+
+class AMemorixImageMemoryConfig(ConfigBase):
+    """A_Memorix 图片资产、向量任务和相似召回配置。"""
+
+    enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用图片记忆",
+                "en_US": "Enable image memory",
+                "ja_JP": "画像記憶を有効化",
+            }
+        },
+    )
+    task_name: str = Field(
+        default="image_embedding",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "图片嵌入任务",
+                "en_US": "Image embedding task",
+                "ja_JP": "画像埋め込みタスク",
+            }
+        },
+    )
+    preprocess_version: str = Field(
+        default="identity_v1",
+        json_schema_extra={"label": {"zh_CN": "预处理版本", "en_US": "Preprocess version", "ja_JP": "前処理バージョン"}},
+    )
+    probe_retry_seconds: float = Field(
+        default=60.0,
+        ge=0.0,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "模型探测重试间隔",
+                "en_US": "Model probe retry interval",
+                "ja_JP": "モデル確認の再試行間隔",
+            }
+        },
+    )
+    max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1,
+        json_schema_extra={"label": {"zh_CN": "单图大小上限", "en_US": "Image size limit", "ja_JP": "画像サイズ上限"}},
+    )
+    max_pixels: int = Field(
+        default=40_000_000,
+        ge=1,
+        json_schema_extra={"label": {"zh_CN": "单图像素上限", "en_US": "Image pixel limit", "ja_JP": "画像ピクセル上限"}},
+    )
+    candidate_limit: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+        json_schema_extra={"label": {"zh_CN": "相似候选数量", "en_US": "Similar candidate count", "ja_JP": "類似候補数"}},
+    )
+    similarity_threshold: float = Field(
+        default=0.72,
+        ge=-1.0,
+        le=1.0,
+        json_schema_extra={"label": {"zh_CN": "相似度阈值", "en_US": "Similarity threshold", "ja_JP": "類似度しきい値"}},
+    )
+    job_poll_interval_seconds: float = Field(
+        default=2.0,
+        ge=0.1,
+        json_schema_extra={"label": {"zh_CN": "任务轮询间隔", "en_US": "Job polling interval", "ja_JP": "ジョブ確認間隔"}},
+    )
+    job_batch_size: int = Field(
+        default=4,
+        ge=1,
+        le=100,
+        json_schema_extra={"label": {"zh_CN": "任务处理批量", "en_US": "Job batch size", "ja_JP": "ジョブ処理バッチ数"}},
+    )
+    job_enqueue_batch_size: int = Field(
+        default=200,
+        ge=1,
+        json_schema_extra={"label": {"zh_CN": "任务入队批量", "en_US": "Job enqueue batch", "ja_JP": "ジョブ登録バッチ数"}},
+    )
+    job_lease_seconds: float = Field(
+        default=120.0,
+        ge=1.0,
+        json_schema_extra={"label": {"zh_CN": "任务租约秒数", "en_US": "Job lease seconds", "ja_JP": "ジョブリース秒数"}},
+    )
+    job_max_retries: int = Field(
+        default=5,
+        ge=0,
+        json_schema_extra={"label": {"zh_CN": "任务最大重试", "en_US": "Maximum job retries", "ja_JP": "ジョブ最大再試行回数"}},
+    )
+    min_train_threshold: int = Field(
+        default=40,
+        ge=1,
+        json_schema_extra={"label": {"zh_CN": "索引训练最小样本", "en_US": "Minimum index training samples", "ja_JP": "索引学習の最小サンプル数"}},
+    )
 
 
 class AMemorixEmbeddingFallbackConfig(ConfigBase):
@@ -3138,20 +3204,6 @@ class AMemorixPersonProfileConfig(ConfigBase):
     )
     """人物画像证据分类最大输出 token 数"""
 
-    evidence_classification_temperature: float = Field(
-        default=0.1,
-        ge=0.0,
-        le=2.0,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "证据分类温度",
-                "en_US": "Evidence classification temperature",
-                "ja_JP": "証拠分類の温度",
-            },
-        },
-    )
-    """人物画像证据分类模型温度"""
-
 
 class AMemorixMemoryEvolutionConfig(ConfigBase):
     """A_Memorix 记忆演化配置"""
@@ -3730,6 +3782,19 @@ class AMemorixConfig(ConfigBase):
     )
     """存储位置"""
 
+    image_memory: AMemorixImageMemoryConfig = Field(
+        default_factory=AMemorixImageMemoryConfig,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "图片记忆",
+                "en_US": "Image memory",
+                "ja_JP": "画像記憶",
+            },
+            "x-collapsed-by-default": True,
+        },
+    )
+    """图片资产留存、图片嵌入和相似内容召回配置"""
+
     embedding: AMemorixEmbeddingConfig = Field(
         default_factory=AMemorixEmbeddingConfig,
         json_schema_extra={
@@ -3947,18 +4012,18 @@ class ExpressionConfig(ConfigBase):
     __ui_sub_label__ = "表达"
 
     expression_checked_only: bool = Field(
-        default=True,
+        default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "仅用人工检查表达",
-                "en_US": "Use human-reviewed expressions only",
-                "ja_JP": "人間が確認した表現のみ使用",
+                "zh_CN": "仅使用精选表达",
+                "en_US": "Use only curated expressions",
+                "ja_JP": "厳選した表現のみを使用",
             },
             "x-widget": "switch",
             "x-row": "expression-learning-switches",
         },
     )
-    """只使用人工确认过的表达方式，更稳但学习效果会慢一些。"""
+    """仅使用人工精选的表达。"""
 
     expression_self_reflect: bool = Field(
         default=True,
@@ -3974,30 +4039,20 @@ class ExpressionConfig(ConfigBase):
     )
     """写入表达方式前先让 AI 检查，减少学到奇怪内容。"""
 
-    expression_selection_mode: Literal["legacy", "vector", "vector_intent"] = Field(
-        default="legacy",
+    use_vector_expression: bool = Field(
+        default=True,
         json_schema_extra={
             "label": {
-                "zh_CN": "表达使用方式",
-                "en_US": "Expression usage mode",
-                "ja_JP": "表現の使用方法",
+                "zh_CN": "使用向量表达",
+                "en_US": "Use vector expressions",
+                "ja_JP": "ベクトル表現を使用",
             },
-            "x-widget": "select",
+            "x-widget": "switch",
+            "x-row": "expression-learning-switches",
             "advanced": False,
-            "options": ["legacy", "vector", "vector_intent"],
-            "x-option-labels": {
-                "legacy": "随手",
-                "vector": "精细",
-                "vector_intent": "超级精细",
-            },
-            "x-option-descriptions": {
-                "legacy": "使用 LLM 进行选择，效果一般",
-                "vector": "使用嵌入模型进行选择，效果较好（需要配置嵌入模型）",
-                "vector_intent": "使用特殊构建的回复方式加上嵌入模型进行选择，效果非常好（需要配置嵌入模型）",
-            },
         },
     )
-    """表达方式的使用策略：legacy 使用 LLM 选择，vector 使用嵌入召回，vector_intent 会额外使用表达选择意图。"""
+    """开启后使用表达意图与嵌入召回，需要配置嵌入模型；关闭时使用随手候选。"""
 
     expression_vector_index_path: str = Field(
         default="data/expression_selection/expression_vector_index.json",
@@ -4562,6 +4617,20 @@ class ResponseSplitterConfig(ConfigBase):
 
     __ui_parent__ = "response_post_process"
 
+    mode: Literal["rule", "llm"] = Field(
+        default="rule",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "断句模式",
+                "en_US": "Splitting mode",
+                "ja_JP": "分割モード",
+            },
+            "x-widget": "select",
+            "options": ["rule", "llm"],
+        },
+    )
+    """规则断句或使用 LLM 按语义断句。"""
+
     enable: bool = Field(
         default=True,
         json_schema_extra={
@@ -4807,6 +4876,32 @@ class LogConfig(ConfigBase):
     )
     """每个聊天最多保留多少条回复效果记录。"""
 
+    event_loop_watchdog_enabled: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "事件循环卡顿看门狗",
+                "en_US": "Event loop lag watchdog",
+                "ja_JP": "イベントループ遅延ウォッチドッグ",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """是否记录事件循环卡顿；主循环与 WebUI 循环各有一份，用于排查界面卡顿。"""
+
+    event_loop_watchdog_warn_seconds: float = Field(
+        default=0.5,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "卡顿告警阈值（秒）",
+                "en_US": "Lag warning threshold (seconds)",
+                "ja_JP": "遅延警告しきい値（秒）",
+            },
+            "x-widget": "input",
+        },
+    )
+    """事件循环唤醒延迟超过该秒数时记录一条警告日志。"""
+
     suppress_libraries: list[str] = Field(
         default_factory=lambda: [
             "faiss",
@@ -4874,7 +4969,7 @@ class DebugConfig(ConfigBase):
     __ui_label__ = "其他"
 
     enable_console_input: bool = Field(
-        default=False,
+        default=True,
         json_schema_extra={
             "label": {
                 "zh_CN": "启用终端输入",
@@ -4898,19 +4993,6 @@ class DebugConfig(ConfigBase):
         },
     )
     """在日志或界面中显示麦麦的思考过程。"""
-
-    enable_clear_context_command: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "启用 /clear 指令",
-                "en_US": "Enable /clear command",
-                "ja_JP": "/clear コマンドを有効化",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """允许使用 /clear 清空当前聊天流的 Maisaka 短期历史上下文。"""
 
     enable_reply_effect_tracking: bool = Field(
         default=False,
@@ -4963,6 +5045,19 @@ class DebugConfig(ConfigBase):
         },
     )
     """记录模型 prompt cache 统计，用于性能调试。"""
+
+    force_plugin_compatibility: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "强制插件兼容",
+                "en_US": "Force plugin compatibility",
+                "ja_JP": "プラグイン互換を強制",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """跳过插件声明的 Host 和 SDK 版本范围校验，直接加载插件；开启后需重启生效。"""
 
 
 class ExtraPromptItem(ConfigBase):
@@ -5206,7 +5301,7 @@ class WebUIConfig(ConfigBase):
     webui_style: int = Field(
         default=1,
         ge=0,
-        le=1,
+        le=2,
         json_schema_extra={
             "label": {
                 "zh_CN": "界面风格",
@@ -5218,7 +5313,7 @@ class WebUIConfig(ConfigBase):
             "x-input-width": "8rem",
         },
     )
-    """界面风格编号；0 为旧风格，1 为未来复古风格。"""
+    """界面风格编号；0 为旧风格，1 为未来复古风格，2 为千禧风格。"""
 
     anti_crawler_mode: Literal["false", "strict", "loose", "basic"] = Field(
         default="basic",
@@ -5773,11 +5868,30 @@ class PluginConfig(ConfigBase):
     )
     """允许用聊天命令管理插件的用户，格式如 qq:123456789。"""
 
+    silent_permission_denied: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "不显示无权限提示",
+                "en_US": "Hide permission denied notice",
+                "ja_JP": "権限なし通知を非表示",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """开启后，用户执行无权限命令时不再发送提示消息，仅静默拦截并记录日志。"""
+
     command_permissions: Dict[str, CommandPermissionConfig] = Field(
         default_factory=dict,
         json_schema_extra={"hidden": True},
     )
     """受保护命令按用户和真实聊天流配置的额外放行规则。"""
+
+    disabled_commands: List[str] = Field(
+        default_factory=list,
+        json_schema_extra={"hidden": True},
+    )
+    """在命令管理中停用的命令 ID 列表（格式为 plugin_id.command_name，内置命令为 core.clear）。"""
 
 
 class PluginRuntimeRenderConfig(ConfigBase):

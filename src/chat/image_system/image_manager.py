@@ -1,9 +1,10 @@
-﻿import asyncio
-import base64
-import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
+
+import asyncio
+import base64
+import hashlib
 
 from rich.traceback import install
 from sqlmodel import select
@@ -52,9 +53,20 @@ class ImageManager:
         """初始化图片管理器。"""
         _ensure_image_dir_exists()
         self._pending_description_tasks: Dict[str, asyncio.Task[None]] = {}
+        self._description_sync_tasks: Set[asyncio.Task[None]] = set()
         self.cleanup_legacy_image_registration_records()
 
         logger.info("图片管理器初始化完成")
+
+    async def shutdown(self) -> None:
+        """等待描述构建及其派生的记忆同步任务完成。"""
+        builds = list(self._pending_description_tasks.values())
+        if builds:
+            await asyncio.gather(*builds, return_exceptions=True)
+        # 构建完成回调会创建同步任务；先让这些回调完成注册。
+        await asyncio.sleep(0)
+        if self._description_sync_tasks:
+            await asyncio.gather(*list(self._description_sync_tasks))
 
     def _get_image_record(self, image_hash: str) -> Optional[Images]:
         """根据哈希获取图片记录。"""
@@ -65,6 +77,14 @@ class ImageManager:
                 # 返回会话外使用的只读记录，避免在会话关闭后触发属性刷新。
                 session.expunge(record)
             return record
+
+    def get_cached_image_description(self, image_hash: str) -> str:
+        """读取已完成的 VLM 描述，不触发新的模型调用。"""
+
+        record = self._get_image_record(str(image_hash or "").strip())
+        if record is None or not record.vlm_processed:
+            return ""
+        return str(record.description or "").strip()
 
     def _normalize_image_registration_fields(self, record: Images) -> bool:
         """Normalize accidental emoji registration fields on image records."""
@@ -87,13 +107,13 @@ class ImageManager:
         """
         获取图片描述的封装方法
 
-        如果图片已存在于数据库中，则直接返回描述
+        提供图片字节时先确保文件已保存，再复用数据库中的描述。
 
         如果不存在，则**保存图片**并**生成描述**后返回
 
         Args:
             image_hash (Optional[str]): 图片的哈希值，如果提供则优先使用该
-            image_bytes (Optional[bytes]): 图片的字节数据，如果提供则在数据库中找不到哈希值时使用该数据生成描述
+            image_bytes (Optional[bytes]): 图片的字节数据，用于保存或恢复文件，并在缺少描述时生成描述
             wait_for_build (bool): 未命中缓存时是否同步等待描述构建完成
         Returns:
             return (str): 图片描述，如果发生错误或无法生成描述则返回空字符串
@@ -108,6 +128,10 @@ class ImageManager:
         else:
             hash_str = hashlib.sha256(image_bytes).hexdigest()
 
+        # 描述可以比缓存文件保留更久，命中描述不能跳过文件恢复。
+        # 保存失败必须上抛，调用方才能保留原始字节，避免误认为图片已持久化。
+        saved_image = await self.ensure_image_saved(image_bytes) if image_bytes else None
+
         try:
             if record := self._get_image_record(hash_str):
                 if record.vlm_processed and record.description:
@@ -117,11 +141,6 @@ class ImageManager:
 
         if not image_bytes:
             logger.warning("图片哈希值未找到，且未提供图片字节数据，返回无描述")
-            return ""
-        try:
-            saved_image = await self.ensure_image_saved(image_bytes)
-        except Exception as e:
-            logger.error(f"保存图片文件时发生错误: {e}")
             return ""
         if not _is_vlm_task_configured():
             logger.info("未配置 VLM 模型，跳过图片识别")
@@ -198,6 +217,30 @@ class ImageManager:
         except Exception as exc:
             logger.debug(f"图片描述后台任务结束时捕获异常，哈希值: {image_hash}，错误: {exc}")
             return
+
+
+        async def sync_description_to_memory() -> None:
+            try:
+                record = self._get_image_record(image_hash)
+                if record is None or not record.description:
+                    return
+                from src.services.memory_service import memory_service
+
+                result = await memory_service.image_memory(
+                    action="describe",
+                    content_hash=image_hash,
+                    text=f"[图片：{record.description}]",
+                )
+                if not result.get("success"):
+                    raise RuntimeError(str(result.get("error") or "图片描述同步失败"))
+            except Exception as exc:
+                logger.warning(f"同步图片描述到记忆失败，哈希值: {image_hash}，错误: {exc}")
+
+        sync_task = asyncio.create_task(
+            sync_description_to_memory(), name=f"A_Memorix.image_description.{image_hash[:12]}"
+        )
+        self._description_sync_tasks.add(sync_task)
+        sync_task.add_done_callback(self._description_sync_tasks.discard)
 
         try:
             from src.maisaka.visual.chat_history_refresher import log_tracked_image_recognition_completed

@@ -1,18 +1,28 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import {
+  ChatStreamSettingsDialog,
+  type ChatStreamSettingsTarget,
+} from '@/components/chat-stream-settings-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { uploadWebuiUserAvatar } from '@/lib/avatar-url'
 import { chatWsClient } from '@/lib/chat-ws-client'
+import { getAllChatStreams } from '@/lib/chat-management-api'
 import {
   maisakaMonitorClient,
   type LlmErrorEvent,
   type LlmRetryEvent,
+  type MessageIngestedEvent,
+  type MessageSentEvent,
   type StageRemovedEvent,
   type StageStatusEvent,
 } from '@/lib/maisaka-monitor-client'
 import { loadUserEmojiPayload, type UserEmojiItem } from '@/lib/user-emoji-api'
+import { MaisakaMonitor } from '@/routes/monitor/maisaka-monitor'
+import { useMaisakaMonitor, type SessionInfo } from '@/routes/monitor/use-maisaka-monitor'
 
 import { ChatComposer } from './ChatComposer'
 import { ChatTabBar } from './ChatTabBar'
@@ -25,6 +35,7 @@ import type {
   ChatMessage,
   ChatRuntimeStatus,
   MessageSegment,
+  ObservedMessagePreview,
   SavedVirtualTab,
   VirtualIdentityConfig,
   WsMessage,
@@ -43,6 +54,13 @@ const MAX_CHAT_IMAGES = 8
 const MAX_MESSAGES_PER_CHAT_TAB = 1000
 const MAX_PROCESSED_MESSAGE_KEYS = 100
 const MAX_USER_AVATAR_BYTES = 5 * 1024 * 1024
+
+function getRequestedObservedSessionId(): string | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  return new URLSearchParams(window.location.search).get('observe')
+}
 
 function appendRecentMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
   if (messages.length < MAX_MESSAGES_PER_CHAT_TAB) {
@@ -168,6 +186,19 @@ function resolveRetryStatusKind(data: LlmRetryEvent): ChatRuntimeStatus['kind'] 
   return 'acting'
 }
 
+// 侧边栏观察聊天流的最新消息预览：优先正文，纯媒体消息退回媒体占位文案
+function buildObservedMessagePreview(
+  data: MessageIngestedEvent | MessageSentEvent
+): ObservedMessagePreview {
+  const content = data.content.trim()
+  const mediaText = (data.media ?? []).find((media) => media.text.trim())?.text.trim() ?? ''
+  return {
+    speakerName: data.speaker_name,
+    content,
+    mediaText,
+  }
+}
+
 function matchesMonitorTarget(
   tab: ChatTab,
   data: StageStatusEvent | StageRemovedEvent | LlmRetryEvent | LlmErrorEvent
@@ -211,6 +242,68 @@ function buildRuntimeStatusFromStage(data: StageStatusEvent): ChatRuntimeStatus 
 
 export function ChatPage() {
   const { t, i18n } = useTranslation()
+  const queryClient = useQueryClient()
+  const {
+    sessions: observedSessions,
+    stageStatuses: observedStageStatuses,
+    allTimeline,
+    setSelectedSession: setSelectedObservedSession,
+  } = useMaisakaMonitor()
+
+  const { data: knownChatStreams = [], isError: knownChatStreamsError } = useQuery({
+    queryKey: ['chat-streams', 'all'],
+    queryFn: getAllChatStreams,
+    staleTime: 30_000,
+  })
+  // 监控中新出现的会话可能刚写入数据库，及时刷新已知聊天流列表。
+  const previousObservedSessionIds = useRef(new Set(observedSessions.keys()))
+  useEffect(() => {
+    const currentIds = new Set(observedSessions.keys())
+    const hasNewSession = Array.from(currentIds).some(
+      (sessionId) => !previousObservedSessionIds.current.has(sessionId)
+    )
+    previousObservedSessionIds.current = currentIds
+    if (hasNewSession) {
+      void queryClient.invalidateQueries({ queryKey: ['chat-streams', 'all'] })
+    }
+  }, [observedSessions, queryClient])
+
+  // 数据库中的真实聊天流为列表来源，实时监控事件只更新对应项的活动时间。
+  const knownSessions = useMemo(() => {
+    const sessions = new Map<string, SessionInfo>()
+    for (const chat of knownChatStreams) {
+      const live = observedSessions.get(chat.session_id)
+      sessions.set(chat.session_id, {
+        sessionId: chat.session_id,
+        sessionName: chat.display_name,
+        isGroupChat: chat.chat_type === 'group',
+        groupId: chat.group_id,
+        userId: chat.user_id,
+        platform: chat.platform,
+        lastActivity: Math.max(
+          chat.last_active_at ?? chat.created_at ?? 0,
+          live?.lastActivity ?? 0
+        ),
+        eventCount: live?.eventCount ?? 0,
+      })
+    }
+    return sessions
+  }, [knownChatStreams, observedSessions])
+
+  // 每个观察聊天流的最新一条消息，用于侧边栏预览（时间线按时间升序，后写覆盖先写）
+  const observedLatestMessages = useMemo(() => {
+    const latestMessages = new Map<string, ObservedMessagePreview>()
+    for (const entry of allTimeline) {
+      if (entry.type !== 'message.ingested' && entry.type !== 'message.sent') {
+        continue
+      }
+      latestMessages.set(
+        entry.sessionId,
+        buildObservedMessagePreview(entry.data as MessageIngestedEvent | MessageSentEvent)
+      )
+    }
+    return latestMessages
+  }, [allTimeline])
 
   // 默认本地聊天标签页
   const defaultTab: ChatTab = {
@@ -251,6 +344,9 @@ export function ChatPage() {
   // 多标签页状态
   const [tabs, setTabs] = useState<ChatTab[]>(initializeTabs)
   const [activeTabId, setActiveTabId] = useState('webui-default')
+  const [activeObservedSessionId, setActiveObservedSessionId] = useState(
+    getRequestedObservedSessionId
+  )
 
   // 当前活动标签页
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0]
@@ -262,9 +358,11 @@ export function ChatPage() {
   const [userName, setUserName] = useState(getStoredUserName())
   const [userAvatarVersion, setUserAvatarVersion] = useState(getStoredUserAvatarVersion)
   const [isUploadingUserAvatar, setIsUploadingUserAvatar] = useState(false)
+  // 页内聊天流设置弹窗：非空时打开
+  const [settingsChat, setSettingsChat] = useState<ChatStreamSettingsTarget | null>(null)
 
   // 持久化用户 ID
-  const userIdRef = useRef(getOrCreateUserId())
+  const [userId] = useState(getOrCreateUserId)
 
   const messageIdCounterRef = useRef(0)
   const monitorStatusesRef = useRef<Map<string, StageStatusEvent>>(new Map())
@@ -276,6 +374,12 @@ export function ChatPage() {
   useEffect(() => {
     tabsRef.current = tabs
   }, [tabs])
+
+  useEffect(() => {
+    if (activeObservedSessionId) {
+      setSelectedObservedSession(activeObservedSessionId)
+    }
+  }, [activeObservedSessionId, setSelectedObservedSession])
 
   // 生成唯一消息 ID
   const generateMessageId = (prefix: string) => {
@@ -356,7 +460,7 @@ export function ChatPage() {
         case 'user_message': {
           updateTab(tabId, { runtimeStatus: null })
           const senderUserId = data.sender?.user_id
-          const currentUserId = tabType === 'virtual' && config ? config.userId : userIdRef.current
+          const currentUserId = tabType === 'virtual' && config ? config.userId : userId
 
           const normalizeSenderId = senderUserId ? senderUserId.replace(/^webui_user_/, '') : ''
           const normalizeCurrentId = currentUserId ? currentUserId.replace(/^webui_user_/, '') : ''
@@ -515,7 +619,7 @@ export function ChatPage() {
           break
       }
     },
-    [addMessageToTab, t, toast, updateTab]
+    [addMessageToTab, t, toast, updateTab, userId]
   )
 
   const ensureSessionListener = useCallback(
@@ -551,7 +655,7 @@ export function ChatPage() {
         } else {
           await chatWsClient.openSession(tabId, {
             client: { type: 'webui', name: 'MaiBot WebUI' },
-            user_id: userIdRef.current,
+            user_id: userId,
             user_name: userName,
           })
         }
@@ -567,7 +671,7 @@ export function ChatPage() {
         })
       }
     },
-    [ensureSessionListener, t, toast, updateTab, userName]
+    [ensureSessionListener, t, toast, updateTab, userId, userName]
   )
 
   // 用于追踪组件是否已卸载
@@ -851,8 +955,7 @@ export function ChatPage() {
     [activeTab, activeTabId, addMessageToTab, t, userName]
   )
 
-  // 处理键盘事件
-  // 处理昵称变更（来自侧边栏）
+  // 处理输入区的图片附件
   const handleAddImages = useCallback(
     async (files: FileList) => {
       const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'))
@@ -904,6 +1007,7 @@ export function ChatPage() {
     setSelectedImages((prev) => prev.filter((image) => image.id !== id))
   }, [])
 
+  // 处理输入框左侧设置中的昵称变更
   const handleUpdateUserName = useCallback(
     (newName: string) => {
       const trimmed = newName.trim() || t('chat.userNameFallback')
@@ -930,7 +1034,7 @@ export function ChatPage() {
 
       setIsUploadingUserAvatar(true)
       try {
-        await uploadWebuiUserAvatar(userIdRef.current, file)
+        await uploadWebuiUserAvatar(userId, file)
         const nextAvatarVersion = Date.now()
         setUserAvatarVersion(nextAvatarVersion)
         saveUserAvatarVersion(nextAvatarVersion)
@@ -950,7 +1054,7 @@ export function ChatPage() {
         setIsUploadingUserAvatar(false)
       }
     },
-    [t, toast]
+    [t, toast, userId]
   )
 
   // 关闭标签页
@@ -995,7 +1099,22 @@ export function ChatPage() {
 
   // 切换标签页
   const switchTab = (tabId: string) => {
+    setActiveObservedSessionId(null)
     setActiveTabId(tabId)
+  }
+
+  const selectObservedSession = (sessionId: string) => {
+    setSelectedObservedSession(sessionId)
+    setActiveObservedSessionId(sessionId)
+  }
+
+  // 在页内直接打开观察聊天流的设置弹窗，不再跳转到聊天管理页
+  const openObservedSettings = (sessionId: string) => {
+    const info = knownSessions.get(sessionId)
+    setSettingsChat({
+      session_id: sessionId,
+      display_name: info?.sessionName || sessionId,
+    })
   }
 
   return (
@@ -1017,14 +1136,15 @@ export function ChatPage() {
         <ChatWorkspaceSidebar
           tabs={tabs}
           activeTabId={activeTabId}
-          userId={userIdRef.current}
-          userName={userName}
-          userAvatarVersion={userAvatarVersion}
-          isUploadingUserAvatar={isUploadingUserAvatar}
+          activeObservedSessionId={activeObservedSessionId}
+          observedSessions={knownSessions}
+          observedSessionsError={knownChatStreamsError}
+          observedStageStatuses={observedStageStatuses}
+          observedLatestMessages={observedLatestMessages}
           onSwitch={switchTab}
+          onSelectObserved={selectObservedSession}
+          onOpenObservedSettings={openObservedSettings}
           onClose={closeTab}
-          onUpdateUserAvatar={handleUpdateUserAvatar}
-          onUpdateUserName={handleUpdateUserName}
         />
       </motion.div>
 
@@ -1047,51 +1167,82 @@ export function ChatPage() {
           <ChatTabBar
             tabs={tabs}
             activeTabId={activeTabId}
-            userId={userIdRef.current}
+            activeObservedSessionId={activeObservedSessionId}
+            observedSessions={knownSessions}
+            userId={userId}
             userName={userName}
             userAvatarVersion={userAvatarVersion}
             isUploadingUserAvatar={isUploadingUserAvatar}
             onSwitch={switchTab}
+            onSelectObserved={selectObservedSession}
+            onOpenObservedSettings={openObservedSettings}
             onClose={closeTab}
             onUpdateUserAvatar={handleUpdateUserAvatar}
           />
         </div>
 
-        <MessageList
-          key={activeTab?.id ?? 'empty-chat'}
-          messages={activeTab?.messages ?? []}
-          isLoadingHistory={isLoadingHistory}
-          botDisplayName={activeTab?.sessionInfo.bot_name || t('chat.botNameFallback')}
-          botQq={activeTab?.sessionInfo.bot_qq}
-          userName={userName}
-          userAvatarPlatform={
-            activeTab?.type === 'virtual'
-              ? activeTab.virtualConfig?.platform
-              : userAvatarVersion
-                ? 'webui'
-                : undefined
-          }
-          userAvatarId={
-            activeTab?.type === 'virtual' ? activeTab.virtualConfig?.userId : userIdRef.current
-          }
-          userAvatarVersion={activeTab?.type === 'virtual' ? undefined : userAvatarVersion}
-          language={i18n.language}
-          runtimeStatus={activeTab?.runtimeStatus ?? null}
-        />
+        {activeObservedSessionId ? (
+          <div className="min-h-0 min-w-0 flex-1" data-chat-observed-session>
+            <MaisakaMonitor
+              embedded
+              reasoningReturnTo={`/chat?observe=${encodeURIComponent(activeObservedSessionId)}`}
+            />
+          </div>
+        ) : (
+          <>
+            <MessageList
+              key={activeTab?.id ?? 'empty-chat'}
+              messages={activeTab?.messages ?? []}
+              isLoadingHistory={isLoadingHistory}
+              botDisplayName={activeTab?.sessionInfo.bot_name || t('chat.botNameFallback')}
+              botQq={activeTab?.sessionInfo.bot_qq}
+              userName={userName}
+              userAvatarPlatform={
+                activeTab?.type === 'virtual'
+                  ? activeTab.virtualConfig?.platform
+                  : userAvatarVersion
+                    ? 'webui'
+                    : undefined
+              }
+              userAvatarId={
+                activeTab?.type === 'virtual' ? activeTab.virtualConfig?.userId : userId
+              }
+              userAvatarVersion={activeTab?.type === 'virtual' ? undefined : userAvatarVersion}
+              language={i18n.language}
+              runtimeStatus={activeTab?.runtimeStatus ?? null}
+            />
 
-        <ChatComposer
-          value={inputValue}
-          onChange={setInputValue}
-          onAddImages={handleAddImages}
-          onRemoveImage={handleRemoveImage}
-          onSendEmoji={sendUserEmoji}
-          onSend={() => void sendMessage()}
-          disabled={!activeTab?.isConnected}
-          images={selectedImages}
-          isConnected={!!activeTab?.isConnected}
-          userId={userIdRef.current}
-        />
+            <ChatComposer
+              value={inputValue}
+              onChange={setInputValue}
+              onAddImages={handleAddImages}
+              onRemoveImage={handleRemoveImage}
+              onSendEmoji={sendUserEmoji}
+              onSend={() => void sendMessage()}
+              disabled={!activeTab?.isConnected}
+              images={selectedImages}
+              isConnected={!!activeTab?.isConnected}
+              userId={userId}
+              userName={userName}
+              userAvatarVersion={userAvatarVersion}
+              isUploadingUserAvatar={isUploadingUserAvatar}
+              onUpdateUserAvatar={handleUpdateUserAvatar}
+              onUpdateUserName={handleUpdateUserName}
+            />
+          </>
+        )}
       </motion.div>
+
+      <ChatStreamSettingsDialog
+        chat={settingsChat}
+        onOpenChange={(open) => !open && setSettingsChat(null)}
+        onDeleted={(sessionId) => {
+          setSettingsChat(null)
+          if (activeObservedSessionId === sessionId) {
+            setActiveObservedSessionId(null)
+          }
+        }}
+      />
     </div>
   )
 }

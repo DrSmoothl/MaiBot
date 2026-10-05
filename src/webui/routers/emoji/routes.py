@@ -218,7 +218,7 @@ async def _review_emoji_record_for_registration(
 
 
 @router.get("/list", response_model=EmojiListResponse)
-async def get_emoji_list(
+def get_emoji_list(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
@@ -226,7 +226,7 @@ async def get_emoji_list(
     is_banned: Optional[bool] = Query(None, description="是否被禁用筛选"),
     status: Optional[str] = Query(None, description="表情包状态筛选"),
     format: Optional[str] = Query(None, description="图片格式筛选"),
-    sort_by: Optional[str] = Query("query_count", description="排序字段"),
+    sort_by: Optional[str] = Query("register_time", description="排序字段"),
     sort_order: Optional[str] = Query("desc", description="排序方向"),
     maibot_session: Optional[str] = Cookie(None),
 ) -> EmojiListResponse:
@@ -272,7 +272,7 @@ async def get_emoji_list(
             "record_time": col(Images.record_time),
             "last_used_time": col(Images.last_used_time),
         }
-        sort_field = sort_field_map.get(sort_by or "query_count", col(Images.query_count))
+        sort_field = sort_field_map.get(sort_by or "register_time", col(Images.register_time))
         statement = statement.order_by(sort_field.asc() if sort_order == "asc" else sort_field.desc())
 
         offset = (page - 1) * page_size
@@ -311,7 +311,7 @@ async def get_emoji_list(
 
 
 @router.get("/{emoji_id}", response_model=EmojiDetailResponse)
-async def get_emoji_detail(emoji_id: int, maibot_session: Optional[str] = Cookie(None)) -> EmojiDetailResponse:
+def get_emoji_detail(emoji_id: int, maibot_session: Optional[str] = Cookie(None)) -> EmojiDetailResponse:
     """获取表情包详细信息。
 
     Args:
@@ -421,7 +421,7 @@ async def update_emoji(
 
 
 @router.delete("/{emoji_id}", response_model=EmojiDeleteResponse)
-async def delete_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(None)) -> EmojiDeleteResponse:
+def delete_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(None)) -> EmojiDeleteResponse:
     """删除表情包。
 
     Args:
@@ -463,7 +463,7 @@ async def delete_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(Non
 
 
 @router.get("/stats/summary")
-async def get_emoji_stats(maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
+def get_emoji_stats(maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
     """获取表情包统计数据。
 
     Args:
@@ -609,7 +609,7 @@ async def register_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(N
 
 
 @router.post("/{emoji_id}/ban", response_model=EmojiUpdateResponse)
-async def ban_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(None)) -> EmojiUpdateResponse:
+def ban_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(None)) -> EmojiUpdateResponse:
     """禁用表情包。
 
     Args:
@@ -654,7 +654,7 @@ async def ban_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(None))
 
 
 @router.get("/{emoji_id}/thumbnail", response_model=None)
-async def get_emoji_thumbnail(
+def get_emoji_thumbnail(
     emoji_id: int,
     token: Optional[str] = Query(None, description="访问令牌"),
     maibot_session: Optional[str] = Cookie(None),
@@ -745,7 +745,7 @@ async def get_emoji_thumbnail(
 
 
 @router.post("/batch/delete", response_model=BatchDeleteResponse)
-async def batch_delete_emojis(
+def batch_delete_emojis(
     request: BatchDeleteRequest,
     maibot_session: Optional[str] = Cookie(None),
 ) -> BatchDeleteResponse:
@@ -1042,7 +1042,7 @@ async def batch_upload_emoji(
 
 
 @router.get("/thumbnail-cache/stats", response_model=ThumbnailCacheStatsResponse)
-async def get_thumbnail_cache_stats(maibot_session: Optional[str] = Cookie(None)) -> ThumbnailCacheStatsResponse:
+def get_thumbnail_cache_stats(maibot_session: Optional[str] = Cookie(None)) -> ThumbnailCacheStatsResponse:
     """获取缩略图缓存统计信息。
 
     Args:
@@ -1080,7 +1080,7 @@ async def get_thumbnail_cache_stats(maibot_session: Optional[str] = Cookie(None)
 
 
 @router.post("/thumbnail-cache/cleanup", response_model=ThumbnailCleanupResponse)
-async def cleanup_thumbnail_cache(maibot_session: Optional[str] = Cookie(None)) -> ThumbnailCleanupResponse:
+def cleanup_thumbnail_cache(maibot_session: Optional[str] = Cookie(None)) -> ThumbnailCleanupResponse:
     """清理孤立的缩略图缓存。
 
     Args:
@@ -1188,7 +1188,7 @@ async def preheat_thumbnail_cache(
 
 
 @router.delete("/thumbnail-cache/clear", response_model=ThumbnailCleanupResponse)
-async def clear_all_thumbnail_cache(maibot_session: Optional[str] = Cookie(None)) -> ThumbnailCleanupResponse:
+def clear_all_thumbnail_cache(maibot_session: Optional[str] = Cookie(None)) -> ThumbnailCleanupResponse:
     """清空所有缩略图缓存。
 
     Args:

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.common.logger import get_logger
 from src.webui.dependencies import require_auth
+from src.webui.utils.http_client import get_shared_ssl_context
 
 logger = get_logger("webui.plugin_stats_proxy")
 
@@ -47,7 +48,11 @@ class DownloadRequest(BaseModel):
 async def _request_stats_service(method: str, path: str, payload: Dict[str, Any] | None = None) -> JSONResponse:
     url = f"{PLUGIN_STATS_BASE_URL}{path}"
     try:
-        async with httpx.AsyncClient(timeout=PLUGIN_STATS_TIMEOUT) as client:
+        # 复用共享 SSLContext：每次新建 AsyncClient 都会重新加载整套 CA 证书（实测约 5s/次），
+        # 且该构造在 async 端点内是同步操作，会阻塞 WebUI 事件循环。
+        async with httpx.AsyncClient(
+            verify=get_shared_ssl_context(), timeout=PLUGIN_STATS_TIMEOUT
+        ) as client:
             response = await client.request(method, url, json=payload)
     except httpx.HTTPError as exc:
         logger.warning(f"插件统计服务请求失败: {url} - {type(exc).__name__}: {exc!r}")

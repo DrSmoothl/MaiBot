@@ -21,13 +21,20 @@ import { getModelConfig } from '@/lib/config-api'
 import {
   replayReasoningPrompt,
   type ContextItemSnapshot,
+  type GenerationAttemptSnapshot,
+  type NormalizedReplayResult,
   type ReasoningPromptFile,
   type ReasoningReplayResponse,
 } from '@/lib/reasoning-process-api'
 import { cn } from '@/lib/utils'
 import { ContextItemTimeline } from './context-items'
 import { GenerationAttemptTimeline } from './generation-attempts'
-import { isRecord, normalizeContextItemSnapshot, type StructuredPromptPayload } from './schema'
+import {
+  isRecord,
+  normalizeContextItemSnapshot,
+  normalizeGenerationAttempt,
+  type StructuredPromptPayload,
+} from './schema'
 
 const REPLAY_COUNT_MAX = 20
 function formatDurationMs(durationMs: number | null): string {
@@ -45,7 +52,7 @@ export type EditableReplayItem = {
 export type ReplayRunResult = {
   id: string
   index: number
-  result: ReasoningReplayResponse | null
+  result: NormalizedReplayResult | null
   error: string | null
 }
 
@@ -238,6 +245,24 @@ function ReplayItemBodyEditor({
       </div>
     </div>
   )
+}
+
+// 后端 /replay 的 generation_attempts 是 serialize_generation_attempt 输出的精简结构（仅元数据与 error），
+// 而 GenerationAttemptTimeline 渲染依赖 attempt 上的完整字段；与详情页一致地规范化补齐默认值。
+export function normalizeReplayResult(result: ReasoningReplayResponse): NormalizedReplayResult {
+  return {
+    ...result,
+    generation_attempts: result.generation_attempts
+      .map((attempt, index) =>
+        normalizeGenerationAttempt(attempt, index, {
+          requestItems: [],
+          outputItems: [],
+          toolDefinitions: [],
+          requestParameters: {},
+        })
+      )
+      .filter((attempt): attempt is GenerationAttemptSnapshot => attempt !== null),
+  }
 }
 
 export function formatReplayTokenSummary(result: ReasoningReplayResponse): string {
@@ -543,7 +568,7 @@ export function ReasoningReplayPanel({
           }
           setReplayResults((current) => [
             ...current,
-            { id: `${Date.now()}-${index}`, index, result: replayResult, error: null },
+            { id: `${Date.now()}-${index}`, index, result: normalizeReplayResult(replayResult), error: null },
           ])
         } catch (err) {
           setReplayResults((current) => [

@@ -8,11 +8,7 @@ from typing import cast
 from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.maisaka.memory.mid_term import is_mid_term_memory_message
 
-from .history import (
-    collect_tool_turn_anchor_indices,
-    drop_leading_orphan_tool_results,
-    normalize_tool_call_result_pairs,
-)
+from .history import drop_leading_orphan_tool_results, normalize_tool_call_result_pairs
 from .messages import (
     ComplexSessionMessage,
     FOCUS_WAKEUP_SOURCE_KINDS,
@@ -175,7 +171,10 @@ def _trim_assistant_history_to_latest(
         ]
         if not unit_indexes:
             continue
-        unit_messages = [cast(ModelOutputContextMessage, chat_history[index]) for index in unit_indexes]
+        unit_messages = [
+            cast(ModelOutputContextMessage, chat_history[index])
+            for index in unit_indexes
+        ]
         folded_message = _build_trimmed_assistant_tool_user_message(
             unit_messages,
             tool_result_by_call_id=tool_result_by_call_id,
@@ -340,11 +339,6 @@ def _trim_history_to_context_target(
     remove_indexes: list[int] = []
     visited_indexes: set[int] = set()
     tool_turn_ids = _collect_tool_turn_ids(chat_history)
-    anchor_index_by_turn_id = collect_tool_turn_anchor_indices(chat_history, tool_turn_ids)
-    turn_ids_by_anchor_index: dict[int, set[str]] = {}
-    for logical_turn_id, anchor_index in anchor_index_by_turn_id.items():
-        turn_ids_by_anchor_index.setdefault(anchor_index, set()).add(logical_turn_id)
-
     for index, message in enumerate(chat_history):
         if index in visited_indexes:
             continue
@@ -352,22 +346,27 @@ def _trim_history_to_context_target(
             continue
 
         unit_indexes = {index}
-        unit_turn_ids = set(turn_ids_by_anchor_index.get(index, set()))
         logical_turn_id = _get_logical_turn_id(message)
         if logical_turn_id in tool_turn_ids:
-            anchor_index = anchor_index_by_turn_id.get(logical_turn_id)
-            if anchor_index is not None:
-                unit_indexes.add(anchor_index)
-                unit_turn_ids.update(turn_ids_by_anchor_index.get(anchor_index, set()))
-            else:
-                unit_turn_ids.add(logical_turn_id)
-
-        if unit_turn_ids:
-            unit_indexes.update(
+            unit_indexes = {
                 candidate_index
                 for candidate_index, candidate in enumerate(chat_history)
-                if _get_logical_turn_id(candidate) in unit_turn_ids
+                if _get_logical_turn_id(candidate) == logical_turn_id
+            }
+        elif message.role == "user":
+            # user 消息触发的工具调用不能在裁切点两侧拆开，否则剩余历史会从
+            # function call 开始，违反部分模型的消息顺序要求。
+            anchored_tool_turn_ids = _collect_following_tool_turn_ids(
+                chat_history,
+                user_index=index,
+                tool_turn_ids=tool_turn_ids,
             )
+            if anchored_tool_turn_ids:
+                unit_indexes.update(
+                    candidate_index
+                    for candidate_index, candidate in enumerate(chat_history)
+                    if _get_logical_turn_id(candidate) in anchored_tool_turn_ids
+                )
 
         visited_indexes.update(unit_indexes)
         remove_indexes.extend(unit_indexes)
@@ -383,6 +382,24 @@ def _trim_history_to_context_target(
     for index in reversed(normalized_remove_indexes):
         del chat_history[index]
     return removed_messages
+
+
+def _collect_following_tool_turn_ids(
+    chat_history: list[LLMContextMessage],
+    *,
+    user_index: int,
+    tool_turn_ids: set[str],
+) -> set[str]:
+    """收集一条 user 消息之后、下一条 user 消息之前的工具轮次。"""
+
+    following_tool_turn_ids: set[str] = set()
+    for message in chat_history[user_index + 1 :]:
+        if message.role == "user":
+            break
+        logical_turn_id = _get_logical_turn_id(message)
+        if logical_turn_id in tool_turn_ids:
+            following_tool_turn_ids.add(logical_turn_id)
+    return following_tool_turn_ids
 
 
 def _get_logical_turn_id(message: LLMContextMessage) -> str | None:

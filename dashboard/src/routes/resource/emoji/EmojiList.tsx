@@ -156,7 +156,7 @@ export function EmojiList({
               </span>
             </div>
 
-            {/* 底部信息和操作 */}
+            {/* 底部信息 */}
             <div
               className={`border-t bg-card ${cardSize === 'small' ? 'p-1' : 'p-2'}`}
             >
@@ -168,90 +168,82 @@ export function EmojiList({
               >
                 {emoji.description?.trim() || '暂无描述'}
               </p>
+            </div>
 
-              {/* 操作按钮 - 悬停时显示 */}
-              <div
-                className={`mt-1 flex justify-center opacity-0 transition-opacity group-hover:opacity-100 ${
-                  cardSize === 'small' ? 'flex-nowrap gap-0.5' : 'gap-1'
-                }`}
+            {/* 操作按钮始终显示在卡片底部，按实际按钮数量均分一行。 */}
+            <div
+              className="grid auto-cols-fr grid-flow-col items-center gap-0.5 border-t bg-card p-1"
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-full min-w-0 px-0"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onEdit(emoji)
+                }}
+                aria-label="编辑"
+                title="编辑"
               >
+                <Edit className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-full min-w-0 px-0"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onViewDetail(emoji)
+                }}
+                aria-label="详情"
+                title="详情"
+              >
+                <Info className="h-3 w-3" />
+              </Button>
+              {emoji.status !== 'adopted' && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cardSize === 'small' ? 'h-5 w-5 flex-none' : 'h-6 w-6'}
+                  className="h-8 w-full min-w-0 px-0 text-green-600 hover:text-green-700"
                   onClick={(e) => {
                     e.stopPropagation()
-                    onEdit(emoji)
+                    onRegister(emoji)
                   }}
-                  title="编辑"
+                  aria-label="注册"
+                  title="注册"
                 >
-                  <Edit className="h-3 w-3" />
+                  <CheckCircle2 className="h-3 w-3" />
                 </Button>
+              )}
+              {emoji.status !== 'discarded' && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cardSize === 'small' ? 'h-5 w-5 flex-none' : 'h-6 w-6'}
+                  className="h-8 w-full min-w-0 px-0 text-orange-600 hover:text-orange-700"
                   onClick={(e) => {
                     e.stopPropagation()
-                    onViewDetail(emoji)
+                    onBan(emoji)
                   }}
-                  title="详情"
+                  aria-label="封禁"
+                  title="封禁"
                 >
-                  <Info className="h-3 w-3" />
+                  <Ban className="h-3 w-3" />
                 </Button>
-                {emoji.status !== 'adopted' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={
-                      cardSize === 'small'
-                        ? 'h-5 w-5 flex-none text-green-600 hover:text-green-700'
-                        : 'h-6 w-6 text-green-600 hover:text-green-700'
-                    }
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onRegister(emoji)
-                    }}
-                    title="注册"
-                  >
-                    <CheckCircle2 className="h-3 w-3" />
-                  </Button>
-                )}
-                {emoji.status !== 'discarded' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={
-                      cardSize === 'small'
-                        ? 'h-5 w-5 flex-none text-orange-600 hover:text-orange-700'
-                        : 'h-6 w-6 text-orange-600 hover:text-orange-700'
-                    }
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onBan(emoji)
-                    }}
-                    title="封禁"
-                  >
-                    <Ban className="h-3 w-3" />
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={
-                    cardSize === 'small'
-                      ? 'h-5 w-5 flex-none text-red-600 hover:text-red-700'
-                      : 'h-6 w-6 text-red-600 hover:text-red-700'
-                  }
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDelete(emoji)
-                  }}
-                  title="删除"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-full min-w-0 px-0 text-red-600 hover:text-red-700"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete(emoji)
+                }}
+                aria-label="删除"
+                title="删除"
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
             </div>
           </div>
         ))}

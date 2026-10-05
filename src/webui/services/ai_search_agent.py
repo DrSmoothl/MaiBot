@@ -38,8 +38,6 @@ logger = get_logger("webui.ai_search")
 
 AI_SEARCH_MAX_TOOL_ROUNDS = 4
 AI_SEARCH_MAX_TOOL_CALLS_PER_ROUND = 4
-AI_SEARCH_PLANNING_MAX_TOKENS = 1024
-AI_SEARCH_FINAL_MAX_TOKENS = 2048
 
 _ai_search_model: LLMServiceClient | None = None
 _document_store = AISearchDocumentStore()
@@ -359,8 +357,6 @@ async def run_ai_search_agent(
         generation_result = await model.generate_response_with_context(
             lambda _client: list(messages),
             options=LLMGenerationOptions(
-                temperature=0,
-                max_tokens=AI_SEARCH_PLANNING_MAX_TOKENS,
                 tool_options=_build_agent_tools(),
             ),
         )
@@ -414,8 +410,6 @@ async def run_ai_search_agent(
     final_result = await model.generate_response_with_context(
         lambda _client: list(final_messages),
         options=LLMGenerationOptions(
-            temperature=0,
-            max_tokens=AI_SEARCH_FINAL_MAX_TOKENS,
             response_format=RespFormat(format_type=RespFormatType.JSON_OBJ),
         ),
     )
@@ -444,8 +438,6 @@ async def run_ai_search_agent(
         corrected_result = await model.generate_response_with_context(
             lambda _client: list(correction_messages),
             options=LLMGenerationOptions(
-                temperature=0,
-                max_tokens=AI_SEARCH_FINAL_MAX_TOKENS,
                 response_format=RespFormat(format_type=RespFormatType.JSON_OBJ),
             ),
         )

@@ -309,7 +309,7 @@ def _merge_text_config(extra_body: Dict[str, Any], response_format: RespFormat |
 
 
 def _extract_usage_record(usage: Any) -> UsageTuple | None:
-    """提取 Responses API 使用量。"""
+    """提取 Responses API 使用量，并判断是否上报了 Prompt 缓存用量。"""
 
     if usage is None:
         return None
@@ -317,13 +317,16 @@ def _extract_usage_record(usage: Any) -> UsageTuple | None:
     output_tokens = int(_get_value(usage, "output_tokens", 0) or 0)
     total_tokens = int(_get_value(usage, "total_tokens", input_tokens + output_tokens) or 0)
     input_details = _get_value(usage, "input_tokens_details")
-    cached_tokens = int(_get_value(input_details, "cached_tokens", 0) or 0)
+    # input_tokens_details.cached_tokens 缺失即未上报缓存用量，用 None 哨兵区分「缺失」与「为 0」
+    reported_cached_tokens = _get_value(input_details, "cached_tokens", None) if input_details is not None else None
+    cached_tokens = int(reported_cached_tokens or 0)
     return (
         input_tokens,
         output_tokens,
         total_tokens,
         cached_tokens,
         max(input_tokens - cached_tokens, 0),
+        reported_cached_tokens is not None,
     )
 
 

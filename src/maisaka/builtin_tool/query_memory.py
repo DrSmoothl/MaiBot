@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
+import re
 
 from src.common.logger import get_logger
 from src.config.config import global_config
@@ -16,6 +17,7 @@ from .context import BuiltinToolRuntimeContext
 logger = get_logger("maisaka_builtin_query_memory")
 
 _ALLOWED_QUERY_MODES = {"search", "time", "hybrid", "episode", "aggregate"}
+_ISO_QUERY_TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$")
 REPLYER_MEMORY_REFERENCE_MARKER = "【长期记忆检索结果-内部参考】"
 
 
@@ -38,7 +40,11 @@ def get_tool_spec(*, enabled: bool = True) -> ToolSpec:
                 },
                 "mode": {
                     "type": "string",
-                    "description": "search事实偏好，time时间段，episode经历，aggregate整体，hybrid不确定。",
+                    "description": (
+                        "检索路由：search按语义检索事实、偏好等记忆；time按时间范围检索；"
+                        "episode检索经历；aggregate综合检索；hybrid同时使用语义与时间范围。"
+                        "time和hybrid至少提供time_start或time_end；没有时间条件时使用search。"
+                    ),
                     "enum": sorted(_ALLOWED_QUERY_MODES),
                     "default": "search",
                 },
@@ -48,11 +54,11 @@ def get_tool_spec(*, enabled: bool = True) -> ToolSpec:
                 },
                 "time_start": {
                     "type": "string",
-                    "description": "起始时间。",
+                    "description": "起始时间，仅接受YYYY/MM/DD或YYYY/MM/DD HH:mm。",
                 },
                 "time_end": {
                     "type": "string",
-                    "description": "结束时间。",
+                    "description": "结束时间，仅接受YYYY/MM/DD或YYYY/MM/DD HH:mm。",
                 },
                 "respect_filter": {
                     "type": "boolean",
@@ -76,6 +82,8 @@ def _normalize_optional_time(raw_value: Any) -> str | float | None:
         time_text = raw_value.strip()
         if not time_text:
             return None
+        if _ISO_QUERY_TIME_RE.fullmatch(time_text):
+            return time_text.replace("-", "/", 2)
         return time_text
     if isinstance(raw_value, (float, int)):
         return float(raw_value)

@@ -1,10 +1,9 @@
 import { useState } from 'react'
 
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import { ArrowUpDown, Plus, Search, Trash2, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { DashboardTabBar, DashboardTabTrigger } from '@/components/ui/dashboard-tabs'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -34,7 +33,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Tabs } from '@/components/ui/tabs'
 
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
@@ -51,6 +49,9 @@ import type { Emoji, EmojiStats, EmojiStatus } from '@/types/emoji'
 import { EmojiCacheMaintenancePanel } from './EmojiCacheMaintenancePanel'
 import { EmojiDetailDialog, EmojiEditDialog, EmojiUploadDialog } from './EmojiDialogs'
 import { EmojiList } from './EmojiList'
+
+// 页面可见时每 10 秒同步后台收录和使用状态，离开页面后停止轮询。
+const EMOJI_REFRESH_INTERVAL = 10_000
 
 // 表情包筛选项：状态 / 格式 / 排序字段 / 排序方向
 interface EmojiFilters {
@@ -73,12 +74,14 @@ export function EmojiManagementPage() {
   const { toast } = useToast()
 
   // 表情包列表：分页/搜索/筛选/排序/多选统一由 useDataList 承载，
-  // 翻页/改参自动重置页码并清空选中，搜索内建 300ms 防抖
+  // 翻页保留选中项，改参重置页码但保留选择，搜索内建 300ms 防抖。
   const list = useDataList<Emoji, EmojiFilters, number>({
     domain: 'emoji',
+    preserveSelectionOnParamsChange: true,
     getId: (emoji) => emoji.id,
-    initialFilters: { status: 'adopted', format: 'all', sortBy: 'usage_count', sortOrder: 'desc' },
+    initialFilters: { status: 'adopted', format: 'all', sortBy: 'register_time', sortOrder: 'desc' },
     searchDebounceMs: 300,
+    queryOptions: { refetchInterval: EMOJI_REFRESH_INTERVAL },
     queryFn: async ({ page, pageSize, search, filters }) => {
       const result = await getEmojiList({
         page,
@@ -104,6 +107,7 @@ export function EmojiManagementPage() {
   const statsQuery = useQuery({
     queryKey: ['emoji', 'stats'],
     queryFn: getEmojiStats,
+    refetchInterval: EMOJI_REFRESH_INTERVAL,
   })
   const stats: EmojiStats | null = statsQuery.data?.data ?? null
 
@@ -129,13 +133,16 @@ export function EmojiManagementPage() {
   const deleteMutation = useMutation({
     mutationFn: (emoji: Emoji) => deleteEmoji(emoji.id),
     meta: { errorTitle: '错误' },
-    onSuccess: () => {
+    onSuccess: (_result, emoji) => {
       toast({
         title: '成功',
         description: '表情包已删除',
       })
       setDeleteDialogOpen(false)
       setSelectedEmoji(null)
+      if (list.isSelected(emoji.id)) {
+        list.toggle(emoji.id)
+      }
       list.invalidate()
     },
   })
@@ -219,63 +226,23 @@ export function EmojiManagementPage() {
 
   // 获取格式选项
   const formatOptions = stats?.formats ? Object.keys(stats.formats) : []
+  const statusOptions = stats
+    ? [
+        { value: 'known' as const, label: '认识', count: stats.known },
+        { value: 'unknown' as const, label: '不认识', count: stats.unknown },
+        { value: 'adopted' as const, label: '据为己用', count: stats.adopted },
+        { value: 'discarded' as const, label: '丢弃', count: stats.discarded },
+      ]
+    : []
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col p-4 sm:p-6">
       <ScrollArea className="flex-1">
         <div className="space-y-4 pr-4 sm:space-y-6">
-          {/* 状态切换 */}
-          {stats && (
-            <Tabs
-              value={list.filters.status === 'all' ? 'adopted' : list.filters.status}
-              onValueChange={(value) => list.setFilter('status', value as EmojiStatus)}
-            >
-              <DashboardTabBar
-                data-emoji-status-tabs="true"
-                variant="grid"
-                className="grid-cols-2 sm:grid-cols-4"
-              >
-                {[
-                  {
-                    value: 'known' as const,
-                    label: '认识',
-                    count: stats.known,
-                    className: 'text-sky-600',
-                  },
-                  {
-                    value: 'unknown' as const,
-                    label: '不认识',
-                    count: stats.unknown,
-                    className: 'text-gray-600',
-                  },
-                  {
-                    value: 'adopted' as const,
-                    label: '据为己用',
-                    count: stats.adopted,
-                    className: 'text-green-600',
-                  },
-                  {
-                    value: 'discarded' as const,
-                    label: '丢弃',
-                    count: stats.discarded,
-                    className: 'text-red-600',
-                  },
-                ].map((item) => (
-                  <DashboardTabTrigger key={item.value} value={item.value} className="h-10 gap-2">
-                    <span>{item.label}</span>
-                    <span className={`leading-none font-semibold ${item.className}`}>
-                      {item.count}
-                    </span>
-                  </DashboardTabTrigger>
-                ))}
-              </DashboardTabBar>
-            </Tabs>
-          )}
-
           {/* 筛选和排序 */}
           <Card>
             <CardHeader className="space-y-3">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-2 items-end gap-4 [&>div]:min-w-0 lg:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto_5rem_auto]">
                 <div className="space-y-2">
                   <Label htmlFor="emoji-search">搜索 tag</Label>
                   <div className="relative">
@@ -304,28 +271,32 @@ export function EmojiManagementPage() {
 
                 <div className="space-y-2">
                   <Label>排序方式</Label>
-                  <Select
-                    value={`${list.filters.sortBy}-${list.filters.sortOrder}`}
-                    onValueChange={(value) => {
-                      const [newSortBy, newSortOrder] = value.split('-')
-                      list.setFilter('sortBy', newSortBy)
-                      list.setFilter('sortOrder', newSortOrder as 'desc' | 'asc')
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="usage_count-desc">使用次数 (多→少)</SelectItem>
-                      <SelectItem value="usage_count-asc">使用次数 (少→多)</SelectItem>
-                      <SelectItem value="register_time-desc">注册时间 (新→旧)</SelectItem>
-                      <SelectItem value="register_time-asc">注册时间 (旧→新)</SelectItem>
-                      <SelectItem value="record_time-desc">记录时间 (新→旧)</SelectItem>
-                      <SelectItem value="record_time-asc">记录时间 (旧→新)</SelectItem>
-                      <SelectItem value="last_used_time-desc">最后使用 (新→旧)</SelectItem>
-                      <SelectItem value="last_used_time-asc">最后使用 (旧→新)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex gap-2">
+                    <Select value={list.filters.sortBy} onValueChange={(value) => list.setFilter('sortBy', value)}>
+                    <SelectTrigger aria-label="排序字段" className="min-w-0 flex-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="usage_count">使用次数</SelectItem>
+                        <SelectItem value="register_time">注册时间</SelectItem>
+                        <SelectItem value="record_time">记录时间</SelectItem>
+                        <SelectItem value="last_used_time">最后使用</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      aria-label={list.filters.sortOrder === 'desc' ? '切换为正序' : '切换为倒序'}
+                      title={list.filters.sortOrder === 'desc' ? '当前倒序，点击切换为正序' : '当前正序，点击切换为倒序'}
+                      onClick={() =>
+                        list.setFilter('sortOrder', list.filters.sortOrder === 'desc' ? 'asc' : 'desc')
+                      }
+                    >
+                      <ArrowUpDown className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -347,82 +318,62 @@ export function EmojiManagementPage() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
 
-              <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-3">
-                  {list.selectedCount > 0 && (
-                    <span className="text-muted-foreground text-sm">
-                      已选择 {list.selectedCount} 个表情包
-                    </span>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-9 items-center gap-1 border-2 px-1.5">
-                      {[
-                        { value: 'small' as const, label: '小', sizeClassName: 'h-3 w-3' },
-                        { value: 'medium' as const, label: '中', sizeClassName: 'h-4 w-4' },
-                        { value: 'large' as const, label: '大', sizeClassName: 'h-5 w-5' },
-                      ].map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => setCardSize(option.value)}
-                          className={`flex h-7 w-7 items-center justify-center transition-colors ${
-                            cardSize === option.value
-                              ? 'bg-primary text-primary-foreground'
-                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                          }`}
-                          aria-label={`${option.label}卡片`}
-                          title={`${option.label}卡片`}
-                        >
-                          <span className={`${option.sizeClassName} bg-current`} />
-                        </button>
-                      ))}
-                    </div>
+                {stats && (
+                  <div className="space-y-2">
+                    <Label>表情包状态</Label>
+                    <Select
+                      value={list.filters.status === 'all' ? 'adopted' : list.filters.status}
+                      onValueChange={(value) => list.setFilter('status', value as EmojiStatus)}
+                    >
+                      <SelectTrigger aria-label="表情包状态">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {statusOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label} ({option.count})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => list.refetch()}
-                    disabled={list.isFetching}
-                    aria-label="刷新"
-                    title="刷新"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${list.isFetching ? 'animate-spin' : ''}`} />
-                  </Button>
-
-                  <Button size="sm" onClick={() => setUploadDialogOpen(true)} className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    新增
-                  </Button>
-
-                  {list.selectedCount > 0 && (
-                    <>
-                      <Button variant="outline" size="sm" onClick={() => list.clearSelection()}>
-                        取消选择
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => setBatchDeleteDialogOpen(true)}
+                )}
+                <div className="space-y-2">
+                  <Label>卡片大小</Label>
+                  <div className="flex h-9 items-center gap-1 border-2 px-1.5">
+                    {[
+                      { value: 'small' as const, label: '小', sizeClassName: 'h-3 w-3' },
+                      { value: 'medium' as const, label: '中', sizeClassName: 'h-4 w-4' },
+                      { value: 'large' as const, label: '大', sizeClassName: 'h-5 w-5' },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setCardSize(option.value)}
+                        className={`flex h-7 w-7 items-center justify-center transition-colors ${
+                          cardSize === option.value
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        }`}
+                        aria-label={`${option.label}卡片`}
+                        title={`${option.label}卡片`}
                       >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        批量删除
-                      </Button>
-                    </>
-                  )}
+                        <span className={`${option.sizeClassName} bg-current`} />
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 sm:ml-auto">
-                  <Label htmlFor="emoji-page-size" className="text-sm whitespace-nowrap">
+                <div className="space-y-2">
+                  <Label htmlFor="emoji-page-size">
                     每页显示
                   </Label>
                   <Select
                     value={pageSize.toString()}
                     onValueChange={(value) => list.setPageSize(parseInt(value))}
                   >
-                    <SelectTrigger id="emoji-page-size" className="w-20">
+                    <SelectTrigger id="emoji-page-size" className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -433,9 +384,35 @@ export function EmojiManagementPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <Button onClick={() => setUploadDialogOpen(true)} className="col-span-2 gap-2 lg:col-span-3 xl:col-span-1">
+                  <Plus className="h-4 w-4" />
+                  新增
+                </Button>
               </div>
             </CardHeader>
           </Card>
+
+          {/* 选择操作栏独立于筛选卡片，滚动到列表后仍保持吸顶。 */}
+          {list.selectedCount > 0 && (
+            <Card className="sticky top-0 z-20">
+              <div className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
+                <span className="text-muted-foreground text-sm">
+                  已选择 {list.selectedCount} 个表情包
+                </span>
+                <Button variant="outline" size="sm" onClick={() => list.clearSelection()}>
+                  取消选择
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setBatchDeleteDialogOpen(true)}
+                >
+                  <Trash2 className="mr-1 h-4 w-4" />
+                  批量删除
+                </Button>
+              </div>
+            </Card>
+          )}
 
           {/* 表情包卡片列表 */}
           <Card>

@@ -48,6 +48,7 @@ def register_capability_impls(manager: "PluginRuntimeManager", supervisor: "Plug
     _register("database.count", manager._cap_database_count)
 
     _register("chat.get_all_streams", manager._cap_chat_get_all_streams)
+    _register("chat.get_avatar", manager._cap_chat_get_avatar)
     _register("chat.get_group_streams", manager._cap_chat_get_group_streams)
     _register("chat.get_private_streams", manager._cap_chat_get_private_streams)
     _register("chat.open_session", manager._cap_chat_open_session)

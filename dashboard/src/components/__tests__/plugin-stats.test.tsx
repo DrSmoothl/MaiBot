@@ -107,21 +107,46 @@ describe('PluginStats', () => {
     expect(screen.getByRole('button', { name: '修改评价' })).toBeInTheDocument()
   })
 
-  it('渲染最近评价列表，无评分的条目显示「仅评论」', async () => {
+  it('评分与评论分区展示：评论归入「最近评论」，纯评分归入「最近评分」', async () => {
     vi.mocked(getPluginStats).mockResolvedValue(
       makeStats({
         recent_ratings: [
           { user_id: 'u1', rating: null, comment: '非常好用', created_at: '2026-01-02T00:00:00Z' },
           { user_id: 'u2', rating: 5, created_at: '2026-01-03T00:00:00Z' },
+          { user_id: 'u3', rating: 4, comment: '还不错', created_at: '2026-01-04T00:00:00Z' },
         ],
       })
     )
 
     render(<PluginStats pluginId="demo-plugin" />)
 
-    expect(await screen.findByText('最近评价')).toBeInTheDocument()
-    expect(screen.getByText('仅评论')).toBeInTheDocument()
+    // 两个分区同时存在，旧的合并标题「最近评价」不再出现
+    expect(await screen.findByText('最近评论')).toBeInTheDocument()
+    expect(screen.getByText('最近评分')).toBeInTheDocument()
+    expect(screen.queryByText('最近评价')).not.toBeInTheDocument()
+
+    // 评论分区展示评论正文；无评分的评论条目标注「仅评论」
     expect(screen.getByText('非常好用')).toBeInTheDocument()
+    expect(screen.getByText('还不错')).toBeInTheDocument()
+    expect(screen.getByText('仅评论')).toBeInTheDocument()
+  })
+
+  it('只有纯评分条目时仅渲染「最近评分」，不渲染「最近评论」', async () => {
+    vi.mocked(getPluginStats).mockResolvedValue(
+      makeStats({
+        recent_ratings: [
+          { user_id: 'u2', rating: 5, created_at: '2026-01-03T00:00:00Z' },
+          { user_id: 'u4', rating: 3, created_at: '2026-01-05T00:00:00Z' },
+        ],
+      })
+    )
+
+    render(<PluginStats pluginId="demo-plugin" />)
+
+    expect(await screen.findByText('最近评分')).toBeInTheDocument()
+    expect(screen.queryByText('最近评论')).not.toBeInTheDocument()
+    // 纯评分条目没有评论正文，也不应出现「仅评论」标注
+    expect(screen.queryByText('仅评论')).not.toBeInTheDocument()
   })
 
   it('点赞成功后更新计数并弹出成功提示', async () => {

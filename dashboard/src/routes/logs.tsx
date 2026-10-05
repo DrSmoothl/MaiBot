@@ -647,7 +647,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
 
           <CollapsibleContent className="w-full space-y-2">
             {/* 级别筛选 */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
               <Select
                 value={levelFilter}
                 onValueChange={(value) => handleLevelFilterChange(value as LogLevelFilter)}
@@ -679,19 +679,19 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
             </div>
 
             {/* 时间筛选 */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'h-8 w-full justify-start text-left font-normal sm:flex-1',
+                      'h-8 min-w-0 w-full justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
                       !dateFrom && 'text-muted-foreground'
                     )}
                   >
-                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
-                    <span className="text-xs">
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate text-xs">
                       {dateFrom ? format(dateFrom, 'PP', { locale: zhCN }) : '开始日期'}
                     </span>
                   </Button>
@@ -713,12 +713,12 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'h-8 w-full justify-start text-left font-normal sm:flex-1',
+                      'h-8 min-w-0 w-full justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
                       !dateTo && 'text-muted-foreground'
                     )}
                   >
-                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
-                    <span className="text-xs">
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate text-xs">
                       {dateTo ? format(dateTo, 'PP', { locale: zhCN }) : '结束日期'}
                     </span>
                   </Button>
@@ -739,7 +739,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                   variant="outline"
                   size="sm"
                   onClick={clearDateFilter}
-                  className="h-8 w-full sm:w-auto"
+                  className="col-span-2 h-8 w-full sm:w-auto"
                 >
                   <X className="h-3.5 w-3.5 sm:mr-1" />
                   <span className="text-xs">清除</span>
@@ -1014,6 +1014,11 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
         }
 
         const rootRect = topbarTabsRoot.getBoundingClientRect()
+        // 千禧顶栏的页签参与正常布局，保持图标模式，不使用绝对定位布局的间距判定。
+        if (document.documentElement.dataset.dashboardStyle === 'millennium') {
+          setTopbarTabsCompact(true)
+          return
+        }
         const measureRect = measureEl.getBoundingClientRect()
         const workspaceRect = workspaceTabs.getBoundingClientRect()
         const workspaceMeasureRect = workspaceTabsMeasure.getBoundingClientRect()
@@ -1080,7 +1085,7 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
   }
 
   const renderTabSwitcher = (includeTopbarActions = false, compact = false) => {
-    const labelClassName = includeTopbarActions && compact ? 'sr-only' : undefined
+    const labelClassName = compact ? 'sr-only' : undefined
 
     return (
       <div className="flex min-w-0 items-center gap-2">
@@ -1128,14 +1133,20 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
       className="flex h-full min-h-0 flex-col overflow-hidden"
     >
       {topbarTabsPortal}
+      {/* 移动端：页签单独置顶并只显示图标，避免挤压下方工具栏按钮 */}
+      <div
+        data-log-viewer-mobile-switcher="true"
+        className="flex shrink-0 items-center border-b px-3 py-1 sm:hidden"
+      >
+        {renderTabSwitcher(false, true)}
+      </div>
       <div
         className={cn(
-          'flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-1 lg:px-4',
+          'flex shrink-0 items-center gap-2 border-b px-3 py-1 lg:px-4',
           ((activeTab === 'reasoning' && !reasoningToolbarVisible) || activeTab === 'statistics') &&
-            'sm:hidden'
+            'hidden'
         )}
       >
-        <div className="sm:hidden">{renderTabSwitcher()}</div>
         <div id={toolbarContainerId} className="flex min-w-0 flex-1 justify-end" />
       </div>
       {showSwitchHint && (

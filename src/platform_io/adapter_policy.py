@@ -130,24 +130,22 @@ class AdapterPolicyManager:
         return actions
 
     def get_adapter_policy(self, identity: AdapterIdentity) -> Dict[str, Dict[str, Any]]:
-        """返回一个精确适配器身份可由 WebUI 编辑的主程序规则。"""
+        """返回一个适配器身份可由 WebUI 编辑的主程序规则。
+
+        与 evaluate 使用同一匹配标准：在条目指定的身份字段与 identity 一致的
+        现有条目中取 specificity 最高者，保证面板读到运行时真正生效的那条。
+        """
 
         policy_match = self._identity_to_policy_match(identity)
         if not policy_match:
             raise ValueError("适配器身份不能为空")
 
         policy_data = self._load_policy_data()
-        exact_policy: Optional[Mapping[str, Any]] = None
-        adapters = policy_data.get("adapters")
-        if isinstance(adapters, list):
-            for item in adapters:
-                if isinstance(item, Mapping) and self._policy_identity_match(item) == policy_match:
-                    exact_policy = item
-                    break
+        best_policy = self._find_display_adapter_policy(policy_data.get("adapters"), identity)
 
         result: Dict[str, Dict[str, Any]] = {}
         for chat_type in sorted(_SUPPORTED_CHAT_TYPES):
-            typed_policy = self._resolve_typed_policy(exact_policy, chat_type) if exact_policy is not None else None
+            typed_policy = self._resolve_typed_policy(best_policy, chat_type) if best_policy is not None else None
             default_action = "inherit"
             allow_ids: List[str] = []
             deny_ids: List[str] = []
@@ -163,6 +161,54 @@ class AdapterPolicyManager:
                 "deny_ids": deny_ids,
             }
         return result
+
+    def has_adapter_policy_entry(self, identity: AdapterIdentity) -> bool:
+        """判断当前身份是否命中已有规则条目（供面板区分「专属规则」与「默认继承」）。"""
+
+        policy_data = self._load_policy_data()
+        return self._find_display_adapter_policy(policy_data.get("adapters"), identity) is not None
+
+    def list_plugin_entries(self, plugin_id: str) -> List[Dict[str, Any]]:
+        """列出某插件名下全部规则条目的身份摘要。
+
+        适配器换账号登录后旧账号条目不再生效但保留在配置中；
+        面板据此展示各账号的规则归属，避免把旧条目误读为当前生效规则。
+        """
+
+        normalized_plugin_id = str(plugin_id or "").strip()
+        if not normalized_plugin_id:
+            return []
+        policy_data = self._load_policy_data()
+        adapters = policy_data.get("adapters")
+        if not isinstance(adapters, list):
+            return []
+        entries: List[Dict[str, Any]] = []
+        for item in adapters:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("plugin_id") or "").strip() != normalized_plugin_id:
+                continue
+            chat_summary: Dict[str, Any] = {}
+            for chat_type in sorted(_SUPPORTED_CHAT_TYPES):
+                typed_policy = self._resolve_typed_policy(item, chat_type)
+                if typed_policy is None:
+                    continue
+                chat_summary[chat_type] = {
+                    "default_action": str(typed_policy.get("default_action") or "inherit"),
+                    "allow_ids": self._normalize_id_list(typed_policy.get("allow_ids")),
+                    "deny_ids": self._normalize_id_list(typed_policy.get("deny_ids")),
+                }
+            entries.append(
+                {
+                    "adapter_id": str(item.get("adapter_id") or ""),
+                    "account_id": str(item.get("account_id") or ""),
+                    "platform": str(item.get("platform") or ""),
+                    "gateway_name": str(item.get("gateway_name") or ""),
+                    "scope": str(item.get("scope") or ""),
+                    "rules": chat_summary,
+                }
+            )
+        return entries
 
     def set_adapter_policy(
         self,
@@ -195,7 +241,7 @@ class AdapterPolicyManager:
 
         policy_doc = self._load_policy_doc()
         adapters = self._ensure_adapter_tables(policy_doc)
-        adapter_policy = self._find_or_create_exact_adapter_policy(adapters, identity)
+        adapter_policy = self._find_or_create_adapter_policy(adapters, identity)
         for chat_type, normalized_policy in normalized_policies.items():
             chat_policy = self._ensure_chat_policy_table(adapter_policy, chat_type)
             default_action = normalized_policy["default_action"]
@@ -248,7 +294,7 @@ class AdapterPolicyManager:
 
         policy_doc = self._load_policy_doc()
         adapters = self._ensure_adapter_tables(policy_doc)
-        adapter_policy = self._find_or_create_exact_adapter_policy(adapters, identity)
+        adapter_policy = self._find_or_create_adapter_policy(adapters, identity)
         chat_policy = self._ensure_chat_policy_table(adapter_policy, normalized_chat_type)
 
         allow_ids = self._normalize_id_list(chat_policy.get("allow_ids"))
@@ -561,18 +607,6 @@ class AdapterPolicyManager:
         }
         return {key: str(value).strip() for key, value in policy_match.items() if str(value).strip()}
 
-    def _policy_identity_match(self, policy: Mapping[str, Any]) -> Dict[str, str]:
-        return self._identity_to_policy_match(
-            AdapterIdentity(
-                adapter_id=str(policy.get("adapter_id") or ""),
-                plugin_id=str(policy.get("plugin_id") or ""),
-                gateway_name=str(policy.get("gateway_name") or ""),
-                platform=str(policy.get("platform") or ""),
-                account_id=str(policy.get("account_id") or "") or None,
-                scope=str(policy.get("scope") or "") or None,
-            )
-        )
-
     @staticmethod
     def _policy_matches_chat_scope(
         policy: Mapping[str, Any],
@@ -610,17 +644,50 @@ class AdapterPolicyManager:
         policy_doc["adapters"] = next_adapters
         return next_adapters
 
-    def _find_or_create_exact_adapter_policy(self, adapters: AoT, identity: AdapterIdentity) -> Table:
-        policy_match = self._identity_to_policy_match(identity)
-        for item in adapters:
-            if not isinstance(item, Table):
-                continue
-            item_match = self._policy_identity_match(item)
-            if item_match == policy_match:
-                return item
+    def _find_display_adapter_policy(self, adapters: Any, identity: AdapterIdentity) -> Optional[Mapping[str, Any]]:
+        """为 WebUI 读取挑选应展示的规则条目。
+
+        先按与 evaluate 相同的匹配标准（条目指定的身份字段与 identity 一致）
+        取 specificity 最高的条目；身份仅含 plugin_id（适配器未运行、无法解析
+        完整身份）时，退回该插件名下 specificity 最高的条目，避免面板读到与
+        运行时脱靶的空模板。
+        """
+
+        if not isinstance(adapters, list):
+            return None
+        matched = [
+            item
+            for item in adapters
+            if isinstance(item, Mapping) and self._adapter_policy_matches(item, identity)
+        ]
+        if not matched and set(self._identity_to_policy_match(identity)) == {"plugin_id"}:
+            plugin_id = str(identity.plugin_id or "").strip()
+            matched = [
+                item
+                for item in adapters
+                if isinstance(item, Mapping) and str(item.get("plugin_id") or "").strip() == plugin_id
+            ]
+        if not matched:
+            return None
+        return max(matched, key=self._adapter_policy_specificity)
+
+    def _find_or_create_adapter_policy(self, adapters: AoT, identity: AdapterIdentity) -> Table:
+        """按运行时求值同一标准定位规则条目，找不到时按身份新建。
+
+        写入必须落在求值会命中的同一条目上，否则会写出一条被更高
+        specificity 条目永久遮蔽、保存成功却不生效的死规则。
+        """
+
+        matched = [
+            item
+            for item in adapters
+            if isinstance(item, Table) and self._adapter_policy_matches(item, identity)
+        ]
+        if matched:
+            return max(matched, key=self._adapter_policy_specificity)
 
         adapter_policy = tomlkit.table()
-        for key, value in policy_match.items():
+        for key, value in self._identity_to_policy_match(identity).items():
             adapter_policy[key] = value
         adapters.append(adapter_policy)
         return adapter_policy

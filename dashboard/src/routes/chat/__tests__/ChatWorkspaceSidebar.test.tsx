@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
-import type { ChatTab } from '../types'
-
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { SessionInfo, StageStatusInfo } from '@/routes/monitor/use-maisaka-monitor'
+
 import { ChatWorkspaceSidebar } from '../ChatWorkspaceSidebar'
-import { useResolvedAvatarUrl } from '@/lib/avatar-url'
+import type { ChatTab, ObservedMessagePreview } from '../types'
 
 // t 稳定引用，拼上关心的插值参数便于断言
 const { tMock } = vi.hoisted(() => ({
@@ -70,13 +70,14 @@ function renderSidebar(overrides: Partial<Parameters<typeof ChatWorkspaceSidebar
   const props: Parameters<typeof ChatWorkspaceSidebar>[0] = {
     tabs: [makeTab('webui-default')],
     activeTabId: 'webui-default',
-    userId: 'user-a',
-    userName: '人类',
-    isUploadingUserAvatar: false,
+    activeObservedSessionId: null,
+    observedSessions: new Map(),
+    observedStageStatuses: new Map(),
+    observedLatestMessages: new Map<string, ObservedMessagePreview>(),
     onSwitch: vi.fn(),
+    onSelectObserved: vi.fn(),
+    onOpenObservedSettings: vi.fn(),
     onClose: vi.fn(),
-    onUpdateUserAvatar: vi.fn(async () => {}),
-    onUpdateUserName: vi.fn(),
     ...overrides,
   }
   const view = render(<ChatWorkspaceSidebar {...props} />)
@@ -143,69 +144,122 @@ describe('ChatWorkspaceSidebar', () => {
     expect(container.querySelector('[class*="bg-muted-foreground/40"]')).not.toBeNull()
   })
 
-  it('编辑昵称后按 Enter 提交去除首尾空白', async () => {
+  it('展示全部观察聊天流并按活跃时间排序，展示状态与最新消息预览', async () => {
     const user = userEvent.setup()
-    const { props } = renderSidebar()
-
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
-    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
-    expect(input).toHaveValue('人类')
-
-    fireEvent.change(input, { target: { value: '  新名字  ' } })
-    fireEvent.keyDown(input, { key: 'Enter' })
-    expect(props.onUpdateUserName).toHaveBeenCalledWith('新名字')
-    // 提交后退出编辑态
-    expect(
-      screen.queryByPlaceholderText('chat.identity.namePlaceholder')
-    ).not.toBeInTheDocument()
-  })
-
-  it('空昵称提交时回退默认昵称（点击保存按钮）', async () => {
-    const user = userEvent.setup()
-    const { props } = renderSidebar()
-
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
-    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
-    fireEvent.change(input, { target: { value: '   ' } })
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.saveName' }))
-    expect(props.onUpdateUserName).toHaveBeenCalledWith('chat.userNameFallback')
-  })
-
-  it('按 Escape 取消编辑且不提交昵称', async () => {
-    const user = userEvent.setup()
-    const { props } = renderSidebar()
-
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.editName' }))
-    const input = screen.getByPlaceholderText('chat.identity.namePlaceholder')
-    fireEvent.change(input, { target: { value: '改了一半' } })
-    fireEvent.keyDown(input, { key: 'Escape' })
-
-    expect(
-      screen.queryByPlaceholderText('chat.identity.namePlaceholder')
-    ).not.toBeInTheDocument()
-    expect(props.onUpdateUserName).not.toHaveBeenCalled()
-    // 原昵称保持展示
-    expect(screen.getByText('人类')).toBeInTheDocument()
-  })
-
-  it('选择头像文件交给回调，上传中禁用入口', () => {
-    const { container, props, rerender } = renderSidebar({ userAvatarVersion: 2 })
-    // 有头像版本号时按 webui 平台解析用户头像
-    expect(useResolvedAvatarUrl).toHaveBeenCalledWith('webui', 'user-a', 'user', 2)
-
-    const file = new File(['avatar'], 'avatar.png', { type: 'image/png' })
-    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
-      target: { files: [file] },
+    const sessions = new Map<string, SessionInfo>([
+      [
+        'old-session',
+        {
+          sessionId: 'old-session',
+          sessionName: '旧群聊',
+          isGroupChat: true,
+          groupId: 'group-old',
+          platform: 'qq',
+          lastActivity: 1,
+          eventCount: 3,
+        },
+      ],
+      [
+        'new-session',
+        {
+          sessionId: 'new-session',
+          sessionName: '新的私聊',
+          isGroupChat: false,
+          userId: 'user-new',
+          platform: 'qq',
+          lastActivity: 2,
+          eventCount: 5,
+        },
+      ],
+    ])
+    const statuses = new Map<string, StageStatusInfo>([
+      [
+        'new-session',
+        {
+          sessionId: 'new-session',
+          stage: '正在思考',
+          detail: '',
+          roundText: '',
+          agentState: 'running',
+          stageStartedAt: 2,
+          updatedAt: 2,
+        },
+      ],
+    ])
+    const latestMessages = new Map<string, ObservedMessagePreview>([
+      // 群聊最新消息带发言者前缀
+      ['old-session', { speakerName: '张三', content: '大家好', mediaText: '' }],
+      // 私聊纯媒体消息退回媒体占位文案，且不拼发言者前缀
+      ['new-session', { speakerName: '李四', content: '', mediaText: '[图片]' }],
+    ])
+    const { props } = renderSidebar({
+      activeObservedSessionId: 'new-session',
+      observedSessions: sessions,
+      observedStageStatuses: statuses,
+      observedLatestMessages: latestMessages,
     })
-    expect(props.onUpdateUserAvatar).toHaveBeenCalledWith(file)
 
-    rerender(<ChatWorkspaceSidebar {...props} isUploadingUserAvatar />)
-    expect(screen.getByRole('button', { name: 'chat.sidebar.editAvatar' })).toBeDisabled()
-    expect(screen.getByText('chat.sidebar.savingAvatar')).toBeInTheDocument()
+    expect(screen.getByText('chat.sidebar.myChats')).toBeInTheDocument()
+    expect(screen.getByText('chat.sidebar.observedChats')).toBeInTheDocument()
+    const observedButtons = screen
+      .getAllByRole('button')
+      .filter((button) => /新的私聊|旧群聊/.test(button.textContent ?? ''))
+    expect(observedButtons.map((button) => button.textContent)).toEqual([
+      expect.stringContaining('新的私聊'),
+      expect.stringContaining('旧群聊'),
+    ])
+    expect(screen.getByText('正在思考')).toBeInTheDocument()
+    expect(screen.getByText('张三: 大家好')).toBeInTheDocument()
+    expect(screen.getByText('[图片]')).toBeInTheDocument()
+    // 不再展示「观察」徽章
+    expect(screen.queryByText('chat.sidebar.observedBadge')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^旧群聊/ }))
+    expect(props.onSelectObserved).toHaveBeenCalledWith('old-session')
+
+    await user.click(screen.getByRole('button', { name: 'chat.sidebar.openSettings:新的私聊' }))
+    expect(props.onOpenObservedSettings).toHaveBeenCalledWith('new-session')
+    expect(props.onSelectObserved).toHaveBeenCalledTimes(1)
   })
 
-  it('无头像版本号时不解析用户头像地址', () => {
-    renderSidebar()
-    expect(useResolvedAvatarUrl).toHaveBeenCalledWith(undefined, 'user-a', 'user', undefined)
+  it('搜索框按显示名过滤本地会话与观察聊天流，无结果时显示提示', async () => {
+    const user = userEvent.setup()
+    const sessions = new Map<string, SessionInfo>([
+      [
+        'session-a',
+        {
+          sessionId: 'session-a',
+          sessionName: '群聊A',
+          isGroupChat: true,
+          groupId: 'g-a',
+          platform: 'qq',
+          lastActivity: 1,
+          eventCount: 1,
+        },
+      ],
+    ])
+    renderSidebar({
+      tabs: [makeTab('webui-default'), makeVirtualTab('virtual-a')],
+      observedSessions: sessions,
+    })
+
+    const searchInput = screen.getByPlaceholderText('chat.sidebar.searchPlaceholder')
+    // 命中虚拟会话：本地分区只留匹配项，观察分区无匹配整体隐藏
+    await user.type(searchInput, '小明')
+    expect(screen.getByText('小明的私聊')).toBeInTheDocument()
+    expect(screen.queryByText('机器人-webui-default')).not.toBeInTheDocument()
+    expect(screen.queryByText('群聊A')).not.toBeInTheDocument()
+    expect(screen.queryByText('chat.sidebar.observedChats')).not.toBeInTheDocument()
+
+    // 全部无结果时两个分区都隐藏，显示统一提示
+    await user.type(searchInput, 'xyz')
+    expect(screen.getByText('chat.sidebar.noSearchResults')).toBeInTheDocument()
+    expect(screen.queryByText('chat.sidebar.myChats')).not.toBeInTheDocument()
+
+    // 清空后恢复完整列表
+    await user.clear(searchInput)
+    expect(screen.getByText('机器人-webui-default')).toBeInTheDocument()
+    expect(screen.getByText('群聊A')).toBeInTheDocument()
+    expect(screen.queryByText('chat.sidebar.noSearchResults')).not.toBeInTheDocument()
   })
 })

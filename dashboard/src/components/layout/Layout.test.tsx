@@ -108,7 +108,11 @@ vi.mock('@/components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => children,
 }))
 vi.mock('@/components/use-theme', () => ({
-  useTheme: () => ({ setTheme: vi.fn(), theme: layoutMocks.theme }),
+  useTheme: () => ({ setTheme: vi.fn(), theme: layoutMocks.theme, themeConfig: { dashboardStyle: 'default' } }),
+}))
+vi.mock('@/lib/plugin-webui', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/plugin-webui')>(),
+  usePluginWebUI: () => ({ extensions: [], loading: false, error: null, preferences: { hidden: [], order: [] } }),
 }))
 vi.mock('@/hooks/use-auth', () => ({
   useAuthGuard: () => ({ checking: layoutMocks.checking }),
@@ -258,14 +262,14 @@ describe('Layout 工作区切换', () => {
     // 冲刷 UpdateNoticeDialog 的 lazy import，避免首个用例在 act 外完成挂起
     await flushMicrotasks()
 
-    fireEvent.click(screen.getByRole('button', { name: '切换到麦麦聊天' }))
+    fireEvent.click(screen.getByRole('button', { name: '切换到日志' }))
     act(() => {
       vi.advanceTimersByTime(280 + 180)
     })
-    expect(routerMocks.navigate).toHaveBeenCalledWith({ to: '/chat' })
+    expect(routerMocks.navigate).toHaveBeenCalledWith({ to: '/logs' })
 
     // 模拟 pathname 已切换，但 Outlet 仍短暂保留旧首页的并发提交窗口。
-    routerMocks.pathname = '/chat'
+    routerMocks.pathname = '/logs'
     routerMocks.status = 'pending'
     view.rerender(
       <Layout>
@@ -281,7 +285,7 @@ describe('Layout 工作区切换', () => {
     routerMocks.status = 'idle'
     view.rerender(
       <Layout>
-        <div>聊天内容</div>
+        <div>日志内容</div>
       </Layout>
     )
     act(() => {
@@ -290,7 +294,7 @@ describe('Layout 工作区切换', () => {
 
     expect(workspaceContent).not.toHaveClass('invisible')
     expect(screen.queryByText('首页内容')).not.toBeInTheDocument()
-    expect(screen.getByText('聊天内容')).toBeInTheDocument()
+    expect(screen.getByText('日志内容')).toBeInTheDocument()
   })
 
   it('侧栏宽度使用 CSS 过渡且不启用会拉伸内容的 FLIP 尺寸缩放', () => {
@@ -349,7 +353,7 @@ describe('Layout 工作区切换', () => {
   })
 
   it('非设置工作区切走时跳过侧栏退场，导航失败后恢复可交互', async () => {
-    routerMocks.pathname = '/chat'
+    routerMocks.pathname = '/logs'
     routerMocks.navigate.mockImplementation(() => Promise.reject(new Error('导航失败')))
     const { container } = render(
       <Layout>
@@ -357,7 +361,7 @@ describe('Layout 工作区切换', () => {
       </Layout>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '切换到日志' }))
+    fireEvent.click(screen.getByRole('button', { name: '切换到设置' }))
     act(() => {
       vi.advanceTimersByTime(279)
     })
@@ -366,11 +370,11 @@ describe('Layout 工作区切换', () => {
     act(() => {
       vi.advanceTimersByTime(1)
     })
-    expect(routerMocks.navigate).toHaveBeenCalledWith({ to: '/logs' })
+    expect(routerMocks.navigate).toHaveBeenCalledWith({ to: '/' })
     await flushMicrotasks()
 
     expect(getWorkspaceContent(container)).not.toHaveClass('invisible')
-    expect(getHeader()).toHaveAttribute('data-workspace-mode', 'chat')
+    expect(getHeader()).toHaveAttribute('data-workspace-mode', 'logs')
   })
 
   it('切回设置工作区时等路由空闲后再侧栏入场', () => {
@@ -613,7 +617,7 @@ describe('Layout 壳层、快捷键与公告入口', () => {
   })
 
   it.each([
-    ['/chat', 'chat', false],
+    ['/chat', 'settings', false],
     ['/logs', 'logs', false],
     ['/statistics', 'logs', false],
     ['/reasoning-process/detail', 'logs', false],
@@ -654,7 +658,7 @@ describe('Layout 壳层、快捷键与公告入口', () => {
     expect(getMain()).toHaveClass('bg-transparent')
   })
 
-  it('聊天工作区主区透明且不滚动，system 主题跟随 matchMedia', () => {
+  it('聊天页面保留设置工作区布局，system 主题跟随 matchMedia', () => {
     routerMocks.pathname = '/chat'
     layoutMocks.theme = 'system'
     vi.spyOn(window, 'matchMedia').mockImplementation(
@@ -676,7 +680,7 @@ describe('Layout 壳层、快捷键与公告入口', () => {
         <div>聊天内容</div>
       </Layout>
     )
-    expect(getMain()).toHaveClass('bg-transparent', 'overflow-hidden')
+    expect(getMain()).toHaveClass('bg-background', 'overflow-y-auto')
     expect(getHeader()).toHaveAttribute('data-actual-theme', 'dark')
   })
 

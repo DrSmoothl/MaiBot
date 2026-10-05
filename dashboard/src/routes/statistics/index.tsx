@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ComponentProps } from 'react'
 import { AlertCircle, CalendarClock, ExternalLink, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from 'recharts'
@@ -107,6 +107,45 @@ function formatDateTime(value: string, locale: string): string {
     minute: '2-digit',
     second: '2-digit',
   })
+}
+
+type StatisticsTooltipContentProps = ComponentProps<typeof ChartTooltipContent> & {
+  valueKind: 'currency' | 'count'
+  locale: string
+}
+
+/** 统一本页图表提示框：关闭位移动画改用淡入，并同时展示条目名与格式化后的数值 */
+function StatisticsTooltipContent({
+  valueKind,
+  locale,
+  className,
+  ...props
+}: StatisticsTooltipContentProps) {
+  const formatValue = (value: number | string) =>
+    valueKind === 'currency'
+      ? formatCurrency(Number(value), locale)
+      : formatNumber(Number(value), locale)
+
+  return (
+    <ChartTooltipContent
+      {...props}
+      className={cn('animate-fade-in max-w-64', className)}
+      formatter={(value, name, item) => (
+        <>
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+            style={{ backgroundColor: item.payload.fill ?? item.color }}
+          />
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3 leading-none">
+            <span className="text-muted-foreground break-words">{name}</span>
+            <span className="text-foreground shrink-0 font-mono font-medium tabular-nums">
+              {formatValue(value)}
+            </span>
+          </div>
+        </>
+      )}
+    />
+  )
 }
 
 function StatisticsPageSkeleton() {
@@ -240,7 +279,10 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
       <Table className="min-w-[1520px]">
         <TableHeader className="bg-muted/60">
           <TableRow>
-            <TableHead className="bg-muted sticky left-0 z-10 min-w-52 font-semibold">
+            <TableHead
+              data-statistics-sticky-cell="true"
+              className="bg-muted sticky left-0 z-10 min-w-32 font-semibold sm:min-w-52"
+            >
               {t('statisticsPage.table.name')}
             </TableHead>
             <TableHead>{t('statisticsPage.table.requests')}</TableHead>
@@ -262,7 +304,8 @@ function BreakdownTable({ rows, locale }: { rows: DetailedStatisticsBreakdown[];
           {rows.map((row) => (
             <TableRow key={row.name}>
               <TableCell
-                className="bg-card sticky left-0 z-10 max-w-64 truncate font-medium"
+                data-statistics-sticky-cell="true"
+                className="bg-card sticky left-0 z-10 max-w-40 truncate font-medium sm:max-w-64"
                 title={row.name}
               >
                 {row.name}
@@ -337,6 +380,7 @@ function DetailTables({ period, locale }: { period: DetailedStatisticsPeriod; lo
         <Tabs defaultValue="models">
           <TabsList className="border-border/70 bg-muted/40 mb-4 h-auto w-full justify-start overflow-x-auto rounded-md border p-1">
             <TabsTrigger value="models">{t('statisticsPage.breakdowns.models')}</TabsTrigger>
+            <TabsTrigger value="taskGroups">{t('statisticsPage.breakdowns.taskGroups')}</TabsTrigger>
             <TabsTrigger value="modules">{t('statisticsPage.breakdowns.modules')}</TabsTrigger>
             <TabsTrigger value="requestTypes">
               {t('statisticsPage.breakdowns.requestTypes')}
@@ -345,6 +389,9 @@ function DetailTables({ period, locale }: { period: DetailedStatisticsPeriod; lo
           </TabsList>
           <TabsContent value="models" className="mt-0">
             <BreakdownTable rows={period.models} locale={locale} />
+          </TabsContent>
+          <TabsContent value="taskGroups" className="mt-0">
+            <BreakdownTable rows={period.task_groups} locale={locale} />
           </TabsContent>
           <TabsContent value="modules" className="mt-0">
             <BreakdownTable rows={period.modules} locale={locale} />
@@ -392,6 +439,11 @@ function DistributionChart({
     })
   }
 
+  const formatValue = (value: number | string) =>
+    valueKind === 'currency'
+      ? formatCurrency(Number(value), locale)
+      : formatNumber(Number(value), locale)
+
   return (
     <Card className="min-w-0 overflow-hidden shadow-sm">
       <CardHeader className="border-b pb-3">
@@ -403,26 +455,23 @@ function DistributionChart({
         {data.length === 0 ? (
           <EmptyState />
         ) : (
-          <>
-            <ChartContainer config={config} className="aspect-auto h-[280px] w-full min-w-0">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <ChartContainer
+              config={config}
+              className="aspect-auto h-[300px] w-full min-w-0 sm:h-[340px] sm:flex-1"
+            >
               <PieChart>
+                {/* 关闭 recharts 默认的位移过渡，改用提示框内容淡入 */}
                 <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      formatter={(value) =>
-                        valueKind === 'currency'
-                          ? formatCurrency(Number(value), locale)
-                          : formatNumber(Number(value), locale)
-                      }
-                    />
-                  }
+                  isAnimationActive={false}
+                  content={<StatisticsTooltipContent valueKind={valueKind} locale={locale} />}
                 />
                 <Pie
                   data={visibleData}
                   dataKey="value"
                   nameKey="name"
-                  innerRadius={54}
-                  outerRadius={96}
+                  innerRadius="52%"
+                  outerRadius="88%"
                   paddingAngle={1}
                   isAnimationActive={false}
                 >
@@ -432,7 +481,7 @@ function DistributionChart({
                 </Pie>
               </PieChart>
             </ChartContainer>
-            <div className="mt-2 grid max-h-28 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+            <div className="grid max-h-40 shrink-0 grid-cols-1 content-start gap-1 overflow-y-auto sm:max-h-[340px] sm:w-44 lg:w-52">
               {chartData.map((item) => {
                 const hidden = hiddenNames.has(item.name)
                 return (
@@ -452,16 +501,12 @@ function DistributionChart({
                       style={{ backgroundColor: item.fill }}
                     />
                     <span className="min-w-0 flex-1 truncate">{item.name}</span>
-                    <span className="shrink-0 tabular-nums">
-                      {valueKind === 'currency'
-                        ? formatCurrency(item.value, locale)
-                        : formatNumber(item.value, locale)}
-                    </span>
+                    <span className="shrink-0 tabular-nums">{formatValue(item.value)}</span>
                   </button>
                 )
               })}
             </div>
-          </>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -597,15 +642,8 @@ function MultiSeriesChart({
                   }
                 />
                 <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      formatter={(value) =>
-                        valueKind === 'currency'
-                          ? formatCurrency(Number(value), locale)
-                          : formatNumber(Number(value), locale)
-                      }
-                    />
-                  }
+                  isAnimationActive={false}
+                  content={<StatisticsTooltipContent valueKind={valueKind} locale={locale} />}
                 />
                 {definitions.map((definition) => (
                   <Line
@@ -695,18 +733,12 @@ function SingleSeriesChart({
               }
             />
             <ChartTooltip
-              content={
-                <ChartTooltipContent
-                  formatter={(value) =>
-                    valueKind === 'currency'
-                      ? formatCurrency(Number(value), locale)
-                      : formatNumber(Number(value), locale)
-                  }
-                />
-              }
+              isAnimationActive={false}
+              content={<StatisticsTooltipContent valueKind={valueKind} locale={locale} />}
             />
             <Line
               dataKey="value"
+              name={title}
               stroke="var(--color-value)"
               strokeWidth={2}
               dot={false}

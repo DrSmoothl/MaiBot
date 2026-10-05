@@ -8,6 +8,7 @@ import {
   HardDrive,
   Hash,
   Home,
+  MessageCircle,
   MessageSquare,
   Puzzle,
   Settings,
@@ -21,8 +22,7 @@ import { createStreamlineIcon } from '@/components/ui/streamline-menu-icon'
 import type { MenuIcon, MenuSection } from './types'
 
 const HomeIcon = createStreamlineIcon('allergens-fish-remix', Home)
-const MonitorIcon = createStreamlineIcon('desktop-chat-remix', Activity)
-const ChatManagementIcon = createStreamlineIcon('chat-two-bubbles-oval-remix', MessageSquare)
+const LocalChatIcon = createStreamlineIcon('desktop-chat-remix', MessageCircle)
 const BotConfigIcon = createStreamlineIcon('page-setting-remix', Settings)
 const ModelIcon = createStreamlineIcon('module-remix', Box)
 const PromptIcon = createStreamlineIcon('script-1-remix', FileText)
@@ -34,7 +34,6 @@ const KnowledgeIcon = createStreamlineIcon('user-sticker-square-remix', Database
 const PluginConfigIcon = createStreamlineIcon('application-add-remix', Puzzle)
 const AdapterManagementIcon = createStreamlineIcon('router-wifi-network-solid', Wifi)
 const PluginMarketIcon = createStreamlineIcon('store-2-solid', Store)
-const McpIcon = createStreamlineIcon('router-wifi-network-solid', Wifi)
 const DataTransferIcon: MenuIcon = (props) => createElement(HardDrive, props)
 const ReplyEffectsIcon: MenuIcon = (props) => createElement(Activity, props)
 
@@ -48,8 +47,7 @@ export const menuSections: MenuSection[] = [
         path: '/',
         searchDescription: 'search.items.homeDesc',
       },
-      { icon: MonitorIcon, label: 'sidebar.menu.maisakaMonitor', path: '/planner-monitor' },
-      { icon: ChatManagementIcon, label: 'sidebar.menu.chatManagement', path: '/chat-management' },
+      { icon: LocalChatIcon, label: 'workspace.chat', path: '/chat' },
     ],
   },
   {
@@ -120,7 +118,6 @@ export const menuSections: MenuSection[] = [
         path: '/plugins',
         searchDescription: 'search.items.pluginsDesc',
       },
-      { icon: McpIcon, label: 'sidebar.menu.mcpSettings', path: '/mcp-settings' },
     ],
   },
   {

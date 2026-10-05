@@ -9,7 +9,6 @@ import json
 import mimetypes
 import os
 import re
-import shutil
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,6 +27,7 @@ from src.llm_models.request_snapshot import (
     serialize_generation_attempt,
     serialize_context_item_snapshot,
 )
+from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
 from src.services.llm_service import generate as generate_llm_response
 from src.services.bot_account_service import get_all_bot_account_pairs
 from src.services.service_task_resolver import get_available_models
@@ -308,6 +308,91 @@ class ReasoningPromptContentResponse(BaseModel):
     completion_tokens: int | None = None
     total_tokens: int | None = None
     message_avatars: dict[str, ReasoningPromptMessageAvatar] = Field(default_factory=dict)
+
+
+class ChatActiveJargonEntry(BaseModel):
+    name: str
+    meaning: str
+
+
+class ChatActiveContextResponse(BaseModel):
+    """当前运行聊天流的上下文与工具概览。"""
+
+    memory: list[str] = Field(default_factory=list)
+    expressions: list[str] = Field(default_factory=list)
+    jargon: list[ChatActiveJargonEntry] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    runtime_active: bool = False
+    replyer_timestamp: int | None = None
+
+
+def _latest_replyer_expressions(session_id: str) -> tuple[list[str], int | None]:
+    """读取当前聊天流最近一次 Replyer 请求实际注入的表达习惯。"""
+
+    from src.maisaka.display.preview_path_utils import build_preview_chat_dir_name
+
+    replyer_dir = PROMPT_LOG_ROOT / "replyer" / build_preview_chat_dir_name(session_id)
+    if not replyer_dir.is_dir():
+        return [], None
+    for snapshot in sorted(replyer_dir.glob("*.json"), key=lambda path: path.stem, reverse=True):
+        if not snapshot.stem.isdigit():
+            continue
+        try:
+            payload = json.loads(snapshot.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(payload, dict) or not isinstance(payload.get("request_items"), list):
+            continue
+        expressions: list[str] = []
+        for item in payload["request_items"]:
+            if not isinstance(item, dict) or not isinstance(item.get("parts"), list):
+                continue
+            for part in item["parts"]:
+                if not isinstance(part, dict) or not isinstance(part.get("text"), str):
+                    continue
+                text = part["text"].strip()
+                if text.startswith("【表达习惯参考"):
+                    expressions.extend(
+                        line.removeprefix("- ").strip()
+                        for line in text.splitlines()[1:]
+                        if line.strip()
+                    )
+        return expressions, int(snapshot.stem)
+    return [], None
+
+
+@router.get("/active-context", response_model=ChatActiveContextResponse)
+def get_chat_active_context(session_id: str = Query(..., min_length=1)):
+    """读取运行中聊天流保留的回想、黑话，以及可用表达方式。"""
+
+    from src.chat.heart_flow.heartflow_manager import heartflow_manager
+    from src.maisaka.context.messages import ReferenceMessage, ReferenceMessageType
+    from src.maisaka.memory.mid_term import is_mid_term_memory_message
+
+    chat_manager = _get_chat_manager()
+    if chat_manager.get_existing_session_by_session_id(session_id) is None:
+        raise HTTPException(status_code=404, detail="聊天流不存在")
+    runtime = heartflow_manager.heartflow_chat_list.get(session_id)
+    history = list(runtime._chat_history) if runtime is not None else []
+    memory = [message.visible_text for message in history if is_mid_term_memory_message(message)]
+    jargon_by_name: dict[str, str] = {}
+    for message in history:
+        if isinstance(message, ReferenceMessage) and message.reference_type == ReferenceMessageType.JARGON:
+            for name, meaning in message.jargon_entries:
+                jargon_by_name[name] = meaning
+    expressions, replyer_timestamp = _latest_replyer_expressions(session_id) if runtime is not None else ([], None)
+    tool_names = list(runtime._chat_loop_service._active_tool_names) if runtime is not None else []
+
+    return ChatActiveContextResponse(
+        memory=memory,
+        expressions=expressions,
+        jargon=[
+            ChatActiveJargonEntry(name=name, meaning=meaning) for name, meaning in jargon_by_name.items()
+        ],
+        tools=tool_names,
+        runtime_active=runtime is not None,
+        replyer_timestamp=replyer_timestamp,
+    )
 
 
 class ReasoningReplayRequest(BaseModel):
@@ -1860,7 +1945,7 @@ def _should_replace_duplicate_replyer_record(existing_item: ReasoningPromptFile,
 
 
 @router.get("/stages", response_model=ReasoningPromptStagesResponse)
-async def list_reasoning_prompt_stages():
+def list_reasoning_prompt_stages():
     """只列出 logs/maisaka_prompt 下的推理过程类型概览。"""
 
     stage_infos = _list_stage_infos()
@@ -1871,7 +1956,7 @@ async def list_reasoning_prompt_stages():
 
 
 @router.delete("/stages/{stage}", response_model=ReasoningPromptClearStageResponse)
-async def clear_reasoning_prompt_stage(stage: str):
+def clear_reasoning_prompt_stage(stage: str):
     """清空指定类型的推理过程日志。"""
 
     stage_name = _resolve_stage_name(stage)
@@ -1883,13 +1968,12 @@ async def clear_reasoning_prompt_stage(stage: str):
     if not stage_dir.is_dir():
         raise HTTPException(status_code=400, detail="推理过程路径不是目录")
 
-    deleted_files = sum(1 for path in stage_dir.rglob("*") if path.is_file())
-    shutil.rmtree(stage_dir)
+    deleted_files = PromptPreviewLogger.clear_stage(stage_dir)
     return ReasoningPromptClearStageResponse(stage=stage_name, deleted_files=deleted_files)
 
 
 @router.get("/files", response_model=ReasoningPromptListResponse)
-async def list_reasoning_prompt_files(
+def list_reasoning_prompt_files(
     stage: str = Query("planner"),
     session: str = Query("auto"),
     action: str = Query(""),
@@ -1980,7 +2064,7 @@ async def list_reasoning_prompt_files(
 
 
 @router.get("/file", response_model=ReasoningPromptContentResponse)
-async def get_reasoning_prompt_file(path: str = Query(...)):
+def get_reasoning_prompt_file(path: str = Query(...)):
     """读取推理过程 txt/json 日志内容。"""
 
     file_path = _resolve_prompt_log_path(path, {".txt", ".json"})
@@ -2017,7 +2101,7 @@ async def get_reasoning_prompt_file(path: str = Query(...)):
 
 
 @router.get("/image")
-async def get_reasoning_prompt_image(path: str = Query(...)):
+def get_reasoning_prompt_image(path: str = Query(...)):
     """读取推理记录引用的本地图片，只允许访问既有图片缓存目录。"""
 
     try:
@@ -2091,7 +2175,7 @@ async def replay_reasoning_prompt(request: ReasoningReplayRequest):
 
 
 @router.get("/html")
-async def get_reasoning_prompt_html(path: str = Query(...)):
+def get_reasoning_prompt_html(path: str = Query(...)):
     """预览推理过程 html 日志内容。"""
 
     file_path = _resolve_prompt_log_path(path, {".html"})

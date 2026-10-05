@@ -38,6 +38,7 @@ import { useLocalCacheMetrics } from './home/hooks/useLocalCacheMetrics'
 import { useMaibotVersion } from './home/hooks/useMaibotVersion'
 import { HitokotoEditorDialog } from './home/HitokotoEditorDialog'
 import { HomeCardManager, type HomeCardDefinition } from './home/HomeCardManager'
+import { NewsCard } from './home/NewsCard'
 import { usePluginHomeCards } from './home/hooks/usePluginHomeCards'
 import { useQuickShortcuts } from './home/hooks/useQuickShortcuts'
 import { useReviewStats } from './home/hooks/useReviewStats'
@@ -108,7 +109,7 @@ function FeatureStatusLight({
       <span
         data-dashboard-feature-status-light="true"
         className={cn(
-          'h-2.5 w-2.5 shrink-0 rounded-full border-0 transition-[background-color,opacity]',
+          'h-2.5 w-2.5 shrink-0 rounded-none border-0 transition-[background-color,opacity]',
           enabled ? 'bg-primary opacity-100' : 'bg-muted-foreground/25 opacity-45'
         )}
       />
@@ -545,7 +546,7 @@ function IndexPageContent() {
       source: 'builtin',
       render: () => (
         <Card className="h-full">
-          <CardContent data-home-titleless-content="true" className="relative pt-4 sm:pt-5">
+          <CardContent data-home-titleless-content="true" className="relative flex flex-col justify-center py-3 sm:py-3">
             {selectedQuickShortcuts.length === 0 ? (
               <div className="text-muted-foreground flex flex-col gap-3 rounded-lg border border-dashed p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
                 <span>{t('home.quickActions.empty')}</span>
@@ -580,6 +581,9 @@ function IndexPageContent() {
                   )
 
                   if (shortcut.href) {
+                    const internalUrl = shortcut.external
+                      ? null
+                      : new URL(shortcut.href, window.location.origin)
                     return (
                       <Button
                         key={shortcut.id}
@@ -588,14 +592,25 @@ function IndexPageContent() {
                         asChild
                         className="max-w-[14rem] justify-start gap-2 overflow-hidden sm:max-w-[18rem]"
                       >
-                        <a
-                          href={shortcut.href}
-                          target={shortcut.external ? '_blank' : undefined}
-                          rel={shortcut.external ? 'noopener noreferrer' : undefined}
-                          title={shortcut.label}
-                        >
-                          {content}
-                        </a>
+                        {internalUrl ? (
+                          <Link
+                            to={internalUrl.pathname}
+                            search={Object.fromEntries(internalUrl.searchParams)}
+                            hash={internalUrl.hash.slice(1)}
+                            title={shortcut.label}
+                          >
+                            {content}
+                          </Link>
+                        ) : (
+                          <a
+                            href={shortcut.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={shortcut.label}
+                          >
+                            {content}
+                          </a>
+                        )}
                       </Button>
                     )
                   }
@@ -624,12 +639,23 @@ function IndexPageContent() {
       id: 'builtin:stats-overview',
       title: t('home.stats.overviewTitle'),
       description: t('home.stats.overviewDesc'),
-      width: 'wide',
+      width: 'large',
       allowedWidths: ['large', 'wide', 'full'],
       preferredHeight: 'low',
       category: 'statistics',
       source: 'builtin',
       render: () => <StatisticsOverviewCard />,
+    },
+    {
+      id: 'builtin:news',
+      title: t('home.news.title'),
+      description: t('home.news.description'),
+      width: 'small',
+      allowedWidths: ['small', 'medium', 'large'],
+      preferredHeight: 'low',
+      category: 'status',
+      source: 'builtin',
+      render: () => <NewsCard />,
     },
     {
       id: 'builtin:prompt-cache',
@@ -916,7 +942,7 @@ function IndexPageContent() {
   const versionsMismatch =
     versionCompatibility?.status !== undefined && versionCompatibility.status !== 'compatible'
   return (
-    <ScrollArea className="h-full">
+    <ScrollArea className="h-full" scrollbars="vertical">
       <div data-home-page="true" className="space-y-2 p-4 sm:space-y-4 sm:p-6">
         {dashboardError && (
           <Card className="border-destructive/50 bg-destructive/5">
