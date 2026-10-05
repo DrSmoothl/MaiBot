@@ -148,6 +148,7 @@ class PromptPreviewAccess:
     record_uri: str
     preview_web_uri: str
     reasoning_web_uri: str | None
+    payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -916,6 +917,7 @@ class PromptCLIVisualizer:
             record_link_text="点击打开 JSON 记录",
         )
         return PromptPreviewAccess(
+            payload=payload,
             body=body,
             record_path=record_path,
             record_uri=build_file_uri(record_path),
@@ -937,11 +939,12 @@ class PromptCLIVisualizer:
         output_items: Sequence[Any] = (),
         metadata: Mapping[str, Any] | None = None,
         generation_attempts: Sequence[GenerationAttemptInput] = (),
+        keep_base64: bool | None = None,
     ) -> PromptPreviewAccess:
         """保存 Prompt 预览文件，并返回 CLI 展示入口与浏览器可打开的 URI。"""
 
         with PromptPreviewLogger.collect_image_assets():
-            keep_json_base64 = cls._should_keep_prompt_preview_json_base64()
+            keep_json_base64 = cls._should_keep_prompt_preview_json_base64() if keep_base64 is None else keep_base64
             return cls._save_structured_preview_access(
                 chat_id=chat_id,
                 category=category,

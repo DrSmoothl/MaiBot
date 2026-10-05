@@ -188,7 +188,7 @@ class GitMirrorConfig:
 
         return True
 
-    def _save_config(self) -> None:
+    def _save_config(self, raise_on_error: bool = False) -> None:
         """保存配置到文件"""
         try:
             # 确保目录存在
@@ -210,6 +210,20 @@ class GitMirrorConfig:
             logger.debug(f"配置已保存到 {self.config_file}")
         except Exception as e:
             logger.error(f"保存配置文件失败: {e}")
+            if raise_on_error:
+                raise
+
+    def reset_default_mirrors(self) -> List[Dict[str, Any]]:
+        """恢复内置镜像源列表；保存失败时保留原来的内存配置。"""
+        previous_mirrors = self.mirrors
+        current_time = datetime.now().isoformat()
+        self.mirrors = [{**mirror, "created_at": current_time} for mirror in self.DEFAULT_MIRRORS]
+        try:
+            self._save_config(raise_on_error=True)
+        except Exception:
+            self.mirrors = previous_mirrors
+            raise
+        return self.get_all_mirrors()
 
     def get_all_mirrors(self) -> List[Dict[str, Any]]:
         """获取所有镜像源"""

@@ -9,6 +9,7 @@ import subprocess
 
 import pytest
 
+from src.plugin_runtime import integration
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator
 from src.webui.routers.plugin import management, release_install, releases, support
 
@@ -40,9 +41,11 @@ def entry(*versions: releases.PluginRelease, **overrides: Any) -> releases.Plugi
 
 @pytest.fixture(autouse=True)
 def validator_versions(monkeypatch):
-    monkeypatch.setattr(releases, "ManifestValidator", lambda **kwargs: ManifestValidator(
-        host_version="1.3.0", sdk_version="2.8.1", **kwargs
-    ))
+    monkeypatch.setattr(releases, "use_github_market_data", lambda: True)
+    def validator(**kwargs):
+        return ManifestValidator(host_version="1.3.0", sdk_version="2.8.1", **kwargs)
+    monkeypatch.setattr(releases, "ManifestValidator", validator)
+    monkeypatch.setattr(release_install, "ManifestValidator", validator)
 
 
 def test_recommendation_filters_host_sdk_protocol_prerelease_and_yanked():
@@ -80,6 +83,8 @@ def test_preview_requires_explicit_selection(monkeypatch):
 
 @pytest.fixture
 def local_install(tmp_path, monkeypatch):
+    manager = integration.PluginRuntimeManager()
+    monkeypatch.setattr(integration, "get_plugin_runtime_manager", lambda: manager)
     plugins = tmp_path / "plugins"
     plugins.mkdir()
     repository = tmp_path / "repository"
@@ -204,6 +209,19 @@ def test_failed_directory_swap_restores_previous_install(local_install, monkeypa
     assert install(client).status_code == 200
     target = support.resolve_installed_plugin_path("example.demo")
     (target / "history.db").write_bytes(b"keep me")
+    manager = integration.get_plugin_runtime_manager()
+    events = []
+    async def stop(plugin_id):
+        assert manager._plugin_file_update_lock.locked()
+        events.append("stop")
+        return [plugin_id]
+    async def resume(plugin_ids):
+        assert manager._plugin_file_update_lock.locked()
+        assert plugin_ids == ["example.demo"]
+        assert (target / "history.db").read_bytes() == b"keep me"
+        events.append("resume")
+    monkeypatch.setattr(release_install, "_stop_runtime", stop)
+    monkeypatch.setattr(release_install, "_resume_runtime", resume)
     original_rename = Path.rename
     def fail_candidate_swap(path, destination):
         if path.parent.name == ".update_tmp" and destination == target:
@@ -216,6 +234,37 @@ def test_failed_directory_swap_restores_previous_install(local_install, monkeypa
     assert response.status_code == 500
     assert (target / "history.db").read_bytes() == b"keep me"
     assert release_install.read_release_receipt(target)["version"] == "1.0.0"
+    assert events == ["stop", "resume"]
+    assert not manager._plugin_file_update_lock.locked()
+
+
+def test_update_resumes_runtime_before_releasing_transaction(local_install, monkeypatch):
+    client, _, _, _, _ = local_install
+    assert install(client).status_code == 200
+    target = support.resolve_installed_plugin_path("example.demo")
+    manager = integration.get_plugin_runtime_manager()
+    events = []
+
+    async def stop(plugin_id):
+        assert manager._plugin_file_update_lock.locked()
+        events.append("stop")
+        return [plugin_id]
+
+    async def resume(plugin_ids):
+        assert manager._plugin_file_update_lock.locked()
+        assert plugin_ids == ["example.demo"]
+        assert release_install.read_release_receipt(target)["pinned"] is True
+        events.append("resume")
+
+    monkeypatch.setattr(release_install, "_stop_runtime", stop)
+    monkeypatch.setattr(release_install, "_resume_runtime", resume)
+    response = client.post("/plugins/update", json={
+        "plugin_id": "example.demo", "repository_url": "https://github.com/example/demo",
+        "version": "1.0.0", "pinned": True,
+    })
+    assert response.status_code == 200, response.text
+    assert events == ["stop", "resume"]
+    assert not manager._plugin_file_update_lock.locked()
 
 
 def test_user_data_conflict_does_not_overwrite_new_code(tmp_path):

@@ -11,10 +11,12 @@ import time
 from rich.console import RenderableType
 
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
+from src.common.data_models.message_component_data_model import AtComponent
 from src.common.i18n import get_locale
 from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
 from src.common.utils.utils_config import ChatConfigUtils
+from src.common.utils.system_utils import is_bot_self
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolRegistry
 from src.llm_models.model_client.base_client import BaseClient, GenerationAttempt
@@ -632,6 +634,9 @@ class MaisakaChatLoopService:
         self._model_task_name = model_task_name.strip() or "planner"
         self._is_group_chat = is_group_chat
         self._session_id = session_id or ""
+        self._bot_platform = ""
+        self._bot_platform_nickname = ""
+        self._bot_group_cardname = ""
         self._extra_tools: List[ToolOption] = []
         self._interrupt_flag: asyncio.Event | None = None
         self._tool_registry: ToolRegistry | None = None
@@ -894,6 +899,42 @@ class MaisakaChatLoopService:
         """设置当前 planner 请求使用的中断标记。"""
         self._interrupt_flag = interrupt_flag
 
+    def _build_bot_nickname_notice(self, history: Sequence[LLMContextMessage]) -> str:
+        """从本会话的真实 @ 信息更新昵称，在上下文前说明 bot 的平台身份。"""
+
+        # 按历史顺序更新，保留最近一次明确提供的昵称；不要把配置昵称当成平台信息。
+        for entry in history:
+            if not isinstance(entry, SessionBackedMessage) or entry.original_message is None:
+                continue
+            message = entry.original_message
+            if not self._session_id or message.session_id != self._session_id:
+                continue
+            for component in message.raw_message.components:
+                if not isinstance(component, AtComponent) or not is_bot_self(message.platform, component.target_user_id):
+                    continue
+                if component.uses_configured_bot_nickname:
+                    continue
+                self._bot_platform = message.platform
+                if component.target_user_nickname:
+                    self._bot_platform_nickname = component.target_user_nickname
+                if self._is_group_chat and component.target_user_cardname:
+                    self._bot_group_cardname = component.target_user_cardname
+
+        lines: List[str] = []
+        if self._bot_platform_nickname:
+            lines.append(self._localized_text({
+                "zh-CN": f"你在 {self._bot_platform} 平台的昵称是“{self._bot_platform_nickname}”。",
+                "en-US": f'Your nickname on {self._bot_platform} is "{self._bot_platform_nickname}".',
+                "ja-JP": f"{self._bot_platform} でのあなたのニックネームは「{self._bot_platform_nickname}」です。",
+            }))
+        if self._is_group_chat and self._bot_group_cardname:
+            lines.append(self._localized_text({
+                "zh-CN": f"你在本群的昵称是“{self._bot_group_cardname}”。",
+                "en-US": f'Your nickname in this group is "{self._bot_group_cardname}".',
+                "ja-JP": f"このグループでのあなたのニックネームは「{self._bot_group_cardname}」です。",
+            }))
+        return (" " if get_locale() == "en-US" else "").join(lines)
+
     def _build_request_messages(
         self,
         selected_history: List[LLMContextMessage],
@@ -922,6 +963,9 @@ class MaisakaChatLoopService:
             resolved_system_prompt = self._custom_chat_system_prompt
         else:
             resolved_system_prompt = self._build_chat_system_prompt()
+        bot_nickname_notice = self._build_bot_nickname_notice(selected_history)
+        if bot_nickname_notice:
+            resolved_system_prompt = f"{bot_nickname_notice}\n\n{resolved_system_prompt}"
         system_item.add_text_content(resolved_system_prompt)
         items.append(system_item.build())
 

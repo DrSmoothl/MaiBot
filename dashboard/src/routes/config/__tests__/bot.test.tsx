@@ -25,6 +25,7 @@ afterEach(() => {
 
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
 vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => async () => {},
   Link: ({ children }: { children?: ReactNode }) => (
     <span data-testid="router-link">{children}</span>
   ),
@@ -243,6 +244,10 @@ const EXPECTED_FIELD_HOOKS: Array<[string, 'replace' | 'wrapper' | 'hidden']> = 
   ['jargon.jargon_groups', 'replace'],
   ['jargon.learning_list', 'replace'],
   ['a_memorix.global_memory_sharing_enabled', 'hidden'],
+  ['a_memorix.plugin.enabled', 'wrapper'],
+  ['a_memorix.person_profile.enabled', 'wrapper'],
+  ['a_memorix.integration.heuristic_memory_recall_enabled', 'wrapper'],
+  ['a_memorix.image_memory.enabled', 'wrapper'],
   ['a_memorix.shared_memory_groups', 'replace'],
   ['a_memorix.filter.chats', 'replace'],
   ['a_memorix.filter.retrieval', 'wrapper'],
@@ -335,7 +340,7 @@ function baseSchema(): { schema: ConfigSchema } {
         }),
         // 无 uiLabel、有 uiParent：应归并进「机器人」tab
         sub_feature: sectionSchema('SubFeatureSection', '子功能配置', { uiParent: 'bot' }),
-        // advanced tab：默认隐藏，点击「更多」后出现
+        // 高级栏目也应直接显示在页面下拉列表中。
         experimental: sectionSchema('ExperimentalSection', '实验性配置', {
           uiLabel: '实验性',
           uiOrder: 3,
@@ -392,7 +397,20 @@ async function enterDetailMode(
   if (screen.getByRole('tab', { name: '详细设置' }).getAttribute('data-state') !== 'active') {
     await user.click(screen.getByRole('tab', { name: '详细设置' }))
   }
+  if (formTestId === 'form-personality' && !screen.queryByTestId(formTestId)) {
+    await selectConfigPage(user, '人格')
+  }
   await screen.findByTestId(formTestId)
+}
+
+async function openConfigMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: '选择设置页面' }))
+  return screen.findByRole('menu')
+}
+
+async function selectConfigPage(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await openConfigMenu(user)
+  await user.click(screen.getByRole('menuitem', { name }))
 }
 
 describe('BotConfigPage 特征化', () => {
@@ -400,7 +418,7 @@ describe('BotConfigPage 特征化', () => {
     await renderBotPage()
     expect(configApi.getBotConfigCached).toHaveBeenCalledTimes(1)
     expect(configApi.getBotConfigSchema).toHaveBeenCalledTimes(1)
-    expect(screen.getByTestId('form-personality')).toBeInTheDocument()
+    expect(screen.getByTestId('form-bot')).toBeInTheDocument()
   })
 
   it('初始加载失败时弹出加载失败 toast', async () => {
@@ -562,33 +580,21 @@ describe('BotConfigPage 特征化', () => {
   })
 
   describe('详细设置模式', () => {
-    it('按 schema 构建 tab 分组：uiOrder 排序、uiParent 归并、advanced 默认隐藏', async () => {
-      localStorage.setItem('bot-config-tabs-guide-dismissed', 'true')
+    it('栏目下拉列表按 uiOrder 排序，包含高级栏目并归并 uiParent', async () => {
       const user = userEvent.setup()
       await renderBotPage()
       await enterDetailMode(user)
-
-      // 详细设置为默认模式，首次加载使用缓存配置。
       expect(configApi.getBotConfig).not.toHaveBeenCalled()
-
-      // tab 按 uiOrder 排序，advanced 的「实验性」默认隐藏
-      const tabList = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement
-      const tabNames = within(tabList)
-        .getAllByRole('tab')
-        .map((tab) => tab.textContent)
-      expect(tabNames).toEqual(['人格', '机器人'])
-
-      // 「人格」tab 默认激活，表单仅包含自身分节
       expect(screen.getByTestId('form-personality-sections')).toHaveTextContent('personality')
       expect(screen.getByTestId('form-personality-values')).toHaveTextContent('原始人格')
-
-      // uiParent 指向 bot 的 sub_feature 归并进「机器人」tab
-      await user.click(within(tabList).getByRole('tab', { name: '机器人' }))
+      const menu = await openConfigMenu(user)
+      expect(
+        within(menu)
+          .getAllByRole('menuitem')
+          .map((item) => item.textContent)
+      ).toEqual(['人格', '机器人', '实验性'])
+      await user.click(within(menu).getByRole('menuitem', { name: '机器人' }))
       expect(await screen.findByTestId('form-bot-sections')).toHaveTextContent('bot,sub_feature')
-
-      // 点击「更多」后 advanced tab 出现
-      await user.click(screen.getByRole('button', { name: '更多' }))
-      expect(within(tabList).getByRole('tab', { name: '实验性' })).toBeInTheDocument()
     })
 
     it('表单修改更新分节值，防抖后按分节自动保存', async () => {
@@ -623,7 +629,7 @@ describe('BotConfigPage 特征化', () => {
       await enterDetailMode(user)
 
       expect(screen.getByTestId('form-personality')).toHaveAttribute('data-advanced', 'false')
-      await user.click(screen.getByRole('button', { name: '高级设置' }))
+      await user.click(screen.getByRole('switch', { name: '高级设置' }))
       expect(screen.getByTestId('form-personality')).toHaveAttribute('data-advanced', 'true')
     })
 
@@ -633,8 +639,7 @@ describe('BotConfigPage 特征化', () => {
       await renderBotPage()
       await enterDetailMode(user)
 
-      await user.click(screen.getByRole('button', { name: '更多' }))
-      await user.click(screen.getByRole('tab', { name: '实验性' }))
+      await selectConfigPage(user, '实验性')
 
       // 实验性功能提示对话框
       expect(await screen.findByText('实验性功能')).toBeInTheDocument()
@@ -646,16 +651,12 @@ describe('BotConfigPage 特征化', () => {
       expect(screen.getByTestId('form-experimental')).toBeInTheDocument()
     })
 
-    it('tab 使用引导可通过「我知道了」关闭并记忆', async () => {
+    it('栏目入口无需旧版展开引导即可显示全部页面', async () => {
       const user = userEvent.setup()
       await renderBotPage()
-      await enterDetailMode(user)
-
-      expect(screen.getByText(/展开隐藏配置栏目/)).toBeInTheDocument()
-      await user.click(screen.getByRole('button', { name: '我知道了' }))
-
       expect(screen.queryByText(/展开隐藏配置栏目/)).not.toBeInTheDocument()
-      expect(localStorage.getItem('bot-config-tabs-guide-dismissed')).toBe('true')
+      const menu = await openConfigMenu(user)
+      expect(within(menu).getAllByRole('menuitem')).toHaveLength(3)
     })
   })
 
@@ -1045,38 +1046,25 @@ describe('BotConfigPage 特征化', () => {
   })
 
   describe('详细设置分节导航', () => {
-    it('收起更多时若当前是高级 tab 则回到第一个普通 tab', async () => {
-      localStorage.setItem('bot-config-tabs-guide-dismissed', 'true')
+    it('关闭栏目菜单保留已选中的高级页面', async () => {
       localStorage.setItem('bot-config-experimental-features-notice-dismissed', 'true')
       const user = userEvent.setup()
       await renderBotPage()
-      await enterDetailMode(user)
-
-      const tabList = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement
-      await user.click(within(tabList).getByRole('button', { name: '更多' }))
-      await user.click(within(tabList).getByRole('tab', { name: '实验性' }))
+      await selectConfigPage(user, '实验性')
       expect(await screen.findByTestId('form-experimental')).toBeInTheDocument()
-
-      await user.click(within(tabList).getByRole('button', { name: '收起' }))
-      expect(within(tabList).queryByRole('tab', { name: '实验性' })).not.toBeInTheDocument()
-      expect(await screen.findByTestId('form-personality')).toBeInTheDocument()
+      await openConfigMenu(user)
+      await user.keyboard('{Escape}')
+      expect(screen.getByTestId('form-experimental')).toBeInTheDocument()
     })
 
-    it('收起更多时若当前是普通 tab 则保持该 tab', async () => {
-      localStorage.setItem('bot-config-tabs-guide-dismissed', 'true')
+    it('关闭栏目菜单保留普通页面', async () => {
       const user = userEvent.setup()
       await renderBotPage()
-      await enterDetailMode(user)
-
-      const tabList = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement
-      await user.click(within(tabList).getByRole('tab', { name: '机器人' }))
+      await selectConfigPage(user, '机器人')
       expect(await screen.findByTestId('form-bot')).toBeInTheDocument()
-
-      await user.click(within(tabList).getByRole('button', { name: '更多' }))
-      expect(within(tabList).getByRole('tab', { name: '实验性' })).toBeInTheDocument()
-      await user.click(within(tabList).getByRole('button', { name: '收起' }))
-
-      expect(within(tabList).queryByRole('tab', { name: '实验性' })).not.toBeInTheDocument()
+      const menu = await openConfigMenu(user)
+      expect(within(menu).getByRole('menuitem', { name: '实验性' })).toBeInTheDocument()
+      await user.keyboard('{Escape}')
       expect(screen.getByTestId('form-bot')).toBeInTheDocument()
     })
 
@@ -1133,8 +1121,7 @@ describe('BotConfigPage 特征化', () => {
       await renderBotPage()
       await enterDetailMode(user)
 
-      await user.click(screen.getByRole('button', { name: '更多' }))
-      await user.click(screen.getByRole('tab', { name: '实验性' }))
+      await selectConfigPage(user, '实验性')
 
       expect(screen.queryByText('实验性功能')).not.toBeInTheDocument()
       expect(await screen.findByTestId('form-experimental')).toBeInTheDocument()
@@ -1146,8 +1133,7 @@ describe('BotConfigPage 特征化', () => {
       await renderBotPage()
       await enterDetailMode(user)
 
-      await user.click(screen.getByRole('button', { name: '更多' }))
-      await user.click(screen.getByRole('tab', { name: '实验性' }))
+      await selectConfigPage(user, '实验性')
       expect(await screen.findByText('实验性功能')).toBeInTheDocument()
 
       await user.keyboard('{Escape}')
@@ -1155,7 +1141,7 @@ describe('BotConfigPage 特征化', () => {
       expect(localStorage.getItem('bot-config-experimental-features-notice-dismissed')).toBe('true')
     })
 
-    it('全部为高级 tab 时默认只显示更多，展开后才能切换', async () => {
+    it('全部为高级栏目时下拉菜单直接显示全部栏目', async () => {
       vi.mocked(configApi.getBotConfigSchema).mockResolvedValue({
         schema: {
           className: 'BotConfigRoot',
@@ -1176,19 +1162,13 @@ describe('BotConfigPage 特征化', () => {
       await renderBotPage()
 
       await user.click(screen.getByRole('tab', { name: '详细设置' }))
-      const tabList = await waitFor(() => {
-        const node = document.querySelector(
-          '[data-config-bot-tab-list="true"]'
-        ) as HTMLElement | null
-        if (!node) throw new Error('missing tab list')
-        return node
-      })
-      expect(within(tabList).queryByRole('tab', { name: '实验性' })).not.toBeInTheDocument()
-      await user.click(within(tabList).getByRole('button', { name: '更多' }))
-      expect(within(tabList).getByRole('tab', { name: '实验性' })).toBeInTheDocument()
+      const tabList = await openConfigMenu(user)
+      expect(within(tabList).getByRole('menuitem', { name: '实验性' })).toBeInTheDocument()
+      await user.keyboard('{Escape}')
+      expect(screen.getByTestId('form-experimental')).toBeInTheDocument()
     })
 
-    it('uiUseSubTabs 按根字段/子类/高级子页拆分，并展示聊天管理提示', async () => {
+    it('uiUseSubTabs 按根字段/子类/高级子页拆分，聊天子页不再显示回复风格', async () => {
       const config = {
         ...baseConfig(),
         chat: { enabled: true, reply_timing: { talk_value: 1 }, reply_style: { style: 'a' } },
@@ -1201,27 +1181,27 @@ describe('BotConfigPage 特征化', () => {
       await renderBotPage()
       await enterDetailMode(user, 'form-ChatSectionRoot')
 
-      const tabList = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement
-      expect(within(tabList).getByRole('tab', { name: '聊天' })).toBeInTheDocument()
-      await user.click(within(tabList).getByRole('tab', { name: '空栏目' }))
+      const tabList = await openConfigMenu(user)
+      expect(within(tabList).getByRole('menuitem', { name: '聊天' })).toBeInTheDocument()
+      await user.click(within(tabList).getByRole('menuitem', { name: '空栏目' }))
       expect(screen.queryByTestId('form-EmptySub')).not.toBeInTheDocument()
 
-      await user.click(within(tabList).getByRole('tab', { name: '聊天' }))
+      await selectConfigPage(user, '聊天')
       const subtabList = document.querySelector(
         '[data-config-bot-subtab-list="true"]'
       ) as HTMLElement
       const defaultSubtabNames = within(subtabList)
         .getAllByRole('tab')
         .map((tab) => tab.textContent)
-      expect(defaultSubtabNames).toEqual(['总览', '时机子页', '回复风格'])
+      expect(defaultSubtabNames).toEqual(['总览', '时机子页'])
+      // 回复风格已迁至人格配置，不再列为聊天子页。
+      expect(within(subtabList).queryByRole('tab', { name: '回复风格' })).not.toBeInTheDocument()
 
       await user.click(within(subtabList).getByRole('tab', { name: '时机子页' }))
-      expect(
-        await screen.findByText(/需要按具体聊天流调整发言频率或查看聊天 Prompt/)
-      ).toBeInTheDocument()
-      expect(screen.getByText('麦麦聊天')).toBeInTheDocument()
+      expect(await screen.findByTestId('form-ReplyTiming-values')).toHaveTextContent('talk_value')
+      expect(screen.queryByText('麦麦聊天')).not.toBeInTheDocument()
 
-      await user.click(within(subtabList).getByRole('button', { name: '更多' }))
+      await user.click(within(subtabList).getByRole('button', { name: '展开更多设置栏目' }))
       expect(within(subtabList).getByRole('tab', { name: '高级文档' })).toBeInTheDocument()
       expect(within(subtabList).getByRole('tab', { name: '内部组' })).toBeInTheDocument()
 
@@ -1230,7 +1210,7 @@ describe('BotConfigPage 特征化', () => {
         'chat_inner,chat_leaf'
       )
 
-      await user.click(within(subtabList).getByRole('button', { name: '收起' }))
+      await user.click(within(subtabList).getByRole('button', { name: '收起设置栏目' }))
       expect(within(subtabList).queryByRole('tab', { name: '内部组' })).not.toBeInTheDocument()
       expect(await screen.findByTestId('form-ChatSectionRoot')).toBeInTheDocument()
     })
@@ -1307,7 +1287,7 @@ describe('BotConfigPage 特征化', () => {
       localStorage.setItem('bot-config-tabs-guide-dismissed', 'true')
       await renderBotPage()
 
-      expect(await screen.findByTestId('form-personality')).toBeInTheDocument()
+      expect(await screen.findByTestId('form-bot')).toBeInTheDocument()
       await waitFor(() => expect(scrollToConfigSearchField).toHaveBeenCalledWith('ghost.missing'))
     })
 
@@ -1337,9 +1317,9 @@ describe('BotConfigPage 特征化', () => {
       await renderBotPage()
       await enterDetailMode(user, 'form-solo')
 
-      const tabList = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement
+      const tabList = await openConfigMenu(user)
       const tabNames = within(tabList)
-        .getAllByRole('tab')
+        .getAllByRole('menuitem')
         .map((tab) => tab.textContent)
       expect(tabNames).toEqual(['单独'])
     })
@@ -1361,9 +1341,9 @@ describe('BotConfigPage 特征化', () => {
       await renderBotPage()
       await enterDetailMode(user, 'form-alpha')
 
-      const tabList = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement
+      const tabList = await openConfigMenu(user)
       const tabNames = within(tabList)
-        .getAllByRole('tab')
+        .getAllByRole('menuitem')
         .map((tab) => tab.textContent)
       expect(tabNames).toEqual(['alpha配置', 'zeta配置'])
     })
@@ -1399,13 +1379,9 @@ describe('BotConfigPage 补充覆盖', () => {
     const user = userEvent.setup()
     await renderBotPage()
     await user.click(screen.getByRole('tab', { name: '详细设置' }))
-    const tabList = await waitFor(() => {
-      const node = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement | null
-      if (!node) throw new Error('missing tab list')
-      return node
-    })
+    const tabList = await openConfigMenu(user)
     const tabNames = within(tabList)
-      .getAllByRole('tab')
+      .getAllByRole('menuitem')
       .map((tab) => tab.textContent)
     expect(tabNames).toEqual(['有序', '无序'])
   })
@@ -1572,8 +1548,8 @@ describe('BotConfigPage 补充覆盖', () => {
     await renderBotPage()
     await enterDetailMode(user)
 
-    const tabList = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement
-    await user.click(within(tabList).getByRole('tab', { name: '机器人' }))
+    const tabList = await openConfigMenu(user)
+    await user.click(within(tabList).getByRole('menuitem', { name: '机器人' }))
     expect(await screen.findByTestId('form-bot')).toBeInTheDocument()
 
     vi.mocked(configApi.getBotConfigSchema).mockResolvedValue({
@@ -1616,7 +1592,7 @@ describe('BotConfigPage 补充覆盖', () => {
     await user.click(screen.getByText('change-deep-root-ReplyTiming'))
     expect(screen.getByTestId('form-ReplyTiming-values')).toHaveTextContent('deep-新值')
 
-    await user.click(within(subtabList).getByRole('button', { name: '更多' }))
+    await user.click(within(subtabList).getByRole('button', { name: '展开更多设置栏目' }))
     await user.click(within(subtabList).getByRole('tab', { name: '内部组' }))
     const groupForm = await screen.findByTestId('form-chat_inner.chat_leaf-values')
     const beforeEmpty = groupForm.textContent
@@ -1688,14 +1664,14 @@ describe('BotConfigPage 补充覆盖', () => {
     expect(within(subtabList).getByRole('tab', { name: 'mystery' })).toBeInTheDocument()
     expect(within(subtabList).queryByRole('tab', { name: '备注' })).not.toBeInTheDocument()
 
-    await user.click(within(subtabList).getByRole('button', { name: '更多' }))
+    await user.click(within(subtabList).getByRole('button', { name: '展开更多设置栏目' }))
     await user.click(within(subtabList).getByRole('tab', { name: 'chat_inner' }))
     expect(await screen.findByTestId('form-chat_inner.chat_leaf-sections')).toHaveTextContent(
       'chat_inner,chat_leaf'
     )
 
-    const tabList = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement
-    await user.click(within(tabList).getByRole('tab', { name: '裸配置' }))
+    const tabList = await openConfigMenu(user)
+    await user.click(within(tabList).getByRole('menuitem', { name: '裸配置' }))
     expect(await screen.findByTestId('form-BareRoot')).toBeInTheDocument()
   })
 
@@ -1738,15 +1714,15 @@ describe('BotConfigPage 补充覆盖', () => {
       return node
     })
     expect(within(subtabList).queryByRole('tab', { name: '机密页' })).not.toBeInTheDocument()
-    await user.click(within(subtabList).getByRole('button', { name: '更多' }))
+    await user.click(within(subtabList).getByRole('button', { name: '展开更多设置栏目' }))
     expect(within(subtabList).getByRole('tab', { name: '机密页' })).toBeInTheDocument()
     expect(await screen.findByTestId('form-Secret')).toBeInTheDocument()
 
-    await user.click(within(subtabList).getByRole('button', { name: '收起' }))
+    await user.click(within(subtabList).getByRole('button', { name: '收起设置栏目' }))
     expect(within(subtabList).queryByRole('tab', { name: '机密页' })).not.toBeInTheDocument()
   })
 
-  it('全部为高级 tab 时选中后收起仍回退到唯一 tab', async () => {
+  it('全部为高级栏目时关闭菜单保持唯一页面', async () => {
     vi.mocked(configApi.getBotConfigSchema).mockResolvedValue({
       schema: {
         className: 'BotConfigRoot',
@@ -1767,16 +1743,12 @@ describe('BotConfigPage 补充覆盖', () => {
     await renderBotPage()
     await user.click(screen.getByRole('tab', { name: '详细设置' }))
 
-    const tabList = await waitFor(() => {
-      const node = document.querySelector('[data-config-bot-tab-list="true"]') as HTMLElement | null
-      if (!node) throw new Error('missing tab list')
-      return node
-    })
-    await user.click(within(tabList).getByRole('button', { name: '更多' }))
-    await user.click(within(tabList).getByRole('tab', { name: '实验性' }))
+    const tabList = await openConfigMenu(user)
+    await user.click(within(tabList).getByRole('menuitem', { name: '实验性' }))
     expect(await screen.findByTestId('form-experimental')).toBeInTheDocument()
 
-    await user.click(within(tabList).getByRole('button', { name: '收起' }))
-    expect(within(tabList).queryByRole('tab', { name: '实验性' })).not.toBeInTheDocument()
+    await openConfigMenu(user)
+    await user.keyboard('{Escape}')
+    expect(screen.getByTestId('form-experimental')).toBeInTheDocument()
   })
 })

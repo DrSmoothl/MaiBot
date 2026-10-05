@@ -13,6 +13,11 @@ import {
   saveThemePartial,
 } from '@/lib/theme/storage'
 import { applyThemePipeline, removeCustomCSS } from '@/lib/theme/pipeline'
+import {
+  applyMillenniumFonts,
+  loadMillenniumCjkFont,
+  loadMillenniumFont,
+} from '@/lib/theme/millennium-font'
 
 type Theme = 'dark' | 'light' | 'system'
 
@@ -87,6 +92,7 @@ export function ThemeProvider({
     }
 
     root.dataset.dashboardStyle = dashboardStyle
+    applyMillenniumFonts(loadMillenniumFont(), loadMillenniumCjkFont())
     root.dataset.retroTextureStyle = futureRetroConfig.textureStyle
     root.style.setProperty('--retro-paper-warmth', `${futureRetroConfig.paperWarmth}%`)
     root.style.setProperty('--retro-panel-depth', String(futureRetroConfig.panelDepth / 100))

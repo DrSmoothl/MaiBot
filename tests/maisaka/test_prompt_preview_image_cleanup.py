@@ -202,3 +202,147 @@ def test_worker_checks_orphans_at_start_and_after_interval(preview_store, monkey
         store._writer_loop()
     assert checks == [0.0, store._ORPHAN_IMAGE_CHECK_INTERVAL_SECONDS]
     assert len(writes) == int(busy)
+
+
+@pytest.fixture
+def cached_image(preview_store, monkeypatch):
+    path = preview_store._IMAGE_DIR / f"{'c' * 64}.png"
+    monkeypatch.setattr(PromptCLIVisualizer, "_build_official_image_path", lambda *_: None)
+    monkeypatch.setattr(PromptCLIVisualizer, "_build_image_cache_path", lambda *_: path)
+    return path
+
+
+def image_item():
+    return UserMessageItem(
+        meta=ContextItemMeta.create(),
+        parts=(ContextImagePart("png", b64encode(b"image").decode()),),
+    )
+
+
+def test_failed_snapshot_saves_images_and_preserves_them_during_cleanup(preview_store, cached_image, monkeypatch):
+    from src.config.model_configs import APIProvider, ModelInfo
+    from src.llm_models import request_snapshot
+    from src.llm_models.model_client.base_client import RequestTraceContext
+
+    monkeypatch.setattr(request_snapshot, "LLM_REQUEST_LOG_DIR", preview_store._BASE_DIR / "llm_error")
+    monkeypatch.setattr(request_snapshot, "_get_llm_request_snapshot_limit", lambda: 128)
+    # 已建立索引时也必须马上登记失败记录，防止巡检或清空其他记录误删图片。
+    preview_store._ensure_image_index()
+    trace = RequestTraceContext()
+    options = dict(
+        api_provider=APIProvider(name="test", base_url="https://example.com", api_key="test-key"),
+        client_type="openai",
+        internal_request={
+            "request_kind": "response",
+            "context_items": request_snapshot.serialize_context_items_snapshot([image_item()]),
+        },
+        model_info=ModelInfo(name="test", model_identifier="test", api_provider="test"),
+        operation="task.hard_timeout",
+        provider_request={},
+        trace_context=trace,
+    )
+    error = TimeoutError("timeout")
+    path = request_snapshot.save_failed_request_snapshot(error=error, **options)
+    assert path is not None and path.is_file()
+    assert cached_image.read_bytes() == b"image"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert "base64_omitted" in json.dumps(payload["request_items"])
+    assert b64encode(b"image").decode() not in json.dumps(payload["request_items"])
+    assert preview_store.cleanup_orphan_images() == 0
+
+    request_snapshot.attach_request_snapshot(error, path)
+    request_snapshot.update_failed_request_attempt(error, status="switching_model")
+    request_snapshot.mark_request_final_failure(error)
+    assert preview_store.cleanup_orphan_images() == 0
+    assert cached_image.exists()
+    preview_store.clear_stage(preview_store._BASE_DIR / "llm_error")
+    assert not cached_image.exists()
+
+
+@pytest.mark.parametrize("side", ["request", "output", "both"])
+def test_reply_result_persists_images_at_finalization(preview_store, cached_image, monkeypatch, side):
+    from src.chat.replyer.maisaka_generator_base import BaseMaisakaReplyGenerator
+    from src.common.data_models.reply_generation_data_models import ReplyGenerationResult, build_reply_monitor_detail
+    from src.llm_models.request_snapshot import serialize_context_items_snapshot
+
+    tasks = []
+    monkeypatch.setattr(preview_store, "_submit", tasks.append)
+    # 即使普通预览配置保留编码，回复监控仍应只携带图片引用。
+    monkeypatch.setattr(PromptCLIVisualizer, "_should_keep_prompt_preview_json_base64", lambda: True)
+    generator = BaseMaisakaReplyGenerator.__new__(BaseMaisakaReplyGenerator)
+    generator.request_type = "maisaka.replyer"
+    monkeypatch.setattr(generator, "_resolve_session_id", lambda _: "test-chat")
+    items = serialize_context_items_snapshot([image_item()])
+    result = ReplyGenerationResult()
+    result.request_messages = items if side in {"request", "both"} else []
+    result.output_items = items if side in {"output", "both"} else []
+    generator._persist_reply_preview(result, stream_id="test-chat", reply_reason="test")
+    assert len(tasks) == 1
+    assert tasks[0].image_assets[cached_image] == b"image"
+    assert not cached_image.exists()
+    detail = build_reply_monitor_detail(result)
+    assert b64encode(b"image").decode() not in json.dumps(detail)
+    preview_store._write_task(tasks[0])
+    assert cached_image.read_bytes() == b"image"
+    assert preview_store.cleanup_orphan_images() == 0
+    preview_store.clear_stage(tasks[0].chat_dir.parent)
+    assert not cached_image.exists()
+
+
+def test_image_collection_nested_scopes_do_not_mix_assets(preview_store, cached_image):
+    other = cached_image.with_name(f"{'d' * 64}.png")
+    with preview_store.collect_image_assets() as outer:
+        preview_store.add_image_asset(cached_image, b"outer")
+        with preview_store.collect_image_assets() as inner:
+            preview_store.add_image_asset(other, b"inner")
+        preview_store.add_image_asset(cached_image, b"updated")
+    assert outer == {cached_image: b"updated"}
+    assert inner == {other: b"inner"}
+    with pytest.raises(RuntimeError, match="预览构建上下文"):
+        preview_store.add_image_asset(cached_image, b"outside")
+
+
+@pytest.mark.parametrize("side", ["request", "output", "both"])
+def test_successful_reply_with_images_completes(preview_store, cached_image, monkeypatch, side):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import asyncio
+
+    from src.chat.replyer.maisaka_generator_base import BaseMaisakaReplyGenerator, MaisakaReplyContext
+    from src.common.data_models.llm_service_data_models import LLMResponseResult
+    from src.llm_models.payload_content.context_item import AssistantMessageItem, ContextTextPart
+
+    tasks = []
+    monkeypatch.setattr(preview_store, "_submit", tasks.append)
+    generator = BaseMaisakaReplyGenerator.__new__(BaseMaisakaReplyGenerator)
+    generator.request_type = "maisaka.replyer"
+    generator.chat_stream = None
+    monkeypatch.setattr(generator, "_resolve_session_id", lambda _: "test-chat")
+    monkeypatch.setattr(generator, "_build_reply_context", AsyncMock(return_value=MaisakaReplyContext()))
+    requests = [image_item()] if side in {"request", "both"} else []
+    monkeypatch.setattr(generator, "_build_request_messages", lambda **_: requests)
+    monkeypatch.setattr(generator, "_resolve_enable_visual_message", lambda _: True)
+    runtime = SimpleNamespace(invoke_hook=AsyncMock(return_value=SimpleNamespace(kwargs={})))
+    monkeypatch.setattr(generator, "_get_runtime_manager", lambda: runtime)
+    parts = [ContextTextPart("hello")]
+    if side in {"output", "both"}:
+        parts.append(ContextImagePart("png", b64encode(b"image").decode()))
+    response = LLMResponseResult(
+        output_items=(AssistantMessageItem(meta=ContextItemMeta.create(), parts=tuple(parts)),),
+        model_name="test",
+    )
+
+    async def generate(*, context_factory, options):
+        await context_factory(SimpleNamespace(api_provider=SimpleNamespace(client_type="openai")))
+        return response
+
+    generator.express_model = SimpleNamespace(task_name="replyer", generate_response_with_context=generate)
+    success, result = asyncio.run(generator.generate_reply_with_context(chat_history=[], stream_id="test-chat"))
+    assert success and result.success
+    assert result.completion.response_text == "hello"
+    assert len(tasks) == 1
+    assert tasks[0].image_assets[cached_image] == b"image"
+    assert b64encode(b"image").decode() not in json.dumps(result.monitor_detail)
+    preview_store._write_task(tasks[0])
+    assert cached_image.read_bytes() == b"image"

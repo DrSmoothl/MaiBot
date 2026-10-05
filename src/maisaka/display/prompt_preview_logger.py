@@ -62,11 +62,12 @@ class PromptPreviewLogger:
 
     @classmethod
     @contextmanager
-    def collect_image_assets(cls) -> Iterator[None]:
+    def collect_image_assets(cls) -> Iterator[Dict[Path, bytes]]:
         """在内存中收集本次预览图片，与 JSON 一起交给后台线程落盘。"""
-        token = _image_assets.set({})
+        assets: Dict[Path, bytes] = {}
+        token = _image_assets.set(assets)
         try:
-            yield
+            yield assets
         finally:
             _image_assets.reset(token)
 
@@ -210,19 +211,39 @@ class PromptPreviewLogger:
 
     @classmethod
     def _write_task_locked(cls, task: _PreviewWriteTask) -> None:
-        task.chat_dir.mkdir(parents=True, exist_ok=True)
+        cls._write_record_locked(task.file_path, task.content, task.image_assets)
+        cls._trim_overflow(task.chat_dir)
+
+    @classmethod
+    def write_record_file(cls, file_path: Path, content: str, image_assets: Dict[Path, bytes]) -> None:
+        """同步原子更新失败记录，与预览写入和图片清理共用存储锁。"""
+        with cls._storage_lock:
+            cls._write_record_locked(file_path, content, image_assets)
+
+    @classmethod
+    def _write_record_locked(cls, file_path: Path, content: str, image_assets: Dict[Path, bytes]) -> None:
         # 图片与记录串行落盘；即使清理先于排队中的记录发生，也会重新写回所需图片。
-        for path, content in task.image_assets.items():
+        for path, content_bytes in image_assets.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists():
-                path.write_bytes(content)
+                path.write_bytes(content_bytes)
         # 先写临时文件再改名，避免 WebUI 读到只写了一半的 JSON。
-        temporary_path = task.file_path.with_name(f".{task.file_path.name}.tmp")
-        temporary_path.write_text(task.content, encoding="utf-8")
-        os.replace(temporary_path, task.file_path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = file_path.with_name(f".{file_path.name}.tmp")
+        temporary_path.write_text(content, encoding="utf-8")
+        os.replace(temporary_path, file_path)
         if cls._image_index_ready:
-            cls._index_preview(task.file_path, task.content)
-        cls._trim_overflow(task.chat_dir)
+            cls._release_record_index(file_path)
+            cls._index_preview(file_path, content)
+
+    @classmethod
+    def _release_record_index(cls, path: Path) -> None:
+        """更新记录前移除旧索引；孤立图片交给巡检回收，避免删除新记录仍需的图片。"""
+        for name in cls._images_by_preview.pop(path, set()):
+            previews = cls._previews_by_image[name]
+            previews.discard(path)
+            if not previews:
+                del cls._previews_by_image[name]
 
     @classmethod
     def _index_preview(cls, path: Path, content: str) -> None:

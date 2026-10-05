@@ -241,6 +241,8 @@ class AtComponent(BaseMessageComponentModel):
         target_user_id: str,
         target_user_nickname: Optional[str] = None,
         target_user_cardname: Optional[str] = None,
+        *,
+        uses_configured_bot_nickname: bool = False,
     ) -> None:
         self.target_user_id = target_user_id
         """目标用户ID"""
@@ -248,6 +250,8 @@ class AtComponent(BaseMessageComponentModel):
         """目标用户昵称"""
         self.target_user_cardname: Optional[str] = target_user_cardname
         """目标用户备注名"""
+        self.uses_configured_bot_nickname: bool = uses_configured_bot_nickname
+        """显示昵称是否由 bot 配置补充，而非实际的平台昵称。"""
         assert isinstance(target_user_id, str), "AtComponent 的 target_user_id 必须是字符串类型"
 
     async def to_seg(self) -> Seg:
@@ -467,6 +471,7 @@ class MessageSequence:
                     "target_user_id": item.target_user_id,
                     "target_user_nickname": item.target_user_nickname,
                     "target_user_cardname": item.target_user_cardname,
+                    "uses_configured_bot_nickname": item.uses_configured_bot_nickname,
                 },
             }
         elif isinstance(item, ReplyComponent):
@@ -521,6 +526,7 @@ class MessageSequence:
                 target_user_id=item["data"]["target_user_id"],
                 target_user_nickname=item["data"].get("target_user_nickname"),
                 target_user_cardname=item["data"].get("target_user_cardname"),
+                uses_configured_bot_nickname=item["data"].get("uses_configured_bot_nickname", False),
             )
         elif item_type == "reply":
             return ReplyComponent(target_message_id=item["data"])

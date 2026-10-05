@@ -1,14 +1,6 @@
 name: Prepare Main Release
 
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - ready_for_review
-      - synchronize
-      - reopened
   workflow_dispatch:
 
 concurrency:
@@ -21,11 +13,6 @@ permissions:
 jobs:
   prepare-dashboard-release:
     name: Prepare Dashboard Stable Release
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'dev' &&
-      github.event.pull_request.draft == false)
     runs-on: ubuntu-24.04
     environment: webui
     steps:

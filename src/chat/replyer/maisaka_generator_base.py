@@ -43,6 +43,7 @@ from src.llm_models.payload_content.context_item import (
     replace_output_projection,
 )
 from src.llm_models.payload_content.context_protocol import ContextProtocolMode
+from src.llm_models.request_snapshot import serialize_context_items_snapshot
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.messages import (
     LLMContextMessage,
@@ -988,6 +989,25 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
         return not cls._is_replyer_filtered_history_message(message)
 
+    def _persist_reply_preview(
+        self, result: ReplyGenerationResult, *, stream_id: Optional[str], reply_reason: str
+    ) -> None:
+        """在持久化边界统一收集图片，返回给监控的数据不携带大块图片编码。"""
+        if result.request_messages or result.output_items:
+            # 同一次保存收集请求和输出图片，监控结果只保留已提交保存的图片引用。
+            preview = PromptCLIVisualizer.build_prompt_preview_access(
+                result.request_messages,
+                category=self.request_type,
+                chat_id=self._resolve_session_id(stream_id),
+                request_kind=self.request_type,
+                selection_reason=reply_reason,
+                output_items=result.output_items,
+                generation_attempts=result.generation_attempts,
+                keep_base64=False,
+            )
+            result.request_messages = preview.payload["request_items"]
+            result.output_items = preview.payload["output_items"]
+
     async def generate_reply_with_context(
         self,
         extra_info: str = "",
@@ -1009,6 +1029,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, ReplyGenerationResult]:
         def finalize(success_value: bool) -> Tuple[bool, ReplyGenerationResult]:
+            self._persist_reply_preview(result, stream_id=stream_id, reply_reason=reply_reason)
             result.monitor_detail = build_reply_monitor_detail(result)
             return success_value, result
 
@@ -1252,10 +1273,8 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
             result.completion.request_prompt = prompt_preview
             result.request_message_count = len(request_messages)
-            result.request_messages = PromptCLIVisualizer.build_structured_context_item_payload(
-                request_messages,
-                keep_base64=False,
-            )
+            # 内存中的结果只做序列化；图片引用在最终记录保存时统一生成。
+            result.request_messages = serialize_context_items_snapshot(request_messages)
             llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
             response_text = (generation_result.response or "").strip()
             hook_original_response = response_text
@@ -1378,10 +1397,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
         generation_result.generation_attempts = tuple(all_generation_attempts)
         result.success = bool(response_text)
-        result.output_items = PromptCLIVisualizer.build_structured_context_item_payload(
-            generation_result.output_items,
-            keep_base64=False,
-        )
+        result.output_items = serialize_context_items_snapshot(generation_result.output_items)
         result.generation_attempts = self._serialize_generation_attempts(generation_result)
         result.completion = LLMCompletionResult(
             request_prompt=prompt_preview,

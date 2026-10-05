@@ -524,7 +524,7 @@ describe('ImportTab', () => {
     )
     expect(screen.queryByText('公共参数')).not.toBeInTheDocument()
     expect(screen.queryByText('这些设置会应用到当前导入任务。一般保持默认即可，只在批量导入或排查问题时调整。')).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('请选择资料类别')
+    expect(screen.getByText('请选择资料类别', { selector: '[role="status"]' })).toHaveAttribute('role', 'status')
 
     await user.click(screen.getByRole('combobox', { name: '资料类别' }))
     await user.click(screen.getByRole('option', { name: '事实资料' }))

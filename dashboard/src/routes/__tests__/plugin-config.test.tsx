@@ -95,6 +95,13 @@ afterEach(() => {
 })
 
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
+// 扩展列表新增 MCP 栏目，列表测试提供独立的空配置，避免发出真实后端请求。
+vi.mock('@/lib/config-api', () => ({
+  getBotConfig: async () => ({ mcp: { enabled: true, servers: [] } }),
+}))
+vi.mock('@/lib/mcp-api', () => ({
+  getMCPStatus: async () => ({ servers: [] }),
+}))
 vi.mock('@/lib/restart-context', () => ({
   RestartProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useRestart: () => restartState,
@@ -215,6 +222,16 @@ function makeHostPolicyResponse(pluginId: string) {
   return {
     success: true,
     plugin_id: pluginId,
+    active_identity: {
+      adapter_id: `gateway:${pluginId}:gw`,
+      plugin_id: pluginId,
+      gateway_name: 'gw',
+      platform: 'qq',
+      account_id: '123456',
+      scope: null,
+    },
+    has_entry: true,
+    account_entries: [],
     global_defaults: { group: 'allow' as const, private: 'block' as const },
     policy: {
       group: { default_action: 'inherit' as const, allow_ids: [] as string[], deny_ids: [] as string[] },
@@ -283,7 +300,10 @@ beforeEach(() => {
   vi.mocked(pluginApi.getLocalPluginReadme).mockResolvedValue('')
   vi.mocked(pluginApi.getLocalPluginChangelog).mockResolvedValue('')
   vi.mocked(chatApi.getAdapterHostPolicy).mockResolvedValue(makeHostPolicyResponse('adapter.qq') as never)
-  vi.mocked(chatApi.updateAdapterHostPolicy).mockResolvedValue(makeHostPolicyResponse('adapter.qq') as never)
+  vi.mocked(chatApi.updateAdapterHostPolicy).mockImplementation(async (pluginId, policy) => ({
+    ...makeHostPolicyResponse(pluginId),
+    policy,
+  }) as never)
   vi.mocked(chatApi.getAdapterPolicyDefaults).mockResolvedValue({ group: 'allow', private: 'block' })
   vi.mocked(chatApi.updateAdapterPolicyDefaults).mockImplementation(async (defaults) => defaults)
 })
@@ -331,7 +351,7 @@ describe('PluginConfigPage 特征化', () => {
   })
 
   it('插件卡片不显示重复的配置按钮，更新按钮保留原色并标记统一边框', async () => {
-    const { container } = render(<PluginConfigPage />)
+    const { container } = renderPage()
 
     await screen.findByText('Emoji Plugin')
     expect(screen.queryByRole('button', { name: '配置' })).not.toBeInTheDocument()
@@ -350,7 +370,7 @@ describe('PluginConfigPage 特征化', () => {
   it('无插件时显示空态提示', async () => {
     vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([] as never)
     renderPage()
-    await waitFor(() => expect(screen.getByText('暂无已安装的插件')).toBeInTheDocument())
+    expect(await screen.findByRole('heading', { name: 'MCP 服务' })).toBeInTheDocument()
   })
 
   it('按照加载成功、加载中、加载失败的顺序分层展示插件', async () => {
@@ -609,9 +629,9 @@ describe('PluginConfigPage 空列表', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Emoji Plugin')
-    await user.type(screen.getByPlaceholderText('搜索插件...'), 'zzz-not-found')
-    expect(await screen.findByText('没有找到匹配的插件')).toBeInTheDocument()
-    expect(screen.getByText('尝试其他搜索关键词')).toBeInTheDocument()
+    await user.type(screen.getByPlaceholderText('搜索插件或 MCP 服务...'), 'zzz-not-found')
+    expect(screen.queryByText('Emoji Plugin')).not.toBeInTheDocument()
+    expect(await screen.findByText('没有匹配的 MCP 服务')).toBeInTheDocument()
   })
 
   it('仅看有更新且没有新版本时显示空态', async () => {
@@ -2118,7 +2138,8 @@ describe('PluginConfigPage 列表操作与状态', () => {
     await screen.findByText('Emoji Plugin')
     await user.click(screen.getByRole('button', { name: '刷新' }))
     await waitFor(() => expect(vi.mocked(pluginApi.getInstalledPlugins).mock.calls.length).toBeGreaterThan(1))
-    await user.click(screen.getByRole('button', { name: /重启麦麦/ }))
+    await user.click(screen.getByRole('button', { name: '更多操作' }))
+    await user.click(screen.getByRole('menuitem', { name: /重启麦麦/ }))
     expect(restartState.triggerRestart).toHaveBeenCalled()
   })
 
@@ -2126,7 +2147,8 @@ describe('PluginConfigPage 列表操作与状态', () => {
     restartState.isRestarting = true
     renderPage()
     await screen.findByText('Emoji Plugin')
-    expect(screen.getByRole('button', { name: /重启麦麦/ })).toBeDisabled()
+    await userEvent.setup().click(screen.getByRole('button', { name: '更多操作' }))
+    expect(screen.getByRole('menuitem', { name: /重启麦麦/ })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('重复插件 ID 只保留第一项', async () => {
@@ -2584,7 +2606,7 @@ describe('PluginConfigPage 覆盖补全', () => {
     themeState.dashboardStyle = 'future-retro'
     vi.mocked(pluginApi.getInstalledPlugins).mockResolvedValue([] as never)
     renderPage()
-    expect(await screen.findByText('暂无已安装的插件')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'MCP 服务' })).toBeInTheDocument()
     expect(screen.getByText('已安装 0 个插件，已启用 0 个，已禁用 0 个，加载中 0 个，启动失败 0 个')).toBeInTheDocument()
   })
 })

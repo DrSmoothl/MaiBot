@@ -136,7 +136,13 @@ class PluginRuntimeManager(
             hook_spec_registry=self._hook_spec_registry,
         )
         self._adapter_transition_lock = asyncio.Lock()
+        self._plugin_file_update_lock = asyncio.Lock()
         self._offline_adapter_plugin_ids: Set[str] = set()
+
+    async def run_plugin_file_update(self, operation: Callable[[], Awaitable[None]]) -> None:
+        """在主循环串行执行文件替换及运行时恢复，避免源码监听中途重启 Supervisor。"""
+        async with self._plugin_file_update_lock:
+            await operation()
 
     async def _dispatch_platform_inbound(self, envelope: InboundMessageEnvelope) -> None:
         """接收 Platform IO 审核后的入站消息并送入主消息链。
@@ -1815,6 +1821,21 @@ class PluginRuntimeManager(
         except Exception as exc:
             logger.warning(f"插件 {plugin_id} 配置文件变更处理失败: {exc}")
 
+    @staticmethod
+    def _is_watchable_plugin_source(path: Path, plugin_dirs: Sequence[Path]) -> bool:
+        """只监听真实插件目录中的源码，排除更新暂存、备份及数据等保留目录。"""
+        if path.name != "_manifest.json" and path.suffix != ".py":
+            return False
+        resolved_path = path.resolve()
+        for plugin_root in plugin_dirs:
+            root = plugin_root.resolve()
+            if resolved_path == root or not resolved_path.is_relative_to(root):
+                continue
+            plugin_directory = root / resolved_path.relative_to(root).parts[0]
+            if not is_reserved_plugin_directory(plugin_directory):
+                return True
+        return False
+
     async def _handle_plugin_source_changes(self, changes: Sequence[FileChange]) -> None:
         """处理插件源码相关变化。
 
@@ -1826,24 +1847,21 @@ class PluginRuntimeManager(
             return
 
         plugin_dirs = list(self._iter_plugin_dirs())
-        relevant_source_changes = [
-            change.path.resolve()
-            for change in changes
-            if change.path.name in {"plugin.py", "_manifest.json"} or change.path.suffix == ".py"
-        ]
-        if not relevant_source_changes:
+        if not any(self._is_watchable_plugin_source(change.path, plugin_dirs) for change in changes):
             return
 
-        dependency_sync_state = await self._sync_plugin_dependencies(plugin_dirs)
-        restart_reason = "file_watcher"
-        if dependency_sync_state.environment_changed:
-            restart_reason = "file_watcher_dependency_install"
-        elif dependency_sync_state.blocked_changed_plugin_ids:
-            restart_reason = "file_watcher_blocklist_changed"
+        # 下载和备份不参与监听；真实源码变化必须等版本替换及运行时恢复完成后再处理。
+        async with self._plugin_file_update_lock:
+            dependency_sync_state = await self._sync_plugin_dependencies(plugin_dirs)
+            restart_reason = "file_watcher"
+            if dependency_sync_state.environment_changed:
+                restart_reason = "file_watcher_dependency_install"
+            elif dependency_sync_state.blocked_changed_plugin_ids:
+                restart_reason = "file_watcher_blocklist_changed"
 
-        restarted = await self._restart_supervisors(restart_reason)
-        if not restarted:
-            logger.warning(f"插件源码变更后重启 Supervisor 失败: {restart_reason}")
+            restarted = await self._restart_supervisors(restart_reason)
+            if not restarted:
+                logger.warning(f"插件源码变更后重启 Supervisor 失败: {restart_reason}")
 
     @staticmethod
     def _plugin_dir_matches(path: Path, plugin_dir: Path) -> bool:
