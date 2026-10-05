@@ -15,7 +15,6 @@ import asyncio
 import base64
 import hashlib
 import time
-import traceback
 from datetime import datetime
 
 from src.chat.message_receive.chat_manager import BotChatSession
@@ -869,8 +868,7 @@ async def _send_via_platform_io(
     try:
         await platform_io_manager.ensure_send_pipeline_ready()
     except Exception as exc:
-        logger.error(f"[SendService] 准备 Platform IO 发送管线失败: {exc}")
-        logger.debug(traceback.format_exc())
+        logger.error(f"[SendService] 准备 Platform IO 发送管线失败: {exc}", exc_info=True)
         return None
 
     try:
@@ -893,8 +891,7 @@ async def _send_via_platform_io(
             metadata={"show_log": False},
         )
     except Exception as exc:
-        logger.error(f"[SendService] Platform IO 发送异常: {exc}")
-        logger.debug(traceback.format_exc())
+        logger.error(f"[SendService] Platform IO 发送异常: {exc}", exc_info=True)
         return None
 
     sent = bool(delivery_batch.has_success)
@@ -1136,8 +1133,7 @@ async def _send_to_target_with_message(
         logger.error("[SendService] 发送消息失败")
         return None
     except Exception as exc:
-        logger.error(f"[SendService] 发送消息时出错: {exc}")
-        traceback.print_exc()
+        logger.exception(f"[SendService] 发送消息时出错: {exc}")
         return None
 
 
