@@ -1414,7 +1414,9 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
             project=api_provider.project,
             base_url=client_config.base_url,
             timeout=api_provider.timeout,
-            max_retries=api_provider.max_retry,
+            # 重试统一由 LLMOrchestrator 外层循环按 api_provider.max_retry 负责（计数、日志、retry_interval）；
+            # SDK 内部再重试会与外层嵌套，使超时请求被重复发送并重复计费输出 token（#1769）
+            max_retries=0,
             default_headers=client_config.default_headers or None,
             default_query=client_config.default_query or None,
         )
