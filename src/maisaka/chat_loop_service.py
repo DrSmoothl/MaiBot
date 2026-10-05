@@ -973,6 +973,7 @@ class MaisakaChatLoopService:
 
         previous_context_timestamp: datetime | None = None
         deferred_boundary_timestamps: List[datetime] = []
+        history_context_items: List[ContextItem] = []
         for msg in selected_history:
             context_items = build_context_items_from_history_entry(
                 msg,
@@ -999,6 +1000,7 @@ class MaisakaChatLoopService:
                     self._append_time_user_message(items, msg.timestamp)
 
             items.extend(context_items)
+            history_context_items.extend(context_items)
             previous_context_timestamp = msg.timestamp
 
         for boundary_timestamp in deferred_boundary_timestamps:
@@ -1035,7 +1037,8 @@ class MaisakaChatLoopService:
                 .build()
             )
 
-        self._validate_function_call_context_anchors(items)
+        # 跨日时间提示由本方法生成，不能代替真实 user 消息充当工具调用锚点
+        self._validate_function_call_context_anchors(history_context_items)
         return items, history_item_count
 
     @staticmethod

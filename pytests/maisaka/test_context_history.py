@@ -266,6 +266,40 @@ def test_request_rejects_function_call_history_without_user_anchor() -> None:
         )
 
 
+def test_day_boundary_hint_does_not_count_as_function_call_anchor() -> None:
+    previous_day = datetime(2026, 7, 20, 23, 59, 59)
+    next_day = datetime(2026, 7, 21, 0, 0, 1)
+    history = [
+        ModelOutputContextMessage(
+            output_item=AssistantMessageItem(
+                meta=ContextItemMeta.create(item_id="assistant", logical_turn_id="turn-0", timestamp=previous_day),
+                parts=(ContextTextPart("前一天的回复"),),
+            )
+        ),
+        ModelOutputContextMessage(
+            output_item=FunctionCallItem(
+                meta=ContextItemMeta.create(item_id="call-item", logical_turn_id="turn-1", timestamp=next_day),
+                tool_call=ContextToolCall.create(call_id="call-1", func_name="lookup", args={}),
+            )
+        ),
+        ToolResultMessage(
+            content="result:call-1",
+            timestamp=next_day,
+            tool_call_id="call-1",
+            tool_name="lookup",
+            logical_turn_id="turn-1",
+        ),
+    ]
+    service = MaisakaChatLoopService(chat_system_prompt="system")
+
+    with pytest.raises(ValueError, match="function call 缺少前置 user/function output 锚点"):
+        service._build_request_messages(
+            history,
+            enable_visual_message=False,
+            include_day_boundary_time_messages=True,
+        )
+
+
 @pytest.mark.asyncio
 async def test_before_request_hook_items_without_user_anchor_are_ignored(monkeypatch) -> None:
     captured_requests: list[list] = []
