@@ -155,7 +155,8 @@ async def test_final_ai_search_request_preserves_tool_evidence(
     assert result.response
     assert "bot_config.toml" in model_output.answer
     assert validation_calls == [model_output.answer]
-    assert final_options.temperature == 0
+    assert final_options.temperature is None
+    assert all(options.max_tokens is None for _, options in model.calls)
     assert final_options.tool_options is None
     assert all(not isinstance(message, FunctionCallOutputItem) for message in final_messages)
     assert all(not isinstance(message, FunctionCallItem) for message in final_messages)
@@ -351,6 +352,36 @@ def test_validate_model_output_evidence_accepts_structured_assignment() -> None:
     evidence = '{"content":"[emoji]\\nsteal_emoji = true"}'
 
     search_grounding.validate_model_output_evidence(model_output, evidence)
+
+
+@pytest.mark.parametrize(
+    "claim, evidence",
+    [
+        ("[experimental] enable_rich_reply = true", "[experimental]\nenable_rich_reply = true"),
+        ("[experimental]enable_rich_reply = true", "experimental.enable_rich_reply = true"),
+        ("[chat.reply_timing] talk_value = 1", "[chat.reply_timing]\ntalk_value = 1"),
+        ("experimental.enable_rich_reply = true", "[experimental] enable_rich_reply = true"),
+    ],
+)
+def test_validate_model_output_evidence_accepts_section_prefixed_fields(claim: str, evidence: str) -> None:
+    model_output = AISearchModelOutput(answer=f"设置 `{claim}`。")
+
+    search_grounding.validate_model_output_evidence(model_output, evidence)
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "[chat]\nenable_rich_reply = true",
+        "[experimental]\nenable_rich_reply = false",
+        "[experimental]\nother_field = true",
+    ],
+)
+def test_validate_model_output_evidence_rejects_unsupported_section_assignment(evidence: str) -> None:
+    model_output = AISearchModelOutput(answer="设置 `[experimental] enable_rich_reply = true`。")
+
+    with pytest.raises(search_grounding.AISearchGroundingError):
+        search_grounding.validate_model_output_evidence(model_output, evidence)
 
 
 def test_validate_model_output_evidence_normalizes_escaped_quoted_value() -> None:
