@@ -26,6 +26,7 @@ import sys
 import time
 import tomllib
 
+from pydantic import TypeAdapter, ValidationError
 import tomlkit
 
 from src.plugin_runtime.local_sdk import activate_local_sdk_import_path
@@ -90,6 +91,9 @@ _PLUGIN_ALLOWED_RAW_HOST_METHODS = frozenset(
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _RUNNER_DEBUG_FILE_PATH = _PROJECT_ROOT / "logs" / "plugin_runtime_debug" / "runner_rpc_debug.jsonl"
+
+# 宿主保留键 [plugin].enabled 的校验器，规则与配置模型声明 ``enabled: bool`` 时一致
+_PLUGIN_ENABLED_VALIDATOR: TypeAdapter[bool] = TypeAdapter(bool)
 
 
 class _ContextAwarePlugin(Protocol):
@@ -323,6 +327,46 @@ def rebuild_plugin_config_data(
     rebuilt_config = _deep_copy_plugin_config_mapping(default_config)
     _overlay_plugin_config_fields(rebuilt_config, current_config)
     return rebuilt_config
+
+
+def _restore_host_reserved_plugin_config(
+    raw_config: Mapping[str, Any],
+    normalized_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """把宿主保留键 ``[plugin].enabled`` 从原始配置带回归一化结果。
+
+    ``[plugin].enabled`` 由宿主解释（启动激活、配置变更处理、WebUI 启停开关），插件配置模型
+    无需声明它；但 SDK 归一化按配置模型 ``model_dump``（``extra="ignore"``），版本升级重建
+    也以默认配置为骨架，二者都会丢弃模型未声明的键。若不带回，所有基于归一化配置判断启用状态
+    的路径都会把磁盘上的禁用误判为启用。配置模型自行声明了 ``enabled`` 时，以模型校验后的值为准；
+    否则带回的值按声明 ``enabled: bool`` 时的规则校验为布尔值，保证写回磁盘、下发 WebUI 的都是真正的布尔值。
+
+    Args:
+        raw_config: 归一化前的原始配置。
+        normalized_config: 归一化后的配置。
+
+    Returns:
+        Dict[str, Any]: 带回宿主保留键后的配置。
+
+    Raises:
+        ValueError: ``[plugin].enabled`` 不是合法布尔值时抛出。
+    """
+
+    raw_plugin_section = raw_config.get("plugin")
+    if not isinstance(raw_plugin_section, Mapping) or "enabled" not in raw_plugin_section:
+        return normalized_config
+
+    normalized_plugin_section = normalized_config.get("plugin", {})
+    if not isinstance(normalized_plugin_section, Mapping) or "enabled" in normalized_plugin_section:
+        return normalized_config
+
+    restored_plugin_section = _deep_copy_plugin_config_mapping(normalized_plugin_section)
+    raw_enabled = raw_plugin_section["enabled"]
+    try:
+        restored_plugin_section["enabled"] = _PLUGIN_ENABLED_VALIDATOR.validate_python(raw_enabled)
+    except ValidationError as exc:
+        raise ValueError(f"插件配置 plugin.enabled 不是合法的布尔值: {raw_enabled!r}") from exc
+    return {**normalized_config, "plugin": restored_plugin_section}
 
 
 def _install_shutdown_signal_handlers(
@@ -960,17 +1004,16 @@ class PluginRunner:
                 should_persist=False,
             )
 
-        if not hasattr(instance, "normalize_plugin_config"):
-            return PluginConfigNormalizationResult(
-                normalized_config=config_for_normalize,
-                changed=config_for_normalize != raw_config,
-                should_persist=should_persist,
-            )
-
         try:
-            normalized_config, normalized_changed = cast(_ConfigAwarePlugin, instance).normalize_plugin_config(
-                config_for_normalize
-            )
+            if hasattr(instance, "normalize_plugin_config"):
+                normalized_config, normalized_changed = cast(_ConfigAwarePlugin, instance).normalize_plugin_config(
+                    config_for_normalize
+                )
+            else:
+                normalized_config, normalized_changed = config_for_normalize, False
+            # [plugin].enabled 是宿主保留键，插件配置模型未声明时会被归一化丢弃，需从原始配置带回；
+            # 带回值非法时与模型校验失败同等处理
+            normalized_config = _restore_host_reserved_plugin_config(raw_config, normalized_config)
         except Exception as exc:
             if not suppress_errors:
                 raise
