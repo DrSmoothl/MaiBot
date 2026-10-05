@@ -284,6 +284,7 @@ interface PluginDetailPageProps {
   embedded?: boolean
   mode?: 'page' | 'dialog'
   onClose?: () => void
+  onInstalledPluginsChange?: (installed: InstalledPlugin[]) => void
   pluginId?: string
 }
 
@@ -291,6 +292,7 @@ export function PluginDetailPage({
   embedded = false,
   mode = 'page',
   onClose,
+  onInstalledPluginsChange,
   pluginId: pluginIdProp,
 }: PluginDetailPageProps) {
   const navigate = useNavigate()
@@ -408,9 +410,12 @@ export function PluginDetailPage({
   const changelog = selectedRelease ? selectedRelease.release_notes : changelogQuery.isError ? '加载更新日志失败' : (changelogQuery.data ?? '')
   const changelogLoading = !selectedRelease && changelogQuery.isPending
 
-  // 任一写操作成功后，重新拉取已安装列表（前缀失效）
-  const invalidateInstalledPlugins = () =>
-    queryClient.invalidateQueries({ queryKey: ['plugin-installed-list'] })
+  // 任一写操作成功后，重新拉取已安装列表，并同步详情与外层市场的安装状态。
+  const refreshInstalledPlugins = async () => {
+    const installed = await getInstalledPlugins({ forceRefresh: true })
+    queryClient.setQueryData(['plugin-installed-list'], installed)
+    onInstalledPluginsChange?.(installed)
+  }
 
   // 检查是否需要更新
   const needsUpdate = () => {
@@ -462,7 +467,7 @@ export function PluginDetailPage({
       })
 
       // 重新加载安装状态
-      invalidateInstalledPlugins()
+      return refreshInstalledPlugins()
     },
   })
 
@@ -478,7 +483,7 @@ export function PluginDetailPage({
       })
 
       // 重新加载安装状态
-      invalidateInstalledPlugins()
+      return refreshInstalledPlugins()
     },
   })
 
@@ -499,7 +504,7 @@ export function PluginDetailPage({
       })
 
       // 重新加载安装状态
-      invalidateInstalledPlugins()
+      return refreshInstalledPlugins()
     },
   })
 

@@ -74,9 +74,10 @@ export function EmojiManagementPage() {
   const { toast } = useToast()
 
   // 表情包列表：分页/搜索/筛选/排序/多选统一由 useDataList 承载，
-  // 翻页/改参自动重置页码并清空选中，搜索内建 300ms 防抖
+  // 翻页保留选中项，改参重置页码但保留选择，搜索内建 300ms 防抖。
   const list = useDataList<Emoji, EmojiFilters, number>({
     domain: 'emoji',
+    preserveSelectionOnParamsChange: true,
     getId: (emoji) => emoji.id,
     initialFilters: { status: 'adopted', format: 'all', sortBy: 'register_time', sortOrder: 'desc' },
     searchDebounceMs: 300,
@@ -132,13 +133,16 @@ export function EmojiManagementPage() {
   const deleteMutation = useMutation({
     mutationFn: (emoji: Emoji) => deleteEmoji(emoji.id),
     meta: { errorTitle: '错误' },
-    onSuccess: () => {
+    onSuccess: (_result, emoji) => {
       toast({
         title: '成功',
         description: '表情包已删除',
       })
       setDeleteDialogOpen(false)
       setSelectedEmoji(null)
+      if (list.isSelected(emoji.id)) {
+        list.toggle(emoji.id)
+      }
       list.invalidate()
     },
   })
@@ -238,7 +242,7 @@ export function EmojiManagementPage() {
           {/* 筛选和排序 */}
           <Card>
             <CardHeader className="space-y-3">
-              <div className="grid items-end gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto_5rem_auto]">
+              <div className="grid grid-cols-2 items-end gap-4 [&>div]:min-w-0 lg:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto_5rem_auto]">
                 <div className="space-y-2">
                   <Label htmlFor="emoji-search">搜索 tag</Label>
                   <div className="relative">
@@ -269,7 +273,7 @@ export function EmojiManagementPage() {
                   <Label>排序方式</Label>
                   <div className="flex gap-2">
                     <Select value={list.filters.sortBy} onValueChange={(value) => list.setFilter('sortBy', value)}>
-                      <SelectTrigger aria-label="排序字段">
+                    <SelectTrigger aria-label="排序字段" className="min-w-0 flex-1">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -283,6 +287,7 @@ export function EmojiManagementPage() {
                       type="button"
                       variant="outline"
                       size="icon"
+                      className="shrink-0"
                       aria-label={list.filters.sortOrder === 'desc' ? '切换为正序' : '切换为倒序'}
                       title={list.filters.sortOrder === 'desc' ? '当前倒序，点击切换为正序' : '当前正序，点击切换为倒序'}
                       onClick={() =>
@@ -379,32 +384,35 @@ export function EmojiManagementPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button onClick={() => setUploadDialogOpen(true)} className="gap-2">
+                <Button onClick={() => setUploadDialogOpen(true)} className="col-span-2 gap-2 lg:col-span-3 xl:col-span-1">
                   <Plus className="h-4 w-4" />
                   新增
                 </Button>
               </div>
-
-              {list.selectedCount > 0 && (
-                <div className="flex flex-wrap items-center gap-3 border-t pt-4">
-                  <span className="text-muted-foreground text-sm">
-                    已选择 {list.selectedCount} 个表情包
-                  </span>
-                  <Button variant="outline" size="sm" onClick={() => list.clearSelection()}>
-                    取消选择
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setBatchDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="mr-1 h-4 w-4" />
-                    批量删除
-                  </Button>
-                </div>
-              )}
             </CardHeader>
           </Card>
+
+          {/* 选择操作栏独立于筛选卡片，滚动到列表后仍保持吸顶。 */}
+          {list.selectedCount > 0 && (
+            <Card className="sticky top-0 z-20">
+              <div className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
+                <span className="text-muted-foreground text-sm">
+                  已选择 {list.selectedCount} 个表情包
+                </span>
+                <Button variant="outline" size="sm" onClick={() => list.clearSelection()}>
+                  取消选择
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setBatchDeleteDialogOpen(true)}
+                >
+                  <Trash2 className="mr-1 h-4 w-4" />
+                  批量删除
+                </Button>
+              </div>
+            </Card>
+          )}
 
           {/* 表情包卡片列表 */}
           <Card>

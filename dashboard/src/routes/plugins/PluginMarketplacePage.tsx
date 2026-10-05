@@ -1224,6 +1224,10 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
                 embedded={embedded}
                 mode="dialog"
                 onClose={() => setDetailPluginId(null)}
+                onInstalledPluginsChange={(installed) => {
+                  setInstalledPlugins(installed)
+                  setPlugins((currentPlugins) => mergeInstalledPluginInfo(currentPlugins, installed))
+                }}
                 pluginId={detailPluginId}
               />
             ) : null}

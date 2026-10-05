@@ -106,12 +106,14 @@ export function Layout({ children }: LayoutProps) {
   const { theme, setTheme, themeConfig } = useTheme()
   const effectiveSidebarOpen = themeConfig.dashboardStyle !== 'millennium' && sidebarOpen
   const builtInMenuSections = useMenuSections()
+  // 日志工作区在移动端保留麦麦导航，顶栏菜单按钮与其它页面保持一致。
+  const sidebarWorkspaceMode = workspaceMode === 'logs' ? 'settings' : workspaceMode
   const menuSections = useMemo(() => {
     const pluginMenuSections: MenuSection[] = extensions.flatMap((extension) => {
       const pages = extension.pages.filter((page) =>
         page.placement === 'sidebar'
-          ? workspaceMode === 'settings'
-          : workspaceMode === extensionWorkspace(extension.plugin_id)
+          ? sidebarWorkspaceMode === 'settings'
+          : sidebarWorkspaceMode === extensionWorkspace(extension.plugin_id)
       )
       return pages.length
         ? [
@@ -128,7 +130,7 @@ export function Layout({ children }: LayoutProps) {
           ]
         : []
     })
-    return workspaceMode === 'settings'
+    return sidebarWorkspaceMode === 'settings'
       ? [
           ...builtInMenuSections,
           ...(pluginMenuSections.length
@@ -141,7 +143,7 @@ export function Layout({ children }: LayoutProps) {
             : []),
         ]
       : pluginMenuSections
-  }, [builtInMenuSections, extensions, workspaceMode])
+  }, [builtInMenuSections, extensions, sidebarWorkspaceMode])
 
   useEffect(() => {
     shellStateRef.current = { sidebarOpen, topbarCollapsed }
@@ -398,22 +400,20 @@ export function Layout({ children }: LayoutProps) {
           )}
 
           {/* 移动端 Sidebar 走自己的 fixed 定位，通过 mobileMenuOpen 控制显隐 */}
-          {isSettingsWorkspace && (
-            <div className="lg:hidden">
-              <Sidebar
-                menuSections={menuSections}
-                sidebarOpen={effectiveSidebarOpen}
-                mobileMenuOpen={mobileMenuOpen}
-                topbarCollapsed={topbarCollapsed}
-                onMobileMenuClose={() => setMobileMenuOpen(false)}
-                onSidebarFix={handleSidebarFix}
-              />
-            </div>
-          )}
+          <div className="lg:hidden">
+            <Sidebar
+              menuSections={menuSections}
+              sidebarOpen={effectiveSidebarOpen}
+              mobileMenuOpen={mobileMenuOpen}
+              topbarCollapsed={topbarCollapsed}
+              onMobileMenuClose={() => setMobileMenuOpen(false)}
+              onSidebarFix={handleSidebarFix}
+            />
+          </div>
 
           {/* Mobile overlay */}
           <AnimatePresence>
-            {isSettingsWorkspace && mobileMenuOpen && (
+            {mobileMenuOpen && (
               <motion.div
                 aria-hidden="true"
                 className="fixed inset-0 z-40 bg-black/50 lg:hidden"

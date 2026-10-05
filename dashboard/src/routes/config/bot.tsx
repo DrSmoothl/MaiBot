@@ -55,6 +55,7 @@ import {
   updateBotConfig,
   updateBotConfigRaw,
 } from '@/lib/config-api'
+import { buildTabGroupsFromSchema, type TabGroup } from '@/lib/config-tab-groups'
 import { fieldHooks } from '@/lib/field-hooks'
 import { getConfigSearchField, scrollToConfigSearchField } from '@/lib/config-search-navigation'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
@@ -99,78 +100,12 @@ const EXPERIMENTAL_FEATURES_NOTICE_DISMISSED_KEY =
   'bot-config-experimental-features-notice-dismissed'
 
 // ==================== Tab 分组类型与构建 ====================
-interface TabGroup {
-  id: string
-  label: string
-  order: number
-  sections: string[]
-}
 
 interface SubtabPane {
   advanced: boolean
   content: ReactNode
   id: string
   label: string
-}
-
-/**
- * 从 schema 的 nested 字段解析出 tab 分组信息。
- * - 有 uiLabel 且无 uiParent → 独立 tab
- * - 有 uiParent → 递归找到最终 host，并归入对应 tab
- */
-function buildTabGroupsFromSchema(schema: ConfigSchema): TabGroup[] {
-  const nested = schema.nested || {}
-  const nestedEntries = Object.entries(nested)
-  const hosts = new Map<string, TabGroup>()
-
-  const resolveHostId = (fieldName: string, visited: Set<string> = new Set()): string | null => {
-    if (visited.has(fieldName)) {
-      return null
-    }
-
-    const fieldSchema = nested[fieldName]
-    if (!fieldSchema) {
-      return null
-    }
-
-    if (!fieldSchema.uiParent) {
-      return fieldSchema.uiLabel ? fieldName : null
-    }
-
-    visited.add(fieldName)
-    return resolveHostId(fieldSchema.uiParent, visited)
-  }
-
-  for (const [fieldName, fieldSchema] of nestedEntries) {
-    if (fieldSchema.uiLabel && !fieldSchema.uiParent) {
-      hosts.set(fieldName, {
-        id: fieldName,
-        label: fieldSchema.uiLabel,
-        order: fieldSchema.uiOrder ?? Number.POSITIVE_INFINITY,
-        sections: [fieldName],
-      })
-    }
-  }
-
-  for (const [fieldName] of nestedEntries) {
-    const hostId = resolveHostId(fieldName)
-    if (!hostId || hostId === fieldName) {
-      continue
-    }
-
-    const parent = hosts.get(hostId)
-    if (parent && !parent.sections.includes(fieldName)) {
-      parent.sections.push(fieldName)
-    }
-  }
-
-  return Array.from(hosts.values()).sort((a, b) => {
-    const orderDelta = a.order - b.order
-    if (orderDelta !== 0) {
-      return orderDelta
-    }
-    return a.label.localeCompare(b.label, 'zh-CN')
-  })
 }
 
 // 主导出组件：包装 RestartProvider
@@ -205,23 +140,29 @@ function BotConfigPageContent() {
   const searchFieldPath = useMemo(() => getConfigSearchField(routeSearch), [routeSearch])
   const lastRouteSearchRef = useRef<string | null>(null)
 
-  // 同页链接可定位共享组或命令管理；未保存的配置完成后再切换。
+  // Schema 状态（用于动态 tab 分组）
+  const [configSchema, setConfigSchema] = useState<ConfigSchema | null>(null)
+
+  // 同页链接可定位配置栏目、共享组或命令管理；未保存的配置完成后再切换。
   useEffect(() => {
     if (lastRouteSearchRef.current === routeSearch) return
-    const mode = new URLSearchParams(routeSearch).get('mode')
-    if (hasUnsavedChanges) return
+    const params = new URLSearchParams(routeSearch)
+    const mode = params.get('mode')
+    const tab = params.get('tab')
+    if (hasUnsavedChanges || (tab && !configSchema)) return
     lastRouteSearchRef.current = routeSearch
     if (mode === 'groups' || mode === 'commands') {
       setEditMode(mode)
     } else {
       setEditMode('detail')
+      if (tab && configSchema && buildTabGroupsFromSchema(configSchema).some((item) => item.id === tab)) {
+        setActiveConfigTab(tab)
+      }
     }
-  }, [hasUnsavedChanges, routeSearch])
+  }, [configSchema, hasUnsavedChanges, routeSearch])
 
   const [sectionValues, setSectionValues] = useState<Record<string, ConfigSectionData | null>>({})
 
-  // Schema 状态（用于动态 tab 分组）
-  const [configSchema, setConfigSchema] = useState<ConfigSchema | null>(null)
 
   // 用于标记初始加载和配置缓存
   const initialLoadRef = useRef(true)
@@ -662,169 +603,169 @@ function BotConfigPageContent() {
 
   return (
     <ScrollArea className="h-full min-w-0" scrollbars="vertical">
-      <div className="max-w-full space-y-4 overflow-x-hidden p-4 sm:space-y-6 sm:p-6">
-        {/* 页面标题 */}
-        <div className="flex flex-col gap-3 sm:gap-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto sm:flex-1">
-              {editMode === 'detail' && tabGroups.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="shrink-0 gap-2 text-base font-semibold ![background-image:none]" aria-label="选择设置页面">
-                      {tabGroups.find((tab) => tab.id === activeConfigTab)?.label ?? tabGroups[0].label}
-                      <ChevronDown className="h-4 w-4" aria-hidden="true" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="flex max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-40 flex-col gap-2 overflow-y-auto p-2 ![background-image:none]">
-                    {tabGroups.map((tab) => {
-                      const pinned = pinnedTabs.some((item) => item.id === tab.id)
-                      const PinIcon = pinned ? PinOff : Pin
-                      const pinLabel = `${pinned ? '取消钉固' : '钉固'}${tab.label}`
-                      return (
-                        <div
-                          key={tab.id}
-                          data-dashboard-button="true"
-                          className={cn(
-                            buttonVariants({ variant: 'outline' }),
-                            'w-full shrink-0 justify-start gap-1 px-2 text-base font-semibold ![background-image:none]'
-                          )}
-                        >
-                          <DropdownMenuItem
-                            asChild
-                            onSelect={(event) => {
-                              event.preventDefault()
-                              togglePin(tab)
-                            }}
-                          >
-                            <button
-                              type="button"
-                              aria-label={pinLabel}
-                              aria-pressed={pinned}
-                              title={pinLabel}
-                              className={cn(
-                                'flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 shadow-none hover:text-primary focus:text-primary',
-                                pinned ? 'text-primary' : 'text-muted-foreground/60'
-                              )}
-                            >
-                              <PinIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                            </button>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => setActiveConfigTab(tab.id)}
-                            className="min-w-0 flex-1 cursor-pointer self-stretch px-1 text-base font-semibold"
-                          >
-                            {tab.label}
-                            {activeConfigTab === tab.id && <Check className="ml-auto h-4 w-4" aria-hidden="true" />}
-                          </DropdownMenuItem>
-                        </div>
-                      )
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              {editMode === 'detail' && pinnedTabs.length > 0 && (
-                <div data-config-pinned-tabs-frame="true" className="min-w-0 flex-1 overflow-hidden rounded-md border bg-muted/30 p-1 shadow-inner">
-                  <nav aria-label="钉固的设置页面" tabIndex={0} className="flex min-w-0 items-center gap-2 overflow-x-auto px-1 py-0.5">
-                    {pinnedTabs.map((pinned) => {
-                      const tab = tabGroups.find((item) => item.id === pinned.id)
-                      if (!tab) return null
-                      return (
-                        <Button
-                          key={tab.id}
-                          size="sm"
-                          variant={activeConfigTab === tab.id ? 'secondary' : 'outline'}
-                          aria-pressed={activeConfigTab === tab.id}
-                          className="shrink-0 text-sm font-semibold ![background-image:none]"
-                          onClick={() => setActiveConfigTab(tab.id)}
-                        >
-                          {tab.label}
-                        </Button>
-                      )
-                    })}
-                  </nav>
-                </div>
-              )}
-            </div>
-            {/* 按钮组 - 桌面端靠右 */}
-            <div className="flex w-full min-w-0 flex-wrap gap-2 sm:w-auto sm:flex-shrink-0 sm:justify-end">
-              {editMode === 'detail' && activeConfigTab !== 'bot' && (
-                <label htmlFor="advanced-settings" className="flex h-9 shrink-0 cursor-pointer items-center gap-2 self-center px-2 text-sm font-semibold">
-                  <Switch id="advanced-settings" checked={advancedVisible} onCheckedChange={setAdvancedVisible} aria-label="高级设置" />
-                  高级设置
-                </label>
-              )}
-              <Tabs
-                value={editMode}
-                onValueChange={(v) => handleModeChange(v as BotSettingsMode)}
-                className="w-full min-w-0 sm:w-64"
-              >
-                <TabsList data-config-bot-mode-tabs="true" className="grid h-9 w-full grid-cols-2">
-                  <TabsTrigger value="detail" className="px-2 text-sm">
-                    <SlidersHorizontal className="mr-1 h-4 w-4" />
-                    详细设置
-                  </TabsTrigger>
-                  <TabsTrigger value="commands" className="px-2 text-sm">
-                    <ShieldCheck className="mr-1 h-4 w-4" />
-                    命令管理
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <Button
-                onClick={handleReloadFromFile}
-                disabled={saving || autoSaving || isRestarting}
-                size="sm"
-                variant="outline"
-                className="h-9 w-9 flex-none px-0"
-                aria-label="刷新"
-                title="刷新"
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
+      <div className="max-w-full space-y-4 p-4 sm:space-y-6 sm:p-6">
+        {/* 顶部操作栏整体吸顶：手机端分两行，PC 端导航与操作按钮同一行。 */}
+        <div data-config-section-navigation="true" className="bg-background sticky top-0 z-20 flex min-w-0 flex-col gap-3 py-2 lg:flex-row lg:items-center">
+          <div className="flex w-full min-w-0 items-center gap-3 lg:flex-1">
+            {editMode === 'detail' && tabGroups.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-9 w-9 flex-none px-0"
-                    aria-label="更多设置"
-                    title="更多设置"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
+                  <Button variant="outline" className="shrink-0 gap-2 text-base font-semibold ![background-image:none]" aria-label="选择设置页面">
+                    {tabGroups.find((tab) => tab.id === activeConfigTab)?.label ?? tabGroups[0].label}
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  <DropdownMenuItem
-                    disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting}
-                    onSelect={() => void (editMode === 'source' ? saveSourceCode() : saveConfig())}
-                  >
-                    <Save className="mr-2 h-4 w-4" />
-                    手动保存
-                    <span className="text-muted-foreground ml-auto text-xs">
-                      {saving
-                        ? '保存中'
-                        : autoSaving
-                          ? '自动保存中'
-                          : !hasUnsavedChanges
-                            ? '已保存'
-                            : ''}
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => void handleModeChange('groups')}>
-                    <UsersRound className="mr-2 h-4 w-4" />
-                    共享组设置
-                    {editMode === 'groups' && <Check className="ml-auto h-4 w-4" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void handleModeChange('source')}>
-                    <Code2 className="mr-2 h-4 w-4" />
-                    源文件编辑
-                    {editMode === 'source' && <Check className="ml-auto h-4 w-4" />}
-                  </DropdownMenuItem>
+                <DropdownMenuContent align="start" className="flex max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-40 flex-col gap-2 overflow-y-auto p-2 ![background-image:none]">
+                  {tabGroups.map((tab) => {
+                    const pinned = pinnedTabs.some((item) => item.id === tab.id)
+                    const PinIcon = pinned ? PinOff : Pin
+                    const pinLabel = `${pinned ? '取消钉固' : '钉固'}${tab.label}`
+                    return (
+                      <div
+                        key={tab.id}
+                        data-dashboard-button="true"
+                        data-config-section-menu-row="true"
+                        className={cn(
+                          buttonVariants({ variant: 'outline' }),
+                          'w-full shrink-0 justify-start gap-1 px-2 text-base font-semibold ![background-image:none]'
+                        )}
+                      >
+                        <DropdownMenuItem
+                          asChild
+                          onSelect={(event) => {
+                            event.preventDefault()
+                            togglePin(tab)
+                          }}
+                        >
+                          <button
+                            type="button"
+                            aria-label={pinLabel}
+                            aria-pressed={pinned}
+                            title={pinLabel}
+                            className={cn(
+                              'flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 shadow-none hover:text-primary focus:text-primary',
+                              pinned ? 'text-primary' : 'text-muted-foreground/60'
+                            )}
+                          >
+                            <PinIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => setActiveConfigTab(tab.id)}
+                          className="min-w-0 flex-1 cursor-pointer self-stretch px-1 text-base font-semibold"
+                        >
+                          {tab.label}
+                          {activeConfigTab === tab.id && <Check className="ml-auto h-4 w-4" aria-hidden="true" />}
+                        </DropdownMenuItem>
+                      </div>
+                    )
+                  })}
                 </DropdownMenuContent>
               </DropdownMenu>
-            </div>
+            )}
+            {editMode === 'detail' && pinnedTabs.length > 0 && (
+              <div data-config-pinned-tabs-frame="true" className="min-w-0 flex-1 overflow-hidden rounded-md border bg-muted/30 p-1 shadow-inner">
+                <nav aria-label="钉固的设置页面" tabIndex={0} className="flex min-w-0 items-center gap-2 overflow-x-auto px-1 py-0.5">
+                  {pinnedTabs.map((pinned) => {
+                    const tab = tabGroups.find((item) => item.id === pinned.id)
+                    if (!tab) return null
+                    return (
+                      <Button
+                        key={tab.id}
+                        size="sm"
+                        variant={activeConfigTab === tab.id ? 'secondary' : 'outline'}
+                        aria-pressed={activeConfigTab === tab.id}
+                        className="shrink-0 text-sm font-semibold ![background-image:none]"
+                        onClick={() => setActiveConfigTab(tab.id)}
+                      >
+                        {tab.label}
+                      </Button>
+                    )
+                  })}
+                </nav>
+              </div>
+            )}
           </div>
+          {/* 模式页签与刷新、更多按钮保持同一行，桌面端靠右。 */}
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:justify-end lg:w-auto lg:shrink-0">
+            {editMode === 'detail' && activeConfigTab !== 'bot' && (
+              <label htmlFor="advanced-settings" className="flex h-9 w-full shrink-0 cursor-pointer items-center gap-2 self-center px-2 text-sm font-semibold sm:w-auto">
+                <Switch id="advanced-settings" checked={advancedVisible} onCheckedChange={setAdvancedVisible} aria-label="高级设置" />
+                高级设置
+              </label>
+            )}
+            <Tabs
+              value={editMode}
+              onValueChange={(v) => handleModeChange(v as BotSettingsMode)}
+              className="min-w-0 flex-1 sm:w-64 sm:flex-none"
+            >
+              <TabsList data-config-bot-mode-tabs="true" className="grid h-9 w-full grid-cols-2">
+                <TabsTrigger value="detail" className="min-w-0 gap-1 !px-1 text-sm sm:!px-2">
+                  <SlidersHorizontal className="h-4 w-4 shrink-0" />
+                  详细设置
+                </TabsTrigger>
+                <TabsTrigger value="commands" className="min-w-0 gap-1 !px-1 text-sm sm:!px-2">
+                  <ShieldCheck className="h-4 w-4 shrink-0" />
+                  命令管理
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Button
+              onClick={handleReloadFromFile}
+              disabled={saving || autoSaving || isRestarting}
+              size="sm"
+              variant="outline"
+              className="h-9 w-9 flex-none px-0"
+              aria-label="刷新"
+              title="刷新"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-9 w-9 flex-none px-0"
+                  aria-label="更多设置"
+                  title="更多设置"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem
+                  disabled={saving || autoSaving || !hasUnsavedChanges || isRestarting}
+                  onSelect={() => void (editMode === 'source' ? saveSourceCode() : saveConfig())}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  手动保存
+                  <span className="text-muted-foreground ml-auto text-xs">
+                    {saving
+                      ? '保存中'
+                      : autoSaving
+                        ? '自动保存中'
+                        : !hasUnsavedChanges
+                          ? '已保存'
+                          : ''}
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void handleModeChange('groups')}>
+                  <UsersRound className="mr-2 h-4 w-4" />
+                  共享组设置
+                  {editMode === 'groups' && <Check className="ml-auto h-4 w-4" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void handleModeChange('source')}>
+                  <Code2 className="mr-2 h-4 w-4" />
+                  源文件编辑
+                  {editMode === 'source' && <Check className="ml-auto h-4 w-4" />}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
         </div>
 
         {/* 源代码模式 */}

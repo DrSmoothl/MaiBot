@@ -188,7 +188,7 @@ export function Header({
 
 
   useEffect(() => {
-    if (workspaceMode !== 'logs') {
+    if (workspaceMode !== 'logs' || themeConfig.dashboardStyle === 'millennium') {
       const resetFrameId = requestAnimationFrame(() => setWorkspaceTabsCompact(false))
       return () => cancelAnimationFrame(resetFrameId)
     }
@@ -249,7 +249,7 @@ export function Header({
       window.removeEventListener('resize', updateCompactState)
       resizeObserver.disconnect()
     }
-  }, [workspaceMode, workspaceTabsKey])
+  }, [workspaceMode, workspaceTabsKey, themeConfig.dashboardStyle])
 
   const handleLogout = async () => {
     await logout()
@@ -367,10 +367,7 @@ export function Header({
               onClick={onMobileMenuToggle}
               aria-label={t('a11y.closeMenu')}
               aria-expanded={mobileMenuOpen}
-              className={cn(
-                'hover:bg-accent rounded-lg p-2 lg:hidden',
-                workspaceMode === 'logs' && 'hidden'
-              )}
+              className="hover:bg-accent rounded-lg p-2 lg:hidden"
             >
               <Menu className="h-5 w-5" />
             </button>
@@ -532,7 +529,9 @@ export function Header({
                 }}
                 className={cn(
                   'relative ml-2 flex min-w-0 flex-1 items-center sm:ml-3 sm:max-w-72',
-                  workspaceMode === 'logs' ? 'flex-none w-28 sm:w-48' : 'mr-auto'
+                  workspaceMode === 'logs' && themeConfig.dashboardStyle !== 'millennium'
+                    ? 'mr-auto sm:mr-0 sm:w-48 sm:flex-none'
+                    : 'mr-auto'
                 )}
               >
                 <Input
@@ -604,6 +603,7 @@ export function Header({
             )}
 
             {/* WebUI 设置 */}
+            <span data-dashboard-header-vent="true" aria-hidden="true" className="hidden" />
             <Button
               variant="ghost"
               size="icon"
