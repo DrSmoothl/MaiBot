@@ -92,7 +92,13 @@ def _is_claim_supported_by_evidence(claim: str, evidence: str) -> bool:
 
 
 def _is_config_field_supported(field_name: str, evidence: str) -> bool:
-    """兼容 TOML 的 `[section]` 与 `section.field` 两种等价字段表示。"""
+    """兼容 TOML 的 `[section] field` 与 `section.field` 两种等价字段表示。"""
+
+    # 模型常把配置节与赋值写在同一行，先还原完整字段路径再校验。
+    section_field_match = re.fullmatch(r"\[([\w.-]+)\]\s*([\w.-]+)", field_name)
+    if section_field_match:
+        section_name, local_field_name = section_field_match.groups()
+        field_name = f"{section_name}.{local_field_name}"
 
     if field_name in evidence:
         return True

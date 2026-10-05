@@ -12,6 +12,7 @@ import {
   Moon,
   MoreHorizontal,
   Search,
+  Settings,
   SlidersHorizontal,
   Sun,
 } from 'lucide-react'
@@ -30,6 +31,7 @@ import { useTranslation } from 'react-i18next'
 import { BackgroundLayer } from '@/components/background-layer'
 import { BackendManager } from '@/components/electron/BackendManager'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -95,7 +97,7 @@ interface HeaderProps {
   workspaceMode: WorkspaceMode
 }
 
-type HeaderActionId = 'search' | 'docs' | 'language' | 'theme' | 'logout'
+type HeaderActionId = 'search' | 'settings' | 'docs' | 'language' | 'theme' | 'logout'
 
 export function Header({
   extensions = [],
@@ -141,6 +143,8 @@ export function Header({
   const currentLang = i18nInstance.language || 'zh'
   const { config: headerBg, inheritedFrom } = useBackground('header')
   const inheritsPageBackground = inheritedFrom === 'page'
+  const [searchQuery, setSearchQuery] = useState('')
+  const [aiSearchRequestId, setAISearchRequestId] = useState(0)
   const [backendManagerOpen, setBackendManagerOpen] = useState(false)
   const [activeBackendName, setActiveBackendName] = useState<string>('')
   const [workspaceTabsCompact, setWorkspaceTabsCompact] = useState(false)
@@ -515,6 +519,38 @@ export function Header({
                   ))}
                 </TabsList>
               </Tabs>
+              {/* 顶栏搜索：提交问题后打开搜索窗口并自动执行 AI 搜索。 */}
+              <form
+                role="search"
+                data-dashboard-header-search="true"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  if (searchQuery.trim()) {
+                    setAISearchRequestId((current) => current + 1)
+                  }
+                  onSearchOpenChange(true)
+                }}
+                className={cn(
+                  'relative ml-2 flex min-w-0 flex-1 items-center sm:ml-3 sm:max-w-72',
+                  workspaceMode === 'logs' ? 'flex-none w-28 sm:w-48' : 'mr-auto'
+                )}
+              >
+                <Input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t('header.searchPlaceholder')}
+                  aria-label={t('header.searchPlaceholder')}
+                  className="h-8 min-w-0 pr-9 text-sm"
+                />
+                <button
+                  type="submit"
+                  aria-label={t('header.searchPlaceholder')}
+                  className="text-muted-foreground hover:text-foreground absolute right-1 flex h-7 w-7 items-center justify-center rounded-sm"
+                >
+                  <Search className="h-4 w-4" />
+                </button>
+              </form>
               {overflowTabs.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -554,34 +590,41 @@ export function Header({
                 <div className="bg-border h-6 w-px" />
               </>
             )}
-            {/* 搜索框 */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => {
-                setHoveredHeaderAction('search')
-                onSearchOpenChange(!searchOpen)
-              }}
-              aria-label={t('header.searchPlaceholder')}
-              title={t('header.searchPlaceholder')}
-              data-dashboard-header-action="true"
-              data-header-action-highlighted={
-                highlightedHeaderAction === 'search' ? 'true' : 'false'
-              }
-              onPointerEnter={() => handleHeaderActionEnter('search')}
-              onPointerLeave={handleHeaderActionLeave}
-              className="relative isolate hidden border-0 bg-transparent shadow-none md:inline-flex"
-            >
-              {renderHeaderActionPill('search')}
-              <Search className="h-4 w-4" />
-            </Button>
-
             {/* 搜索对话框 */}
             {(searchOpen || searchDialogLoaded) && (
               <Suspense fallback={null}>
-                <SearchDialog open={searchOpen} onOpenChange={onSearchOpenChange} />
+                <SearchDialog
+                  open={searchOpen}
+                  onOpenChange={onSearchOpenChange}
+                  query={searchQuery}
+                  onQueryChange={setSearchQuery}
+                  aiSearchRequestId={aiSearchRequestId}
+                />
               </Suspense>
             )}
+
+            {/* WebUI 设置 */}
+            <Button
+              variant="ghost"
+              size="icon"
+              asChild
+              className="relative isolate hidden border-0 bg-transparent shadow-none sm:inline-flex"
+            >
+              <Link
+                to="/settings"
+                title={t('sidebar.menu.settings')}
+                aria-label={t('sidebar.menu.settings')}
+                data-dashboard-header-action="true"
+                data-header-action-highlighted={
+                  highlightedHeaderAction === 'settings' ? 'true' : 'false'
+                }
+                onPointerEnter={() => handleHeaderActionEnter('settings')}
+                onPointerLeave={handleHeaderActionLeave}
+              >
+                {renderHeaderActionPill('settings')}
+                <Settings className="h-4 w-4" />
+              </Link>
+            </Button>
 
             {/* 麦麦文档链接 */}
             <Button
@@ -730,6 +773,12 @@ export function Header({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem asChild>
+                  <Link to="/settings" className="cursor-pointer gap-2">
+                    <Settings className="h-4 w-4" />
+                    {t('sidebar.menu.settings')}
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={(event) => {
                     const newTheme = actualTheme === 'dark' ? 'light' : 'dark'
