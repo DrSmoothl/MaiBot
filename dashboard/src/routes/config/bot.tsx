@@ -7,6 +7,8 @@ import {
   Code2,
   Info,
   MoreHorizontal,
+  Pin,
+  PinOff,
   RefreshCw,
   Save,
   Settings,
@@ -45,6 +47,7 @@ import { CodeEditor } from '@/components/CodeEditor'
 import { DynamicConfigForm } from '@/components/dynamic-form'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
+import { usePinnedConfigTabs } from '@/hooks/use-pinned-config-tabs'
 import {
   getBotConfig,
   getBotConfigCached,
@@ -187,6 +190,7 @@ export function BotConfigPage() {
 // 内部实现组件
 function BotConfigPageContent() {
   const navigate = useNavigate()
+  const { pinnedTabs, togglePin } = usePinnedConfigTabs()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
@@ -668,33 +672,83 @@ function BotConfigPageContent() {
         {/* 页面标题 */}
         <div className="flex flex-col gap-3 sm:gap-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 flex-wrap items-center gap-3">
-              <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">麦麦设置</h1>
+            <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto sm:flex-1">
               {editMode === 'detail' && tabGroups.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="gap-2 text-base font-semibold ![background-image:none]" aria-label="选择设置页面">
+                    <Button variant="outline" className="shrink-0 gap-2 text-base font-semibold ![background-image:none]" aria-label="选择设置页面">
                       {tabGroups.find((tab) => tab.id === activeConfigTab)?.label ?? tabGroups[0].label}
                       <ChevronDown className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="flex max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-40 flex-col gap-2 overflow-y-auto p-2 ![background-image:none]">
-                    {tabGroups.map((tab) => (
-                      <DropdownMenuItem
-                        key={tab.id}
-                        data-dashboard-button="true"
-                        onSelect={() => setActiveConfigTab(tab.id)}
-                        className={cn(
-                          buttonVariants({ variant: 'outline' }),
-                          'w-full shrink-0 justify-start text-base font-semibold ![background-image:none]'
-                        )}
-                      >
-                        {tab.label}
-                        {activeConfigTab === tab.id && <Check className="ml-auto h-4 w-4" aria-hidden="true" />}
-                      </DropdownMenuItem>
-                    ))}
+                    {tabGroups.map((tab) => {
+                      const pinned = pinnedTabs.some((item) => item.id === tab.id)
+                      const PinIcon = pinned ? PinOff : Pin
+                      const pinLabel = `${pinned ? '取消钉固' : '钉固'}${tab.label}`
+                      return (
+                        <div
+                          key={tab.id}
+                          data-dashboard-button="true"
+                          className={cn(
+                            buttonVariants({ variant: 'outline' }),
+                            'w-full shrink-0 justify-start gap-1 px-2 text-base font-semibold ![background-image:none]'
+                          )}
+                        >
+                          <DropdownMenuItem
+                            asChild
+                            onSelect={(event) => {
+                              event.preventDefault()
+                              togglePin(tab)
+                            }}
+                          >
+                            <button
+                              type="button"
+                              aria-label={pinLabel}
+                              aria-pressed={pinned}
+                              title={pinLabel}
+                              className={cn(
+                                'flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 shadow-none hover:text-primary focus:text-primary',
+                                pinned ? 'text-primary' : 'text-muted-foreground/60'
+                              )}
+                            >
+                              <PinIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => setActiveConfigTab(tab.id)}
+                            className="min-w-0 flex-1 cursor-pointer self-stretch px-1 text-base font-semibold"
+                          >
+                            {tab.label}
+                            {activeConfigTab === tab.id && <Check className="ml-auto h-4 w-4" aria-hidden="true" />}
+                          </DropdownMenuItem>
+                        </div>
+                      )
+                    })}
                   </DropdownMenuContent>
                 </DropdownMenu>
+              )}
+              {editMode === 'detail' && pinnedTabs.length > 0 && (
+                <div data-config-pinned-tabs-frame="true" className="min-w-0 flex-1 overflow-hidden rounded-md border bg-muted/30 p-1 shadow-inner">
+                  <nav aria-label="钉固的设置页面" tabIndex={0} className="flex min-w-0 items-center gap-2 overflow-x-auto px-1 py-0.5">
+                    {pinnedTabs.map((pinned) => {
+                      const tab = tabGroups.find((item) => item.id === pinned.id)
+                      if (!tab) return null
+                      return (
+                        <Button
+                          key={tab.id}
+                          size="sm"
+                          variant={activeConfigTab === tab.id ? 'secondary' : 'outline'}
+                          aria-pressed={activeConfigTab === tab.id}
+                          className="shrink-0 text-sm font-semibold ![background-image:none]"
+                          onClick={() => setActiveConfigTab(tab.id)}
+                        >
+                          {tab.label}
+                        </Button>
+                      )
+                    })}
+                  </nav>
+                </div>
               )}
             </div>
             {/* 按钮组 - 桌面端靠右 */}

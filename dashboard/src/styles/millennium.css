@@ -726,6 +726,15 @@
   transform: translateY(2px);
 }
 
+/* 钉固入口收在内凹槽中，固定边框与横向滚动内容分开。 */
+:root[data-dashboard-style='millennium'] [data-config-pinned-tabs-frame='true'] {
+  background-color: var(--mil-panel);
+  border: 2px solid var(--mil-line);
+  box-shadow:
+    inset 3px 3px 0 var(--mil-lo),
+    inset -2px -2px 0 var(--mil-hi);
+}
+
 /* ---------- 开关、复选框、单选 ---------- */
 
 :root[data-dashboard-style='millennium'] [data-dashboard-switch='true'] {
