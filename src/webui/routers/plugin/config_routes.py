@@ -1,7 +1,7 @@
 """插件配置相关 WebUI 路由。"""
 
 from pathlib import Path
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 import asyncio
 
@@ -30,6 +30,8 @@ router = APIRouter()
 
 _PLUGIN_RUNTIME_TOGGLE_TIMEOUT_SECONDS = 16.0
 _PLUGIN_RUNTIME_TOGGLE_POLL_INTERVAL_SECONDS = 0.1
+_SDK_VIRTUAL_GENERAL_SECTION_NAME = "general"
+_PLUGIN_RESERVED_SECTION_NAME = "plugin"
 
 
 def _to_builtin_data(obj: Any) -> Any:
@@ -69,6 +71,86 @@ def _merge_plugin_config_patch(base_config: Dict[str, Any], patch_config: Dict[s
     merged_config = cast(Dict[str, Any], _to_builtin_data(base_config))
     deep_merge(merged_config, patch_config)
     return merged_config
+
+
+def _get_virtual_general_field_names(runtime_snapshot: InspectPluginConfigResultPayload) -> List[str]:
+    """获取 SDK 虚构 general 配置节中的字段名。
+
+    SDK 生成配置 Schema 时，会把配置模型根级的扁平字段归入一个名为 ``general``
+    的配置节，但这些字段在 ``config.toml`` 中位于根级，并不存在 ``[general]`` 表。
+    只有 Schema 含有 general 节、该节字段全部是插件默认配置的根级键，且插件默认
+    配置与当前配置中都没有真实的 general 表时，才把它视为虚构节，避免影响真正
+    声明了 general 配置节的插件（包括自定义 Schema、未提供默认配置的插件）。
+
+    Args:
+        runtime_snapshot: 插件运行时返回的配置解析结果。
+
+    Returns:
+        List[str]: 虚构 general 节中的字段名；general 节不是虚构节时返回空列表。
+    """
+
+    sections = runtime_snapshot.config_schema.get("sections")
+    if not isinstance(sections, dict):
+        return []
+    general_section = sections.get(_SDK_VIRTUAL_GENERAL_SECTION_NAME)
+    if not isinstance(general_section, dict) or not isinstance(general_section.get("fields"), dict):
+        return []
+    if isinstance(runtime_snapshot.default_config.get(_SDK_VIRTUAL_GENERAL_SECTION_NAME), dict):
+        return []
+    if isinstance(runtime_snapshot.normalized_config.get(_SDK_VIRTUAL_GENERAL_SECTION_NAME), dict):
+        return []
+    general_field_names = list(general_section["fields"])
+    # SDK 虚构节的字段都来自配置模型根级，默认配置会把它们全部导出到根级；自定义 Schema 声明的 general 节不满足这一点
+    if not general_field_names or any(
+        field_name not in runtime_snapshot.default_config for field_name in general_field_names
+    ):
+        return []
+    return general_field_names
+
+
+def _fold_root_fields_into_virtual_general(config_data: Dict[str, Any], field_names: List[str]) -> Dict[str, Any]:
+    """把根级扁平字段移入虚构 general 节，使配置形状与 Schema 一致。
+
+    WebUI 可视化表单按 ``config[section][field]`` 读写字段，因此读取时需要把
+    根级扁平字段放到 ``general`` 下；保存时再由
+    :func:`_unfold_virtual_general_into_root` 还原回根级。
+    ``plugin`` 保留节被声明为普通 dict 时也会出现在虚构节中，它只复制不移动：
+    WebUI 依赖根级 ``config.plugin.enabled`` 判断启用状态，而保存时 ``general.*``
+    优先于根级键还原，复制不会产生冲突。
+
+    Args:
+        config_data: 磁盘形状（根级扁平字段）的配置。
+        field_names: 虚构 general 节中的字段名。
+
+    Returns:
+        Dict[str, Any]: 扁平字段位于 ``general`` 下的配置副本。
+    """
+
+    folded_config = dict(config_data)
+    general_config: Dict[str, Any] = {}
+    for field_name in field_names:
+        if field_name not in folded_config:
+            continue
+        if field_name == _PLUGIN_RESERVED_SECTION_NAME:
+            general_config[field_name] = folded_config[field_name]
+        else:
+            general_config[field_name] = folded_config.pop(field_name)
+    folded_config[_SDK_VIRTUAL_GENERAL_SECTION_NAME] = general_config
+    return folded_config
+
+
+def _unfold_virtual_general_into_root(config_patch: Dict[str, Any]) -> None:
+    """把提交内容中虚构 general 节下的字段就地还原到根级。
+
+    Args:
+        config_patch: 本次提交的配置改动。
+    """
+
+    general_patch = config_patch.get(_SDK_VIRTUAL_GENERAL_SECTION_NAME)
+    if not isinstance(general_patch, dict):
+        return
+    del config_patch[_SDK_VIRTUAL_GENERAL_SECTION_NAME]
+    config_patch.update(general_patch)
 
 
 def _build_schema_from_current_config(plugin_id: str, current_config: Any) -> Dict[str, Any]:
@@ -396,6 +478,9 @@ async def get_plugin_config_bundle(plugin_id: str, maibot_session: Optional[str]
 
         if runtime_snapshot is not None:
             current_config = dict(runtime_snapshot.normalized_config)
+            # 表单按 Schema 的 general 节读写根级扁平字段，返回与 Schema 一致的形状
+            if virtual_general_fields := _get_virtual_general_field_names(runtime_snapshot):
+                current_config = _fold_root_fields_into_virtual_general(current_config, virtual_general_fields)
         else:
             current_config = _load_plugin_config_from_disk(plugin_path) if config_path.exists() else {}
 
@@ -623,6 +708,10 @@ async def update_plugin_config(
                 runtime_snapshot = await _inspect_plugin_config_via_runtime(plugin_id)
             except ValueError as exc:
                 logger.warning(f"插件 {plugin_id} 保存前配置检查失败，将回退到磁盘内容: {exc}")
+
+            # 表单把根级扁平字段提交在 SDK 虚构的 general 节下，需还原回根级，否则会被模型校验丢弃
+            if runtime_snapshot is not None and _get_virtual_general_field_names(runtime_snapshot):
+                _unfold_virtual_general_into_root(config_patch)
 
             base_config = (
                 dict(runtime_snapshot.normalized_config)
