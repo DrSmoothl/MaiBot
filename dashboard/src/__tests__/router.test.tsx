@@ -47,7 +47,6 @@ vi.mock('@/routes/reply-effects', () => ({ ReplyEffectsPage: StubPage }))
 vi.mock('@/routes/config/bot', () => ({ BotConfigPage: StubPage }))
 vi.mock('@/routes/config/model', () => ({ ModelConfigPage: StubPage }))
 vi.mock('@/routes/config/prompts', () => ({ PromptManagementPage: StubPage }))
-vi.mock('@/routes/prompt-generator', () => ({ PromptGeneratorPage: StubPage }))
 vi.mock('@/routes/resource/emoji/index.tsx', () => ({ EmojiManagementPage: StubPage }))
 vi.mock('@/routes/resource/expression/index.tsx', () => ({ ExpressionManagementPage: StubPage }))
 vi.mock('@/routes/person', () => ({ PersonManagementPage: StubPage }))
@@ -88,7 +87,6 @@ const expectedPaths = [
   '/config/bot',
   '/config/model',
   '/config/prompts',
-  '/config/prompt-generator',
   '/resource/emoji',
   '/resource/expression',
   '/resource/jargon',
@@ -215,24 +213,6 @@ describe('router 路由表', () => {
           replace: true,
         })
       }
-    }
-  })
-
-  it.each([
-    { searchStr: '?tab=security', hash: '#other', href: '/config/bot?tab=security&mode=webui' },
-    { searchStr: '', hash: '#other', href: '/config/bot?mode=webui&tab=other' },
-    { searchStr: '', hash: '', href: '/config/bot?mode=webui' },
-  ])('旧设置书签跳转内嵌 WebUI 设置：$href', ({ searchStr, hash, href }) => {
-    const beforeLoad = getRoutesByPath()['/settings']?.options.beforeLoad as (ctx: {
-      location: { searchStr: string; hash: string }
-    }) => void
-    expect(typeof beforeLoad).toBe('function')
-    try {
-      beforeLoad({ location: { searchStr, hash } })
-      throw new Error('预期跳转 WebUI 设置')
-    } catch (error) {
-      expect(isRedirect(error)).toBe(true)
-      if (isRedirect(error)) expect(error.options).toMatchObject({ href, replace: true })
     }
   })
 

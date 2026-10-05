@@ -322,7 +322,7 @@ export function useQuickShortcuts({
         label: t('home.quickActions.appearanceSettings'),
         description: t('home.quickActions.descriptions.appearanceSettings'),
         icon: Settings,
-        href: '/config/bot?mode=webui&tab=appearance',
+        href: '/settings?tab=appearance',
       },
       {
         id: 'route:settings-local-cache',

@@ -12,12 +12,13 @@ import { SecurityTab } from './SecurityTab'
 type SettingsTab = 'appearance' | 'security' | 'other' | 'about'
 const SETTINGS_TABS: SettingsTab[] = ['appearance', 'security', 'other', 'about']
 
-// 内嵌于麦麦设置，滚动由外层页面统一管理。
+// 独立设置页，滚动由主内容区统一管理。
 export function SettingsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const search = useRouterState({ select: (state) => state.location.searchStr })
-  const searchTab = new URLSearchParams(search).get('tab')
+  const hash = useRouterState({ select: (state) => state.location.hash })
+  const searchTab = new URLSearchParams(search).get('tab') ?? hash.replace(/^#/, '')
   const activeTab: SettingsTab = SETTINGS_TABS.includes(searchTab as SettingsTab)
     ? (searchTab as SettingsTab)
     : 'appearance'
@@ -29,12 +30,13 @@ export function SettingsPage() {
     } else {
       params.set('tab', value)
     }
-    params.set('mode', 'webui')
-    void navigate({ href: `/config/bot?${params.toString()}`, replace: true })
+    params.delete('mode')
+    const nextSearch = params.size ? `?${params.toString()}` : ''
+    void navigate({ href: `/settings${nextSearch}`, replace: true })
   }
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 p-4 sm:p-6">
       {/* WebUI 设置标签页 */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="min-w-0 w-full">
         <div className="-mx-1 shrink-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:overflow-visible sm:p-0">
