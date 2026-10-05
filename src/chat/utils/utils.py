@@ -430,12 +430,7 @@ def _split_into_sentence_segments(text: str) -> list[tuple[str, str]]:
 
         # 检查是否可以与下一段合并
         # 条件：不是最后一段，且随机数小于合并概率，且当前段有内容（避免合并空段）
-        if (
-            idx + 1 < len(segments)
-            and current_content
-            and current_sep != "\n"
-            and random.random() < merge_probability
-        ):
+        if idx + 1 < len(segments) and current_content and current_sep != "\n" and random.random() < merge_probability:
             next_content, next_sep = segments[idx + 1]
             # 合并: (内容1 + 分隔符1 + 内容2, 分隔符2)
             # 只有当下一段也有内容时才合并文本，否则只传递分隔符
@@ -571,8 +566,9 @@ def _apply_response_post_processing(
     enable_chinese_typo: bool,
 ) -> list[ProcessedResponseSegment]:
     """对已完成断句的文本执行错别字注入和纠正段处理。"""
-    typo_enabled = global_config.chinese_typo.enable and enable_chinese_typo
-    if typo_enabled:
+    # 两种断句模式共用此入口：关闭功能时不构建生成器，启用时复用共享数据。
+    typo_generator = None
+    if global_config.chinese_typo.enable and enable_chinese_typo:
         typo_generator = ChineseTypoGenerator(
             error_rate=global_config.chinese_typo.error_rate,
             min_freq=global_config.chinese_typo.min_freq,
@@ -581,7 +577,7 @@ def _apply_response_post_processing(
         )
     segments: list[ProcessedResponseSegment] = []
     for sentence, sentence_separator in split_sentences:
-        if typo_enabled:
+        if typo_generator is not None:
             typoed_text, typo_corrections = typo_generator.create_typo_sentence(sentence)
             if typo_corrections:
                 if random.random() < 0.5:
@@ -1091,5 +1087,3 @@ def parse_keywords_string(keywords_input) -> list[str]:
 
     # 如果没有分隔符，返回单个关键词
     return [keywords_str] if keywords_str else []
-
-

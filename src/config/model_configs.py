@@ -164,7 +164,7 @@ class APIProvider(ConfigBase):
             "x-widget": "input",
         },
     )
-    """最大重试次数 (单个模型API调用失败, 最多重试的次数)"""
+    """最大尝试次数 (单个模型API调用失败时, 含首次请求在内最多发送的请求总数, 设为 0 或 1 表示不重试)"""
 
     timeout: int = Field(
         default=120,

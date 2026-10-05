@@ -9,6 +9,7 @@ from pypinyin import Style, pinyin
 from threading import Lock
 from typing import Dict, List
 
+import itertools
 import jieba
 import json
 import math
@@ -79,6 +80,7 @@ class ChineseTypoGenerator:
         normalized_freq = {char: freq / max_freq * 1000 for char, freq in char_freq.items()}
 
         # 保存到缓存文件
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
         with open(cache_file, "w", encoding="utf-8") as f:
             json.dump(normalized_freq, f, ensure_ascii=False, indent=2)
 
@@ -268,8 +270,6 @@ class ChineseTypoGenerator:
             candidates.append(chars)
 
         # 生成所有可能的组合
-        import itertools
-
         all_combinations = itertools.product(*candidates)
 
         # 获取jieba词典和词频信息
@@ -284,16 +284,20 @@ class ChineseTypoGenerator:
         homophones = []
         for combo in all_combinations:
             new_word = "".join(combo)
-            if new_word != word and new_word in valid_words:
-                new_word_freq = valid_words[new_word]
-                # 只保留词频达到阈值的词
-                if new_word_freq >= min_word_freq:
-                    # 计算词的平均字频（考虑字频和词频）
-                    char_avg_freq = sum(self.char_frequency.get(c, 0) for c in new_word) / len(new_word)
-                    # 综合评分：结合词频和字频
-                    combined_score = new_word_freq * 0.7 + char_avg_freq * 0.3
-                    if combined_score >= self.min_freq:
-                        homophones.append((new_word, combined_score))
+            if new_word == word:
+                continue
+            new_word_freq = valid_words.get(new_word, 0)
+            # 排除无效词频，避免将非真实词条作为候选词
+            if new_word_freq <= 0:
+                continue
+            # 只保留词频达到阈值的词
+            if new_word_freq >= min_word_freq:
+                # 计算词的平均字频（考虑字频和词频）
+                char_avg_freq = sum(self.char_frequency.get(c, 0) for c in new_word) / len(new_word)
+                # 综合评分：结合词频和字频
+                combined_score = new_word_freq * 0.7 + char_avg_freq * 0.3
+                if combined_score >= self.min_freq:
+                    homophones.append((new_word, combined_score))
 
         # 按综合分数排序并限制返回数量
         sorted_homophones = sorted(homophones, key=lambda x: x[1], reverse=True)
