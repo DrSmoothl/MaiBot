@@ -5,7 +5,7 @@ from binascii import Error as BinasciiError
 from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
 from rich.panel import Panel
 
@@ -27,6 +27,7 @@ from src.common.logger import get_logger
 from src.config.config import global_config
 from src.core.tooling import (
     ToolAvailabilityContext,
+    ToolContentItem,
     ToolExecutionContext,
     ToolExecutionResult,
     ToolInvocation,
@@ -35,9 +36,11 @@ from src.core.tooling import (
 from src.learners.behavior_selector import behavior_pattern_selector
 from src.llm_models.exceptions import ReqAbortException, RespNotOkException
 from src.llm_models.payload_content.context_item import (
+    ContextImagePart,
     ContextItemBuilder,
     ContextItemMeta,
     RoleType,
+    UserMessageItem,
     replace_output_projection,
 )
 from src.llm_models.payload_content.tool_option import ToolCall
@@ -81,6 +84,7 @@ from src.maisaka.jargon_context_matcher import (
 )
 from src.maisaka.memory.heuristic_injector import heuristic_memory_injector
 from src.maisaka.memory.image_injector import image_memory_injector
+from src.maisaka.monitor.tool_media import build_tool_result_images
 from src.maisaka.memory.mid_term import (
     build_mid_term_memory_message,
     build_mid_term_memory_reference_message,
@@ -731,6 +735,7 @@ class MaisakaReasoningEngine:
             planner_selected_history_count=None,
             planner_tool_count=None,
             planner_content=response.content,
+            planner_model_name=response.model_name,
             planner_tool_calls=response.tool_calls,
             planner_native_tool_calls=response.native_tool_calls,
             planner_prompt_tokens=response.prompt_tokens,
@@ -1040,6 +1045,7 @@ class MaisakaReasoningEngine:
             planner_selected_history_count=response.selected_history_count if response is not None else None,
             planner_tool_count=response.tool_count if response is not None else None,
             planner_content=response.content if response is not None else None,
+            planner_model_name=response.model_name if response is not None else None,
             planner_tool_calls=response.tool_calls if response is not None else None,
             planner_native_tool_calls=response.native_tool_calls if response is not None else None,
             planner_prompt_tokens=response.prompt_tokens if response is not None else None,
@@ -2073,7 +2079,24 @@ class MaisakaReasoningEngine:
             tool_monitor_result["prompt_html_uri"] = prompt_html_uri
         return tool_monitor_result
 
-    def _append_tool_display_results(
+    @staticmethod
+    def _build_tool_monitor_images(result: ToolExecutionResult) -> List[Dict[str, str]]:
+        """同时提取统一内容项和工具追加上下文中的图片（如表情候选拼图）。"""
+
+        items = list(result.content_items)
+        for message in result.post_history_messages:
+            if not isinstance(message, LLMContextMessage):
+                continue
+            context_item = message.to_context_item(enable_visual_message=True)
+            if isinstance(context_item, UserMessageItem):
+                items.extend(
+                    ToolContentItem(content_type="image", data=part.image_base64)
+                    for part in context_item.parts
+                    if isinstance(part, ContextImagePart)
+                )
+        return build_tool_result_images(items)
+
+    async def _append_tool_display_results(
         self,
         *,
         tool_result_summaries: list[str],
@@ -2087,15 +2110,19 @@ class MaisakaReasoningEngine:
         """追加终端摘要和监控详情。"""
 
         tool_result_summaries.append(self._build_tool_result_summary(tool_call, result))
-        tool_monitor_results.append(
-            self._build_tool_monitor_result(
-                tool_call,
-                invocation,
-                result,
-                duration_ms,
-                tool_spec=tool_spec,
-            )
+        monitor_result = self._build_tool_monitor_result(
+            tool_call,
+            invocation,
+            result,
+            duration_ms,
+            tool_spec=tool_spec,
         )
+        if result.content_items or result.post_history_messages:
+            # 图片解码与缩放不能占用 bot 事件循环；每个工具结果只处理一次。
+            images = await asyncio.to_thread(self._build_tool_monitor_images, result)
+            if images:
+                monitor_result["images"] = images
+        tool_monitor_results.append(monitor_result)
 
     async def _handle_tool_calls(
         self,
@@ -2132,7 +2159,7 @@ class MaisakaReasoningEngine:
                 )
                 await self._record_tool_execution_effects(invocation, result, None)
                 self._append_tool_execution_result(tool_call, result)
-                self._append_tool_display_results(
+                await self._append_tool_display_results(
                     tool_result_summaries=tool_result_summaries,
                     tool_monitor_results=tool_monitor_results,
                     tool_call=tool_call,
@@ -2176,7 +2203,7 @@ class MaisakaReasoningEngine:
             deferred_post_history_messages.extend(
                 message for message in result.post_history_messages if isinstance(message, LLMContextMessage)
             )
-            self._append_tool_display_results(
+            await self._append_tool_display_results(
                 tool_result_summaries=tool_result_summaries,
                 tool_monitor_results=tool_monitor_results,
                 tool_call=tool_call,

@@ -236,6 +236,13 @@ def _serialize_tool_results(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "summary": str(tool.get("summary", "")),
         }
         detail = tool.get("detail")
+        if tool.get("images"):
+            serialized_tool["images"] = _normalize_payload_value(tool["images"])
+        if isinstance(detail, dict):
+            metrics = detail.get("metrics")
+            if isinstance(metrics, dict) and metrics.get("model_name"):
+                # 模型名属于卡片摘要，增量传输裁掉 detail 后仍需保留。
+                serialized_tool["model_name"] = str(metrics["model_name"]).strip()
         prompt_html_uri = str(tool.get("prompt_html_uri") or "").strip()
         if not prompt_html_uri and isinstance(detail, dict):
             prompt_html_uri = str(detail.get("prompt_html_uri") or "").strip()
@@ -323,6 +330,7 @@ def _serialize_planner_block(
     prompt_html_uri: Optional[str] = None,
     prompt_cache_hit_tokens: Optional[int] = None,
     prompt_cache_miss_tokens: Optional[int] = None,
+    model_name: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """标准化 planner 结果区块。"""
 
@@ -335,11 +343,13 @@ def _serialize_planner_block(
         and total_tokens is None
         and duration_ms is None
         and prompt_html_uri is None
+        and model_name is None
     ):
         return None
 
     return {
         "content": content,
+        "model_name": model_name,
         "tool_calls": _serialize_tool_calls_from_objects(list(tool_calls or [])),
         "native_tool_calls": _serialize_native_tool_calls(list(native_tool_calls or [])),
         "prompt_tokens": int(prompt_tokens or 0),
@@ -594,6 +604,7 @@ async def emit_planner_snapshot(
     planner_total_tokens: Optional[int],
     planner_duration_ms: Optional[float],
     planner_prompt_html_uri: Optional[str] = None,
+    planner_model_name: Optional[str] = None,
     planner_prompt_cache_hit_tokens: Optional[int] = None,
     planner_prompt_cache_miss_tokens: Optional[int] = None,
     planner_context_sections: Optional[List[ContextSectionUsage]] = None,
@@ -629,6 +640,7 @@ async def emit_planner_snapshot(
             planner_prompt_html_uri,
             planner_prompt_cache_hit_tokens,
             planner_prompt_cache_miss_tokens,
+            model_name=planner_model_name,
         ),
         "tools": _serialize_tool_results(list(tools or [])),
         "active_tool_call_id": active_tool_call_id,

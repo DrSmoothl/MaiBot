@@ -218,6 +218,7 @@ export interface MaisakaNativeToolCall {
 
 export interface MaisakaPlannerBlock {
   content: string | null
+  model_name?: string | null
   tool_calls: MaisakaToolCall[]
   native_tool_calls?: MaisakaNativeToolCall[]
   prompt_tokens: number
@@ -246,6 +247,8 @@ export interface MaisakaTimingGateBlock {
 export interface MaisakaFinalizedToolResult {
   tool_call_id: string
   tool_name: string
+  model_name?: string
+  images?: { thumbnail_url: string; label: string; error?: string }[]
   tool_args: Record<string, unknown>
   tool_call_source?: string
   tool_call_source_label?: string

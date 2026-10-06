@@ -48,6 +48,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -834,6 +835,7 @@ function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
     showOriginal && !inlineSource ? 'loading' : 'idle'
   )
   const [loadRequestId, setLoadRequestId] = useState(showOriginal && !inlineSource ? 1 : 0)
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const label = item.kind === 'emoji' ? '表情包' : '图片'
 
   useEffect(() => {
@@ -873,59 +875,86 @@ function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
   }, [inlineSource, label, loadRequestId, remoteSource])
 
   return (
-    <button
-      type="button"
-      className={cn(
-        'group max-w-full overflow-hidden rounded-md text-left transition-opacity hover:opacity-80'
-      )}
-      title={`点击切换为${showOriginal ? '识别文本' : '原文件'}`}
-      onClick={() => {
-        if (!canShowOriginal) {
-          return
-        }
-        if (!showOriginal) {
-          if (!inlineSource && !resolvedSource && loadState !== 'loading') {
-            setLoadState('loading')
-            setLoadRequestId((current) => current + 1)
-          }
-        }
-        setShowOriginal((current) => !current)
-      }}
-    >
-      {showOriginal ? (
-        resolvedSource ? (
-          <img
-            src={resolvedSource}
-            alt={`${label}原文件`}
-            className={cn(
-              'block rounded object-contain',
-              item.kind === 'emoji' ? 'max-h-24 max-w-24' : 'max-h-56 max-w-full'
+    <>
+      <div className="relative max-w-full rounded-md">
+        {showOriginal ? (
+          <button
+            type="button"
+            className="focus-visible:ring-ring block max-w-full cursor-zoom-in rounded-md text-left focus-visible:ring-2 disabled:cursor-default"
+            title={`放大查看${label}`}
+            aria-label={`放大查看${label}`}
+            disabled={!resolvedSource}
+            onClick={() => setIsPreviewOpen(true)}
+          >
+            {resolvedSource ? (
+              <img
+                src={resolvedSource}
+                alt={`${label}原文件`}
+                className={cn(
+                  'block rounded object-contain',
+                  item.kind === 'emoji' ? 'max-h-24 max-w-24' : 'max-h-56 max-w-full'
+                )}
+                onError={() => {
+                  setResolvedSource('')
+                  setLoadState('error')
+                }}
+              />
+            ) : loadState === 'error' ? (
+              <span className="text-destructive flex min-h-8 items-center gap-1.5 py-1 pr-9 pl-1 text-xs">
+                <ImageOff className="h-3.5 w-3.5 shrink-0" />
+                原文件读取失败
+              </span>
+            ) : (
+              <span className="text-muted-foreground flex min-h-8 items-center gap-1.5 py-1 pr-9 pl-1 text-xs">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                正在读取{label}…
+              </span>
             )}
-            onError={() => {
-              setResolvedSource('')
-              setLoadState('error')
-            }}
-          />
-        ) : loadState === 'error' ? (
-          <span className="text-destructive flex min-h-8 items-center gap-1.5 px-1 text-xs">
-            <ImageOff className="h-3.5 w-3.5 shrink-0" />
-            原文件读取失败
-          </span>
+          </button>
         ) : (
-          <span className="text-muted-foreground flex min-h-8 items-center gap-1.5 px-1 text-xs">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-            正在读取{label}…
+          <span className="text-muted-foreground flex min-h-8 max-w-sm items-center gap-1.5 py-1 pr-9 text-xs">
+            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 break-words whitespace-pre-wrap">
+              {item.text || `[${label}]`}
+            </span>
           </span>
-        )
-      ) : (
-        <span className="text-muted-foreground flex max-w-sm items-center gap-1.5 text-xs">
-          <ImageIcon className="h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words whitespace-pre-wrap">
-            {item.text || `[${label}]`}
-          </span>
-        </span>
-      )}
-    </button>
+        )}
+        {canShowOriginal && (
+          <button
+            type="button"
+            className={cn(
+              'focus-visible:ring-ring absolute top-1 right-1 flex h-6 w-6 items-center justify-center rounded border text-xs font-medium shadow-sm focus-visible:ring-2',
+              showOriginal ? 'bg-background/90 text-foreground hover:bg-background' : 'bg-primary text-primary-foreground'
+            )}
+            title={`切换为${showOriginal ? '识别文本' : '原文件'}`}
+            aria-label={`切换为${showOriginal ? '识别文本' : '原文件'}`}
+            aria-pressed={!showOriginal}
+            onClick={() => {
+              if (!showOriginal && !inlineSource && !resolvedSource && loadState !== 'loading') {
+                setLoadState('loading')
+                setLoadRequestId((current) => current + 1)
+              }
+              setShowOriginal((current) => !current)
+            }}
+          >
+            文
+          </button>
+        )}
+      </div>
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="border-0 bg-black/95 p-2 text-white shadow-2xl [--dialog-width:72rem]">
+          <DialogTitle className="sr-only">{label}预览</DialogTitle>
+          <DialogDescription className="sr-only">正在查看放大的{label}。</DialogDescription>
+          <div className="flex max-h-[calc(100vh-3rem)] min-h-0 w-full items-center justify-center">
+            <img
+              src={resolvedSource}
+              alt={`${label}大图`}
+              className="max-h-[calc(100vh-4rem)] max-w-full rounded-md object-contain"
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -1181,6 +1210,16 @@ function PlannerResponseCard({ data }: { data: PlannerResponseEvent }) {
   )
 }
 
+function ModelNameBadge({ modelName }: { modelName?: string | null }) {
+  if (!modelName) return null
+
+  return (
+    <Badge variant="outline" className="min-w-0 max-w-full text-[10px] font-normal" title={modelName}>
+      <span className="max-w-64 truncate">模型: {modelName}</span>
+    </Badge>
+  )
+}
+
 function PlannerFinalizedCard({
   data,
   onOpenReasoning,
@@ -1198,6 +1237,7 @@ function PlannerFinalizedCard({
         <div data-maisaka-trace-meta="true" className="flex flex-wrap items-center gap-2">
           <Brain className="h-4 w-4 text-emerald-500" />
           <CardTitle className="text-sm font-medium">Planner</CardTitle>
+          <ModelNameBadge modelName={planner?.model_name} />
           <Badge variant="outline" className="ml-auto text-xs font-normal">
             {formatMs(planner?.duration_ms ?? 0)}
           </Badge>
@@ -1465,6 +1505,44 @@ function ToolFullJsonBlock({
   )
 }
 
+function ToolResultImage({ image }: { image: NonNullable<MaisakaFinalizedToolResult['images']>[number] }) {
+  const [failed, setFailed] = useState(false)
+
+  if (failed || image.error || !image.thumbnail_url) {
+    return (
+      <span className="text-muted-foreground flex items-center gap-1.5 text-xs" title={image.label}>
+        <ImageOff className="h-3.5 w-3.5 shrink-0" />
+        {image.error || '图片读取失败'}
+      </span>
+    )
+  }
+
+  return (
+    <img
+      src={image.thumbnail_url}
+      alt={image.label}
+      title={image.label}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      className="max-h-48 max-w-full rounded-md border object-contain sm:max-w-48"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+function ToolResultImages({ images }: { images: MaisakaFinalizedToolResult['images'] }) {
+  if (!images?.length) return null
+
+  return (
+    <div className="flex flex-wrap items-start gap-2 pt-1" aria-label="工具返回图片">
+      {images.map((image, index) => (
+        <ToolResultImage key={index} image={image} />
+      ))}
+    </div>
+  )
+}
+
 function PlannerToolResultCard({
   tool,
   index,
@@ -1500,26 +1578,29 @@ function PlannerToolResultCard({
   const newlyDiscoveredTools = new Set(tool.newly_discovered_tool_names)
 
   if (isWaitTool(tool.tool_name)) {
-    if (hideHeader) return null
+    if (hideHeader) return <ToolResultImages images={tool.images} />
     return (
-      <div data-maisaka-trace-meta="true" className="flex flex-wrap items-center gap-1.5">
-        <Hourglass className="text-muted-foreground h-3.5 w-3.5" />
-        <span className="text-foreground text-sm font-medium">
-          {formatWaitToolText(tool.tool_args)}
-        </span>
-        <span className="text-muted-foreground ml-auto text-[10px]">#{index + 1}</span>
-        {canOpenReasoning && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-1.5 text-[10px]"
-            onClick={() => onOpenReasoning(promptHtmlUri)}
-            title="查看这个工具对应的推理"
-          >
-            <FileCode2 className="mr-1 h-3 w-3" />
-            推理
-          </Button>
-        )}
+      <div className="space-y-1.5">
+        <div data-maisaka-trace-meta="true" className="flex flex-wrap items-center gap-1.5">
+          <Hourglass className="text-muted-foreground h-3.5 w-3.5" />
+          <span className="text-foreground text-sm font-medium">
+            {formatWaitToolText(tool.tool_args)}
+          </span>
+          <span className="text-muted-foreground ml-auto text-[10px]">#{index + 1}</span>
+          {canOpenReasoning && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px]"
+              onClick={() => onOpenReasoning(promptHtmlUri)}
+              title="查看这个工具对应的推理"
+            >
+              <FileCode2 className="mr-1 h-3 w-3" />
+              推理
+            </Button>
+          )}
+        </div>
+        <ToolResultImages images={tool.images} />
       </div>
     )
   }
@@ -1531,6 +1612,7 @@ function PlannerToolResultCard({
           <span className="text-foreground font-mono text-sm font-semibold">
             {tool.tool_name || 'unknown'}
           </span>
+          <ModelNameBadge modelName={tool.model_name} />
           {tool.status && (
             <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
               {statusText}
@@ -1626,6 +1708,7 @@ function PlannerToolResultCard({
             </div>
           )
         )}
+        <ToolResultImages images={tool.images} />
       </div>
     </div>
   )
@@ -1671,7 +1754,9 @@ function PlannerToolCallsBlock({
           }))
   const isFinishTool = (toolName?: string) => toolName?.trim().toLowerCase() === 'finish'
   const finishTools = displayTools.filter((tool) => isFinishTool(tool.tool_name))
-  const regularTools = displayTools.filter((tool) => !isFinishTool(tool.tool_name) || tool.status)
+  const regularTools = displayTools.filter(
+    (tool) => !isFinishTool(tool.tool_name) || tool.status || tool.images?.length
+  )
   const plannerStopped =
     finishTools.some((tool) => !tool.status) ||
     data.final_state.end_reason === 'tool_stop_after_execution'
@@ -1722,6 +1807,7 @@ function PlannerToolCallsBlock({
               ? formatWaitToolText(singleTool?.tool_args)
               : regularTools.map((tool) => tool.tool_name || 'unknown').join('、')}
           </CardTitle>
+          <ModelNameBadge modelName={singleTool?.model_name} />
           {singleTool?.status && (
             <Badge variant="secondary" className="px-1.5 text-[10px]">
               {singleTool.status === 'running' ? '执行中' : '等待执行'}
@@ -1776,7 +1862,7 @@ function PlannerToolCallsBlock({
             <span className="text-muted-foreground">等待新的消息。</span>
           </div>
         )}
-        {!singleToolIsWait && (
+        {(!singleToolIsWait || Boolean(singleTool?.images?.length)) && (
         <div className="space-y-2">
           {regularTools.map((tool, idx) => (
             <div key={`${tool.tool_call_id || tool.tool_name}-${idx}`} className="space-y-2">
