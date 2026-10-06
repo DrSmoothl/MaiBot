@@ -151,32 +151,11 @@
   animation: expression-actions-menu-exit 160ms ease-in;
 }
 
-@keyframes toast-countdown {
-  from {
-    transform: scaleX(1);
-  }
-
-  to {
-    transform: scaleX(0);
-  }
-}
-
-.toast-progress {
-  animation-name: toast-countdown;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
-}
-
 [data-config-search-highlight='true'] {
   outline: 2px solid hsl(var(--primary));
   outline-offset: 4px;
   border-radius: var(--visual-radius-md);
   transition: outline-color 180ms ease-out;
-}
-
-[data-dashboard-toast='true']:hover .toast-progress,
-[data-dashboard-toast='true']:focus-within .toast-progress {
-  animation-play-state: paused;
 }
 
 @keyframes future-retro-gear-rotate {
@@ -1496,6 +1475,25 @@
   [data-dashboard-tabs-trigger='true'] {
   font-size: 0.875rem !important;
   font-weight: 800;
+}
+
+/* 现代主题的工作区标签保持内容宽度，避免顶栏压缩时图标和文字挤到相邻标签。 */
+:root[data-dashboard-style='modern']
+  [data-dashboard-header='true']
+  div:has(> [data-dashboard-workspace-tabs='true']) {
+  flex-shrink: 0;
+}
+
+:root[data-dashboard-style='modern'] [data-dashboard-workspace-tabs='true'] {
+  width: max-content;
+  flex-shrink: 0;
+}
+
+:root[data-dashboard-style='modern']
+  [data-dashboard-workspace-tabs='true']
+  [data-dashboard-tabs-trigger='true'],
+:root[data-dashboard-style='modern'] [data-dashboard-workspace-tabs='true'] svg {
+  flex-shrink: 0;
 }
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-workspace-tabs='true'] {
