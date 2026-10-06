@@ -259,7 +259,6 @@ def _is_collected_emoji_size_allowed(size_bytes: int) -> bool:
 
 
 emoji_manager_vlm = LLMServiceClient(task_name="vlm", request_type="emoji.see")
-emoji_manager_emotion_judge_llm = LLMServiceClient(task_name="utils", request_type="emoji")
 
 
 class EmojiManager:
@@ -899,7 +898,11 @@ class EmojiManager:
         emoji_replace_prompt_template.add_context("description", new_emoji.description or "无描述")
         emoji_replace_prompt = await prompt_manager.render_prompt(emoji_replace_prompt_template)
 
-        decision_result = await emoji_manager_emotion_judge_llm.generate_response(
+        # 替换决策只使用文字描述，优先使用 emoji 任务，未配置时使用 planner。
+        emoji_models = config_manager.get_model_config().model_task_config.emoji.model_list
+        replacement_task_name = "emoji" if any(model_name.strip() for model_name in emoji_models) else "planner"
+        replacement_client = LLMServiceClient(task_name=replacement_task_name, request_type="emoji")
+        decision_result = await replacement_client.generate_response(
             emoji_replace_prompt,
             session_id=session_id,
         )

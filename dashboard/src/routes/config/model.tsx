@@ -340,9 +340,11 @@ function ModelConfigPageContent() {
   const visibleTaskFields = useMemo(
     () =>
       taskConfigSchema?.fields.filter(
-        (field) => field.type === 'object' && (advancedTaskSettingsVisible || !field.advanced)
+        (field) =>
+          field.type === 'object' &&
+          (advancedTaskSettingsVisible || !field.advanced || (taskConfig?.[field.name]?.model_list.length ?? 0) > 0)
       ) ?? [],
-    [advancedTaskSettingsVisible, taskConfigSchema]
+    [advancedTaskSettingsVisible, taskConfig, taskConfigSchema]
   )
   const selectedTaskField =
     visibleTaskFields.find((field) => field.name === selectedTaskName) ?? visibleTaskFields[0]
