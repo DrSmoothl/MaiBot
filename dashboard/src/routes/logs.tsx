@@ -964,7 +964,10 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
     () => defaultTab ?? loadStoredLogViewerTab()
   )
   const [topbarTabsRoot, setTopbarTabsRoot] = useState<HTMLElement | null>(null)
-  const [topbarTabsCompact, setTopbarTabsCompact] = useState(false)
+  // 千禧顶栏始终用图标模式，初始即取紧凑态，避免先渲染完整文字再收窄造成顶栏跳动。
+  const [topbarTabsCompact, setTopbarTabsCompact] = useState(
+    () => document.documentElement.dataset.dashboardStyle === 'millennium'
+  )
   const topbarTabsCompactRef = useRef(false)
   const [reasoningToolbarVisible, setReasoningToolbarVisible] = useState(activeTab === 'reasoning')
   const [showSwitchHint, setShowSwitchHint] = useState(() =>

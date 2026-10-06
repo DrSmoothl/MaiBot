@@ -1249,6 +1249,161 @@ function formatToolValue(value: unknown) {
 
 type DisplayTool = MaisakaFinalizedToolResult & { status?: 'running' | 'pending' }
 
+type MonitorMessage = MessageIngestedEvent | MessageSentEvent
+type ReplyToolMessageProps = {
+  messages?: Map<string, MonitorMessage>
+  onJumpToMessage?: (messageId: string) => void
+}
+
+/** reply 的 at 和附图参数引用的是消息编号，按真实消息解析发送者与媒体。 */
+function ReplyToolArguments({
+  tool,
+  messages,
+  onJumpToMessage,
+}: ReplyToolMessageProps & {
+  tool: DisplayTool
+}) {
+  const args = tool.tool_args ?? {}
+  const messageId = String(args.msg_id ?? '')
+  const message = messages?.get(messageId)
+  const atTargets = Array.isArray(args.attach_at) ? args.attach_at : []
+  const pictures = Array.isArray(args.attach_pic) ? args.attach_pic : []
+  const intentLabels: Record<string, string> = {
+    focus: '表达重点',
+    reply_act: '回复目的',
+    scene: '场景',
+    tone: '语气',
+    prefer: '偏好',
+    avoid: '避免',
+  }
+  const handledArguments = new Set([
+    'msg_id',
+    'attach_at',
+    'attach_pic',
+    'expression_intent',
+    'reply_reference',
+    'set_quote',
+  ])
+
+  return (
+    <div className="space-y-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        {messageId && (
+          <div className="min-w-0 max-w-xl [&>button]:mb-0 [&>div]:mb-0">
+          <ReplyPreviewBlock
+            onJumpToMessage={onJumpToMessage}
+            replyTo={{
+              message_id: messageId,
+              sender_name: message?.speaker_name ?? '',
+              content: message?.content ?? '',
+            }}
+          />
+          </div>
+        )}
+        {atTargets.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-muted-foreground">at 对象：</span>
+            {atTargets.map((target, index) => {
+            const targetId = String(target)
+            return (
+              <button
+                key={`${targetId}-${index}`}
+                type="button"
+                className="text-primary bg-primary/10 hover:bg-primary/20 rounded-md px-2 py-0.5"
+                title={`跳转到目标消息 #${targetId}`}
+                onClick={() => onJumpToMessage?.(targetId)}
+              >
+                @{messages?.get(targetId)?.speaker_name || `消息 #${targetId} 的发送者`}
+              </button>
+            )
+            })}
+          </div>
+        )}
+        {args.set_quote === true && (
+          <span className="shrink-0 rounded-md bg-muted/70 px-2.5 py-1.5 text-xs text-muted-foreground">
+            引用
+          </span>
+        )}
+        {!tool.status && <ToolFullJsonBlock tool={tool} />}
+      </div>
+      {args.expression_intent != null && (
+        <details className="group rounded-md border px-2.5 py-1.5">
+          <summary className="text-muted-foreground flex cursor-pointer list-none items-center gap-1">
+            <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+            表达倾向
+          </summary>
+          <div className="mt-2 space-y-1 break-words whitespace-pre-wrap">
+            {typeof args.expression_intent === 'object' && !Array.isArray(args.expression_intent)
+              ? Object.entries(args.expression_intent).map(([name, value]) => (
+                  <div key={name}>
+                    <span className="text-muted-foreground">{intentLabels[name] ?? name}：</span>
+                    {Array.isArray(value)
+                      ? value.map(formatToolValue).join('、')
+                      : formatToolValue(value)}
+                  </div>
+                ))
+              : formatToolValue(args.expression_intent)}
+          </div>
+        </details>
+      )}
+      {typeof args.reply_reference === 'string' && args.reply_reference.trim() && (
+        <div className="bg-muted/50 rounded-md px-2.5 py-2">
+          <span className="text-muted-foreground mb-1 block">回复参考信息</span>
+          <p className="leading-5 break-words whitespace-pre-wrap">
+            {args.reply_reference}
+          </p>
+        </div>
+      )}
+      {pictures.length > 0 && (
+        <div className="space-y-1.5">
+          <span className="text-muted-foreground">附加图片</span>
+          <div className="flex flex-wrap items-start gap-2">
+            {pictures.map((picture, index) => {
+              if (!picture || typeof picture !== 'object') {
+                return <ToolArgumentBlock key={index} name="图片" value={picture} />
+              }
+              const reference = picture as Record<string, unknown>
+              const sourceId = String(reference.msg_id ?? '')
+              const imageIndex = Number(reference.index ?? 0)
+              const sourceMessage = messages?.get(sourceId)
+              // 工具 index 是图片序号，监控媒体的 index 则是原始消息组件序号。
+              const media = sourceMessage?.media?.filter((item) => item.kind === 'image')[
+                imageIndex
+              ]
+              return (
+                <div key={index} className="max-w-sm space-y-1 rounded-md border p-2">
+                  {sourceId ? (
+                    <button
+                      type="button"
+                      className="text-primary hover:underline"
+                      title="跳转到图片来源消息"
+                      onClick={() => onJumpToMessage?.(sourceId)}
+                    >
+                      {sourceMessage?.speaker_name || `消息 #${sourceId}`} · 第 {imageIndex + 1}{' '}
+                      张图片
+                    </button>
+                  ) : (
+                    <p className="break-all">工具媒体：{String(reference.media_index ?? '')}</p>
+                  )}
+                  {media && <MessageMediaItem item={{ ...media, default_original: true }} />}
+                  {sourceId && !media && (
+                    <p className="text-muted-foreground">图片不在当前监控记录中</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+      {Object.entries(args)
+        .filter(([name]) => !handledArguments.has(name))
+        .map(([name, value]) => (
+          <ToolArgumentBlock key={name} name={name} value={value} />
+        ))}
+    </div>
+  )
+}
+
 function ToolArgumentBlock({ name, value }: { name: string; value: unknown }) {
   const formattedValue = formatToolValue(value)
   const inlineValue = formattedValue.replace(/\s+/g, ' ')
@@ -1316,7 +1471,9 @@ function PlannerToolResultCard({
   hideSourceLabel = false,
   hideHeader = false,
   onOpenReasoning,
-}: {
+  messages,
+  onJumpToMessage,
+}: ReplyToolMessageProps & {
   tool: DisplayTool
   index: number
   /** 所有工具来源一致时由卡片右上角统一展示，单条工具不再重复 */
@@ -1427,7 +1584,10 @@ function PlannerToolResultCard({
             {!tool.status && <ToolFullJsonBlock tool={tool} />}
           </div>
         )}
-        {!isToolSearch && argumentEntries.length > 0 && (
+        {tool.tool_name === 'reply' && (
+          <ReplyToolArguments tool={tool} messages={messages} onJumpToMessage={onJumpToMessage} />
+        )}
+        {!isToolSearch && tool.tool_name !== 'reply' && argumentEntries.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {argumentEntries.map(([name, value]) => (
               <ToolArgumentBlock key={name} name={name} value={value} />
@@ -1454,15 +1614,17 @@ function PlannerToolResultCard({
               <span className="text-muted-foreground">未找到匹配工具</span>
             )}
           </div>
-        ) : !tool.status && (
-          <div className="flex flex-wrap items-baseline gap-x-1.5">
-            <span className="text-muted-foreground shrink-0 text-[10px] leading-4 font-medium">
-              执行结果
-            </span>
-            <p className="text-muted-foreground min-w-0 flex-1 text-xs leading-4 break-words whitespace-pre-wrap">
-              {tool.summary || '未返回结果摘要。'}
-            </p>
-          </div>
+        ) : (
+          !tool.status && (
+            <div className="flex flex-wrap items-baseline gap-x-1.5">
+              <span className="text-muted-foreground shrink-0 text-[10px] leading-4 font-medium">
+                执行结果
+              </span>
+              <p className="text-muted-foreground min-w-0 flex-1 text-xs leading-4 break-words whitespace-pre-wrap">
+                {tool.summary || '未返回结果摘要。'}
+              </p>
+            </div>
+          )
         )}
       </div>
     </div>
@@ -1473,7 +1635,9 @@ function PlannerToolCallsBlock({
   data,
   isProgress,
   onOpenReasoning,
-}: {
+  messages,
+  onJumpToMessage,
+}: ReplyToolMessageProps & {
   data: PlannerFinalizedEvent
   isProgress: boolean
   onOpenReasoning: (promptHtmlUri: string) => void
@@ -1618,6 +1782,8 @@ function PlannerToolCallsBlock({
             <div key={`${tool.tool_call_id || tool.tool_name}-${idx}`} className="space-y-2">
               {idx > 0 && <Separator />}
               <PlannerToolResultCard
+                messages={messages}
+                onJumpToMessage={onJumpToMessage}
                 tool={tool}
                 index={idx}
                 hideSourceLabel={Boolean(sharedSourceLabel)}
@@ -1838,8 +2004,10 @@ function TimelineEventRenderer({
   entry,
   onJumpToMessage,
   onOpenReasoning,
+  messages,
 }: {
   entry: TimelineEntry
+  messages?: Map<string, MonitorMessage>
   onJumpToMessage: (messageId: string) => void
   onOpenReasoning: (promptHtmlUri: string) => void
 }) {
@@ -1875,6 +2043,8 @@ function TimelineEventRenderer({
           />
           <PlannerNativeToolCallsBlock data={entry.data as PlannerFinalizedEvent} />
           <PlannerToolCallsBlock
+            messages={messages}
+            onJumpToMessage={onJumpToMessage}
             data={entry.data as PlannerFinalizedEvent}
             isProgress={entry.type === 'planner.progress'}
             onOpenReasoning={onOpenReasoning}
@@ -2032,6 +2202,17 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
       }
     })
     return indexes
+  }, [visibleTimelineEntries])
+
+  const monitorMessages = useMemo(() => {
+    const messages = new Map<string, MonitorMessage>()
+    visibleTimelineEntries.forEach((entry) => {
+      if (isMessageTimelineEntry(entry)) {
+        const message = entry.data as MonitorMessage
+        messages.set(message.message_id, message)
+      }
+    })
+    return messages
   }, [visibleTimelineEntries])
 
   /** 滚动到指定时间线位置，并短暂高亮该条消息（供消息跳转与“查找上条”共用） */
@@ -2391,6 +2572,7 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
                           )}
                         >
                           <TimelineEventRenderer
+                            messages={monitorMessages}
                             entry={entry}
                             onJumpToMessage={handleJumpToMessage}
                             onOpenReasoning={handleOpenReasoning}

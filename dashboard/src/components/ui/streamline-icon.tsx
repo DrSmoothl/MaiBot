@@ -3,7 +3,8 @@ import { Icon } from '@iconify/react'
 
 import { useTheme } from '@/components/use-theme'
 import { cn } from '@/lib/utils'
-import { getMillenniumIconPath, MillenniumIcon } from './millennium-icons'
+import { getMillenniumIcon } from './millennium-icon-set'
+import { MillenniumIcon } from './millennium-icons'
 import { getStreamlineIcon } from './streamline-icons'
 import type { StreamlineCollection } from './streamline-icons'
 
@@ -35,11 +36,11 @@ export function StreamlineIcon({
 
   // 千禧风格有自己的一套线条图标；没登记的名称退回到备用图标。
   if (themeConfig.dashboardStyle === 'millennium') {
-    const path = getMillenniumIconPath(name)
-    if (path) {
+    const millenniumIcon = getMillenniumIcon(name)
+    if (millenniumIcon) {
       return (
         <MillenniumIcon
-          path={path}
+          icon={millenniumIcon}
           className={cn('inline-block shrink-0', className)}
           color={color}
           size={size}

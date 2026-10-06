@@ -42,7 +42,7 @@ def read_release_receipt(plugin_path: Path) -> Optional[Dict[str, Any]]:
     if not receipt_path.exists():
         return None
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    if not isinstance(receipt, dict) or not isinstance(receipt.get("pinned"), bool):
+    if not isinstance(receipt, dict):
         raise HTTPException(status_code=409, detail="插件安装记录损坏，请检查 .maibot-release.json")
     return receipt
 
@@ -174,7 +174,6 @@ async def _install_release(
     *,
     updating: bool,
     automatic: bool,
-    pinned: bool,
     mirror_id: Optional[str],
 ) -> Dict[str, Any]:
     from src.common.runtime_loop import run_on_main_loop
@@ -194,9 +193,8 @@ async def _install_release(
         raise HTTPException(status_code=409, detail="插件目标目录已存在，请先处理现有目录")
     old_manifest = load_manifest_json(target / "_manifest.json") if existing else None
     old_version = old_manifest["version"] if old_manifest else None
-    receipt = read_release_receipt(target) if existing else None
-    if automatic and receipt and receipt["pinned"]:
-        raise HTTPException(status_code=409, detail="该插件已锁定版本，请在插件详情中选择版本并解除锁定后更新")
+    if existing:
+        read_release_receipt(target)  # 安装记录损坏时在动文件之前报错
     if automatic and old_version and Version(release.version) <= Version(old_version):
         raise HTTPException(status_code=409, detail="当前已是最新兼容版本，不会自动降级或重装")
     candidate = _work_directory(target.parent, ".update_tmp") / f"{target.name}.{uuid4().hex}"
@@ -206,7 +204,7 @@ async def _install_release(
     def replace_files() -> None:
         receipt_data = {
             "plugin_id": canonical_id, "version": release.version, "tag": release.tag,
-            "commit": release.commit, "repository_url": entry.repositoryUrl, "pinned": pinned,
+            "commit": release.commit, "repository_url": entry.repositoryUrl,
         }
         (candidate / RECEIPT_NAME).write_text(json.dumps(receipt_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         if existing:
@@ -267,7 +265,7 @@ async def _install_release(
         "success": swapped, "message": "插件版本安装成功", "plugin_id": canonical_id,
         "plugin_name": release.manifest["name"], "version": release.version,
         "old_version": old_version, "new_version": release.version, "commit": release.commit,
-        "pinned": pinned, "update_mode": "release", "backup_path": str(backup) if existing else None,
+        "update_mode": "release", "backup_path": str(backup) if existing else None,
     }
 
 
@@ -278,12 +276,11 @@ async def install_release(
     *,
     updating: bool,
     automatic: bool,
-    pinned: bool,
     mirror_id: Optional[str],
 ) -> Dict[str, Any]:
     try:
         return await _install_release(
-            plugin_id, entry, release, updating=updating, automatic=automatic, pinned=pinned, mirror_id=mirror_id
+            plugin_id, entry, release, updating=updating, automatic=automatic, mirror_id=mirror_id
         )
     except Exception as exc:
         message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)

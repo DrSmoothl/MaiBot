@@ -24,7 +24,7 @@ export interface MaimaiVersion {
  * 已安装插件信息
  */
 export interface InstalledPlugin {
-  release?: { version: string; commit: string; pinned: boolean } | null
+  release?: { version: string; commit: string } | null
   id: string
   manifest: {
     manifest_version: number

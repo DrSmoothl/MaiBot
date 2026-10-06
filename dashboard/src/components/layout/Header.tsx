@@ -23,6 +23,7 @@ import {
   type ComponentType,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react'
@@ -83,6 +84,10 @@ const WORKSPACE_TABS: Array<{
 
 interface HeaderProps {
   extensions?: WebUIExtension[]
+  /** 工作区切换动画期间隐藏日志视图切换，让它随页面一起淡入淡出 */
+  logSwitcherHidden?: boolean
+  /** 侧栏滑入/滑出期间让顶栏延伸到侧栏下方，顶栏自身保持不动 */
+  sidebarUnderlay?: boolean
   sidebarOpen: boolean
   mobileMenuOpen: boolean
   searchOpen: boolean
@@ -101,6 +106,8 @@ type HeaderActionId = 'search' | 'settings' | 'docs' | 'language' | 'theme' | 'l
 
 export function Header({
   extensions = [],
+  logSwitcherHidden = false,
+  sidebarUnderlay = false,
   sidebarOpen,
   mobileMenuOpen,
   searchOpen,
@@ -152,6 +159,16 @@ export function Header({
   const [workspaceHoverLocked, setWorkspaceHoverLocked] = useState(false)
   const [hoveredHeaderAction, setHoveredHeaderAction] = useState<HeaderActionId | null>(null)
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
+  const logSwitcherShown = workspaceMode === 'logs' && !logSwitcherHidden
+  const [logSwitcherSettled, setLogSwitcherSettled] = useState(logSwitcherShown)
+  // 桌面端侧栏当前占据的布局宽度（px）；小屏侧栏不占布局，探针不显示，取 0。
+  const [sidebarInset, setSidebarInset] = useState(0)
+  const sidebarInsetProbeRef = useRef<HTMLSpanElement | null>(null)
+  const [topbarRowGap, setTopbarRowGap] = useState(0)
+  // 只有千禧顶栏的日志槽位参与正常布局，其它风格是绝对定位，不需要让位。
+  // 槽位自身会多带一段行间距，让位宽度里要扣掉，工作区键才正好停在原位。
+  const logSwitcherInset =
+    themeConfig.dashboardStyle === 'millennium' ? Math.max(0, sidebarInset - topbarRowGap) : 0
   const workspaceTabsCompactRef = useRef(false)
   const workspaceHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const headerActionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -168,6 +185,20 @@ export function Header({
   useEffect(() => {
     workspaceTabsCompactRef.current = workspaceTabsCompact
   }, [workspaceTabsCompact])
+
+  // 首帧就要量到侧栏宽度：侧栏顶部此时已让出底色，顶栏晚一帧垫过去会闪一下页面底色。
+  useLayoutEffect(() => {
+    const probe = sidebarInsetProbeRef.current
+    if (!probe) return
+    setSidebarInset(probe.offsetWidth)
+    const resizeObserver = new ResizeObserver(() => {
+      setSidebarInset(probe.offsetWidth)
+      const row = document.getElementById('log-viewer-topbar-tabs')?.parentElement
+      setTopbarRowGap(row ? parseFloat(window.getComputedStyle(row).columnGap) || 0 : 0)
+    })
+    resizeObserver.observe(probe)
+    return () => resizeObserver.disconnect()
+  }, [])
 
   useEffect(
     () => () => {
@@ -298,12 +329,28 @@ export function Header({
       initial={false}
       animate={{ height: topbarCollapsed ? 16 : expandedTopbarHeight, marginBottom: 0 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+      style={
+        sidebarUnderlay && sidebarInset > 0 && !topbarCollapsed
+          ? // 向左延伸到侧栏下方并用等量内边距抵消，内容位置不变；侧栏滑走后露出的仍是顶栏。
+            { marginLeft: -sidebarInset, paddingLeft: `calc(1rem + ${sidebarInset}px)` }
+          : undefined
+      }
       className={cn(
         'sticky top-0 isolate z-30 min-w-0 overflow-visible',
         topbarCollapsed ? 'h-4' : 'flex h-[42px] flex-col border-b px-3 backdrop-blur-md sm:px-4',
         topbarCollapsed || inheritsPageBackground ? 'bg-transparent' : 'bg-background'
       )}
     >
+      <span
+        ref={sidebarInsetProbeRef}
+        aria-hidden="true"
+        className={cn(
+          'pointer-events-none invisible absolute top-0 left-0 hidden h-0 lg:block',
+          sidebarOpen
+            ? 'w-[var(--layout-sidebar-width)]'
+            : 'w-[var(--layout-sidebar-collapsed-width)]'
+        )}
+      />
       {topbarCollapsed && (
         <div
           data-dashboard-header-strip="true"
@@ -353,12 +400,29 @@ export function Header({
       )}
       <div className={cn(topbarCollapsed ? 'hidden' : 'contents')}>
         <div className="relative z-10 flex h-full min-h-0 items-center justify-between gap-2">
-          <div
+          {/* 千禧风格下此槽位占据实际布局宽度：宽度从 0 展开，把工作区键平滑推开而不是瞬间挤开。
+              隐藏态左侧留出侧栏宽度，工作区键停在设置工作区时的位置，入场/退场只做一次单向移动。 */}
+          <motion.div
             id="log-viewer-topbar-tabs"
             className={cn(
-              'absolute top-1/2 left-0 hidden min-w-0 shrink-0 -translate-y-1/2 items-center',
-              workspaceMode === 'logs' && 'sm:flex'
+              'absolute top-1/2 left-0 hidden min-w-0 shrink-0 -translate-y-1/2 items-center [&>*]:shrink-0',
+              workspaceMode === 'logs' && 'sm:flex',
+              // 展开/收起过程中裁掉尚未露出的部分；静止后放开，避免裁掉键帽阴影。
+              !(logSwitcherShown && logSwitcherSettled) && 'pointer-events-none overflow-x-clip'
             )}
+            initial={false}
+            animate={
+              logSwitcherShown
+                ? { opacity: 1, width: 'auto', marginLeft: 0 }
+                : { opacity: 0, width: 0, marginLeft: logSwitcherInset }
+            }
+            transition={
+              logSwitcherShown
+                ? // 宽度动画跑在主线程：等日志页挂载、上滑完成后再展开，避开最重的那几帧
+                  { duration: 0.36, delay: 0.28, ease: [0.22, 1, 0.36, 1] }
+                : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }
+            }
+            onAnimationComplete={() => setLogSwitcherSettled(logSwitcherShown)}
           />
 
           <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-4">

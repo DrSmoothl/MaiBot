@@ -22,14 +22,14 @@ export async function installPlugin(
   pluginId: string,
   repositoryUrl: string,
   branch: string = 'main',
-  release?: { version: string; pinned: boolean } | null
+  release?: { version: string } | null
 ): Promise<{ success: boolean; message: string }> {
   return backendApi.post<{ success: boolean; message: string }>('/api/webui/plugins/install', {
     body: {
       plugin_id: pluginId,
       repository_url: repositoryUrl,
       branch: branch,
-      ...(release === null ? {} : release || (branch === 'main' ? { version: 'latest', pinned: false } : {})),
+      ...(release === null ? {} : release || (branch === 'main' ? { version: 'latest' } : {})),
     },
     errorMessage: '安装插件失败',
   })
@@ -56,14 +56,14 @@ export async function updatePlugin(
   pluginId: string,
   repositoryUrl: string,
   branch: string = 'main',
-  release?: { version: string; pinned: boolean } | null
+  release?: { version: string } | null
 ): Promise<UpdatePluginResult> {
   return backendApi.post<UpdatePluginResult>('/api/webui/plugins/update', {
     body: {
       plugin_id: pluginId,
       repository_url: repositoryUrl,
       branch: branch,
-      ...(release === null ? {} : release || (branch === 'main' ? { version: 'latest', pinned: false } : {})),
+      ...(release === null ? {} : release || (branch === 'main' ? { version: 'latest' } : {})),
     },
     errorMessage: '更新插件失败',
   })

@@ -2,7 +2,8 @@ import { Icon } from '@iconify/react'
 import { createElement } from 'react'
 
 import { useTheme } from '@/components/use-theme'
-import { getMillenniumIconPath, MillenniumIcon } from './millennium-icons'
+import { getMillenniumIcon } from './millennium-icon-set'
+import { MillenniumIcon } from './millennium-icons'
 import { getStreamlineIcon } from './streamline-icons'
 
 import type { MenuIcon } from '@/components/layout/types'
@@ -14,8 +15,10 @@ export function createStreamlineIcon(name: string, fallback?: MenuIcon): MenuIco
 
     // 千禧风格有自己的一套线条图标；没登记的名称退回到备用图标。
     if (themeConfig.dashboardStyle === 'millennium') {
-      const path = getMillenniumIconPath(name)
-      if (path) return createElement(MillenniumIcon, { path, className, color, size })
+      const millenniumIcon = getMillenniumIcon(name)
+      if (millenniumIcon) {
+        return createElement(MillenniumIcon, { icon: millenniumIcon, className, color, size })
+      }
       if (fallback) return createElement(fallback, { className, color, size })
     }
 
