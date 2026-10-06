@@ -151,7 +151,7 @@ vi.mock('@/lib/maisaka-monitor-client', () => ({
 }))
 
 vi.mock('@/routes/monitor/use-maisaka-monitor', () => ({
-  useMaisakaMonitor: mocks.monitorHook,
+  useMaisakaMonitorOverview: mocks.monitorHook,
 }))
 
 vi.mock('@/routes/monitor/maisaka-monitor', () => ({
@@ -422,7 +422,7 @@ beforeEach(() => {
   mocks.monitorHook.mockReturnValue({
     sessions: mocks.observedSessions,
     stageStatuses: mocks.observedStageStatuses,
-    allTimeline: [],
+    latestMessages: new Map(),
     setSelectedSession: mocks.setSelectedObservedSession,
   })
 })

@@ -42,7 +42,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { Key, ReactNode } from 'react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -73,7 +73,7 @@ import type {
   ToolExecutionEvent,
 } from '@/lib/maisaka-monitor-client'
 import type { SessionInfo, StageStatusInfo, TimelineEntry } from './use-maisaka-monitor'
-import { useMaisakaMonitor } from './use-maisaka-monitor'
+import { useMaisakaMonitorOverview, useMaisakaMonitorSession } from './use-maisaka-monitor'
 
 // ─── 工具函数 ──────────────────────────────────────────────────
 
@@ -2156,18 +2156,13 @@ interface MaisakaMonitorProps {
   reasoningReturnTo?: string
 }
 
-export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaMonitorProps = {}) {
+const MonitorTimeline = memo(function MonitorTimeline({
+  embedded = false,
+  reasoningReturnTo,
+}: MaisakaMonitorProps) {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const {
-    timeline,
-    sessions,
-    stageStatuses,
-    selectedSession,
-    setSelectedSession,
-    connected,
-    clearTimeline,
-  } = useMaisakaMonitor()
+  const { timeline, selectedSession, selectedStageStatus, clearTimeline } = useMaisakaMonitorSession()
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null)
@@ -2179,10 +2174,6 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
   const previousSelectedSessionRef = useRef<string | null | undefined>(undefined)
   /** 用户向上浏览时记录视口顶部的锚点条目，列表变化后据此恢复位置，避免内容被顶走 */
   const scrollAnchorRef = useRef<{ key: Key; offset: number } | null>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('maisaka-monitor-sidebar-collapsed')
-    return saved !== 'false'
-  })
 
   const handleOpenReasoning = useCallback(
     (promptHtmlUri: string) => {
@@ -2201,10 +2192,6 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
     },
     [navigate, reasoningReturnTo]
   )
-
-  useEffect(() => {
-    localStorage.setItem('maisaka-monitor-sidebar-collapsed', String(sidebarCollapsed))
-  }, [sidebarCollapsed])
 
   useEffect(
     () => () => {
@@ -2520,9 +2507,173 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
 
     return currentStats
   }, [timeline])
-  const selectedStageStatus = selectedSession ? stageStatuses.get(selectedSession) : undefined
   const virtualItems = timelineVirtualizer.getVirtualItems()
 
+  // 主时间线区域
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* 时间线 */}
+      <StageStatusPanel
+        autoScroll={autoScroll}
+        sessionId={selectedSession}
+        onClearTimeline={clearTimeline}
+        onFindPreviousBotMessage={handleFindPreviousBotMessage}
+        onScrollToTop={scrollToTop}
+        onScrollToBottom={() => scrollToBottom('smooth')}
+        stats={stats}
+        status={selectedStageStatus}
+      />
+
+      <Card
+        className={cn(
+          'min-w-0 flex-1 overflow-hidden',
+          embedded ? 'min-h-0' : 'min-h-[420px] lg:min-h-0'
+        )}
+      >
+        <ScrollArea className="h-full" ref={scrollRef} onScrollCapture={handleScroll}>
+          <div className="min-w-0 p-4">
+            {visibleTimelineEntries.length === 0 ? (
+              <div className="text-muted-foreground flex flex-col items-center justify-center gap-3 py-20">
+                <Clock className="h-10 w-10 opacity-30" />
+                <p className="text-sm">等待 MaiSaka 推理事件…</p>
+                <p className="text-xs opacity-60">
+                  当 MaiSaka 处理新消息时，推理过程会实时展示在这里
+                </p>
+              </div>
+            ) : (
+              <div
+                className="relative min-w-0"
+                style={{ height: `${timelineVirtualizer.getTotalSize()}px` }}
+              >
+                {virtualItems.map((virtualItem) => {
+                  const entry = visibleTimelineEntries[virtualItem.index]
+                  if (!entry) return null
+                  const entryData = entry.data as unknown as Record<string, unknown>
+                  const entryMessageId =
+                    typeof entryData.message_id === 'string' ? entryData.message_id : undefined
+                  // 推理与推理、推理与消息之间用细横线分隔，连续消息之间不加
+                  const previousEntry = visibleTimelineEntries[virtualItem.index - 1]
+                  const showDivider =
+                    Boolean(previousEntry) &&
+                    !(isMessageTimelineEntry(entry) && isMessageTimelineEntry(previousEntry))
+                  return (
+                    <div
+                      key={virtualItem.key}
+                      ref={timelineVirtualizer.measureElement}
+                      data-index={virtualItem.index}
+                      className="absolute top-0 right-0 left-0 pb-3"
+                      style={{ transform: `translateY(${virtualItem.start}px)` }}
+                    >
+                      {showDivider && (
+                        <div
+                          data-maisaka-timeline-divider="true"
+                          className="border-border mb-3 border-t"
+                        />
+                      )}
+                      <div
+                        data-maisaka-message-id={entryMessageId}
+                        data-jump-highlighted={
+                          entryMessageId && focusedMessageId === entryMessageId
+                            ? 'true'
+                            : undefined
+                        }
+                        className={cn(
+                          'animate-in fade-in-0 slide-in-from-bottom-2 rounded-md duration-300',
+                          entryMessageId &&
+                            focusedMessageId === entryMessageId &&
+                            'bg-primary/5 ring-primary/55 ring-offset-background ring-2 ring-offset-2'
+                        )}
+                      >
+                        <TimelineEventRenderer
+                          messages={monitorMessages}
+                          entry={entry}
+                          onJumpToMessage={handleJumpToMessage}
+                          onOpenReasoning={handleOpenReasoning}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+      </Card>
+    </div>
+  )
+})
+
+// 会话摘要与详情分别订阅，其他群的状态更新不会穿透到虚拟时间线。
+function MonitorSidebar() {
+  const { sessions, stageStatuses, selectedSession, setSelectedSession, connected } =
+    useMaisakaMonitorOverview()
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('maisaka-monitor-sidebar-collapsed')
+    return saved !== 'false'
+  })
+
+  useEffect(() => {
+    localStorage.setItem('maisaka-monitor-sidebar-collapsed', String(sidebarCollapsed))
+  }, [sidebarCollapsed])
+
+  // 会话侧边栏
+  return (
+    <aside
+      className={cn(
+        'border-border bg-background/45 flex min-w-0 shrink-0 flex-col overflow-hidden border transition-[width] duration-200',
+        sidebarCollapsed ? 'w-full lg:w-16' : 'w-full lg:w-52'
+      )}
+    >
+      <div className={cn('py-2', sidebarCollapsed ? 'px-2' : 'px-3')}>
+        <h2
+          className={cn(
+            'flex items-center gap-2 text-sm font-medium',
+            sidebarCollapsed && 'justify-center text-[0px]'
+          )}
+        >
+          {!sidebarCollapsed && <Activity className="h-4 w-4" />}
+          聊天流
+          {connected && (
+            <span
+              className={cn(
+                'flex h-2 w-2 rounded-full bg-emerald-500',
+                !sidebarCollapsed && 'ml-auto'
+              )}
+            />
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            title={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+          >
+            {sidebarCollapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronLeft className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </h2>
+      </div>
+      <Separator />
+      <ScrollArea className="max-h-40 flex-1 lg:max-h-none">
+        <SessionSidebar
+          sessions={sessions}
+          stageStatuses={stageStatuses}
+          selectedSession={selectedSession}
+          onSelect={setSelectedSession}
+          collapsed={sidebarCollapsed}
+        />
+      </ScrollArea>
+    </aside>
+  )
+}
+
+export const MaisakaMonitor = memo(function MaisakaMonitor({
+  embedded = false,
+  reasoningReturnTo,
+}: MaisakaMonitorProps = {}) {
   return (
     <div
       className={cn(
@@ -2530,149 +2681,8 @@ export function MaisakaMonitor({ embedded = false, reasoningReturnTo }: MaisakaM
         embedded ? 'h-full min-h-0 p-2 sm:p-3' : 'gap-4 lg:h-[calc(100vh-116px)] lg:flex-row'
       )}
     >
-      {/* 会话侧边栏 */}
-      {!embedded && (
-        <aside
-          className={cn(
-            'border-border bg-background/45 flex min-w-0 shrink-0 flex-col overflow-hidden border transition-[width] duration-200',
-            sidebarCollapsed ? 'w-full lg:w-16' : 'w-full lg:w-52'
-          )}
-        >
-          <div className={cn('py-2', sidebarCollapsed ? 'px-2' : 'px-3')}>
-            <h2
-              className={cn(
-                'flex items-center gap-2 text-sm font-medium',
-                sidebarCollapsed && 'justify-center text-[0px]'
-              )}
-            >
-              {!sidebarCollapsed && <Activity className="h-4 w-4" />}
-              聊天流
-              {connected && (
-                <span
-                  className={cn(
-                    'flex h-2 w-2 rounded-full bg-emerald-500',
-                    !sidebarCollapsed && 'ml-auto'
-                  )}
-                />
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 shrink-0"
-                onClick={() => setSidebarCollapsed((value) => !value)}
-                title={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
-              >
-                {sidebarCollapsed ? (
-                  <ChevronRight className="h-3.5 w-3.5" />
-                ) : (
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                )}
-              </Button>
-            </h2>
-          </div>
-          <Separator />
-          <ScrollArea className="max-h-40 flex-1 lg:max-h-none">
-            <SessionSidebar
-              sessions={sessions}
-              stageStatuses={stageStatuses}
-              selectedSession={selectedSession}
-              onSelect={setSelectedSession}
-              collapsed={sidebarCollapsed}
-            />
-          </ScrollArea>
-        </aside>
-      )}
-
-      {/* 主时间线区域 */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* 时间线 */}
-        <StageStatusPanel
-          autoScroll={autoScroll}
-          sessionId={selectedSession}
-          onClearTimeline={clearTimeline}
-          onFindPreviousBotMessage={handleFindPreviousBotMessage}
-          onScrollToTop={scrollToTop}
-          onScrollToBottom={() => scrollToBottom('smooth')}
-          stats={stats}
-          status={selectedStageStatus}
-        />
-
-        <Card
-          className={cn(
-            'min-w-0 flex-1 overflow-hidden',
-            embedded ? 'min-h-0' : 'min-h-[420px] lg:min-h-0'
-          )}
-        >
-          <ScrollArea className="h-full" ref={scrollRef} onScrollCapture={handleScroll}>
-            <div className="min-w-0 p-4">
-              {visibleTimelineEntries.length === 0 ? (
-                <div className="text-muted-foreground flex flex-col items-center justify-center gap-3 py-20">
-                  <Clock className="h-10 w-10 opacity-30" />
-                  <p className="text-sm">等待 MaiSaka 推理事件…</p>
-                  <p className="text-xs opacity-60">
-                    当 MaiSaka 处理新消息时，推理过程会实时展示在这里
-                  </p>
-                </div>
-              ) : (
-                <div
-                  className="relative min-w-0"
-                  style={{ height: `${timelineVirtualizer.getTotalSize()}px` }}
-                >
-                  {virtualItems.map((virtualItem) => {
-                    const entry = visibleTimelineEntries[virtualItem.index]
-                    if (!entry) return null
-                    const entryData = entry.data as unknown as Record<string, unknown>
-                    const entryMessageId =
-                      typeof entryData.message_id === 'string' ? entryData.message_id : undefined
-                    // 推理与推理、推理与消息之间用细横线分隔，连续消息之间不加
-                    const previousEntry = visibleTimelineEntries[virtualItem.index - 1]
-                    const showDivider =
-                      Boolean(previousEntry) &&
-                      !(isMessageTimelineEntry(entry) && isMessageTimelineEntry(previousEntry))
-                    return (
-                      <div
-                        key={virtualItem.key}
-                        ref={timelineVirtualizer.measureElement}
-                        data-index={virtualItem.index}
-                        className="absolute top-0 right-0 left-0 pb-3"
-                        style={{ transform: `translateY(${virtualItem.start}px)` }}
-                      >
-                        {showDivider && (
-                          <div
-                            data-maisaka-timeline-divider="true"
-                            className="border-border mb-3 border-t"
-                          />
-                        )}
-                        <div
-                          data-maisaka-message-id={entryMessageId}
-                          data-jump-highlighted={
-                            entryMessageId && focusedMessageId === entryMessageId
-                              ? 'true'
-                              : undefined
-                          }
-                          className={cn(
-                            'animate-in fade-in-0 slide-in-from-bottom-2 rounded-md duration-300',
-                            entryMessageId &&
-                              focusedMessageId === entryMessageId &&
-                              'bg-primary/5 ring-primary/55 ring-offset-background ring-2 ring-offset-2'
-                          )}
-                        >
-                          <TimelineEventRenderer
-                            messages={monitorMessages}
-                            entry={entry}
-                            onJumpToMessage={handleJumpToMessage}
-                            onOpenReasoning={handleOpenReasoning}
-                          />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          </ScrollArea>
-        </Card>
-      </div>
+      {!embedded && <MonitorSidebar />}
+      <MonitorTimeline embedded={embedded} reasoningReturnTo={reasoningReturnTo} />
     </div>
   )
-}
+})

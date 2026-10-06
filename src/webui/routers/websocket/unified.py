@@ -161,6 +161,11 @@ async def _handle_maisaka_monitor_subscribe(
     since_event_id = _coerce_non_negative_int(data.get("since_event_id"))
     replay_limit = _coerce_non_negative_int(data.get("replay_limit"), default=1000)
     replay_limit = max(1, min(replay_limit, 10000))
+    connection = websocket_manager.get_connection(connection_id)
+    # 显式协商版本；未声明支持的旧 WebUI 继续收到完整快照。
+    supports_planner_delta = data.get("planner_delta") == 1
+    if connection is not None and not supports_planner_delta:
+        connection.planner_delta_encoder = None
     websocket_manager.subscribe(connection_id, domain="maisaka_monitor", topic="main")
     await websocket_manager.send_response(
         connection_id,
@@ -175,6 +180,11 @@ async def _handle_maisaka_monitor_subscribe(
     )
     from src.maisaka.monitor.event_store import replay_monitor_events
 
+    if supports_planner_delta:
+        # 重置标记与快照共用出站队列，前后端在相同位置清空基准，重订阅也不会错位。
+        await websocket_manager.send_event(
+            connection_id, domain="maisaka_monitor", event="planner.reset", topic="main", data={}
+        )
     replay_events = await asyncio.to_thread(
         replay_monitor_events,
         since_event_id=since_event_id,

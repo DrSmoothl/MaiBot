@@ -38,6 +38,7 @@ Element.prototype.scrollTo = (() => {}) as unknown as Element['scrollTo']
 // 监控 hook 整体打桩：组件只消费其返回的状态与两个动作回调
 const monitorHookMocks = vi.hoisted(() => ({
   useMaisakaMonitor: vi.fn(),
+  listeners: new Set<() => void>(),
 }))
 
 // 路由跳转桩：捕获推理记录跳转参数
@@ -59,9 +60,21 @@ const virtualizerMocks = vi.hoisted(() => ({
   scrollToIndex: vi.fn(),
 }))
 
-vi.mock('./use-maisaka-monitor', () => ({
-  useMaisakaMonitor: monitorHookMocks.useMaisakaMonitor,
-}))
+vi.mock('./use-maisaka-monitor', async () => {
+  const { useSyncExternalStore } = await import('react')
+  const subscribe = (listener: () => void) => {
+    monitorHookMocks.listeners.add(listener)
+    return () => { monitorHookMocks.listeners.delete(listener) }
+  }
+  const readSnapshot = () => monitorHookMocks.useMaisakaMonitor()
+  function useMonitorSnapshot() {
+    return useSyncExternalStore(subscribe, readSnapshot)
+  }
+  return {
+    useMaisakaMonitorOverview: useMonitorSnapshot,
+    useMaisakaMonitorSession: useMonitorSnapshot,
+  }
+})
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => routerMocks.navigate,
@@ -137,6 +150,8 @@ function setupMonitorState(overrides: MonitorStateOverrides = {}) {
   const state: MonitorHookResult = {
     timeline,
     allTimeline: timeline,
+    latestMessages: new Map(),
+    selectedStageStatus: overrides.selectedSession ? overrides.stageStatuses?.get(overrides.selectedSession) : undefined,
     sessions: overrides.sessions ?? new Map(),
     stageStatuses: overrides.stageStatuses ?? new Map(),
     selectedSession: overrides.selectedSession ?? null,
@@ -145,6 +160,7 @@ function setupMonitorState(overrides: MonitorStateOverrides = {}) {
     clearTimeline: hookActions.clearTimeline,
   }
   monitorHookMocks.useMaisakaMonitor.mockReturnValue(state)
+  act(() => monitorHookMocks.listeners.forEach((listener) => listener()))
 }
 
 function nowSec() {
