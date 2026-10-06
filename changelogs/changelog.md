@@ -8,6 +8,7 @@
 - Planner 不再将原生 reasoning 传给 replyer；有 reply reference 时只使用参考，没有时才使用 Planner 正文。
 - 修复记忆图谱快照和向量索引发布前未强制落盘，意外断电后可能损坏的问题。
 - 修复 MCP 连接异常时持续占用 CPU 的问题，连接由独立任务管理，stdio 解码失败时记录原因并停用连接；建连或关闭操作被取消时仍释放连接资源，异常断连后同步更新 WebUI 状态。
+- 修复模型提供商 `auth_type` 为 `none`、`header`、`query` 或使用自定义 Bearer 前缀时，在 openai SDK 2.34 及以上版本中初始化即报 `Missing credentials` 的问题。
 
 ## Webui [1.8.3]
 
