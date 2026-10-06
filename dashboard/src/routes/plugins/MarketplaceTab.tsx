@@ -320,6 +320,7 @@ export function MarketplaceTab({
     const matchesSearch =
       searchQuery === '' ||
       plugin.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      plugin.manifest.author?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       plugin.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (plugin.manifest.keywords &&
         plugin.manifest.keywords.some((k) => k.toLowerCase().includes(searchQuery.toLowerCase())))

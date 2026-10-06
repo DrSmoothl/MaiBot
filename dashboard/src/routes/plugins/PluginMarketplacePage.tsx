@@ -999,6 +999,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
       if (!showInstalledPlugins && p.installed) return false
       const matchesSearch = searchQuery === '' ||
         p.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.manifest.author?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.manifest.keywords && p.manifest.keywords.some(k => k.toLowerCase().includes(searchQuery.toLowerCase())))
       const matchesType = pluginTypeFilter === 'all' || getPluginType(p) === pluginTypeFilter
