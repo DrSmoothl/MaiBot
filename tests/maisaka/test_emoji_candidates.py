@@ -20,6 +20,9 @@ from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 
 @pytest.fixture
 def candidate_context(monkeypatch, tmp_path):
+    from src.config.config import global_config
+
+    monkeypatch.setattr(global_config.emoji, "use_new_send_logic", True)
     monkeypatch.setattr(image_path, "PROJECT_ROOT", tmp_path)
     image_bytes = BytesIO()
     Image.new("RGB", (24, 24), "red").save(image_bytes, format="PNG")
@@ -42,7 +45,7 @@ async def test_multiple_collages_keep_unique_indices_and_old_selection(candidate
     indices = [next(iter(message.emoji_hashes)) for message in messages]
     assert len(set(indices)) == 3
     candidate_context.runtime._chat_history.extend(messages)
-    items = await candidate_context.post_process_rich_reply_message_items_async(
+    items = await candidate_context.post_process_reply_message_items_async(
         "你好", {"attach_emoji": indices[0]}, skip_post_process=True,
     )
     assert len(items) == 2
@@ -116,10 +119,10 @@ async def test_empty_library_and_nonvisual_planner(candidate_context, monkeypatc
 def test_tool_visibility_and_integer_schema(monkeypatch):
     from src.config.config import global_config
 
-    monkeypatch.setattr(global_config.experimental, "enable_rich_reply", True)
+    monkeypatch.setattr(global_config.emoji, "use_new_send_logic", True)
     names = {spec.name for spec in get_all_builtin_tool_specs()}
     assert "show_emoji_list" in names and "send_emoji" not in names
     assert get_tool_spec().parameters_schema["properties"]["attach_emoji"]["type"] == "integer"
-    monkeypatch.setattr(global_config.experimental, "enable_rich_reply", False)
+    monkeypatch.setattr(global_config.emoji, "use_new_send_logic", False)
     names = {spec.name for spec in get_all_builtin_tool_specs()}
     assert "send_emoji" in names and "show_emoji_list" not in names

@@ -1503,10 +1503,13 @@
     "news": {
       "title": "资讯",
       "description": "来自服务器的新闻动态",
+      "unread": "未读",
+      "unreadCount": "{{count}} 条未读",
       "refresh": "刷新资讯",
       "retry": "重新加载",
       "open": "打开资讯详情",
       "openLink": "打开原文链接",
+      "openPlugin": "查看插件",
       "pinned": "置顶",
       "empty": "暂无资讯"
     },

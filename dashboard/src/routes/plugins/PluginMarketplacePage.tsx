@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -181,7 +181,16 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   // 安装对话框状态
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
   const [installingPlugin, setInstallingPlugin] = useState<PluginInfo | null>(null)
-  const [detailPluginId, setDetailPluginId] = useState<string | null>(null)
+  // 详情写入地址，支持从资讯直达，以及刷新后保留当前插件。
+  const search = useSearch({ strict: false }) as { pluginId?: string }
+  const detailPluginId = search.pluginId || null
+  const setDetailPluginId = (pluginId: string | null) => {
+    void navigate({
+      to: embedded ? '/plugins/embed' : '/plugins',
+      search: { pluginId: pluginId || undefined },
+      replace: true,
+    })
+  }
   
   const { toast } = useToast()
   const isFetchingMarketplace = marketplaceProgress?.stage === 'loading'

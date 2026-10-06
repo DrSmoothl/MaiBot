@@ -1506,10 +1506,13 @@
     "news": {
       "title": "News",
       "description": "Latest news from the server",
+      "unread": "Unread",
+      "unreadCount": "{{count}} unread",
       "refresh": "Refresh news",
       "retry": "Reload",
       "open": "Open news details",
       "openLink": "Open source link",
+      "openPlugin": "View plugin",
       "pinned": "Pinned",
       "empty": "No news yet"
     },

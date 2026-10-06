@@ -1439,10 +1439,13 @@
     "news": {
       "title": "ニュース",
       "description": "サーバーからの最新ニュース",
+      "unread": "未読",
+      "unreadCount": "未読 {{count}} 件",
       "refresh": "ニュースを更新",
       "retry": "再読み込み",
       "open": "ニュースの詳細を開く",
       "openLink": "原文リンクを開く",
+      "openPlugin": "プラグインを見る",
       "pinned": "ピン留め",
       "empty": "ニュースはまだありません"
     },

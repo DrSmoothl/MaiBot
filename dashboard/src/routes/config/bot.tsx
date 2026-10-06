@@ -1149,7 +1149,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             ...replyStyleSchema,
             uiLabel: '聊天流prompt',
             uiSubLabel: '聊天流prompt',
-            uiAdvanced: true,
+            uiAdvanced: false,
             fields: hasPersonalitySchema
               ? replyStyleSchema.fields.filter((field) => !basicChatPromptFieldNames.has(field.name))
               : replyStyleSchema.fields,

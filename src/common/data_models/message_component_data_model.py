@@ -65,20 +65,25 @@ class ImageComponent(BaseMessageComponentModel, ByteComponent):
     def format_name(self) -> str:
         return "image"
 
-    async def load_image_binary(self):
+    async def load_image_binary(self) -> None:
         if self.binary_data:
             return
         from src.common.database.database import get_db_session
         from src.common.database.database_model import Images, ImageType
 
-        try:
+        def load_stored_image() -> bytes:
+            """数据库查询与文件读取一起在线程中完成，避免占用聊天事件循环。"""
+
             with get_db_session() as db:
                 statement = select(Images).filter_by(image_hash=self.binary_hash, image_type=ImageType.IMAGE).limit(1)
                 if image_record := db.exec(statement).first():
                     image_path = resolve_stored_image_path(image_record.full_path)
                 else:
                     raise ValueError(f"无法通过 image_hash 加载图片二进制数据: {self.binary_hash}")
-            self.binary_data = await asyncio.to_thread(image_path.read_bytes)
+            return image_path.read_bytes()
+
+        try:
+            self.binary_data = await asyncio.to_thread(load_stored_image)
         except Exception as e:
             raise ValueError(f"通过 image_hash 加载图片二进制数据时发生错误: {e}") from e
 

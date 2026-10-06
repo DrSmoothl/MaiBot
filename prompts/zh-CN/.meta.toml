@@ -23,6 +23,11 @@ display_name = "回复"
 advanced = false
 description = "Maisaka 回复生成模板，负责根据人格、表达风格、群聊注意事项和待回复上下文生成最终回复。"
 
+[reply_attachments]
+display_name = "回复附件提示"
+advanced = true
+description = "说明回复附带的图片、@ 和表情包由系统发送，避免正文重复输出附件信息。"
+
 [retro_replyer]
 display_name = "复古回复"
 advanced = true

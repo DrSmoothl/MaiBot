@@ -236,19 +236,19 @@ export function PluginCard({
               <Button 
                 variant="destructive" 
                 size="sm"
-                className="w-full sm:w-auto"
+                className="w-full px-0 sm:w-8"
                 disabled={!gitStatus?.installed || isPluginOperating}
                 title={
                   !gitStatus?.installed
                     ? 'Git 未安装'
                     : isPluginOperating
                       ? '插件操作进行中'
-                      : undefined
+                      : '卸载'
                 }
+                aria-label="卸载"
                 onClick={() => onUninstall(plugin)}
               >
-                <Trash2 className="h-4 w-4 mr-1" />
-                卸载
+                <Trash2 className="h-4 w-4" />
               </Button>
             )
           ) : (

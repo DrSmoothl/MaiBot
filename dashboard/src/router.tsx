@@ -231,6 +231,9 @@ const chatEmbedRoute = createRoute({
 const pluginsEmbedRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/plugins/embed',
+  validateSearch: (search: Record<string, unknown>): { pluginId?: string } => ({
+    pluginId: typeof search.pluginId === 'string' ? search.pluginId.trim() || undefined : undefined,
+  }),
   component: lazyRouteComponent(
     () => import('./routes/plugins/embed'),
     'PluginMarketplaceEmbedPage'
@@ -241,6 +244,9 @@ const pluginsEmbedRoute = createRoute({
 const pluginsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/plugins',
+  validateSearch: (search: Record<string, unknown>): { pluginId?: string } => ({
+    pluginId: typeof search.pluginId === 'string' ? search.pluginId.trim() || undefined : undefined,
+  }),
   component: lazyRouteComponent(
     () => import('./routes/plugins/PluginMarketplacePage'),
     'PluginMarketplacePage'

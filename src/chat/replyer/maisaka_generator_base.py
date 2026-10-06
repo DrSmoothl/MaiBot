@@ -386,7 +386,9 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         if raw_emoji:
             lines.append(f"当前文字回复后还会单独发送已选中的第 {raw_emoji} 号表情包，无需在正文中输出序号。")
 
-        return "\n".join(lines)
+        if not lines:
+            return ""
+        return self._load_prompt("reply_attachments", attachments="\n".join(lines))
 
     @staticmethod
     def _get_chat_prompt_for_chat(chat_id: str, is_group_chat: Optional[bool]) -> str:
