@@ -122,10 +122,10 @@ def local_install(tmp_path, monkeypatch):
     return TestClient(app), plugins, repository, chosen, catalog_entry
 
 
-def install(client, version="latest", pinned=False):
+def install(client, version="latest"):
     return client.post("/plugins/install", json={
         "plugin_id": "example.demo", "repository_url": "https://github.com/untrusted/ignored",
-        "version": version, "pinned": pinned,
+        "version": version,
     })
 
 
@@ -156,12 +156,10 @@ def test_manifest_mismatch_does_not_install(local_install):
     assert support.resolve_installed_plugin_path("example.demo") is None
 
 
-def test_pinned_and_branch_updates_cannot_override_release(local_install):
+def test_branch_updates_cannot_override_release(local_install):
     client, _, _, _, _ = local_install
-    assert install(client, pinned=True).status_code == 200
+    assert install(client).status_code == 200
     body = {"plugin_id": "example.demo", "repository_url": "https://github.com/example/demo"}
-    response = client.post("/plugins/update", json={**body, "version": "latest"})
-    assert response.status_code == 409 and "锁定" in response.text
     response = client.post("/plugins/update", json=body)
     assert response.status_code == 409 and "不能使用分支" in response.text
 
@@ -174,13 +172,13 @@ def test_explicit_version_switch_preserves_data_and_backup(local_install):
     (target / "history.db").write_bytes(b"user data")
     response = client.post("/plugins/update", json={
         "plugin_id": "example.demo", "repository_url": "https://github.com/example/demo",
-        "version": "1.0.0", "pinned": True,
+        "version": "1.0.0",
     })
     assert response.status_code == 200, response.text
     assert (target / "history.db").read_bytes() == b"user data"
     assert "false" in (target / "config.toml").read_text(encoding="utf-8")
     assert (Path(response.json()["backup_path"]) / "history.db").read_bytes() == b"user data"
-    assert release_install.read_release_receipt(target)["pinned"] is True
+    assert release_install.read_release_receipt(target)["version"] == "1.0.0"
 
 
 def test_local_code_changes_block_switch_without_losing_edits(local_install):
@@ -253,14 +251,14 @@ def test_update_resumes_runtime_before_releasing_transaction(local_install, monk
     async def resume(plugin_ids):
         assert manager._plugin_file_update_lock.locked()
         assert plugin_ids == ["example.demo"]
-        assert release_install.read_release_receipt(target)["pinned"] is True
+        assert release_install.read_release_receipt(target)["version"] == "1.0.0"
         events.append("resume")
 
     monkeypatch.setattr(release_install, "_stop_runtime", stop)
     monkeypatch.setattr(release_install, "_resume_runtime", resume)
     response = client.post("/plugins/update", json={
         "plugin_id": "example.demo", "repository_url": "https://github.com/example/demo",
-        "version": "1.0.0", "pinned": True,
+        "version": "1.0.0",
     })
     assert response.status_code == 200, response.text
     assert events == ["stop", "resume"]

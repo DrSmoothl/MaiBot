@@ -591,7 +591,6 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
   // 检查是否需要更新（市场版本比已安装版本新）
   const needsUpdate = (plugin: PluginInfo): boolean => {
-    if (plugin.installed_release?.pinned) return false
     if (!plugin.installed || !plugin.installed_version || !plugin.manifest?.version) {
       return false
     }
