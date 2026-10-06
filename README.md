@@ -57,9 +57,9 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 ## 安装 · INSTALL
 
-**最新版本: v1.3.0**
+**最新版本: v1.3.4**
 
-<sub><sup><strong>Latest Version: v1.3.0</strong></sup></sub>
+<sub><sup><strong>Latest Version: v1.3.4</strong></sup></sub>
 
 - **发布**：[Release](https://github.com/Mai-with-u/MaiBot/releases/) 页面展示了最新发布的正式版。
   <sub><sup><strong>Download</strong>: Visit the <a href="https://github.com/Mai-with-u/MaiBot/releases/">Release</a> page to get the latest version.</sup></sub>
@@ -151,8 +151,9 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 ### 🤝 开源项目友链
 <sub><sup>Open Source Friends</sup></sub>
 
-- **[AstrBot](https://github.com/AstrBotDevs/AstrBot)**: 优秀的LLM Agent项目  
+- **[AstrBot](https://github.com/AstrBotDevs/AstrBot)**: 优秀的LLM Agent项目。
   <sub><sup>An excellent LLM Agent project.</sup></sub>
+- **[Pallas-Bot](https://github.com/PallasBot/Pallas-Bot)**: 以防你不知道牛牛又开始更新了。
 
 ### ❤️ 特别致谢
 <sub><sup>Special Thanks</sup></sub>

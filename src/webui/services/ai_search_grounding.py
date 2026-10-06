@@ -1,14 +1,9 @@
 """WebUI AI 搜索回答的技术项提取与证据校验。"""
 
-from typing import List, Protocol
+from typing import List
 import re
 
-
-class GroundableOutput(Protocol):
-    """证据校验所需的最小回答结构。"""
-
-    answer: str
-    suggestions: List[str]
+from .ai_search_models import AISearchModelOutput
 
 
 class AISearchGroundingError(ValueError):
@@ -49,7 +44,7 @@ def extract_verifiable_claims(text: str) -> List[str]:
     return claims
 
 
-def validate_model_output_evidence(model_output: GroundableOutput, evidence: str) -> None:
+def validate_model_output_evidence(model_output: AISearchModelOutput, evidence: str) -> None:
     """拒绝展示本次检索或读取证据中未出现的配置项、路径、命令或数值代码。"""
 
     normalized_evidence = evidence.casefold()

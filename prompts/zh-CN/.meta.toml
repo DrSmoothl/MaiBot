@@ -152,3 +152,18 @@ description = "用于在上下文裁切时，将被移出的聊天记录概括�
 display_name = "WebUI AI 搜索"
 advanced = true
 description = "用于根据自然语言意图从 WebUI 提供的真实页面与配置候选中选择搜索结果。"
+
+[webui_ai_search_final]
+display_name = "WebUI AI 搜索定稿指令"
+advanced = true
+description = "用于在 AI 搜索的工具轮次用尽或未按格式作答时，要求模型停止检索并返回最终 JSON。"
+
+[webui_ai_search_correction]
+display_name = "WebUI AI 搜索纠错指令"
+advanced = true
+description = "用于在 AI 搜索回答未通过证据校验时，要求模型删除无依据内容并重写最终 JSON。"
+
+[webui_ai_search_evidence]
+display_name = "WebUI AI 搜索证据消息"
+advanced = true
+description = "用于把 AI 搜索中只读工具的返回结果包装成无工具请求可用的证据消息。"

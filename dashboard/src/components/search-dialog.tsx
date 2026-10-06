@@ -62,7 +62,6 @@ interface SearchItem {
 interface AISearchItem {
   item: SearchItem
   reason: string
-  score: number
 }
 
 function getProgressTitle(event: AISearchProgressEvent, t: TFunction): string {
@@ -90,9 +89,9 @@ function getProgressTitle(event: AISearchProgressEvent, t: TFunction): string {
 
   const actionKeyByTool: Record<string, string> = {
     search_webui_index: 'search.progressSearchWebui',
-    read_webui_documents: 'search.progressReadWebui',
     search_official_docs: 'search.progressSearchDocs',
     read_official_docs: 'search.progressReadDocs',
+    read_local_config: 'search.progressReadConfig',
   }
   const action = t(actionKeyByTool[event.tool ?? ''] ?? 'search.progressTool')
   if (event.status === 'completed') {
@@ -524,7 +523,6 @@ export function SearchDialog({
             ? {
                 item,
                 reason: result.reason,
-                score: result.score,
               }
             : null
         })
@@ -538,7 +536,9 @@ export function SearchDialog({
       if (response.answer) {
         setAISearchProgressOpen(false)
       }
-      if (nextItems.length === 0 && !response.answer) {
+      if (response.grounding_error) {
+        setAISearchError(response.grounding_error)
+      } else if (nextItems.length === 0 && !response.answer) {
         setAISearchError(t('search.aiNoResults'))
       }
       setSelectedIndex(0)

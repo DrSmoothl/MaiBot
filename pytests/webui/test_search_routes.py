@@ -10,12 +10,14 @@ from src.llm_models.payload_content.context_item import (
     FunctionCallOutputItem,
     get_item_text,
 )
+from src.config.config import Config
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.webui.routers import search as search_router
 from src.webui.services import ai_search_agent as search_agent
 from src.webui.services import ai_search_grounding as search_grounding
+from src.webui.services import ai_search_local_config as search_local_config
 from src.webui.services.ai_search_documents import AISearchDocumentStore, OfficialDocument
-from src.webui.services.ai_search_models import AISearchModelOutput
+from src.webui.services.ai_search_models import AISearchModelOutput, AISearchResponse
 
 
 class FakeSearchModel:
@@ -51,7 +53,7 @@ class FakeSearchModel:
         )
 
 
-def test_ai_search_document_store_searches_and_reads_candidates() -> None:
+def test_ai_search_document_store_searches_candidates_with_content() -> None:
     store = AISearchDocumentStore()
     candidates = [
         search_router.AISearchCandidate(
@@ -71,10 +73,8 @@ def test_ai_search_document_store_searches_and_reads_candidates() -> None:
     ]
 
     matches = store.search_candidates("表情 emoji", candidates, 6)
-    documents = store.read_candidates(["emoji", "emoji", "missing"], candidates, 6)
 
-    assert [match["id"] for match in matches] == ["emoji"]
-    assert documents == [
+    assert matches == [
         {
             "id": "emoji",
             "title": "表情配置",
@@ -123,9 +123,9 @@ async def test_final_ai_search_request_preserves_tool_evidence(
         tool_call: ToolCall,
         candidates,
         read_source_ids,
-    ) -> str:
+    ) -> dict:
         del tool_call, candidates, read_source_ids
-        return '{"content":"bot_config.toml 使用 [emoji] 段，不存在 config.yaml"}'
+        return {"content": "bot_config.toml 使用 [emoji] 段，不存在 config.yaml"}
 
     monkeypatch.setattr(search_agent, "_get_ai_search_model", lambda: model)
     monkeypatch.setattr(search_agent, "_execute_agent_tool", fake_execute_agent_tool)
@@ -149,12 +149,12 @@ async def test_final_ai_search_request_preserves_tool_evidence(
         ],
     )
 
-    result, model_output = await search_agent.run_ai_search_agent(request)
+    response = await search_agent.run_ai_search_agent(request)
 
     final_messages, final_options = model.calls[-1]
-    assert result.response
-    assert "bot_config.toml" in model_output.answer
-    assert validation_calls == [model_output.answer]
+    assert response.model_name == "fake-model"
+    assert "bot_config.toml" in response.answer
+    assert validation_calls == [response.answer]
     assert final_options.temperature is None
     assert all(options.max_tokens is None for _, options in model.calls)
     assert final_options.tool_options is None
@@ -228,10 +228,7 @@ async def test_execute_ai_search_request_writes_compact_search_record(
                 count=2,
             )
         )
-        return (
-            LLMResponseResult(model_name="fake-model", total_tokens=42),
-            AISearchModelOutput(answer="根据文档完成回答"),
-        )
+        return AISearchResponse(model_name="fake-model", total_tokens=42, answer="根据文档完成回答")
 
     monkeypatch.setattr(search_router, "logger", CapturingLogger())
     monkeypatch.setattr(search_router, "_get_cached_response", lambda _cache_key: None)
@@ -249,7 +246,10 @@ async def test_execute_ai_search_request_writes_compact_search_record(
         ],
     )
 
-    response = await search_router._execute_ai_search_request(request)
+    async def ignore_progress(event: search_router.AISearchProgressEvent) -> None:
+        del event
+
+    response = await search_router._execute_ai_search_request(request, ignore_progress)
 
     assert response.answer == "根据文档完成回答"
     summary = next(fields for level, event, fields in log_entries if level == "info" and event == "WebUI AI 搜索记录")
@@ -468,9 +468,9 @@ async def test_ai_search_uses_search_evidence_and_rewrites_once_after_grounding_
         tool_call: ToolCall,
         candidates,
         read_source_ids,
-    ) -> str:
+    ) -> dict:
         del tool_call, candidates, read_source_ids
-        return '{"content":"no_action_backoff_base_seconds 控制空闲退避基准"}'
+        return {"content": "no_action_backoff_base_seconds 控制空闲退避基准"}
 
     async def capture_progress(event: search_router.AISearchProgressEvent) -> None:
         progress_events.append(event)
@@ -497,14 +497,194 @@ async def test_ai_search_uses_search_evidence_and_rewrites_once_after_grounding_
 
     monkeypatch.setattr(search_agent, "validate_model_output_evidence", track_validation)
 
-    result, model_output = await search_agent.run_ai_search_agent(request, capture_progress)
+    response = await search_agent.run_ai_search_agent(request, capture_progress)
 
     assert len(model.calls) == 4
-    assert "no_action_backoff_*" in result.response
-    assert "no_action_backoff_*" in model_output.answer
+    assert "no_action_backoff_*" in response.answer
+    assert response.grounding_error == ""
     assert len(validation_calls) == 2
     assert "POST /api/webui/auth/verify" in validation_calls[0]
     assert "no_action_backoff_*" in validation_calls[1]
     assert any(event.stage == "correcting" for event in progress_events)
     correction_prompt = get_item_text(model.calls[-1][0][-1])
     assert "POST /api/webui/auth/verify" in correction_prompt
+
+
+class ScriptedSearchModel:
+    """按预设顺序返回响应的假模型。"""
+
+    def __init__(self, results: List[LLMResponseResult]) -> None:
+        self.results = results
+        self.calls: List[tuple[List[ContextItem], LLMGenerationOptions]] = []
+
+    async def generate_response_with_context(
+        self,
+        context_factory,
+        options: LLMGenerationOptions,
+    ) -> LLMResponseResult:
+        self.calls.append((context_factory(None), options))
+        return self.results[len(self.calls) - 1]
+
+
+@pytest.mark.asyncio
+async def test_ai_search_uses_agent_final_json_without_extra_finalizing_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    long_answer = "回复时机页面可以调整发言频率。" * 300
+    model = ScriptedSearchModel(
+        [
+            LLMResponseResult.from_portable_output(
+                tool_calls=[
+                    ToolCall(
+                        call_id="search-config",
+                        func_name="search_webui_index",
+                        args={"query": "回复时机"},
+                    )
+                ]
+            ),
+            LLMResponseResult.from_portable_output(
+                response=json.dumps(
+                    {
+                        "answer": long_answer,
+                        "suggestions": [f"建议 {index}" for index in range(12)],
+                        "results": [{"id": "reply-timing", "reason": "调整发言频率"}],
+                    },
+                    ensure_ascii=False,
+                ),
+                model_name="fake-model",
+            ),
+        ]
+    )
+    progress_events: List[search_router.AISearchProgressEvent] = []
+
+    async def capture_progress(event: search_router.AISearchProgressEvent) -> None:
+        progress_events.append(event)
+
+    monkeypatch.setattr(search_agent, "_get_ai_search_model", lambda: model)
+    request = search_router.AISearchRequest(
+        query="麦麦说话太多",
+        candidates=[
+            search_router.AISearchCandidate(
+                id="reply-timing",
+                title="回复时机",
+                document="chat.reply_timing.talk_value",
+            )
+        ],
+    )
+
+    response = await search_agent.run_ai_search_agent(request, capture_progress)
+
+    assert len(model.calls) == 2
+    assert all(event.stage != "finalizing" for event in progress_events)
+    # 模型输出不做任何长度或数量截断
+    assert response.answer == long_answer
+    assert len(response.suggestions) == 12
+    assert [result.id for result in response.results] == ["reply-timing"]
+    tool_event = next(event for event in progress_events if event.stage == "tool" and event.status == "completed")
+    assert tool_event.titles == ["回复时机"]
+
+
+@pytest.mark.asyncio
+async def test_ai_search_keeps_results_when_answer_fails_grounding_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ungrounded_output = json.dumps(
+        {
+            "answer": "设置 `reply_frequency_limit = 10`。",
+            "suggestions": ["检查 `config.yaml`。"],
+            "results": [{"id": "reply-timing", "reason": "调整发言频率"}],
+        },
+        ensure_ascii=False,
+    )
+    model = ScriptedSearchModel(
+        [
+            LLMResponseResult.from_portable_output(response=ungrounded_output),
+            LLMResponseResult.from_portable_output(response=ungrounded_output),
+        ]
+    )
+    progress_events: List[search_router.AISearchProgressEvent] = []
+
+    async def capture_progress(event: search_router.AISearchProgressEvent) -> None:
+        progress_events.append(event)
+
+    monkeypatch.setattr(search_agent, "_get_ai_search_model", lambda: model)
+    request = search_router.AISearchRequest(
+        query="麦麦说话太多",
+        candidates=[
+            search_router.AISearchCandidate(
+                id="reply-timing",
+                title="回复时机",
+                document="chat.reply_timing.talk_value",
+            )
+        ],
+    )
+
+    response = await search_agent.run_ai_search_agent(request, capture_progress)
+
+    assert len(model.calls) == 2
+    assert response.answer == ""
+    assert response.suggestions == []
+    assert "reply_frequency_limit = 10" in response.grounding_error
+    assert [result.id for result in response.results] == ["reply-timing"]
+    assert [event.status for event in progress_events if event.stage == "correcting"] == ["started", "failed"]
+
+
+def test_redact_config_value_hides_secrets_but_keeps_ordinary_fields() -> None:
+    provider = {
+        "name": "openai",
+        "base_url": "https://user:pass@api.example.com/v1?key=abc",
+        "api_key": "sk-real-secret",
+        "auth_token": "",
+        "default_headers": {"X-Api-Key": "header-secret"},
+        "default_query": {"access": "query-secret"},
+        "field_docs": {"api_key": "API密钥"},
+        "max_tokens": 8192,
+        "keywords": ["表情"],
+        "extra_params": {"enable_thinking": False, "api_key": "nested-secret"},
+    }
+
+    redacted = search_local_config.redact_config_value("api_providers", [provider])[0]
+
+    assert "secret" not in json.dumps(redacted, ensure_ascii=False)
+    assert redacted["api_key"] == search_local_config.LOCAL_CONFIG_REDACTED_VALUE
+    assert redacted["default_headers"] == search_local_config.LOCAL_CONFIG_REDACTED_VALUE
+    assert redacted["extra_params"] == {
+        "enable_thinking": False,
+        "api_key": search_local_config.LOCAL_CONFIG_REDACTED_VALUE,
+    }
+    assert redacted["default_query"] == search_local_config.LOCAL_CONFIG_REDACTED_VALUE
+    assert "field_docs" not in redacted
+    # 未填写的敏感字段保留空值，便于判断是否漏填
+    assert redacted["auth_token"] == ""
+    assert redacted["base_url"] == "https://api.example.com/v1"
+    assert redacted["max_tokens"] == 8192
+    assert redacted["keywords"] == ["表情"]
+
+
+def test_read_local_config_returns_current_values_with_section_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = Config()
+    monkeypatch.setattr(search_local_config.config_manager, "get_global_config", lambda: config)
+
+    documents = search_local_config.read_local_config(
+        ["emoji.steal_emoji", "emoji.steal_emoji", "emoji", "emoji.missing_field", "unknown_section"]
+    )
+
+    assert [document["title"] for document in documents] == [
+        "emoji.steal_emoji",
+        "emoji",
+        "emoji.missing_field",
+        "unknown_section",
+    ]
+    assert documents[0] == {
+        "title": "emoji.steal_emoji",
+        "source": "bot_config.toml",
+        "value": config.emoji.steal_emoji,
+        "section": "[emoji]",
+    }
+    assert documents[1]["section"] == "[emoji]"
+    assert documents[1]["value"]["steal_emoji"] == config.emoji.steal_emoji
+    assert "steal_emoji" in documents[2]["available"]
+    assert "emoji" in documents[3]["available"]
+    assert "models" in documents[3]["available"]
