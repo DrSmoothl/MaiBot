@@ -59,6 +59,9 @@ interface SearchItem {
   fieldPath?: string
 }
 
+// 与后端 AI_SEARCH_MAX_CANDIDATES 保持一致，需容纳全部页面与配置项
+const AI_SEARCH_MAX_CANDIDATES = 2000
+
 interface AISearchItem {
   item: SearchItem
   reason: string
@@ -484,7 +487,7 @@ export function SearchDialog({
     setAISearchProgressOpen(true)
 
     const aiCandidates = [...searchItems, ...configSearchItems]
-      .slice(0, 600)
+      .slice(0, AI_SEARCH_MAX_CANDIDATES)
       .map((item, index) => ({
         id: `c${index}`,
         item,

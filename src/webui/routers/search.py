@@ -185,7 +185,8 @@ async def _execute_ai_search_request(
         log_record("grounding_failed", response, response.grounding_error)
         return response
 
-    _cache_response(cache_key, response)
+    if not response.used_local_config:
+        _cache_response(cache_key, response)
     log_record("completed", response)
     return response
 

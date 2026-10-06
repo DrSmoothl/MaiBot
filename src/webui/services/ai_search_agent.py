@@ -1,6 +1,7 @@
 """WebUI AI 搜索 Agent 的工具编排与回答生成。"""
 
 from typing import Any, Dict, List, Literal
+import asyncio
 import json
 
 import httpx
@@ -127,7 +128,10 @@ def _build_agent_tools() -> List[ToolDefinitionInput]:
         },
         {
             "name": "read_official_docs",
-            "description": "按路径读取 docs.mai-mai.org 官方文档正文。回答文档问题前应先调用此工具。",
+            "description": (
+                "按路径读取 docs.mai-mai.org 官方文档正文。回答文档问题前应先调用此工具。"
+                "单次返回的正文有长度上限，结果带有 next_offset 时说明文档还有后续内容。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -137,7 +141,14 @@ def _build_agent_tools() -> List[ToolDefinitionInput]:
                         "description": (
                             f"search_official_docs 返回的文档路径，最多 {OFFICIAL_DOCS_MAX_READ_COUNT} 个"
                         ),
-                    }
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": (
+                            "开始读取的字符位置，默认 0。可填上次返回的 next_offset 继续读取，"
+                            "或填 search_official_docs 返回的 snippet_offset 直接跳到命中位置"
+                        ),
+                    },
                 },
                 "required": ["paths"],
             },
@@ -236,7 +247,9 @@ async def _execute_agent_tool(
     if tool_call.func_name == "search_webui_index":
         query = _resolve_tool_query(arguments)
         limit = _resolve_tool_limit(arguments, WEBUI_SEARCH_MAX_LIMIT)
-        return {"query": query, "documents": _document_store.search_candidates(query, candidates, limit)}
+        # 候选索引的分词与扫描放到线程里，避免占住 WebUI 事件循环
+        documents = await asyncio.to_thread(_document_store.search_candidates, query, candidates, limit)
+        return {"query": query, "documents": documents}
 
     if tool_call.func_name == "read_local_config":
         return {"documents": read_local_config(arguments.get("paths"))}
@@ -250,7 +263,9 @@ async def _execute_agent_tool(
             limit = _resolve_tool_limit(arguments, OFFICIAL_DOCS_SEARCH_MAX_LIMIT)
             return {"query": query, "documents": await _document_store.search_official_docs(query, limit)}
 
-        documents = await _document_store.read_official_docs(arguments.get("paths"))
+        raw_offset = arguments.get("offset")
+        offset = max(0, raw_offset) if isinstance(raw_offset, int) else 0
+        documents = await _document_store.read_official_docs(arguments.get("paths"), offset)
         read_source_ids.update(document["source_id"] for document in documents)
         return {"documents": documents}
     except (httpx.HTTPError, ValueError) as exc:
@@ -326,7 +341,10 @@ async def run_ai_search_agent(
     read_source_ids: set[str] = set()
     grounding_evidence: List[str] = []
     answer_result: LLMResponseResult | None = None
+    used_local_config = False
 
+    # 首轮规划通常要几秒，趁这段时间在后台准备好官方文档包
+    _document_store.prewarm_official_docs()
     await _emit_progress(progress_callback, AISearchProgressEvent(stage="start"))
     for round_index in range(AI_SEARCH_MAX_TOOL_ROUNDS):
         await _emit_progress(
@@ -367,6 +385,7 @@ async def run_ai_search_agent(
         for tool_call in tool_calls:
             await _emit_progress(progress_callback, _build_tool_progress_event(tool_call, "started"))
             tool_payload = await _execute_agent_tool(tool_call, request.candidates, read_source_ids)
+            used_local_config = used_local_config or tool_call.func_name == "read_local_config"
             tool_result = json.dumps(tool_payload, ensure_ascii=False, separators=(",", ":"))
             logical_turn_id = logical_turn_by_call_id.get(tool_call.call_id)
             if not logical_turn_id:
@@ -398,7 +417,8 @@ async def run_ai_search_agent(
         parsed_output = _extract_model_output(answer_result.response)
 
     model_output = _normalize_model_output(parsed_output, request.candidates, read_source_ids)
-    evidence = "\n".join(grounding_evidence)
+    # 用户问题里出现的字段名也算依据，否则“没有这个配置项”这类回答会因复述字段名被误判
+    evidence = "\n".join([request.query, *grounding_evidence])
     grounding_error = ""
     try:
         validate_model_output_evidence(model_output, evidence)
@@ -438,6 +458,7 @@ async def run_ai_search_agent(
         results=model_output.results,
         total_tokens=total_tokens,
         grounding_error=grounding_error,
+        used_local_config=used_local_config,
     )
 
 

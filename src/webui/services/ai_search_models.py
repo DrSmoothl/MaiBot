@@ -5,7 +5,7 @@ from typing import Awaitable, Callable, List, Literal
 from pydantic import BaseModel, Field
 
 
-AI_SEARCH_MAX_CANDIDATES = 600
+AI_SEARCH_MAX_CANDIDATES = 2000
 
 
 class AISearchOutputError(ValueError):
@@ -67,6 +67,8 @@ class AISearchResponse(BaseModel):
     total_tokens: int = 0
     # 回答正文未通过证据校验而被丢弃时的原因；此时仅保留导航结果
     grounding_error: str = ""
+    # 回答是否依据了本地配置的当前值；配置随时可能被修改，这类回答不能缓存
+    used_local_config: bool = False
 
 
 class AISearchProgressEvent(BaseModel):

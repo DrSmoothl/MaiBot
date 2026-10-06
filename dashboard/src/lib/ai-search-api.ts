@@ -29,6 +29,7 @@ export interface AISearchResponse {
   results: AISearchResult[]
   total_tokens: number
   grounding_error: string
+  used_local_config: boolean
 }
 
 export type AISearchProgressStage =

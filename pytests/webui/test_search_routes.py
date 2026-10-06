@@ -14,10 +14,18 @@ from src.config.config import Config
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.webui.routers import search as search_router
 from src.webui.services import ai_search_agent as search_agent
+from src.webui.services import ai_search_documents as search_documents
 from src.webui.services import ai_search_grounding as search_grounding
 from src.webui.services import ai_search_local_config as search_local_config
 from src.webui.services.ai_search_documents import AISearchDocumentStore, OfficialDocument
 from src.webui.services.ai_search_models import AISearchModelOutput, AISearchResponse
+
+
+@pytest.fixture(autouse=True)
+def disable_official_docs_prewarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent 启动时会在后台预热官方文档包，测试中不应发起真实下载。"""
+
+    monkeypatch.setattr(search_agent._document_store, "prewarm_official_docs", lambda: None)
 
 
 class FakeSearchModel:
@@ -688,3 +696,120 @@ def test_read_local_config_returns_current_values_with_section_header(
     assert "steal_emoji" in documents[2]["available"]
     assert "emoji" in documents[3]["available"]
     assert "models" in documents[3]["available"]
+
+
+def test_ai_search_document_store_segments_chinese_query_without_spaces() -> None:
+    store = AISearchDocumentStore()
+    candidates = [
+        search_router.AISearchCandidate(id="emoji", title="表情配置", document="emoji.steal_emoji"),
+        search_router.AISearchCandidate(id="reply", title="回复时机", document="chat.reply_timing.talk_value"),
+    ]
+
+    matches = store.search_candidates("为什么无法发送表情包", candidates, 6)
+
+    assert [match["id"] for match in matches] == ["emoji"]
+
+
+@pytest.mark.asyncio
+async def test_ai_search_document_store_reads_long_official_document_in_segments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = AISearchDocumentStore()
+    content = "前言" * 5000 + "talk_value 控制发言频率"
+    documents = [OfficialDocument(path="/manual/reply.md", title="回复设置", content=content)]
+
+    async def fake_load_official_docs():
+        return documents
+
+    monkeypatch.setattr(store, "_load_official_docs", fake_load_official_docs)
+
+    match = (await store.search_official_docs("talk_value", 4))[0]
+    first_segment = (await store.read_official_docs(["/manual/reply.md"]))[0]
+    hit_segment = (await store.read_official_docs(["/manual/reply.md"], match["snippet_offset"]))[0]
+
+    assert "talk_value" in match["snippet"]
+    assert "talk_value" not in first_segment["content"]
+    assert first_segment["next_offset"] == len(first_segment["content"])
+    assert "talk_value" in hit_segment["content"]
+    assert "next_offset" not in hit_segment
+
+
+@pytest.mark.asyncio
+async def test_ai_search_document_store_serves_stale_documents_while_refreshing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = AISearchDocumentStore()
+    stale_documents = [OfficialDocument(path="/manual/old.md", title="旧文档", content="旧内容")]
+    fresh_documents = [OfficialDocument(path="/manual/new.md", title="新文档", content="新内容")]
+    download_count = 0
+
+    async def fake_download_official_docs():
+        nonlocal download_count
+        download_count += 1
+        store._official_docs_cache = (search_documents.time.monotonic() + 600, fresh_documents)
+        return fresh_documents
+
+    monkeypatch.setattr(store, "_download_official_docs", fake_download_official_docs)
+    store._official_docs_cache = (0.0, stale_documents)
+
+    # 缓存过期时立即返回旧数据，并只启动一个后台刷新任务
+    assert await store._load_official_docs() is stale_documents
+    store.prewarm_official_docs()
+    assert store._official_docs_refresh_task is not None
+    await store._official_docs_refresh_task
+
+    assert download_count == 1
+    assert await store._load_official_docs() is fresh_documents
+
+
+@pytest.mark.asyncio
+async def test_ai_search_accepts_answer_repeating_field_name_from_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ScriptedSearchModel(
+        [
+            LLMResponseResult.from_portable_output(
+                response=json.dumps({"answer": "没有找到名为 `reply_frequency_limit` 的配置项。"}, ensure_ascii=False)
+            )
+        ]
+    )
+    monkeypatch.setattr(search_agent, "_get_ai_search_model", lambda: model)
+    request = search_router.AISearchRequest(
+        query="reply_frequency_limit 在哪里设置",
+        candidates=[search_router.AISearchCandidate(id="reply-timing", title="回复时机")],
+    )
+
+    response = await search_agent.run_ai_search_agent(request)
+
+    assert len(model.calls) == 1
+    assert response.grounding_error == ""
+    assert "reply_frequency_limit" in response.answer
+
+
+@pytest.mark.asyncio
+async def test_execute_ai_search_request_does_not_cache_answers_based_on_local_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_count = 0
+
+    async def fake_run_ai_search_agent(request, progress_callback=None):
+        nonlocal run_count
+        del request, progress_callback
+        run_count += 1
+        return AISearchResponse(answer="当前 talk_value 为 0.5", used_local_config=True)
+
+    async def ignore_progress(event: search_router.AISearchProgressEvent) -> None:
+        del event
+
+    monkeypatch.setattr(search_router, "_AI_SEARCH_CACHE", search_router.OrderedDict())
+    monkeypatch.setattr(search_router, "run_ai_search_agent", fake_run_ai_search_agent)
+    request = search_router.AISearchRequest(
+        query="现在的发言频率是多少",
+        candidates=[search_router.AISearchCandidate(id="reply-timing", title="回复时机")],
+    )
+
+    await search_router._execute_ai_search_request(request, ignore_progress)
+    response = await search_router._execute_ai_search_request(request, ignore_progress)
+
+    assert run_count == 2
+    assert response.cached is False
