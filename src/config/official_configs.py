@@ -777,6 +777,19 @@ class ChatConfig(ConfigBase):
     __ui_use_subtabs__ = True
     __ui_root_sub_label__ = "基础设置"
 
+    enable_reply_at: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "允许回复时 @ 用户",
+                "en_US": "Allow mentions in replies",
+                "ja_JP": "返信でユーザーへのメンションを許可",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """允许麦麦在回复开头 @ 一个或多个用户，由模型根据聊天内容决定是否使用。"""
+
     max_context_size: int = Field(
         default=40,
         json_schema_extra={
@@ -954,19 +967,6 @@ class ExperimentalConfig(ConfigBase):
         },
     )
     """让麦麦从聊天中学习什么时候该怎么回应的经验。"""
-
-    enable_rich_reply: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "丰富回复能力",
-                "en_US": "Rich reply ability",
-                "ja_JP": "豊かな返信能力",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """开启后，reply 动作可通过 attach_pic、attach_emoji、attach_at 参数附加图片、表情包或 at。"""
 
     replyer_retro_prompt: bool = Field(
         default=False,
@@ -4257,6 +4257,19 @@ class EmojiConfig(ConfigBase):
     __ui_advanced__ = True
     __ui_order__ = 80
 
+    use_new_send_logic: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "采用新表情包发送逻辑",
+                "en_US": "Use new emoji sending logic",
+                "ja_JP": "新しい絵文字送信方式を使用",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """开启后由思考模型直接查看并挑选表情包，在文字回复后发送，需要思考模型支持视觉；关闭时沿用独立选择并发送表情包的旧方式。"""
+
     emoji_send_num: int = Field(
         default=25,
         ge=1,
@@ -4459,7 +4472,6 @@ class KeywordReactionConfig(ConfigBase):
 class ResponsePostProcessConfig(ConfigBase):
     """回复后处理配置类"""
 
-    __ui_parent__ = "chat"
     __ui_label__ = "后处理"
     __ui_advanced__ = True
     __ui_order__ = 100

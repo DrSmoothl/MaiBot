@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, cast
 
 from src.common.data_models.message_component_data_model import MessageSequence, ReplyComponent, TextComponent
-from src.llm_models.payload_content.context_item import ContextItem, FunctionCallItem
+from src.llm_models.payload_content.context_item import ContextItem, FunctionCallItem, RoleType
 from src.llm_models.payload_content.context_protocol import (
     analyze_context_item_relations,
     prune_context_items_for_history,
@@ -157,6 +157,29 @@ def normalize_tool_call_result_pairs(
         "moved_tool_results": moved_tool_result_count,
         "invalid_tool_turns": invalid_tool_turn_count,
     }
+
+
+def collect_tool_turn_anchor_indices(
+    chat_history: list[LLMContextMessage],
+    logical_turn_ids: set[str],
+) -> dict[str, int]:
+    """定位每个工具轮次之前最近的 user 上下文索引。"""
+
+    first_turn_index_by_id: dict[str, int] = {}
+    for index, message in enumerate(chat_history):
+        logical_turn_id = _get_logical_turn_id(message)
+        if logical_turn_id in logical_turn_ids and logical_turn_id not in first_turn_index_by_id:
+            first_turn_index_by_id[logical_turn_id] = index
+
+    anchor_index_by_turn_id: dict[str, int] = {}
+    for logical_turn_id, first_turn_index in first_turn_index_by_id.items():
+        anchor_index = next(
+            (index for index in range(first_turn_index - 1, -1, -1) if chat_history[index].role == RoleType.User.value),
+            None,
+        )
+        if anchor_index is not None:
+            anchor_index_by_turn_id[logical_turn_id] = anchor_index
+    return anchor_index_by_turn_id
 
 
 def drop_unanswered_tool_calls(

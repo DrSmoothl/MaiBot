@@ -21,7 +21,6 @@ from .context import BuiltinToolRuntimeContext
 
 logger = get_logger("maisaka_builtin_reply")
 _REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote"}
-_RICH_REPLY_ARGUMENTS = {"attach_pic", "attach_emoji", "attach_at"}
 _DUPLICATE_TARGET_REPLY_REMINDER_ARG = "_duplicate_target_reply_reminder"
 _DUPLICATE_TARGET_REPLY_REMINDER_TEMPLATE = (
     "你刚刚已经回复过这条消息，你刚刚的发言是：“{previous_reply}”\n"
@@ -171,40 +170,41 @@ def get_tool_spec() -> ToolSpec:
                 },
             },
         }
-    if bool(config_module.global_config.experimental.enable_rich_reply):
-        properties["attach_pic"] = {
-            "type": "array",
-            "description": (
-                "可选。随本次回复附加一张或多张上下文图片。每项使用 msg_id + index，"
-                "或使用 media_index=tool_result:<call_id>:<item_index> 指向工具返回媒体。"
-            ),
-            "items": {
-                "type": "object",
-                "properties": {
-                    "msg_id": {
-                        "type": "string",
-                        "description": "图片所在的消息编号。",
-                        "default": "",
-                    },
-                    "media_index": {
-                        "type": "string",
-                        "description": "工具返回媒体索引，例如 tool_result:call_x:1；与 msg_id 二选一。",
-                        "default": "",
-                    },
-                    "index": {
-                        "type": "integer",
-                        "description": "同一消息中的图片序号，从 0 开始。",
-                        "default": 0,
-                    },
+    properties["attach_pic"] = {
+        "type": "array",
+        "description": (
+            "可选。随本次回复附加一张或多张上下文图片。每项使用 msg_id + index，"
+            "或使用 media_index=tool_result:<call_id>:<item_index> 指向工具返回媒体。"
+        ),
+        "items": {
+            "type": "object",
+            "properties": {
+                "msg_id": {
+                    "type": "string",
+                    "description": "图片所在的消息编号。",
+                    "default": "",
+                },
+                "media_index": {
+                    "type": "string",
+                    "description": "工具返回媒体索引，例如 tool_result:call_x:1；与 msg_id 二选一。",
+                    "default": "",
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "同一消息中的图片序号，从 0 开始。",
+                    "default": 0,
                 },
             },
-            "default": [],
-        }
+        },
+        "default": [],
+    }
+    if config_module.global_config.emoji.use_new_send_logic:
         properties["attach_emoji"] = {
             "type": "integer",
             "minimum": 1,
             "description": "可选。从 show_emoji_list 的拼图选择一个表情包，填写图片序号，在文字后单独发送。",
         }
+    if config_module.global_config.chat.enable_reply_at:
         properties["attach_at"] = {
             "type": "array",
             "description": "可选。随本次回复 at 一个或多个目标消息的发送者，填写目标 msg_id。",
@@ -214,7 +214,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="reply",
-        description="根据当前思考生成并发送一条可见回复。",
+        description="根据当前思考生成并发送可见回复；需要向用户展示上下文或工具返回的图片时，使用 attach_pic 随回复附加图片。",
         parameters_schema={
             "type": "object",
             "properties": properties,
@@ -338,18 +338,21 @@ async def handle_tool(
             f"{tool_ctx.runtime.log_prefix} 检测到 reply 工具参数被重复包裹，已自动解包: "
             f"调用编号={invocation.call_id}"
         )
+    # 工具上下文的 reasoning 是兼容字段，由 Planner 可见正文填充，不包含 Provider 原生 reasoning。
     latest_thought = context.reasoning if context is not None else invocation.reasoning
     target_message_id = str(invocation_arguments.get("msg_id") or "").strip()
     set_quote = bool(invocation_arguments.get("set_quote", True))
-    rich_reply_enabled = bool(config_module.global_config.experimental.enable_rich_reply)
+    if invocation_arguments.get("attach_at") and not config_module.global_config.chat.enable_reply_at:
+        return tool_ctx.build_failure_result(invocation.tool_name, "回复时 @ 用户已关闭，不能使用 attach_at。")
+    if invocation_arguments.get("attach_emoji") is not None and not config_module.global_config.emoji.use_new_send_logic:
+        return tool_ctx.build_failure_result(
+            invocation.tool_name, "新表情包发送逻辑未开启，请使用 send_emoji 工具。"
+        )
     reply_tool_args = {
         key: value
         for key, value in invocation_arguments.items()
         if key not in _REPLY_TOOL_INTERNAL_ARGUMENTS
     }
-    if not rich_reply_enabled:
-        for key in _RICH_REPLY_ARGUMENTS:
-            reply_tool_args.pop(key, None)
     if not _use_expression_intent():
         reply_tool_args.pop("expression_intent", None)
     enable_reply_quote = bool(config_module.global_config.chat.reply_style.enable_reply_quote)
@@ -396,7 +399,7 @@ async def handle_tool(
     try:
         tool_ctx.runtime._update_stage_status("Replyer", "生成可见回复")
         success, reply_result = await replyer.generate_reply_with_context(
-            reply_reason=latest_thought,
+            reply_reason="" if str(reply_tool_args.get("reply_reference") or "").strip() else latest_thought,
             stream_id=tool_ctx.runtime.session_id,
             reply_message=target_message,
             chat_history=replyer_chat_history,
@@ -456,17 +459,11 @@ async def handle_tool(
         )
 
     try:
-        if rich_reply_enabled:
-            reply_items = await tool_ctx.post_process_rich_reply_message_items_async(
-                reply_text,
-                invocation_arguments,
-                **post_process_options,
-            )
-        else:
-            reply_items = await tool_ctx.post_process_reply_message_items_async(
-                reply_text,
-                **post_process_options,
-            )
+        reply_items = await tool_ctx.post_process_reply_message_items_async(
+            reply_text,
+            invocation_arguments,
+            **post_process_options,
+        )
     except Exception as exc:
         reply_result.completion.response_text = reply_text
         reply_result.monitor_detail = build_reply_monitor_detail(reply_result)

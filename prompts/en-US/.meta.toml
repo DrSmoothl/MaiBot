@@ -23,6 +23,11 @@ display_name = "Replyer"
 advanced = false
 description = "Maisaka reply generation template that creates the final reply from persona, expression style, chat notes, and reply context."
 
+[reply_attachments]
+display_name = "Reply attachments"
+advanced = true
+description = "Explains that the system sends reply images, mentions and emojis, preventing attachment information from being repeated in the reply text."
+
 [retro_replyer]
 display_name = "Retro reply"
 advanced = true
@@ -157,3 +162,18 @@ description = "Advanced memory retrieval prompt header used by the ReAct-style m
 display_name = "WebUI AI Search"
 advanced = true
 description = "Selects relevant results from real WebUI page and configuration candidates based on natural-language intent."
+
+[webui_ai_search_final]
+display_name = "WebUI AI Search Final Instruction"
+advanced = true
+description = "Asks the model to stop researching and return the final JSON when AI search runs out of tool rounds or the answer is not in the required format."
+
+[webui_ai_search_correction]
+display_name = "WebUI AI Search Correction Instruction"
+advanced = true
+description = "Asks the model to remove unsupported content and rewrite the final JSON when an AI search answer fails evidence validation."
+
+[webui_ai_search_evidence]
+display_name = "WebUI AI Search Evidence Message"
+advanced = true
+description = "Wraps read-only tool results from AI search as evidence messages usable in requests without tools."

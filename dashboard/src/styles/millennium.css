@@ -355,7 +355,7 @@
 :root[data-dashboard-style='millennium']
   [data-dashboard-header='true']
   div:has(> [data-dashboard-workspace-tabs='true']) {
-  margin-right: auto;
+  margin-right: 0;
 }
 
 :root[data-dashboard-style='millennium'] [data-dashboard-workspace-tabs='true'] {
@@ -420,20 +420,18 @@
   color: var(--mil-on-ink);
 }
 
-/* 散热栅格：贴在第一个图标键左边的装饰 */
+/* 散热栅格参与顶栏布局，宽度不足时收缩，避免盖住搜索框。 */
 @media (min-width: 1100px) {
   :root[data-dashboard-style='millennium']
     [data-dashboard-header='true']
-    a[data-dashboard-header-action='true'][href='/settings']::before {
+    [data-dashboard-header-vent='true'] {
     background: repeating-linear-gradient(90deg, var(--mil-vent) 0 3px, transparent 3px 8px);
-    content: '';
+    display: block;
+    flex: 0 1 120px;
     height: 22px;
+    min-width: 0;
+    margin-inline: 1rem;
     pointer-events: none;
-    position: absolute;
-    right: calc(100% + 1.25rem);
-    top: 50%;
-    transform: translateY(-50%);
-    width: 120px;
   }
 }
 
@@ -679,6 +677,20 @@
   color: var(--mil-on-ink);
 }
 
+/* 设置页面菜单的一行包含钉固与切页两个操作，高亮使用整行键帽材质。 */
+:root[data-dashboard-style='millennium']
+  [data-config-section-menu-row='true'][data-dashboard-button='true']:has(> [role='menuitem'][data-highlighted]) {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-config-section-menu-row='true'] > [role='menuitem'][data-highlighted] {
+  background-color: transparent;
+  color: inherit;
+}
+
 /* ---------- 标签页：一排键帽，选中的是按下去的绿键 ---------- */
 
 :root[data-dashboard-style='millennium'] [data-dashboard-tabs-list='true'] {
@@ -724,6 +736,15 @@
   color: var(--mil-on-ink);
   padding-bottom: calc(0.25rem + 1px);
   transform: translateY(2px);
+}
+
+/* 钉固入口收在内凹槽中，固定边框与横向滚动内容分开。 */
+:root[data-dashboard-style='millennium'] [data-config-pinned-tabs-frame='true'] {
+  background-color: var(--mil-panel);
+  border: 2px solid var(--mil-line);
+  box-shadow:
+    inset 3px 3px 0 var(--mil-lo),
+    inset -2px -2px 0 var(--mil-hi);
 }
 
 /* ---------- 开关、复选框、单选 ---------- */
@@ -787,6 +808,21 @@
   background-color: var(--mil-key);
   border-color: var(--mil-line);
   color: var(--mil-ink);
+}
+
+/* 插件市场的数量读数：和旁边的搜索框一样做成下沉的小屏幕，不用细线框 */
+:root[data-dashboard-style='millennium'] [data-plugin-market-count-badge='true'] {
+  background-color: var(--mil-screen) !important;
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: var(--mil-sunk);
+  color: var(--mil-screen-ink);
+  font-weight: 700;
+  height: 2.875rem;
+  margin: 0 4px;
+  white-space: nowrap;
 }
 
 /* ---------- 表格：整张表是一块屏幕 ---------- */
@@ -991,6 +1027,7 @@
   background-image: none;
   border-color: transparent;
   box-shadow: none;
+  margin-top: 7px;
 }
 
 /* 首页的数字排版是按窄体字调的，这里的字更宽，字号收一档避免被截断 */
@@ -1440,15 +1477,22 @@
 
 :root[data-dashboard-style='millennium'] [data-home-page='true'] [data-maibot-runtime-label='true'] {
   color: var(--mil-screen-ink);
+  flex-shrink: 0;
   font-size: 2.375rem;
   letter-spacing: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 :root[data-dashboard-style='millennium'] [data-home-page='true'] [data-maibot-runtime-uptime='true'] {
   color: var(--mil-screen-ink);
   font-size: 0.8125rem;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding-bottom: 0.25rem;
   text-align: right;
+  white-space: normal;
 }
 
 :root[data-dashboard-style='millennium'] [data-home-page='true'] [data-maibot-feature-lights='true'] {
@@ -1656,9 +1700,12 @@
   color: var(--mil-on-ink);
 }
 
-/* 日志页会往顶栏左侧塞一组视图切换；千禧下工作区键也在左边，把它让到工作区键右侧 */
+/* 日志视图切换占据实际布局宽度，不再通过固定偏移挤占工作区键和搜索框。 */
 :root[data-dashboard-style='millennium'] [data-dashboard-header='true'] #log-viewer-topbar-tabs {
-  left: 13.5rem;
+  position: static;
+  /* Tailwind 4 的位移使用独立 translate 属性，需与 transform 一并清除。 */
+  translate: none;
+  transform: none;
 }
 
 :root[data-dashboard-style='millennium']
@@ -1907,6 +1954,40 @@
   background-position: 0 0;
 }
 
+/* 顶栏垫在侧栏下方时，机壳上沿整条都由顶栏来画：铭牌和侧栏顶部让出底色、边线和投影，
+   不再由两个元素各画一段去拼，非整数缩放下拼接处也就不会出现细缝或错位。 */
+@media (min-width: 1024px) {
+  :root[data-dashboard-style='millennium']
+    [data-dashboard-header-underlay='true']
+    [data-dashboard-logo-area='true'] {
+    background: transparent;
+    border-bottom-color: transparent;
+    box-shadow: none;
+  }
+
+  :root[data-dashboard-style='millennium']
+    [data-dashboard-header-underlay='true']
+    [data-dashboard-sidebar='true'] {
+    background: transparent;
+  }
+
+  /* 侧栏自身的机壳底色只从顶栏投影下沿开始铺。 */
+  :root[data-dashboard-style='millennium']
+    [data-dashboard-header-underlay='true']
+    [data-dashboard-sidebar='true']::before {
+    background-attachment: fixed;
+    background-color: var(--mil-shell);
+    background-image: var(--mil-speck);
+    background-position: 0 0;
+    background-size: 5px 5px;
+    content: '';
+    inset: calc(var(--layout-sidebar-logo-height) + 5px) 0 0 0;
+    pointer-events: none;
+    position: absolute;
+    z-index: -1;
+  }
+}
+
 /* ---------- 麦麦聊天侧栏：两块屏幕，「与麦麦聊天」固定，聊天流独立滚动 ---------- */
 
 /* 列表容器本身不再是屏幕，两个分组各有一块 */
@@ -2027,6 +2108,12 @@
 /* 模块标题右侧的防滑纹（标题条里有按钮或切换时不画） */
 :root[data-dashboard-style='millennium'] [data-dashboard-card-header='true'] {
   position: relative;
+}
+
+/* 防滑纹是浮在标题条右上角的，给标题让出它的宽度，长标题才不会叠上去 */
+:root[data-dashboard-style='millennium']
+  [data-dashboard-card-header='true']:not(:has(button, input, [role='tablist'], [role='combobox'])) {
+  padding-right: calc(0.875rem + 34px + 0.75rem);
 }
 
 :root[data-dashboard-style='millennium']
@@ -2390,6 +2477,14 @@
   [data-dashboard-card-header='true']
   [data-dashboard-card-title='true'] {
   font-size: 0.75rem;
+}
+
+/* 快捷按钮区域上下居中，标题条额外留白由内容区域统一承担。 */
+:root[data-dashboard-style='millennium']
+  [data-home-page='true']
+  [data-home-card-id='builtin:quick-actions']
+  [data-dashboard-card='true']::before {
+  margin-bottom: 0;
 }
 
 /* 标题条右侧的切换键跟着上移到新的标题条里 */
@@ -2776,7 +2871,7 @@
   [data-maibot-runtime-status='true']
   > div {
   flex-wrap: wrap;
-  row-gap: 2px;
+  row-gap: 6px;
 }
 
 /* 待审核数量角标：用界面的珊瑚橙，直角 */
@@ -2804,247 +2899,39 @@
     var(--mil-sunk);
 }
 
-/* ---------- 千禧图标：把形状偏圆的常用图标换成方头直角的画法 ---------- */
+/* ---------- 千禧图标 ---------- */
 
-/* 图标组件遍布各处，这里用遮罩在样式层统一替换：隐藏原来的线条，
-   用当前文字色填充一个按新路径裁出的形状，颜色、尺寸都跟随原图标。 */
-:root[data-dashboard-style='millennium'] svg.lucide:is(
-    .lucide-settings,
-    .lucide-settings-2,
-    .lucide-cog,
-    .lucide-search,
-    .lucide-globe,
-    .lucide-earth,
-    .lucide-languages,
-    .lucide-moon,
-    .lucide-sun,
-    .lucide-circle-alert,
-    .lucide-alert-circle,
-    .lucide-info,
-    .lucide-circle-check,
-    .lucide-check-circle,
-    .lucide-circle-check-big,
-    .lucide-check-circle-2,
-    .lucide-circle-x,
-    .lucide-x-circle,
-    .lucide-circle-help,
-    .lucide-help-circle,
-    .lucide-circle-question-mark,
-    .lucide-refresh-cw,
-    .lucide-refresh-ccw,
-    .lucide-rotate-ccw,
-    .lucide-rotate-cw,
-    .lucide-clock,
-    .lucide-timer,
-    .lucide-eye,
-    .lucide-eye-off,
-    .lucide-message-circle,
-    .lucide-message-square,
-    .lucide-user,
-    .lucide-circle-user,
-    .lucide-user-circle,
-    .lucide-circle-user-round,
-    .lucide-user-circle-2,
-    .lucide-user-round,
-    .lucide-users,
-    .lucide-users-round,
-    .lucide-bot,
-    .lucide-brain,
-    .lucide-cpu,
-    .lucide-smile,
-    .lucide-pencil,
-    .lucide-pen,
-    .lucide-pen-line,
-    .lucide-square-pen,
-    .lucide-edit,
-    .lucide-edit-2,
-    .lucide-edit-3,
-    .lucide-pencil-line,
-    .lucide-database,
-    .lucide-ellipsis,
-    .lucide-more-horizontal,
-    .lucide-circle-plus,
-    .lucide-plus-circle,
-    .lucide-power,
-    .lucide-gauge
-  ) {
-  -webkit-mask: var(--mil-icon) center / 100% 100% no-repeat;
-  background-color: currentColor;
-  mask: var(--mil-icon) center / 100% 100% no-repeat;
+/* 手绘图标的路径和替换规则统一登记在 src/components/ui/millennium-icon-set.ts，
+   替换图标库图标用的样式由它在启动时生成，这里不再手写。 */
+
+/* 下沉屏幕阴影上下各外扩 4px，扣除后让视觉高度与工作区键对齐。 */
+:root[data-dashboard-style='millennium'] [data-dashboard-header-search='true'] input {
+  height: calc(2.875rem - 8px);
 }
 
-:root[data-dashboard-style='millennium'] svg.lucide:is(
-    .lucide-settings,
-    .lucide-settings-2,
-    .lucide-cog,
-    .lucide-search,
-    .lucide-globe,
-    .lucide-earth,
-    .lucide-languages,
-    .lucide-moon,
-    .lucide-sun,
-    .lucide-circle-alert,
-    .lucide-alert-circle,
-    .lucide-info,
-    .lucide-circle-check,
-    .lucide-check-circle,
-    .lucide-circle-check-big,
-    .lucide-check-circle-2,
-    .lucide-circle-x,
-    .lucide-x-circle,
-    .lucide-circle-help,
-    .lucide-help-circle,
-    .lucide-circle-question-mark,
-    .lucide-refresh-cw,
-    .lucide-refresh-ccw,
-    .lucide-rotate-ccw,
-    .lucide-rotate-cw,
-    .lucide-clock,
-    .lucide-timer,
-    .lucide-eye,
-    .lucide-eye-off,
-    .lucide-message-circle,
-    .lucide-message-square,
-    .lucide-user,
-    .lucide-circle-user,
-    .lucide-user-circle,
-    .lucide-circle-user-round,
-    .lucide-user-circle-2,
-    .lucide-user-round,
-    .lucide-users,
-    .lucide-users-round,
-    .lucide-bot,
-    .lucide-brain,
-    .lucide-cpu,
-    .lucide-smile,
-    .lucide-pencil,
-    .lucide-pen,
-    .lucide-pen-line,
-    .lucide-square-pen,
-    .lucide-edit,
-    .lucide-edit-2,
-    .lucide-edit-3,
-    .lucide-pencil-line,
-    .lucide-database,
-    .lucide-ellipsis,
-    .lucide-more-horizontal,
-    .lucide-circle-plus,
-    .lucide-plus-circle,
-    .lucide-power,
-    .lucide-gauge
-  )
-  > * {
-  display: none;
+/* 搜索结果沿用聊天记录的下沉屏幕材质，外框保留机壳颗粒底纹。 */
+:root[data-dashboard-style='millennium'] [data-search-results='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 0 0 0 1px var(--mil-line), inset 4px 4px 0 var(--mil-screen-shade);
+  color: var(--mil-screen-ink);
+  margin: 0.5rem;
 }
 
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-settings, .lucide-settings-2, .lucide-cog) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M9 9h6v6H9zM12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2 2M16.5 16.5l2 2M18.5 5.5l-2 2M7.5 16.5l-2 2'/%3E%3C/svg%3E");
+:root[data-dashboard-style='millennium'] [data-search-results='true'] [data-search-answer='true'] {
+  background-color: transparent;
 }
 
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-search) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h11v11H4zM15 15l6 6'/%3E%3C/svg%3E");
+:root[data-dashboard-style='millennium'] [data-search-results='true'] .text-muted-foreground {
+  color: var(--mil-screen-dim);
 }
 
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-globe, .lucide-earth, .lucide-languages) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M12 3v4M4 7h16M16 8L5 20M8 11l11 9'/%3E%3C/svg%3E");
+:root[data-dashboard-style='millennium'] [data-search-results='true'] .text-foreground {
+  color: var(--mil-screen-ink);
 }
 
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-moon) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10z'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-sun) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M9 9h6v6H9zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-alert, .lucide-alert-circle) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM12 8v5M12 16v1'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-info) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM12 11v6M12 7v1'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-check, .lucide-check-circle, .lucide-circle-check-big, .lucide-check-circle-2) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM8 12l3 3 5-6'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-x, .lucide-x-circle) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM9 9l6 6M15 9l-6 6'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-help, .lucide-help-circle, .lucide-circle-question-mark) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM9 9h6v3h-3v2M12 17v1'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-refresh-cw, .lucide-refresh-ccw) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 11V6h13M14 3l3 3-3 3M20 13v5H7M10 21l-3-3 3-3'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-rotate-ccw) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M8 4L4 8l4 4M4 8h16v12H6'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-rotate-cw) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M16 4l4 4-4 4M20 8H4v12h14'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-clock, .lucide-timer) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM12 8v5h4'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-eye) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M2 12l5-5h10l5 5-5 5H7zM10 10h4v4h-4z'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-eye-off) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M2 12l5-5h10l5 5-5 5H7zM4 3l16 18'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-message-circle, .lucide-message-square) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v12H10l-4 4v-4H4z'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-user, .lucide-circle-user, .lucide-user-circle, .lucide-circle-user-round, .lucide-user-circle-2, .lucide-user-round) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M9 4h6v6H9zM5 20v-6h14v6'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-users, .lucide-users-round) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M6 5h5v5H6zM3 20v-6h11v6M16 6h3v4h-3M17 14h4v6'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-bot) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M5 9h14v10H5zM12 9V5M10 5h4M9 13v2M15 13v2M2 13v3M22 13v3'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-brain, .lucide-cpu) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M7 7h10v10H7zM10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-smile) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM9 9v2M15 9v2M8 15h8'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-pencil, .lucide-pen, .lucide-pen-line, .lucide-square-pen, .lucide-edit, .lucide-edit-2, .lucide-edit-3, .lucide-pencil-line) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 20h4L20 8l-4-4L4 16z'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-database) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M5 4h14v5H5zM5 9v5h14V9M5 14v6h14v-6M8 6.5h1M8 11.5h1M8 17h1'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-ellipsis, .lucide-more-horizontal) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M5 12h1M12 12h1M19 12h1'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-circle-plus, .lucide-plus-circle) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 4h16v16H4zM12 8v8M8 12h8'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-power) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M12 3v9M7 6H5v14h14V6h-2'/%3E%3C/svg%3E");
-}
-
-:root[data-dashboard-style='millennium'] svg.lucide:is(.lucide-gauge) {
-  --mil-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M4 18V8h16v10M12 18l4-6'/%3E%3C/svg%3E");
+:root[data-dashboard-style='millennium'] [data-search-answer='true'] > .text-muted-foreground {
+  color: var(--mil-screen-ink);
 }

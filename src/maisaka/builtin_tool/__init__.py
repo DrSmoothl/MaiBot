@@ -23,8 +23,6 @@ from .reply import get_tool_spec as get_reply_tool_spec
 from .reply import handle_tool as handle_reply_tool
 from .send_emoji import get_tool_spec as get_send_emoji_tool_spec
 from .send_emoji import handle_tool as handle_send_emoji_tool
-from .send_image import get_tool_spec as get_send_image_tool_spec
-from .send_image import handle_tool as handle_send_image_tool
 from .show_emoji_list import get_tool_spec as get_show_emoji_list_tool_spec
 from .show_emoji_list import handle_tool as handle_show_emoji_list_tool
 from .switch_chat import get_tool_spec as get_switch_chat_tool_spec
@@ -109,7 +107,6 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     ),
     BuiltinToolEntry("send_emoji", get_send_emoji_tool_spec, handle_send_emoji_tool, stage="action"),
     BuiltinToolEntry("show_emoji_list", get_show_emoji_list_tool_spec, handle_show_emoji_list_tool, stage="action"),
-    BuiltinToolEntry("send_image", get_send_image_tool_spec, handle_send_image_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),
     BuiltinToolEntry(
         "fetch_history",
@@ -144,9 +141,9 @@ def _is_builtin_tool_enabled_by_config(entry: BuiltinToolEntry) -> bool:
     """根据全局配置判断内置工具是否应暴露。"""
 
     if entry.name == "show_emoji_list":
-        return bool(global_config.experimental.enable_rich_reply)
-    if entry.name in {"send_emoji", "send_image"} and bool(global_config.experimental.enable_rich_reply):
-        return False
+        return global_config.emoji.use_new_send_logic
+    if entry.name == "send_emoji":
+        return not global_config.emoji.use_new_send_logic
     if entry.name in {"fetch_history", "switch_chat"}:
         return bool(global_config.experimental.focus_mode)
     return True

@@ -647,7 +647,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
 
           <CollapsibleContent className="w-full space-y-2">
             {/* 级别筛选 */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
               <Select
                 value={levelFilter}
                 onValueChange={(value) => handleLevelFilterChange(value as LogLevelFilter)}
@@ -679,19 +679,19 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
             </div>
 
             {/* 时间筛选 */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'h-8 w-full justify-start text-left font-normal sm:flex-1',
+                      'h-8 min-w-0 w-full justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
                       !dateFrom && 'text-muted-foreground'
                     )}
                   >
-                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
-                    <span className="text-xs">
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate text-xs">
                       {dateFrom ? format(dateFrom, 'PP', { locale: zhCN }) : '开始日期'}
                     </span>
                   </Button>
@@ -713,12 +713,12 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'h-8 w-full justify-start text-left font-normal sm:flex-1',
+                      'h-8 min-w-0 w-full justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
                       !dateTo && 'text-muted-foreground'
                     )}
                   >
-                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
-                    <span className="text-xs">
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate text-xs">
                       {dateTo ? format(dateTo, 'PP', { locale: zhCN }) : '结束日期'}
                     </span>
                   </Button>
@@ -739,7 +739,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                   variant="outline"
                   size="sm"
                   onClick={clearDateFilter}
-                  className="h-8 w-full sm:w-auto"
+                  className="col-span-2 h-8 w-full sm:w-auto"
                 >
                   <X className="h-3.5 w-3.5 sm:mr-1" />
                   <span className="text-xs">清除</span>
@@ -964,7 +964,10 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
     () => defaultTab ?? loadStoredLogViewerTab()
   )
   const [topbarTabsRoot, setTopbarTabsRoot] = useState<HTMLElement | null>(null)
-  const [topbarTabsCompact, setTopbarTabsCompact] = useState(false)
+  // 千禧顶栏始终用图标模式，初始即取紧凑态，避免先渲染完整文字再收窄造成顶栏跳动。
+  const [topbarTabsCompact, setTopbarTabsCompact] = useState(
+    () => document.documentElement.dataset.dashboardStyle === 'millennium'
+  )
   const topbarTabsCompactRef = useRef(false)
   const [reasoningToolbarVisible, setReasoningToolbarVisible] = useState(activeTab === 'reasoning')
   const [showSwitchHint, setShowSwitchHint] = useState(() =>
@@ -1014,6 +1017,11 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
         }
 
         const rootRect = topbarTabsRoot.getBoundingClientRect()
+        // 千禧顶栏的页签参与正常布局，保持图标模式，不使用绝对定位布局的间距判定。
+        if (document.documentElement.dataset.dashboardStyle === 'millennium') {
+          setTopbarTabsCompact(true)
+          return
+        }
         const measureRect = measureEl.getBoundingClientRect()
         const workspaceRect = workspaceTabs.getBoundingClientRect()
         const workspaceMeasureRect = workspaceTabsMeasure.getBoundingClientRect()

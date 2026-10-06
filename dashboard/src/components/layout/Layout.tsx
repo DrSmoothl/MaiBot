@@ -106,12 +106,14 @@ export function Layout({ children }: LayoutProps) {
   const { theme, setTheme, themeConfig } = useTheme()
   const effectiveSidebarOpen = themeConfig.dashboardStyle !== 'millennium' && sidebarOpen
   const builtInMenuSections = useMenuSections()
+  // 日志工作区在移动端保留麦麦导航，顶栏菜单按钮与其它页面保持一致。
+  const sidebarWorkspaceMode = workspaceMode === 'logs' ? 'settings' : workspaceMode
   const menuSections = useMemo(() => {
     const pluginMenuSections: MenuSection[] = extensions.flatMap((extension) => {
       const pages = extension.pages.filter((page) =>
         page.placement === 'sidebar'
-          ? workspaceMode === 'settings'
-          : workspaceMode === extensionWorkspace(extension.plugin_id)
+          ? sidebarWorkspaceMode === 'settings'
+          : sidebarWorkspaceMode === extensionWorkspace(extension.plugin_id)
       )
       return pages.length
         ? [
@@ -128,7 +130,7 @@ export function Layout({ children }: LayoutProps) {
           ]
         : []
     })
-    return workspaceMode === 'settings'
+    return sidebarWorkspaceMode === 'settings'
       ? [
           ...builtInMenuSections,
           ...(pluginMenuSections.length
@@ -141,7 +143,7 @@ export function Layout({ children }: LayoutProps) {
             : []),
         ]
       : pluginMenuSections
-  }, [builtInMenuSections, extensions, workspaceMode])
+  }, [builtInMenuSections, extensions, sidebarWorkspaceMode])
 
   useEffect(() => {
     shellStateRef.current = { sidebarOpen, topbarCollapsed }
@@ -327,6 +329,17 @@ export function Layout({ children }: LayoutProps) {
     workspaceTransitionStage !== 'idle' &&
     workspaceTransitionStage !== 'page-enter'
   const sidebarExiting = workspaceTransitionStage === 'sidebar-exit'
+  // 去往日志工作区时侧栏只滑出、不收布局宽度：顶栏不跟着侧栏位移，切换完成后由日志槽位接管这段宽度。
+  const sidebarKeepsWidth = sidebarExiting && workspaceTransitionTarget === 'logs'
+  // 侧栏滑出/滑入期间顶栏延伸到侧栏下方，侧栏移开时露出的是完整的顶栏而不是页面底色。
+  // 千禧风格的铭牌与顶栏是同一条机壳上沿：顶栏常驻垫在侧栏下方，
+  // 否则非整数缩放下侧栏裁剪边缘的抗锯齿会在两段投影之间透出一条细缝。
+  const sidebarUnderlay =
+    isSettingsWorkspace &&
+    (themeConfig.dashboardStyle === 'millennium' || sidebarKeepsWidth || targetWorkspaceWaiting)
+  // 日志视图切换挂在顶栏里，不随页面容器移动；让它与页面同步退场/入场，避免突兀地出现或消失。
+  const logSwitcherHidden =
+    workspaceTransitionStage !== 'idle' && workspaceTransitionStage !== 'page-enter'
   const handleSidebarFix = () => {
     // 悬浮展开已处于完整宽度；固定时跳过占位宽度过渡，避免已经展开的侧栏出现二次动画。
     setSkipSidebarResizeAnimation(true)
@@ -364,6 +377,9 @@ export function Layout({ children }: LayoutProps) {
             <motion.div
               key={workspaceMode}
               data-dashboard-sidebar-layout="true"
+              data-dashboard-header-underlay={
+                sidebarUnderlay && !topbarCollapsed ? 'true' : undefined
+              }
               layout={false}
               className={cn(
                 'relative z-40 hidden shrink-0 transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none lg:block',
@@ -372,7 +388,7 @@ export function Layout({ children }: LayoutProps) {
               )}
               initial={false}
               style={{
-                width: sidebarExiting
+                width: sidebarExiting && !sidebarKeepsWidth
                   ? 0
                   : effectiveSidebarOpen
                     ? 'var(--layout-sidebar-width)'
@@ -398,22 +414,20 @@ export function Layout({ children }: LayoutProps) {
           )}
 
           {/* 移动端 Sidebar 走自己的 fixed 定位，通过 mobileMenuOpen 控制显隐 */}
-          {isSettingsWorkspace && (
-            <div className="lg:hidden">
-              <Sidebar
-                menuSections={menuSections}
-                sidebarOpen={effectiveSidebarOpen}
-                mobileMenuOpen={mobileMenuOpen}
-                topbarCollapsed={topbarCollapsed}
-                onMobileMenuClose={() => setMobileMenuOpen(false)}
-                onSidebarFix={handleSidebarFix}
-              />
-            </div>
-          )}
+          <div className="lg:hidden">
+            <Sidebar
+              menuSections={menuSections}
+              sidebarOpen={effectiveSidebarOpen}
+              mobileMenuOpen={mobileMenuOpen}
+              topbarCollapsed={topbarCollapsed}
+              onMobileMenuClose={() => setMobileMenuOpen(false)}
+              onSidebarFix={handleSidebarFix}
+            />
+          </div>
 
           {/* Mobile overlay */}
           <AnimatePresence>
-            {isSettingsWorkspace && mobileMenuOpen && (
+            {mobileMenuOpen && (
               <motion.div
                 aria-hidden="true"
                 className="fixed inset-0 z-40 bg-black/50 lg:hidden"
@@ -428,7 +442,11 @@ export function Layout({ children }: LayoutProps) {
           {/* Main content */}
           <motion.div
             layout={false}
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+            className={cn(
+              'flex min-h-0 min-w-0 flex-1 flex-col',
+              // 顶栏延伸到侧栏下方时不能被本列裁掉；页面内容仍由 main 自己裁剪。
+              sidebarUnderlay ? 'overflow-visible' : 'overflow-hidden'
+            )}
           >
             {/* HTTP 安全警告横幅 */}
             <HttpWarningBanner />
@@ -436,6 +454,8 @@ export function Layout({ children }: LayoutProps) {
             {/* Topbar */}
             <Header
               extensions={extensions}
+              logSwitcherHidden={logSwitcherHidden}
+              sidebarUnderlay={sidebarUnderlay}
               sidebarOpen={effectiveSidebarOpen}
               mobileMenuOpen={mobileMenuOpen}
               searchOpen={searchOpen}

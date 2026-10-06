@@ -147,7 +147,7 @@ export interface PluginInfo {
   installed: boolean
   /** 安装的版本（如果已安装） */
   installed_version?: string
-  installed_release?: { version: string; commit: string; pinned: boolean } | null
+  installed_release?: { version: string; commit: string } | null
   /** 发布时间 */
   published_at: string
   /** 最后更新时间 */

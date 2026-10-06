@@ -386,7 +386,9 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         if raw_emoji:
             lines.append(f"当前文字回复后还会单独发送已选中的第 {raw_emoji} 号表情包，无需在正文中输出序号。")
 
-        return "\n".join(lines)
+        if not lines:
+            return ""
+        return self._load_prompt("reply_attachments", attachments="\n".join(lines))
 
     @staticmethod
     def _get_chat_prompt_for_chat(chat_id: str, is_group_chat: Optional[bool]) -> str:
@@ -571,26 +573,13 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         )
 
     @staticmethod
-    def _build_reply_reference_lines(reply_reason: str, reply_reference: str) -> List[str]:
-        """将 Planner 内容和 reply 工具参考信息直接合并。"""
+    def _build_reply_reference_message(reply_reason: str, reply_reference: str) -> str:
+        """有 reply reference 时只使用参考，否则使用 Planner 正文。"""
 
-        reference_lines: List[str] = []
-        normalized_reply_reason = reply_reason.strip()
-        if normalized_reply_reason:
-            reference_lines.append(normalized_reply_reason)
-        normalized_reply_reference = reply_reference.strip()
-        if normalized_reply_reference:
-            reference_lines.append(normalized_reply_reference)
-        return reference_lines
-
-    @classmethod
-    def _build_reply_reference_message(cls, reply_reason: str, reply_reference: str) -> str:
-        """构建独立的回复信息参考消息。"""
-
-        reference_lines = cls._build_reply_reference_lines(reply_reason, reply_reference)
-        if not reference_lines:
-            return ""
-        return "\n\n".join(reference_lines)
+        normalized_reference = reply_reference.strip()
+        if normalized_reference:
+            return normalized_reference
+        return reply_reason.strip()
 
     def _build_final_user_message(
         self,

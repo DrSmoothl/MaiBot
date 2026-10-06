@@ -25,6 +25,7 @@ async def test_length_truncation_logs_sent_limit_and_task(monkeypatch, stream, o
     client.reasoning_parse_mode = ReasoningParseMode.NONE
     client.tool_argument_parse_mode = ToolArgumentParseMode.STRICT
     client.reasoning_key = "reasoning_content"
+    client._omit_sdk_authorization = True
 
     async def create(**kwargs):
         if kwargs["stream"]:

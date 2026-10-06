@@ -24,9 +24,11 @@ from src.llm_models.payload_content.context_item import (
     CONTEXT_ITEM_SCHEMA_VERSION,
     ContextItem,
     ContextItemBuilder,
+    FunctionCallItem,
     FunctionCallOutputItem,
     ProviderActivityItem,
     RoleType,
+    UserMessageItem,
     bind_output_items_to_turn,
     get_response_reasoning,
     get_response_text,
@@ -46,7 +48,7 @@ from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistr
 from src.services.llm_service import LLMServiceClient
 
 from src.maisaka.builtin_tool import get_builtin_tools
-from src.maisaka.context.history import normalize_tool_call_result_pairs
+from src.maisaka.context.history import collect_tool_turn_anchor_indices, normalize_tool_call_result_pairs
 from src.maisaka.context.messages import (
     LLMContextMessage,
     ModelOutputContextMessage,
@@ -79,7 +81,7 @@ REQUEST_TYPE_BY_REQUEST_KIND = {
     "sub_agent": "maisaka.sub_agent",
 }
 MODEL_TASK_NAME_BY_REQUEST_KIND: dict[str, str] = {
-    "expression_selector": "expression_use",
+    "expression_selector": "fast_model",
     "reply_effect_judge": "utils",
 }
 PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
@@ -971,6 +973,7 @@ class MaisakaChatLoopService:
 
         previous_context_timestamp: datetime | None = None
         deferred_boundary_timestamps: List[datetime] = []
+        history_context_items: List[ContextItem] = []
         for msg in selected_history:
             context_items = build_context_items_from_history_entry(
                 msg,
@@ -997,6 +1000,7 @@ class MaisakaChatLoopService:
                     self._append_time_user_message(items, msg.timestamp)
 
             items.extend(context_items)
+            history_context_items.extend(context_items)
             previous_context_timestamp = msg.timestamp
 
         for boundary_timestamp in deferred_boundary_timestamps:
@@ -1033,7 +1037,23 @@ class MaisakaChatLoopService:
                 .build()
             )
 
+        # 跨日时间提示由本方法生成，不能代替真实 user 消息充当工具调用锚点
+        self._validate_function_call_context_anchors(history_context_items)
         return items, history_item_count
+
+    @staticmethod
+    def _validate_function_call_context_anchors(items: Sequence[ContextItem]) -> None:
+        """禁止请求历史从缺少 user/function output 锚点的工具调用开始。"""
+
+        has_function_call_anchor = False
+        for item in items:
+            if isinstance(item, (UserMessageItem, FunctionCallOutputItem)):
+                has_function_call_anchor = True
+                continue
+            if isinstance(item, FunctionCallItem) and not has_function_call_anchor:
+                raise ValueError(
+                    f"请求上下文中的 function call 缺少前置 user/function output 锚点: call_id={item.tool_call.call_id}"
+                )
 
     async def chat_loop_step(
         self,
@@ -1145,14 +1165,17 @@ class MaisakaChatLoopService:
         raw_items = before_request_kwargs.get("items")
         if isinstance(raw_items, list) and raw_items != serialized_items:
             try:
-                built_messages = deserialize_prompt_items(
+                hook_messages = deserialize_prompt_items(
                     raw_items,
                     item_schema_version=before_request_kwargs.get("item_schema_version"),
                     mode=ContextProtocolMode.REQUEST_CONTEXT,
                     original_items=built_messages,
                 )
+                # 协议校验只检查 call/output 配对，hook 替换后的请求仍需满足锚点约束
+                self._validate_function_call_context_anchors(hook_messages)
+                built_messages = hook_messages
             except Exception as exc:
-                logger.warning(f"Hook maisaka.planner.before_request 返回的 items 无法反序列化，已忽略: {exc}")
+                logger.warning(f"Hook maisaka.planner.before_request 返回的 items 无效，已忽略: {exc}")
         if enable_visual_message:
             built_messages = limit_latest_images_in_messages(
                 built_messages,
@@ -1396,6 +1419,13 @@ class MaisakaChatLoopService:
             if (logical_turn_id := MaisakaChatLoopService._get_history_logical_turn_id(message)) in tool_turn_ids
         }
         selected_ids = {id(message) for message in selected_history}
+        anchor_index_by_turn_id = collect_tool_turn_anchor_indices(list(full_history), selected_turn_ids)
+
+        # logical_turn_id 只绑定模型输出和工具结果；窗口命中工具轮次时，还必须补回
+        # 该轮次之前最近的真实 user 上下文，避免请求从 function call 开始。
+        for anchor_index in anchor_index_by_turn_id.values():
+            selected_ids.add(id(full_history[anchor_index]))
+
         return [
             message
             for message in full_history

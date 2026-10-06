@@ -164,7 +164,7 @@ class APIProvider(ConfigBase):
             "x-widget": "input",
         },
     )
-    """最大重试次数 (单个模型API调用失败, 最多重试的次数)"""
+    """最大尝试次数 (单个模型API调用失败时, 含首次请求在内最多发送的请求总数, 设为 0 或 1 表示不重试)"""
 
     timeout: int = Field(
         default=120,
@@ -490,14 +490,14 @@ class ModelTaskConfig(ConfigBase):
     )
     """学习模型配置，用于表达方式学习和黑话学习；留空时用 utils 模型"""
 
-    expression_use: TaskConfig = Field(
+    fast_model: TaskConfig = Field(
         default_factory=TaskConfig,
         json_schema_extra={
             "x-widget": "custom",
             "advanced": True,
         },
     )
-    """表达方式使用模型配置；留空时用 utils 模型"""
+    """快速模型配置，用于表达方式选择、回复断句等需要快速完成的小任务，建议选择响应快的模型；留空时用 utils 模型"""
 
     emoji: TaskConfig = Field(
         default_factory=TaskConfig,

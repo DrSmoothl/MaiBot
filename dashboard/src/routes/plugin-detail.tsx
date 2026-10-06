@@ -284,6 +284,7 @@ interface PluginDetailPageProps {
   embedded?: boolean
   mode?: 'page' | 'dialog'
   onClose?: () => void
+  onInstalledPluginsChange?: (installed: InstalledPlugin[]) => void
   pluginId?: string
 }
 
@@ -291,6 +292,7 @@ export function PluginDetailPage({
   embedded = false,
   mode = 'page',
   onClose,
+  onInstalledPluginsChange,
   pluginId: pluginIdProp,
 }: PluginDetailPageProps) {
   const navigate = useNavigate()
@@ -299,7 +301,7 @@ export function PluginDetailPage({
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const pluginId = pluginIdProp ?? search.pluginId
-  const [selection, setSelection] = useState<{ pluginId?: string; version: string; pinned: boolean } | null>(null)
+  const [selection, setSelection] = useState<{ pluginId?: string; version: string } | null>(null)
   const isDialog = mode === 'dialog'
   const containerClassName = isDialog
     ? 'space-y-4 sm:space-y-5 p-4 sm:p-5'
@@ -383,9 +385,8 @@ export function PluginDetailPage({
   // 由已安装列表派生安装状态与已安装版本（纯函数，不再用本地 state）
   const isInstalled = plugin ? checkPluginInstalled(plugin.id, installedPlugins) : false
   const installedVersion = plugin ? getInstalledPluginVersion(plugin.id, installedPlugins) : undefined
-  const installedRelease = installedPlugins.find((item) => item.id === plugin?.id)?.release
   const releaseRequest = releaseCatalog?.mode === 'releases'
-    ? { version: versionSelection?.version || 'latest', pinned: versionSelection?.pinned ?? installedRelease?.pinned ?? false }
+    ? { version: versionSelection?.version || 'latest' }
     : plugin?.source === 'local' ? null : undefined
 
   const readmeQuery = useQuery({
@@ -408,17 +409,19 @@ export function PluginDetailPage({
   const changelog = selectedRelease ? selectedRelease.release_notes : changelogQuery.isError ? '加载更新日志失败' : (changelogQuery.data ?? '')
   const changelogLoading = !selectedRelease && changelogQuery.isPending
 
-  // 任一写操作成功后，重新拉取已安装列表（前缀失效）
-  const invalidateInstalledPlugins = () =>
-    queryClient.invalidateQueries({ queryKey: ['plugin-installed-list'] })
+  // 任一写操作成功后，重新拉取已安装列表，并同步详情与外层市场的安装状态。
+  const refreshInstalledPlugins = async () => {
+    const installed = await getInstalledPlugins({ forceRefresh: true })
+    queryClient.setQueryData(['plugin-installed-list'], installed)
+    onInstalledPluginsChange?.(installed)
+  }
 
   // 检查是否需要更新
   const needsUpdate = () => {
     if (!plugin || !isInstalled || !installedVersion) return false
     if (releaseCatalog?.mode === 'releases') {
       if (!selectedRelease) return false
-      if (versionSelection) return selectedRelease.version !== installedVersion || versionSelection.pinned !== (installedRelease?.pinned ?? false)
-      if (installedRelease?.pinned) return false
+      if (versionSelection) return selectedRelease.version !== installedVersion
       const target = selectedRelease.version.split('.').map(Number)
       const current = installedVersion.split('.').map(Number)
       return target.some((value, index) => value > current[index] && target.slice(0, index).every((part, i) => part === current[i]))
@@ -462,7 +465,7 @@ export function PluginDetailPage({
       })
 
       // 重新加载安装状态
-      invalidateInstalledPlugins()
+      return refreshInstalledPlugins()
     },
   })
 
@@ -478,7 +481,7 @@ export function PluginDetailPage({
       })
 
       // 重新加载安装状态
-      invalidateInstalledPlugins()
+      return refreshInstalledPlugins()
     },
   })
 
@@ -499,7 +502,7 @@ export function PluginDetailPage({
       })
 
       // 重新加载安装状态
-      invalidateInstalledPlugins()
+      return refreshInstalledPlugins()
     },
   })
 
@@ -749,7 +752,7 @@ export function PluginDetailPage({
                         className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-foreground"
                         value={selectedRelease?.version || ''}
                         disabled={operating}
-                        onChange={(event) => setSelection({ pluginId, version: event.target.value, pinned: versionSelection?.pinned ?? installedRelease?.pinned ?? false })}
+                        onChange={(event) => setSelection({ pluginId, version: event.target.value })}
                       >
                         {!selectedRelease && <option value="" disabled>没有兼容的稳定版本，请查看其他版本</option>}
                         {releaseCatalog.versions.map((release) => (
@@ -761,15 +764,8 @@ export function PluginDetailPage({
                         ))}
                       </select>
                     </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" disabled={!selectedRelease || operating}
-                        checked={versionSelection?.pinned ?? installedRelease?.pinned ?? false}
-                        onChange={(event) => selectedRelease && setSelection({ pluginId, version: selectedRelease.version, pinned: event.target.checked })}
-                      />
-                      安装后锁定此版本，阻止自动更新
-                    </label>
                     <p className="text-sm text-muted-foreground">
-                      当前安装：{installedVersion || '未安装'}{installedRelease?.pinned ? '（已锁定）' : ''}；
+                      当前安装：{installedVersion || '未安装'}；
                       推荐版本：{releaseCatalog.recommended_version || '暂无兼容稳定版本'}
                     </p>
                     {selectedRelease && (

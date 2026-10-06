@@ -314,7 +314,7 @@ describe('complexFieldHooks', () => {
 
       expect(screen.getByText('尚未配置任何学习规则。')).toBeInTheDocument()
 
-      await addLearningRule('默认兜底')
+      await addLearningRule('全局默认')
       expect(onChange).toHaveBeenLastCalledWith([
         { type: 'group', use: true, learn: true, platform: '', item_id: '' },
       ])
@@ -331,14 +331,14 @@ describe('complexFieldHooks', () => {
       expect(screen.getByText('全局默认')).toBeInTheDocument()
       expect(screen.getByText('当前范围不需要填写平台或聊天流 ID。')).toBeInTheDocument()
 
-      await addLearningRule('全局通配', '私聊')
+      await addLearningRule('全局默认', '私聊')
       expect(onChange).toHaveBeenLastCalledWith([
         { type: 'group', use: true, learn: true, platform: '', item_id: '' },
-        { type: 'private', use: true, learn: true, platform: '*', item_id: '*' },
+        { type: 'private', use: true, learn: true, platform: '', item_id: '' },
       ])
     })
 
-    it('平台通配、平台兜底和指定聊天流分别写入不同字段', async () => {
+    it('平台默认和指定聊天流分别写入不同字段，不再提供通配范围', async () => {
       const onChange = vi.fn()
       render(
         <ExpressionLearningListHook
@@ -349,12 +349,13 @@ describe('complexFieldHooks', () => {
         />,
       )
 
-      await addLearningRule('平台通配')
-      expect(onChange).toHaveBeenLastCalledWith([
-        { type: 'group', use: true, learn: true, platform: 'qq', item_id: '*' },
-      ])
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: '添加学习规则' }))
+      const dialog = await screen.findByRole('dialog')
+      expect(within(dialog).queryByRole('button', { name: /通配/ })).not.toBeInTheDocument()
+      await user.click(within(dialog).getByRole('button', { name: '取消' }))
 
-      await addLearningRule('平台兜底')
+      await addLearningRule('平台默认')
       expect(onChange).toHaveBeenLastCalledWith([
         { type: 'group', use: true, learn: true, platform: 'qq', item_id: '' },
       ])
@@ -386,10 +387,10 @@ describe('complexFieldHooks', () => {
         />,
       )
 
-      expect(screen.getByText('全局默认')).toBeInTheDocument()
-      expect(screen.getByText('全部聊天')).toBeInTheDocument()
-      expect(screen.getByText('qq:全部目标')).toBeInTheDocument()
-      expect(screen.getByText('wx:平台兜底')).toBeInTheDocument()
+      // * 与留空等价：*:* 是全局默认，qq:* 是平台默认
+      expect(screen.getAllByText('全局默认')).toHaveLength(2)
+      expect(screen.getByText('qq:平台默认')).toBeInTheDocument()
+      expect(screen.getByText('wx:平台默认')).toBeInTheDocument()
       expect(screen.getByText('任意平台:777')).toBeInTheDocument()
       expect(screen.getByText(`qq:${chatId}`)).toBeInTheDocument()
       expect(screen.queryByText('使用和学习均关闭')).not.toBeInTheDocument()
@@ -400,7 +401,6 @@ describe('complexFieldHooks', () => {
 
       const platformInputs = screen.getAllByPlaceholderText('qq')
       fireEvent.change(platformInputs[0], { target: { value: 'telegram' } })
-      // 平台通配改平台时会同步把 item_id 写回 *
       expect(onChange).toHaveBeenCalled()
 
       const useSwitches = screen.getAllByRole('switch')
@@ -572,7 +572,7 @@ describe('complexFieldHooks', () => {
         />,
       )
 
-      expect(await screen.findByText('telegram:全部目标')).toBeInTheDocument()
+      expect(await screen.findByText('telegram:平台默认')).toBeInTheDocument()
       await waitFor(() => {
         expect(getBotConfigCachedMock).toHaveBeenCalled()
       })
@@ -682,9 +682,7 @@ describe('complexFieldHooks', () => {
         />,
       )
       expect(screen.getByText('留空:123')).toBeInTheDocument()
-      expect(screen.getByText('任意平台:留空')).toBeInTheDocument()
-      expect(screen.getByText('留空:全部目标')).toBeInTheDocument()
-      expect(screen.getByText('全局默认')).toBeInTheDocument()
+      expect(screen.getAllByText('全局默认')).toHaveLength(3)
 
       const learnSwitches = screen.getAllByRole('switch')
       await user.click(learnSwitches[1])

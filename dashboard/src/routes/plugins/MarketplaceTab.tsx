@@ -18,6 +18,8 @@ const FRESHNESS_BOOST_WINDOW_DAYS = 120
 const LAUNCH_BOOST_WEIGHT = 12
 const LAUNCH_BOOST_FULL_HOURS = 24
 const LAUNCH_BOOST_DECAY_HOURS = 48
+const UPDATE_BOOST_WEIGHT = 3
+const UPDATE_BOOST_WINDOW_DAYS = 14
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const MS_PER_HOUR = 60 * 60 * 1000
 
@@ -64,8 +66,21 @@ function parsePluginTime(value: string | undefined): number {
   return Number.isNaN(time) ? 0 : time
 }
 
-function getPluginFreshness(plugin: PluginInfo): number {
+// 插件的上架时间：市场条目自带发布时间时用它，否则取版本索引里最早那个版本的发布时间。
+function getPublishedTime(plugin: PluginInfo): number {
   const publishedTime = parsePluginTime(plugin.published_at)
+  if (publishedTime > 0) {
+    return publishedTime
+  }
+
+  const releaseTimes = (plugin.releases?.versions ?? [])
+    .map((release) => parsePluginTime(release.published_at))
+    .filter((time) => time > 0)
+  return releaseTimes.length > 0 ? Math.min(...releaseTimes) : 0
+}
+
+function getPluginFreshness(plugin: PluginInfo): number {
+  const publishedTime = getPublishedTime(plugin)
   if (publishedTime > 0) {
     return publishedTime
   }
@@ -79,7 +94,7 @@ function getPluginFreshness(plugin: PluginInfo): number {
 }
 
 function getFreshnessBoost(plugin: PluginInfo, maxMarketplaceOrder: number, now: number): number {
-  const publishedTime = parsePluginTime(plugin.published_at)
+  const publishedTime = getPublishedTime(plugin)
   const updatedTime = parsePluginTime(plugin.updated_at)
   const pluginTime = publishedTime > 0 ? publishedTime : updatedTime
 
@@ -100,7 +115,7 @@ function getFreshnessBoost(plugin: PluginInfo, maxMarketplaceOrder: number, now:
 }
 
 function getLaunchBoost(plugin: PluginInfo, now: number): number {
-  const publishedTime = parsePluginTime(plugin.published_at)
+  const publishedTime = getPublishedTime(plugin)
   const updatedTime = parsePluginTime(plugin.updated_at)
   const pluginTime = publishedTime > 0 ? publishedTime : updatedTime
 
@@ -119,6 +134,46 @@ function getLaunchBoost(plugin: PluginInfo, now: number): number {
   const decayProgress =
     (ageHours - LAUNCH_BOOST_FULL_HOURS) / (LAUNCH_BOOST_DECAY_HOURS - LAUNCH_BOOST_FULL_HOURS)
   return (1 - decayProgress) * LAUNCH_BOOST_WEIGHT
+}
+
+// 更新加成：发布过新版本的插件，在新版本发布后的一段时间内小幅靠前。
+// 「有没有更新」以版本索引为准：至少有两个正式版本（不含预发布和已撤回），
+// 才把最新那个版本的发布时间算作一次更新；只有一个版本说明是首次收录，不算更新。
+function getLatestUpdateTime(plugin: PluginInfo): number {
+  const releaseTimes = (plugin.releases?.versions ?? [])
+    .filter((release) => !release.prerelease && !release.yanked)
+    .map((release) => parsePluginTime(release.published_at))
+    .filter((time) => time > 0)
+
+  if (releaseTimes.length >= 2) {
+    return Math.max(...releaseTimes)
+  }
+  if (releaseTimes.length === 1) {
+    return 0
+  }
+
+  // 没有版本索引时退回市场条目自带的时间：发布后 48 小时内的改动仍算上新期；
+  // 没有发布时间的条目已经按更新时间计入上新和新鲜度加成，不再叠加。
+  const publishedTime = parsePluginTime(plugin.published_at)
+  const updatedTime = parsePluginTime(plugin.updated_at)
+  if (publishedTime <= 0 || updatedTime - publishedTime < LAUNCH_BOOST_DECAY_HOURS * MS_PER_HOUR) {
+    return 0
+  }
+  return updatedTime
+}
+
+function getUpdateBoost(plugin: PluginInfo, now: number): number {
+  const updateTime = getLatestUpdateTime(plugin)
+  if (updateTime <= 0) {
+    return 0
+  }
+
+  const ageDays = Math.max(0, (now - updateTime) / MS_PER_DAY)
+  if (ageDays >= UPDATE_BOOST_WINDOW_DAYS) {
+    return 0
+  }
+
+  return (1 - ageDays / UPDATE_BOOST_WINDOW_DAYS) * UPDATE_BOOST_WEIGHT
 }
 
 function normalizeScore(value: number, maxValue: number, weight: number): number {
@@ -222,6 +277,7 @@ export function MarketplaceTab({
         normalizeScore(likeScore, scoreBasis.maxLikeScore, 3) +
         normalizeScore(ratingScore, scoreBasis.maxRatingScore, 2) +
         getLaunchBoost(plugin, now) +
+        getUpdateBoost(plugin, now) +
         getFreshnessBoost(plugin, scoreBasis.maxMarketplaceOrder, now)
       )
     }

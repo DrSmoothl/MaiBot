@@ -546,7 +546,7 @@ function IndexPageContent() {
       source: 'builtin',
       render: () => (
         <Card className="h-full">
-          <CardContent data-home-titleless-content="true" className="relative pt-4 sm:pt-5">
+          <CardContent data-home-titleless-content="true" className="relative flex flex-col justify-center py-3 sm:py-3">
             {selectedQuickShortcuts.length === 0 ? (
               <div className="text-muted-foreground flex flex-col gap-3 rounded-lg border border-dashed p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
                 <span>{t('home.quickActions.empty')}</span>
@@ -581,6 +581,9 @@ function IndexPageContent() {
                   )
 
                   if (shortcut.href) {
+                    const internalUrl = shortcut.external
+                      ? null
+                      : new URL(shortcut.href, window.location.origin)
                     return (
                       <Button
                         key={shortcut.id}
@@ -589,14 +592,25 @@ function IndexPageContent() {
                         asChild
                         className="max-w-[14rem] justify-start gap-2 overflow-hidden sm:max-w-[18rem]"
                       >
-                        <a
-                          href={shortcut.href}
-                          target={shortcut.external ? '_blank' : undefined}
-                          rel={shortcut.external ? 'noopener noreferrer' : undefined}
-                          title={shortcut.label}
-                        >
-                          {content}
-                        </a>
+                        {internalUrl ? (
+                          <Link
+                            to={internalUrl.pathname}
+                            search={Object.fromEntries(internalUrl.searchParams)}
+                            hash={internalUrl.hash.slice(1)}
+                            title={shortcut.label}
+                          >
+                            {content}
+                          </Link>
+                        ) : (
+                          <a
+                            href={shortcut.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={shortcut.label}
+                          >
+                            {content}
+                          </a>
+                        )}
                       </Button>
                     )
                   }

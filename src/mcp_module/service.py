@@ -166,6 +166,8 @@ class MCPService:
                 close_immediately = self._retire_manager_locked(old_manager)
 
             self._update_status_snapshot(new_manager)
+            if new_manager is not None:
+                new_manager.add_status_change_callback(lambda: self._refresh_manager_status(new_manager))
             if close_immediately is not None:
                 await close_immediately.close()
 
@@ -246,6 +248,12 @@ class MCPService:
 
         with self._status_lock:
             return json.loads(json.dumps(self._status_snapshot, ensure_ascii=False))
+
+    def _refresh_manager_status(self, manager: MCPManager) -> None:
+        """在主循环发布断连状态，避免旧连接清理覆盖新一代管理器快照。"""
+
+        if manager is self._manager:
+            self._update_status_snapshot(manager)
 
     def _update_status_snapshot(
         self,

@@ -254,6 +254,7 @@ async def test_openai_image_embedding_uses_explicit_data_uri_protocol() -> None:
     client = object.__new__(OpenaiClient)
     client.api_provider = _build_provider()
     client.client = SimpleNamespace(embeddings=FakeEmbeddings())
+    client._omit_sdk_authorization = False
     request = ImageEmbeddingRequest(
         model_info=_build_model(),
         image_bytes=b"image-bytes",

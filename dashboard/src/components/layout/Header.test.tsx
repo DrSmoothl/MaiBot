@@ -78,6 +78,19 @@ vi.mock('motion/react', async () => {
   ))
   MotionHeader.displayName = 'MotionHeader'
 
+  const MotionDiv = ({
+    animate: _animate,
+    initial: _initial,
+    transition: _transition,
+    onAnimationComplete: _onAnimationComplete,
+    ...props
+  }: HTMLAttributes<HTMLDivElement> & {
+    onAnimationComplete?: unknown
+    animate?: unknown
+    initial?: unknown
+    transition?: unknown
+  }) => <div {...props} />
+
   const MotionSpan = ({
     children,
     layoutId,
@@ -95,6 +108,7 @@ vi.mock('motion/react', async () => {
   return {
     LayoutGroup: ({ children }: { children: ReactNode }) => <>{children}</>,
     motion: {
+      div: MotionDiv,
       header: MotionHeader,
       span: MotionSpan,
     },

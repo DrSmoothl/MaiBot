@@ -153,27 +153,31 @@ export function PluginCard({
               </Badge>
             )}
           </div>
-          {/* 版本和作者 */}
-          <div className="space-y-1 border-t pt-2 text-xs text-muted-foreground">
-            <div>v{plugin.manifest?.version || 'unknown'} · {plugin.manifest?.author?.name || 'Unknown'}</div>
-            {/* 支持版本 */}
+        </div>
+      </CardContent>
+      <CardFooter className="mt-auto px-4 pb-4 pt-0">
+        <div className="flex w-full flex-col gap-2 border-t pt-2.5 sm:flex-row sm:items-end sm:justify-between">
+          {/* 版本、作者和支持版本 */}
+          <div
+            data-plugin-version-info="true"
+            className="text-muted-foreground min-w-0 space-y-0.5 text-[11px] leading-tight"
+          >
+            <div className="truncate">
+              v{plugin.manifest?.version || 'unknown'} · {plugin.manifest?.author?.name || 'Unknown'}
+            </div>
             {plugin.manifest?.host_application && (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 whitespace-nowrap">
                 <span>支持:</span>
                 <span className="font-medium">
                   {plugin.manifest.host_application.min_version}
-                  {plugin.manifest.host_application.max_version 
+                  {plugin.manifest.host_application.max_version
                     ? ` - ${plugin.manifest.host_application.max_version}`
-                    : ' - 最新版本'
-                  }
+                    : ' - 最新版本'}
                 </span>
               </div>
             )}
           </div>
-        </div>
-      </CardContent>
-      <CardFooter className="mt-auto px-4 pb-4 pt-1.5">
-        <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:items-center sm:justify-end">
+          <div className="grid shrink-0 grid-cols-3 gap-2 sm:flex sm:items-center sm:justify-end">
           <Button
             variant={isLiked ? 'secondary' : 'outline'}
             size="sm"
@@ -232,19 +236,19 @@ export function PluginCard({
               <Button 
                 variant="destructive" 
                 size="sm"
-                className="w-full sm:w-auto"
+                className="w-full px-0 sm:w-8"
                 disabled={!gitStatus?.installed || isPluginOperating}
                 title={
                   !gitStatus?.installed
                     ? 'Git 未安装'
                     : isPluginOperating
                       ? '插件操作进行中'
-                      : undefined
+                      : '卸载'
                 }
+                aria-label="卸载"
                 onClick={() => onUninstall(plugin)}
               >
-                <Trash2 className="h-4 w-4 mr-1" />
-                卸载
+                <Trash2 className="h-4 w-4" />
               </Button>
             )
           ) : (
@@ -269,6 +273,7 @@ export function PluginCard({
               {isInstalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </Button>
           )}
+          </div>
         </div>
       </CardFooter>
       {/* 安装/卸载/更新进度显示 - 在卡片下方 */}

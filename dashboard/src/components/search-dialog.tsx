@@ -43,6 +43,9 @@ const MAX_RECENT_SEARCH_ROUTES = 8
 interface SearchDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  query?: string
+  onQueryChange?: (query: string) => void
+  aiSearchRequestId?: number
 }
 
 interface SearchItem {
@@ -56,10 +59,12 @@ interface SearchItem {
   fieldPath?: string
 }
 
+// 与后端 AI_SEARCH_MAX_CANDIDATES 保持一致，需容纳全部页面与配置项
+const AI_SEARCH_MAX_CANDIDATES = 2000
+
 interface AISearchItem {
   item: SearchItem
   reason: string
-  score: number
 }
 
 function getProgressTitle(event: AISearchProgressEvent, t: TFunction): string {
@@ -87,9 +92,9 @@ function getProgressTitle(event: AISearchProgressEvent, t: TFunction): string {
 
   const actionKeyByTool: Record<string, string> = {
     search_webui_index: 'search.progressSearchWebui',
-    read_webui_documents: 'search.progressReadWebui',
     search_official_docs: 'search.progressSearchDocs',
     read_official_docs: 'search.progressReadDocs',
+    read_local_config: 'search.progressReadConfig',
   }
   const action = t(actionKeyByTool[event.tool ?? ''] ?? 'search.progressTool')
   if (event.status === 'completed') {
@@ -256,11 +261,21 @@ function collectConfigFields(
   return items
 }
 
-export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
-  const [searchQuery, setSearchQuery] = useState('')
+export function SearchDialog({
+  open,
+  onOpenChange,
+  query,
+  onQueryChange,
+  aiSearchRequestId = 0,
+}: SearchDialogProps) {
+  const [localSearchQuery, setLocalSearchQuery] = useState('')
+  const searchQuery = query ?? localSearchQuery
+  const setSearchQuery = onQueryChange ?? setLocalSearchQuery
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [configSearchItems, setConfigSearchItems] = useState<SearchItem[]>([])
   const [configIndexLoading, setConfigIndexLoading] = useState(false)
+  const [configIndexReady, setConfigIndexReady] = useState(false)
+  const handledAISearchRequestRef = useRef(0)
   const [recentSearchRoutes, setRecentSearchRoutes] = useState<string[]>(loadRecentSearchRoutes)
   const [aiSearchItems, setAISearchItems] = useState<AISearchItem[]>([])
   const [aiAnswer, setAIAnswer] = useState('')
@@ -277,9 +292,28 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const { i18n, t } = useTranslation()
   const menuSections = useMenuSections()
 
+  // 顶栏和对话框共享查询，任一入口修改后都清除上一轮 AI 结果。
+  useEffect(() => {
+    aiSearchAbortRef.current?.abort()
+    const frameId = window.requestAnimationFrame(() => {
+      setSelectedIndex(0)
+      setAISearchItems([])
+      setAIAnswer('')
+      setAISuggestions([])
+      setAISources([])
+      setAIExpandedTerms([])
+      setAISearchProgress([])
+      setAISearchProgressOpen(true)
+      setAISearchError('')
+      setAISearchLoading(false)
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [searchQuery])
+
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
       setConfigSearchItems([])
+      setConfigIndexReady(false)
     })
 
     return () => window.cancelAnimationFrame(frameId)
@@ -340,12 +374,14 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
 
       setConfigSearchItems(nextItems)
       setConfigIndexLoading(false)
+      setConfigIndexReady(true)
     }
 
     loadConfigSearchItems().catch(() => {
       if (!cancelled) {
         setConfigSearchItems([])
         setConfigIndexLoading(false)
+        setConfigIndexReady(true)
       }
     })
 
@@ -451,7 +487,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
     setAISearchProgressOpen(true)
 
     const aiCandidates = [...searchItems, ...configSearchItems]
-      .slice(0, 600)
+      .slice(0, AI_SEARCH_MAX_CANDIDATES)
       .map((item, index) => ({
         id: `c${index}`,
         item,
@@ -490,7 +526,6 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
             ? {
                 item,
                 reason: result.reason,
-                score: result.score,
               }
             : null
         })
@@ -504,7 +539,9 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
       if (response.answer) {
         setAISearchProgressOpen(false)
       }
-      if (nextItems.length === 0 && !response.answer) {
+      if (response.grounding_error) {
+        setAISearchError(response.grounding_error)
+      } else if (nextItems.length === 0 && !response.answer) {
         setAISearchError(t('search.aiNoResults'))
       }
       setSelectedIndex(0)
@@ -533,6 +570,26 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
       }
     }
   }, [configIndexLoading, configSearchItems, i18n.language, searchItems, searchQuery, t])
+
+  // 等配置索引加载完成再消费顶栏提交，避免首次打开时漏搜配置项。
+  useEffect(() => {
+    if (!open) {
+      handledAISearchRequestRef.current = aiSearchRequestId
+      return
+    }
+    if (
+      aiSearchRequestId <= handledAISearchRequestRef.current ||
+      !configIndexReady ||
+      configIndexLoading
+    ) {
+      return
+    }
+    const frameId = window.requestAnimationFrame(() => {
+      handledAISearchRequestRef.current = aiSearchRequestId
+      void runAISearch()
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [aiSearchRequestId, configIndexLoading, configIndexReady, open, runAISearch])
 
   // 导航到页面
   const handleNavigate = useCallback(
@@ -592,51 +649,42 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
       initialTop={88}
     >
       <div className="px-4 pt-3">
-        <div className="relative">
-          <StreamlineIcon
-            name="search-bar-solid"
-            fallback={Search}
-            className="text-muted-foreground absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2"
-          />
-          <Input
-            ref={inputRef}
-            value={searchQuery}
-            onChange={(e) => {
-              aiSearchAbortRef.current?.abort()
-              setSearchQuery(e.target.value)
-              setSelectedIndex(0)
-              setAISearchItems([])
-              setAIAnswer('')
-              setAISuggestions([])
-              setAISources([])
-              setAIExpandedTerms([])
-              setAISearchProgress([])
-              setAISearchProgressOpen(true)
-              setAISearchError('')
-              setAISearchLoading(false)
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder={t('search.aiHint')}
-            className="h-12 border-0 pl-11 text-base shadow-none focus-visible:ring-0"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <StreamlineIcon
+              name="search-bar-solid"
+              fallback={Search}
+              className="text-muted-foreground absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2"
+            />
+            <Input
+              ref={inputRef}
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value)
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={t('search.aiHint')}
+              className="h-12 border-0 pl-11 text-base shadow-none focus-visible:ring-0"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-12 shrink-0 gap-1.5 px-3"
+            disabled={!normalizedQuery || aiSearchLoading || configIndexLoading}
+            onClick={() => void runAISearch()}
+          >
+            {aiSearchLoading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            {aiSearchLoading ? t('search.aiSearching') : t('search.aiSearch')}
+          </Button>
         </div>
         {normalizedQuery && (
           <div className="flex min-h-10 flex-wrap items-center gap-2 border-t px-2 py-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 gap-1.5"
-              disabled={aiSearchLoading || configIndexLoading}
-              onClick={() => void runAISearch()}
-            >
-              {aiSearchLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="h-3.5 w-3.5" />
-              )}
-              {aiSearchLoading ? t('search.aiSearching') : t('search.aiSearch')}
-            </Button>
             <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
               {configIndexLoading
                 ? t('search.indexLoading')
@@ -652,7 +700,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
         )}
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div data-search-results="true" className="min-h-0 flex-1">
         <ScrollArea className="h-full" viewportClassName="px-0">
           {visibleItems.length > 0 ||
           aiAnswer ||
@@ -752,7 +800,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
                 </Collapsible>
               )}
               {aiAnswer && (
-                <section className="border-border/70 bg-muted/30 rounded-lg border p-3">
+                <section data-search-answer="true" className="border-border/70 bg-muted/30 rounded-lg border p-3">
                   <div className="mb-2 flex items-center gap-2 text-sm font-medium">
                     <Sparkles className="text-primary h-4 w-4" />
                     {t('search.aiAnswer')}

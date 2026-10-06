@@ -36,6 +36,8 @@ from src.maisaka.context.planner_messages import (
 )
 from src.plugin_runtime.integration import get_plugin_runtime_manager
 
+from .image_attachment import resolve_image_attachment
+
 if TYPE_CHECKING:
     from src.maisaka.reasoning_engine import MaisakaReasoningEngine
     from src.maisaka.runtime import MaisakaHeartFlowChatting
@@ -209,38 +211,6 @@ class BuiltinToolRuntimeContext:
             return processed_segments
         return [ProcessedResponseSegment(reply_text.strip())]
 
-    async def post_process_reply_message_items_async(
-        self,
-        reply_text: str,
-        *,
-        skip_post_process: bool = False,
-        enable_splitter: bool = True,
-        enable_chinese_typo: bool = True,
-    ) -> List[PostProcessedReplyMessage]:
-        """将 replyer 输出处理为带发送提示的组件序列。"""
-
-        if skip_post_process:
-            return [
-                PostProcessedReplyMessage(
-                    sequence=MessageSequence([TextComponent(reply_text.strip())]),
-                    quote_previous=False,
-                )
-            ]
-
-        segments = await process_llm_response_segments_async(
-            reply_text,
-            enable_splitter=enable_splitter,
-            enable_chinese_typo=enable_chinese_typo,
-        )
-        return [
-            PostProcessedReplyMessage(
-                sequence=MessageSequence([TextComponent(segment.text.strip())]),
-                quote_previous=segment.quote_previous,
-            )
-            for segment in segments
-            if segment.text.strip()
-        ]
-
     def post_process_reply_message_items(
         self,
         reply_text: str,
@@ -267,6 +237,7 @@ class BuiltinToolRuntimeContext:
     async def post_process_reply_message_sequences_async(
         self,
         reply_text: str,
+        attachments: Optional[Dict[str, Any]] = None,
         *,
         skip_post_process: bool = False,
         enable_splitter: bool = True,
@@ -274,12 +245,14 @@ class BuiltinToolRuntimeContext:
     ) -> List[MessageSequence]:
         """将 replyer 输出处理为可发送组件序列。"""
 
-        return self.post_process_reply_message_sequences(
+        items = await self.post_process_reply_message_items_async(
             reply_text,
+            attachments,
             skip_post_process=skip_post_process,
             enable_splitter=enable_splitter,
             enable_chinese_typo=enable_chinese_typo,
         )
+        return [item.sequence for item in items]
 
     def post_process_reply_message_sequences(
         self,
@@ -326,9 +299,7 @@ class BuiltinToolRuntimeContext:
         )
 
     async def _resolve_image_attachment(self, raw_attachment: Any) -> ImageComponent:
-        """把 attach_pic 参数按 send_image 的 msg_id/index 语义解析为图片组件。"""
-
-        from .send_image import _collect_message_images
+        """把 attach_pic 参数按消息或工具媒体索引解析为图片组件。"""
 
         if isinstance(raw_attachment, dict):
             target_message_id = str(
@@ -348,18 +319,7 @@ class BuiltinToolRuntimeContext:
         except (TypeError, ValueError) as exc:
             raise ValueError(f"图片序号无效：index={raw_index}") from exc
 
-        images, error = await _collect_message_images(self, target_message_id)
-        if error is not None:
-            raise ValueError(error)
-        if image_index < 0 or image_index >= len(images):
-            raise ValueError(f"图片序号超出范围：index={image_index}，该消息共有 {len(images)} 张图片。")
-
-        image = images[image_index]
-        return ImageComponent(
-            binary_hash=image.binary_hash,
-            content=image.content,
-            binary_data=image.binary_data,
-        )
+        return await resolve_image_attachment(self, target_message_id, image_index)
 
     async def _resolve_emoji_attachment(self, raw_index: Any) -> EmojiComponent:
         """把 attach_emoji 参数解析为表情包组件。"""
@@ -404,27 +364,7 @@ class BuiltinToolRuntimeContext:
             return [raw_value]
         raise ValueError(f"{argument_name} 参数类型无效，应为字符串、对象或列表。")
 
-    async def post_process_rich_reply_message_sequences_async(
-        self,
-        reply_text: str,
-        attachments: Optional[Dict[str, Any]] = None,
-        *,
-        skip_post_process: bool = False,
-        enable_splitter: bool = True,
-        enable_chinese_typo: bool = True,
-    ) -> List[MessageSequence]:
-        """将 replyer 正文和 reply 动作附件参数处理为可发送组件序列。"""
-
-        items = await self.post_process_rich_reply_message_items_async(
-            reply_text,
-            attachments,
-            skip_post_process=skip_post_process,
-            enable_splitter=enable_splitter,
-            enable_chinese_typo=enable_chinese_typo,
-        )
-        return [item.sequence for item in items]
-
-    async def post_process_rich_reply_message_items_async(
+    async def post_process_reply_message_items_async(
         self,
         reply_text: str,
         attachments: Optional[Dict[str, Any]] = None,
@@ -433,15 +373,30 @@ class BuiltinToolRuntimeContext:
         enable_splitter: bool = True,
         enable_chinese_typo: bool = True,
     ) -> List[PostProcessedReplyMessage]:
-        """处理 replyer 正文和附件，并保留每条消息的发送提示。"""
+        """异步处理 replyer 正文和附件，并保留每条消息的发送提示。"""
 
-        items = self.post_process_reply_message_items(
-            reply_text,
-            skip_post_process=skip_post_process,
-            enable_splitter=enable_splitter,
-            enable_chinese_typo=enable_chinese_typo,
-        )
+        if skip_post_process:
+            segments = [ProcessedResponseSegment(reply_text.strip())]
+        else:
+            segments = await process_llm_response_segments_async(
+                reply_text,
+                enable_splitter=enable_splitter,
+                enable_chinese_typo=enable_chinese_typo,
+            )
+        items = [
+            PostProcessedReplyMessage(
+                sequence=MessageSequence([TextComponent(segment.text.strip())]),
+                quote_previous=segment.quote_previous,
+            )
+            for segment in segments
+            if segment.text.strip()
+        ]
         attachment_args = dict(attachments or {})
+
+        if attachment_args.get("attach_at") and not global_config.chat.enable_reply_at:
+            raise ValueError("回复时 @ 用户已关闭，不能使用 attach_at。")
+        if attachment_args.get("attach_emoji") is not None and not global_config.emoji.use_new_send_logic:
+            raise ValueError("新表情包发送逻辑未开启，请使用 send_emoji 工具。")
 
         at_components = [
             self._resolve_at_attachment(raw_target)
@@ -456,6 +411,9 @@ class BuiltinToolRuntimeContext:
 
         if not at_components and not image_components and not emoji_components:
             return items
+
+        if not items:
+            raise ValueError("回复附件需要搭配非空的文字回复。")
 
         at_prefix_components = []
         for at_component in at_components:
