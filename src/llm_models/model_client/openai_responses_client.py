@@ -734,7 +734,7 @@ class OpenAIResponsesClient(OpenaiClient):
                     temperature=temperature if temperature is not None else omit,
                     store=store,
                     stream=bool(model_info.force_stream_mode),
-                    extra_headers=request_overrides.extra_headers or None,
+                    extra_headers=self._build_request_headers(request_overrides.extra_headers),
                     extra_query=request_overrides.extra_query or None,
                     extra_body=extra_body or None,
                 )

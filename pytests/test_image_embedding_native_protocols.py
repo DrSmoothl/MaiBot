@@ -70,6 +70,7 @@ def _make_openai_client(provider: APIProvider, handler: Callable[[httpx.Request]
         base_url=provider.base_url,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
+    client._omit_sdk_authorization = False
     return client
 
 
@@ -317,6 +318,7 @@ async def test_explicit_template_takes_precedence_on_official_url() -> None:
     client = object.__new__(OpenaiClient)
     client.api_provider = _build_provider("https://dashscope.aliyuncs.com/compatible-mode/v1")
     client.client = SimpleNamespace(embeddings=FakeEmbeddings())
+    client._omit_sdk_authorization = False
     request = _build_request("qwen3-vl-embedding", {"image_embedding_input": "{data_uri}"})
 
     response = await client.get_image_embedding(request)
