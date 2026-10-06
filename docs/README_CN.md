@@ -143,11 +143,17 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 ## 📊 仓库状态
 
-![Alt](../depends-data/repository-metrics.svg "麦麦仓库状态")
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://status.maibot.top/card/repo.svg?theme=night">
+  <img src="https://status.maibot.top/card/repo.svg" alt="麦麦仓库状态" width="100%">
+</picture>
 
 ### Star History
 
-![Star 趋势](../depends-data/star-history.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://status.maibot.top/card/stars.svg?theme=night">
+  <img src="https://status.maibot.top/card/stars.svg" alt="Star 趋势" width="100%">
+</picture>
 
 ---
 

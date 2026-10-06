@@ -143,11 +143,17 @@ Contributions are welcome. Please read the [Contribution Guide](CONTRIBUTE.md) f
 
 ## 📊 Repository Status
 
-![Alt](../depends-data/repository-metrics.svg "MaiBot Repository Status")
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://status.maibot.top/card/repo.svg?theme=night">
+  <img src="https://status.maibot.top/card/repo.svg" alt="MaiBot Repository Status" width="100%">
+</picture>
 
 ### Star History
 
-![Star History](../depends-data/star-history.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://status.maibot.top/card/stars.svg?theme=night">
+  <img src="https://status.maibot.top/card/stars.svg" alt="Star History" width="100%">
+</picture>
 
 ---
 
