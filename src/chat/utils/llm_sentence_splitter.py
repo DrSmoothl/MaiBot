@@ -1,5 +1,7 @@
 """基于 LLM 的回复断句。"""
 
+from typing import List, Tuple
+
 import json
 
 from src.common.logger import get_logger
@@ -37,7 +39,16 @@ def _is_no_split_marker(payload: str) -> bool:
     return payload.strip().strip('"').strip() == _NO_SPLIT_MARKER
 
 
-async def split_text_with_llm(text: str) -> list[tuple[str, str]]:
+def _extract_trailing_comma(sentence: str) -> Tuple[str, str]:
+    """将段尾逗号移入分隔符，逐条发送时省略，压缩合并时恢复。"""
+    content = sentence.rstrip("，, \t\r\n")
+    separator = sentence[len(content) :]
+    if content.strip() and ("，" in separator or "," in separator):
+        return content, separator
+    return sentence, ""
+
+
+async def split_text_with_llm(text: str) -> List[Tuple[str, str]]:
     """调用 LLM 断句，并返回兼容规则断句器的句子元组。"""
     if not text:
         return []
@@ -46,9 +57,9 @@ async def split_text_with_llm(text: str) -> list[tuple[str, str]]:
     result = await client.generate_response(_SPLITTER_PROMPT + text)
     payload = _normalize_json_payload(result.response)
 
-    # 模型判断不需要拆分时只返回标记，此时保持原文作为单独一段
+    # 模型判断不需要拆分时只返回标记，此时作为单独一段，并同样处理段尾逗号
     if _is_no_split_marker(payload):
-        return [(text, "")]
+        return [_extract_trailing_comma(text)]
 
     try:
         sentences = json.loads(payload)
@@ -63,4 +74,5 @@ async def split_text_with_llm(text: str) -> list[tuple[str, str]]:
     if "".join(sentences) != text:
         raise ValueError("LLM 断句结果未完整保留原文")
 
-    return [(sentence, "") for sentence in sentences if sentence]
+    # 完整性检查通过后再分离段尾逗号，避免改变模型输出校验与句内标点。
+    return [_extract_trailing_comma(sentence) for sentence in sentences if sentence]

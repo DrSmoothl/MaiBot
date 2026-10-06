@@ -34,7 +34,7 @@ async def test_llm_splitter_preserves_original_text(monkeypatch) -> None:
     monkeypatch.setattr(llm_sentence_splitter, "LLMServiceClient", _Client)
 
     assert await llm_sentence_splitter.split_text_with_llm("今天去上课了，然后回来睡觉") == [
-        ("今天去上课了，", ""),
+        ("今天去上课了", "，"),
         ("然后回来睡觉", ""),
     ]
 
