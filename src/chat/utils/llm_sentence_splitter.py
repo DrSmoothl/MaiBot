@@ -42,7 +42,7 @@ async def split_text_with_llm(text: str) -> list[tuple[str, str]]:
     if not text:
         return []
 
-    client = LLMServiceClient(task_name="utils", request_type="response.splitter")
+    client = LLMServiceClient(task_name="fast_model", request_type="response.splitter")
     result = await client.generate_response(_SPLITTER_PROMPT + text)
     payload = _normalize_json_payload(result.response)
 

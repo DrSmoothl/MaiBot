@@ -81,7 +81,7 @@ REQUEST_TYPE_BY_REQUEST_KIND = {
     "sub_agent": "maisaka.sub_agent",
 }
 MODEL_TASK_NAME_BY_REQUEST_KIND: dict[str, str] = {
-    "expression_selector": "expression_use",
+    "expression_selector": "fast_model",
     "reply_effect_judge": "utils",
 }
 PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {

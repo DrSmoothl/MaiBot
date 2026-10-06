@@ -5,6 +5,7 @@
 ## 主程序
 
 - 优化错别字缓存
+- 模型配置新增 fast_model 快速模型任务，取代 expression_use，负责表达方式选择、回复断句等需要快速完成的小任务；留空时使用 utils 模型（原 expression_use 的配置需重新填写到 fast_model）
 - 修复 MCP 连接异常时持续占用 CPU 的问题。
 
 ## Webui [1.8.3]
