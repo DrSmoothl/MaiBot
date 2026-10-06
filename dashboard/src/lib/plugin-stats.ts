@@ -26,6 +26,8 @@ export interface PluginStatsData {
   comment_count: number
   recent_ratings?: Array<{
     user_id: string
+    username?: string | null
+    anonymous?: boolean
     rating?: number | null
     comment?: string
     created_at: string
@@ -65,6 +67,20 @@ export interface PluginUserState {
   disliked: boolean
   rating: number | null
   comment: string
+  username?: string | null
+  anonymous?: boolean
+}
+
+export interface PluginReviewIdentity {
+  username: string
+  anonymous: boolean
+}
+
+/** 获取本地 bot 昵称；此请求不会发往插件统计服务。 */
+export async function getPluginReviewIdentity(): Promise<{ username: string }> {
+  return backendApi.get<{ username: string }>(`${STATS_API_BASE_URL}/identity`, {
+    errorMessage: '获取默认评论用户名失败',
+  })
 }
 
 export interface PluginVoteState {
@@ -283,6 +299,8 @@ export async function getPluginUserState(
       disliked: data.disliked === true,
       rating: data.rating == null ? null : Number(data.rating),
       comment: typeof data.comment === 'string' ? data.comment : '',
+      ...(data.username !== undefined ? { username: data.username } : {}),
+      ...(data.anonymous !== undefined ? { anonymous: data.anonymous } : {}),
     }
   } catch (error) {
     console.error('Error fetching plugin user state:', error)
@@ -428,7 +446,8 @@ export async function ratePlugin(
   pluginId: string,
   rating?: number | null,
   comment?: string | null,
-  userId?: string
+  userId?: string,
+  identity?: PluginReviewIdentity
 ): Promise<RatingStatsResponse> {
   const hasRating = rating !== undefined && rating !== null
   const hasComment = comment !== undefined
@@ -448,6 +467,8 @@ export async function ratePlugin(
       user_id: string
       rating?: number
       comment?: string | null
+      username?: string
+      anonymous?: boolean
     } = { plugin_id: pluginId, user_id: finalUserId }
 
     if (hasRating) {
@@ -455,6 +476,16 @@ export async function ratePlugin(
     }
     if (hasComment) {
       payload.comment = comment
+    }
+    if (identity) {
+      payload.anonymous = identity.anonymous
+      if (!identity.anonymous) {
+        const username = identity.username.trim()
+        if (!username || username.length > 100) {
+          return { success: false, error: '用户名需要填写 1-100 个字符' }
+        }
+        payload.username = username
+      }
     }
 
     const data = await backendApi.post<Omit<RatingStatsResponse, 'success'>>(
