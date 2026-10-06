@@ -161,6 +161,28 @@ CHAT_COMPLETIONS_RESERVED_EXTRA_BODY_KEYS = {
 }
 """由当前客户端显式承载、不应再落入 `extra_body` 的字段集合。"""
 
+_SDK_AUTH_PLACEHOLDER_API_KEY = "maibot-sdk-auth-disabled"
+"""鉴权不交给 SDK 时传给 `AsyncOpenAI` 的占位密钥。
+
+OpenAI SDK 2.34+ 构造时拒绝空 `api_key`，且每次请求要么带 `Authorization` 头、要么显式省略它；
+占位密钥只用于通过构造校验，它生成的 `Authorization` 头会被自定义鉴权头覆盖或在请求时被省略。"""
+
+_AUTHORIZATION_HEADER = "Authorization"
+
+
+def _canonicalize_authorization_header(headers: Dict[str, str]) -> Dict[str, str]:
+    """把任意大小写的 Authorization 请求头统一为标准写法。
+
+    SDK 按精确键名合并请求头：大小写不同的同名头会与占位密钥生成的 `Authorization` 头同时发出，
+    或被请求级的省略标记误删，所以先统一键名。
+    """
+
+    return {
+        (_AUTHORIZATION_HEADER if key.lower() == _AUTHORIZATION_HEADER.lower() else key): value
+        for key, value in headers.items()
+    }
+
+
 _MODELS_REQUIRING_MAX_COMPLETION_TOKENS: Set[Tuple[str, str]] = set()
 """记录本进程内已确认「仅支持 max_completion_tokens」的模型，键为 (base_url, model_identifier)。
 命中后直接使用 max_completion_tokens，避免重复触发首次失败重试。"""
@@ -1408,8 +1430,12 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
         self.reasoning_parse_mode = _normalize_reasoning_parse_mode(api_provider.reasoning_parse_mode)
         self.reasoning_key = _build_reasoning_key(api_provider)
         self.tool_argument_parse_mode = _normalize_tool_argument_parse_mode(api_provider.tool_argument_parse_mode)
+        default_headers = _canonicalize_authorization_header(client_config.default_headers)
+        # api_key 为空表示鉴权不交给 SDK（none/header/query 或自定义 Bearer 前缀）；
+        # 此时若没有自定义 Authorization 头覆盖占位密钥，每次请求都要显式省略它
+        self._omit_sdk_authorization = not client_config.api_key and _AUTHORIZATION_HEADER not in default_headers
         self.client = AsyncOpenAI(
-            api_key=client_config.api_key,
+            api_key=client_config.api_key or _SDK_AUTH_PLACEHOLDER_API_KEY,
             organization=api_provider.organization,
             project=api_provider.project,
             base_url=client_config.base_url,
@@ -1417,9 +1443,24 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
             # 重试统一由 LLMOrchestrator 外层循环按 api_provider.max_retry 负责（计数、日志、retry_interval）；
             # SDK 内部再重试会与外层嵌套，使超时请求被重复发送并重复计费输出 token（#1769）
             max_retries=0,
-            default_headers=client_config.default_headers or None,
+            default_headers=default_headers or None,
             default_query=client_config.default_query or None,
         )
+
+    def _build_request_headers(self, extra_headers: Dict[str, str]) -> Dict[str, str | Omit] | None:
+        """构造单次请求的附加请求头。
+
+        Args:
+            extra_headers: 模型 `extra_params` 中声明的附加请求头。
+
+        Returns:
+            Dict[str, str | Omit] | None: 传给 SDK 的 `extra_headers`；鉴权不交给 SDK 时
+            会显式省略占位密钥生成的 `Authorization` 头。
+        """
+        request_headers: Dict[str, str | Omit] = dict(_canonicalize_authorization_header(extra_headers))
+        if self._omit_sdk_authorization:
+            request_headers.setdefault(_AUTHORIZATION_HEADER, omit)
+        return request_headers or None
 
     def _build_default_stream_response_handler(
         self,
@@ -1581,7 +1622,7 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                             max_tokens=max_tokens_argument,
                             stream=True,
                             response_format=openai_response_format,
-                            extra_headers=request_overrides.extra_headers or None,
+                            extra_headers=self._build_request_headers(request_overrides.extra_headers),
                             extra_query=request_overrides.extra_query or None,
                             extra_body=extra_body or None,
                         )
@@ -1606,7 +1647,7 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
                         max_tokens=max_tokens_argument,
                         stream=False,
                         response_format=openai_response_format,
-                        extra_headers=request_overrides.extra_headers or None,
+                        extra_headers=self._build_request_headers(request_overrides.extra_headers),
                         extra_query=request_overrides.extra_query or None,
                         extra_body=extra_body or None,
                     )
@@ -1779,7 +1820,7 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
             raw_response = await self.client.embeddings.create(
                 model=model_info.model_identifier,
                 input=cast(Any, image_input),
-                extra_headers=request_overrides.extra_headers or None,
+                extra_headers=self._build_request_headers(request_overrides.extra_headers),
                 extra_query=request_overrides.extra_query or None,
                 extra_body=request_overrides.extra_body or None,
             )
@@ -1848,8 +1889,9 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
             },
         }
         options: Dict[str, Any] = {}
-        if native_request.extra_headers:
-            options["headers"] = native_request.extra_headers
+        request_headers = self._build_request_headers(native_request.extra_headers)
+        if request_headers:
+            options["headers"] = request_headers
         if native_request.extra_query:
             options["params"] = native_request.extra_query
         try:
@@ -1931,7 +1973,7 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
             raw_response = await self.client.embeddings.create(
                 model=model_info.model_identifier,
                 input=embedding_input,
-                extra_headers=request_overrides.extra_headers or None,
+                extra_headers=self._build_request_headers(request_overrides.extra_headers),
                 extra_query=request_overrides.extra_query or None,
                 extra_body=request_overrides.extra_body or None,
             )
@@ -2041,7 +2083,7 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
             raw_response = await self.client.audio.transcriptions.create(
                 model=model_info.model_identifier,
                 file=audio_file,
-                extra_headers=request_overrides.extra_headers or None,
+                extra_headers=self._build_request_headers(request_overrides.extra_headers),
                 extra_query=request_overrides.extra_query or None,
                 extra_body=request_overrides.extra_body or None,
             )
