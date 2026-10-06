@@ -23,6 +23,7 @@ export interface PluginStatsData {
   downloads: number
   rating: number
   rating_count: number
+  comment_count: number
   recent_ratings?: Array<{
     user_id: string
     rating?: number | null
@@ -51,6 +52,7 @@ export interface RatingStatsResponse extends StatsResponse {
   comment?: string | null
   rating?: number
   rating_count?: number
+  comment_count?: number
 }
 
 export interface DownloadStatsResponse extends StatsResponse {
@@ -63,6 +65,11 @@ export interface PluginUserState {
   disliked: boolean
   rating: number | null
   comment: string
+}
+
+export interface PluginVoteState {
+  liked: boolean
+  disliked: boolean
 }
 
 interface PluginStatsSummaryResponse {
@@ -84,6 +91,7 @@ function createEmptyStats(pluginId: string): PluginStatsData {
     downloads: 0,
     rating: 0,
     rating_count: 0,
+    comment_count: 0,
   }
 }
 
@@ -106,6 +114,7 @@ function normalizePluginStatsResponse(data: unknown, pluginId: string): PluginSt
     downloads: Number(stats.downloads ?? 0),
     rating: Number(stats.rating ?? 0),
     rating_count: Number(stats.rating_count ?? 0),
+    comment_count: Number(stats.comment_count ?? 0),
     recent_ratings: Array.isArray(stats.recent_ratings) ? stats.recent_ratings : undefined,
   }
 }
@@ -281,6 +290,35 @@ export async function getPluginUserState(
   }
 }
 
+/**
+ * 批量获取当前用户对所有插件的点赞/点踩状态，键为插件 ID
+ */
+export async function getPluginUserStates(
+  userId: string = getUserId()
+): Promise<Record<string, PluginVoteState>> {
+  try {
+    const data = await backendApi.get<{
+      success?: boolean
+      states?: Record<string, Partial<PluginVoteState>>
+    }>(`${STATS_API_BASE_URL}/stats/user-states`, {
+      query: { user_id: userId },
+    })
+    if (!data.success || !data.states || typeof data.states !== 'object') {
+      return {}
+    }
+
+    return Object.fromEntries(
+      Object.entries(data.states).map(([pluginId, state]) => [
+        pluginId,
+        { liked: state.liked === true, disliked: state.disliked === true },
+      ])
+    )
+  } catch (error) {
+    console.error('Error fetching plugin user states:', error)
+    return {}
+  }
+}
+
 export async function getPluginStatsSummary(
   options: { forceRefresh?: boolean } = {}
 ): Promise<Record<string, PluginStatsData>> {
@@ -433,6 +471,9 @@ export async function ratePlugin(
     }
     if (result.rating_count !== undefined) {
       updatedStats.rating_count = Number(result.rating_count)
+    }
+    if (result.comment_count !== undefined) {
+      updatedStats.comment_count = Number(result.comment_count)
     }
     updateCachedPluginStats(pluginId, updatedStats)
     return result

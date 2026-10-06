@@ -208,6 +208,7 @@ function PluginStatsContent({ pluginId, compact = false }: PluginStatsProps) {
           ...currentStats,
           rating: Number(result.rating ?? currentStats.rating),
           rating_count: Number(result.rating_count ?? currentStats.rating_count),
+          comment_count: Number(result.comment_count ?? currentStats.comment_count),
         }
         : currentStats)
       setIsRatingDialogOpen(false)

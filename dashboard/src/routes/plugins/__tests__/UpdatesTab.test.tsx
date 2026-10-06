@@ -79,6 +79,7 @@ function makeStats(id: string, overrides: Partial<PluginStatsData> = {}): Plugin
     downloads: 0,
     rating: 0,
     rating_count: 0,
+    comment_count: 0,
     ...overrides,
   }
 }

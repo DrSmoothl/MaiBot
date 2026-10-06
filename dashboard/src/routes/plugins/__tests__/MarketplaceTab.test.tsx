@@ -76,6 +76,7 @@ function makeStats(id: string, overrides: Partial<PluginStatsData> = {}): Plugin
     downloads: 0,
     rating: 0,
     rating_count: 0,
+    comment_count: 0,
     ...overrides,
   }
 }
@@ -324,6 +325,7 @@ describe('MarketplaceTab 排序与推荐', () => {
           likes: 500,
           rating: 5,
           rating_count: 200,
+          comment_count: 200,
         }),
       },
     })
@@ -346,7 +348,7 @@ describe('MarketplaceTab 排序与推荐', () => {
       pluginStats: {
         'high-dl': makeStats('high-dl', { downloads: 10000 }),
         'high-like': makeStats('high-like', { likes: 10000 }),
-        'high-rating': makeStats('high-rating', { rating: 5, rating_count: 100 }),
+        'high-rating': makeStats('high-rating', { rating: 5, rating_count: 100, comment_count: 100 }),
       },
     })
 
@@ -457,7 +459,7 @@ describe('MarketplaceTab 排序与推荐', () => {
     const popular = makePlugin('popular', { published_at: '', updated_at: '', downloads: 99999 })
     renderTab([popular, oldWithNewVersion, justListed], {
       pluginStats: {
-        popular: makeStats('popular', { downloads: 99999, likes: 500, rating: 5, rating_count: 200 }),
+        popular: makeStats('popular', { downloads: 99999, likes: 500, rating: 5, rating_count: 200, comment_count: 200 }),
       },
     })
     expect(getDisplayedPluginNames()).toEqual(['插件-z-just-listed', '插件-popular', '插件-old'])

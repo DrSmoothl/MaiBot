@@ -106,7 +106,7 @@ describe('plugin-api/marketplace', () => {
         source: 'service',
         details: [createMarketItem()],
         catalog: { plugins: [] },
-        stats: { 'plugin-a': { plugin_id: 'plugin-a', downloads: 12, likes: 3, dislikes: 0, rating: 4, rating_count: 2 } },
+        stats: { 'plugin-a': { plugin_id: 'plugin-a', downloads: 12, likes: 3, dislikes: 0, rating: 4, rating_count: 2, comment_count: 2 } },
       })
       const marketplace = await loadMarketplace()
       const plugins = await marketplace.fetchPluginList()

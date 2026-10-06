@@ -321,7 +321,7 @@ describe('PluginMarketplacePage 初始加载与数据合并', () => {
   it('存在缓存清单时先渲染缓存内容，拉取完成后替换为最新清单', async () => {
     vi.mocked(pluginApi.getCachedPluginList).mockReturnValue([makeMarketPlugin('cached-x')])
     vi.mocked(pluginStatsApi.getCachedPluginStatsSummary).mockReturnValue({
-      'cached-x': { plugin_id: 'cached-x', likes: 3, dislikes: 0, downloads: 9, rating: 5, rating_count: 2 },
+      'cached-x': { plugin_id: 'cached-x', likes: 3, dislikes: 0, downloads: 9, rating: 5, rating_count: 2, comment_count: 2 },
     })
 
     render(<PluginMarketplacePage />)
@@ -1637,6 +1637,7 @@ describe('PluginMarketplacePage 合并、兼容性边界与进度清理', () => 
         downloads: 3,
         rating: 5,
         rating_count: 1,
+        comment_count: 1,
       },
     })
 

@@ -327,7 +327,7 @@ async function fetchPluginListUncached(compatibleOnly: boolean): Promise<PluginI
         assets: normalizePluginAssets(item.assets),
         downloads: market.source === 'service' ? market.stats[pluginId]?.downloads ?? 0 : 0,
         rating: market.source === 'service' ? market.stats[pluginId]?.rating ?? 0 : 0,
-        review_count: market.source === 'service' ? market.stats[pluginId]?.rating_count ?? 0 : 0,
+        review_count: market.source === 'service' ? market.stats[pluginId]?.comment_count ?? 0 : 0,
         installed: false,
         source: 'market' as const,
         changelog: normalizeOptionalString(item.changelog),

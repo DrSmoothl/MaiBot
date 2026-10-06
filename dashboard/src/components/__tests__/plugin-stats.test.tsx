@@ -36,6 +36,7 @@ function makeStats(overrides: Partial<PluginStatsData> = {}): PluginStatsData {
     downloads: 1234,
     rating: 4.2,
     rating_count: 9,
+    comment_count: 9,
     ...overrides,
   }
 }
@@ -223,6 +224,7 @@ describe('PluginStats', () => {
       user_rating: 4,
       rating: 4.5,
       rating_count: 10,
+      comment_count: 10,
     })
 
     render(<PluginStats pluginId="demo-plugin" />)
