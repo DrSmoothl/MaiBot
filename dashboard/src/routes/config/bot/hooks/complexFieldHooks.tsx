@@ -263,15 +263,23 @@ const talkRuleGroupKey = (item: Record<string, unknown>) => {
   return `${platform}\u0000${itemId}\u0000${ruleType}`
 }
 
-const learningScopeLabel = (item: Record<string, unknown>) => {
+// 学习规则里 platform/item_id 的 * 与留空等价，都表示该层级的默认值。
+const learningTargetValues = (item: Record<string, unknown>) => {
   const platform = typeof item.platform === 'string' ? item.platform.trim() : ''
   const itemId = typeof item.item_id === 'string' ? item.item_id.trim() : ''
+  return {
+    anyPlatform: platform === '*',
+    platform: platform === '*' ? '' : platform,
+    itemId: itemId === '*' ? '' : itemId,
+  }
+}
+
+const learningScopeLabel = (item: Record<string, unknown>) => {
+  const { anyPlatform, platform, itemId } = learningTargetValues(item)
   if (!platform && !itemId) return '全局默认'
-  if (platform === '*' && itemId === '*') return '全部聊天'
-  if (platform === '*') return `任意平台:${itemId || '留空'}`
-  if (itemId === '*') return `${platform || '留空'}:全部目标`
-  if (platform && !itemId) return `${platform}:平台兜底`
-  if (!platform || !itemId) return `${platform || '留空'}:${itemId || '留空'}`
+  if (anyPlatform) return `任意平台:${itemId}`
+  if (!platform) return `留空:${itemId}`
+  if (!itemId) return `${platform}:平台默认`
   return `${platform}:${itemId}`
 }
 
@@ -364,6 +372,28 @@ const LEARNING_SCOPE_OPTIONS: Array<{
   },
 ]
 
+const LEARNING_RULE_SCOPE_OPTIONS: Array<{
+  description: string
+  kind: LearningScopeKind
+  title: string
+}> = [
+  {
+    kind: 'default',
+    title: '全局默认',
+    description: '没有更具体规则命中时使用',
+  },
+  {
+    kind: 'platformDefault',
+    title: '平台默认',
+    description: '该平台没有更具体规则时使用',
+  },
+  {
+    kind: 'chat',
+    title: '指定聊天流',
+    description: '指定平台里的一个具体聊天',
+  },
+]
+
 const GROUP_SCOPE_OPTIONS: Array<{
   description: string
   kind: GroupScopeKind
@@ -399,13 +429,10 @@ const EXACT_GROUP_SCOPE_OPTIONS: Array<{
 ]
 
 const resolveLearningScopeKind = (item: Record<string, unknown>): LearningScopeKind => {
-  const platform = normalizeSpecialTextValue(item.platform)
-  const itemId = normalizeSpecialTextValue(item.item_id)
+  const { anyPlatform, platform, itemId } = learningTargetValues(item)
   if (!platform && !itemId) return 'default'
-  if (platform === '*' && itemId === '*') return 'global'
-  if (platform === '*' && itemId && itemId !== '*') return 'target'
-  if (platform && platform !== '*' && !itemId) return 'platformDefault'
-  if (platform && platform !== '*' && itemId === '*') return 'platform'
+  if (anyPlatform) return 'target'
+  if (platform && !itemId) return 'platformDefault'
   return 'chat'
 }
 
@@ -1216,7 +1243,7 @@ function AddLearningRuleDialog({
       open={open}
       onAdd={onAdd}
       onOpenChange={onOpenChange}
-      scopeOptions={LEARNING_SCOPE_OPTIONS}
+      scopeOptions={LEARNING_RULE_SCOPE_OPTIONS}
       title="添加学习规则"
     />
   )
@@ -1251,9 +1278,6 @@ function LearningRuleItem({
   const chatTargetState = useExactChatTargetResolution(platformValue, itemId, ruleType, scopeKind === 'chat')
   const updateScopeField = (fieldName: string, fieldValue: unknown) => {
     onItemFieldChange(index, fieldName, fieldValue)
-    if (fieldName === 'platform' && scopeKind === 'platform') {
-      onItemFieldChange(index, 'item_id', '*')
-    }
   }
 
   return (
@@ -2806,7 +2830,7 @@ export const ChatPromptsHook = createListItemEditorHook({
 export const ExpressionLearningListHook = createListItemEditorHook({
   addLabel: '添加学习规则',
   addButtonPlacement: 'none',
-  infoText: '可以单独为每个聊天开启学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台兜底，* 表示通配。',
+  infoText: '可以单独为每个聊天开启学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台默认；越具体的规则越优先，* 与留空等价。',
   emptyText: '尚未配置任何学习规则。',
   fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
   renderItems: ({
@@ -2832,7 +2856,7 @@ export const ExpressionLearningListHook = createListItemEditorHook({
 export const JargonLearningListHook = createListItemEditorHook({
   addLabel: '添加黑话学习规则',
   addButtonPlacement: 'none',
-  infoText: '可以单独为每个聊天开启黑话学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台兜底，* 表示通配。平台下拉来自基础设置中已定义的平台。',
+  infoText: '可以单独为每个聊天开启黑话学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台默认；越具体的规则越优先，* 与留空等价。平台下拉来自基础设置中已定义的平台。',
   emptyText: '尚未配置任何黑话学习规则。',
   fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
   renderItems: ({
@@ -2859,7 +2883,7 @@ export const JargonLearningListHook = createListItemEditorHook({
 export const BehaviorLearningListHook = createListItemEditorHook({
   addLabel: '添加行为学习规则',
   addButtonPlacement: 'none',
-  infoText: '可以单独为每个聊天开启行为经验的学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台兜底，* 表示通配。',
+  infoText: '可以单独为每个聊天开启行为经验的学习和使用；平台和聊天流 ID 都留空表示全局默认，只填平台表示平台默认；越具体的规则越优先，* 与留空等价。',
   emptyText: '尚未配置任何行为学习规则。',
   fallbackNestedSchema: LEARNING_ITEM_FALLBACK_SCHEMA,
   renderItems: ({

@@ -224,3 +224,71 @@ def test_removed_reply_necessity_trigger_mode_hook_preserves_frequency_mode():
 
     assert result.migrated is False
     assert result.data["chat"]["reply_timing"]["reply_trigger_mode"] == "frequency"
+
+
+def _learning_rule(platform: str, item_id: str, rule_type: str, use: bool) -> dict:
+    return {"platform": platform, "item_id": item_id, "type": rule_type, "use": use, "learn": True}
+
+
+def _upgrade_learning_list(learning_list: list[dict]) -> list[dict]:
+    result = apply_config_upgrade_hooks(
+        {"expression": {"learning_list": learning_list}},
+        config_name="bot_config.toml",
+        old_ver="8.14.59",
+        new_ver="8.14.60",
+    )
+    return result.data["expression"]["learning_list"]
+
+
+def test_wildcard_learning_rule_replaces_same_scope_default():
+    # 旧逻辑里通配压过平台兜底，不论书写顺序，合并后保留通配那条的开关。
+    assert _upgrade_learning_list(
+        [
+            _learning_rule("qq", "", "group", False),
+            _learning_rule("qq", "*", "group", True),
+            _learning_rule("qq", "123", "group", False),
+            _learning_rule("", "", "group", False),
+        ]
+    ) == [
+        _learning_rule("qq", "", "group", True),
+        _learning_rule("qq", "123", "group", False),
+        _learning_rule("", "", "group", False),
+    ]
+
+
+def test_global_wildcard_learning_rule_keeps_other_chat_type_behavior():
+    # *:* 只对自己的聊天类型生效，另一类型原本落到留空默认，拆成两条默认规则保持不变。
+    assert _upgrade_learning_list(
+        [
+            _learning_rule("", "", "group", False),
+            _learning_rule("*", "*", "group", True),
+        ]
+    ) == [
+        _learning_rule("", "", "group", True),
+        _learning_rule("", "", "private", False),
+    ]
+
+    # 没有留空默认时，另一类型原本未命中任何规则，即使用与学习都开启。
+    assert _upgrade_learning_list([_learning_rule("*", "*", "private", False)]) == [
+        _learning_rule("", "", "group", True),
+        _learning_rule("", "", "private", False),
+    ]
+
+
+def test_learning_rule_merge_hook_drops_dead_defaults_and_skips_clean_config():
+    # 留空默认只有第一条生效；半边留空的通配从不命中。
+    assert _upgrade_learning_list(
+        [
+            _learning_rule("", "", "group", False),
+            _learning_rule("", "", "private", True),
+            _learning_rule("*", "", "group", True),
+        ]
+    ) == [_learning_rule("", "", "group", False)]
+
+    clean_config = {
+        "jargon": {"learning_list": [_learning_rule("", "", "group", True), _learning_rule("qq", "", "group", True)]},
+        "experimental": {"behavior_learning_list": [_learning_rule("qq", "*", "group", True)]},
+    }
+    result = apply_config_upgrade_hooks(clean_config, "bot_config.toml", "8.14.59", "8.14.60")
+    assert result.reason == "8.14.60:experimental.behavior_learning_list"
+    assert result.data["experimental"]["behavior_learning_list"] == [_learning_rule("qq", "", "group", True)]

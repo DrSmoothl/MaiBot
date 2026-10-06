@@ -21,8 +21,9 @@ export function GlobalLearningSettings({ values, sections, onChange }: GlobalLea
       {sections.map((section) => {
         const value = values[section]?.learning_list
         const rules = Array.isArray(value) ? value as LearningRule[] : []
-        // 与后端一致：平台和目标均为空的第一条规则是全局默认，不区分聊天类型。
-        const globalIndex = rules.findIndex((rule) => !rule.platform.trim() && !rule.item_id.trim())
+        // 与后端一致：平台和目标均为空（* 与留空等价）的第一条规则是全局默认。
+        const isBlank = (value: string) => value.trim() === '' || value.trim() === '*'
+        const globalIndex = rules.findIndex((rule) => isBlank(rule.platform) && isBlank(rule.item_id))
         const globalRule = globalIndex >= 0 ? rules[globalIndex] : {
           platform: '', item_id: '', type: 'group' as const, use: true, learn: true,
         }
