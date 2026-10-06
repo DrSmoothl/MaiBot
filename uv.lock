@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -902,7 +902,7 @@ requires-dist = [
     { name = "jieba", specifier = ">=0.42.1" },
     { name = "json-repair", specifier = ">=0.60.1,<0.61" },
     { name = "jsonschema", specifier = ">=4.26.0,<5" },
-    { name = "maibot-dashboard", specifier = "==1.8.3" },
+    { name = "maibot-dashboard", specifier = "==1.8.3.dev20261006484" },
     { name = "maibot-plugin-sdk", specifier = ">=2.9.0" },
     { name = "maim-message", specifier = "==0.6.8" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
@@ -939,11 +939,11 @@ dev = [
 
 [[package]]
 name = "maibot-dashboard"
-version = "1.8.3"
+version = "1.8.3.dev20261006484"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/94/58/0344596ebad82d5a4e4c2371e79b870fb04a3ab2fc0c11d9d0e333525234/maibot_dashboard-1.8.3.tar.gz", hash = "sha256:83dcf59ab4df905c4c23584e1dce7ca5ac524974aab278c118d2bd3983144a04", size = 3032403, upload-time = "2026-10-06T09:02:16.654Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/8d/627f611c69e10293689af3796fb20b2ba059a0ebb99b298becc599c14fb2/maibot_dashboard-1.8.3.dev20261006484.tar.gz", hash = "sha256:220cd375ca283c01a40ea0a48f438d7370002ed92c11507e33399dd2e0f902f6", size = 3033896, upload-time = "2026-10-06T12:21:03.006Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/0a/191639941084f170ab6e886d0fc212dcd6c74a4b70938b7fe6492a3c3a24/maibot_dashboard-1.8.3-py3-none-any.whl", hash = "sha256:2d2386dd5d9d7eb8c3fcab4c4cf1d2b4eed0a110db21b30544d8d474f71b19c1", size = 3117513, upload-time = "2026-10-06T09:02:14.284Z" },
+    { url = "https://files.pythonhosted.org/packages/83/ed/fd73f75164b57902aa23401a0106cb85fdb6e9d16fc61e8f1ae3caf96160/maibot_dashboard-1.8.3.dev20261006484-py3-none-any.whl", hash = "sha256:2f23a640f352d33b1546b163b42d9e0da87f71be8e6d9256ed1e9aa713f261c8", size = 3117863, upload-time = "2026-10-06T12:21:00.664Z" },
 ]
 
 [[package]]
