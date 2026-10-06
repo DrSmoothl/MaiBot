@@ -73,6 +73,11 @@ async def get_plugin_user_state(plugin_id: str, user_id: str) -> JSONResponse:
     return await _request_stats_service("GET", f"/stats/user-state?{query}")
 
 
+@router.get("/stats-proxy/stats/user-states")
+async def get_plugin_user_states(user_id: str) -> JSONResponse:
+    return await _request_stats_service("GET", f"/stats/user-states?user_id={quote(user_id, safe='')}")
+
+
 @router.get("/stats-proxy/stats/summary")
 async def get_plugin_stats_summary() -> JSONResponse:
     return await _request_stats_service("GET", "/stats/summary")

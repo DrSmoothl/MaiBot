@@ -1294,6 +1294,7 @@ class PluginRunner:
         self._rpc_client.register_method("plugin.invoke_action", self._handle_invoke)
         self._rpc_client.register_method("plugin.invoke_api", self._handle_invoke)
         self._rpc_client.register_method("plugin.invoke_tool", self._handle_invoke)
+        self._rpc_client.register_method("plugin.invoke_reply_extension", self._handle_invoke)
         self._rpc_client.register_method("plugin.invoke_message_gateway", self._handle_invoke)
         self._rpc_client.register_method("plugin.invoke_llm_provider", self._handle_llm_provider_invoke)
         self._rpc_client.register_method("plugin.emit_event", self._handle_event_invoke)

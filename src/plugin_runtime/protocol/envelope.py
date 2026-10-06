@@ -189,8 +189,10 @@ class ComponentDeclaration(BaseModel):
 
     name: str = Field(description="组件名称")
     """组件名称"""
-    component_type: str = Field(description="组件类型：action/command/tool/event_handler/hook_handler/message_gateway")
-    """组件类型：`action`/`command`/`tool`/`event_handler`/`hook_handler`/`message_gateway`"""
+    component_type: str = Field(
+        description="组件类型：ACTION/COMMAND/TOOL/EVENT_HANDLER/HOOK_HANDLER/MESSAGE_GATEWAY/HOME_CARD/REPLY_EXTENSION"
+    )
+    """组件协议类型，包括随 reply 注册参数与消息处理器的 REPLY_EXTENSION。"""
     plugin_id: str = Field(description="所属插件 ID")
     """所属插件 ID"""
     chat_scope: str = Field(default="all", description="组件适用聊天类型：all/group/private")
