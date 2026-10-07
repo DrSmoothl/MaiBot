@@ -209,10 +209,10 @@ describe('AdapterHostPolicyPanel', () => {
       makeResponse(pluginId, { policy }))
     await renderReadyPanel()
 
-    await user.click(screen.getByRole('button', { name: '添加:输入接收消息的用户 ID', exact: true }))
+    await user.click(screen.getByRole('button', { name: '添加:输入接收消息的用户 ID' }))
     await user.click(screen.getByRole('button', { name: '复制当前组' }))
     await user.type(screen.getByLabelText('分组名称'), '测试组')
-    await user.click(screen.getByRole('button', { name: '创建', exact: true }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
     await waitFor(() => expect(updateAdapterHostPolicy).toHaveBeenCalledTimes(1))
     const copied = vi.mocked(updateAdapterHostPolicy).mock.calls[0][1]
     expect(copied.active_group).toBe('default')
@@ -220,7 +220,7 @@ describe('AdapterHostPolicyPanel', () => {
     expect(copied.policy_groups?.[1].private.allow_ids).toEqual(['new-item'])
 
     await waitFor(() => expect(screen.getByRole('button', { name: '新建分组' })).toBeEnabled())
-    await user.click(screen.getByRole('button', { name: '测试组', exact: true }))
+    await user.click(screen.getByRole('button', { name: '测试组' }))
     await waitFor(() => expect(updateAdapterHostPolicy).toHaveBeenCalledTimes(2))
     expect(vi.mocked(updateAdapterHostPolicy).mock.calls[1][1].active_group).toBe(copied.policy_groups?.[1].id)
     await waitFor(() => expect(screen.getByRole('button', { name: '新建分组' })).toBeEnabled())
