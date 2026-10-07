@@ -8,6 +8,7 @@ import json
 import traceback
 
 from src.chat.replyer.replyer_manager import replyer_manager
+from src.chat.utils.utils import is_bot_self
 from src.cli.maisaka_cli_sender import CLI_PLATFORM_NAME, render_cli_message
 from src.common.data_models.reply_generation_data_models import ReplyGenerationResult, build_reply_monitor_detail
 from src.common.logger import get_logger
@@ -636,8 +637,14 @@ async def handle_tool(
         )
 
     target_user_info = target_message.message_info.user_info
-    target_user_name = target_user_info.user_cardname or target_user_info.user_nickname or target_user_info.user_id
     bot_name = config_module.global_config.bot.nickname.strip() or "MaiSaka"
+    if is_bot_self(tool_ctx.runtime.chat_stream.platform, target_user_info.user_id):
+        # 自身消息只是回复的引用锚点，不能把其作者当作实际收件人。
+        target_user_name = ""
+        reply_receipt = f'"{bot_name}"已生成并向当前会话发送了回复"{combined_reply_text}"'
+    else:
+        target_user_name = target_user_info.user_cardname or target_user_info.user_nickname or target_user_info.user_id
+        reply_receipt = f'"{bot_name}"已生成并向"{target_user_name}"发送了回复"{combined_reply_text}"'
 
     if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
@@ -665,7 +672,7 @@ async def handle_tool(
         )
     return tool_ctx.build_success_result(
         invocation.tool_name,
-        f'"{bot_name}"已生成并向"{target_user_name}"发送了回复"{combined_reply_text}"',
+        reply_receipt,
         structured_content={
             "msg_id": target_message_id,
             "set_quote": set_quote,
