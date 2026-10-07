@@ -73,7 +73,7 @@ MaiSaka is more than just a bot, and more than a "helpful assistant" that comple
 
 - **Download**: Visit the [Release](https://github.com/Mai-with-u/MaiBot/releases/) page to get the latest version.
 
-- **[Deployment Guide](https://docs.mai-mai.org/manual/deployment/)**
+- **[Deployment Guide](https://docs.mai-mai.org/manual/)**
 
 - **Easy-to-use MaiBot launcher (Windows/macOS)**: [Maibot-OK](https://github.com/Mai-with-u/MaiBotOneKey/releases/)
 

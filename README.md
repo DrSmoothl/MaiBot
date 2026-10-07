@@ -32,7 +32,7 @@
   <!-- Quick links -->
   <p>
     <a href="https://github.com/Mai-with-u/MaiBotOneKey/releases/"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-get-night.svg"><img src="depends-data/readme/key-get-day.svg" alt="下载启动器"></picture></a>
-    <a href="https://docs.mai-mai.org/manual/deployment/"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-setup-night.svg"><img src="depends-data/readme/key-setup-day.svg" alt="部署教程"></picture></a>
+    <a href="https://docs.mai-mai.org/manual/"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-setup-night.svg"><img src="depends-data/readme/key-setup-day.svg" alt="部署教程"></picture></a>
     <a href="https://docs.mai-mai.org"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-docs-night.svg"><img src="depends-data/readme/key-docs-day.svg" alt="文档"></picture></a>
     <a href="https://github.com/Mai-with-u/MaiBot/releases/"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-release-night.svg"><img src="depends-data/readme/key-release-day.svg" alt="发布页"></picture></a>
   </p>
@@ -78,7 +78,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 - **发布**：[Release](https://github.com/Mai-with-u/MaiBot/releases/) 页面展示了最新发布的正式版。
   <sub><sup><strong>Download</strong>: Visit the <a href="https://github.com/Mai-with-u/MaiBot/releases/">Release</a> page to get the latest version.</sup></sub>
 
-- **[部署教程](https://docs.mai-mai.org/manual/deployment/)**  
+- **[部署教程](https://docs.mai-mai.org/manual/)**  
 <sub><sup>Deployment Guide</sup></sub>
 
 - **方便使用的麦麦启动器下载 (Windows/MAC)**：[Maibot-OK](https://github.com/Mai-with-u/MaiBotOneKey/releases/)  

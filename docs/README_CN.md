@@ -73,7 +73,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 - **发布**：[Release](https://github.com/Mai-with-u/MaiBot/releases/) 页面展示了最新发布的正式版。
 
-- **[部署教程](https://docs.mai-mai.org/manual/deployment/)**
+- **[部署教程](https://docs.mai-mai.org/manual/)**
 
 - **方便使用的麦麦启动器下载 (Windows/MAC)**：[Maibot-OK](https://github.com/Mai-with-u/MaiBotOneKey/releases/)
 
