@@ -98,7 +98,7 @@ def _preserve_user_files(source: Path, target: Path) -> None:
         copied.append(relative)
 
 
-def _validate_candidate(candidate: Path, entry: PluginReleaseEntry, release: PluginRelease) -> None:
+def _validate_candidate(candidate: Path, entry: PluginReleaseEntry, release: PluginRelease) -> List[str]:
     _check_tree(candidate)
     if _git(candidate, "rev-parse", "HEAD").strip() != release.commit:
         raise HTTPException(status_code=409, detail="Tag 当前指向的 commit 与版本索引不一致，已停止安装")
@@ -120,7 +120,8 @@ def _validate_candidate(candidate: Path, entry: PluginReleaseEntry, release: Plu
     missing = validator.get_unsatisfied_plugin_dependencies(parsed, available)
     if missing:
         raise HTTPException(status_code=400, detail=f"插件依赖不满足：{'；'.join(missing)}")
-    # 切换基础插件的版本也不能破坏其他已安装插件的版本约束。
+    # 其他已安装插件的版本约束仅作提醒，不阻止用户切换基础插件的版本。
+    warnings: List[str] = []
     for directory in iter_plugin_directories():
         installed = load_manifest_json(directory / "_manifest.json")
         if not installed or installed.get("manifest_version") != 2 or installed.get("id") == parsed.id:
@@ -130,10 +131,11 @@ def _validate_candidate(candidate: Path, entry: PluginReleaseEntry, release: Plu
                 continue
             dependency = PluginDependencyDefinition.model_validate(declaration)
             if not validator.is_plugin_dependency_satisfied(dependency, parsed.version):
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"该版本不满足已安装插件 {installed['id']} 的依赖要求：{dependency.version_spec}",
+                warnings.append(
+                    f"已安装插件 {installed['name']}（{installed['id']}）要求 {parsed.id} "
+                    f"版本 {dependency.version_spec}，本次安装 {parsed.version}，该插件可能无法运行"
                 )
+    return warnings
 
 
 async def _stop_runtime(plugin_id: str) -> List[str]:
@@ -231,6 +233,12 @@ async def _install_release(
                 await asyncio.to_thread(_preserve_user_files, target, candidate)
             await asyncio.to_thread(replace_files)
             swapped = True
+            if existing is None:
+                # 整个目录移入时可能没有源码事件，首次安装必须主动同步运行时。
+                try:
+                    await get_plugin_runtime_manager().activate_installed_plugin(canonical_id)
+                except RuntimeError as exc:
+                    raise HTTPException(status_code=409, detail=f"插件文件已安装，但运行时加载失败：{exc}") from exc
         except Exception as exc:
             failure = exc
             raise
@@ -254,18 +262,22 @@ async def _install_release(
         )
         if not result.get("success"):
             raise HTTPException(status_code=502, detail=result.get("error", "下载发布版本失败"))
-        await asyncio.to_thread(_validate_candidate, candidate, entry, release)
+        warnings = await asyncio.to_thread(_validate_candidate, candidate, entry, release)
         await run_on_main_loop(get_plugin_runtime_manager().run_plugin_file_update(replace_and_reload))
     finally:
         if candidate.exists():
             # candidate 来自插件根目录下固定的临时目录，且下载文件已拒绝链接。
             await asyncio.to_thread(remove_tree, candidate)
-    await update_progress(stage="success", progress=100, message=f"已安装发布版本 {release.version}", operation=operation, plugin_id=plugin_id)
+    message = f"已安装发布版本 {release.version}"
+    if warnings:
+        message += f"；依赖提醒：{'；'.join(warnings)}"
+    await update_progress(stage="success", progress=100, message=message, operation=operation, plugin_id=plugin_id)
     return {
         "success": swapped, "message": "插件版本安装成功", "plugin_id": canonical_id,
         "plugin_name": release.manifest["name"], "version": release.version,
         "old_version": old_version, "new_version": release.version, "commit": release.commit,
         "update_mode": "release", "backup_path": str(backup) if existing else None,
+        "warnings": warnings,
     }
 
 

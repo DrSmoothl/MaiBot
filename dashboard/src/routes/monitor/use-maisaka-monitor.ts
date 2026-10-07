@@ -3,7 +3,7 @@
  *
  * 管理 WebSocket 订阅与事件流的状态。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 
 import type { MaisakaMonitorEvent } from '@/lib/maisaka-monitor-client'
@@ -90,6 +90,12 @@ function resolveSessionDisplayName({
 
 let entryCounter = 0
 let cachedTimeline: TimelineEntry[] = []
+const emptyTimeline: TimelineEntry[] = []
+const timelinesBySession = new Map<string, TimelineEntry[]>()
+const entriesById = new Map<string, TimelineEntry>()
+const messageEntryIds = new Map<string, string>()
+const plannerEntryIds = new Map<string, string>()
+let cachedLatestMessages = new Map<string, TimelineEntry>()
 let cachedSessions: Map<string, SessionInfo> = new Map()
 let cachedStageStatuses: Map<string, StageStatusInfo> = new Map()
 let cachedSelectedSession: string | null = null
@@ -183,6 +189,7 @@ function notifyStoreListeners() {
   if (monitorInitialSyncPending) {
     return
   }
+  publishSnapshots()
   storeListeners.forEach((listener) => listener())
 }
 
@@ -256,6 +263,7 @@ async function loadMonitorSnapshot() {
       .map(toTimelineEntry)
       .sort(compareTimelineEntries)
       .slice(-MAX_TIMELINE_ENTRIES)
+    rebuildTimelineIndexes()
     cachedSeenEventIds = new Set(
       cachedTimeline
         .map((entry) => entry.eventId)
@@ -323,7 +331,7 @@ async function flushMonitorSnapshot() {
       await tx.objectStore('timeline').put({ ...entry, persistedAt })
     }
     for (const entryId of updatedEntryIds) {
-      const entry = cachedTimeline.find((item) => item.id === entryId)
+      const entry = entriesById.get(entryId)
       if (entry) {
         await tx.objectStore('timeline').put({ ...entry, persistedAt })
       }
@@ -395,9 +403,92 @@ function shouldKeepMonitorActive() {
 }
 
 function appendTimelineEntry(entry: TimelineEntry) {
-  const next = [...cachedTimeline, entry].sort(compareTimelineEntries)
-  cachedTimeline =
-    next.length > MAX_TIMELINE_ENTRIES ? next.slice(next.length - MAX_TIMELINE_ENTRIES) : next
+  cachedTimeline = insertTimelineEntry(cachedTimeline, entry)
+  timelinesBySession.set(
+    entry.sessionId,
+    insertTimelineEntry(timelinesBySession.get(entry.sessionId) ?? emptyTimeline, entry)
+  )
+  indexTimelineEntry(entry)
+  if (cachedTimeline.length > MAX_TIMELINE_ENTRIES) {
+    const removed = cachedTimeline[0]
+    cachedTimeline = cachedTimeline.slice(1)
+    const sessionTimeline = timelinesBySession.get(removed.sessionId)!
+    timelinesBySession.set(removed.sessionId, sessionTimeline.filter((item) => item !== removed))
+    entriesById.delete(removed.id)
+    const key = getEntryLookupKey(removed)
+    if (key) {
+      const index = isMessageEntry(removed) ? messageEntryIds : plannerEntryIds
+      if (index.get(key) === removed.id) index.delete(key)
+    }
+  }
+}
+
+/** 正常实时事件直接追加；回放乱序时二分插入，不为每条事件重排全部历史。 */
+function insertTimelineEntry(timeline: TimelineEntry[], entry: TimelineEntry) {
+  const last = timeline.at(-1)
+  if (!last || compareTimelineEntries(last, entry) <= 0) return [...timeline, entry]
+  let low = 0
+  let high = timeline.length
+  while (low < high) {
+    const mid = (low + high) >>> 1
+    if (compareTimelineEntries(timeline[mid], entry) <= 0) low = mid + 1
+    else high = mid
+  }
+  return [...timeline.slice(0, low), entry, ...timeline.slice(low)]
+}
+
+function isMessageEntry(entry: TimelineEntry) {
+  return entry.type === 'message.ingested' || entry.type === 'message.sent'
+}
+
+function getEntryLookupKey(entry: TimelineEntry): string | null {
+  const data = entry.data as unknown as Record<string, unknown>
+  if (isMessageEntry(entry)) return JSON.stringify([entry.sessionId, data.message_id])
+  if (
+    (entry.type === 'planner.progress' || entry.type === 'planner.finalized') &&
+    typeof data.run_id === 'string' &&
+    data.run_id.length > 0
+  ) {
+    return JSON.stringify([entry.sessionId, data.run_id, data.cycle_id])
+  }
+  return null
+}
+
+function indexTimelineEntry(entry: TimelineEntry) {
+  entriesById.set(entry.id, entry)
+  const key = getEntryLookupKey(entry)
+  if (key) (isMessageEntry(entry) ? messageEntryIds : plannerEntryIds).set(key, entry.id)
+  if (isMessageEntry(entry)) {
+    const latest = cachedLatestMessages.get(entry.sessionId)
+    if (!latest || latest.id === entry.id || compareTimelineEntries(latest, entry) < 0) {
+      cachedLatestMessages = new Map(cachedLatestMessages).set(entry.sessionId, entry)
+    }
+  }
+}
+
+function rebuildTimelineIndexes() {
+  timelinesBySession.clear()
+  entriesById.clear()
+  messageEntryIds.clear()
+  plannerEntryIds.clear()
+  cachedLatestMessages = new Map()
+  for (const entry of cachedTimeline) {
+    const sessionTimeline = timelinesBySession.get(entry.sessionId) ?? []
+    sessionTimeline.push(entry)
+    timelinesBySession.set(entry.sessionId, sessionTimeline)
+    indexTimelineEntry(entry)
+  }
+}
+
+/** 只替换所属会话的数组，其他会话保留引用，详情订阅不会被无关更新唤醒。 */
+function replaceTimelineEntry(existing: TimelineEntry, updated: TimelineEntry) {
+  const next = cachedTimeline.slice()
+  next[next.indexOf(existing)] = updated
+  cachedTimeline = next
+  const sessionTimeline = timelinesBySession.get(existing.sessionId)!.slice()
+  sessionTimeline[sessionTimeline.indexOf(existing)] = updated
+  timelinesBySession.set(existing.sessionId, sessionTimeline)
+  indexTimelineEntry(updated)
 }
 
 function schedulePersistUpdatedTimelineEntry(entryId: string, sessionId?: string) {
@@ -490,7 +581,7 @@ function updateSessionInfo(event: MaisakaMonitorEvent, sessionId: string, timest
       groupId,
       userId,
       platform,
-      lastActivity: timestamp,
+      lastActivity: Math.max(existing?.lastActivity ?? 0, timestamp),
       eventCount: (existing?.eventCount ?? 0) + 1,
     })
   } else {
@@ -507,7 +598,7 @@ function updateSessionInfo(event: MaisakaMonitorEvent, sessionId: string, timest
       groupId: groupId ?? existing.groupId,
       userId: userId ?? existing.userId,
       platform: platform ?? existing.platform,
-      lastActivity: timestamp,
+      lastActivity: Math.max(existing.lastActivity, timestamp),
       eventCount: existing.eventCount + 1,
     })
   }
@@ -580,38 +671,25 @@ function updateTimelineMessageContent(event: MaisakaMonitorEvent, sessionId: str
     return false
   }
 
-  let updatedEntryId = ''
-  const nextTimeline = cachedTimeline.map((entry) => {
-    if (
-      entry.sessionId !== sessionId ||
-      (entry.type !== 'message.ingested' && entry.type !== 'message.sent')
-    ) {
-      return entry
+  const entryId = messageEntryIds.get(JSON.stringify([sessionId, messageId]))
+  const entry = entryId ? entriesById.get(entryId) : undefined
+  if (!entry) {
+    // 历史裁剪不清除侧栏摘要；迟到的识图结果仍须更新该群保留的最新消息。
+    const latest = cachedLatestMessages.get(sessionId)
+    if (latest && (latest.data as unknown as Record<string, unknown>).message_id === messageId) {
+      cachedLatestMessages = new Map(cachedLatestMessages).set(sessionId, {
+        ...latest,
+        data: { ...latest.data, content, reply_to: replyTo, media } as TimelineEntry['data'],
+      })
     }
-
-    const entryData = entry.data as unknown as Record<string, unknown>
-    if (entryData.message_id !== messageId) {
-      return entry
-    }
-
-    updatedEntryId = entry.id
-    return {
-      ...entry,
-      data: {
-        ...entryData,
-        content,
-        reply_to: replyTo,
-        media,
-      } as TimelineEntry['data'],
-    }
-  })
-
-  if (!updatedEntryId) {
     return false
   }
 
-  cachedTimeline = nextTimeline
-  schedulePersistUpdatedTimelineEntry(updatedEntryId, sessionId)
+  replaceTimelineEntry(entry, {
+    ...entry,
+    data: { ...entry.data, content, reply_to: replyTo, media } as TimelineEntry['data'],
+  })
+  schedulePersistUpdatedTimelineEntry(entry.id, sessionId)
   return true
 }
 
@@ -644,30 +722,25 @@ function handleMonitorEvent(event: MaisakaMonitorEvent) {
   }
 
   if (event.type === 'message.updated') {
-    const updated = updateTimelineMessageContent(event, sessionId)
+    updateTimelineMessageContent(event, sessionId)
     updateSessionInfo(event, sessionId, timestamp)
-    if (updated) {
-      notifyStoreListeners()
-    }
+    schedulePersistMonitorSnapshot(undefined, sessionId)
+    notifyStoreListeners()
     return
   }
 
   if (event.type === 'planner.progress' || event.type === 'planner.finalized') {
     const cycleId = dataRecord.cycle_id
     const runId = dataRecord.run_id
-    const existing = cachedTimeline.find(
-      (entry) =>
-        typeof runId === 'string' &&
-        runId.length > 0 &&
-        (entry.type === 'planner.progress' || entry.type === 'planner.finalized') &&
-        entry.sessionId === sessionId &&
-        (entry.data as unknown as Record<string, unknown>).cycle_id === cycleId &&
-        (entry.data as unknown as Record<string, unknown>).run_id === runId
-    )
+    const entryId = plannerEntryIds.get(JSON.stringify([sessionId, runId, cycleId]))
+    const existing = entryId ? entriesById.get(entryId) : undefined
     if (existing) {
+      // 回放与实时推送可能交错；旧版本不能把正在执行/已完成的轮次回滚。
+      const previousEventId = getMonitorEventId(existing.data as unknown as Record<string, unknown>)
+      if (eventId !== null && previousEventId !== null && eventId <= previousEventId) return
       // 保留首次出现的位置，让正在执行的工具在原卡片内更新。
       const updated: TimelineEntry = { ...existing, type: event.type, data: event.data }
-      cachedTimeline = cachedTimeline.map((entry) => (entry.id === existing.id ? updated : entry))
+      replaceTimelineEntry(existing, updated)
       updateSessionInfo(event, sessionId, timestamp)
       schedulePersistUpdatedTimelineEntry(existing.id, sessionId)
       notifyStoreListeners()
@@ -761,86 +834,105 @@ function stopMonitorSubscriptionIfIdle() {
   }
 }
 
-export function useMaisakaMonitor() {
-  const [timeline, setTimeline] = useState<TimelineEntry[]>(cachedTimeline)
-  const [sessions, setSessions] = useState<Map<string, SessionInfo>>(new Map(cachedSessions))
-  const [stageStatuses, setStageStatuses] = useState<Map<string, StageStatusInfo>>(
-    new Map(cachedStageStatuses)
-  )
-  const [selectedSession, setSelectedSessionState] = useState<string | null>(cachedSelectedSession)
-  const [connected, setConnected] = useState(cachedConnected)
+function clearTimeline() {
+  cachedTimeline = []
+  rebuildTimelineIndexes()
+  cachedSessions = new Map()
+  cachedStageStatuses = new Map()
+  cachedSelectedSession = null
+  pendingPersistEntries = []
+  pendingPersistUpdatedEntryIds = new Set()
+  pendingPersistSessionIds = new Set()
+  pendingPersistMeta = false
+  void clearPersistedMonitorSnapshot()
+  notifyStoreListeners()
+}
 
-  useEffect(() => {
-    activeConsumerCount += 1
-    ensureMonitorSubscription()
-    const syncFromStore = () => {
-      setTimeline(cachedTimeline)
-      setSessions(new Map(cachedSessions))
-      setStageStatuses(new Map(cachedStageStatuses))
-      setSelectedSessionState(cachedSelectedSession)
-      setConnected(cachedConnected)
-    }
+function setSelectedSession(sessionId: string | null) {
+  if (cachedSelectedSession === sessionId) return
+  cachedSelectedSession = sessionId
+  schedulePersistMonitorSnapshot()
+  notifyStoreListeners()
+}
 
-    storeListeners.add(syncFromStore)
-    syncFromStore()
-    return () => {
-      storeListeners.delete(syncFromStore)
-      activeConsumerCount = Math.max(0, activeConsumerCount - 1)
-      stopMonitorSubscriptionIfIdle()
-    }
-  }, [])
-
-  const clearTimeline = useCallback(() => {
-    cachedTimeline = []
-    cachedSessions = new Map()
-    cachedStageStatuses = new Map()
-    cachedSelectedSession = null
-    setTimeline([])
-    setSessions(new Map())
-    setStageStatuses(new Map())
-    setSelectedSessionState(null)
-    pendingPersistEntries = []
-    pendingPersistUpdatedEntryIds = new Set()
-    pendingPersistSessionIds = new Set()
-    pendingPersistMeta = false
-    void clearPersistedMonitorSnapshot()
-    notifyStoreListeners()
-  }, [])
-
-  const setSelectedSession = useCallback((sessionId: string | null) => {
-    cachedSelectedSession = sessionId
-    setSelectedSessionState(sessionId)
-    schedulePersistMonitorSnapshot()
-    notifyStoreListeners()
-  }, [])
-
-  /** 当前选中会话的时间线 */
-  const timelineBySession = useMemo(() => {
-    const groupedTimeline = new Map<string, TimelineEntry[]>()
-    for (const entry of timeline) {
-      const sessionTimeline = groupedTimeline.get(entry.sessionId)
-      if (sessionTimeline) {
-        sessionTimeline.push(entry)
-      } else {
-        groupedTimeline.set(entry.sessionId, [entry])
-      }
-    }
-    return groupedTimeline
-  }, [timeline])
-
-  const filteredTimeline = useMemo(
-    () => (selectedSession ? (timelineBySession.get(selectedSession) ?? []) : timeline),
-    [selectedSession, timeline, timelineBySession]
-  )
-
+function getSessionSnapshot() {
   return {
-    timeline: filteredTimeline,
-    allTimeline: timeline,
-    sessions,
-    stageStatuses,
-    selectedSession,
-    setSelectedSession,
-    connected,
+    timeline: cachedSelectedSession
+      ? (timelinesBySession.get(cachedSelectedSession) ?? emptyTimeline)
+      : cachedTimeline,
+    selectedSession: cachedSelectedSession,
+    selectedStageStatus: cachedSelectedSession
+      ? cachedStageStatuses.get(cachedSelectedSession)
+      : undefined,
     clearTimeline,
   }
+}
+
+function getOverviewSnapshot() {
+  return {
+    sessions: cachedSessions,
+    stageStatuses: cachedStageStatuses,
+    latestMessages: cachedLatestMessages,
+    selectedSession: cachedSelectedSession,
+    connected: cachedConnected,
+    setSelectedSession,
+  }
+}
+
+let sessionSnapshot = getSessionSnapshot()
+let overviewSnapshot = getOverviewSnapshot()
+let fullSnapshot = { ...overviewSnapshot, ...sessionSnapshot, allTimeline: cachedTimeline }
+
+/** 摘要可以全局更新；当前会话的时间线/阶段未变时，保持详情快照引用不变。 */
+function publishSnapshots() {
+  const nextSession = getSessionSnapshot()
+  if (
+    nextSession.timeline !== sessionSnapshot.timeline ||
+    nextSession.selectedSession !== sessionSnapshot.selectedSession ||
+    nextSession.selectedStageStatus !== sessionSnapshot.selectedStageStatus
+  ) {
+    sessionSnapshot = nextSession
+  }
+
+  const nextOverview = getOverviewSnapshot()
+  if (
+    nextOverview.sessions !== overviewSnapshot.sessions ||
+    nextOverview.stageStatuses !== overviewSnapshot.stageStatuses ||
+    nextOverview.latestMessages !== overviewSnapshot.latestMessages ||
+    nextOverview.selectedSession !== overviewSnapshot.selectedSession ||
+    nextOverview.connected !== overviewSnapshot.connected
+  ) {
+    overviewSnapshot = nextOverview
+  }
+
+  fullSnapshot = { ...overviewSnapshot, ...sessionSnapshot, allTimeline: cachedTimeline }
+}
+
+function subscribeMonitorStore(listener: () => void) {
+  activeConsumerCount += 1
+  storeListeners.add(listener)
+  ensureMonitorSubscription()
+  return () => {
+    storeListeners.delete(listener)
+    activeConsumerCount = Math.max(0, activeConsumerCount - 1)
+    stopMonitorSubscriptionIfIdle()
+  }
+}
+
+const readSessionSnapshot = () => sessionSnapshot
+const readOverviewSnapshot = () => overviewSnapshot
+const readFullSnapshot = () => fullSnapshot
+
+/** 侧边栏只订阅各会话摘要，不再遍历整个事件历史寻找最新消息。 */
+export function useMaisakaMonitorOverview() {
+  return useSyncExternalStore(subscribeMonitorStore, readOverviewSnapshot)
+}
+
+/** 其他群的事件继续入库和更新摘要，但不会触发当前详情重渲染。 */
+export function useMaisakaMonitorSession() {
+  return useSyncExternalStore(subscribeMonitorStore, readSessionSnapshot)
+}
+
+export function useMaisakaMonitor() {
+  return useSyncExternalStore(subscribeMonitorStore, readFullSnapshot)
 }

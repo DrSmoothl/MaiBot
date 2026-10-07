@@ -40,6 +40,8 @@ interface MarketplaceTabProps {
   gitStatus: GitStatus | null
   maimaiVersion: MaimaiVersion | null
   pluginStats: Record<string, PluginStatsData>
+  /** 排序专用的统计快照：不随本次会话内的点赞变化，避免卡片在点击后当场换位；缺省时与 pluginStats 相同 */
+  sortPluginStats?: Record<string, PluginStatsData>
   pluginProgressById: PluginProgressById
   likingPluginIds: Set<string>
   onInstall: (plugin: PluginInfo) => void
@@ -234,6 +236,7 @@ export function MarketplaceTab({
   gitStatus,
   maimaiVersion,
   pluginStats,
+  sortPluginStats = pluginStats,
   pluginProgressById,
   likingPluginIds,
   onInstall,
@@ -253,7 +256,7 @@ export function MarketplaceTab({
   const getPluginStats = (plugin: PluginInfo): PluginStatsData | undefined => {
     const statsIds = [plugin.manifest?.id, plugin.id].filter((id): id is string => Boolean(id))
 
-    return statsIds.map((id) => pluginStats[id]).find(Boolean)
+    return statsIds.map((id) => sortPluginStats[id]).find(Boolean)
   }
 
   const getSortValue = (
@@ -317,6 +320,7 @@ export function MarketplaceTab({
     const matchesSearch =
       searchQuery === '' ||
       plugin.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      plugin.manifest.author?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       plugin.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (plugin.manifest.keywords &&
         plugin.manifest.keywords.some((k) => k.toLowerCase().includes(searchQuery.toLowerCase())))

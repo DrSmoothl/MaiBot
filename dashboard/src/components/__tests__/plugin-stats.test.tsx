@@ -5,6 +5,7 @@ import { PluginStats } from '../plugin-stats'
 
 import {
   dislikePlugin,
+  getPluginReviewIdentity,
   getPluginStats,
   getPluginUserState,
   likePlugin,
@@ -21,6 +22,7 @@ vi.mock('@/hooks/use-toast', () => ({
 }))
 
 vi.mock('@/lib/plugin-stats', () => ({
+  getPluginReviewIdentity: vi.fn(),
   getPluginStats: vi.fn(),
   getPluginUserState: vi.fn(),
   likePlugin: vi.fn(),
@@ -36,6 +38,7 @@ function makeStats(overrides: Partial<PluginStatsData> = {}): PluginStatsData {
     downloads: 1234,
     rating: 4.2,
     rating_count: 9,
+    comment_count: 9,
     ...overrides,
   }
 }
@@ -59,6 +62,7 @@ function getStarButtons(dialog: HTMLElement): HTMLElement[] {
 
 describe('PluginStats', () => {
   beforeEach(() => {
+    vi.mocked(getPluginReviewIdentity).mockResolvedValue({ username: '麦麦' })
     vi.mocked(getPluginStats).mockResolvedValue(makeStats())
     vi.mocked(getPluginUserState).mockResolvedValue(makeUserState())
   })
@@ -111,7 +115,7 @@ describe('PluginStats', () => {
     vi.mocked(getPluginStats).mockResolvedValue(
       makeStats({
         recent_ratings: [
-          { user_id: 'u1', rating: null, comment: '非常好用', created_at: '2026-01-02T00:00:00Z' },
+          { user_id: 'u1', username: '测试用户', rating: null, comment: '非常好用', created_at: '2026-01-02T00:00:00Z' },
           { user_id: 'u2', rating: 5, created_at: '2026-01-03T00:00:00Z' },
           { user_id: 'u3', rating: 4, comment: '还不错', created_at: '2026-01-04T00:00:00Z' },
         ],
@@ -125,10 +129,10 @@ describe('PluginStats', () => {
     expect(screen.getByText('最近评分')).toBeInTheDocument()
     expect(screen.queryByText('最近评价')).not.toBeInTheDocument()
 
-    // 评论分区展示评论正文；无评分的评论条目标注「仅评论」
+    // 评论分区展示评论正文和用户名。
     expect(screen.getByText('非常好用')).toBeInTheDocument()
     expect(screen.getByText('还不错')).toBeInTheDocument()
-    expect(screen.getByText('仅评论')).toBeInTheDocument()
+    expect(screen.getByText('测试用户')).toBeInTheDocument()
   })
 
   it('只有纯评分条目时仅渲染「最近评分」，不渲染「最近评论」', async () => {
@@ -223,6 +227,7 @@ describe('PluginStats', () => {
       user_rating: 4,
       rating: 4.5,
       rating_count: 10,
+      comment_count: 10,
     })
 
     render(<PluginStats pluginId="demo-plugin" />)
@@ -238,7 +243,7 @@ describe('PluginStats', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '提交评价' }))
 
     await waitFor(() => {
-      expect(ratePlugin).toHaveBeenCalledWith('demo-plugin', 4, undefined)
+      expect(ratePlugin).toHaveBeenCalledWith('demo-plugin', 4, undefined, undefined, { username: '麦麦', anonymous: false })
     })
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -266,7 +271,7 @@ describe('PluginStats', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '提交评价' }))
 
     await waitFor(() => {
-      expect(ratePlugin).toHaveBeenCalledWith('demo-plugin', undefined, '很好用')
+      expect(ratePlugin).toHaveBeenCalledWith('demo-plugin', undefined, '很好用', undefined, { username: '麦麦', anonymous: false })
     })
     // 评论保存后按钮文案变为「修改评价」
     await waitFor(() => {

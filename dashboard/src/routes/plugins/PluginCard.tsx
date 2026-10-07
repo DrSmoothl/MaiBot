@@ -52,7 +52,7 @@ export function PluginCard({
   const likeCount = stats?.likes ?? 0
   const downloadCount = stats?.downloads ?? plugin.downloads ?? 0
   const ratingValue = stats?.rating ?? plugin.rating ?? 0
-  const reviewCount = stats?.rating_count ?? plugin.review_count ?? 0
+  const reviewCount = stats?.comment_count ?? plugin.review_count ?? 0
   const isLiked = stats?.liked === true
   const isLiking = likingPluginIds.has(plugin.manifest?.id || plugin.id)
   const isInstalling = loadProgress?.operation === 'install'

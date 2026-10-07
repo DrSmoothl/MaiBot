@@ -38,6 +38,7 @@ Element.prototype.scrollTo = (() => {}) as unknown as Element['scrollTo']
 // 监控 hook 整体打桩：组件只消费其返回的状态与两个动作回调
 const monitorHookMocks = vi.hoisted(() => ({
   useMaisakaMonitor: vi.fn(),
+  listeners: new Set<() => void>(),
 }))
 
 // 路由跳转桩：捕获推理记录跳转参数
@@ -59,9 +60,21 @@ const virtualizerMocks = vi.hoisted(() => ({
   scrollToIndex: vi.fn(),
 }))
 
-vi.mock('./use-maisaka-monitor', () => ({
-  useMaisakaMonitor: monitorHookMocks.useMaisakaMonitor,
-}))
+vi.mock('./use-maisaka-monitor', async () => {
+  const { useSyncExternalStore } = await import('react')
+  const subscribe = (listener: () => void) => {
+    monitorHookMocks.listeners.add(listener)
+    return () => { monitorHookMocks.listeners.delete(listener) }
+  }
+  const readSnapshot = () => monitorHookMocks.useMaisakaMonitor()
+  function useMonitorSnapshot() {
+    return useSyncExternalStore(subscribe, readSnapshot)
+  }
+  return {
+    useMaisakaMonitorOverview: useMonitorSnapshot,
+    useMaisakaMonitorSession: useMonitorSnapshot,
+  }
+})
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => routerMocks.navigate,
@@ -137,6 +150,8 @@ function setupMonitorState(overrides: MonitorStateOverrides = {}) {
   const state: MonitorHookResult = {
     timeline,
     allTimeline: timeline,
+    latestMessages: new Map(),
+    selectedStageStatus: overrides.selectedSession ? overrides.stageStatuses?.get(overrides.selectedSession) : undefined,
     sessions: overrides.sessions ?? new Map(),
     stageStatuses: overrides.stageStatuses ?? new Map(),
     selectedSession: overrides.selectedSession ?? null,
@@ -145,6 +160,7 @@ function setupMonitorState(overrides: MonitorStateOverrides = {}) {
     clearTimeline: hookActions.clearTimeline,
   }
   monitorHookMocks.useMaisakaMonitor.mockReturnValue(state)
+  act(() => monitorHookMocks.listeners.forEach((listener) => listener()))
 }
 
 function nowSec() {
@@ -965,22 +981,21 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('滑稽表情')).toBeInTheDocument()
     expect(screen.getByText('[图片]')).toBeInTheDocument()
 
-    // 点击表情包切换为原文件图片
-    const emojiButton = screen.getByText('滑稽表情').closest('button')
-    if (!emojiButton) throw new Error('未找到表情包媒体按钮')
-    await user.click(emojiButton)
+    // 通过右上角按钮切换为原文件图片。
+    await user.click(screen.getByRole('button', { name: '切换为原文件' }))
     const image = screen.getByAltText('表情包原文件')
     expect(image).toHaveAttribute('src', 'data:image/png;base64,abc')
 
-    // 再次点击切回识别文本
+    // 点击图片打开大图，关闭预览后通过按钮切回识别文本。
     await user.click(image)
+    expect(screen.getByAltText('表情包大图')).toHaveAttribute('src', 'data:image/png;base64,abc')
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: '切换为识别文本' }))
     expect(screen.queryByAltText('表情包原文件')).not.toBeInTheDocument()
     expect(screen.getByText('滑稽表情')).toBeInTheDocument()
 
-    // 没有 url/data_url 的媒体点击后保持文本态
-    const placeholderButton = screen.getByText('[图片]').closest('button')
-    if (!placeholderButton) throw new Error('未找到图片媒体按钮')
-    await user.click(placeholderButton)
+    // 没有 url/data_url 的媒体保持文本态，不提供切换按钮。
+    expect(screen.getAllByRole('button', { name: '切换为原文件' })).toHaveLength(1)
     expect(screen.queryByAltText('图片原文件')).not.toBeInTheDocument()
   })
 
@@ -1013,7 +1028,7 @@ describe('时间线事件卡片', () => {
     })
     render(<MaisakaMonitor />)
 
-    await user.click(screen.getByText('图片描述'))
+    await user.click(screen.getByRole('button', { name: '切换为原文件' }))
 
     expect(screen.getByText('正在读取图片…')).toBeInTheDocument()
     await act(async () => {
@@ -1056,7 +1071,7 @@ describe('时间线事件卡片', () => {
     })
     render(<MaisakaMonitor />)
 
-    await user.click(screen.getByText('图片描述'))
+    await user.click(screen.getByRole('button', { name: '切换为原文件' }))
 
     expect(await screen.findByText('原文件读取失败')).toBeInTheDocument()
     expect(screen.queryByAltText('图片原文件')).not.toBeInTheDocument()

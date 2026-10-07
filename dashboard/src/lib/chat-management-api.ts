@@ -123,6 +123,15 @@ export interface AdapterHostPolicySection {
 export interface AdapterHostPolicy {
   group: AdapterHostPolicySection
   private: AdapterHostPolicySection
+  policy_groups?: AdapterHostPolicyGroup[]
+  active_group?: string
+}
+
+export interface AdapterHostPolicyGroup {
+  id: string
+  name: string
+  group: AdapterHostPolicySection
+  private: AdapterHostPolicySection
 }
 
 /** 聊天流的适配器放行状态：不允许时 reason 说明被阻止的原因 */

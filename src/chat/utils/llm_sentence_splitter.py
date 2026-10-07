@@ -1,5 +1,7 @@
 """基于 LLM 的回复断句。"""
 
+from typing import List, Tuple
+
 import json
 
 from src.common.logger import get_logger
@@ -37,7 +39,16 @@ def _is_no_split_marker(payload: str) -> bool:
     return payload.strip().strip('"').strip() == _NO_SPLIT_MARKER
 
 
-async def split_text_with_llm(text: str) -> list[tuple[str, str]]:
+def _extract_trailing_comma(sentence: str) -> Tuple[str, str]:
+    """将段尾逗号移入分隔符，逐条发送时省略，压缩合并时恢复。"""
+    content = sentence.rstrip("，, \t\r\n")
+    separator = sentence[len(content) :]
+    if content.strip() and ("，" in separator or "," in separator):
+        return content, separator
+    return sentence, ""
+
+
+async def split_text_with_llm(text: str) -> List[Tuple[str, str]]:
     """调用 LLM 断句，并返回兼容规则断句器的句子元组。"""
     if not text:
         return []
@@ -46,9 +57,9 @@ async def split_text_with_llm(text: str) -> list[tuple[str, str]]:
     result = await client.generate_response(_SPLITTER_PROMPT + text)
     payload = _normalize_json_payload(result.response)
 
-    # 模型判断不需要拆分时只返回标记，此时保持原文作为单独一段
+    # 模型判断不需要拆分时只返回标记，此时作为单独一段，并同样处理段尾逗号
     if _is_no_split_marker(payload):
-        return [(text, "")]
+        return [_extract_trailing_comma(text)]
 
     try:
         sentences = json.loads(payload)
@@ -60,7 +71,31 @@ async def split_text_with_llm(text: str) -> list[tuple[str, str]]:
 
     if not isinstance(sentences, list) or not sentences or not all(isinstance(item, str) for item in sentences):
         raise ValueError("LLM 断句结果必须是非空字符串数组")
-    if "".join(sentences) != text:
-        raise ValueError("LLM 断句结果未完整保留原文")
+    if sentences == [_NO_SPLIT_MARKER]:
+        return [_extract_trailing_comma(text)]
 
-    return [(sentence, "") for sentence in sentences if sentence]
+    # 换行不影响消息内容校验，其他字符（包括空格和标点）仍必须完整保留。
+    comparison_text = text.replace("\r", "").replace("\n", "")
+    reconstructed_text = "".join(sentences).replace("\r", "").replace("\n", "")
+    if reconstructed_text != comparison_text:
+        # 保留完整性校验，并显示首处差异；repr 让空格和标点差异可见。
+        mismatch_index = next(
+            (
+                index
+                for index, (original, returned) in enumerate(zip(comparison_text, reconstructed_text, strict=False))
+                if original != returned
+            ),
+            min(len(comparison_text), len(reconstructed_text)),
+        )
+        context_start = max(0, mismatch_index - 20)
+        context_end = mismatch_index + 21
+        raise ValueError(
+            "LLM 断句结果未完整保留原文（忽略换行后）："
+            f"首个差异位置={mismatch_index}（从 0 开始），"
+            f"原文长度={len(comparison_text)}，结果长度={len(reconstructed_text)}，"
+            f"原文片段={comparison_text[context_start:context_end]!r}，"
+            f"结果片段={reconstructed_text[context_start:context_end]!r}"
+        )
+
+    # 完整性检查通过后再分离段尾逗号，避免改变模型输出校验与句内标点。
+    return [_extract_trailing_comma(sentence) for sentence in sentences if sentence]

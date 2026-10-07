@@ -7,6 +7,30 @@ from src.llm_models import utils_model
 from src.llm_models.utils_model import LLMOrchestrator
 
 
+@pytest.mark.parametrize(
+    ("mid_models", "fast_models", "expected_task"),
+    [
+        (["mid-model"], ["fast-model"], "mid_memory"),
+        ([], ["fast-model"], "fast_model"),
+        ([], [], "utils"),
+    ],
+)
+def test_mid_memory_resolves_configured_task_chain(monkeypatch, mid_models, fast_models, expected_task) -> None:
+    tasks = SimpleNamespace(
+        mid_memory=TaskConfig(model_list=mid_models, hard_timeout=180.0),
+        fast_model=TaskConfig(model_list=fast_models, hard_timeout=120.0),
+        utils=TaskConfig(model_list=["utils-model"], hard_timeout=240.0),
+        planner=TaskConfig(model_list=["planner-model"]),
+    )
+    monkeypatch.setattr(
+        utils_model.config_manager, "get_model_config", lambda: SimpleNamespace(model_task_config=tasks)
+    )
+
+    orchestrator = LLMOrchestrator(task_name="mid_memory")
+
+    assert orchestrator.model_for_task is getattr(tasks, expected_task)
+
+
 def _resolve_task_config(
     monkeypatch,
     *,

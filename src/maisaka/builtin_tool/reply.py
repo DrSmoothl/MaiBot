@@ -1,26 +1,31 @@
 ﻿"""reply 内置工具。"""
 
-from typing import Any, Optional
+from copy import deepcopy
+from typing import Any, Dict, Optional
 
+import asyncio
 import json
 import traceback
 
 from src.chat.replyer.replyer_manager import replyer_manager
+from src.chat.utils.utils import is_bot_self
 from src.cli.maisaka_cli_sender import CLI_PLATFORM_NAME, render_cli_message
 from src.common.data_models.reply_generation_data_models import ReplyGenerationResult, build_reply_monitor_detail
 from src.common.logger import get_logger
 from src.config import config as config_module
-from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
+from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.maisaka.context.message_adapter import build_visible_text_from_sequence, parse_speaker_content
 from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import LLMContextMessage, SessionBackedMessage
 from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
+from src.plugin_runtime.host.message_utils import PluginMessageUtils
+from src.plugin_runtime.host.reply_extensions import ReplyExtensionExecution, build_reply_extensions_schema
 from src.services import send_service
 
-from .context import BuiltinToolRuntimeContext
+from .context import BuiltinToolRuntimeContext, PostProcessedReplyMessage
 
 logger = get_logger("maisaka_builtin_reply")
-_REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote"}
+_REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote", "_reply_id", "_plugin_reply_prompt"}
 _DUPLICATE_TARGET_REPLY_REMINDER_ARG = "_duplicate_target_reply_reminder"
 _DUPLICATE_TARGET_REPLY_REMINDER_TEMPLATE = (
     "你刚刚已经回复过这条消息，你刚刚的发言是：“{previous_reply}”\n"
@@ -109,7 +114,7 @@ async def _run_expression_selector(tool_ctx: BuiltinToolRuntimeContext, system_p
     return (response.content or "").strip()
 
 
-def get_tool_spec() -> ToolSpec:
+def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec:
     """获取 reply 工具声明。"""
 
     properties: dict[str, Any] = {
@@ -212,6 +217,10 @@ def get_tool_spec() -> ToolSpec:
             "default": [],
         }
 
+    extension_schema = build_reply_extensions_schema(context)
+    if extension_schema is not None:
+        properties["plugin_options"] = extension_schema
+
     return ToolSpec(
         name="reply",
         description="根据当前思考生成并发送可见回复；需要向用户展示上下文或工具返回的图片时，使用 attach_pic 随回复附加图片。",
@@ -225,13 +234,14 @@ def get_tool_spec() -> ToolSpec:
     )
 
 
-def _build_monitor_metadata(reply_result: ReplyGenerationResult) -> dict[str, object]:
+def _build_monitor_metadata(reply_result: ReplyGenerationResult, reply_id: str = "") -> Dict[str, object]:
     """从 reply 结果中提取统一监控详情。"""
 
     monitor_detail = reply_result.monitor_detail
+    metadata: Dict[str, object] = {"reply_id": reply_id} if reply_id else {}
     if isinstance(monitor_detail, dict):
-        return {"monitor_detail": monitor_detail}
-    return {}
+        metadata["monitor_detail"] = monitor_detail
+    return metadata
 
 
 def _build_send_result(
@@ -371,6 +381,32 @@ async def handle_tool(
             f"未找到要回复的目标消息，msg_id={to_display_message_id(target_message_id)}",
         )
 
+    extension_execution = ReplyExtensionExecution(
+        context=ToolAvailabilityContext(
+            session_id=tool_ctx.runtime.session_id,
+            stream_id=tool_ctx.runtime.session_id,
+            platform=tool_ctx.runtime.chat_stream.platform,
+        ),
+        reply_message_id=target_message_id,
+        call_id=invocation.call_id,
+    )
+    if invocation_arguments.get("plugin_options"):
+        extension_execution.context.is_group_chat = tool_ctx.runtime.chat_stream.is_group_session
+        extension_execution.context.group_id = tool_ctx.runtime.chat_stream.group_id
+        extension_execution.context.user_id = tool_ctx.runtime.chat_stream.user_id
+    try:
+        await extension_execution.prepare(invocation_arguments.get("plugin_options", {}))
+    except Exception as exc:
+        logger.exception(f"{tool_ctx.runtime.log_prefix} 准备插件回复扩展失败: {exc}")
+        return tool_ctx.build_failure_result(
+            invocation.tool_name, f"准备插件回复扩展失败：{exc}",
+            metadata={"reply_id": extension_execution.reply_id},
+        )
+    if extension_execution.targets:
+        reply_tool_args["plugin_options"] = deepcopy(extension_execution.parameters)
+        reply_tool_args["_reply_id"] = extension_execution.reply_id
+        reply_tool_args["_plugin_reply_prompt"] = extension_execution.extra_prompt
+
     try:
         replyer = replyer_manager.get_replyer(
             chat_stream=tool_ctx.runtime.chat_stream,
@@ -383,6 +419,7 @@ async def handle_tool(
         return tool_ctx.build_failure_result(
             invocation.tool_name,
             "获取 Maisaka 回复生成器时发生异常。",
+            metadata={"reply_id": extension_execution.reply_id},
         )
 
     if replyer is None:
@@ -390,6 +427,7 @@ async def handle_tool(
         return tool_ctx.build_failure_result(
             invocation.tool_name,
             "Maisaka 回复生成器当前不可用。",
+            metadata={"reply_id": extension_execution.reply_id},
         )
 
     replyer_chat_history = list(tool_ctx.runtime._chat_history)
@@ -417,13 +455,14 @@ async def handle_tool(
         return tool_ctx.build_failure_result(
             invocation.tool_name,
             "生成可见回复时发生异常。",
+            metadata={"reply_id": extension_execution.reply_id},
         )
 
     reply_text = reply_result.completion.response_text.strip() if success else ""
 
     if not reply_text:
         reply_result.monitor_detail = build_reply_monitor_detail(reply_result)
-        reply_metadata = _build_monitor_metadata(reply_result)
+        reply_metadata = _build_monitor_metadata(reply_result, extension_execution.reply_id)
         logger.warning(
             f"{tool_ctx.runtime.log_prefix} 回复生成器返回空文本: "
             f"目标消息编号={target_message_id} 错误信息={reply_result.error_message!r}"
@@ -455,7 +494,7 @@ async def handle_tool(
         return tool_ctx.build_failure_result(
             invocation.tool_name,
             "回复文本后处理前 Hook 返回了空回复。",
-            metadata=_build_monitor_metadata(reply_result),
+            metadata=_build_monitor_metadata(reply_result, extension_execution.reply_id),
         )
 
     try:
@@ -467,20 +506,51 @@ async def handle_tool(
     except Exception as exc:
         reply_result.completion.response_text = reply_text
         reply_result.monitor_detail = build_reply_monitor_detail(reply_result)
-        reply_metadata = _build_monitor_metadata(reply_result)
+        reply_metadata = _build_monitor_metadata(reply_result, extension_execution.reply_id)
         logger.exception(f"{tool_ctx.runtime.log_prefix} 解析回复附件失败: {exc}")
         return tool_ctx.build_failure_result(
             invocation.tool_name,
             f"解析回复附件失败：{exc}",
             metadata=reply_metadata,
         )
+    if extension_execution.targets:
+        try:
+            # 序列化可能读取图片库和文件，放到线程中；整组消息只在发送前转换一次。
+            serialized = await asyncio.to_thread(
+                lambda: [
+                    {
+                        "segments": PluginMessageUtils._message_sequence_to_dict(item.sequence),
+                        "quote_previous": item.quote_previous,
+                    }
+                    for item in reply_items
+                ]
+            )
+            transformed = await extension_execution.transform(reply_text, serialized)
+            reply_items = await asyncio.to_thread(
+                lambda: [
+                    PostProcessedReplyMessage(
+                        sequence=PluginMessageUtils._message_sequence_from_dict(item["segments"]),
+                        quote_previous=item["quote_previous"],
+                    )
+                    for item in transformed
+                ]
+            )
+            extension_execution.ensure_active()
+        except Exception as exc:
+            logger.exception(f"{tool_ctx.runtime.log_prefix} 插件回复扩展处理失败: {exc}")
+            return tool_ctx.build_failure_result(
+                invocation.tool_name, f"插件回复扩展处理失败：{exc}",
+                metadata=_build_monitor_metadata(reply_result, extension_execution.reply_id),
+            )
     reply_sequences = [item.sequence for item in reply_items]
     reply_segments = [build_visible_text_from_sequence(sequence) for sequence in reply_sequences]
     combined_reply_text = "".join(reply_segments)
     reply_result.completion.response_text = combined_reply_text
     reply_result.text_fragments = reply_segments
     reply_result.monitor_detail = build_reply_monitor_detail(reply_result)
-    reply_metadata = _build_monitor_metadata(reply_result)
+    reply_metadata = _build_monitor_metadata(reply_result, extension_execution.reply_id)
+    if extension_execution.targets:
+        reply_metadata["reply_extensions"] = list(extension_execution.parameters)
     sent_message_ids: list[str] = []
     send_results: list[dict[str, Any]] = []
     try:
@@ -567,8 +637,14 @@ async def handle_tool(
         )
 
     target_user_info = target_message.message_info.user_info
-    target_user_name = target_user_info.user_cardname or target_user_info.user_nickname or target_user_info.user_id
     bot_name = config_module.global_config.bot.nickname.strip() or "MaiSaka"
+    if is_bot_self(tool_ctx.runtime.chat_stream.platform, target_user_info.user_id):
+        # 自身消息只是回复的引用锚点，不能把其作者当作实际收件人。
+        target_user_name = ""
+        reply_receipt = f'"{bot_name}"已生成并向当前会话发送了回复"{combined_reply_text}"'
+    else:
+        target_user_name = target_user_info.user_cardname or target_user_info.user_nickname or target_user_info.user_id
+        reply_receipt = f'"{bot_name}"已生成并向"{target_user_name}"发送了回复"{combined_reply_text}"'
 
     if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
@@ -596,7 +672,7 @@ async def handle_tool(
         )
     return tool_ctx.build_success_result(
         invocation.tool_name,
-        f'"{bot_name}"已生成并向"{target_user_name}"发送了回复"{combined_reply_text}"',
+        reply_receipt,
         structured_content={
             "msg_id": target_message_id,
             "set_quote": set_quote,

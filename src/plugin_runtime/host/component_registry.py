@@ -1,7 +1,7 @@
 """Host 侧组件注册表。
 
 对齐旧系统 component_registry.py 的核心能力：
-- 按类型注册组件（action / command / tool / event_handler / hook_handler / message_gateway）
+- 按类型注册组件（action / command / tool / event_handler / hook_handler / message_gateway / reply_extension）
 - 命名空间 (plugin_id.component_name)
 - 命令正则匹配
 - 组件启用/禁用
@@ -18,6 +18,7 @@ import re
 from src.common.logger import get_logger
 from .component_timeout import normalize_component_timeout_ms
 from .hook_spec_registry import HookSpecRegistry
+from .reply_extension_schema import validate_parameter_schema
 
 logger = get_logger("plugin_runtime.host.component_registry")
 
@@ -56,6 +57,7 @@ class ComponentTypes(str, Enum):
     HOOK_HANDLER = "HOOK_HANDLER"
     MESSAGE_GATEWAY = "MESSAGE_GATEWAY"
     HOME_CARD = "HOME_CARD"
+    REPLY_EXTENSION = "REPLY_EXTENSION"
 
 
 ComponentChatScope = Literal["all", "group", "private"]
@@ -80,6 +82,7 @@ class StatusDict(TypedDict):
     event_handler: int
     hook_handler: int
     message_gateway: int
+    reply_extension: int
     plugins: int
 
 
@@ -123,6 +126,23 @@ class ComponentEntry:
             for session_id in (allowed_session or [])
             if str(session_id).strip()
         }
+
+class ReplyExtensionEntry(ComponentEntry):
+    """随 reply 注册的命名空间参数和回复处理器。"""
+
+    def __init__(
+        self, name: str, component_type: str, plugin_id: str, metadata: Dict[str, Any],
+        chat_scope: str = "all", allowed_session: Optional[List[str]] = None,
+    ) -> None:
+        super().__init__(name, component_type, plugin_id, metadata, chat_scope, allowed_session)
+        if not name.strip() or chat_scope.strip().lower() not in {"all", "group", "private"}:
+            raise ValueError("回复扩展名称不能为空，chat_scope 必须是 all/group/private")
+        self.parameters_schema: Dict[str, Any] = validate_parameter_schema(metadata.get("parameters_schema"))
+        self.description: str = metadata.get("description", "")
+        self.priority: int = metadata.get("priority", 0)
+        if not isinstance(self.description, str) or type(self.priority) is not int:
+            raise ValueError("回复扩展 description 必须是字符串，priority 必须是整数")
+
 
 class ActionEntry(ComponentEntry):
     """Action 组件条目"""
@@ -669,6 +689,11 @@ class ComponentRegistry:
 
         try:
             normalized_type = self._normalize_component_type(component_type)
+            existing = self._components.get(f"{plugin_id}.{name}")
+            if existing is not None and existing.plugin_id != plugin_id and (
+                normalized_type == ComponentTypes.REPLY_EXTENSION or isinstance(existing, ReplyExtensionEntry)
+            ):
+                raise ValueError(f"回复扩展命名空间与另一插件冲突：{existing.full_name}")
             normalized_metadata = dict(metadata)
             if normalized_type == ComponentTypes.ACTION:
                 normalized_metadata = self._convert_action_metadata_to_tool_metadata(name, normalized_metadata)
@@ -697,6 +722,10 @@ class ComponentRegistry:
                     normalized_metadata,
                     chat_scope,
                     allowed_session,
+                )
+            elif normalized_type == ComponentTypes.REPLY_EXTENSION:
+                component = ReplyExtensionEntry(
+                    name, normalized_type.value, plugin_id, normalized_metadata, chat_scope, allowed_session,
                 )
             elif normalized_type == ComponentTypes.EVENT_HANDLER:
                 component = EventHandlerEntry(
@@ -863,6 +892,14 @@ class ComponentRegistry:
                 )
             )
 
+        names: Dict[str, ComponentEntry] = {}
+        for component in prepared_components:
+            previous = names.get(component.full_name)
+            if previous is not None and (
+                isinstance(component, ReplyExtensionEntry) or isinstance(previous, ReplyExtensionEntry)
+            ):
+                raise ComponentRegistrationError(f"回复扩展组件名称重复：{component.full_name}")
+            names[component.full_name] = component
         self.remove_components_by_plugin(plugin_id)
         for component in prepared_components:
             self._add_component_entry(component)
@@ -1275,5 +1312,6 @@ class ComponentRegistry:
             event_handler=len(self._by_type[ComponentTypes.EVENT_HANDLER]),
             hook_handler=len(self._by_type[ComponentTypes.HOOK_HANDLER]),
             message_gateway=len(self._by_type[ComponentTypes.MESSAGE_GATEWAY]),
+            reply_extension=len(self._by_type[ComponentTypes.REPLY_EXTENSION]),
             plugins=len(self._by_plugin),
         )

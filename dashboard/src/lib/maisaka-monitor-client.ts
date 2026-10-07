@@ -5,6 +5,7 @@
  */
 import type { WsEventEnvelope } from './unified-ws'
 
+import { PlannerDeltaDecoder } from './maisaka-planner-delta'
 import { unifiedWsClient } from './unified-ws'
 
 // ─── 事件数据类型 ───────────────────────────────────────────────
@@ -194,7 +195,8 @@ export interface ToolExecutionEvent {
 }
 
 export interface MaisakaRequestBlock {
-  messages: MaisakaMessage[]
+  /** 完整请求仅旧版监控载荷携带；新版通过推理详情页读取。 */
+  messages?: MaisakaMessage[]
   selected_history_count: number
   tool_count: number
   context_sections?: MaisakaContextSection[]
@@ -218,6 +220,7 @@ export interface MaisakaNativeToolCall {
 
 export interface MaisakaPlannerBlock {
   content: string | null
+  model_name?: string | null
   tool_calls: MaisakaToolCall[]
   native_tool_calls?: MaisakaNativeToolCall[]
   prompt_tokens: number
@@ -246,6 +249,8 @@ export interface MaisakaTimingGateBlock {
 export interface MaisakaFinalizedToolResult {
   tool_call_id: string
   tool_name: string
+  model_name?: string
+  images?: { thumbnail_url: string; label: string; error?: string }[]
   tool_args: Record<string, unknown>
   tool_call_source?: string
   tool_call_source_label?: string
@@ -324,6 +329,7 @@ export type MaisakaEventListener = (event: MaisakaMonitorEvent) => void
 // ─── 客户端 ───────────────────────────────────────────────────
 
 class MaisakaMonitorClient {
+  private readonly plannerDecoder = new PlannerDeltaDecoder()
   private initialized = false
   private readonly initialReplayLimit = 1000
   private listenerIdCounter = 0
@@ -344,9 +350,12 @@ class MaisakaMonitorClient {
         return
       }
 
+      // 先重建快照，再交给事件去重/持久化；即使基准事件已入账，也必须更新解码基准。
+      const decoded = this.plannerDecoder.decode(message)
+      if (!decoded) return
       const event: MaisakaMonitorEvent = {
-        type: message.event as MaisakaMonitorEvent['type'],
-        data: message.data as never,
+        type: decoded.event as MaisakaMonitorEvent['type'],
+        data: decoded.data as never,
       }
 
       this.listeners.forEach((listener) => {

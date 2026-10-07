@@ -24,6 +24,14 @@
     "max_version": "2.99.99"
   },
   "dependencies": [],
+  "display": {
+    "icon": {
+      "type": "local",
+      "value": "assets/icon.svg",
+      "fallback": "puzzle",
+      "background": "#1C272C"
+    }
+  },
   "capabilities": [
     "send.text",
     "send.forward",

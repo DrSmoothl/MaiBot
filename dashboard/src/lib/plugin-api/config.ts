@@ -138,8 +138,8 @@ export async function resetPluginConfig(
  */
 export async function togglePlugin(
   pluginId: string
-): Promise<{ success: boolean; enabled: boolean; message: string; note?: string }> {
-  return backendApi.post<{ success: boolean; enabled: boolean; message: string; note?: string }>(
+): Promise<{ success: boolean; enabled: boolean; message: string; note?: string; runtime_status?: string }> {
+  return backendApi.post<{ success: boolean; enabled: boolean; message: string; note?: string; runtime_status?: string }>(
     `${API_BASE}/${pluginId}/toggle`,
     { errorMessage: '切换插件状态失败' }
   )

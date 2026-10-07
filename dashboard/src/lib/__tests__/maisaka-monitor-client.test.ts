@@ -127,6 +127,23 @@ describe('maisakaMonitorClient', () => {
     )
   })
 
+  it('重置消息不交给业务，Planner 增量还原成完整事件再分发', async () => {
+    const listener = vi.fn()
+    await client.subscribe(listener)
+    const envelope = { op: 'event' as const, domain: 'maisaka_monitor' }
+    capturedWsListener?.({ ...envelope, event: 'planner.reset', data: {} })
+    expect(listener).not.toHaveBeenCalled()
+    const data = { session_id: 's', run_id: 'r', cycle_id: 1, event_id: 1, tools: [], planner: { content: '思考' } }
+    capturedWsListener?.({ ...envelope, event: 'planner.progress', data })
+    capturedWsListener?.({
+      ...envelope, event: 'planner.delta', data: {
+        session_id: 's', run_id: 'r', cycle_id: 1, base_event_id: 1,
+        event_type: 'planner.finalized', changes: { event_id: 2 }, removed_fields: [],
+      },
+    })
+    expect(listener).toHaveBeenLastCalledWith({ type: 'planner.finalized', data: { ...data, event_id: 2 } })
+  })
+
   it('并发首次订阅共享同一个订阅 Promise，底层 subscribe 只调用一次', async () => {
     const pendingSubscribe = createDeferred<Record<string, unknown>>()
     wsMocks.subscribe.mockImplementation(() => pendingSubscribe.promise)

@@ -78,7 +78,7 @@ MIN_COMPRESSED_IMAGE_TARGET_SIZE_BYTES = 512 * 1024
 EMPTY_TASK_FALLBACKS = {
     "fast_model": "utils",
     "learner": "utils",
-    "mid_memory": "planner",
+    "mid_memory": "fast_model",
 }
 EMBEDDING_TASK_NAMES = {"embedding", "image_embedding"}
 """嵌入类任务：向量空间必须保持一致，因此忽略配置里的选择策略，始终按配置顺序取第一个可用模型"""
@@ -145,14 +145,19 @@ class LLMOrchestrator:
         task_config = getattr(model_task_config, self.task_name, None)
         if not isinstance(task_config, TaskConfig):
             raise ValueError(f"未找到名为 '{self.task_name}' 的任务配置")
-        if not any(str(model_name).strip() for model_name in task_config.model_list):
-            fallback_task_name = EMPTY_TASK_FALLBACKS.get(self.task_name, "")
+        effective_task_name = self.task_name
+        # 按任务继用链解析，确保 mid_memory 留空时也遵循 fast_model -> utils。
+        while not any(str(model_name).strip() for model_name in task_config.model_list):
+            fallback_task_name = EMPTY_TASK_FALLBACKS.get(effective_task_name, "")
             if fallback_task_name:
                 fallback_task_config = getattr(model_task_config, fallback_task_name, None)
                 if isinstance(fallback_task_config, TaskConfig):
-                    return fallback_task_config
+                    task_config = fallback_task_config
+                    effective_task_name = fallback_task_name
+                    continue
             if self.task_name == "image_embedding":
                 raise ValueError("图片嵌入任务未配置模型，请在 image_embedding 中指定支持图片嵌入的模型")
+            break
         return task_config
 
     def _refresh_task_config(self) -> TaskConfig:

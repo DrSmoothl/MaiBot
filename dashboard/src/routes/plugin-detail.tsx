@@ -51,6 +51,12 @@ import { recordPluginDownload } from '@/lib/plugin-stats'
 import { PluginIcon } from './plugins/PluginIcon'
 import { getPluginTypeLabel } from './plugins/types'
 
+function formatPluginUpdateDate(timestamp?: string): string {
+  const date = timestamp ? new Date(timestamp) : null
+  if (!date || !Number.isFinite(date.getTime())) return '时间未知'
+  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
 function isAbortError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false
@@ -348,6 +354,17 @@ export function PluginDetailPage({
   const plugin = pluginQuery.data ?? null
   const versionSelection = selection?.pluginId === pluginId ? selection : null
   const releaseCatalog = plugin?.releases
+  // 最新更新时间取全部发布版本中的最大日期，不随安装版本选择变化。
+  const pluginUpdateTimestamps = [
+    plugin?.updated_at,
+    ...(releaseCatalog?.versions.map((release) => release.published_at) ?? []),
+  ]
+    .filter((timestamp): timestamp is string => Boolean(timestamp))
+    .map((timestamp) => Date.parse(timestamp))
+    .filter(Number.isFinite)
+  const latestPluginUpdate = pluginUpdateTimestamps.length > 0
+    ? new Date(Math.max(...pluginUpdateTimestamps)).toISOString()
+    : undefined
   const selectedRelease = releaseCatalog?.versions.find(
     (release) => release.version === (versionSelection?.version || releaseCatalog.recommended_version)
   )
@@ -760,6 +777,7 @@ export function PluginDetailPage({
                             {release.version}{release.version === releaseCatalog.recommended_version ? ' · 推荐' : ''}
                             {release.prerelease ? ' · 预发布' : ''}{release.yanked ? ' · 已撤回' : ''}
                             {!release.compatible ? ` · ${shortenReleaseReasons(release.reasons)}` : ''}
+                            {` · 更新于 ${formatPluginUpdateDate(release.published_at)}`}
                           </option>
                         ))}
                       </select>
@@ -807,6 +825,9 @@ export function PluginDetailPage({
                   <CardTitle className="text-lg">统计信息</CardTitle>
                 </CardHeader>
                 <CardContent>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    最新更新：{formatPluginUpdateDate(latestPluginUpdate)}
+                  </p>
                   {plugin.manifest.id && <PluginStats pluginId={plugin.manifest.id} />}
                 </CardContent>
               </Card>

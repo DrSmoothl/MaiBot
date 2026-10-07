@@ -143,6 +143,7 @@ function makeStats(id: string, overrides: Partial<PluginStatsData> = {}): Plugin
     downloads: 99,
     rating: 4.8,
     rating_count: 10,
+    comment_count: 10,
     ...overrides,
   }
 }
@@ -232,7 +233,7 @@ describe('PluginCard', () => {
     const plugin = makePlugin('zero', { downloads: 0, rating: 0 })
     const props = cardProps(plugin)
     props.pluginStats = {
-      zero: makeStats('zero', { downloads: 0, rating: 0, rating_count: 0, likes: 0 }),
+      zero: makeStats('zero', { downloads: 0, rating: 0, rating_count: 0, comment_count: 0, likes: 0 }),
     }
     render(<PluginCard {...props} />)
 

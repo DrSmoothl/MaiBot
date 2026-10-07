@@ -22,6 +22,7 @@ from src.webui.routers.chat.service import (
 from src.webui.routers.plugin.progress import get_current_progress
 from src.webui.routers.websocket.auth import verify_ws_token
 from src.webui.routers.websocket.manager import websocket_manager
+from .plugin_runtime import stop_plugin_runtime_subscription, subscribe_plugin_runtime
 
 logger = get_logger("webui.unified_ws")
 router = APIRouter()
@@ -175,6 +176,10 @@ async def _handle_maisaka_monitor_subscribe(
     )
     from src.maisaka.monitor.event_store import replay_monitor_events
 
+    # 重置标记与快照共用出站队列，前后端在相同位置清空基准，重订阅也不会错位。
+    await websocket_manager.send_event(
+        connection_id, domain="maisaka_monitor", event="planner.reset", topic="main", data={}
+    )
     replay_events = await asyncio.to_thread(
         replay_monitor_events,
         since_event_id=since_event_id,
@@ -239,6 +244,10 @@ async def _handle_subscribe(connection_id: str, message: Dict[str, Any]) -> None
         await _handle_plugin_progress_subscribe(connection_id, request_id)
         return
 
+    if domain == "plugin_runtime" and topic == "main":
+        await subscribe_plugin_runtime(connection_id, request_id)
+        return
+
     if domain == "maisaka_monitor" and topic == "main":
         await _handle_maisaka_monitor_subscribe(connection_id, request_id, data)
         return
@@ -272,6 +281,8 @@ async def _handle_unsubscribe(connection_id: str, message: Dict[str, Any]) -> No
         return
 
     websocket_manager.unsubscribe(connection_id, domain=domain, topic=topic)
+    if domain == "plugin_runtime" and topic == "main":
+        stop_plugin_runtime_subscription(connection_id)
     await websocket_manager.send_response(
         connection_id,
         request_id=request_id,
@@ -642,6 +653,7 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
     except Exception as exc:
         logger.error(f"统一 WebSocket 处理失败: connection={connection_id}, error={exc}", exc_info=True)
     finally:
+        stop_plugin_runtime_subscription(connection_id)
         chat_manager.disconnect_connection(connection_id)
         await websocket_manager.disconnect(connection_id)
         logger.info(

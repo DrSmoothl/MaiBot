@@ -85,11 +85,15 @@ class DynamicReplyTurnGate:
             self._round_message_ids |= new_message_ids
             round_messages = [message for message in external_messages if message.message_id in self._round_message_ids]
             self._gate.record_proactive_demand(
-                estimate_reply_probability(self._build_likelihood_input(round_messages, now)),
+                estimate_reply_probability(
+                    self._build_likelihood_input(round_messages, now, pending_messages=external_messages)
+                ),
                 now,
             )
 
-        probability = estimate_reply_probability(self._build_likelihood_input(external_messages, now))
+        probability = estimate_reply_probability(
+            self._build_likelihood_input(external_messages, now, pending_messages=external_messages)
+        )
         gate_decision = self._gate.evaluate(probability, frequency, now)
         if gate_decision.should_trigger:
             self._gate.close_round()
@@ -106,7 +110,13 @@ class DynamicReplyTurnGate:
             if not is_bot_self(message.platform, message.message_info.user_info.user_id)
         ]
 
-    def _build_likelihood_input(self, messages: Sequence[SessionMessage], now: float) -> ReplyLikelihoodInput:
+    def _build_likelihood_input(
+        self,
+        messages: Sequence[SessionMessage],
+        now: float,
+        *,
+        pending_messages: Sequence[SessionMessage],
+    ) -> ReplyLikelihoodInput:
         """按当前 runtime 快照为一批外部消息构造概率函数的输入。"""
 
         texts = [(message.processed_plain_text or "") for message in messages]
@@ -115,8 +125,14 @@ class DynamicReplyTurnGate:
             has_at_bot=any(message.is_at for message in messages),
         )
         recent_self_count, recent_history_count, seconds_since_bot = self._summarize_recent_history(now)
-        # 待处理消息尚未写入内部历史，近期消息量需要把它们补上
-        recent_message_count = recent_history_count + len(messages)
+        # 待处理消息尚未写入内部历史，只补上最近 5 分钟内的消息，避免旧积压持续压低概率。
+        # 近期活跃度属于整个聊天流；虚拟轮次评分与放行评分必须使用同一批待处理消息统计。
+        current_time = datetime.fromtimestamp(now)
+        recent_pending_count = sum(
+            (current_time - message.timestamp).total_seconds() <= RECENT_PRESENCE_WINDOW_SECONDS
+            for message in pending_messages
+        )
+        recent_message_count = recent_history_count + recent_pending_count
         return ReplyLikelihoodInput(
             mention_bot=any(message.is_mentioned for message in messages),
             at_other=at_other,

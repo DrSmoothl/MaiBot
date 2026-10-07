@@ -55,10 +55,10 @@ class BuiltinToolEntry:
     visibility: BuiltinToolVisibility = "visible"
     chat_scope: BuiltinToolChatScope = "all"
 
-    def build_spec(self) -> ToolSpec:
+    def build_spec(self, context: Optional[ToolAvailabilityContext] = None) -> ToolSpec:
         """生成带统一可见性元数据的工具声明。"""
 
-        tool_spec = deepcopy(self.get_spec())
+        tool_spec = deepcopy(get_reply_tool_spec(context) if self.name == "reply" else self.get_spec())
         tool_spec.metadata["builtin_stage"] = self.stage
         tool_spec.metadata["visibility"] = self.visibility
         return tool_spec
@@ -189,14 +189,14 @@ def is_builtin_tool_in_action_stage(tool_spec: ToolSpec) -> bool:
 def get_all_builtin_tool_specs(context: Optional[ToolAvailabilityContext] = None) -> List[ToolSpec]:
     """获取全部内置工具声明。"""
 
-    return [entry.build_spec() for entry in _get_builtin_tool_entries(context=context)]
+    return [entry.build_spec(context) for entry in _get_builtin_tool_entries(context=context)]
 
 
 def get_builtin_tools(context: Optional[ToolAvailabilityContext] = None) -> List[ToolDefinitionInput]:
     """获取默认暴露给模型层的内置工具定义。"""
 
     tool_specs = [
-        entry.build_spec()
+        entry.build_spec(context)
         for entry in _get_builtin_tool_entries(stage="action", visibility="visible", context=context)
     ]
     return [tool_spec.to_llm_definition() for tool_spec in tool_specs if tool_spec.enabled]

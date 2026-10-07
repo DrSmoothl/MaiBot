@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
 import asyncio
 import contextlib
@@ -130,6 +130,7 @@ class PluginRunnerSupervisor:
         health_check_interval_sec: Optional[float] = None,
         max_restart_attempts: Optional[int] = None,
         runner_spawn_timeout_sec: Optional[float] = None,
+        status_changed_callback: Optional[Callable[[], None]] = None,
     ) -> None:
         """初始化 Supervisor。
 
@@ -143,7 +144,9 @@ class PluginRunnerSupervisor:
             health_check_interval_sec: 健康检查间隔，单位秒。
             max_restart_attempts: 自动重启 Runner 的最大次数。
             runner_spawn_timeout_sec: 等待 Runner 建连并就绪的超时时间，单位秒。
+            status_changed_callback: 注册、卸载及进程状态变化时通知管理器。
         """
+        self._status_changed_callback = status_changed_callback
         runtime_config = global_config.plugin_runtime
         self._group_name: str = str(group_name or "third_party").strip() or "third_party"
         self._logger_name = _RUNTIME_GROUP_LOGGER_NAMES.get(
@@ -314,6 +317,10 @@ class PluginRunnerSupervisor:
         """
         return {plugin_id: registration.plugin_version for plugin_id, registration in self._registered_plugins.items()}
 
+    def _notify_status_changed(self) -> None:
+        if self._status_changed_callback is not None:
+            self._status_changed_callback()
+
     def get_plugin_load_statuses(self) -> Dict[str, str]:
         """返回 Runner 最近一次上报的插件加载状态。"""
 
@@ -387,6 +394,8 @@ class PluginRunnerSupervisor:
             explicitly_disabled_plugins=sorted(disabled_set),
         )
 
+        self._notify_status_changed()
+
     def _apply_plugin_unload_result(self, unloaded_plugins: List[str]) -> None:
         """从最近一次 Runner 加载状态中移除已卸载插件。"""
 
@@ -405,6 +414,8 @@ class PluginRunnerSupervisor:
                 set(self._runner_ready_payloads.explicitly_disabled_plugins) - unloaded_set
             ),
         )
+
+        self._notify_status_changed()
 
     @property
     def is_loading(self) -> bool:
@@ -1193,6 +1204,7 @@ class PluginRunnerSupervisor:
             )
         self._registered_plugins[payload.plugin_id] = payload
         self._message_gateway_states[payload.plugin_id] = {}
+        self._notify_status_changed()
 
         return envelope.make_response(
             payload={
@@ -1233,6 +1245,7 @@ class PluginRunnerSupervisor:
         removed_registration = self._registered_plugins.pop(payload.plugin_id, None) is not None
         await self._unregister_all_message_gateway_drivers_for_plugin(payload.plugin_id)
         self._message_gateway_states.pop(payload.plugin_id, None)
+        self._notify_status_changed()
 
         return envelope.make_response(
             payload={
@@ -1813,6 +1826,7 @@ class PluginRunnerSupervisor:
             f"loaded={len(payload.loaded_plugins)} failed={len(payload.failed_plugins)} inactive={len(payload.inactive_plugins)}"
         )
         self._runner_ready_events.set()
+        self._notify_status_changed()
         return envelope.make_response(payload={"accepted": True})
 
     def _build_runner_environment(self) -> Dict[str, str]:
@@ -2207,6 +2221,7 @@ class PluginRunnerSupervisor:
         self._message_gateway_states.clear()
         self._runner_ready_events = asyncio.Event()
         self._runner_ready_payloads = RunnerReadyPayload()
+        self._notify_status_changed()
         self._rpc_server.clear_handshake_state()
 
     def _get_runner_startup_failure_reason(self) -> Optional[str]:

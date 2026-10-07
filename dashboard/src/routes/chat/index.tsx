@@ -22,7 +22,7 @@ import {
 } from '@/lib/maisaka-monitor-client'
 import { loadUserEmojiPayload, type UserEmojiItem } from '@/lib/user-emoji-api'
 import { MaisakaMonitor } from '@/routes/monitor/maisaka-monitor'
-import { useMaisakaMonitor, type SessionInfo } from '@/routes/monitor/use-maisaka-monitor'
+import { useMaisakaMonitorOverview, type SessionInfo } from '@/routes/monitor/use-maisaka-monitor'
 
 import { ChatComposer } from './ChatComposer'
 import { ChatTabBar } from './ChatTabBar'
@@ -246,9 +246,9 @@ export function ChatPage() {
   const {
     sessions: observedSessions,
     stageStatuses: observedStageStatuses,
-    allTimeline,
+    latestMessages,
     setSelectedSession: setSelectedObservedSession,
-  } = useMaisakaMonitor()
+  } = useMaisakaMonitorOverview()
 
   const { data: knownChatStreams = [], isError: knownChatStreamsError } = useQuery({
     queryKey: ['chat-streams', 'all'],
@@ -290,20 +290,17 @@ export function ChatPage() {
     return sessions
   }, [knownChatStreams, observedSessions])
 
-  // 每个观察聊天流的最新一条消息，用于侧边栏预览（时间线按时间升序，后写覆盖先写）
+  // 最新消息由监控仓库增量维护，状态/Planner 更新不再触发扫描全部历史。
   const observedLatestMessages = useMemo(() => {
-    const latestMessages = new Map<string, ObservedMessagePreview>()
-    for (const entry of allTimeline) {
-      if (entry.type !== 'message.ingested' && entry.type !== 'message.sent') {
-        continue
-      }
-      latestMessages.set(
-        entry.sessionId,
+    const previews = new Map<string, ObservedMessagePreview>()
+    for (const [sessionId, entry] of latestMessages) {
+      previews.set(
+        sessionId,
         buildObservedMessagePreview(entry.data as MessageIngestedEvent | MessageSentEvent)
       )
     }
-    return latestMessages
-  }, [allTimeline])
+    return previews
+  }, [latestMessages])
 
   // 默认本地聊天标签页
   const defaultTab: ChatTab = {

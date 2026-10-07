@@ -1038,6 +1038,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             return finalize(False)
 
         active_reply_tool_args = self._normalize_reply_tool_args(reply_tool_args)
+        plugin_reply_prompt = str(active_reply_tool_args.get("_plugin_reply_prompt", ""))
         if chat_history is None:
             result.error_message = "聊天历史为空"
             return finalize(False)
@@ -1103,7 +1104,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                     request_type=self.request_type,
                     task_name=default_task_name,
                     model_name="",
-                    extra_prompt="",
+                    extra_prompt=plugin_reply_prompt,
                     attempt=retry_count + 1,
                     retry_count=retry_count,
                     max_retries=REPLYER_MAX_HOOK_RETRIES,
@@ -1117,7 +1118,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                     active_reply_tool_args = dict(before_request_kwargs["reply_tool_args"])
             except Exception as exc:
                 logger.warning(f"Maisaka 回复器 before_request Hook 调用失败，将继续使用当前请求参数: {exc}")
-                before_request_kwargs = {}
+                before_request_kwargs = {"extra_prompt": plugin_reply_prompt}
 
             active_task_name = str(before_request_kwargs.get("task_name") or default_task_name).strip()
             if not active_task_name:

@@ -51,10 +51,10 @@ export interface InstalledPlugin {
   }
   path: string
   changelog?: string | null
-  enabled?: boolean
+  enabled?: boolean | null
   disabled?: boolean
   loaded?: boolean
-  load_status?: 'success' | 'failed' | 'inactive' | 'disabled' | 'offline' | 'unknown' | 'loading'
+  load_status?: 'success' | 'failed' | 'inactive' | 'disabled' | 'offline' | 'unknown' | 'loading' | 'stopping' | 'not_loaded' | 'stopped'
   load_error?: string
   circuit_status?: {
     state: 'open' | 'half_open'

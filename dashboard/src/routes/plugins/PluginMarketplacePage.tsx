@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,9 +32,11 @@ import {
 import {
   getCachedPluginStatsSummary,
   getPluginStatsSummary,
+  getPluginUserStates,
   likePlugin,
   recordPluginDownload,
   type PluginStatsData,
+  type PluginVoteState,
 } from '@/lib/plugin-stats'
 import { PLUGIN_MARKET_VIEW_STATE_KEY } from '@/lib/plugin-market-navigation'
 
@@ -83,6 +85,8 @@ const resolvePluginStats = (
 
   return statsIds.map(id => statsSummary[id]).find(Boolean)
 }
+
+type PluginVoteOverlay = PluginVoteState & Partial<Pick<PluginStatsData, 'likes' | 'dislikes'>>
 
 const buildPluginStatsMap = (
   pluginList: PluginInfo[],
@@ -177,6 +181,34 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   const [, setInstalledPlugins] = useState<InstalledPlugin[]>([])
   const [pluginStats, setPluginStats] = useState<Record<string, PluginStatsData>>({})
   const [likingPluginIds, setLikingPluginIds] = useState<Set<string>>(() => new Set())
+  // 本机用户的点赞状态与本次会话内的点赞结果，单独存放而不写回 pluginStats：
+  // pluginStats 同时是排序依据，点赞后保持不变才能避免卡片当场换位。
+  const [voteOverlay, setVoteOverlay] = useState<Record<string, PluginVoteOverlay>>({})
+  const displayPluginStats = useMemo(() => {
+    const mergedStats: Record<string, PluginStatsData> = {}
+
+    for (const [statsId, stats] of Object.entries(pluginStats)) {
+      const overlay = voteOverlay[statsId] ?? voteOverlay[stats.plugin_id]
+      mergedStats[statsId] = overlay ? { ...stats, ...overlay } : stats
+    }
+    // 统计摘要里没有记录的插件，点赞后也要能显示点赞数
+    for (const [statsId, overlay] of Object.entries(voteOverlay)) {
+      if (!mergedStats[statsId]) {
+        mergedStats[statsId] = {
+          plugin_id: statsId,
+          likes: 0,
+          dislikes: 0,
+          downloads: 0,
+          rating: 0,
+          rating_count: 0,
+          comment_count: 0,
+          ...overlay,
+        }
+      }
+    }
+
+    return mergedStats
+  }, [pluginStats, voteOverlay])
   
   // 安装对话框状态
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
@@ -352,6 +384,12 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     const init = async () => {
       const cachedPluginList = getCachedPluginList(showCompatibleOnly)
       const cachedStatsSummary = getCachedPluginStatsSummary()
+      // 已点赞状态只影响按钮样式，不阻塞清单加载；本次会话内已产生的点赞结果优先
+      void getPluginUserStates().then((userStates) => {
+        if (!isUnmounted) {
+          setVoteOverlay((currentOverlay) => ({ ...userStates, ...currentOverlay }))
+        }
+      })
       if (cachedPluginList?.length && !isUnmounted) {
         setPlugins(cachedPluginList)
         if (cachedStatsSummary) {
@@ -693,32 +731,25 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         return
       }
 
-      setPluginStats((currentStats) => {
-        const currentPluginStats = currentStats[pluginId] ?? currentStats[plugin.id] ?? {
-          plugin_id: pluginId,
-          likes: 0,
-          dislikes: 0,
-          downloads: plugin.downloads ?? 0,
-          rating: plugin.rating ?? 0,
-          rating_count: 0,
-        }
-        const nextPluginStats: PluginStatsData = {
-          ...currentPluginStats,
-          plugin_id: pluginId,
-          likes: Number(result.likes ?? currentPluginStats.likes),
-          dislikes: Number(result.dislikes ?? currentPluginStats.dislikes),
-          liked: result.liked,
-          disliked: result.disliked,
-        }
-        const nextStats = { ...currentStats }
-        const statsIds = [pluginId, plugin.id, plugin.manifest?.id, currentPluginStats.plugin_id]
-          .filter((id): id is string => Boolean(id))
+      const nextOverlay: PluginVoteOverlay = {
+        liked: result.liked === true,
+        disliked: result.disliked === true,
+      }
+      if (result.likes !== undefined) {
+        nextOverlay.likes = Number(result.likes)
+      }
+      if (result.dislikes !== undefined) {
+        nextOverlay.dislikes = Number(result.dislikes)
+      }
+      const statsIds = [pluginId, plugin.manifest?.id, pluginStats[pluginId]?.plugin_id]
+        .filter((id): id is string => Boolean(id))
 
+      setVoteOverlay((currentOverlay) => {
+        const mergedOverlay = { ...currentOverlay }
         for (const statsId of statsIds) {
-          nextStats[statsId] = nextPluginStats
+          mergedOverlay[statsId] = nextOverlay
         }
-
-        return nextStats
+        return mergedOverlay
       })
     } finally {
       setLikingPluginIds((currentIds) => {
@@ -968,6 +999,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
       if (!showInstalledPlugins && p.installed) return false
       const matchesSearch = searchQuery === '' ||
         p.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.manifest.author?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.manifest.keywords && p.manifest.keywords.some(k => k.toLowerCase().includes(searchQuery.toLowerCase())))
       const matchesType = pluginTypeFilter === 'all' || getPluginType(p) === pluginTypeFilter
@@ -1201,7 +1233,8 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             sortBy={marketplaceSortBy}
             gitStatus={gitStatus}
             maimaiVersion={maimaiVersion}
-            pluginStats={pluginStats}
+            pluginStats={displayPluginStats}
+            sortPluginStats={pluginStats}
             pluginProgressById={pluginProgressById}
             likingPluginIds={likingPluginIds}
             onInstall={openInstallDialog}
