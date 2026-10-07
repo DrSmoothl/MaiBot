@@ -62,7 +62,7 @@ MaiSaka is more than just a bot, and more than a "helpful assistant" that comple
 
 <div align="center">
   <br>
-  <img src="../depends-data/webui-millennium-showcase.jpg" width="90%" alt="MaiBot WebUI home page in the Millennium theme" style="box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  <img src="../depends-data/webui-millennium-showcase.png" width="90%" alt="MaiBot WebUI Millennium theme in light and dark modes" style="box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
 </div>
 
 ---

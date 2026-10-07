@@ -65,7 +65,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 <div align="center">
   <br>
-  <img src="depends-data/webui-millennium-showcase.jpg" width="90%" alt="MaiBot WebUI 千禧主题首页" style="box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  <img src="depends-data/webui-millennium-showcase.png" width="90%" alt="MaiBot WebUI 千禧主题浅色与夜间模式" style="box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
 </div>
 
 <a id="-更新和安装--updates-and-installation"></a>
