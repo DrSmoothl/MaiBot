@@ -38,9 +38,8 @@ class PlannerDeltaEncoder:
             return message
         payload = project_planner_snapshot(message["data"])
         message = {**message, "data": payload}
-        # 旧账本没有 run_id/event_id 时仍使用其原有完整快照协议。
-        if not payload.get("run_id") or not isinstance(payload.get("event_id"), int):
-            return message
+        if not payload.get("run_id") or type(payload.get("event_id")) is not int or payload["event_id"] <= 0:
+            raise ValueError("Planner 快照缺少有效的 run_id/event_id")
         key = (payload["session_id"], payload["run_id"], payload["cycle_id"])
         previous = self._bases.get(key)
         encoded = message

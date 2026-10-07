@@ -9,6 +9,7 @@ import subprocess
 
 import pytest
 
+from src.config.file_watcher import FileWatcher
 from src.plugin_runtime import integration
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator
 from src.webui.routers.plugin import management, release_install, releases, support
@@ -140,6 +141,105 @@ def test_install_verifies_commit_and_records_source(local_install):
     assert list((plugins / ".update_tmp").iterdir()) == []
 
 
+@pytest.mark.parametrize("load_failure", [False, True])
+def test_install_activates_runtime_before_reporting_success(local_install, monkeypatch, load_failure):
+    client, _, _, _, _ = local_install
+    manager = integration.get_plugin_runtime_manager()
+    events = []
+
+    async def activate(plugin_id):
+        assert plugin_id == "example.demo"
+        assert manager._plugin_file_update_lock.locked()
+        target = support.resolve_installed_plugin_path(plugin_id)
+        assert (target / "plugin.py").is_file()
+        assert release_install.read_release_receipt(target)["version"] == "1.0.0"
+        events.append("activate")
+        if load_failure:
+            raise RuntimeError("测试插件启动异常")
+
+    async def progress(**kwargs):
+        if kwargs["stage"] == "success":
+            events.append("success")
+
+    monkeypatch.setattr(manager, "activate_installed_plugin", activate)
+    monkeypatch.setattr(release_install, "update_progress", progress)
+    response = install(client)
+    assert not manager._plugin_file_update_lock.locked()
+    if load_failure:
+        assert response.status_code == 409
+        assert "插件文件已安装" in response.text
+        assert "测试插件启动异常" in response.text
+        assert events == ["activate"]
+    else:
+        assert response.status_code == 200, response.text
+        assert events == ["activate", "success"]
+
+
+@pytest.mark.parametrize("status", ["success", "inactive", "failed"])
+@pytest.mark.parametrize("environment_changed, blocked_changed", [(False, False), (True, False), (False, True)])
+def test_new_plugin_syncs_dependencies_and_config_subscription(
+    tmp_path, monkeypatch, status, environment_changed, blocked_changed
+):
+    manager = integration.PluginRuntimeManager()
+    manager._started = True
+    plugin_path = tmp_path / "example.demo"
+    plugin_path.mkdir()
+    manager._plugin_file_watcher = FileWatcher(paths=[tmp_path])
+    events = []
+
+    async def sync(plugin_dirs):
+        assert plugin_dirs == [tmp_path]
+        events.append("dependencies")
+        return integration.DependencySyncState(
+            blocked_changed_plugin_ids={"example.demo"} if blocked_changed else set(),
+            environment_changed=environment_changed,
+        )
+
+    async def load(plugin_id, reason):
+        assert plugin_id == "example.demo" and reason == "release_install"
+        events.append("load")
+        return status == "success"
+
+    async def restart(reason):
+        assert reason == "release_install"
+        events.append("restart")
+        return True
+
+    monkeypatch.setattr(manager, "_iter_plugin_dirs", lambda: iter([tmp_path]))
+    monkeypatch.setattr(manager, "_iter_watchable_plugin_paths", lambda: iter([("example.demo", plugin_path)]))
+    monkeypatch.setattr(manager, "_sync_plugin_dependencies", sync)
+    monkeypatch.setattr(manager, "load_plugin_globally", load)
+    monkeypatch.setattr(manager, "_restart_supervisors", restart)
+    monkeypatch.setattr(manager, "get_plugin_load_statuses", lambda: {"example.demo": status})
+    monkeypatch.setattr(manager, "get_plugin_load_failure_reasons", lambda: {"example.demo": "配置无效"})
+    if status == "failed":
+        with pytest.raises(RuntimeError, match="配置无效"):
+            asyncio.run(manager.activate_installed_plugin("example.demo"))
+    else:
+        asyncio.run(manager.activate_installed_plugin("example.demo"))
+    assert events == ["dependencies", "restart" if environment_changed or blocked_changed else "load"]
+    assert manager._plugin_config_watcher_subscriptions["example.demo"][0] == plugin_path / "config.toml"
+
+
+def test_new_plugin_restart_failure_still_registers_config_subscription(tmp_path, monkeypatch):
+    manager = integration.PluginRuntimeManager()
+    manager._started = True
+    manager._plugin_file_watcher = FileWatcher(paths=[tmp_path])
+
+    async def sync(plugin_dirs):
+        return integration.DependencySyncState(blocked_changed_plugin_ids=set(), environment_changed=True)
+
+    async def restart(reason):
+        return False
+
+    monkeypatch.setattr(manager, "_sync_plugin_dependencies", sync)
+    monkeypatch.setattr(manager, "_restart_supervisors", restart)
+    monkeypatch.setattr(manager, "_iter_watchable_plugin_paths", lambda: iter([("example.demo", tmp_path)]))
+    with pytest.raises(RuntimeError, match="重启插件运行时失败"):
+        asyncio.run(manager.activate_installed_plugin("example.demo"))
+    assert manager._plugin_config_watcher_subscriptions["example.demo"][0] == tmp_path / "config.toml"
+
+
 def test_moved_tag_or_manifest_tampering_does_not_install(local_install):
     client, _, _, chosen, _ = local_install
     chosen.commit = "b" * 40
@@ -178,6 +278,34 @@ def test_explicit_version_switch_preserves_data_and_backup(local_install):
     assert (target / "history.db").read_bytes() == b"user data"
     assert "false" in (target / "config.toml").read_text(encoding="utf-8")
     assert (Path(response.json()["backup_path"]) / "history.db").read_bytes() == b"user data"
+    assert release_install.read_release_receipt(target)["version"] == "1.0.0"
+
+
+@pytest.mark.parametrize("version_spec, has_warning", [("<1.0.0", True), (">=1.0.0,<2.0.0", False)])
+def test_reverse_dependency_only_warns_without_blocking_update(local_install, version_spec, has_warning):
+    client, plugins, _, _, _ = local_install
+    assert install(client).status_code == 200
+    dependent = manifest()
+    dependent["id"] = "example.dependent"
+    dependent["name"] = "依赖方插件"
+    dependent["dependencies"] = [{"type": "plugin", "id": "example.demo", "version_spec": version_spec}]
+    directory = plugins / "example.dependent"
+    directory.mkdir()
+    (directory / "_manifest.json").write_text(json.dumps(dependent), encoding="utf-8")
+
+    response = client.post("/plugins/update", json={
+        "plugin_id": "example.demo", "repository_url": "https://github.com/example/demo", "version": "1.0.0",
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] is True
+    warnings = response.json()["warnings"]
+    assert bool(warnings) is has_warning
+    if has_warning:
+        assert "example.dependent" in warnings[0]
+        assert "依赖方插件" in warnings[0]
+        assert version_spec in warnings[0]
+    target = support.resolve_installed_plugin_path("example.demo")
     assert release_install.read_release_receipt(target)["version"] == "1.0.0"
 
 
@@ -287,7 +415,7 @@ def test_registry_alias_shares_install_operation_lock(local_install):
     assert response.status_code == 409 and "正在执行" in response.text
 
 
-def test_switch_checks_reverse_dependency_versions(local_install):
+def test_install_warns_about_reverse_dependency_versions(local_install):
     client, plugins, _, _, _ = local_install
     dependent = plugins / "dependent"
     dependent.mkdir()
@@ -296,8 +424,10 @@ def test_switch_checks_reverse_dependency_versions(local_install):
     data["dependencies"] = [{"type": "plugin", "id": "example.demo", "version_spec": ">=2.0.0"}]
     (dependent / "_manifest.json").write_text(json.dumps(data), encoding="utf-8")
     response = install(client)
-    assert response.status_code == 409 and "依赖要求" in response.text
-    assert support.resolve_installed_plugin_path("example.demo") is None
+    assert response.status_code == 200, response.text
+    assert "example.dependent" in response.json()["warnings"][0]
+    assert ">=2.0.0" in response.json()["warnings"][0]
+    assert support.resolve_installed_plugin_path("example.demo") is not None
 
 
 def test_missing_plugin_dependency_blocks_install(local_install):

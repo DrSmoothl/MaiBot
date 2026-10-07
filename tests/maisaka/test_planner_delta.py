@@ -3,12 +3,14 @@
 from copy import deepcopy
 from types import ModuleType
 
+from pytest import raises
+
 import asyncio
 import json
 import logging
 import sys
 
-from src.maisaka.monitor.planner_delta import MAX_PLANNER_BASES, PlannerDeltaEncoder, project_planner_snapshot
+from src.maisaka.monitor.planner_delta import MAX_PLANNER_BASES, PlannerDeltaEncoder
 
 
 def message(event_id=1, event="planner.progress", **changes):
@@ -98,16 +100,16 @@ def test_removed_fields_and_null_values_are_not_confused():
     assert delta["removed_fields"] == ["active_tool_call_id"]
 
 
-def test_non_planner_events_and_legacy_snapshots_do_not_require_bases():
+def test_non_planner_events_pass_through_and_unversioned_snapshots_fail():
     encoder = PlannerDeltaEncoder()
     original = message(event="message.ingested")
     assert encoder.encode(original) is original
-    legacy = message(run_id="")
-    assert encoder.encode(legacy)["event"] == "planner.progress"
-    assert encoder.encode(legacy)["data"] == project_planner_snapshot(legacy["data"])
+    for invalid in (message(run_id=""), message(event_id=None), message(event_id=0)):
+        with raises(ValueError, match="run_id/event_id"):
+            encoder.encode(invalid)
 
 
-def test_sender_negotiation_and_reset_follow_queue_order(monkeypatch):
+def test_sender_always_encodes_and_resets_in_queue_order(monkeypatch):
     # 发送协议测试不启动应用日志的文件扫描/清理任务。
     logger_module = ModuleType("src.common.logger")
     logger_module.get_logger = logging.getLogger
@@ -139,11 +141,12 @@ def test_sender_negotiation_and_reset_follow_queue_order(monkeypatch):
 
     frames = asyncio.run(send())
     assert [frame["event"] for frame in frames] == [
-        "planner.progress", "planner.progress", "planner.reset", "planner.progress",
+        "planner.progress", "planner.delta", "planner.reset", "planner.progress",
         "planner.delta", "planner.reset", "planner.progress", "planner.delta",
     ]
-    # 旧客户端既不接收增量，也不删除原字段；新版基准在每次重订阅处重建。
-    assert "messages" in frames[0]["data"]["request"]
+    # 无需协商即可裁剪并增量发送；每次重订阅按出站队列顺序重建基准。
+    assert "messages" not in frames[0]["data"]["request"]
+    assert frames[1]["data"]["base_event_id"] == 1
     assert "messages" not in frames[3]["data"]["request"]
     assert frames[4]["data"]["base_event_id"] == 3
     assert frames[7]["data"]["base_event_id"] == 5

@@ -64,7 +64,6 @@ describe('maisakaMonitorClient', () => {
     expect(wsMocks.subscribe).toHaveBeenCalledTimes(1)
     expect(wsMocks.subscribe).toHaveBeenCalledWith('maisaka_monitor', 'main', {
       since_event_id: 0,
-      planner_delta: 1,
       replay_limit: 1000,
     })
   })
@@ -166,7 +165,6 @@ describe('maisakaMonitorClient', () => {
     await client.subscribe(vi.fn())
     expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', {
       since_event_id: 0,
-      planner_delta: 1,
       replay_limit: 1000,
     })
 
@@ -177,7 +175,6 @@ describe('maisakaMonitorClient', () => {
     expect(wsMocks.subscribe).toHaveBeenCalledTimes(2)
     expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', {
       since_event_id: 42,
-      planner_delta: 1,
       replay_limit: 10000,
     })
   })
@@ -187,7 +184,6 @@ describe('maisakaMonitorClient', () => {
     expect(wsMocks.updateSubscriptionData).toHaveBeenCalledTimes(1)
     expect(wsMocks.updateSubscriptionData).toHaveBeenCalledWith('maisaka_monitor', 'main', {
       since_event_id: 7,
-      planner_delta: 1,
       replay_limit: 10000,
     })
 
@@ -209,7 +205,6 @@ describe('maisakaMonitorClient', () => {
     await client.subscribe(vi.fn())
     expect(wsMocks.subscribe).toHaveBeenCalledWith('maisaka_monitor', 'main', {
       since_event_id: 8,
-      planner_delta: 1,
       replay_limit: 10000,
     })
   })
@@ -231,7 +226,6 @@ describe('maisakaMonitorClient', () => {
     expect(wsMocks.subscribe).toHaveBeenCalledTimes(2)
     expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', {
       since_event_id: 0,
-      planner_delta: 1,
       replay_limit: 1000,
     })
   })

@@ -110,8 +110,8 @@ class PluginDependencyPipeline:
             DependencyPipelineResult: 最终的阻止加载结果与环境变更状态。
         """
 
-        plan = self.build_plan(
-            plugin_dirs,
+        plan = await asyncio.to_thread(
+            self.build_plan, plugin_dirs,
             initial_blocked_plugin_reasons=initial_blocked_plugin_reasons,
         )
         if not plan.install_requirements:

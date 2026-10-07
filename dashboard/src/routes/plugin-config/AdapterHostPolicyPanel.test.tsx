@@ -203,6 +203,34 @@ afterEach(() => {
 })
 
 describe('AdapterHostPolicyPanel', () => {
+  it('复制包含未保存编辑，切换保留其他组，删除仅移除非当前组', async () => {
+    const user = userEvent.setup()
+    vi.mocked(updateAdapterHostPolicy).mockImplementation(async (pluginId, policy) =>
+      makeResponse(pluginId, { policy }))
+    await renderReadyPanel()
+
+    await user.click(screen.getByRole('button', { name: '添加:输入接收消息的用户 ID', exact: true }))
+    await user.click(screen.getByRole('button', { name: '复制当前组' }))
+    await user.type(screen.getByLabelText('分组名称'), '测试组')
+    await user.click(screen.getByRole('button', { name: '创建', exact: true }))
+    await waitFor(() => expect(updateAdapterHostPolicy).toHaveBeenCalledTimes(1))
+    const copied = vi.mocked(updateAdapterHostPolicy).mock.calls[0][1]
+    expect(copied.active_group).toBe('default')
+    expect(copied.policy_groups).toHaveLength(2)
+    expect(copied.policy_groups?.[1].private.allow_ids).toEqual(['new-item'])
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '新建分组' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: '测试组', exact: true }))
+    await waitFor(() => expect(updateAdapterHostPolicy).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(updateAdapterHostPolicy).mock.calls[1][1].active_group).toBe(copied.policy_groups?.[1].id)
+    await waitFor(() => expect(screen.getByRole('button', { name: '新建分组' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: '管理分组' }))
+    expect(screen.queryByRole('button', { name: '删除分组 测试组' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '删除分组 默认分组' }))
+    await waitFor(() => expect(updateAdapterHostPolicy).toHaveBeenCalledTimes(3))
+    expect(vi.mocked(updateAdapterHostPolicy).mock.calls[2][1].policy_groups).toHaveLength(1)
+  })
+
   it('加载中展示转圈提示', async () => {
     const deferred = createDeferred<ReturnType<typeof makeResponse>>()
     vi.mocked(getAdapterHostPolicy).mockReturnValue(deferred.promise as never)

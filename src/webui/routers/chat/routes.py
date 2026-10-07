@@ -102,11 +102,22 @@ class AdapterHostPolicySectionRequest(BaseModel):
     deny_ids: List[str] = Field(default_factory=list)
 
 
+class AdapterHostPolicyGroupRequest(BaseModel):
+    """配置域内保存的一组群聊与私聊策略。"""
+
+    id: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=100)
+    group: AdapterHostPolicySectionRequest = Field(default_factory=AdapterHostPolicySectionRequest)
+    private: AdapterHostPolicySectionRequest = Field(default_factory=AdapterHostPolicySectionRequest)
+
+
 class AdapterHostPolicyUpdateRequest(BaseModel):
     """按适配器插件编辑主程序放行规则的请求。"""
 
     group: AdapterHostPolicySectionRequest = Field(default_factory=AdapterHostPolicySectionRequest)
     private: AdapterHostPolicySectionRequest = Field(default_factory=AdapterHostPolicySectionRequest)
+    policy_groups: Optional[List[AdapterHostPolicyGroupRequest]] = None
+    active_group: Optional[str] = None
 
 
 class ChatTargetResolveItem(BaseModel):
@@ -1655,6 +1666,10 @@ def update_adapter_plugin_policy(
         manager.set_adapter_policy(
             identity,
             request.model_dump(),
+            policy_groups=(
+                [group.model_dump() for group in request.policy_groups] if request.policy_groups is not None else None
+            ),
+            active_group=request.active_group,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

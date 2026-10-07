@@ -61,8 +61,9 @@ export class PlannerDeltaDecoder {
       decoded = { ...message, event: eventType, data: snapshot as unknown as Record<string, unknown> }
     } else {
       snapshot = data as PlannerSnapshot
-      // 无版本信息的旧事件无需参与增量链，仍按原事件交给监控视图。
-      if (!snapshot.run_id || !Number.isInteger(snapshot.event_id)) return message
+      if (!snapshot.run_id || !Number.isInteger(snapshot.event_id) || snapshot.event_id <= 0) {
+        throw new Error(`Planner 快照缺少有效的 run_id/event_id: ${key}`)
+      }
     }
 
     if (eventType === 'planner.finalized') {

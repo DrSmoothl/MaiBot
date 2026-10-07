@@ -372,7 +372,6 @@ class MaisakaMonitorClient {
 
   private getReplaySubscribeData(): Record<string, unknown> {
     return {
-      planner_delta: 1,
       since_event_id: this.replayCursor,
       replay_limit: this.replayCursor > 0 ? this.replayLimit : this.initialReplayLimit,
     }

@@ -623,6 +623,7 @@ async def test_host_config_change_unloads_sdk_config_model_plugin_disabled_on_di
 
     supervisor = SimpleNamespace(
         _registered_plugins=transport.registered,
+        get_loaded_plugin_ids=lambda: list(transport.registered),
         inspect_plugin_config=inspect_plugin_config,
         notify_plugin_config_updated=notify_plugin_config_updated,
     )
@@ -634,6 +635,7 @@ async def test_host_config_change_unloads_sdk_config_model_plugin_disabled_on_di
         [FileChange(change_type=Change.modified, path=paths[_CONFIG_MODEL] / "config.toml")],
     )
 
+    await manager._plugin_change_task
     assert handled == ["config_disabled"]
     assert _CONFIG_MODEL not in transport.registered
     assert runner._loader.get_plugin(_CONFIG_MODEL) is None

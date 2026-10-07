@@ -1325,7 +1325,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
             {showHostPolicy && <TabsTrigger value="host-policy">黑白名单规则</TabsTrigger>}
             <TabsTrigger value="details">详情</TabsTrigger>
           </TabsList>
-          {/* 黑白名单页的账号与保存工具栏渲染到页签同一行，节省纵向空间 */}
+          {/* 黑白名单页的账号、分组操作与保存工具栏渲染到页签同一行，节省纵向空间 */}
           {showHostPolicy && <div ref={setHostPolicyToolbar} className="min-w-0 flex-1" />}
         </div>
         <TabsContent value="settings" className="mt-4">
@@ -1797,7 +1797,7 @@ function PluginConfigPageContent() {
                 <div className="divide-border/80 divide-y">
                   {group.plugins.map((plugin) => {
               const pluginActing = actingPluginId === plugin.id
-              const pluginDisabled = isPluginDisabled(plugin)
+              const pluginDisabled = plugin.enabled === false
               const updateState = getPluginUpdateState(plugin)
               const pluginLoadFailed = isPluginLoadFailed(plugin)
               const pluginVersionIncompatible = isPluginVersionIncompatible(plugin)
@@ -1956,8 +1956,9 @@ function PluginConfigPageContent() {
                       variant="outline"
                       size="sm"
                       data-plugin-update-button="true"
-                      className="relative h-9 w-9 p-0"
+                      className={`relative h-9 w-9 p-0 ${checkingUpdates ? 'text-primary disabled:opacity-100' : ''}`}
                       disabled={pluginActing || !updateState.canUpdate}
+                      aria-busy={checkingUpdates || pluginActing}
                       title={updateState.title}
                       aria-label={updateState.title || '更新/升级'}
                       onClick={(event) => openUpdatePluginDialog(plugin, event)}
@@ -1968,9 +1969,7 @@ function PluginConfigPageContent() {
                           aria-hidden="true"
                         />
                       )}
-                      {pluginActing ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : checkingUpdates ? (
+                      {pluginActing || checkingUpdates ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <ArrowUp className="h-4 w-4" />

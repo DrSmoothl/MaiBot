@@ -22,6 +22,7 @@ from src.webui.routers.chat.service import (
 from src.webui.routers.plugin.progress import get_current_progress
 from src.webui.routers.websocket.auth import verify_ws_token
 from src.webui.routers.websocket.manager import websocket_manager
+from .plugin_runtime import stop_plugin_runtime_subscription, subscribe_plugin_runtime
 
 logger = get_logger("webui.unified_ws")
 router = APIRouter()
@@ -161,11 +162,6 @@ async def _handle_maisaka_monitor_subscribe(
     since_event_id = _coerce_non_negative_int(data.get("since_event_id"))
     replay_limit = _coerce_non_negative_int(data.get("replay_limit"), default=1000)
     replay_limit = max(1, min(replay_limit, 10000))
-    connection = websocket_manager.get_connection(connection_id)
-    # 显式协商版本；未声明支持的旧 WebUI 继续收到完整快照。
-    supports_planner_delta = data.get("planner_delta") == 1
-    if connection is not None and not supports_planner_delta:
-        connection.planner_delta_encoder = None
     websocket_manager.subscribe(connection_id, domain="maisaka_monitor", topic="main")
     await websocket_manager.send_response(
         connection_id,
@@ -180,11 +176,10 @@ async def _handle_maisaka_monitor_subscribe(
     )
     from src.maisaka.monitor.event_store import replay_monitor_events
 
-    if supports_planner_delta:
-        # 重置标记与快照共用出站队列，前后端在相同位置清空基准，重订阅也不会错位。
-        await websocket_manager.send_event(
-            connection_id, domain="maisaka_monitor", event="planner.reset", topic="main", data={}
-        )
+    # 重置标记与快照共用出站队列，前后端在相同位置清空基准，重订阅也不会错位。
+    await websocket_manager.send_event(
+        connection_id, domain="maisaka_monitor", event="planner.reset", topic="main", data={}
+    )
     replay_events = await asyncio.to_thread(
         replay_monitor_events,
         since_event_id=since_event_id,
@@ -249,6 +244,10 @@ async def _handle_subscribe(connection_id: str, message: Dict[str, Any]) -> None
         await _handle_plugin_progress_subscribe(connection_id, request_id)
         return
 
+    if domain == "plugin_runtime" and topic == "main":
+        await subscribe_plugin_runtime(connection_id, request_id)
+        return
+
     if domain == "maisaka_monitor" and topic == "main":
         await _handle_maisaka_monitor_subscribe(connection_id, request_id, data)
         return
@@ -282,6 +281,8 @@ async def _handle_unsubscribe(connection_id: str, message: Dict[str, Any]) -> No
         return
 
     websocket_manager.unsubscribe(connection_id, domain=domain, topic=topic)
+    if domain == "plugin_runtime" and topic == "main":
+        stop_plugin_runtime_subscription(connection_id)
     await websocket_manager.send_response(
         connection_id,
         request_id=request_id,
@@ -652,6 +653,7 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
     except Exception as exc:
         logger.error(f"统一 WebSocket 处理失败: connection={connection_id}, error={exc}", exc_info=True)
     finally:
+        stop_plugin_runtime_subscription(connection_id)
         chat_manager.disconnect_connection(connection_id)
         await websocket_manager.disconnect(connection_id)
         logger.info(

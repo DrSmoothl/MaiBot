@@ -25,7 +25,7 @@ class WebSocketConnection:
     chat_sessions: Dict[str, str] = field(default_factory=dict)
     send_queue: "asyncio.Queue[Optional[Dict[str, Any]]]" = field(default_factory=asyncio.Queue)
     sender_task: Optional["asyncio.Task[None]"] = None
-    planner_delta_encoder: Optional[PlannerDeltaEncoder] = None
+    planner_delta_encoder: PlannerDeltaEncoder = field(default_factory=PlannerDeltaEncoder)
 
 
 class UnifiedWebSocketManager:
@@ -79,8 +79,7 @@ class UnifiedWebSocketManager:
                 if message.get("domain") == "maisaka_monitor" and message.get("event") == "planner.reset":
                     connection.planner_delta_encoder = PlannerDeltaEncoder()
                 # 在连接所属循环按出站顺序编码，避免跨线程广播和历史回放打乱增量基准。
-                if connection.planner_delta_encoder is not None:
-                    message = connection.planner_delta_encoder.encode(message)
+                message = connection.planner_delta_encoder.encode(message)
                 try:
                     text = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
                 except (TypeError, ValueError) as exc:
@@ -88,7 +87,7 @@ class UnifiedWebSocketManager:
                     logger.error(
                         f"统一 WebSocket 消息序列化失败，已丢弃: connection={connection.connection_id}, error={exc}"
                     )
-                    if connection.planner_delta_encoder is not None and message.get("event") in {
+                    if message.get("domain") == "maisaka_monitor" and message.get("event") in {
                         "planner.progress", "planner.finalized", "planner.delta",
                     }:
                         # 增量依赖前一帧，不能跳过坏帧后继续推进基准；关闭连接让订阅从完整快照恢复。

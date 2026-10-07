@@ -94,11 +94,11 @@ describe('Planner 增量解码', () => {
     expect(decoder.decode(delta(2, { cycle_id: 0 }))!.data.event_id).toBe(2)
   })
 
-  it('非 Planner 事件和无版本的旧快照仍可接收', () => {
+  it('非 Planner 事件直接传递，无版本的快照报错', () => {
     const decoder = new PlannerDeltaDecoder()
     const message = { ...full(), event: 'message.ingested' }
     expect(decoder.decode(message)).toBe(message)
     const legacy = full(1, { event_id: undefined, run_id: undefined })
-    expect(decoder.decode(legacy)).toBe(legacy)
+    expect(() => decoder.decode(legacy)).toThrow('run_id/event_id')
   })
 })

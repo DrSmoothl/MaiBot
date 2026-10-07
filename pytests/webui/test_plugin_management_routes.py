@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.plugin_runtime import integration as integration_module
 from src.plugin_runtime.protocol.envelope import (
     Envelope,
     InspectPluginConfigPayload,
@@ -29,6 +30,8 @@ from src.webui.routers.plugin import support as support_module
 
 @pytest.fixture
 def client(tmp_path, monkeypatch) -> TestClient:
+    manager = integration_module.PluginRuntimeManager()
+    monkeypatch.setattr(integration_module, "get_plugin_runtime_manager", lambda: manager)
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir(parents=True, exist_ok=True)
 
@@ -72,7 +75,7 @@ def test_installed_plugins_only_scan_plugins_dir_and_exclude_a_memorix(client: T
 
 def test_installed_plugins_expose_duplicate_id_failure_reason(client: TestClient, monkeypatch) -> None:
     plugins_dir = support_module.get_plugins_dir()
-    (plugins_dir / "demo_plugin" / "config.toml").write_text("[plugin]\nenabled = false\n", encoding="utf-8")
+    (plugins_dir / "demo_plugin" / "config.toml").write_text("[plugin]\nenabled = true\n", encoding="utf-8")
     duplicate_dir = plugins_dir / "demo_plugin_copy"
     duplicate_dir.mkdir()
     duplicate_manifest = json.loads((plugins_dir / "demo_plugin" / "_manifest.json").read_text(encoding="utf-8"))
@@ -81,12 +84,10 @@ def test_installed_plugins_expose_duplicate_id_failure_reason(client: TestClient
         "插件 ID 重复，已阻止加载；冲突目录: "
         f"{plugins_dir / 'demo_plugin'}, {duplicate_dir}"
     )
-    monkeypatch.setattr(management_module, "_get_runtime_plugin_load_statuses", lambda: {"test.demo": "failed"})
-    monkeypatch.setattr(
-        management_module,
-        "_get_runtime_plugin_load_failure_reasons",
-        lambda: {"test.demo": failure_reason},
-    )
+    async def snapshot():
+        return {"statuses": {"test.demo": "failed"}, "failure_reasons": {"test.demo": failure_reason},
+                "circuit_statuses": {}, "running": True}
+    monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "get_plugin_state_snapshot", snapshot)
     response = client.get("/api/webui/plugins/installed")
 
     assert response.status_code == 200
@@ -96,9 +97,34 @@ def test_installed_plugins_expose_duplicate_id_failure_reason(client: TestClient
     assert payload["plugins"][0]["load_error"] == failure_reason
 
 
+@pytest.mark.parametrize("runtime_status, expected", [
+    ("failed", "disabled"), ("offline", "disabled"),
+    ("success", "success"), ("loading", "loading"), ("stopping", "stopping"),
+])
+def test_disabled_plugin_ignores_scan_failures_but_preserves_live_state(
+    client: TestClient, monkeypatch, runtime_status: str, expected: str,
+) -> None:
+    plugin_path = support_module.resolve_installed_plugin_path("test.demo")
+    (plugin_path / "config.toml").write_text("[plugin]\nenabled = false\n", encoding="utf-8")
+
+    async def snapshot():
+        return {"statuses": {"test.demo": runtime_status},
+                "failure_reasons": {"test.demo": "Host 版本不兼容"},
+                "circuit_statuses": {}, "running": True}
+
+    monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "get_plugin_state_snapshot", snapshot)
+    response = client.get("/api/webui/plugins/installed")
+    assert response.status_code == 200
+    plugin = response.json()["plugins"][0]
+    assert plugin["enabled"] is False
+    assert plugin["load_status"] == expected
+    assert plugin["load_error"] == ""
+
+
 def test_installed_plugins_expose_offline_adapter_status(client: TestClient, monkeypatch) -> None:
-    monkeypatch.setattr(management_module, "_get_runtime_plugin_load_statuses", lambda: {"test.demo": "offline"})
-    monkeypatch.setattr(management_module, "_get_runtime_plugin_load_failure_reasons", lambda: {})
+    async def snapshot():
+        return {"statuses": {"test.demo": "offline"}, "failure_reasons": {}, "circuit_statuses": {}, "running": True}
+    monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "get_plugin_state_snapshot", snapshot)
 
     response = client.get("/api/webui/plugins/installed")
 
@@ -108,7 +134,7 @@ def test_installed_plugins_expose_offline_adapter_status(client: TestClient, mon
     assert plugin["load_error"] == ""
 
 
-def test_toggle_plugin_waits_until_runtime_applies_enabled_state(client: TestClient, monkeypatch) -> None:
+def test_toggle_plugin_applies_enabled_state_before_returning(client: TestClient, monkeypatch) -> None:
     plugin_path = support_module.resolve_installed_plugin_path("test.demo")
     assert plugin_path is not None
     (plugin_path / "config.toml").write_text("[plugin]\nenabled = false\n", encoding="utf-8")
@@ -128,13 +154,14 @@ def test_toggle_plugin_waits_until_runtime_applies_enabled_state(client: TestCli
             normalized_config={"plugin": {"enabled": False}},
         )
 
-    async def fake_wait_for_runtime(plugin_id: str, enabled: bool) -> str:
-        waited_states.append((plugin_id, enabled))
+    async def fake_apply_config(plugin_id: str, write_config) -> str:
+        await write_config()
+        waited_states.append((plugin_id, True))
         assert "enabled = true" in (plugin_path / "config.toml").read_text(encoding="utf-8")
         return "success"
 
     monkeypatch.setattr(config_routes_module, "_inspect_plugin_config_via_runtime", fake_inspect_plugin_config)
-    monkeypatch.setattr(config_routes_module, "_wait_for_plugin_runtime_toggle", fake_wait_for_runtime)
+    monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "apply_plugin_config", fake_apply_config)
     monkeypatch.setattr(config_routes_module, "require_plugin_token", lambda _: "ok")
 
     app = FastAPI()
@@ -146,35 +173,24 @@ def test_toggle_plugin_waits_until_runtime_applies_enabled_state(client: TestCli
     assert response.json() == {
         "success": True,
         "enabled": True,
+        "runtime_status": "success",
         "message": "插件已启用",
         "note": "状态更改已同步到插件运行时",
     }
     assert waited_states == [("test.demo", True)]
 
 
-def test_wait_for_plugin_runtime_toggle_ignores_inactive_until_enabled_plugin_loads(
-    monkeypatch,
-) -> None:
-    from src.plugin_runtime import integration as integration_module
-
-    runtime_statuses = iter(["inactive", "inactive", "success"])
-
-    class FakeRuntimeManager:
-        def get_plugin_load_statuses(self) -> Dict[str, str]:
-            return {"test.demo": next(runtime_statuses)}
-
-    monkeypatch.setattr(integration_module, "get_plugin_runtime_manager", lambda: FakeRuntimeManager())
-
-    runtime_status = asyncio.run(
-        config_routes_module._wait_for_plugin_runtime_toggle(
-            "test.demo",
-            True,
-            timeout_seconds=1,
-            poll_interval_seconds=0,
-        )
-    )
-
-    assert runtime_status == "success"
+def test_toggle_exposes_runtime_failure_instead_of_reporting_success(client: TestClient, monkeypatch) -> None:
+    async def fail(plugin_id, write_config):
+        await write_config()
+        raise RuntimeError("模拟插件加载失败")
+    monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "apply_plugin_config", fail)
+    monkeypatch.setattr(config_routes_module, "require_plugin_token", lambda _: "ok")
+    app = FastAPI()
+    app.include_router(config_routes_module.router, prefix="/api/webui/plugins")
+    response = TestClient(app).post("/api/webui/plugins/config/test.demo/toggle")
+    assert response.status_code == 409
+    assert "模拟插件加载失败" in response.json()["detail"]
 
 
 _CONFIG_MODEL_PLUGIN_ID = "test.config_model"
@@ -314,11 +330,13 @@ def test_toggle_round_trips_config_model_plugin_without_declared_enabled(
     _write_config_model_plugin_config(plugin_path, enabled=True)
     waited_states: List[bool] = []
 
-    async def fake_wait_for_runtime(plugin_id: str, enabled: bool) -> str:
+    async def fake_apply_config(plugin_id: str, write_config) -> str:
+        await write_config()
+        enabled = _read_plugin_config(plugin_path)["plugin"]["enabled"]
         waited_states.append(enabled)
         return "success" if enabled else "inactive"
 
-    monkeypatch.setattr(config_routes_module, "_wait_for_plugin_runtime_toggle", fake_wait_for_runtime)
+    monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "apply_plugin_config", fake_apply_config)
 
     toggled_states: List[bool] = []
     for _ in range(3):
