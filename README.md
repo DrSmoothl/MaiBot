@@ -35,7 +35,6 @@
     <a href="https://docs.mai-mai.org/manual/deployment/"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-setup-night.svg"><img src="depends-data/readme/key-setup-day.svg" alt="部署教程"></picture></a>
     <a href="https://docs.mai-mai.org"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-docs-night.svg"><img src="depends-data/readme/key-docs-day.svg" alt="文档"></picture></a>
     <a href="https://github.com/Mai-with-u/MaiBot/releases/"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-release-night.svg"><img src="depends-data/readme/key-release-day.svg" alt="发布页"></picture></a>
-    <a href="https://status.maibot.top"><picture><source media="(prefers-color-scheme: dark)" srcset="depends-data/readme/key-stats-night.svg"><img src="depends-data/readme/key-stats-day.svg" alt="遥测控制台"></picture></a>
   </p>
 
   <p>
