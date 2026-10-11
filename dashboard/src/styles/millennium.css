@@ -525,7 +525,7 @@
 :root[data-dashboard-style='millennium']
   [data-dashboard-button='true']:is(.border-input, .bg-secondary, .bg-primary, .bg-destructive) {
   background-color: var(--mil-key);
-  border-color: transparent;
+  border-color: var(--mil-line);
   box-shadow: var(--mil-keycap);
   color: var(--mil-ink);
 }
@@ -2318,7 +2318,7 @@
 
 :root[data-dashboard-style='millennium'] [data-dashboard-button='true'][data-plugin-delete-button] {
   background-color: var(--mil-danger);
-  border-color: transparent;
+  border-color: var(--mil-line);
   box-shadow:
     inset 0 0 0 2px var(--mil-line),
     inset 0 -7px 0 var(--mil-danger-side),
@@ -2447,7 +2447,7 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   background-color: var(--mil-key);
-  border-color: transparent;
+  border-color: var(--mil-line);
   box-shadow:
     var(--mil-keycap),
     0 4px 0 var(--mil-drop);
