@@ -298,6 +298,11 @@ class PluginRunnerSupervisor:
 
         return sorted(self._registered_plugins.keys())
 
+    def get_plugin_config_error(self, plugin_id: str) -> str:
+        """返回已加载插件的配置错误；非空时业务组件未注册。"""
+        registration = self._registered_plugins.get(plugin_id)
+        return registration.config_error if registration is not None else ""
+
     def get_loaded_plugin_ids_by_type(self, plugin_type: str) -> List[str]:
         """返回指定 Manifest 类型的已加载插件 ID。"""
 
@@ -305,7 +310,8 @@ class PluginRunnerSupervisor:
         return sorted(
             plugin_id
             for plugin_id, registration in self._registered_plugins.items()
-            if str(registration.plugin_type or "extension").strip().lower() == normalized_type
+            if not registration.config_error
+            and str(registration.plugin_type or "extension").strip().lower() == normalized_type
         )
 
     def get_loaded_plugin_versions(self) -> Dict[str, str]:
@@ -314,7 +320,11 @@ class PluginRunnerSupervisor:
         Returns:
             Dict[str, str]: 已注册插件版本映射，键为插件 ID，值为插件版本。
         """
-        return {plugin_id: registration.plugin_version for plugin_id, registration in self._registered_plugins.items()}
+        return {
+            plugin_id: registration.plugin_version
+            for plugin_id, registration in self._registered_plugins.items()
+            if not registration.config_error
+        }
 
     def _notify_status_changed(self) -> None:
         if self._status_changed_callback is not None:

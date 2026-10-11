@@ -247,6 +247,7 @@ class RegisterPluginPayload(BaseModel):
     """插件默认配置"""
     config_schema: Dict[str, Any] = Field(default_factory=dict, description="插件配置 Schema")
     """插件配置 Schema"""
+    config_error: str = Field(default="", description="配置错误；非空时仅加载配置管理，不启用业务")
 
 
 class BootstrapPluginPayload(BaseModel):
@@ -375,6 +376,7 @@ class InspectPluginConfigResultPayload(BaseModel):
 
     success: bool = Field(description="是否解析成功")
     """是否解析成功"""
+    config_error: str = Field(default="", description="配置解析或校验的具体错误")
     default_config: Dict[str, Any] = Field(default_factory=dict, description="插件默认配置")
     """插件默认配置"""
     config_schema: Dict[str, Any] = Field(default_factory=dict, description="插件配置 Schema")

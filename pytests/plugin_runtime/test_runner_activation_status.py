@@ -208,6 +208,7 @@ class _HostTransport:
         self.runner = runner
         self.ready: RunnerReadyPayload | None = None
         self.registered: Set[str] = set()
+        self.registrations: Dict[str, Dict[str, Any]] = {}
         self.registration_failures: Counter[str] = Counter()
         self.handlers: Dict[str, Any] = {}
         self.disconnected = False
@@ -229,8 +230,10 @@ class _HostTransport:
                 self.registration_failures[plugin_id] -= 1
                 return request.make_error_response("E_INTERNAL", "registration refused")
             self.registered.add(plugin_id)
+            self.registrations[plugin_id] = request.payload
         elif method == "plugin.unregister":
             self.registered.discard(plugin_id)
+            self.registrations.pop(plugin_id, None)
         elif method == "runner.ready":
             self.ready = RunnerReadyPayload.model_validate(request.payload)
             self.runner._shutting_down = True
@@ -297,6 +300,62 @@ async def test_startup_distinguishes_self_disable_from_transitive_dependency_blo
     assert transport.registered == {_UNRELATED}
     assert runner._loader.list_plugins() == [_UNRELATED]
     assert runner._loader.get_plugin(_UNRELATED).instance.loads == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_toml", ['[greeting]\nmessage = []\n', '[greeting\nmessage = "hi"\n'])
+async def test_config_error_loads_management_only_and_repair_activates_business(
+    activation_runtime, invalid_toml: str,
+) -> None:
+    runner, transport, paths = activation_runtime
+    plugin_dir = _write_config_model_plugin(paths[_UNRELATED].parent)
+    paths[_CONFIG_MODEL] = plugin_dir
+    source = _CONFIG_MODEL_PLUGIN_SOURCE.replace(
+        '    config_model = DemoConfig',
+        '    config_model = DemoConfig\n'
+        '    def __init__(self):\n'
+        '        super().__init__()\n'
+        '        self.loads = 0\n'
+        '        self.unloads = 0\n'
+        '    def get_components(self):\n'
+        '        return [{"name": "sample", "type": "tool"}]',
+    ).replace('    async def on_load(self):\n        pass', '    async def on_load(self):\n        self.loads += 1')
+    source = source.replace('    async def on_unload(self):\n        pass', '    async def on_unload(self):\n        self.unloads += 1')
+    (plugin_dir / "plugin.py").write_text(source, encoding="utf-8")
+    config_path = plugin_dir / "config.toml"
+    config_path.write_text('[plugin]\nconfig_version = "1.0.0"\n' + invalid_toml, encoding="utf-8")
+    original = config_path.read_bytes()
+
+    await runner.run()
+    invalid_meta = runner._loader.get_plugin(_CONFIG_MODEL)
+    assert invalid_meta is not None and invalid_meta.config_error
+    assert invalid_meta.instance.loads == 0
+    registration = transport.registrations[_CONFIG_MODEL]
+    assert registration["config_error"] == invalid_meta.config_error
+    assert registration["components"] == []
+    assert registration["capabilities_required"] == []
+    assert registration["config_schema"] == {}
+    snapshot = await _inspect(runner, _CONFIG_MODEL)
+    assert snapshot.config_error and not snapshot.enabled
+    assert snapshot.normalized_config == {} and snapshot.config_schema == {}
+    assert config_path.read_bytes() == original
+
+    _configure_config_model(plugin_dir, enabled=True)
+    result = await _reload(runner, "single", [_CONFIG_MODEL])
+    assert result.success
+    repaired_meta = runner._loader.get_plugin(_CONFIG_MODEL)
+    assert repaired_meta.config_error == ""
+    assert repaired_meta.instance.loads == 1
+    assert invalid_meta.instance.unloads == 0
+    assert transport.registrations[_CONFIG_MODEL]["components"][0]["name"] == "sample"
+
+    # 再次写坏配置必须卸载已运行业务，不能保留之前的工具和调度。
+    config_path.write_bytes(original)
+    result = await _reload(runner, "single", [_CONFIG_MODEL])
+    assert result.success
+    assert repaired_meta.instance.unloads == 1
+    assert runner._loader.get_plugin(_CONFIG_MODEL).instance.loads == 0
+    assert transport.registrations[_CONFIG_MODEL]["components"] == []
 
 
 @pytest.mark.asyncio
@@ -624,6 +683,7 @@ async def test_host_config_change_unloads_sdk_config_model_plugin_disabled_on_di
     supervisor = SimpleNamespace(
         _registered_plugins=transport.registered,
         get_loaded_plugin_ids=lambda: list(transport.registered),
+        get_plugin_config_error=lambda plugin_id: runner._loader.get_plugin(plugin_id).config_error,
         inspect_plugin_config=inspect_plugin_config,
         notify_plugin_config_updated=notify_plugin_config_updated,
     )

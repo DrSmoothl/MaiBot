@@ -1137,6 +1137,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
     activeConfigTab,
     handleConfigTabChange,
     schema,
+    configError,
     config,
     sourceCode,
     handleSourceCodeChange,
@@ -1166,7 +1167,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
     )
   }
 
-  if (!schema) {
+  if (!schema && !configError) {
     return (
       <div className="flex h-64 flex-col items-center justify-center space-y-4">
         <AlertCircle className="text-muted-foreground h-12 w-12" />
@@ -1180,21 +1181,21 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
   }
 
   // 按 order 排序 sections
-  const sortedSections = Object.entries(schema.sections).sort(
+  const sortedSections = Object.entries(schema?.sections ?? {}).sort(
     ([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0)
   )
-  const schemaTabs = schema.layout.type === 'tabs' ? schema.layout.tabs : []
+  const schemaTabs = schema?.layout.type === 'tabs' ? schema.layout.tabs : []
   const selectedConfigTab = schemaTabs.some((tab) => tab.id === activeConfigTab)
     ? activeConfigTab
     : schemaTabs[0]?.id
 
   // 获取当前启用状态
-  const isEnabled = (config.plugin as Record<string, unknown>)?.enabled !== false
+  const isEnabled = !configError && (config.plugin as Record<string, unknown>)?.enabled !== false
   const pluginName = resolveLocalizedText(
-    schema.plugin_info.name,
+    schema?.plugin_info.name,
     language,
     plugin.manifest.name,
-    schema.plugin_info.i18n,
+    schema?.plugin_info.i18n,
     'name'
   )
   const manifestUrls = plugin.manifest.urls as
@@ -1209,7 +1210,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
   const pluginRepositoryUrl = plugin.manifest.repository_url || manifestUrls?.repository
   const pluginDetailItems = [
     { label: '插件 ID', value: plugin.manifest.id || plugin.id },
-    { label: '版本', value: schema.plugin_info.version || plugin.manifest.version },
+    { label: '版本', value: schema?.plugin_info.version || plugin.manifest.version },
     { label: '类型', value: getPluginTypeLabel(plugin) },
     { label: '作者', value: plugin.manifest.author?.name },
     { label: '许可证', value: plugin.manifest.license },
@@ -1237,10 +1238,10 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
               {pluginName}
             </h1>
             <Badge variant={isEnabled ? 'default' : 'secondary'} className="shrink-0">
-              {isEnabled ? '已启用' : '已禁用'}
+              {configError ? '配置错误，业务暂停' : isEnabled ? '已启用' : '已禁用'}
             </Badge>
             <span className="text-muted-foreground shrink-0 text-sm">
-              v{schema.plugin_info.version || plugin.manifest.version}
+              v{schema?.plugin_info.version || plugin.manifest.version}
             </span>
           </div>
         </div>
@@ -1262,6 +1263,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
               size="sm"
               className="h-8"
               onClick={() => setEditMode(editMode === 'visual' ? 'source' : 'visual')}
+              disabled={!schema}
             >
               {editMode === 'visual' ? (
                 <>
@@ -1282,6 +1284,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
           >
             <Switch
               checked={isEnabled}
+              disabled={!!configError}
               onCheckedChange={() => void handleToggle()}
               aria-label={isEnabled ? '禁用插件' : '启用插件'}
             />
@@ -1326,6 +1329,15 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
           {showHostPolicy && <div ref={setHostPolicyToolbar} className="min-w-0 flex-1" />}
         </div>
         <TabsContent value="settings" className="mt-4">
+          {configError && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                <p>配置校验失败，工具和调度已暂停。请修正下方原始 TOML 并保存，校验通过后恢复运行。</p>
+                <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{configError}</pre>
+              </AlertDescription>
+            </Alert>
+          )}
           {/* 源代码模式 */}
           {editMode === 'source' && (
             <div className="space-y-4">
@@ -1354,7 +1366,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
           )}
 
           {/* 可视化模式 */}
-          {editMode === 'visual' && (
+          {editMode === 'visual' && schema && (
             <>
               {/* 配置区域 */}
               {schema.layout.type === 'tabs' && schemaTabs.length > 0 ? (

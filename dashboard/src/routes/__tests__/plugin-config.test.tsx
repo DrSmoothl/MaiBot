@@ -317,6 +317,19 @@ beforeEach(() => {
 })
 
 describe('PluginConfigPage 特征化', () => {
+  it('配置校验失败展示原始 TOML 和具体错误并禁用启用开关', async () => {
+    window.history.replaceState(null, '', '/plugin-config?plugin=test.emoji')
+    vi.mocked(pluginApi.getPluginConfigBundle).mockResolvedValue({
+      schema: null, config: {}, rawConfig: '# 原始配置\ntarget = "123"\n',
+      configError: 'proactive.group_ids: 群聊目标必须填写 平台:ID:group',
+    })
+    renderPage()
+    const editor = await screen.findByTestId('code-editor')
+    expect(editor).toHaveValue('# 原始配置\ntarget = "123"\n')
+    expect(screen.getByText('proactive.group_ids: 群聊目标必须填写 平台:ID:group')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: '启用插件' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '可视化' })).toBeDisabled()
+  })
   it('显示已装插件且不暴露 A_Memorix', async () => {
     renderPage()
     expect(await screen.findByText('Emoji Plugin')).toBeInTheDocument()
