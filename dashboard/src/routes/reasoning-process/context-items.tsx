@@ -973,7 +973,7 @@ export function ContextItemTimeline({
   botSelfNames: Set<string>
 }) {
   return (
-    <section className="space-y-2 rounded-md border p-2.5 sm:p-3">
+    <section className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-semibold">{title}</span>
         <Badge variant="secondary">{items.length} Items</Badge>

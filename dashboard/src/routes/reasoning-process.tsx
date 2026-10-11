@@ -1313,7 +1313,7 @@ export function ReasoningProcessPage({
       data-reasoning-process="true"
       className={cn(
         'flex h-full min-h-0 flex-col gap-2 overflow-hidden sm:gap-3',
-        embedded ? 'p-0' : 'p-2 lg:p-4'
+        embedded ? 'p-0' : 'p-1'
       )}
     >
       {toolbarPortal}
@@ -1399,7 +1399,7 @@ export function ReasoningProcessPage({
         <div
           className={cn(
             // 移动端列表与详情纵向堆叠，整体可上下滚动；桌面端各栏各自滚动
-            'grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-x-hidden overflow-y-auto transition-[gap,grid-template-columns] duration-300 ease-out lg:gap-3 lg:overflow-visible',
+            'grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-x-hidden overflow-y-auto transition-[gap,grid-template-columns] duration-300 ease-out lg:overflow-visible',
             replayPanelOpen
               ? 'lg:grid-cols-[320px_minmax(0,1fr)_420px] xl:grid-cols-[360px_minmax(0,1fr)_460px]'
               : 'lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)]'
@@ -1583,6 +1583,7 @@ export function ReasoningProcessPage({
               >
                 <div className="relative min-h-0 flex-1 overflow-hidden">
                   <ScrollArea
+                    data-reasoning-screen="true"
                     className="h-full transition-transform duration-300 ease-out"
                     scrollbars="vertical"
                     viewportClassName="overscroll-auto lg:overscroll-contain"
@@ -1763,7 +1764,7 @@ export function ReasoningProcessPage({
                         )}
                       </div>
 
-                      <TabsContent value="structured" data-reasoning-screen="true" className="m-0">
+                      <TabsContent value="structured" className="m-0">
                         {contentLoading ? (
                           <div className="flex min-h-[360px] items-center justify-center p-4">
                             <ThinkingIllustration />
@@ -1870,7 +1871,7 @@ export function ReasoningProcessPage({
                         )}
                       </TabsContent>
 
-                      <TabsContent value="text" data-reasoning-screen="true" className="m-0">
+                      <TabsContent value="text" className="m-0">
                         {contentLoading ? (
                           <div className="flex min-h-[360px] items-center justify-center p-4">
                             <ThinkingIllustration />
@@ -1882,7 +1883,7 @@ export function ReasoningProcessPage({
                         )}
                       </TabsContent>
 
-                      <TabsContent value="html" data-reasoning-screen="true" className="m-0">
+                      <TabsContent value="html" className="m-0">
                         {selected?.html_path && htmlPreviewUrl ? (
                           <iframe
                             title="推理过程 HTML 预览"

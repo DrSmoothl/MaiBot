@@ -1184,7 +1184,7 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
           toolbarVisible={activeTab === 'terminal'}
         />
       </TabsContent>
-      <TabsContent value="reasoning" className="m-0 min-h-0 flex-1 overflow-hidden p-2 lg:p-4">
+      <TabsContent value="reasoning" className="m-0 min-h-0 flex-1 overflow-hidden p-1">
         <ReasoningProcessPage
           embedded
           toolbarContainerId={toolbarContainerId}

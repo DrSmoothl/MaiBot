@@ -2974,11 +2974,11 @@
   color: var(--mil-screen-ink);
 }
 
-/* ---------- 日志 → 推理过程：两个凸起模块，记录列表和记录内容各是一块屏幕 ---------- */
+/* ---------- 日志 → 推理过程：两栏平铺，记录列表和记录内容各是一块屏幕 ---------- */
 
-/* 模块底部的塑料厚度画在外侧，给它让出位置，免得被页面裁掉 */
+/* 两栏不再套凸起外壳，内容区直接使用页面空间 */
 :root[data-dashboard-style='millennium'] [data-reasoning-process='true'] {
-  padding-bottom: 5px;
+  padding-bottom: 0;
 }
 
 /* 这一页原来到处是 1px 细线框：统一加粗到 2px。带语义色的边框（角色、状态）保留颜色，
@@ -3017,20 +3017,18 @@
   border-color: var(--mil-line);
 }
 
-/* 列表和内容两栏、重放面板：凸起的塑料模块 */
+/* 列表和内容两栏、重放面板：平铺在页面上，边框只留给内容屏幕 */
 :root[data-dashboard-style='millennium'] [data-reasoning-panel='true'] {
-  background-color: var(--mil-panel);
-  background-image: var(--mil-speck);
-  background-size: 5px 5px;
-  border: 2px solid var(--mil-line);
-  box-shadow: var(--mil-raise);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
   color: var(--mil-ink);
 }
 
-/* 标题条下面是一道刻线（暗线 + 亮线） */
+/* 标题条和正文共用整栏背景，只用一道刻线分隔 */
 :root[data-dashboard-style='millennium'] [data-reasoning-panel-header='true'] {
   border-bottom: 2px solid var(--mil-lo);
-  box-shadow: 0 2px 0 var(--mil-hi);
+  box-shadow: none;
 }
 
 /* 记录数和页码是印在壳上的丝印小字 */
@@ -3040,10 +3038,10 @@
   letter-spacing: 0.06em;
 }
 
-/* 筛选栏和翻页键直接放在机壳上，和屏幕之间不再画线 */
+/* 筛选栏和翻页键与记录列表左右对齐，和屏幕之间不再画线 */
 :root[data-dashboard-style='millennium'] [data-reasoning-panel-toolbar='true'] {
   border-bottom: 0;
-  padding: 0.5rem 0.625rem 0.125rem;
+  padding: 0.5rem 0 0.125rem;
 }
 
 /* 筛选栏里的键帽和输入框统一收到小一档的高度，给下面的记录列表多留位置 */
@@ -3074,23 +3072,23 @@
 :root[data-dashboard-style='millennium'] [data-reasoning-panel-footer='true'] {
   border-top: 0;
   height: auto;
-  padding: 0.125rem 0.625rem 0.5rem;
+  padding: 0.125rem 0 0.5rem;
 }
 
-/* 下沉屏幕：记录列表、结构化 / 文本 / HTML 内容 */
+/* 内容背景铺满记录列表和详情滚动区，短内容下方也不露出不同底色 */
 :root[data-dashboard-style='millennium'] [data-reasoning-screen='true'] {
   background-color: var(--mil-screen);
   background-image: var(--mil-screen-tex);
   background-size: 3px 3px;
   border: 2px solid var(--mil-line);
-  /* 屏幕紧贴在模块里，只留内侧的下沉阴影，不再画外圈的亮暗两道边，免得和模块的斜面叠成一排竖线 */
-  box-shadow: inset 3px 3px 0 var(--mil-screen-shade);
+  /* 屏幕紧贴两栏边缘，只保留这一层边框，不再叠加下沉阴影 */
+  box-shadow: none;
   color: var(--mil-screen-ink);
-  margin: 0.625rem;
+  margin: 0;
 }
 
 :root[data-dashboard-style='millennium'] [data-reasoning-screen='true'][data-reasoning-list='true'] {
-  margin: 0.375rem 0.625rem;
+  margin: 0;
 }
 
 :root[data-dashboard-style='millennium'] [data-reasoning-screen='true'] .text-foreground {
@@ -3215,7 +3213,7 @@
   padding-left: 0;
 }
 
-/* 最终输出：屏幕最上方一块深色实线框，下面再压一道实线，和请求过程明确分开 */
+/* 最终输出：用底部实线和请求过程分开，不再套额外的分区框 */
 :root[data-dashboard-style='millennium'] [data-reasoning-output='true'] {
   border-bottom: 2px solid var(--mil-line);
   margin-bottom: 0.75rem;
@@ -3223,6 +3221,6 @@
 }
 
 :root[data-dashboard-style='millennium'] [data-reasoning-output='true'] > section {
-  border: 2px solid var(--mil-line);
-  box-shadow: 4px 4px 0 var(--mil-screen-shade);
+  border: 0;
+  box-shadow: none;
 }
