@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import {
   extensionPath,
+  orderedWorkspaceExtensions,
   refreshPluginWebUI,
   setPluginWebUIPreferences,
   usePluginWebUI,
@@ -26,6 +27,18 @@ export function PluginWebUIManagerPanel() {
     const order = ordered.map((item) => item.plugin_id)
     ;[order[index], order[index + delta]] = [order[index + delta], order[index]]
     setPluginWebUIPreferences({ ...registry.preferences, order })
+  }
+  const workspaces = orderedWorkspaceExtensions(
+    registry.extensions,
+    registry.preferences.workspaceOrder ?? registry.preferences.order
+  )
+  const moveWorkspace = (index: number, delta: number) => {
+    const workspaceOrder = workspaces.map((item) => item.plugin_id)
+    ;[workspaceOrder[index], workspaceOrder[index + delta]] = [
+      workspaceOrder[index + delta],
+      workspaceOrder[index],
+    ]
+    setPluginWebUIPreferences({ ...registry.preferences, workspaceOrder })
   }
   return (
     <section
@@ -55,6 +68,49 @@ export function PluginWebUIManagerPanel() {
       {registry.loading && <p>{t('pluginWebUI.loading')}</p>}
       {!registry.loading && !registry.error && ordered.length === 0 && (
         <p>{t('pluginWebUI.empty')}</p>
+      )}
+      {workspaces.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('pluginWebUI.workspaceOrder')}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-muted-foreground text-sm">{t('pluginWebUI.workspaceOrderHint')}</p>
+            <ol className="space-y-2">
+              {workspaces.map((extension, index) => {
+                const title = extension.workspace_title ?? extension.plugin_id
+                return (
+                  <li key={extension.plugin_id} className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-6 shrink-0 text-center text-sm">
+                      {index + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate" title={title}>
+                      {title}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={index === 0}
+                      aria-label={`${title}: ${t('pluginWebUI.moveUp')}`}
+                      onClick={() => moveWorkspace(index, -1)}
+                    >
+                      {t('pluginWebUI.moveUp')}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={index === workspaces.length - 1}
+                      aria-label={`${title}: ${t('pluginWebUI.moveDown')}`}
+                      onClick={() => moveWorkspace(index, 1)}
+                    >
+                      {t('pluginWebUI.moveDown')}
+                    </Button>
+                  </li>
+                )
+              })}
+            </ol>
+          </CardContent>
+        </Card>
       )}
       {ordered.map((extension, index) => (
         <Card key={extension.plugin_id}>

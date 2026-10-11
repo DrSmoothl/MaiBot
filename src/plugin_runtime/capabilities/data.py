@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+import asyncio
 import random
 import re
 import time
@@ -437,12 +438,13 @@ class RuntimeDataCapabilityMixin:
         try:
             chat_id = str(args.get("chat_id") or args.get("stream_id") or "").strip()
             include_binary_data = bool(args.get("include_binary_data", False))
-            message = message_service.get_message_by_id(
+            message = await asyncio.to_thread(
+                message_service.get_message_by_id,
                 message_id=message_id,
                 chat_id=chat_id or None,
             )
             serialized_message = (
-                self._serialize_messages([message], include_binary_data=include_binary_data)[0]
+                (await asyncio.to_thread(self._serialize_messages, [message], include_binary_data=include_binary_data))[0]
                 if message is not None
                 else None
             )

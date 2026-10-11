@@ -372,15 +372,8 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         ]
         if image_targets:
             lines.append(
-                f"除了当前你输出的回复，你还会（由另一个模型控制）发送图片{self._join_chinese_items(image_targets)}。"
+                f"当前文字回复后还会另外发送图片{self._join_chinese_items(image_targets)}。"
             )
-
-        at_targets = [
-            self._format_attachment_at_target(raw_target, chat_history, reply_message)
-            for raw_target in self._normalize_attachment_items(reply_tool_args.get("attach_at"))
-        ]
-        if at_targets:
-            lines.append(f"除了当前你输出的回复，你还会（由另一个模型控制）at {self._join_chinese_items(at_targets)}。")
 
         raw_emoji = str(reply_tool_args.get("attach_emoji") or "").strip()
         if raw_emoji:
@@ -684,7 +677,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         reply_tool_args: Optional[Dict[str, Any]] = None,
         think_level: int = 1,
     ) -> List[ContextItem]:
-        # 复古模式把所有回复指令集中到一份完整模板里，整段作为一条 user 消息发送
+        # 复古模式将人设与注意事项放在首条 system 消息，其余模板作为一条 user 消息发送
         if global_config.experimental.replyer_retro_prompt:
             return self._build_retro_request_messages(
                 chat_history=chat_history,
@@ -695,6 +688,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                 stream_id=stream_id,
                 think_level=think_level,
                 reply_tool_args=reply_tool_args,
+                enable_visual_message=enable_visual_message,
             )
 
         items: List[ContextItem] = []
@@ -1437,11 +1431,9 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         if hook_rewrite_events:
             result.metrics.extra["replyer_hook_rewrite_events"] = list(hook_rewrite_events)
         logger.info(
-            "Replyer缓存："
-            f"命中={prompt_cache_hit_tokens}, "
-            f"未命中={prompt_cache_miss_tokens}, "
-            f"命中率={prompt_cache_hit_rate:.2f}%, "
-            f"token使用={generation_result.prompt_tokens}"
+            f"Replyer缓存 输入={generation_result.prompt_tokens} "
+            f"命中={prompt_cache_hit_tokens} 未命中={prompt_cache_miss_tokens} "
+            f"命中率={prompt_cache_hit_rate:.2f}%"
         )
 
         if not result.success:
@@ -1450,9 +1442,8 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             return finalize(False)
 
         logger.info(
-            f"Maisaka 回复器生成成功 文本={response_text!r} "
-            f"总耗时ms={result.metrics.overall_ms} 重生成次数={retry_count} "
-            f"推理续写次数={reasoning_continuation_count} "
+            f"回复生成完成 耗时={result.metrics.overall_ms / 1000:.2f}s "
+            f"重生成={retry_count} 续写={reasoning_continuation_count} "
             f"已选表达={result.selected_expression_ids!r}"
         )
         if retry_count > 0:

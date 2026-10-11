@@ -13,13 +13,29 @@ import { PLUGIN_MARKET_VIEW_STATE_KEY } from '@/lib/plugin-market-navigation'
 
 // toast 与 navigate 使用 hoisted 稳定引用：toast 位于页面 useEffect 依赖数组中，
 // 引用不稳定会导致初始化 effect 反复执行
-const { toastMock, navigateMock } = vi.hoisted(() => ({
+const { toastMock, navigateMock, routerState } = vi.hoisted(() => ({
   toastMock: vi.fn(),
   navigateMock: vi.fn(),
+  routerState: {
+    search: {} as { pluginId?: string },
+    listeners: new Set<() => void>(),
+  },
 }))
 
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: toastMock }) }))
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => navigateMock }))
+// 详情插件 ID 存放在路由 search 中：navigate 写入 routerState 并通知订阅者，
+// useSearch 通过 useSyncExternalStore 订阅，模拟真实路由在地址变化后重渲染
+vi.mock('@tanstack/react-router', async () => {
+  const { useSyncExternalStore } = await import('react')
+  const subscribe = (listener: () => void) => {
+    routerState.listeners.add(listener)
+    return () => routerState.listeners.delete(listener)
+  }
+  return {
+    useNavigate: () => navigateMock,
+    useSearch: () => useSyncExternalStore(subscribe, () => routerState.search),
+  }
+})
 
 // 重启上下文与遮罩层：页面仅作为容器使用，桩掉避免引入 system-api 链路
 vi.mock('@/lib/restart-context', () => ({
@@ -46,6 +62,7 @@ vi.mock('@/lib/plugin-api', () => ({
 vi.mock('@/lib/plugin-stats', () => ({
   getCachedPluginStatsSummary: vi.fn(),
   getPluginStatsSummary: vi.fn(),
+  getPluginUserStates: vi.fn(),
   likePlugin: vi.fn(),
   recordPluginDownload: vi.fn(),
 }))
@@ -221,6 +238,12 @@ beforeEach(() => {
   progressHandler = null
   wsErrorHandler = null
 
+  routerState.search = {}
+  navigateMock.mockImplementation(({ search }: { search?: { pluginId?: string } }) => {
+    routerState.search = search ?? {}
+    routerState.listeners.forEach((listener) => listener())
+  })
+
   vi.mocked(pluginApi.getCachedPluginList).mockReturnValue(null)
   vi.mocked(pluginApi.checkGitStatus).mockResolvedValue({ installed: true, version: 'git version 2.44.0' })
   vi.mocked(pluginApi.getMaimaiVersion).mockResolvedValue({
@@ -259,6 +282,7 @@ beforeEach(() => {
 
   vi.mocked(pluginStatsApi.getCachedPluginStatsSummary).mockReturnValue(null)
   vi.mocked(pluginStatsApi.getPluginStatsSummary).mockResolvedValue({})
+  vi.mocked(pluginStatsApi.getPluginUserStates).mockResolvedValue({})
   vi.mocked(pluginStatsApi.likePlugin).mockResolvedValue({
     success: true,
     likes: 1,
@@ -789,6 +813,7 @@ describe('PluginMarketplacePage 视图状态与交互', () => {
     await renderPage()
 
     await user.click(screen.getByText('detail-plugin-a'))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/plugins', search: { pluginId: 'plugin-a' }, replace: true })
     const detail = await screen.findByTestId('plugin-detail')
     expect(detail).toHaveAttribute('data-plugin-id', 'plugin-a')
 

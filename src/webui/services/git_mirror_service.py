@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 
@@ -20,6 +21,42 @@ logger = get_logger("webui.git_mirror")
 
 # 导入进度更新函数（避免循环导入）
 _update_progress = None
+
+
+async def _run_git_process(cmd: List[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+    """在线程池等待 Git；取消或超时时终止进程树并等待退出。"""
+    launch = asyncio.create_task(asyncio.to_thread(
+        subprocess.Popen, cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=os.name != "nt",
+    ))
+    communicate = None
+    try:
+        process = await asyncio.shield(launch)
+        communicate = asyncio.create_task(asyncio.to_thread(process.communicate))
+        stdout, stderr = await asyncio.wait_for(asyncio.shield(communicate), timeout=300)
+        return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+    except (asyncio.CancelledError, asyncio.TimeoutError) as exc:
+        # 进程创建也可能与取消并发，先取得句柄，再终止所有 Git 子进程。
+        process = await launch
+        if process.poll() is None:
+            if os.name == "nt":
+                result = await asyncio.to_thread(
+                    subprocess.run, ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True,
+                )
+                if result.returncode and process.poll() is None:
+                    raise RuntimeError(f"终止 Git 进程失败: {result.stderr!r}") from exc
+            else:
+                import signal
+
+                os.killpg(process.pid, signal.SIGKILL)
+        if communicate is not None:
+            await communicate
+        else:
+            await asyncio.to_thread(process.communicate)
+        if isinstance(exc, asyncio.TimeoutError):
+            raise subprocess.TimeoutExpired(cmd, 300) from exc
+        raise
 
 
 def _validate_mirror_prefix(url: str, field_name: str) -> str:
@@ -614,23 +651,13 @@ class GitMirrorService:
         else:
             commands.append(["git", "pull", "--ff-only"])
 
-        loop = asyncio.get_event_loop()
         executed: List[str] = []
 
         for cmd in commands:
             executed.append(" ".join(cmd))
 
-            def run_git_command(git_cmd=cmd):
-                return subprocess.run(
-                    git_cmd,
-                    cwd=repository_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-
             try:
-                process = await loop.run_in_executor(None, run_git_command)
+                process = await _run_git_process(cmd, cwd=repository_path)
             except subprocess.TimeoutExpired:
                 return {"success": False, "error": f"Git 命令超时: {' '.join(cmd)}", "commands": executed}
             except FileNotFoundError:
@@ -892,18 +919,8 @@ class GitMirrorService:
                     except Exception as e:
                         logger.warning(f"推送进度失败: {e}")
 
-                # 执行 git clone（在线程池中运行以避免阻塞）
-                loop = asyncio.get_event_loop()
-
-                def run_git_clone(clone_cmd=cmd):
-                    return subprocess.run(
-                        clone_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=300,  # 5分钟超时
-                    )
-
-                process = await loop.run_in_executor(None, run_git_clone)
+                # 执行 git clone（在线程池中运行以避免阻塞），取消时终止进程树。
+                process = await _run_git_process(cmd)
 
                 if process.returncode == 0:
                     logger.info(f"成功克隆仓库: {url} -> {target_path}")
@@ -964,6 +981,12 @@ class GitMirrorService:
                             )
                         except Exception as e:
                             logger.warning(f"推送进度失败: {e}")
+
+            except asyncio.CancelledError:
+                # Git 已退出后才删除半成品，避免子进程继续写入临时目录。
+                if target_path.exists():
+                    await asyncio.to_thread(shutil.rmtree, target_path)
+                raise
 
             except subprocess.TimeoutExpired:
                 last_error = "克隆超时（超过 5 分钟）"

@@ -79,6 +79,10 @@ const resolvePluginStats = (
   plugin: PluginInfo,
   statsSummary: Record<string, PluginStatsData>
 ): PluginStatsData | undefined => {
+  // 服务模式的清单与统计来自同一份快照，缓存首屏和刷新后都使用它，避免混入独立统计缓存。
+  if (plugin.market_data_source === 'service') {
+    return plugin.marketplace_stats
+  }
   const statsIds = [
     plugin.manifest?.id,
   ].filter((id): id is string => Boolean(id))
@@ -392,10 +396,9 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
       })
       if (cachedPluginList?.length && !isUnmounted) {
         setPlugins(cachedPluginList)
-        if (cachedStatsSummary) {
-          setPluginStats(buildPluginStatsMap(cachedPluginList, cachedStatsSummary))
-        }
+        setPluginStats(buildPluginStatsMap(cachedPluginList, cachedStatsSummary ?? {}))
         setLoading(false)
+        console.info('加载插件市场中：展示缓存')
       } else {
         setPlugins([])
         setPluginStats({})
@@ -501,12 +504,11 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             return
           }
 
+          console.info('插件市场已获取')
           setInstalledPlugins(installed)
           const mergedData = mergeInstalledPluginInfo(marketResult.data, installed)
 
-          if (cachedStatsSummary) {
-            setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary))
-          }
+          setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary ?? {}))
           setPlugins(mergedData)
           const bundledStats = Object.fromEntries(marketResult.data
             .filter((plugin) => plugin.marketplace_stats)
@@ -517,6 +519,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
               ? bundledStats
               : await getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
             setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
+            console.info('插件市场已更新')
           } catch (error) {
             console.warn('刷新插件统计失败:', error)
           }

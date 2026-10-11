@@ -262,8 +262,18 @@ async def _install_release(
         )
         if not result.get("success"):
             raise HTTPException(status_code=502, detail=result.get("error", "下载发布版本失败"))
-        warnings = await asyncio.to_thread(_validate_candidate, candidate, entry, release)
-        await run_on_main_loop(get_plugin_runtime_manager().run_plugin_file_update(replace_and_reload))
+        async def validate_and_replace() -> List[str]:
+            warnings = await asyncio.to_thread(_validate_candidate, candidate, entry, release)
+            await run_on_main_loop(get_plugin_runtime_manager().run_plugin_file_update(replace_and_reload))
+            return warnings
+
+        # 文件替换及运行时重载一旦开始就收尾完成，避免取消后删除仍被使用的候选目录。
+        commit_task = asyncio.create_task(validate_and_replace())
+        try:
+            warnings = await asyncio.shield(commit_task)
+        except asyncio.CancelledError:
+            await commit_task
+            raise
     finally:
         if candidate.exists():
             # candidate 来自插件根目录下固定的临时目录，且下载文件已拒绝链接。

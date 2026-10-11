@@ -362,8 +362,7 @@ async def test_profile_classification_uses_llm_buckets_and_guards_uncertain_stab
 
     assert buckets["identity_settings"] == ["测试用户是画师。"]
     assert buckets["relationship_settings"] == ["测试用户把麦麦当搭档。"]
-    assert "测试用户可能长期熬夜。" not in buckets["stable_facts"]
-    assert "测试用户可能长期熬夜。" in buckets["uncertain_notes"]
+    assert "测试用户可能长期熬夜。" in buckets["stable_facts"]
     assert "测试用户似乎偏好蓝色。" in buckets["uncertain_notes"]
 
 
@@ -418,7 +417,7 @@ async def test_model_derived_person_fact_is_confined_to_uncertain_projection() -
 
 
 @pytest.mark.asyncio
-async def test_model_classification_cannot_promote_free_text_to_stable_profile() -> None:
+async def test_model_classification_can_write_stable_profile() -> None:
     metadata_store = FakeMetadataStore()
     metadata_store.fact_claims = []
     service = PersonProfileService(metadata_store=metadata_store, retriever=FakeRetriever())
@@ -440,5 +439,5 @@ async def test_model_classification_cannot_promote_free_text_to_stable_profile()
     payload = await service.query_person_profile(person_id="person-1", top_k=12, force_refresh=True)
     sections = parse_profile_sections(payload["profile_text"])
 
-    assert "旧金山" not in "\n".join(sections["稳定了解"])
-    assert "旧金山" in "\n".join(sections["不确定信息"])
+    assert "旧金山" in "\n".join(sections["稳定了解"])
+    assert "旧金山" not in "\n".join(sections["不确定信息"])

@@ -74,7 +74,10 @@ def test_verified_repeat_promotes_existing_uncertain_claim(tmp_path: Path) -> No
             paragraph_hash=paragraph_hash,
             content=content,
             person_ids=["test:alice"],
-            metadata={"evidence_message_ids": ["old"]},
+            metadata={
+                "evidence_message_ids": ["old"],
+                "fact_claim": {"stability": "uncertain", "profile_section": "uncertain_notes"},
+            },
             timestamp=None,
         )
         assert store.list_current_person_fact_claims("test:alice") == []
@@ -85,7 +88,7 @@ def test_verified_repeat_promotes_existing_uncertain_claim(tmp_path: Path) -> No
             metadata={"evidence_message_ids": ["new"], "fact_claim": {"trust": "server_verified"}},
             timestamp=None,
         )
-        assert len(store.list_current_person_fact_claims("test:alice")) == 1
+        assert len(store.list_current_person_fact_claims("test:alice", limit=300)) == 1
     finally:
         store.close()
 
@@ -125,6 +128,11 @@ async def test_257_uncertain_facts_remain_searchable_and_historical_recheck_is_i
                 "chat_id": "stream-1",
                 "evidence_source": "user_supported",
                 "evidence_message_ids": [f"m-{index}"],
+                "fact_claim": {
+                    "stability": "uncertain",
+                    "profile_section": "uncertain_notes",
+                    "authority": "summary_derived",
+                },
             }
             paragraph_hash = store.add_paragraph(
                 content=text, source="person_fact:test:alice", metadata=metadata, knowledge_type="factual"
@@ -169,7 +177,6 @@ async def test_257_uncertain_facts_remain_searchable_and_historical_recheck_is_i
             return []
 
         monkeypatch.setattr(person_fact_verifier, "find_messages", find_messages)
-        monkeypatch.setattr(person_fact_reverification, "find_messages", find_messages)
 
         async def fact_admin(*, action: str, **kwargs: Any) -> Dict[str, Any]:
             claim_id = str(kwargs["claim_id"])
@@ -191,14 +198,14 @@ async def test_257_uncertain_facts_remain_searchable_and_historical_recheck_is_i
         cursor = ""
         promoted = 0
         while True:
-            result = await person_fact_reverification.reverify_historical_person_facts(cursor, limit=37)
+            result = await person_fact_reverification.reclassify_historical_person_facts(cursor, limit=37)
             cursor = result["next_cursor"]
             promoted += result["promoted"]
             if not result["has_more"]:
                 break
-        assert promoted == 1
-        assert len(store.list_current_person_fact_claims("test:alice")) == 1
-        assert len(store.list_uncertain_person_fact_claims("test:alice")) == 256
-        assert (await person_fact_reverification.reverify_historical_person_facts("", limit=300))["promoted"] == 0
+        assert promoted == 257
+        assert len(store.list_current_person_fact_claims("test:alice", limit=300)) == 257
+        assert len(store.list_uncertain_person_fact_claims("test:alice")) == 0
+        assert (await person_fact_reverification.reclassify_historical_person_facts("", limit=300))["promoted"] == 0
     finally:
         store.close()

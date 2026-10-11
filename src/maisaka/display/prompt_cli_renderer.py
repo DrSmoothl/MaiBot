@@ -16,6 +16,8 @@ from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
+from src.common.logger import get_logger
+from src.common.operation_timing import log_operation, timed_operation
 from src.llm_models.model_client.base_client import GenerationAttempt
 from src.llm_models.payload_content.context_item import (
     AssistantMessageItem,
@@ -41,6 +43,8 @@ from .display_utils import (
 )
 from .preview_path_utils import build_display_path, build_file_uri, REPO_ROOT
 from .prompt_preview_logger import PromptPreviewLogger
+
+logger = get_logger("maisaka_prompt_preview")
 
 DATA_IMAGE_DIR = REPO_ROOT / "data" / "images"
 DATA_EMOJI_DIR = REPO_ROOT / "data" / "emoji"
@@ -790,6 +794,7 @@ class PromptCLIVisualizer:
         return sanitized_item
 
     @classmethod
+    @timed_operation(logger, "preview.build_structured_preview_payload")
     def _build_structured_preview_payload(
         cls,
         request_items: list[Any],
@@ -901,12 +906,14 @@ class PromptCLIVisualizer:
         category: str,
         payload: dict[str, Any],
     ) -> PromptPreviewAccess:
-        structured_preview_text = json.dumps(
-            payload,
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        )
+        with log_operation(logger, "preview.serialize", category=category, chat_id=chat_id) as stats:
+            structured_preview_text = json.dumps(
+                payload,
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+            stats["chars"] = len(structured_preview_text)
         record_path = PromptPreviewLogger.save_preview_file(
             chat_id,
             category,
@@ -926,6 +933,7 @@ class PromptCLIVisualizer:
         )
 
     @classmethod
+    @timed_operation(logger, "preview.build_prompt_preview_access")
     def build_prompt_preview_access(
         cls,
         request_items: list[Any],
@@ -1062,6 +1070,7 @@ class PromptCLIVisualizer:
         ).body
 
     @classmethod
+    @timed_operation(logger, "preview.build_text_preview_access")
     def build_text_preview_access(
         cls,
         content: str,

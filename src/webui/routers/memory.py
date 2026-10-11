@@ -4302,6 +4302,21 @@ async def rebuild_memory_runtime_vectors(payload: VectorRebuildRequest):
     return await _runtime_rebuild_vectors(payload)
 
 
+@router.get("/runtime/vectors/spaces")
+async def list_memory_vector_spaces():
+    return await memory_service.runtime_admin(action="list_vector_spaces")
+
+
+@router.delete("/runtime/vectors/spaces/{space_id}")
+async def delete_memory_vector_space(space_id: str):
+    result = await memory_service.runtime_admin(action="delete_vector_space", space_id=space_id)
+    if not result.get("success"):
+        error = result.get("error", "删除向量库失败")
+        status = 409 if error == "vector_space_in_use" else 404 if error == "vector_space_not_found" else 500
+        raise HTTPException(status_code=status, detail=error)
+    return result
+
+
 @router.get("/maintenance/recycle-bin")
 async def get_memory_recycle_bin(limit: int = Query(50, ge=1, le=200)):
     return await _maintenance_recycle_bin(limit)

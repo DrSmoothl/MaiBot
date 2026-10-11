@@ -27,6 +27,7 @@ from src.learners.expression_review_store import (
     get_recent_ai_review_logs,
 )
 from src.services.bot_account_service import get_all_bot_account_pairs
+from src.services.expression_vector_service import expression_vector_service
 from src.webui.dependencies import require_auth
 
 logger = get_logger("webui.expression")
@@ -38,6 +39,22 @@ LEGACY_EXPRESSION_IMPORT_FILE = File(...)
 router = APIRouter(prefix="/expression", tags=["Expression"], dependencies=[Depends(require_auth)])
 LEGACY_IMPORT_UPLOAD_DIR = Path("data/webui_legacy_expression_imports")
 LOGGED_INVALID_EXPRESSION_SESSION_IDS: set[int] = set()
+
+
+@router.get("/runtime/vectors/spaces")
+async def list_expression_vector_spaces() -> Dict[str, Any]:
+    """查询表达模型库及补建状态，跨线程调用统一交给宿主接入层。"""
+    return await expression_vector_service.list_vector_spaces()
+
+
+@router.delete("/runtime/vectors/spaces/{space_id}")
+async def delete_expression_vector_space(space_id: str) -> Dict[str, Any]:
+    result = await expression_vector_service.delete_vector_space(space_id)
+    if not result["success"]:
+        error = result["error"]
+        status = 409 if error == "vector_space_in_use" else 404 if error == "vector_space_not_found" else 500
+        raise HTTPException(status_code=status, detail=error)
+    return result
 
 
 def get_configured_platform_accounts() -> set[tuple[str, str]]:

@@ -1,4 +1,3 @@
-import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -12,6 +11,8 @@ from maim_message import (
     SenderInfo as MaimSenderInfo,
     UserInfo as MaimUserInfo,
 )
+
+import json
 
 from src.common.database.database_model import Messages
 from src.common.data_models.message_component_data_model import MessageSequence
@@ -46,6 +47,8 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
         self.timestamp: datetime = timestamp
         self.initialized = False
         self.platform: str = platform
+        self.account_id: Optional[str] = None
+        self.scope: Optional[str] = None
 
         self.message_info: MessageInfo
         self.is_mentioned: bool = False
@@ -78,6 +81,8 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
             group_info=group_info,
             additional_config=json.loads(db_record.additional_config) if db_record.additional_config else {},
         )
+        obj.account_id = db_record.account_id
+        obj.scope = db_record.scope
         obj.is_mentioned = db_record.is_mentioned
         obj.is_at = db_record.is_at
         obj.is_emoji = db_record.is_emoji
@@ -99,6 +104,8 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
             message_id=self.message_id,
             timestamp=self.timestamp,
             platform=self.platform,
+            account_id=self.account_id,
+            scope=self.scope,
             user_id=self.message_info.user_info.user_id,
             user_nickname=self.message_info.user_info.user_nickname,
             user_cardname=self.message_info.user_info.user_cardname,
@@ -156,6 +163,12 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
 
         add_cfg = msg_info.additional_config or {}
         obj.message_info = MessageInfo(user_info=user_info, group_info=group_info, additional_config=add_cfg)
+        # 暂时兼容 maim_message 的旧归属格式；下个版本移除旧字段读取。
+        from src.platform_io.route_key_factory import RouteKeyFactory
+
+        route_key = RouteKeyFactory.from_session_message(obj)
+        obj.account_id = route_key.account_id
+        obj.scope = route_key.scope
         return obj
 
     async def to_maim_message(self) -> MessageBase:

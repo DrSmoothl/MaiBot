@@ -21,6 +21,7 @@ import {
   extensionIcons,
   extensionPath,
   extensionWorkspace,
+  orderedWorkspaceExtensions,
   usePluginWebUI,
   visibleExtensions,
 } from '@/lib/plugin-webui'
@@ -67,6 +68,14 @@ export function Layout({ children }: LayoutProps) {
   const announce = useAnnounce()
   const extensionRegistry = usePluginWebUI(!checking)
   const extensions = useMemo(() => visibleExtensions(extensionRegistry), [extensionRegistry])
+  const workspaceExtensions = useMemo(
+    () =>
+      orderedWorkspaceExtensions(
+        extensions,
+        extensionRegistry.preferences.workspaceOrder ?? extensionRegistry.preferences.order
+      ),
+    [extensions, extensionRegistry.preferences]
+  )
   const workspaceForPath = (path: string): WorkspaceMode => {
     const extension = extensions.find((extension) =>
       extension.pages.some(
@@ -453,7 +462,7 @@ export function Layout({ children }: LayoutProps) {
 
             {/* Topbar */}
             <Header
-              extensions={extensions}
+              extensions={workspaceExtensions}
               logSwitcherHidden={logSwitcherHidden}
               sidebarUnderlay={sidebarUnderlay}
               sidebarOpen={effectiveSidebarOpen}

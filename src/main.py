@@ -130,11 +130,17 @@ class MainSystem:
         plugin_runtime_task = asyncio.create_task(plugin_runtime_manager.start(), name="plugin_runtime_start")
         await _wait_for_plugin_runners_spawned(plugin_runtime_manager, plugin_runtime_task)
 
+        # 数据库启动维护已完成；让 WebUI 在线程中加载，与后续组件初始化并行，
+        # 无需等待全部插件就绪后才开放管理页面。
+        self._start_webui_server()
+
         from src.A_memorix.host_service import a_memorix_host_service
         from src.mcp_module.service import get_mcp_service
+        from src.services.expression_vector_service import expression_vector_service
 
         a_memorix_host_service.register_config_reload_callback()
         get_mcp_service().register_config_reload_callback()
+        expression_vector_service.start()
         a_memorix_task = asyncio.create_task(a_memorix_host_service.start(), name="a_memorix_start")
 
         await asyncio.sleep(0)
@@ -184,8 +190,6 @@ class MainSystem:
 
         await event_bus.emit(event_type=EventType.ON_START)
         # logger.info("已触发 ON_START 事件")
-
-        self._start_webui_server()
 
         from src.chat.utils.statistic import OnlineTimeRecordTask, StatisticOutputTask
 
@@ -276,10 +280,12 @@ async def main() -> None:
         from src.emoji_system.emoji_manager import emoji_manager
         from src.mcp_module.service import get_mcp_service
         from src.plugin_runtime.integration import get_plugin_runtime_manager
+        from src.services.expression_vector_service import expression_vector_service
         from src.services.memory_flow_service import memory_automation_service
 
         emoji_manager.shutdown()
         await image_manager.shutdown()
+        await expression_vector_service.stop()
         await memory_automation_service.shutdown()
         await a_memorix_host_service.stop()
         await get_plugin_runtime_manager().bridge_event("on_stop")

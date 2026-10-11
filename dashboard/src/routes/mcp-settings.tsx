@@ -795,7 +795,7 @@ export function MCPExtensionList({
         <div className="divide-border/80 divide-y">
           {visible.map((server, index) => {
             const runtime = status.data?.servers.find((item) => item.name === server.name)
-            const enabled = Boolean(mcp?.enabled) && server.enabled
+            const enabled = Boolean(mcp?.enable) && server.enabled
             const statusLabel = !enabled
               ? '已禁用'
               : status.isError

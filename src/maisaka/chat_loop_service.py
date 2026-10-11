@@ -73,7 +73,6 @@ from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
 PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
-    "behavior_scenario_analyzer": "behavior.scenario_analyzer",
     "emotion": "emoji.selector",
     "expression_selector": "expression.selector",
     "planner": "maisaka.planner",
@@ -88,7 +87,6 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "planner": "planner",
     "reply_effect_judge": "reply_effect_judge",
     "expression_selector": "expression_selector",
-    "behavior_scenario_analyzer": "behavior_scenario_analyzer",
     "emotion": "emotion",
     "sub_agent": "sub_agent",
 }
@@ -740,12 +738,9 @@ class MaisakaChatLoopService:
             prompt_cache_hit_tokens / prompt_cache_total_tokens * 100 if prompt_cache_total_tokens > 0 else 0
         )
         logger.info(
-            "Planner缓存："
-            f"{request_kind}, "
-            f"命中={prompt_cache_hit_tokens}, "
-            f"miss_tokens={prompt_cache_miss_tokens}, "
-            f"hit_rate={prompt_cache_hit_rate:.2f}%, "
-            f"prompt_tokens={prompt_tokens}"
+            f"Planner缓存 [{request_kind}] 输入={prompt_tokens} "
+            f"命中={prompt_cache_hit_tokens} 未命中={prompt_cache_miss_tokens} "
+            f"命中率={prompt_cache_hit_rate:.2f}%"
         )
 
     async def ensure_chat_prompt_loaded(self, tools_section: str = "") -> None:
@@ -1213,6 +1208,7 @@ class MaisakaChatLoopService:
                 tool_options=all_tools if all_tools else None,
                 response_format=response_format,
                 interrupt_flag=self._interrupt_flag,
+                force_stream_mode=request_kind == "planner" and global_config.experimental.planner_message_steering,
             ),
         )
         if logical_turn_id:
@@ -1480,7 +1476,7 @@ class MaisakaChatLoopService:
             return [
                 message
                 for message in selected_history
-                if message.source != "behavior_pattern" and not is_mid_term_memory_message(message)
+                if not is_mid_term_memory_message(message)
             ]
 
         return selected_history
@@ -1489,6 +1485,6 @@ class MaisakaChatLoopService:
     def _resolve_enable_visual_message(request_kind: str) -> bool:
         if request_kind == "planner":
             return resolve_enable_visual_planner()
-        if request_kind in {"expression_selector", "reply_effect_judge", "behavior_scenario_analyzer"}:
+        if request_kind in {"expression_selector", "reply_effect_judge"}:
             return False
         return True

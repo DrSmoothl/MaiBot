@@ -187,13 +187,19 @@ vi.mock('./Header', () => ({
 }))
 vi.mock('./Sidebar', () => ({
   Sidebar: ({
+    menuSections,
     onSidebarFix,
     sidebarOpen,
   }: {
+    menuSections: Array<{ title: string }>
     onSidebarFix: () => void
     sidebarOpen: boolean
   }) => (
-    <div data-testid="sidebar" data-sidebar-open={String(sidebarOpen)}>
+    <div
+      data-testid="sidebar"
+      data-sidebar-open={String(sidebarOpen)}
+      data-section-titles={menuSections.map((section) => section.title).join(',')}
+    >
       <button type="button" onClick={onSidebarFix}>
         切换为固定模式
       </button>
@@ -547,7 +553,9 @@ describe('Layout 壳层、快捷键与公告入口', () => {
     expect(getHeader()).toHaveAttribute('data-search-open', 'true')
   })
 
-  it('移动端遮罩只在设置工作区打开，点击后关闭菜单', () => {
+  // 日志工作区在移动端同样保留麦麦导航，遮罩随菜单一起打开
+  it.each(['/', '/logs'])('移动端遮罩在 %s 随菜单打开，点击后关闭菜单', (pathname) => {
+    routerMocks.pathname = pathname
     render(
       <Layout>
         <div>首页内容</div>
@@ -625,6 +633,12 @@ describe('Layout 壳层、快捷键与公告入口', () => {
     ['/config/bot', 'settings', true],
   ] as const)('路径 %s 映射工作区 %s，返回顶部=%s', (pathname, workspace, showBackToTop) => {
     routerMocks.pathname = pathname
+    layoutMocks.menuSections = [
+      {
+        title: 'sidebar.groups.botConfig',
+        items: [{ path: '/config/bot', label: 'sidebar.menu.botMainConfig' }],
+      },
+    ]
     render(
       <Layout>
         <div>页面内容</div>
@@ -636,7 +650,14 @@ describe('Layout 壳层、快捷键与公告入口', () => {
     if (workspace === 'settings') {
       expect(screen.getAllByTestId('sidebar').length).toBeGreaterThan(0)
     } else {
-      expect(screen.queryByTestId('sidebar')).not.toBeInTheDocument()
+      // 日志工作区不挂桌面侧栏，只保留移动端侧栏供顶栏菜单按钮打开
+      expect(
+        document.querySelector('[data-dashboard-sidebar-layout="true"]')
+      ).not.toBeInTheDocument()
+      const mobileSidebar = screen.getByTestId('sidebar')
+      expect(mobileSidebar.parentElement).toHaveClass('lg:hidden')
+      // 移动端侧栏沿用设置工作区的内置麦麦导航
+      expect(mobileSidebar).toHaveAttribute('data-section-titles', 'sidebar.groups.botConfig')
     }
   })
 

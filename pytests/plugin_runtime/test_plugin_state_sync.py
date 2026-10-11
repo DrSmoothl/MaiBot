@@ -6,6 +6,7 @@ import pytest
 
 from src.config.file_watcher import FileChange
 from src.plugin_runtime.integration import PluginRuntimeManager
+from src.plugin_runtime.protocol.envelope import InspectPluginConfigResultPayload
 from src.webui.routers.websocket import plugin_runtime as runtime_ws
 
 
@@ -39,7 +40,7 @@ async def test_explicit_toggle_does_not_depend_on_a_file_event(monkeypatch):
     manager.subscribe_status_changes(lambda: notifications.append(dict(manager._plugin_transitions)))
 
     async def inspect(plugin_id):
-        return SimpleNamespace(enabled=True, normalized_config={"plugin": {"enabled": True}})
+        return InspectPluginConfigResultPayload(success=True, enabled=True, normalized_config={"plugin": {"enabled": True}})
 
     async def load(plugin_id, reason):
         assert manager._plugin_file_update_lock.locked()
@@ -51,7 +52,8 @@ async def test_explicit_toggle_does_not_depend_on_a_file_event(monkeypatch):
         assert manager._plugin_file_update_lock.locked()
         calls.append("save")
 
-    supervisor = SimpleNamespace(inspect_plugin_config=inspect, get_loaded_plugin_ids=lambda: loaded)
+    supervisor = SimpleNamespace(inspect_plugin_config=inspect, get_loaded_plugin_ids=lambda: loaded,
+                                 get_plugin_config_error=lambda plugin_id: "")
     monkeypatch.setattr(manager, "_get_supervisor_for_plugin", lambda plugin_id: supervisor)
     monkeypatch.setattr(manager, "load_plugin_globally", load)
     async def refresh():
@@ -82,6 +84,46 @@ async def test_file_callback_returns_before_slow_plugin_work(tmp_path, monkeypat
     assert not completed.is_set()
     await manager._plugin_change_task
     assert completed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_config_error_pauses_business_and_valid_save_reloads(monkeypatch):
+    manager = PluginRuntimeManager()
+    manager._started = True
+    config_error = "invalid group target"
+    registered_error = ""
+    reload_reasons = []
+
+    async def inspect(plugin_id):
+        return InspectPluginConfigResultPayload(
+            success=True, config_error=config_error, enabled=not config_error,
+            normalized_config={} if config_error else {"plugin": {"enabled": True}},
+        )
+
+    async def reload(plugin_ids, reason):
+        nonlocal registered_error
+        assert manager._plugin_file_update_lock.locked()
+        reload_reasons.append(reason)
+        registered_error = config_error
+        return True
+
+    async def refresh():
+        pass
+
+    supervisor = SimpleNamespace(
+        inspect_plugin_config=inspect, get_loaded_plugin_ids=lambda: ["demo"],
+        get_plugin_config_error=lambda plugin_id: registered_error,
+    )
+    monkeypatch.setattr(manager, "_get_supervisor_for_plugin", lambda plugin_id: supervisor)
+    monkeypatch.setattr(manager, "reload_plugins_globally", reload)
+    monkeypatch.setattr(manager, "_refresh_plugin_config_watch_subscriptions", refresh)
+    assert await manager.apply_plugin_config("demo") == "config_error"
+    assert await manager.apply_plugin_config("demo") == "config_error"
+    assert "demo" not in manager._applied_plugin_configs
+    config_error = ""
+    assert await manager.apply_plugin_config("demo") == "success"
+    assert await manager.apply_plugin_config("demo") == "success"
+    assert reload_reasons == ["config_invalid", "config_repaired"]
 
 
 @pytest.mark.asyncio
@@ -118,7 +160,7 @@ async def test_failed_config_notification_does_not_mark_running_plugin_as_failed
     manager._started = True
 
     async def inspect(plugin_id):
-        return SimpleNamespace(enabled=True, normalized_config={"plugin": {"enabled": True}})
+        return InspectPluginConfigResultPayload(success=True, enabled=True, normalized_config={"plugin": {"enabled": True}})
 
     async def notify(**kwargs):
         return False
@@ -126,6 +168,7 @@ async def test_failed_config_notification_does_not_mark_running_plugin_as_failed
     supervisor = SimpleNamespace(
         inspect_plugin_config=inspect, get_loaded_plugin_ids=lambda: ["demo"],
         notify_plugin_config_updated=notify,
+        get_plugin_config_error=lambda plugin_id: "",
     )
     monkeypatch.setattr(manager, "_get_supervisor_for_plugin", lambda plugin_id: supervisor)
     monkeypatch.setattr(manager, "get_plugin_load_statuses", lambda: {"demo": "success"})

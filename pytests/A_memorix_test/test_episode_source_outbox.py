@@ -629,7 +629,7 @@ def test_interval_sweep_frontier_survives_model_call_chunk_boundary() -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_source_planning_uses_one_batched_entity_query_for_400_paragraphs(tmp_path) -> None:
+async def test_full_source_planning_uses_one_batched_entity_query_for_400_paragraphs(tmp_path, monkeypatch) -> None:
     store = MetadataStore(data_dir=tmp_path)
     store.connect()
     source = "chat_summary:sql-count"
@@ -646,9 +646,16 @@ async def test_full_source_planning_uses_one_batched_entity_query_for_400_paragr
             )
 
         statements: List[str] = []
-        store._conn.set_trace_callback(statements.append)
+        original_query = store.get_paragraph_entities_by_hashes
+        def trace_entity_query(hashes):
+            connection = store.get_connection()
+            connection.set_trace_callback(statements.append)
+            try:
+                return original_query(hashes)
+            finally:
+                connection.set_trace_callback(None)
+        monkeypatch.setattr(store, "get_paragraph_entities_by_hashes", trace_entity_query)
         plan = await service.plan_source_rebuild(source)
-        store._conn.set_trace_callback(None)
 
         entity_queries = [
             sql

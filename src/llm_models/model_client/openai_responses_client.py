@@ -773,21 +773,25 @@ class OpenAIResponsesClient(OpenaiClient):
             }
             return response
         except (EmptyResponseException, RespParseException) as exc:
-            self._attach_failure_snapshot(exc, request, snapshot_provider_request)
+            await asyncio.to_thread(self._attach_failure_snapshot, exc, request, snapshot_provider_request)
             raise
         except APIConnectionError as exc:
             wrapped_error = NetworkConnectionError(str(exc))
-            self._attach_failure_snapshot(wrapped_error, request, snapshot_provider_request, original_error=exc)
+            await asyncio.to_thread(
+                self._attach_failure_snapshot, wrapped_error, request, snapshot_provider_request, original_error=exc
+            )
             raise wrapped_error from exc
         except APIStatusError as exc:
             wrapped_error = RespNotOkException(exc.status_code, _build_api_status_message(exc))
-            self._attach_failure_snapshot(wrapped_error, request, snapshot_provider_request, original_error=exc)
+            await asyncio.to_thread(
+                self._attach_failure_snapshot, wrapped_error, request, snapshot_provider_request, original_error=exc
+            )
             raise wrapped_error from exc
         except ReqAbortException:
             raise
         except Exception as exc:
             if not has_request_snapshot(exc):
-                self._attach_failure_snapshot(exc, request, snapshot_provider_request)
+                await asyncio.to_thread(self._attach_failure_snapshot, exc, request, snapshot_provider_request)
             raise
 
     def _attach_failure_snapshot(

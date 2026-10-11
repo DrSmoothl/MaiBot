@@ -21,6 +21,7 @@ import base64
 import hashlib
 import json
 import math
+import re
 
 from src.llm_models.openai_compat import normalize_openai_base_url
 
@@ -37,6 +38,12 @@ _DASHSCOPE_NATIVE_PATH = "/api/v1/services/embeddings/multimodal-embedding/multi
 
 _ARK_NATIVE_SUFFIX = "/embeddings/multimodal"
 """豆包原生多模态向量接口后缀；套餐(/api/plan/v3)与普通(/api/v3)网关都在各自基路径下提供该端点。"""
+
+_DASHSCOPE_HOSTNAME = "dashscope.aliyuncs.com"
+"""百炼共享 DashScope 域名。"""
+
+_DASHSCOPE_WORKSPACE_HOSTNAME_PATTERN = re.compile(r"[a-z0-9-]+\.[a-z0-9-]+\.maas\.aliyuncs\.com")
+"""百炼业务空间专属域名 `{WorkspaceId}.{region}.maas.aliyuncs.com`，对小写 hostname 整体匹配。"""
 
 _DASHSCOPE_BASE_PATHS = {"/compatible-mode/v1", "/api/v1"}
 """百炼 Provider 地址允许的基路径（规范化后精确匹配）。"""
@@ -88,7 +95,8 @@ class NativeImageEmbeddingResult:
 def resolve_native_image_embedding_protocol(base_url: str) -> str | None:
     """识别官方百炼/豆包地址并返回对应原生协议；其他地址返回 None。
 
-    匹配基于规范化后的 hostname 与路径精确比对，不做子串或子域名猜测；
+    匹配基于规范化后的 hostname 与路径精确比对，不做子串或任意子域名猜测；
+    百炼业务空间专属域名按 `{WorkspaceId}.{region}.maas.aliyuncs.com` 固定格式整体匹配。
     未识别的地址一律返回 None，由调用方继续走原有 OpenAI 兼容逻辑。
     """
     parsed = urlsplit(normalize_openai_base_url(str(base_url or "")))
@@ -96,11 +104,16 @@ def resolve_native_image_embedding_protocol(base_url: str) -> str | None:
         return None
     hostname = parsed.hostname.lower()
     path = parsed.path.rstrip("/")
-    if hostname == "dashscope.aliyuncs.com" and path in _DASHSCOPE_BASE_PATHS:
+    if _is_dashscope_hostname(hostname) and path in _DASHSCOPE_BASE_PATHS:
         return DASHSCOPE_PROTOCOL
     if hostname == "ark.cn-beijing.volces.com" and path in _ARK_BASE_PATHS:
         return ARK_PROTOCOL
     return None
+
+
+def _is_dashscope_hostname(hostname: str) -> bool:
+    """判断小写 hostname 是否为百炼官方推理域名（共享 DashScope 域名或业务空间专属域名）。"""
+    return hostname == _DASHSCOPE_HOSTNAME or _DASHSCOPE_WORKSPACE_HOSTNAME_PATTERN.fullmatch(hostname) is not None
 
 
 def resolve_compatible_image_embedding_input(base_url: str) -> Dict[str, str] | None:

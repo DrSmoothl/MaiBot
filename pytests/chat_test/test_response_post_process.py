@@ -18,6 +18,44 @@ class _FixedTypoGenerator:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["rule", "llm"])
+@pytest.mark.parametrize(
+    "post_process_enabled,config_enabled,call_enabled",
+    [
+        (True, False, True),
+        (True, True, False),
+        (True, False, False),
+        (False, True, True),
+        (False, False, True),
+        (False, True, False),
+        (False, False, False),
+    ],
+)
+async def test_disabled_splitter_preserves_reply(
+    monkeypatch, mode, post_process_enabled, config_enabled, call_enabled
+) -> None:
+    def unexpected_rule_split(_text):
+        pytest.fail("关闭回复分割时不应执行规则断句")
+
+    async def unexpected_llm_split(_text):
+        pytest.fail("关闭回复分割时不应调用断句模型")
+
+    monkeypatch.setattr(chat_utils, "_split_into_sentence_segments", unexpected_rule_split)
+    monkeypatch.setattr(chat_utils, "split_text_with_llm", unexpected_llm_split)
+    monkeypatch.setattr(
+        chat_utils.global_config.response_post_process, "enable_response_post_process", post_process_enabled
+    )
+    monkeypatch.setattr(chat_utils.global_config.response_splitter, "mode", mode)
+    monkeypatch.setattr(chat_utils.global_config.response_splitter, "enable", config_enabled)
+    monkeypatch.setattr(chat_utils.global_config.chinese_typo, "enable", False)
+    text = "今天见，晚点聊。\n先去吃饭"
+
+    segments = await chat_utils.process_llm_response_segments_async(text, enable_splitter=call_enabled)
+
+    assert segments == [ProcessedResponseSegment(text)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["rule", "llm"])
 @pytest.mark.parametrize("config_enabled,call_enabled", [(False, True), (True, False), (False, False)])
 async def test_disabled_typo_skips_construction(monkeypatch, mode, config_enabled, call_enabled) -> None:
     def unexpected_constructor(**_kwargs):
@@ -47,6 +85,7 @@ async def test_llm_split_preserves_typo_correction_metadata(monkeypatch) -> None
     monkeypatch.setattr(chat_utils, "ChineseTypoGenerator", _FixedTypoGenerator)
     monkeypatch.setattr(chat_utils.global_config.response_post_process, "enable_response_post_process", True)
     monkeypatch.setattr(chat_utils.global_config.response_splitter, "mode", "llm")
+    monkeypatch.setattr(chat_utils.global_config.response_splitter, "enable", True)
     monkeypatch.setattr(chat_utils.global_config.response_splitter, "max_split_num", 3)
     monkeypatch.setattr(chat_utils.global_config.response_splitter, "max_sentence_num", 3)
     monkeypatch.setattr(chat_utils.global_config.chinese_typo, "enable", True)

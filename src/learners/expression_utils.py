@@ -161,7 +161,7 @@ async def check_expression_suitability(
 
     prompt = await prompt_manager.render_prompt(prompt_template)
 
-    logger.info(f"正在优化表达方式: situation={situation}, style={style}")
+    logger.debug(f"优化表达 场景={situation!r} 表达={style!r}")
 
     generation_result = await judge_llm.generate_response(
         prompt=prompt,

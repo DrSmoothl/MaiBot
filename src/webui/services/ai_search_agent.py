@@ -99,8 +99,7 @@ def _build_agent_tools() -> List[ToolDefinitionInput]:
         {
             "name": "search_webui_index",
             "description": (
-                "搜索当前 WebUI 中可导航的页面和配置项，返回候选 ID、标题，"
-                "以及配置说明、字段路径、类型和选项信息。"
+                "搜索当前 WebUI 中可导航的页面和配置项，返回候选 ID、标题，以及配置说明、字段路径、类型和选项信息。"
             ),
             "parameters": {
                 "type": "object",
@@ -138,9 +137,7 @@ def _build_agent_tools() -> List[ToolDefinitionInput]:
                     "paths": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": (
-                            f"search_official_docs 返回的文档路径，最多 {OFFICIAL_DOCS_MAX_READ_COUNT} 个"
-                        ),
+                        "description": (f"search_official_docs 返回的文档路径，最多 {OFFICIAL_DOCS_MAX_READ_COUNT} 个"),
                     },
                     "offset": {
                         "type": "integer",

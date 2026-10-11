@@ -297,6 +297,14 @@ export function useModelAutoSave(options: UseModelAutoSaveOptions): UseModelAuto
     [enqueueWrite, onSaveError, setDomainDirty, updateSavingCount]
   )
 
+  // 先登记卸载状态，后面的定时器清理才能区分重新编辑与离开页面。
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
   // 监听 models 变化。
   useEffect(() => {
     if (initialLoadRef.current) return
@@ -323,6 +331,10 @@ export function useModelAutoSave(options: UseModelAutoSaveOptions): UseModelAuto
       if (modelsTimerRef.current) {
         clearTimeout(modelsTimerRef.current)
         modelsTimerRef.current = null
+        // 离开页面时立即入队，不能丢弃防抖期间尚未保存的最新草稿。
+        if (!isMountedRef.current) {
+          void queueModelsSave(models, snapshot, generation)
+        }
       }
     }
   }, [models, debounceMs, queueModelsSave, setDomainDirty, snapshotModels])
@@ -353,17 +365,12 @@ export function useModelAutoSave(options: UseModelAutoSaveOptions): UseModelAuto
       if (taskConfigTimerRef.current) {
         clearTimeout(taskConfigTimerRef.current)
         taskConfigTimerRef.current = null
+        if (!isMountedRef.current) {
+          void queueTaskConfigSave(taskConfig, snapshot, generation)
+        }
       }
     }
   }, [taskConfig, debounceMs, queueTaskConfigSave, setDomainDirty, snapshotTaskConfig])
-
-  useEffect(() => {
-    isMountedRef.current = true
-    return () => {
-      isMountedRef.current = false
-      cancelPendingTimers()
-    }
-  }, [cancelPendingTimers])
 
   return {
     cancelPendingTimers,

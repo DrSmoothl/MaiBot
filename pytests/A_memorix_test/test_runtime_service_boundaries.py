@@ -775,6 +775,7 @@ async def test_embedding_probe_retries_pending_vector_fingerprint_without_embedd
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     kernel = SDKMemoryKernel(plugin_root=Path.cwd(), config={})
+    kernel.embedding_manager = object()  # type: ignore[assignment]
     kernel._background_stopping = False
     kernel._vector_health["error_code"] = "embedding_fingerprint_unavailable"
     calls: list[str] = []
@@ -800,6 +801,7 @@ async def test_embedding_probe_runs_once_before_waiting_for_periodic_interval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     kernel = SDKMemoryKernel(plugin_root=Path.cwd(), config={})
+    kernel.embedding_manager = object()  # type: ignore[assignment]
     kernel._background_stopping = False
     calls: list[str] = []
 

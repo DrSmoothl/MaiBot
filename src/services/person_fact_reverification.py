@@ -1,4 +1,4 @@
-"""对旧人物事实执行可中断、幂等的原始消息重验。"""
+"""将旧自动提取的人物事实按当前准入规则恢复为稳定事实。"""
 
 from typing import Any, Dict, List, Tuple
 
@@ -8,10 +8,8 @@ import sqlite3
 
 from src.A_memorix.host_service import a_memorix_host_service
 from src.common.logger import get_logger
-from src.common.message_repository import find_messages
 from src.services.memory_service import memory_service
 
-from .person_fact_verifier import verify_direct_person_fact
 
 logger = get_logger("person_fact_reverification")
 
@@ -37,8 +35,12 @@ def _historical_fact_batch(cursor: str, limit: int) -> Tuple[List[Dict[str, Any]
               AND (p.is_deleted IS NULL OR p.is_deleted = 0)
               AND e.evidence_id = (
                   SELECT MIN(e2.evidence_id) FROM fact_evidence e2
+                  JOIN paragraphs p2 ON p2.hash = e2.evidence_id
                   WHERE e2.claim_id = c.claim_id AND e2.evidence_type = 'paragraph'
                     AND e2.stance = 'support'
+                    AND (p2.is_deleted IS NULL OR p2.is_deleted = 0)
+                    AND json_valid(p2.metadata)
+                    AND json_extract(p2.metadata, '$.evidence_source') = 'user_supported'
               )
             ORDER BY c.claim_id ASC LIMIT ?
             """,
@@ -49,32 +51,7 @@ def _historical_fact_batch(cursor: str, limit: int) -> Tuple[List[Dict[str, Any]
         connection.close()
 
 
-def _has_verified_message(row: Dict[str, Any], metadata: Dict[str, Any]) -> bool:
-    person_id = str(row["person_id"] or "").strip()
-    session_id = str(metadata.get("chat_id", "") or "").strip()
-    person_name = str(metadata.get("person_name", "") or "").strip()
-    message_ids = metadata.get("evidence_message_ids", [])
-    if not isinstance(message_ids, list):
-        return False
-    for message_id in message_ids:
-        token = str(message_id or "").strip()
-        messages = find_messages(session_id=session_id, message_id=token, limit=2)
-        if len(messages) != 1:
-            continue
-        quote = str(messages[0].processed_plain_text or "").strip()
-        if verify_direct_person_fact(
-            fact=str(row["value_text"]),
-            evidence_message_id=token,
-            evidence_quote=quote,
-            person_id=person_id,
-            person_name=person_name,
-            session_id=session_id,
-        ):
-            return True
-    return False
-
-
-async def reverify_historical_person_facts(cursor: str = "", limit: int = 50) -> Dict[str, Any]:
+async def reclassify_historical_person_facts(cursor: str = "", limit: int = 50) -> Dict[str, Any]:
     """处理一批旧事实；调用方持久化 next_cursor 后可安全续跑。"""
 
     rows, has_more = await asyncio.to_thread(_historical_fact_batch, cursor, limit)
@@ -87,7 +64,7 @@ async def reverify_historical_person_facts(cursor: str = "", limit: int = 50) ->
             continue
         if not isinstance(metadata, dict):
             continue
-        if not await asyncio.to_thread(_has_verified_message, row, metadata):
+        if metadata.get("evidence_source") != "user_supported":
             continue
         current = await memory_service.fact_admin(action="get", claim_id=str(row["claim_id"]))
         claim = current.get("claim") if isinstance(current, dict) else None
@@ -100,7 +77,7 @@ async def reverify_historical_person_facts(cursor: str = "", limit: int = 50) ->
             stability="stable",
             profile_section="stable_facts",
             confidence=1.0,
-            reason="historical_message_reverified",
+            reason="historical_person_fact_reclassified",
         )
         if not result.get("success"):
             raise RuntimeError(f"历史人物事实晋升失败: {row['claim_id']}: {result.get('error')}")

@@ -7,6 +7,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, Optional, Tuple
+from unittest.mock import AsyncMock
 
 import copy
 import json
@@ -141,7 +142,7 @@ def _build_client(
             meta,
             config_data=config_data,
             use_provided_config=use_provided_config,
-            suppress_errors=use_provided_config,
+            suppress_errors=True,
             enforce_version=not use_provided_config,
         )
 
@@ -340,3 +341,88 @@ def test_visual_form_keeps_custom_general_section_without_defaults(
         "plugin": {"enabled": True, "config_version": "1.0.0"},
         "general": {"api_contact": "me@example.com"},
     }
+
+
+@pytest.mark.parametrize("endpoint,method", [("/bundle", "GET"), ("/schema", "GET"), ("", "GET"), ("", "PUT")])
+@pytest.mark.parametrize("invalid", [False, True])
+def test_runtime_failure_is_reported_without_disk_fallback(tmp_path, monkeypatch, endpoint, method, invalid):
+    from src.plugin_runtime import integration
+
+    inspect = config_routes_module._inspect_plugin_config_via_runtime
+    client, config_path = _build_client(tmp_path, monkeypatch, _FlatFieldsPlugin(), _FLAT_FIELDS_CONFIG_TOML)
+    monkeypatch.setattr(config_routes_module, "_inspect_plugin_config_via_runtime", inspect)
+    manager = SimpleNamespace(inspect_plugin_config=AsyncMock(return_value=None))
+    if invalid:
+        manager.inspect_plugin_config.side_effect = ValueError("invalid group target")
+    monkeypatch.setattr(integration, "get_plugin_runtime_manager", lambda: manager)
+
+    async def run_direct(coroutine):
+        return await coroutine
+
+    monkeypatch.setattr(config_routes_module, "run_on_main_loop", run_direct)
+    original = config_path.read_bytes()
+    kwargs = {"json": {"config": {"timeout": 60}}} if method == "PUT" else {}
+    response = client.request(method, f"/api/webui/plugins/config/{_PLUGIN_ID}{endpoint}", **kwargs)
+    assert response.status_code == (400 if invalid else 503)
+    assert "detail" in response.json() and "schema" not in response.json()
+    assert config_path.read_bytes() == original
+
+
+def test_missing_schema_does_not_infer_disk_fields(tmp_path, monkeypatch):
+    client, _ = _build_client(tmp_path, monkeypatch, _FlatFieldsPlugin(), _FLAT_FIELDS_CONFIG_TOML)
+    inspect = config_routes_module._inspect_plugin_config_via_runtime
+
+    async def missing_schema(*args, **kwargs):
+        snapshot = await inspect(*args, **kwargs)
+        return snapshot.model_copy(update={"config_schema": {}})
+
+    monkeypatch.setattr(config_routes_module, "_inspect_plugin_config_via_runtime", missing_schema)
+    for endpoint in ("/bundle", "/schema"):
+        response = client.get(f"/api/webui/plugins/config/{_PLUGIN_ID}{endpoint}")
+        assert response.status_code == 500
+        assert "schema" not in response.json()
+
+
+@pytest.mark.parametrize("invalid_toml", ['timeout = "broken"\n', 'timeout = [\n'])
+def test_invalid_config_bundle_preserves_source_and_reports_error(tmp_path, monkeypatch, invalid_toml):
+    raw = '# 用户注释\n' + invalid_toml + '[plugin]\nconfig_version = "1.0.0"\n'
+    client, config_path = _build_client(tmp_path, monkeypatch, _FlatFieldsPlugin(), raw)
+    response = client.get(f"/api/webui/plugins/config/{_PLUGIN_ID}/bundle")
+    assert response.status_code == 200
+    bundle = response.json()
+    assert bundle["schema"] is None and bundle["config"] == {}
+    assert bundle["raw_config"] == raw
+    assert bundle["config_error"]
+    assert config_path.read_text(encoding="utf-8") == raw
+    for endpoint in ("", "/schema"):
+        response = client.get(f"/api/webui/plugins/config/{_PLUGIN_ID}{endpoint}")
+        assert response.status_code == 400
+        assert response.json()["detail"] == bundle["config_error"]
+
+
+def test_raw_save_applies_and_refreshes_repaired_config(tmp_path, monkeypatch):
+    from src.plugin_runtime import integration
+
+    client, config_path = _build_client(
+        tmp_path, monkeypatch, _FlatFieldsPlugin(), 'timeout = "broken"\n[plugin]\nconfig_version = "1.0.0"\n',
+    )
+    applied = []
+
+    async def apply(plugin_id, write_config):
+        await write_config()
+        snapshot = await config_routes_module._inspect_plugin_config_via_runtime(plugin_id)
+        status = "config_error" if snapshot.config_error else "success"
+        applied.append(status)
+        return status
+
+    async def run_direct(coroutine):
+        return await coroutine
+
+    monkeypatch.setattr(integration, "get_plugin_runtime_manager", lambda: SimpleNamespace(apply_plugin_config=apply))
+    monkeypatch.setattr(config_routes_module, "run_on_main_loop", run_direct)
+    response = client.put(f"/api/webui/plugins/config/{_PLUGIN_ID}/raw", json={"config": _FLAT_FIELDS_CONFIG_TOML})
+    assert response.status_code == 200 and response.json()["runtime_status"] == "success"
+    assert applied == ["success"]
+    bundle = client.get(f"/api/webui/plugins/config/{_PLUGIN_ID}/bundle").json()
+    assert bundle["schema"] and "config_error" not in bundle
+    assert config_path.read_text(encoding="utf-8") == _FLAT_FIELDS_CONFIG_TOML

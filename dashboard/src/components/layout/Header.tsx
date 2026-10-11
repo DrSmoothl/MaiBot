@@ -102,7 +102,7 @@ interface HeaderProps {
   workspaceMode: WorkspaceMode
 }
 
-type HeaderActionId = 'search' | 'settings' | 'docs' | 'language' | 'theme' | 'logout'
+type HeaderActionId = 'settings' | 'docs' | 'language' | 'theme' | 'logout' | 'extensions'
 
 export function Header({
   extensions = [],
@@ -136,13 +136,17 @@ export function Header({
         ]
       : []
   })
-  // 顶栏最多直接展示一个插件工作区，其余收进“更多”；当前工作区保持可见。
-  const visiblePluginTab = pluginTabs.find((tab) => tab.value === workspaceMode) ?? pluginTabs[0]
+  // 顶栏最多直接展示两个插件工作区，其余收进“更多”；当前工作区保持可见。
+  const activePluginTab = pluginTabs.find((tab) => tab.value === workspaceMode)
+  const visiblePluginTabs = pluginTabs.slice(0, 2)
+  if (activePluginTab && !visiblePluginTabs.includes(activePluginTab)) {
+    visiblePluginTabs[1] = activePluginTab
+  }
   const workspaceTabs = [
     ...WORKSPACE_TABS.map((tab) => ({ ...tab, literal: false })),
-    ...(visiblePluginTab ? [visiblePluginTab] : []),
+    ...visiblePluginTabs,
   ]
-  const overflowTabs = pluginTabs.filter((tab) => tab !== visiblePluginTab)
+  const overflowTabs = pluginTabs.filter((tab) => !visiblePluginTabs.includes(tab))
   const workspaceTabsKey = workspaceTabs.map((tab) => `${tab.value}:${tab.labelKey}`).join('|')
   const { themeConfig } = useContext(ThemeProviderContext)
   // 千禧风格的顶栏要放得下键帽，比其它风格高一截；高度由动画驱动，所以在这里按风格取值。
@@ -286,11 +290,7 @@ export function Header({
     await logout()
   }
 
-  const activeHeaderAction: HeaderActionId | null = languageMenuOpen
-    ? 'language'
-    : searchOpen
-      ? 'search'
-      : null
+  const activeHeaderAction: HeaderActionId | null = languageMenuOpen ? 'language' : null
   const highlightedHeaderAction =
     hoveredWorkspace === null ? (hoveredHeaderAction ?? activeHeaderAction) : null
 
@@ -580,6 +580,40 @@ export function Header({
                   ))}
                 </TabsList>
               </Tabs>
+              {overflowTabs.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title={t('pluginWebUI.more')}
+                      aria-label={t('pluginWebUI.more')}
+                      data-dashboard-header-action="true"
+                      data-dashboard-workspace-more="true"
+                      data-header-action-highlighted={
+                        highlightedHeaderAction === 'extensions' ? 'true' : 'false'
+                      }
+                      onPointerEnter={() => handleHeaderActionEnter('extensions')}
+                      onPointerLeave={handleHeaderActionLeave}
+                      className="relative isolate shrink-0 border-0 bg-transparent shadow-none"
+                    >
+                      {renderHeaderActionPill('extensions')}
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {overflowTabs.map((tab) => (
+                      <DropdownMenuItem
+                        key={tab.value}
+                        onSelect={() => onWorkspaceNavigate(tab.to)}
+                      >
+                        <tab.icon className="mr-2 h-4 w-4" />
+                        {tab.labelKey}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               {/* 顶栏搜索：提交问题后打开搜索窗口并自动执行 AI 搜索。 */}
               <form
                 role="search"
@@ -614,26 +648,6 @@ export function Header({
                   <Search className="h-4 w-4" />
                 </button>
               </form>
-              {overflowTabs.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" aria-label={t('pluginWebUI.more')}>
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {overflowTabs.map((tab) => (
-                      <DropdownMenuItem
-                        key={tab.value}
-                        onSelect={() => onWorkspaceNavigate(tab.to)}
-                      >
-                        <tab.icon className="mr-2 h-4 w-4" />
-                        {tab.labelKey}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
               {/* 后端切换按钮（仅 Electron） */}
             {isElectron() && (
               <>

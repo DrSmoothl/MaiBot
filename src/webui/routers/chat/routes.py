@@ -15,10 +15,6 @@ from src.chat.heart_flow.heartflow_manager import heartflow_manager
 from src.chat.message_receive.chat_manager import chat_manager as core_chat_manager
 from src.common.database.database import get_db_session
 from src.common.database.database_model import (
-    BehaviorAction,
-    BehaviorExperiencePath,
-    BehaviorOutcome,
-    BehaviorSceneCluster,
     ChatSession,
     Expression,
     HighFrequencyTerm,
@@ -30,7 +26,6 @@ from src.common.database.database_model import (
 )
 from src.common.logger import get_logger
 from src.common.utils.utils_config import (
-    BehaviorConfigUtils,
     ChatConfigUtils,
     ExpressionConfigUtils,
     JargonConfigUtils,
@@ -792,7 +787,6 @@ async def _save_chat_learning_rule(chat_session: ChatSession, kind: str, request
     learning_config_map = {
         "expression": ("expression", "learning_list"),
         "jargon": ("jargon", "learning_list"),
-        "behavior": ("experimental", "behavior_learning_list"),
     }
     config_target = learning_config_map.get(kind)
     if config_target is None:
@@ -835,8 +829,6 @@ async def _save_chat_learning_rule(chat_session: ChatSession, kind: str, request
         rules[replace_index] = next_rule
 
     config_section[field_name] = rules
-    if kind == "behavior" and request.learn:
-        config_section["enable_behavior_learning"] = True
     save_toml_with_format(config_data, str(config_path))
 
     if not await config_manager.reload_config(changed_scopes=["bot"], changed_sections=[section_name]):
@@ -944,7 +936,6 @@ def _chat_session_detail_to_response(chat_session: ChatSession) -> Dict[str, Any
     core_chat_manager.get_existing_session_by_session_id(session_id)
 
     expression_use, expression_learn = ExpressionConfigUtils.get_expression_config_for_chat(session_id)
-    behavior_use, behavior_learn = BehaviorConfigUtils.get_behavior_config_for_chat(session_id)
     jargon_use, jargon_learn = JargonConfigUtils.get_jargon_config_for_chat(session_id)
     return {
         "session_id": session_id,
@@ -959,11 +950,6 @@ def _chat_session_detail_to_response(chat_session: ChatSession) -> Dict[str, Any
             "learn": expression_learn,
             "matched_rule": _target_config_to_dict(ExpressionConfigUtils._find_expression_config_item(session_id)),
         },
-        "behavior": {
-            "use": behavior_use,
-            "learn": behavior_learn,
-            "matched_rule": _target_config_to_dict(BehaviorConfigUtils._find_behavior_config_item(session_id)),
-        },
         "jargon": {
             "use": jargon_use,
             "learn": jargon_learn,
@@ -976,7 +962,7 @@ def _chat_session_detail_to_response(chat_session: ChatSession) -> Dict[str, Any
 
 
 def _get_adapter_policy_details(chat_session: ChatSession) -> List[Dict[str, Any]]:
-    """返回当前聊天流在各适配器插件中的路由与放行状态。"""
+    """返回当前聊天流在同平台适配器插件中的路由与放行状态。"""
 
     platform = str(chat_session.platform or "").strip()
     target_id = _get_chat_target_id(chat_session)
@@ -996,7 +982,7 @@ def _get_adapter_policy_details(chat_session: ChatSession) -> List[Dict[str, Any
     platform_io_manager = get_platform_io_manager()
     policy_manager = get_adapter_policy_manager()
     adapter_details: List[Dict[str, Any]] = []
-    for driver in platform_io_manager.driver_registry.list(kind=DriverKind.PLUGIN):
+    for driver in platform_io_manager.driver_registry.list(kind=DriverKind.PLUGIN, platform=chat_route_key.platform):
         descriptor = driver.descriptor
         metadata = descriptor.metadata if isinstance(descriptor.metadata, dict) else {}
         if str(metadata.get("plugin_type") or "").strip().lower() != "adapter":
@@ -1092,16 +1078,20 @@ def _get_running_adapter_identity(adapter_id: str) -> AdapterIdentity:
     return _get_driver_adapter_identity(driver)
 
 
-async def _save_adapter_policy_rule(chat_session: ChatSession, request: AdapterPolicyUpdateRequest) -> None:
+def _save_adapter_policy_rule(chat_session: ChatSession, request: AdapterPolicyUpdateRequest) -> None:
     """写入当前聊天流在指定适配器上的显式放行策略。"""
 
     target_id = _get_chat_target_id(chat_session)
     if not target_id:
         raise HTTPException(status_code=400, detail="聊天流缺少目标 ID，无法保存适配器策略")
 
+    identity = _get_running_adapter_identity(request.adapter_id)
+    if identity.platform != chat_session.platform.strip().lower():
+        raise HTTPException(status_code=400, detail="适配器与聊天流的平台不匹配，无法保存策略")
+
     try:
         get_adapter_policy_manager().set_chat_override(
-            _get_running_adapter_identity(request.adapter_id),
+            identity,
             chat_type=_get_chat_type(chat_session),
             target_id=target_id,
             action=request.action,
@@ -1114,10 +1104,6 @@ SESSION_DELETE_TABLES = [
     ("messages", "消息", Messages, "session_id"),
     ("expressions", "表达", Expression, "session_id"),
     ("tool_records", "工具调用记录", ToolRecord, "session_id"),
-    ("behavior_experience_paths", "行为经验路径", BehaviorExperiencePath, "session_id"),
-    ("behavior_scene_clusters", "行为场景簇", BehaviorSceneCluster, "session_id"),
-    ("behavior_actions", "行为动作", BehaviorAction, "session_id"),
-    ("behavior_outcomes", "行为结果", BehaviorOutcome, "session_id"),
     ("statistics_message_hourly", "消息统计", StatisticsMessageHourly, "chat_id"),
     ("high_frequency_terms", "高频词", HighFrequencyTerm, "chat_id"),
     ("chat_sessions", "聊天流记录", ChatSession, "session_id"),
@@ -1529,7 +1515,7 @@ async def upsert_chat_session_prompt(
 
 
 @router.put("/sessions/{session_id}/adapters/policy")
-async def update_chat_session_adapter_policy(
+def update_chat_session_adapter_policy(
     session_id: str,
     request: AdapterPolicyUpdateRequest,
 ) -> Dict[str, object]:
@@ -1547,7 +1533,7 @@ async def update_chat_session_adapter_policy(
     if chat_session is None:
         raise HTTPException(status_code=404, detail=f"聊天流不存在: {normalized_session_id}")
 
-    await _save_adapter_policy_rule(chat_session, request)
+    _save_adapter_policy_rule(chat_session, request)
     return {"success": True, "detail": _chat_session_detail_to_response(chat_session)}
 
 

@@ -195,7 +195,8 @@ describe('插件发布版本选择', () => {
     renderPage()
     await waitDetailReady()
     expect(screen.getByRole('button', { name: '安装' })).toBeDisabled()
-    expect(screen.getByRole('option', { name: '2.0.0 · SDK 版本不兼容' })).toBeDisabled()
+    // 发布版本选项末尾附带更新日期，夹具未提供 published_at 时显示「时间未知」
+    expect(screen.getByRole('option', { name: '2.0.0 · SDK 版本不兼容 · 更新于 时间未知' })).toBeDisabled()
     expect(pluginApi.installPlugin).not.toHaveBeenCalled()
   })
 })

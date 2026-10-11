@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ErrorBoundary } from '@/components/error-boundary'
+import { PluginCustomPage } from '@/components/plugin-custom-page'
 import { PluginWebUIRenderer } from '@/components/plugin-webui-renderer'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
@@ -16,36 +17,80 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { readPluginPageState } from '@/lib/plugin-api-arguments'
 import {
   invokePluginWebUI,
   refreshPluginWebUI,
+  resolveReference,
   usePluginWebUI,
+  nodeChildren,
 } from '@/lib/plugin-webui'
-import type { APIBinding, Scalar, WebUIPage, WebUINode } from '@/lib/plugin-webui'
+import type {
+  DeclarativeBinding,
+  DataContexts,
+  DeclarativePage,
+  Scalar,
+  WebUINode,
+} from '@/lib/plugin-webui'
 
 function initialValues(nodes: WebUINode[]): Record<string, Scalar> {
   const values: Record<string, Scalar> = {}
   const pending = [...nodes]
   while (pending.length) {
     const node = pending.pop()!
-    if (node.name !== null && (node.value === null || typeof node.value !== 'object'))
+    if (node.type === 'pagination' && node.name !== null) values[node.name] = 1
+    if (
+      node.type === 'input' ||
+      node.type === 'select' ||
+      node.type === 'switch' ||
+      node.type === 'date'
+    )
       values[node.name] = node.value
-    pending.push(...node.children)
+    pending.push(...nodeChildren(node))
   }
   return values
 }
 
-function argumentsFor(binding: APIBinding, values: Record<string, Scalar>): Record<string, Scalar> {
-  return Object.fromEntries(
+function pageValues(page: DeclarativePage): Record<string, Scalar> {
+  const values = initialValues(page.content)
+  // 导航状态仅初始化本页已声明的表单；不猜测字符串类型或写入插件配置。
+  for (const [name, value] of Object.entries(readPluginPageState())) {
+    if (!Object.hasOwn(values, name) || (value !== null && typeof value === 'object'))
+      throw new Error(`Page state must target a declared scalar input: ${name}`)
+    values[name] = value
+  }
+  return values
+}
+
+function argumentsFor(
+  binding: DeclarativeBinding,
+  values: Record<string, Scalar>,
+  data: Record<string, unknown> = {},
+  contexts: DataContexts = {}
+): Record<string, Scalar> {
+  const args: Record<string, Scalar> = Object.fromEntries(
     Object.keys(binding.parameters)
       .filter((name) => values[name] !== undefined && values[name] !== null)
       .map((name) => [name, values[name]])
   )
+  for (const [name, reference] of Object.entries(binding.arguments ?? {})) {
+    const value = resolveReference(reference, data, contexts)
+    if (value === null || value === undefined) {
+      delete args[name]
+      if (binding.parameters[name].required) throw new Error(`Missing action argument: ${name}`)
+    } else if (
+      !['string', 'number', 'boolean'].includes(typeof value) ||
+      (typeof value === 'number' && !Number.isFinite(value))
+    ) {
+      throw new Error(`Action argument must be scalar: ${name}`)
+    } else args[name] = value as Scalar
+  }
+  return args
 }
 
-function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }) {
+function ExtensionPage({ pluginId, page }: { pluginId: string; page: DeclarativePage }) {
   const { t } = useTranslation()
-  const [values, setValues] = useState(() => initialValues(page.content))
+  const [values, setValues] = useState(() => pageValues(page))
   const valuesRef = useRef(values)
   const [data, setData] = useState<Record<string, unknown>>({})
   const [busy, setBusy] = useState(false)
@@ -53,8 +98,13 @@ function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [confirmation, setConfirmation] = useState<string | null>(null)
+  const [confirmation, setConfirmation] = useState<{
+    name: string
+    args: Record<string, Scalar>
+  } | null>(null)
   const [revision, setRevision] = useState(0)
+  const [selectionRevision, setSelectionRevision] = useState(0)
+  const renderFailed = useRef(false)
   const alive = useRef(true)
   const controller = useRef<AbortController | null>(null)
 
@@ -76,30 +126,42 @@ function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }
       if (!signal.aborted && alive.current) {
         setData(results)
         setLoaded(true)
-        setRevision((value) => value + 1)
+        setSelectionRevision((value) => value + 1)
+        if (renderFailed.current) {
+          renderFailed.current = false
+          setRevision((value) => value + 1)
+        }
       }
     },
     [page, pluginId]
   )
 
-  const refresh = useCallback(async () => {
-    if (busyRef.current) return
-    busyRef.current = true
-    setBusy(true)
-    setError(null)
-    controller.current = new AbortController()
-    const operation = controller.current
-    try {
-      await loadQueries(operation.signal)
-    } catch (error) {
-      if (alive.current && !operation.signal.aborted) setError(String(error))
-    } finally {
-      if (controller.current === operation) {
-        busyRef.current = false
-        if (alive.current) setBusy(false)
+  const refresh = useCallback(
+    async (clearError = true) => {
+      if (busyRef.current) return
+      if (!clearError && controller.current) return
+      controller.current?.abort()
+      if (clearError) {
+        busyRef.current = true
+        setBusy(true)
       }
-    }
-  }, [loadQueries])
+      if (clearError) setError(null)
+      controller.current = new AbortController()
+      const operation = controller.current
+      try {
+        await loadQueries(operation.signal)
+      } catch (error) {
+        if (alive.current && !operation.signal.aborted) setError(String(error))
+      } finally {
+        if (controller.current === operation) {
+          controller.current = null
+          busyRef.current = false
+          if (alive.current) setBusy(false)
+        }
+      }
+    },
+    [loadQueries]
+  )
 
   useEffect(() => {
     alive.current = true
@@ -111,11 +173,21 @@ function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }
     }
   }, [refresh])
 
-  const execute = async (name: string, confirmed = false) => {
+  useEffect(() => {
+    const seconds = page.poll_interval_seconds ?? 0
+    if (seconds < 3) return
+    const timer = window.setInterval(() => {
+      if (!busyRef.current) void refresh(false)
+    }, seconds * 1000)
+    return () => window.clearInterval(timer)
+  }, [page.poll_interval_seconds, refresh])
+
+  const execute = async (name: string, args: Record<string, Scalar>, confirmed = false) => {
     if (busyRef.current) return
     const binding = page.actions[name]
     if (binding.confirmation && !confirmed) {
-      setConfirmation(name)
+      // Freeze the selected row's scalar arguments while the user confirms the action.
+      setConfirmation({ name, args })
       return
     }
     setConfirmation(null)
@@ -123,24 +195,22 @@ function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }
     setBusy(true)
     setError(null)
     setMessage(null)
+    controller.current?.abort()
     controller.current = new AbortController()
     const operation = controller.current
     try {
-      await invokePluginWebUI(
-        pluginId,
-        page.id,
-        'actions',
-        name,
-        argumentsFor(binding, valuesRef.current),
-        confirmed,
-        operation.signal
-      )
-      if (alive.current && !operation.signal.aborted) setMessage(t('pluginWebUI.completed'))
+      await invokePluginWebUI(pluginId, page.id, 'actions', name, args, confirmed, operation.signal)
+      if (alive.current && !operation.signal.aborted) {
+        setMessage(t('pluginWebUI.completed'))
+        // 写入已经成功，即使随后刷新失败，也不能继续使用旧行详情执行操作。
+        setSelectionRevision((value) => value + 1)
+      }
       await loadQueries(operation.signal)
     } catch (error) {
       if (alive.current && !operation.signal.aborted) setError(String(error))
     } finally {
       if (controller.current === operation) {
+        controller.current = null
         busyRef.current = false
         if (alive.current) setBusy(false)
       }
@@ -151,11 +221,13 @@ function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">{page.title}</h1>
-          <p className="text-muted-foreground text-sm">{page.description}</p>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {t('pluginWebUI.providedBy', { plugin: pluginId })}
-          </p>
+          <h1
+            className="text-2xl font-semibold"
+            title={t('pluginWebUI.providedBy', { plugin: pluginId })}
+          >
+            {page.title}
+          </h1>
+          {page.description && <p className="text-muted-foreground text-sm">{page.description}</p>}
         </div>
         <Button
           variant="outline"
@@ -181,6 +253,9 @@ function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }
       {
         <ErrorBoundary
           key={revision}
+          onError={() => {
+            renderFailed.current = true
+          }}
           fallback={
             <Alert variant="destructive">
               <AlertDescription>{t('pluginWebUI.invalidData')}</AlertDescription>
@@ -194,13 +269,31 @@ function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }
               values={values}
               busy={busy}
               pendingData={!loaded}
+              selectionRevision={selectionRevision}
               onChange={(name, value) => {
                 const next = { ...valuesRef.current, [name]: value }
+                if (page.auto_refresh) {
+                  const pending = [...page.content]
+                  while (pending.length) {
+                    const node = pending.pop()!
+                    if (node.type === 'pagination' && node.name !== null && node.name !== name)
+                      next[node.name] = 1
+                    pending.push(...nodeChildren(node))
+                  }
+                }
                 valuesRef.current = next
                 setValues(next)
+                if (page.auto_refresh) void refresh()
               }}
-              onAction={(name) => {
-                void execute(name)
+              onAction={(name, contexts) => {
+                try {
+                  void execute(
+                    name,
+                    argumentsFor(page.actions[name], valuesRef.current, data, contexts)
+                  )
+                } catch (error) {
+                  setError(String(error))
+                }
               }}
             />
           </div>
@@ -216,14 +309,14 @@ function ExtensionPage({ pluginId, page }: { pluginId: string; page: WebUIPage }
           <AlertDialogHeader>
             <AlertDialogTitle>{t('pluginWebUI.confirmTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmation ? page.actions[confirmation].confirmation : ''}
+              {confirmation ? page.actions[confirmation.name].confirmation : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('pluginWebUI.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (confirmation) void execute(confirmation, true)
+                if (confirmation) void execute(confirmation.name, confirmation.args, true)
               }}
             >
               {t('pluginWebUI.confirm')}
@@ -257,6 +350,12 @@ export function PluginWebUIPage() {
         </Button>
       </div>
     )
+  if (extension?.compatibility_error)
+    return (
+      <Alert variant="destructive" className="m-4">
+        <AlertDescription>{extension.compatibility_error}</AlertDescription>
+      </Alert>
+    )
   if (!page || registry.preferences.hidden.includes(pluginId))
     return (
       <p className="p-6">
@@ -268,10 +367,12 @@ export function PluginWebUIPage() {
     )
   // 注册表刷新得到相同声明时保留表单；声明发生变化时重建页面状态。
   return (
-    <ExtensionPage
-      key={`${pluginId}/${pageId}/${JSON.stringify(page)}`}
-      pluginId={pluginId}
-      page={page}
-    />
+    <ErrorBoundary key={`${pluginId}/${pageId}/${JSON.stringify(page)}`}>
+      {page.mode === 'custom' ? (
+        <PluginCustomPage pluginId={pluginId} page={page} pages={extension!.pages} />
+      ) : (
+        <ExtensionPage pluginId={pluginId} page={page} />
+      )}
+    </ErrorBoundary>
   )
 }

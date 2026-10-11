@@ -13,6 +13,7 @@ import { PluginCard } from './PluginCard'
 
 const SURPRISE_PLUGIN_COUNT = 4
 const SURPRISE_CANDIDATE_LIMIT = 20
+const SURPRISE_SEED_STORAGE_KEY = 'plugins-market-surprise-seed'
 const FRESHNESS_BOOST_WEIGHT = 4
 const FRESHNESS_BOOST_WINDOW_DAYS = 120
 const LAUNCH_BOOST_WEIGHT = 12
@@ -20,6 +21,9 @@ const LAUNCH_BOOST_FULL_HOURS = 24
 const LAUNCH_BOOST_DECAY_HOURS = 48
 const UPDATE_BOOST_WEIGHT = 3
 const UPDATE_BOOST_WINDOW_DAYS = 14
+const GROWTH_BOOST_RANK_LIMIT = 8
+const GROWTH_BOOST_WEIGHT_7D = 1
+const GROWTH_BOOST_WEIGHT_30D = 0.6
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const MS_PER_HOUR = 60 * 60 * 1000
 
@@ -186,6 +190,24 @@ function normalizeScore(value: number, maxValue: number, weight: number): number
   return (value / maxValue) * weight
 }
 
+function getGrowthBoost(stats: PluginStatsData | undefined): number {
+  if (!stats) return 0
+
+  const rankings = [
+    { rank: stats.downloads_growth_rank_7d, weight: GROWTH_BOOST_WEIGHT_7D },
+    { rank: stats.likes_growth_rank_7d, weight: GROWTH_BOOST_WEIGHT_7D },
+    { rank: stats.downloads_growth_rank_30d, weight: GROWTH_BOOST_WEIGHT_30D },
+    { rank: stats.likes_growth_rank_30d, weight: GROWTH_BOOST_WEIGHT_30D },
+  ]
+  // 仅为前八名小幅加权，取最强的一项，避免多个榜单的加成叠加。
+  return rankings.reduce((boost, { rank, weight }) => {
+    if (rank == null || !Number.isInteger(rank) || rank < 1 || rank > GROWTH_BOOST_RANK_LIMIT) {
+      return boost
+    }
+    return Math.max(boost, ((GROWTH_BOOST_RANK_LIMIT + 1 - rank) / GROWTH_BOOST_RANK_LIMIT) * weight)
+  }, 0)
+}
+
 function getStableRandomRank(seed: string, plugin: PluginInfo): number {
   const value = `${seed}:${getPluginIdentity(plugin)}`
   let hash = 2166136261
@@ -249,7 +271,14 @@ export function MarketplaceTab({
   getStatusBadge,
   getIncompatibleReason,
 }: MarketplaceTabProps) {
-  const [surpriseSeed] = useState(() => Math.random().toString(36).slice(2))
+  const [surpriseSeed] = useState(() => {
+    // 同一浏览器会话沿用抽选种子，返回市场或重挂载时不重新抽选推荐位。
+    const savedSeed = sessionStorage.getItem(SURPRISE_SEED_STORAGE_KEY)
+    if (savedSeed) return savedSeed
+    const seed = Math.random().toString(36).slice(2)
+    sessionStorage.setItem(SURPRISE_SEED_STORAGE_KEY, seed)
+    return seed
+  })
   const [renderTime] = useState(() => Date.now())
 
   // 过滤插件
@@ -281,6 +310,7 @@ export function MarketplaceTab({
         normalizeScore(ratingScore, scoreBasis.maxRatingScore, 2) +
         getLaunchBoost(plugin, now) +
         getUpdateBoost(plugin, now) +
+        getGrowthBoost(stats) +
         getFreshnessBoost(plugin, scoreBasis.maxMarketplaceOrder, now)
       )
     }

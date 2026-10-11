@@ -172,6 +172,8 @@ export function EmojiList({
 
             {/* 操作按钮始终显示在卡片底部，按实际按钮数量均分一行。 */}
             <div
+              role="toolbar"
+              aria-label="表情包操作"
               className="grid auto-cols-fr grid-flow-col items-center gap-0.5 border-t bg-card p-1"
               onKeyDown={(event) => event.stopPropagation()}
             >

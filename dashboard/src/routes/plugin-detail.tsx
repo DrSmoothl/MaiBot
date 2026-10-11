@@ -315,8 +315,6 @@ export function PluginDetailPage({
   const detailScrollClassName = isDialog
     ? 'h-[min(68vh,720px)]'
     : 'h-[calc(100vh-200px)] sm:h-[calc(100vh-220px)]'
-  // 由外层详情滚动容器统一滚动，避免 README 内层固定高度造成嵌套滚动和内容截断。
-  const readmeScrollClassName = 'pr-4'
   const handleBack = () => {
     if (onClose) {
       onClose()
@@ -750,12 +748,9 @@ export function PluginDetailPage({
                 {detailActionButtons}
               </div>
             </CardHeader>
-          </Card>
-
-          {releaseCatalog && (
-            <Card>
-              <CardHeader><CardTitle className="text-lg">安装版本</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
+            {releaseCatalog && (
+              <CardContent className="space-y-3 border-t pt-4">
+                <h3 className="text-lg font-semibold">安装版本</h3>
                 {releaseCatalog.sync_error ? (
                   <p role="alert" className="text-sm text-destructive">版本同步失败：{releaseCatalog.sync_error}</p>
                 ) : releaseCatalog.mode === 'branch' ? (
@@ -813,12 +808,56 @@ export function PluginDetailPage({
                   </>
                 )}
               </CardContent>
-            </Card>
-          )}
+            )}
+          </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* 左侧 - 详细信息 */}
-            <div className="lg:col-span-1 space-y-6">
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
+            {/* 左侧 - README 和更新日志，由外层详情容器统一滚动 */}
+            <div className="min-w-0 space-y-6 lg:col-span-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">插件说明</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {readmeLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <ThinkingIllustration />
+                    </div>
+                  ) : readme ? (
+                    <MarkdownRenderer content={readme} />
+                  ) : (
+                    <div className="text-center text-muted-foreground py-12">
+                      暂无说明文档
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    更新日志
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {changelogLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <ThinkingIllustration />
+                    </div>
+                  ) : changelog ? (
+                    <MarkdownRenderer content={changelog} />
+                  ) : (
+                    <div className="text-center text-muted-foreground py-12">
+                      暂无更新日志
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* 右侧 - 详细信息 */}
+            <div className="min-w-0 space-y-6 lg:col-span-1">
               {/* 统计信息 */}
               <Card>
                 <CardHeader>
@@ -943,52 +982,6 @@ export function PluginDetailPage({
                 </Card>
               )}
             </div>
-
-            {/* 右侧 - README */}
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-lg">插件说明</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ScrollArea className={readmeScrollClassName}>
-                  {readmeLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <ThinkingIllustration />
-                    </div>
-                  ) : readme ? (
-                    <MarkdownRenderer content={readme} />
-                  ) : (
-                    <div className="text-center text-muted-foreground py-12">
-                      暂无说明文档
-                    </div>
-                  )}
-                </ScrollArea>
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                  更新日志
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-[min(36vh,420px)] pr-4">
-                  {changelogLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <ThinkingIllustration />
-                    </div>
-                  ) : changelog ? (
-                    <MarkdownRenderer content={changelog} />
-                  ) : (
-                    <div className="text-center text-muted-foreground py-12">
-                      暂无更新日志
-                    </div>
-                  )}
-                </ScrollArea>
-              </CardContent>
-            </Card>
           </div>
         </div>
       </ScrollArea>

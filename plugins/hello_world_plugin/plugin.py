@@ -141,6 +141,20 @@ class HelloWorldPlugin(MaiBotPlugin):
         self._webui_last_greeting = "演示记录已清空，可以重新生成问候。"
         return {"cleared": True}
 
+    @API("webui_remove_greeting", description="按选中记录的序号删除一条页面演示记录", version="1")
+    async def webui_remove_greeting(self, sequence: int) -> Dict[str, Any]:
+        """演示行数据参数绑定；只修改页面内存，不发送消息。"""
+        if type(sequence) is not int or sequence < 1:
+            raise ValueError("记录序号必须为正整数")
+        record = next((item for item in self._webui_greetings if item["sequence"] == sequence), None)
+        if record is None:
+            raise ValueError("记录不存在或已被删除，请刷新页面")
+        self._webui_greetings.remove(record)
+        self._webui_last_greeting = (
+            self._webui_greetings[-1]["message"] if self._webui_greetings else "演示记录已清空，可以重新生成问候。"
+        )
+        return {"removed": sequence}
+
     # ===== HomeCard 组件 =====
 
     @HomeCard(

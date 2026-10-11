@@ -559,12 +559,12 @@ def test_clone_repository_reports_plugin_and_mirror_progress(tmp_path, monkeypat
     async def collect_progress(**kwargs):
         events.append(kwargs)
 
-    def fake_run(cmd, capture_output, text, timeout):
+    async def fake_run(cmd, cwd=None):
         assert cmd[:2] == ["git", "clone"]
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     service = mirror_service_module.GitMirrorService(max_retries=1, timeout=1, config=FakeMirrorConfig())
-    monkeypatch.setattr(mirror_service_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(mirror_service_module, "_run_git_process", fake_run)
     mirror_service_module.set_update_progress_callback(collect_progress)
 
     try:
@@ -589,14 +589,14 @@ def test_clone_repository_reports_plugin_and_mirror_progress(tmp_path, monkeypat
 def test_clone_repository_cleans_partial_directory_on_git_failure(tmp_path, monkeypatch):
     target_path = tmp_path / "bad_plugin"
 
-    def fake_run(cmd, capture_output, text, timeout):
+    async def fake_run(cmd, cwd=None):
         assert cmd[:2] == ["git", "clone"]
         target_path.mkdir(parents=True, exist_ok=True)
         (target_path / ".git").mkdir()
         return SimpleNamespace(returncode=128, stdout="", stderr="network failed")
 
     service = mirror_service_module.GitMirrorService(max_retries=1, timeout=1)
-    monkeypatch.setattr(mirror_service_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(mirror_service_module, "_run_git_process", fake_run)
 
     result = asyncio.run(
         service._clone_with_url(
@@ -772,3 +772,99 @@ def test_plugin_operation_reservation_releases_after_failure(client: TestClient)
 
     with management_module._reserve_plugin_operation("test.demo", "update"):
         pass
+
+
+def test_update_disconnect_cancels_worker_and_waits_for_cleanup(monkeypatch) -> None:
+    async def scenario() -> None:
+        started = asyncio.Event()
+        cleaned = asyncio.Event()
+        progress = []
+
+        async def worker(request, token):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                cleaned.set()
+
+        class DisconnectedRequest:
+            async def receive(self) -> Dict[str, Any]:
+                await started.wait()
+                return {"type": "http.disconnect"}
+
+        async def record_progress(**kwargs):
+            progress.append(kwargs)
+
+        monkeypatch.setattr(management_module, "require_plugin_token", lambda _: "ok")
+        monkeypatch.setattr(management_module, "_perform_update_plugin", worker)
+        monkeypatch.setattr(management_module, "update_progress", record_progress)
+        request = management_module.UpdatePluginRequest(
+            plugin_id="test.demo", repository_url="https://github.com/test/demo", branch="main",
+        )
+        with pytest.raises(management_module.HTTPException) as error:
+            await management_module.update_plugin(request, "ok", DisconnectedRequest())
+        assert error.value.status_code == 499
+        assert cleaned.is_set()
+        assert progress[-1]["message"] == "更新已取消"
+
+    asyncio.run(scenario())
+
+
+def test_cancel_git_process_terminates_process_before_returning(monkeypatch) -> None:
+    async def scenario() -> None:
+        processes = []
+        original_popen = mirror_service_module.subprocess.Popen
+
+        def capture_process(*args, **kwargs):
+            process = original_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        monkeypatch.setattr(mirror_service_module.subprocess, "Popen", capture_process)
+        task = asyncio.create_task(mirror_service_module._run_git_process(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+        ))
+        while not processes:
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert processes[0].poll() is not None
+
+    asyncio.run(scenario())
+
+
+def test_cancel_non_git_update_preserves_plugin_and_removes_candidate(tmp_path, monkeypatch) -> None:
+    async def scenario() -> None:
+        plugin_path = tmp_path / "demo"
+        plugin_path.mkdir()
+        (plugin_path / "plugin.py").write_text("old source", encoding="utf-8")
+        manifest = {"id": "test.demo", "version": "1.0.0"}
+        candidate_paths = []
+        started = asyncio.Event()
+
+        async def clone(request, target_path):
+            target_path.mkdir()
+            (target_path / "partial").write_text("partial download", encoding="utf-8")
+            candidate_paths.append(target_path)
+            started.set()
+            await asyncio.Event().wait()
+
+        async def progress(**kwargs):
+            pass
+
+        monkeypatch.setattr(management_module, "_clone_plugin_repository_for_update", clone)
+        monkeypatch.setattr(management_module, "update_progress", progress)
+        request = management_module.UpdatePluginRequest(plugin_id="test.demo")
+        task = asyncio.create_task(management_module._update_non_git_plugin(
+            "test.demo", plugin_path, manifest, request,
+        ))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert (plugin_path / "plugin.py").read_text(encoding="utf-8") == "old source"
+        assert not candidate_paths[0].exists()
+
+    asyncio.run(scenario())

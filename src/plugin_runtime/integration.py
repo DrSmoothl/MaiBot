@@ -199,6 +199,21 @@ class PluginRuntimeManager(
                 raise RuntimeError(f"插件 {plugin_id} 没有对应的运行时")
             snapshot = await supervisor.inspect_plugin_config(plugin_id)
             loaded = plugin_id in supervisor.get_loaded_plugin_ids()
+            if snapshot.config_error:
+                if not loaded or supervisor.get_plugin_config_error(plugin_id) != snapshot.config_error:
+                    if not await self.reload_plugins_globally([plugin_id], reason="config_invalid"):
+                        raise RuntimeError("插件配置管理状态加载失败")
+                self._applied_plugin_configs.pop(plugin_id, None)
+                self._notify_status_changed()
+                await self._refresh_plugin_config_watch_subscriptions()
+                return "config_error"
+            if loaded and supervisor.get_plugin_config_error(plugin_id):
+                if not await self.reload_plugins_globally([plugin_id], reason="config_repaired"):
+                    raise RuntimeError("修正配置后插件激活失败")
+                self._applied_plugin_configs[plugin_id] = dict(snapshot.normalized_config)
+                self._notify_status_changed()
+                await self._refresh_plugin_config_watch_subscriptions()
+                return "success" if snapshot.enabled else "inactive"
             config_data = dict(snapshot.normalized_config)
             if self._applied_plugin_configs.get(plugin_id) == config_data and loaded == snapshot.enabled:
                 return "success" if loaded else "inactive"

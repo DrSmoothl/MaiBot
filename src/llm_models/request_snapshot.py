@@ -13,6 +13,7 @@ import time
 import uuid
 
 from src.common.logger import get_logger
+from src.common.operation_timing import log_operation, timed_operation
 from src.config.model_configs import APIProvider, ModelInfo
 from src.llm_models.model_client.base_client import (
     APIResponse,
@@ -978,17 +979,97 @@ def _build_display_path(file_path: Path) -> str:
         return resolved_path.as_posix()
 
 
+def _read_snapshot(snapshot_path: Path) -> Dict[str, Any]:
+    return json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+
+def _append_snapshot_event(
+    snapshot_path: Path, event: Dict[str, Any], image_assets: Dict[Path, bytes] | None = None,
+) -> None:
+    """事件流只追加，不改写快照或已经保存的事件。"""
+    from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
+
+    with PromptPreviewLogger._timed_storage_lock("snapshot.append_event"):
+        if not snapshot_path.is_file():
+            return
+        event["request_id"] = _read_snapshot(snapshot_path)["metadata"]["request_id"]
+        event["recorded_at"] = datetime.now().isoformat(timespec="seconds")
+        PromptPreviewLogger.append_record_event(
+            snapshot_path.with_suffix(".events.jsonl"),
+            json.dumps(event, ensure_ascii=False, default=str),
+            image_assets if image_assets is not None else {},
+        )
+
+
+def read_request_snapshot(snapshot_path: Path) -> Dict[str, Any]:
+    """读取原始快照并在内存汇总事件；兼容没有事件流的旧快照。"""
+    from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
+
+    with log_operation(logger, "snapshot.read", quiet=True, path=str(snapshot_path)):
+        payload = _read_snapshot(snapshot_path)
+        # 普通预览与不可变快照无需存储锁；只有实际存在事件流时才与追加互斥。
+        if not snapshot_path.with_suffix(".events.jsonl").exists():
+            return payload
+        with PromptPreviewLogger._timed_storage_lock("snapshot.read_events", quiet=True):
+            return _read_request_snapshot_events(snapshot_path, payload)
+
+
+def _read_request_snapshot_events(snapshot_path: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
+    event_path = snapshot_path.with_suffix(".events.jsonl")
+    if not event_path.exists():
+        return payload
+    with event_path.open(encoding="utf-8") as stream:
+        for line in stream:
+            event = json.loads(line)
+            kind = event["type"]
+            attempts = payload.setdefault("generation_attempts", [])
+            if kind == "failed_attempt":
+                latest = event["snapshot"]
+                combined = list(attempts)
+                for latest_attempt in latest["generation_attempts"]:
+                    for index, existing in enumerate(combined):
+                        if existing.get("attempt_id") == latest_attempt["attempt_id"]:
+                            combined[index] = latest_attempt
+                            break
+                    else:
+                        combined.append(latest_attempt)
+                payload.update(latest)
+                payload["generation_attempts"] = combined
+            elif kind == "attempt_status":
+                for attempt in reversed(attempts):
+                    if event["provider_attempt"] <= 0 or attempt.get("provider_attempt") == event["provider_attempt"]:
+                        attempt["status"] = event["status"]
+                        if event.get("retry_interval") is not None:
+                            attempt["retry_interval"] = event["retry_interval"]
+                        break
+                payload["metadata"]["status"] = event["status"]
+            elif kind == "succeeded":
+                payload["output_items"] = event["output_items"]
+                if "request_items" in event:
+                    payload["request_items"] = event["request_items"]
+                payload["metadata"].update(event["metadata"])
+                attempts.extend(event["generation_attempts"])
+            else:
+                raise ValueError(f"未知模型请求事件类型: {kind}")
+            payload["metadata"]["updated_at"] = event["recorded_at"]
+    return payload
+
+
+@timed_operation(logger, "snapshot.write_snapshot")
 def _write_snapshot(
     snapshot_path: Path, payload: dict[str, Any], *, image_assets: Dict[Path, bytes] | None = None
 ) -> None:
-    """原子更新单个逻辑请求的失败记录。"""
+    """写入不可变的首次失败快照。"""
 
     payload["metadata"]["updated_at"] = datetime.now().isoformat(timespec="seconds")
     from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
 
+    with log_operation(logger, "snapshot.serialize", path=str(snapshot_path)) as stats:
+        content = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        stats["chars"] = len(content)
     PromptPreviewLogger.write_record_file(
         snapshot_path,
-        json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        content,
         image_assets if image_assets is not None else {},
     )
 
@@ -1007,20 +1088,27 @@ def _get_llm_request_snapshot_limit() -> int:
         return DEFAULT_LLM_REQUEST_SNAPSHOT_LIMIT
 
 
+@timed_operation(logger, "snapshot.trim_llm_request_snapshots")
 def _trim_llm_request_snapshots() -> None:
-    limit = _get_llm_request_snapshot_limit()
-    snapshot_files = [file_path for file_path in LLM_REQUEST_LOG_DIR.rglob("*.json") if file_path.is_file()]
+    with log_operation(logger, "snapshot.scan", directory=str(LLM_REQUEST_LOG_DIR)) as stats:
+        limit = _get_llm_request_snapshot_limit()
+        snapshot_files = [file_path for file_path in LLM_REQUEST_LOG_DIR.rglob("*.json") if file_path.is_file()]
+        stats.update(files=len(snapshot_files), limit=limit)
     if len(snapshot_files) <= limit:
         return
 
-    sorted_files = sorted(snapshot_files, key=lambda file_path: file_path.stat().st_mtime)
-    for old_file in sorted_files[: len(snapshot_files) - limit]:
-        try:
-            old_file.unlink()
-        except FileNotFoundError:
-            continue
+    with log_operation(logger, "snapshot.trim") as stats:
+        sorted_files = sorted(snapshot_files, key=lambda file_path: file_path.stat().st_mtime)
+        stats["deleted"] = 0
+        for old_file in sorted_files[: len(snapshot_files) - limit]:
+            from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
+
+            PromptPreviewLogger.delete_record_file(old_file)
+            PromptPreviewLogger.delete_record_file(old_file.with_suffix(".events.jsonl"))
+            stats["deleted"] += 1
 
 
+@timed_operation(logger, "snapshot.save_failed_request_snapshot")
 def save_failed_request_snapshot(
     *,
     api_provider: APIProvider,
@@ -1032,7 +1120,7 @@ def save_failed_request_snapshot(
     provider_request: dict[str, Any],
     trace_context: RequestTraceContext | None = None,
 ) -> Path | None:
-    """保存或追加一次逻辑请求的失败尝试。"""
+    """首次失败保存固定快照，后续失败只追加事件。"""
     from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
 
     try:
@@ -1048,87 +1136,57 @@ def save_failed_request_snapshot(
             )
             error.generation_trace_context = active_trace_context
             error.request_snapshot_attempt = generation_attempt.provider_attempt
-            snapshot_path = (
-                Path(active_trace_context.snapshot_path).resolve()
-                if active_trace_context.snapshot_path
-                else _build_snapshot_path(active_trace_context)
-            )
-            active_trace_context.snapshot_path = str(snapshot_path)
+            with PromptPreviewLogger._timed_storage_lock("snapshot.save_transaction"):
+                snapshot_path = (
+                    Path(active_trace_context.snapshot_path).resolve()
+                    if active_trace_context.snapshot_path
+                    else _build_snapshot_path(active_trace_context)
+                )
+                active_trace_context.snapshot_path = str(snapshot_path)
 
-            if snapshot_path.is_file():
-                snapshot_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-                if "request_items" not in snapshot_payload:
-                    snapshot_payload["schema_version"] = SNAPSHOT_VERSION
-                    snapshot_payload["presentation"] = {"output_title": "输出 Items"}
-                    snapshot_payload["request_items"] = _build_structured_items(internal_request)
-                    snapshot_payload["output_items"] = []
-                    snapshot_payload.pop("messages", None)
-                    snapshot_payload.pop("output", None)
-            else:
-                request_kind = str(internal_request.get("request_kind") or "request")
-                created_at = datetime.fromtimestamp(active_trace_context.started_at).isoformat(timespec="seconds")
-                snapshot_payload = {
-                    "schema_version": SNAPSHOT_VERSION,
-                    "request": {
-                        "kind": request_kind,
-                        "operation": operation,
-                        "request_type": active_trace_context.request_type,
-                        "task_name": active_trace_context.task_name,
-                    },
-                    "metadata": {
-                        "client_type": client_type,
-                        "created_at": created_at,
-                        "model_name": model_info.name,
-                        "provider_name": api_provider.name,
-                        "request_id": active_trace_context.request_id,
-                        "session_id": active_trace_context.session_id,
-                        "status": "retrying",
-                        "updated_at": created_at,
-                    },
-                    "presentation": {"output_title": "输出 Items"},
-                    "request_items": _build_structured_items(internal_request),
-                    "output_items": [],
-                    "tool_definitions": internal_request.get("tool_options") or [],
-                    "request_parameters": _build_request_parameters(internal_request),
-                    "model_info": serialize_model_info_snapshot(model_info),
-                    "api_provider": serialize_api_provider_snapshot(api_provider),
-                    "generation_attempts": [],
-                    "replay": {
-                        "command": build_replay_command(snapshot_path),
-                        "file_uri": snapshot_path.as_uri(),
-                        "script_path": str(REPLAY_SCRIPT_PATH),
-                    },
-                }
+                with log_operation(logger, "snapshot.build", path=str(snapshot_path)):
+                    request_kind = str(internal_request.get("request_kind") or "request")
+                    created_at = datetime.fromtimestamp(active_trace_context.started_at).isoformat(timespec="seconds")
+                    snapshot_payload = {
+                        "schema_version": SNAPSHOT_VERSION,
+                        "request": {
+                            "kind": request_kind,
+                            "operation": operation,
+                            "request_type": active_trace_context.request_type,
+                            "task_name": active_trace_context.task_name,
+                        },
+                        "metadata": {
+                            "client_type": client_type,
+                            "created_at": created_at,
+                            "model_name": model_info.name,
+                            "provider_name": api_provider.name,
+                            "request_id": active_trace_context.request_id,
+                            "session_id": active_trace_context.session_id,
+                            "status": "failed",
+                            "updated_at": created_at,
+                        },
+                        "presentation": {"output_title": "输出 Items"},
+                        "request_items": _build_structured_items(internal_request),
+                        "output_items": [],
+                        "tool_definitions": internal_request.get("tool_options") or [],
+                        "request_parameters": _build_request_parameters(internal_request),
+                        "model_info": serialize_model_info_snapshot(model_info),
+                        "api_provider": serialize_api_provider_snapshot(api_provider),
+                        "generation_attempts": [],
+                        "replay": {
+                            "command": build_replay_command(snapshot_path),
+                            "file_uri": snapshot_path.as_uri(),
+                            "script_path": str(REPLAY_SCRIPT_PATH),
+                        },
+                    }
 
-            attempt_number = generation_attempt.provider_attempt
-            attempt_payload = serialize_generation_attempt(generation_attempt)
-            attempts = snapshot_payload.setdefault("generation_attempts", [])
-            snapshot_payload.pop("attempts", None)
-            snapshot_payload.pop("provider_request", None)
-            existing_attempt = next(
-                (
-                    item
-                    for item in attempts
-                    if item.get("provider_attempt") == attempt_number
-                    and item.get("model") == model_info.model_identifier
-                ),
-                None,
-            )
-            if existing_attempt is None:
-                attempts.append(attempt_payload)
-            else:
-                existing_attempt.update(attempt_payload)
-            snapshot_payload["metadata"].update(
-                {
-                    "client_type": client_type,
-                    "model_name": model_info.name,
-                    "provider_name": api_provider.name,
-                    "status": "retrying",
-                }
-            )
-            _write_snapshot(snapshot_path, snapshot_payload, image_assets=image_assets)
-            _trim_llm_request_snapshots()
-            return snapshot_path
+                    snapshot_payload["generation_attempts"] = [serialize_generation_attempt(generation_attempt)]
+                if snapshot_path.exists():
+                    _append_snapshot_event(snapshot_path, {"type": "failed_attempt", "snapshot": snapshot_payload}, image_assets)
+                else:
+                    _write_snapshot(snapshot_path, snapshot_payload, image_assets=image_assets)
+                _trim_llm_request_snapshots()
+                return snapshot_path
     except Exception:
         logger.exception("保存 LLM 失败请求快照时发生异常")
         return None
@@ -1144,60 +1202,51 @@ def _resolve_snapshot_from_exception(exception: Exception) -> tuple[Path | None,
     return None, 0
 
 
+@timed_operation(logger, "snapshot.update_failed_request_attempt")
 def update_failed_request_attempt(
     exception: Exception,
     *,
     status: str,
     retry_interval: float | None = None,
 ) -> None:
-    """更新异常对应尝试的后续状态。"""
+    """追加异常对应尝试的后续状态，保留原始失败快照。"""
 
     snapshot_path, attempt_number = _resolve_snapshot_from_exception(exception)
     trace_context = getattr(exception, "generation_trace_context", None)
     if isinstance(trace_context, RequestTraceContext):
         trace_context.replace_attempt_status(attempt_number, status)
-    if snapshot_path is None or not snapshot_path.is_file():
+    if snapshot_path is None:
         return
-    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    for attempt in reversed(payload.get("generation_attempts") or []):
-        if attempt_number <= 0 or attempt.get("provider_attempt") == attempt_number:
-            attempt["status"] = status
-            if retry_interval is not None:
-                attempt["retry_interval"] = retry_interval
-            break
-    payload["metadata"]["status"] = status
-    _write_snapshot(snapshot_path, payload)
+    _append_snapshot_event(snapshot_path, {
+        "type": "attempt_status", "provider_attempt": attempt_number,
+        "status": status, "retry_interval": retry_interval,
+    })
 
 
+@timed_operation(logger, "snapshot.mark_request_succeeded")
 def mark_request_succeeded(request: ClientRequest, response: APIResponse) -> None:
-    """请求在至少一次失败后成功时，追加成功尝试并结束失败记录。"""
+    """请求在失败后成功时追加成功事件。"""
 
     trace_context = request.trace_context
     if trace_context is None or not trace_context.snapshot_path:
         return
     snapshot_path = Path(trace_context.snapshot_path).resolve()
-    if not snapshot_path.is_file():
-        return
-    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    payload["output_items"] = serialize_context_items_snapshot(response.output_items)
-    if isinstance(request, ResponseRequest):
-        payload["request_items"] = serialize_context_items_snapshot(request.context_items)
-    if trace_context.generation_attempts:
-        success_attempt = trace_context.generation_attempts[-1]
-        serialized_attempt = serialize_generation_attempt(success_attempt)
-        generation_attempts = payload.setdefault("generation_attempts", [])
-        if not any(item.get("attempt_id") == success_attempt.attempt_id for item in generation_attempts):
-            generation_attempts.append(serialized_attempt)
-    payload["metadata"].update(
-        {
-            "model_name": request.model_info.name,
-            "provider_name": request.model_info.api_provider,
-            "status": "succeeded_after_retry",
+    from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
+
+    with PromptPreviewLogger.collect_image_assets() as image_assets:
+        event = {
+            "type": "succeeded", "output_items": serialize_context_items_snapshot(response.output_items),
+            "metadata": {"model_name": request.model_info.name,
+                         "provider_name": request.model_info.api_provider, "status": "succeeded_after_retry"},
+            "generation_attempts": [serialize_generation_attempt(trace_context.generation_attempts[-1])]
+                if trace_context.generation_attempts else [],
         }
-    )
-    _write_snapshot(snapshot_path, payload)
+        if isinstance(request, ResponseRequest):
+            event["request_items"] = serialize_context_items_snapshot(request.context_items)
+        _append_snapshot_event(snapshot_path, event, image_assets)
 
 
+@timed_operation(logger, "snapshot.mark_request_final_failure")
 def mark_request_final_failure(exception: Exception) -> None:
     """把一次逻辑请求标记为最终失败。"""
 
@@ -1205,15 +1254,11 @@ def mark_request_final_failure(exception: Exception) -> None:
     trace_context = getattr(exception, "generation_trace_context", None)
     if isinstance(trace_context, RequestTraceContext):
         trace_context.replace_attempt_status(attempt_number, "final_failed")
-    if snapshot_path is None or not snapshot_path.is_file():
+    if snapshot_path is None:
         return
-    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    for attempt in reversed(payload.get("generation_attempts") or []):
-        if attempt_number <= 0 or attempt.get("provider_attempt") == attempt_number:
-            attempt["status"] = "final_failed"
-            break
-    payload["metadata"]["status"] = "final_failed"
-    _write_snapshot(snapshot_path, payload)
+    _append_snapshot_event(snapshot_path, {
+        "type": "attempt_status", "provider_attempt": attempt_number, "status": "final_failed",
+    })
 
 
 def attach_request_snapshot(exception: Exception, snapshot_path: Path | None) -> None:

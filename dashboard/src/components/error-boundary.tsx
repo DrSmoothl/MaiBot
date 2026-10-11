@@ -12,6 +12,7 @@ import { useState } from 'react'
 interface Props {
   children: ReactNode
   fallback?: ReactNode
+  onError?: (error: Error) => void
 }
 
 interface State {
@@ -271,6 +272,7 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo)
     this.setState({ errorInfo })
+    this.props.onError?.(error)
   }
 
   handleReset = () => {

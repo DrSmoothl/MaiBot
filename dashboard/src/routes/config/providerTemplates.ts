@@ -19,6 +19,8 @@ export interface ProviderTemplate {
   id: string
   name: string
   base_url: string
+  // 额外匹配的 base_url 正则（可选，用于含账号/地域变量的官方地址；对规范化后的 URL 整体匹配）
+  baseUrlPattern?: RegExp
   client_type: 'openai' | 'openai_responses' | 'gemini'
   allowed_client_types?: Array<'openai' | 'openai_responses' | 'gemini'>
   display_name: string
@@ -122,6 +124,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     id: 'alibaba',
     name: 'Alibaba',
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    // 业务空间专属域名 https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1
+    baseUrlPattern: /^https?:\/\/[a-z0-9-]+\.[a-z0-9-]+\.maas\.aliyuncs\.com\/compatible-mode\/v1$/,
     client_type: 'openai',
     display_name: '阿里云百炼 (Alibaba Qwen)',
     modelFetcher: { endpoint: '/models', parser: 'openai' },
@@ -304,7 +308,10 @@ export function findTemplateByBaseUrl(baseUrl: string): ProviderTemplate | null 
 
   return (
     PROVIDER_TEMPLATES.find(
-      (template) => template.id !== 'custom' && normalizeUrl(template.base_url) === normalizedUrl
+      (template) =>
+        template.id !== 'custom' &&
+        (normalizeUrl(template.base_url) === normalizedUrl ||
+          (template.baseUrlPattern?.test(normalizedUrl) ?? false))
     ) || null
   )
 }

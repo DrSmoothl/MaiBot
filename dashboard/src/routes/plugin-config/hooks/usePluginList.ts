@@ -22,6 +22,7 @@ import {
   togglePlugin,
 } from '@/lib/plugin-api'
 import type { InstalledPlugin, MaimaiVersion } from '@/lib/plugin-api'
+import { refreshPluginWebUI } from '@/lib/plugin-webui'
 import type { PluginInfo } from '@/types/plugin'
 import { useToast } from '@/hooks/use-toast'
 import { unifiedWsClient } from '@/lib/unified-ws'
@@ -190,7 +191,11 @@ export function usePluginList() {
     const requestId = ++installedRequestRef.current
     if (!background) setLoading(true)
     try {
-      const allInstalled = await getInstalledPlugins()
+      // 启停和状态通知同步刷新列表及导航，跳过缓存以获取最新运行状态。
+      const [allInstalled] = await Promise.all([
+        getInstalledPlugins({ forceRefresh: true }),
+        refreshPluginWebUI(true),
+      ])
       if (requestId !== installedRequestRef.current) return
       const installed = adapterOnly
         ? allInstalled.filter((plugin) => getPluginType(plugin) === 'adapter')
@@ -234,14 +239,11 @@ export function usePluginList() {
       pending = true
       if (refreshing) return
       refreshing = true
-      try {
-        while (pending && !cancelled) {
-          pending = false
-          await refreshPlugins(true)
-        }
-      } finally {
-        refreshing = false
+      while (pending && !cancelled) {
+        pending = false
+        await refreshPlugins(true)
       }
+      refreshing = false
     }
     const removeListener = unifiedWsClient.addEventListener((message) => {
       if (message.domain === 'plugin_runtime' && message.topic === 'main') {

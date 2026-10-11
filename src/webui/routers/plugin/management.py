@@ -1,4 +1,4 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -9,7 +9,7 @@ import asyncio
 import json
 import shutil
 
-from fastapi import APIRouter, Cookie, HTTPException
+from fastapi import APIRouter, Cookie, HTTPException, Request
 import tomlkit
 
 from src.common.runtime_loop import run_on_main_loop
@@ -311,11 +311,11 @@ async def _update_non_git_plugin(
             "update_mode": "reinstall_from_backup",
             "backup_path": str(backup_path),
         }
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         if candidate_path.exists():
-            _remove_path(candidate_path)
+            await asyncio.to_thread(_remove_path, candidate_path)
         if old_moved and backup_path.exists() and not plugin_path.exists():
-            backup_path.rename(plugin_path)
+            await asyncio.to_thread(backup_path.rename, plugin_path)
         raise
 
 
@@ -585,8 +585,48 @@ async def uninstall_plugin(
 
 
 @router.post("/update")
+async def update_plugin(
+    request: UpdatePluginRequest,
+    maibot_session: Optional[str] = Cookie(None),
+    http_request: Request = None,
+) -> Dict[str, Any]:
+    require_plugin_token(maibot_session)
+    if http_request is None:
+        return await _perform_update_plugin(request, maibot_session)
+
+    async def watch_disconnect() -> None:
+        # 请求体已由 FastAPI 解析完毕，此处直接等待 ASGI 断开事件。
+        while True:
+            message = await http_request.receive()
+            if message["type"] == "http.disconnect":
+                return
+
+    update_task = asyncio.create_task(_perform_update_plugin(request, maibot_session))
+    disconnect_task = asyncio.create_task(watch_disconnect())
+    try:
+        done, _ = await asyncio.wait({update_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED)
+        if update_task in done:
+            return await update_task
+        await disconnect_task
+        update_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await update_task
+        await update_progress(
+            stage="error", progress=0, message="更新已取消", operation="update",
+            plugin_id=request.plugin_id, error="更新已取消",
+        )
+        raise HTTPException(status_code=499, detail="更新已取消")
+    finally:
+        # 必须等待更新清理完成才释放资源，避免后台继续克隆或占用操作锁。
+        for task in (disconnect_task, update_task):
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
 @_exclusive_plugin_operation("update")
-async def update_plugin(request: UpdatePluginRequest, maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
+async def _perform_update_plugin(request: UpdatePluginRequest, maibot_session: Optional[str]) -> Dict[str, Any]:
     require_plugin_token(maibot_session)
     logger.info(f"收到更新插件请求: {request.plugin_id}")
     plugin_id = request.plugin_id

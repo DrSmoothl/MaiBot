@@ -67,7 +67,7 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.14.62"
+CONFIG_VERSION: str = "8.14.67"
 MODEL_CONFIG_VERSION: str = "1.17.15"
 
 logger = get_logger("config")
@@ -193,6 +193,10 @@ class ModelConfig(ConfigBase):
         model_names = [model.name for model in self.models]
         if len(model_names) != len(set(model_names)):
             raise ValueError(t("config.model_name_duplicate"))
+
+        for model_name in self.model_task_config.embedding.model_list:
+            if model_name not in model_names:
+                raise ValueError(f"embedding.model_list references an undefined model: {model_name}")
 
         api_providers_dict = {provider.name: provider for provider in self.api_providers}
 

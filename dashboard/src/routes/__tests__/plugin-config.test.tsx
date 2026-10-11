@@ -120,6 +120,14 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/lib/plugin-progress-client', () => ({
   pluginProgressClient: { subscribe: progressClient.subscribe },
 }))
+// 插件列表订阅统一 WebSocket 的运行状态推送，同样桩掉避免真实连接
+vi.mock('@/lib/unified-ws', () => ({
+  unifiedWsClient: {
+    addEventListener: vi.fn(() => vi.fn()),
+    subscribe: vi.fn(async () => ({})),
+    unsubscribe: vi.fn(async () => ({})),
+  },
+}))
 vi.mock('@/components/CodeEditor', () => ({
   CodeEditor: ({ value, onChange }: { value: string; onChange?: (v: string) => void }) => (
     <textarea data-testid="code-editor" value={value} onChange={(e) => onChange?.(e.target.value)} />
@@ -309,6 +317,19 @@ beforeEach(() => {
 })
 
 describe('PluginConfigPage 特征化', () => {
+  it('配置校验失败展示原始 TOML 和具体错误并禁用启用开关', async () => {
+    window.history.replaceState(null, '', '/plugin-config?plugin=test.emoji')
+    vi.mocked(pluginApi.getPluginConfigBundle).mockResolvedValue({
+      schema: null, config: {}, rawConfig: '# 原始配置\ntarget = "123"\n',
+      configError: 'proactive.group_ids: 群聊目标必须填写 平台:ID:group',
+    })
+    renderPage()
+    const editor = await screen.findByTestId('code-editor')
+    expect(editor).toHaveValue('# 原始配置\ntarget = "123"\n')
+    expect(screen.getByText('proactive.group_ids: 群聊目标必须填写 平台:ID:group')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: '启用插件' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '可视化' })).toBeDisabled()
+  })
   it('显示已装插件且不暴露 A_Memorix', async () => {
     renderPage()
     expect(await screen.findByText('Emoji Plugin')).toBeInTheDocument()
@@ -378,6 +399,8 @@ describe('PluginConfigPage 特征化', () => {
     failedPlugin.load_status = 'failed'
     const disabledPlugin = makePlugin('test.disabled', 'Disabled Plugin')
     disabledPlugin.enabled = false
+    // 后端对已禁用且未运行的插件下发 load_status=disabled，前端以 load_status 为准分组
+    disabledPlugin.load_status = 'disabled'
     const loadingPlugin = makePlugin('test.loading', 'Loading Plugin')
     loadingPlugin.load_status = 'loading'
     const successPlugin = makePlugin('test.success', 'Success Plugin')
@@ -796,7 +819,9 @@ describe('PluginConfigPage 主程序放行规则', () => {
     expect(screen.queryByRole('button', { name: /重置/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
 
-    await user.click(screen.getAllByRole('combobox')[0])
+    // 页签行工具栏新增了「当前生效分组」下拉框，默认规则下拉框需限定在群聊规则卡片内查找
+    const groupRulesCard = screen.getByText('群聊规则').closest('[data-dashboard-card="true"]') as HTMLElement
+    await user.click(within(groupRulesCard).getByRole('combobox'))
     await user.click(await screen.findByText('接收所有消息'))
     await user.click(screen.getAllByRole('button', { name: '添加列表项' })[0])
 
@@ -818,7 +843,8 @@ describe('PluginConfigPage 主程序放行规则', () => {
     await user.click(await screen.findByRole('button', { name: /QQ Adapter/ }))
     await user.click(await screen.findByRole('tab', { name: '黑白名单规则' }))
     await user.click(await screen.findByText('群聊规则'))
-    await user.click(screen.getAllByRole('combobox')[0])
+    const groupRulesCard = screen.getByText('群聊规则').closest('[data-dashboard-card="true"]') as HTMLElement
+    await user.click(within(groupRulesCard).getByRole('combobox'))
     await user.click(await screen.findByText('默认不接收消息'))
 
     await waitFor(
@@ -2116,6 +2142,7 @@ describe('PluginConfigPage 列表操作与状态', () => {
     themeState.dashboardStyle = 'future-retro'
     const disabled = makePlugin('p.off', 'Off Plugin')
     disabled.enabled = false
+    disabled.load_status = 'disabled'
     const failed = makePlugin('p.bad', 'Bad Plugin')
     failed.load_status = 'failed'
     failed.load_error = 'boom'

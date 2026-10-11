@@ -21,6 +21,11 @@ export interface PluginStatsData {
   liked?: boolean
   disliked?: boolean
   downloads: number
+  /** 全市场飙升排名，1～30；未上榜为 null，旧统计接口可能不提供。 */
+  downloads_growth_rank_7d?: number | null
+  likes_growth_rank_7d?: number | null
+  downloads_growth_rank_30d?: number | null
+  likes_growth_rank_30d?: number | null
   rating: number
   rating_count: number
   comment_count: number

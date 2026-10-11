@@ -235,6 +235,7 @@ export function useModelConfig() {
 
   // ---- provider 自动保存定时器 / 快照 ----
   const providerAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isMountedRef = useRef(true)
   const providersSnapshotRef = useRef<string | null>(null)
   const latestProvidersSnapshotRef = useRef('')
   const providerGenerationRef = useRef(0)
@@ -737,6 +738,14 @@ export function useModelConfig() {
     ]
   )
 
+  // 在定时器清理前标记卸载，让切换页面时的待保存改动立即入队。
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
   // 监听 apiProviders 变化，防抖自动保存
   useEffect(() => {
     if (initialLoadRef.current) return
@@ -761,6 +770,9 @@ export function useModelConfig() {
       if (providerAutoSaveTimerRef.current) {
         clearTimeout(providerAutoSaveTimerRef.current)
         providerAutoSaveTimerRef.current = null
+        if (!isMountedRef.current) {
+          void autoSaveProviders(apiProviders, snapshot, generation)
+        }
       }
     }
   }, [apiProviders, autoSaveProviders, initialLoadRef])
@@ -980,23 +992,50 @@ export function useModelConfig() {
         nextProviders.push(providerToSave)
       }
 
-      const { shouldProceed } = await checkDeleteProviderImpact(nextProviders, 'manual')
-      if (!shouldProceed) {
-        setProviderDialogOpen(false)
-        setEditingProvider(null)
-        setEditingProviderIndex(null)
-        return
-      }
+      const oldProviderName = index !== null ? apiProviders[index].name : null
+      const providerRenamed = oldProviderName !== null && oldProviderName !== providerToSave.name
+      const hasLinkedModels =
+        providerRenamed && models.some((model) => model.api_provider === oldProviderName)
 
       try {
         setSaving(true)
-        await saveProviders(nextProviders)
+        if (hasLinkedModels) {
+          // 改名只迁移供应商引用；与供应商一起写入，避免触发级联删除或留下无效引用。
+          const nextModels = models.map((model) =>
+            model.api_provider === oldProviderName
+              ? { ...model, api_provider: providerToSave.name }
+              : model
+          )
+          const persistResult = await persistModelConfigDraft(nextModels, taskConfig, nextProviders)
+          if (persistResult.applyProviders) {
+            syncProviderState(nextProviders)
+          }
+          if (persistResult.applyModels) {
+            setModels(nextModels)
+            setModelNames(nextModels.map((model) => model.name))
+          }
+          if (persistResult.applyTaskConfig) {
+            setTaskConfig(taskConfig)
+          }
+          if (persistResult.applyModels && persistResult.applyTaskConfig) {
+            checkTaskConfigIssues(taskConfig, nextModels)
+          }
+        } else {
+          await saveProviders(nextProviders)
+        }
+        if (providerRenamed) {
+          setModelProviderFilter((current) =>
+            current === oldProviderName ? providerToSave.name : current
+          )
+        }
         setProviderDialogOpen(false)
         setEditingProvider(null)
         setEditingProviderIndex(null)
         toast({
           title: index !== null ? '提供商已更新' : '提供商已添加',
-          description: '模型配置已保存',
+          description: hasLinkedModels
+            ? '供应商名称及关联模型已同步保存，任务分配已保留'
+            : '模型配置已保存',
         })
       } catch (error) {
         toast({
@@ -1008,7 +1047,16 @@ export function useModelConfig() {
         setSaving(false)
       }
     },
-    [apiProviders, checkDeleteProviderImpact, saveProviders, toast]
+    [
+      apiProviders,
+      checkTaskConfigIssues,
+      models,
+      persistModelConfigDraft,
+      saveProviders,
+      syncProviderState,
+      taskConfig,
+      toast,
+    ]
   )
 
   // 保存模型编辑

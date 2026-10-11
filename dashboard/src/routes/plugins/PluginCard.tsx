@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Download, Info, Loader2, RefreshCw, ThumbsUp, Trash2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Download, Info, Loader2, RefreshCw, ThumbsUp, Trash2, TrendingUp } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,47 @@ interface PluginCardProps {
   needsUpdate: (plugin: PluginInfo) => boolean
   getStatusBadge: (plugin: PluginInfo) => React.JSX.Element | null
   getIncompatibleReason: (plugin: PluginInfo) => string | null
+}
+
+function getRecentPluginActivity(plugin: PluginInfo): { timeLabel: string; action: string } | null {
+  const parseTime = (value?: string) => value ? Date.parse(value) : NaN
+  const releaseTimes = (plugin.releases?.versions ?? [])
+    .filter((release) => !release.prerelease && !release.yanked)
+    .map((release) => parseTime(release.published_at))
+    .filter(Number.isFinite)
+  const publishedTime = parseTime(plugin.published_at)
+  const firstPublishedTime = Number.isFinite(publishedTime)
+    ? publishedTime
+    : releaseTimes.length > 0 ? Math.min(...releaseTimes) : NaN
+  const activityTimes = [firstPublishedTime, parseTime(plugin.updated_at), ...releaseTimes]
+    .filter(Number.isFinite)
+  if (activityTimes.length === 0) return null
+
+  // 首次发布时间之后的市场改动或正式版本发布都算更新，只展示最近七天的活动。
+  const latestTime = Math.max(...activityTimes)
+  const ageMinutes = (Date.now() - latestTime) / 60_000
+  if (ageMinutes < 0 || ageMinutes >= 7 * 24 * 60) return null
+
+  const timeLabel = ageMinutes >= 24 * 60
+    ? `${Math.floor(ageMinutes / (24 * 60))} 天前`
+    : ageMinutes >= 60
+      ? `${Math.floor(ageMinutes / 60)} H前`
+      : `${Math.floor(ageMinutes)} 分钟前`
+  return {
+    timeLabel,
+    action: latestTime === firstPublishedTime ? '发布' : '更新',
+  }
+}
+
+function getPluginGrowthRank(rank7d?: number | null, rank30d?: number | null): { rank: number; days: number } | null {
+  // 仅展示前八名；同一指标优先展示短期飙升，避免四套位次挤占卡片标题。
+  if (rank7d != null && Number.isInteger(rank7d) && rank7d >= 1 && rank7d <= 8) {
+    return { rank: rank7d, days: 7 }
+  }
+  if (rank30d != null && Number.isInteger(rank30d) && rank30d >= 1 && rank30d <= 8) {
+    return { rank: rank30d, days: 30 }
+  }
+  return null
 }
 
 export function PluginCard({
@@ -61,11 +102,21 @@ export function PluginCard({
   const isPluginOperating = loadProgress?.stage === 'loading'
     && loadProgress.operation !== 'fetch'
   const progressDetail = loadProgress ? getPluginProgressDetail(loadProgress) : null
+  const recentActivity = getRecentPluginActivity(plugin)
+  const downloadGrowth = getPluginGrowthRank(stats?.downloads_growth_rank_7d, stats?.downloads_growth_rank_30d)
+  const likeGrowth = getPluginGrowthRank(stats?.likes_growth_rank_7d, stats?.likes_growth_rank_30d)
+  // 下载与点赞只保留名次更靠前的一项；同名次优先短期榜，再优先下载榜。
+  const showDownloadGrowth = downloadGrowth !== null && (
+    likeGrowth === null
+    || downloadGrowth.rank < likeGrowth.rank
+    || (downloadGrowth.rank === likeGrowth.rank && downloadGrowth.days <= likeGrowth.days)
+  )
 
   return (
     <Card
       key={plugin.id}
       data-plugin-market-card="true"
+      data-plugin-recent-activity={recentActivity || downloadGrowth || likeGrowth ? 'true' : undefined}
       className="flex h-full flex-col"
     >
       <CardHeader className="p-4 pb-2.5">
@@ -93,7 +144,36 @@ export function PluginCard({
               </span>
             </CardTitle>
           </div>
-          {getStatusBadge(plugin)}
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            {getStatusBadge(plugin)}
+            {showDownloadGrowth && downloadGrowth && (
+              <div
+                className="flex items-center gap-1 rounded-sm bg-orange-700 px-1.5 py-1 text-[11px] font-semibold text-white shadow-sm dark:bg-orange-400 dark:text-orange-950"
+                title={`${downloadGrowth.days} 天下载飙升榜第 ${downloadGrowth.rank} 名，按本期比上期的增加量排序`}
+              >
+                <TrendingUp className="h-3 w-3 shrink-0" />
+                <span className="whitespace-nowrap">{downloadGrowth.days}日下载飙升 #{downloadGrowth.rank}</span>
+              </div>
+            )}
+            {!showDownloadGrowth && likeGrowth && (
+              <div
+                className="flex items-center gap-1 rounded-sm bg-rose-700 px-1.5 py-1 text-[11px] font-semibold text-white shadow-sm dark:bg-rose-400 dark:text-rose-950"
+                title={`${likeGrowth.days} 天点赞飙升榜第 ${likeGrowth.rank} 名，按本期比上期的增加量排序，仅统计当前有效的赞`}
+              >
+                <TrendingUp className="h-3 w-3 shrink-0" />
+                <span className="whitespace-nowrap">{likeGrowth.days}日点赞飙升 #{likeGrowth.rank}</span>
+              </div>
+            )}
+            {recentActivity && (
+              <div
+                className={`flex flex-col border-r-2 pr-2 text-right text-[11px] leading-tight ${recentActivity.action === '发布' ? 'border-emerald-500/70' : 'border-orange-500/70'}`}
+                title={`${recentActivity.timeLabel}${recentActivity.action}`}
+              >
+                <span className="text-muted-foreground whitespace-nowrap">{recentActivity.timeLabel}</span>
+                <span className="mt-0.5 font-medium">{recentActivity.action}</span>
+              </div>
+            )}
+          </div>
         </div>
         <CardDescription className="line-clamp-3 min-h-[3.09375rem] text-xs leading-snug">
           {plugin.manifest?.description || '无描述'}

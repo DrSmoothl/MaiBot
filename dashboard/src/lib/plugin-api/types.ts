@@ -217,9 +217,10 @@ export interface PluginConfigSchema {
  * 插件配置页初始化数据
  */
 export interface PluginConfigBundle {
-  schema: PluginConfigSchema
+  schema: PluginConfigSchema | null
   config: Record<string, unknown>
   rawConfig: string
+  configError?: string
   message?: string
 }
 

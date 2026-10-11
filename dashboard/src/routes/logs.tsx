@@ -1145,7 +1145,9 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
       </div>
       <div
         className={cn(
-          'flex shrink-0 items-center gap-2 border-b px-3 py-1 lg:px-4',
+          // 工具栏容器里没有内容时整行收起，避免只剩一条分隔线；
+          // 推理过程的「返回观察」键在桌面端放进顶栏，这一行只在移动端保留
+          'flex shrink-0 items-center gap-2 border-b px-3 py-1 has-[>:empty]:hidden sm:has-[[data-reasoning-toolbar-mobile-only]]:hidden lg:px-4',
           ((activeTab === 'reasoning' && !reasoningToolbarVisible) || activeTab === 'statistics') &&
             'hidden'
         )}
@@ -1182,12 +1184,13 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
           toolbarVisible={activeTab === 'terminal'}
         />
       </TabsContent>
-      <TabsContent value="reasoning" className="m-0 min-h-0 flex-1 overflow-hidden p-2 lg:p-4">
+      <TabsContent value="reasoning" className="m-0 min-h-0 flex-1 overflow-hidden p-1">
         <ReasoningProcessPage
           embedded
           toolbarContainerId={toolbarContainerId}
           toolbarVisible={activeTab === 'reasoning'}
-          topbarActionsContainerId={reasoningTopbarActionsContainerId}
+          // 顶栏操作位随页签一起挂进顶栏，挂好之后再把容器交给推理过程页，否则它首次查找时容器还不存在
+          topbarActionsContainerId={topbarTabsRoot ? reasoningTopbarActionsContainerId : undefined}
           onToolbarContentVisibleChange={setReasoningToolbarVisible}
         />
       </TabsContent>

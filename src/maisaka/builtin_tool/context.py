@@ -27,6 +27,7 @@ from src.config.config import global_config
 from src.core.tooling import ToolExecutionResult
 from src.maisaka.context.message_adapter import format_speaker_content
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
+from src.maisaka.context.image_attachment import resolve_context_image
 from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import SessionBackedMessage
 from src.maisaka.context.planner_messages import (
@@ -35,8 +36,6 @@ from src.maisaka.context.planner_messages import (
     extract_quote_ids_from_message_sequence,
 )
 from src.plugin_runtime.integration import get_plugin_runtime_manager
-
-from .image_attachment import resolve_image_attachment
 
 if TYPE_CHECKING:
     from src.maisaka.reasoning_engine import MaisakaReasoningEngine
@@ -319,7 +318,7 @@ class BuiltinToolRuntimeContext:
         except (TypeError, ValueError) as exc:
             raise ValueError(f"图片序号无效：index={raw_index}") from exc
 
-        return await resolve_image_attachment(self, target_message_id, image_index)
+        return await resolve_context_image(self.runtime, target_message_id, image_index)
 
     async def _resolve_emoji_attachment(self, raw_index: Any) -> EmojiComponent:
         """把 attach_emoji 参数解析为表情包组件。"""
@@ -346,9 +345,12 @@ class BuiltinToolRuntimeContext:
         emoji_path = resolve_stored_image_path(selected_emoji.full_path)
         emoji_bytes = await asyncio.to_thread(emoji_path.read_bytes)
         await asyncio.to_thread(emoji_manager.update_emoji_usage, selected_emoji)
+        # content 是表情的文本表示，会写入已发送消息的纯文本、数据库和 Maisaka 历史；
+        # 必须与入站表情一致渲染为「[表情包: 描述]」，裸描述会被模型当作自身正文模仿。
+        emoji_description = selected_emoji.description.strip()
         return EmojiComponent(
             binary_hash=selected_emoji.file_hash,
-            content=selected_emoji.description.strip() or "[表情包]",
+            content=f"[表情包: {emoji_description}]" if emoji_description else "[表情包]",
             binary_data=emoji_bytes,
         )
 
@@ -420,7 +422,8 @@ class BuiltinToolRuntimeContext:
             at_prefix_components.extend([at_component, TextComponent(" ")])
 
         items[0].sequence.components = at_prefix_components + items[0].sequence.components
-        items[-1].sequence.components.extend(image_components)
+        for image_component in image_components:
+            items.append(PostProcessedReplyMessage(sequence=MessageSequence([image_component])))
         if emoji_components:
             items.append(PostProcessedReplyMessage(sequence=MessageSequence(emoji_components)))
         return items

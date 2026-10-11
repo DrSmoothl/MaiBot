@@ -74,7 +74,14 @@ def describe_market_list(data: Dict[str, Any]) -> Dict[str, Any]:
             description["recommended_version"] = None
         catalog.append(description)
         stats[item["id"]] = item["stats"]
-    return {"source": "service", "details": details, "catalog": {"plugins": catalog}, "stats": stats}
+    return {
+        "source": "service",
+        "details": details,
+        "catalog": {"plugins": catalog},
+        "stats": stats,
+        "stats_as_of": data.get("stats_as_of"),
+        "growth_ranking": data.get("growth_ranking"),
+    }
 
 
 @router.get("/marketplace")

@@ -774,9 +774,11 @@ async def test_embedding_profile_cache_invalidates_when_model_config_changes(tmp
             name=configured_model["name"],
             model_identifier=configured_model["identifier"],
             api_provider=configured_model["provider"],
+            extra_params={},
         )
         return SimpleNamespace(
             models=[model],
+            api_providers=[SimpleNamespace(name=model.api_provider, base_url="https://example.com/v1")],
             model_task_config=SimpleNamespace(embedding=SimpleNamespace(model_list=[model.name])),
         )
 
@@ -886,7 +888,7 @@ def test_write_index_files_keeps_previous_generation_when_manifest_commit_fails(
         ],
     }
 
-    def fail_manifest_commit(_path, _content):
+    def fail_manifest_commit(_path, _content, **_kwargs):
         raise OSError("manifest commit failed")
 
     monkeypatch.setattr(vector_index_module, "_atomic_write_text", fail_manifest_commit)

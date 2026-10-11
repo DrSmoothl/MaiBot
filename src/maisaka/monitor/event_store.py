@@ -114,7 +114,7 @@ def cleanup_monitor_events(session: Optional[Session] = None) -> int:
     )
     removed_count = int(age_result.rowcount or 0) + int(count_result.rowcount or 0)
     if removed_count > 0:
-        logger.info(f"麦麦观察事件账本清理完成，删除记录数={removed_count}")
+        logger.debug(f"麦麦观察事件账本清理完成，删除记录数={removed_count}")
     return removed_count
 
 

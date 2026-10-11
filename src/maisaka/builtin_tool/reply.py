@@ -124,18 +124,20 @@ def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec
         },
         "set_quote": {
             "type": "boolean",
-            "description": "以引用回复的方式发送这条回复，当发言人数过多，聊天比较乱时使用。",
+            "description": "以引用回复的方式发送这条回复，适合应用在发言时间较早或者间隔消息数较多的msg_id",
             "default": True,
         },
         "reply_reference": {
             "type": "string",
+            "minLength": 1,
             "description": (
-                "有助于回复的信息，包括当前聊天状态、人物关系、事实信息、回忆信息。"
+                "提供本次回复的上下文关键信息与回复方向，"
+                "包括当前聊天状态、人物关系、事实信息、回忆信息；不是回复正文。"
             ),
         },
         "reply_style": {
             "type": "string",
-            "description": "可选。控制本次回复的篇幅和表达方式；正常回复不会附加额外要求。",
+            "description": "可选。控制本次回复的篇幅和表达方式",
             "enum": ["简短表达", "正常回复", "长回复"],
         },
     }
@@ -207,7 +209,7 @@ def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec
         properties["attach_emoji"] = {
             "type": "integer",
             "minimum": 1,
-            "description": "可选。从 show_emoji_list 的拼图选择一个表情包，填写图片序号，在文字后单独发送。",
+            "description": "可选。从 show_emoji_list 的拼图选择一个表情包，填写图片序号，在文字后发送。",
         }
     if config_module.global_config.chat.enable_reply_at:
         properties["attach_at"] = {
@@ -227,7 +229,7 @@ def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec
         parameters_schema={
             "type": "object",
             "properties": properties,
-            "required": ["msg_id"],
+            "required": ["msg_id", "reply_reference"],
         },
         provider_name="maisaka_builtin",
         provider_type="builtin",
@@ -348,6 +350,13 @@ async def handle_tool(
             f"{tool_ctx.runtime.log_prefix} 检测到 reply 工具参数被重复包裹，已自动解包: "
             f"调用编号={invocation.call_id}"
         )
+    reply_reference = invocation_arguments.get("reply_reference")
+    if not isinstance(reply_reference, str) or not reply_reference.strip():
+        return tool_ctx.build_failure_result(
+            invocation.tool_name,
+            "reply 工具必须提供非空字符串 `reply_reference`，请填写本次回复的上下文关键信息与回复方向后重新调用。",
+        )
+    invocation_arguments["reply_reference"] = reply_reference.strip()
     # 工具上下文的 reasoning 是兼容字段，由 Planner 可见正文填充，不包含 Provider 原生 reasoning。
     latest_thought = context.reasoning if context is not None else invocation.reasoning
     target_message_id = str(invocation_arguments.get("msg_id") or "").strip()
@@ -437,7 +446,7 @@ async def handle_tool(
     try:
         tool_ctx.runtime._update_stage_status("Replyer", "生成可见回复")
         success, reply_result = await replyer.generate_reply_with_context(
-            reply_reason="" if str(reply_tool_args.get("reply_reference") or "").strip() else latest_thought,
+            reply_reason="",
             stream_id=tool_ctx.runtime.session_id,
             reply_message=target_message,
             chat_history=replyer_chat_history,

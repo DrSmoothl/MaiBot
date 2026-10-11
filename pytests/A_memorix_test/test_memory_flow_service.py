@@ -352,9 +352,9 @@ async def test_person_fact_writeback_marks_verified_user_statement_stable(monkey
     await service._handle_message(message)
 
     assert stored_payloads[0]["fact_claim"] == {
-        "trust": "server_verified",
         "authority": "direct_user",
         "stability": "stable",
+        "profile_section": "stable_facts",
     }
     assert stored_payloads[0]["evidence_message_ids"] == ["user-1"]
 

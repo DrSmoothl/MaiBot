@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { createContext, useContext, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 
@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -24,8 +27,14 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { resolveNodeValue } from '@/lib/plugin-webui'
-import type { Scalar, WebUINode } from '@/lib/plugin-webui'
+import {
+  conditionMatches,
+  nodeChildren,
+  nodeVisible,
+  resolveNodeValue,
+  validateRenderSize,
+} from '@/lib/plugin-webui'
+import type { DataContexts, Scalar, WebUINode } from '@/lib/plugin-webui'
 
 interface RendererProps {
   nodes: WebUINode[]
@@ -33,9 +42,17 @@ interface RendererProps {
   values: Record<string, Scalar>
   busy: boolean
   pendingData?: boolean
+  selectionRevision?: number
   onChange: (name: string, value: Scalar) => void
-  onAction: (name: string) => void
+  onAction: (name: string, contexts?: DataContexts) => void
 }
+interface InteractionState {
+  selection: Record<string, unknown>
+  openDialog: string | null
+  select: (name: string, row: Record<string, unknown>, detail?: string | null) => void
+  close: () => void
+}
+const InteractionContext = createContext<InteractionState | null>(null)
 
 function display(value: unknown): string {
   if (value === null || value === undefined) return '—'
@@ -43,18 +60,46 @@ function display(value: unknown): string {
   return String(value)
 }
 
+// Missing images are empty; malformed/oversized data is an explicit rendering error.
+function imageSource(value: unknown): string | null {
+  if (value === null) return null
+  if (
+    typeof value !== 'string' ||
+    value.length > 24000 ||
+    !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)
+  )
+    throw new Error('Image must be a bounded JPEG, PNG or WebP data URL')
+  return value
+}
+
 function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node: WebUINode }) {
   const { t } = useTranslation()
   const id = useId()
   const [tablePage, setTablePage] = useState(0)
-  const awaitingData = props.pendingData && node.value !== null && typeof node.value === 'object'
-  const value = awaitingData ? null : resolveNodeValue(node, props.data)
-  const children = <PluginWebUIRenderer {...props} nodes={node.children} />
-  const fieldValue = node.name === null ? null : props.values[node.name]
+  const [expanded, setExpanded] = useState(node.type === 'collapsible' && !!node.default_open)
+  const interaction = useContext(InteractionContext)!
+  const contexts: DataContexts = { selection: interaction.selection }
+  const awaitingData =
+    props.pendingData && 'value' in node && node.value !== null && typeof node.value === 'object'
+  const visible = props.pendingData && node.when ? false : nodeVisible(node, props.data, contexts)
+  const value = awaitingData || !visible ? null : resolveNodeValue(node, props.data, contexts)
+  const children = <NodesRenderer {...props} nodes={nodeChildren(node)} />
+  const fieldValue = 'name' in node ? props.values[node.name] : null
   const change = (next: Scalar) => {
-    if (node.name !== null) props.onChange(node.name, next)
+    if ('name' in node) props.onChange(node.name, next)
   }
+  const disabledByRule =
+    !props.pendingData &&
+    'disabled_when' in node &&
+    !!node.disabled_when &&
+    conditionMatches(node.disabled_when, props.data, contexts)
+  const disabled =
+    props.busy ||
+    (!!props.pendingData && 'disabled_when' in node && !!node.disabled_when) ||
+    disabledByRule
   const heading = node.label ? <Label htmlFor={id}>{node.label}</Label> : null
+
+  if (!visible) return null
 
   if (awaitingData)
     return (
@@ -64,6 +109,63 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
     )
 
   switch (node.type) {
+    case 'progress': {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100)
+        throw new Error('Invalid progress percentage')
+      return (
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs">
+            {heading}
+            <span>{value}%</span>
+          </div>
+          <progress
+            className="accent-primary h-2 w-full"
+            value={value}
+            max={100}
+            aria-label={node.label ?? '进度'}
+          />
+        </div>
+      )
+    }
+    case 'image': {
+      const source = imageSource(value)
+      return source ? (
+        <img
+          src={source}
+          alt={node.label ?? ''}
+          loading="lazy"
+          decoding="async"
+          className="bg-muted h-72 w-full rounded-md object-contain"
+        />
+      ) : (
+        <p className="text-muted-foreground text-sm">{t('pluginWebUI.empty')}</p>
+      )
+    }
+    case 'dialog':
+      return (
+        <Dialog
+          open={interaction.openDialog === node.name}
+          onOpenChange={(open) => {
+            if (!open) interaction.close()
+          }}
+        >
+          <DialogContent aria-describedby={undefined} className="max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{node.label}</DialogTitle>
+            </DialogHeader>
+            {children}
+          </DialogContent>
+        </Dialog>
+      )
+    case 'collapsible':
+      return (
+        <Collapsible open={expanded} onOpenChange={setExpanded} className="space-y-3">
+          <CollapsibleTrigger asChild>
+            <Button variant="outline">{node.label}</Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-4">{children}</CollapsibleContent>
+        </Collapsible>
+      )
     case 'stack':
       return (
         <section className="space-y-4">
@@ -118,6 +220,21 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
         </Tabs>
       )
     case 'text':
+      if (node.format === 'log')
+        return (
+          <div className="space-y-2">
+            {heading}
+            <Textarea
+              id={id}
+              readOnly
+              autoResize={false}
+              data-dashboard-input="true"
+              aria-label={node.label ?? '日志'}
+              value={display(value)}
+              className="bg-muted/40 h-64 resize-y font-mono text-xs leading-relaxed shadow-inner"
+            />
+          </div>
+        )
       return (
         <div className="space-y-2">
           {heading}
@@ -140,7 +257,7 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
           {heading}
           <Input
             id={id}
-            disabled={props.busy}
+            disabled={disabled}
             type={
               node.type === 'date' ? 'date' : typeof node.value === 'number' ? 'number' : 'text'
             }
@@ -161,7 +278,7 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
         <div className="flex items-center gap-3">
           <Switch
             id={id}
-            disabled={props.busy}
+            disabled={disabled}
             checked={fieldValue === true}
             onCheckedChange={change}
           />
@@ -173,7 +290,7 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
         <div className="space-y-2">
           {heading}
           <Select
-            disabled={props.busy}
+            disabled={disabled}
             value={typeof fieldValue === 'string' ? fieldValue : undefined}
             onValueChange={change}
           >
@@ -192,22 +309,73 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
       )
     case 'button':
       return (
-        <Button
-          disabled={props.busy}
-          variant={
-            node.variant === 'danger'
-              ? 'destructive'
-              : node.variant === 'muted'
-                ? 'secondary'
-                : 'default'
-          }
-          onClick={() => {
-            if (node.action !== null) props.onAction(node.action)
-          }}
-        >
-          {node.label}
-        </Button>
+        <div className="inline-flex flex-col gap-1">
+          <Button
+            disabled={disabled}
+            variant={
+              node.variant === 'danger'
+                ? 'destructive'
+                : node.variant === 'muted'
+                  ? 'secondary'
+                  : 'default'
+            }
+            onClick={() => {
+              props.onAction(node.action, contexts)
+            }}
+          >
+            {node.label}
+          </Button>
+          {disabledByRule && node.disabled_reason && (
+            <span className="text-muted-foreground text-xs">{node.disabled_reason}</span>
+          )}
+        </div>
       )
+    case 'pagination': {
+      if (!value || typeof value !== 'object' || Array.isArray(value))
+        throw new Error('Pagination data must be an object')
+      const paging = value as Record<string, unknown>
+      const current = paging.page
+      const pages = paging.pages
+      const total = paging.total
+      if (
+        typeof current !== 'number' ||
+        typeof pages !== 'number' ||
+        typeof total !== 'number' ||
+        !Number.isSafeInteger(current) ||
+        !Number.isSafeInteger(pages) ||
+        !Number.isSafeInteger(total) ||
+        current < 1 ||
+        pages < current ||
+        total < 0
+      )
+        throw new Error('Invalid pagination bounds')
+      return (
+        <nav
+          aria-label={node.label ?? 'Pagination'}
+          className="flex flex-wrap items-center justify-between gap-3"
+        >
+          <span className="text-muted-foreground text-sm">
+            {t('pluginWebUI.paginationSummary', { page: current, pages, total })}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              disabled={disabled || current === 1}
+              onClick={() => change(current - 1)}
+            >
+              {t('pluginWebUI.previous')}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={disabled || current === pages}
+              onClick={() => change(current + 1)}
+            >
+              {t('pluginWebUI.next')}
+            </Button>
+          </div>
+        </nav>
+      )
+    }
     case 'table': {
       if (
         !Array.isArray(value) ||
@@ -231,7 +399,32 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
             </TableHeader>
             <TableBody>
               {rows.slice(current * 50, (current + 1) * 50).map((row, index) => (
-                <TableRow key={index}>
+                <TableRow
+                  key={index}
+                  className={
+                    node.selection
+                      ? 'focus-visible:outline-ring cursor-pointer focus-visible:outline-2'
+                      : undefined
+                  }
+                  tabIndex={node.selection && !props.busy ? 0 : undefined}
+                  aria-selected={
+                    node.selection ? interaction.selection[node.selection] === row : undefined
+                  }
+                  onClick={() => {
+                    if (node.selection && !props.busy)
+                      interaction.select(node.selection, row, node.detail)
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      node.selection &&
+                      !props.busy &&
+                      (event.key === 'Enter' || event.key === ' ')
+                    ) {
+                      event.preventDefault()
+                      interaction.select(node.selection, row, node.detail)
+                    }
+                  }}
+                >
                   {columns.map((column) => (
                     <TableCell key={column.field}>{display(row[column.field])}</TableCell>
                   ))}
@@ -299,32 +492,70 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
           {heading}
           <ChartContainer
             className="h-72 w-full"
-            config={{ [y]: { label: node.label ?? y, color: 'var(--primary)' } }}
+            config={{ [y]: { label: node.label ?? y, color: 'hsl(var(--chart-1))' } }}
           >
             {node.chart_type === 'bar' ? (
               <BarChart data={value}>
                 {chartChildren}
-                <Bar dataKey={y} fill="var(--primary)" isAnimationActive={false} />
+                <Bar dataKey={y} fill={`var(--color-${y})`} isAnimationActive={false} />
               </BarChart>
             ) : (
               <LineChart data={value}>
                 {chartChildren}
-                <Line dataKey={y} stroke="var(--primary)" dot={false} isAnimationActive={false} />
+                <Line
+                  dataKey={y}
+                  stroke={`var(--color-${y})`}
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: `var(--color-${y})` }}
+                  isAnimationActive={false}
+                />
               </LineChart>
             )}
           </ChartContainer>
         </div>
       )
     }
+    default:
+      throw new Error('Unsupported component; migrate complex UI to a custom page')
   }
 }
 
-export function PluginWebUIRenderer({ nodes, ...props }: RendererProps) {
+function NodesRenderer({ nodes, ...props }: RendererProps) {
   return (
     <>
       {nodes.map((node, index) => (
         <NodeRenderer key={index} node={node} {...props} />
       ))}
     </>
+  )
+}
+
+export function PluginWebUIRenderer(props: RendererProps) {
+  const revision = props.selectionRevision ?? 0
+  const [state, setState] = useState<{
+    revision: number
+    selection: Record<string, unknown>
+    openDialog: string | null
+  }>({ revision, selection: {}, openDialog: null })
+  // Row details belong to a query snapshot. Invalidate synchronously before children render.
+  const current =
+    state.revision === revision ? state : { revision, selection: {}, openDialog: null }
+  validateRenderSize(props.nodes)
+  return (
+    <InteractionContext.Provider
+      value={{
+        selection: current.selection,
+        openDialog: current.openDialog,
+        select: (name, row, detail) =>
+          setState({
+            revision,
+            selection: { ...current.selection, [name]: row },
+            openDialog: detail ?? null,
+          }),
+        close: () => setState({ ...current, openDialog: null }),
+      }}
+    >
+      <NodesRenderer {...props} />
+    </InteractionContext.Provider>
   )
 }

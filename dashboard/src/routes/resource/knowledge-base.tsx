@@ -557,7 +557,7 @@ export function KnowledgeBasePage() {
   })
 
   // 运行时配置：服务于概览区/图谱，默认即拉取（非懒加载）；自检与向量重建一并下沉
-  const memoryRuntime = useMemoryRuntimeConfig()
+  const memoryRuntime = useMemoryRuntimeConfig(runtimeStatusDialogOpen)
   const { runtimeConfig } = memoryRuntime
 
   // 删除领域：来源/操作列表懒加载、操作详情、源选择、删除预览-执行（usePendingOperation）、恢复
@@ -1074,6 +1074,68 @@ export function KnowledgeBasePage() {
                   暂无记忆状态数据，请刷新后重试。
                 </div>
               )}
+              <div className="space-y-2 border-t pt-3">
+                <div className="text-sm font-medium">已保存向量库</div>
+                <p className="text-muted-foreground text-xs">
+                  切换模型时会保留旧库供再次使用。删除未使用的库只清理向量，记忆内容仍会保留。
+                </p>
+                {memoryRuntime.vectorSpacesError ? (
+                  <p className="text-destructive text-sm">{memoryRuntime.vectorSpacesError}</p>
+                ) : memoryRuntime.vectorSpacesLoading ? (
+                  <p className="text-muted-foreground text-sm">正在读取向量库…</p>
+                ) : memoryRuntime.vectorSpaces.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">暂无已保存的模型向量库。</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-muted-foreground border-b">
+                        <tr>
+                          <th className="py-2 font-medium">模型、服务商</th>
+                          <th className="px-2 font-medium">维度</th>
+                          <th className="px-2 font-medium">向量数</th>
+                          <th className="px-2 font-medium">占用</th>
+                          <th className="px-2 font-medium">状态</th>
+                          <th className="text-right font-medium">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {memoryRuntime.vectorSpaces.map((space) => (
+                          <tr key={space.space_id} className="border-b last:border-0">
+                            <td className="max-w-64 py-2">
+                              <div className="truncate" title={space.embedding_fingerprint.model_identifier}>
+                                {space.embedding_fingerprint.model_identifier || space.embedding_fingerprint.model || '未知模型'}
+                              </div>
+                              <div className="text-muted-foreground truncate">
+                                {space.embedding_fingerprint.provider || '未知服务商'}
+                                {space.last_used_at ? ` · ${new Date(space.last_used_at * 1000).toLocaleString()}` : ''}
+                              </div>
+                            </td>
+                            <td className="px-2 tabular-nums">{space.embedding_fingerprint.dimension ?? '-'}</td>
+                            <td className="px-2 tabular-nums">{space.vector_count.toLocaleString()}</td>
+                            <td className="px-2 whitespace-nowrap tabular-nums">{(space.size_bytes / 1024 / 1024).toFixed(1)} MB</td>
+                            <td className="px-2 whitespace-nowrap">
+                              {space.state === 'active' ? '使用中' : space.state === 'syncing' ? '同步中' : '未使用'}
+                            </td>
+                            <td className="text-right">
+                              {space.can_delete ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-destructive"
+                                  disabled={memoryRuntime.deletingSpaceId !== null}
+                                  onClick={() => void memoryRuntime.deleteVectorSpace(space.space_id)}
+                                >
+                                  {memoryRuntime.deletingSpaceId === space.space_id ? '删除中…' : '删除'}
+                                </Button>
+                              ) : <span className="text-muted-foreground">—</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </DialogContent>
           </Dialog>
 
@@ -1093,7 +1155,7 @@ export function KnowledgeBasePage() {
                 <Alert variant={runtimeConfig?.vector_rebuild_required ? 'destructive' : 'default'}>
                   <AlertDescription>
                     {runtimeConfig?.vector_rebuild_message ||
-                      '这个操作会替换现有向量库，适合更换 embedding 模型或维度后执行。'}
+                      '这个操作会重新生成当前模型的向量库，其他模型的库会继续保留。模型切换后会自动同步，无需手动重建。'}
                   </AlertDescription>
                 </Alert>
                 <div className="grid gap-2 sm:grid-cols-3">

@@ -30,6 +30,10 @@ from src.llm_models.model_client.openai_client import OpenaiClient
 DASHSCOPE_NATIVE_URL = (
     "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
 )
+DASHSCOPE_WORKSPACE_NATIVE_URL = (
+    "https://llm-abc123.cn-beijing.maas.aliyuncs.com"
+    "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
+)
 ARK_PLAN_NATIVE_URL = "https://ark.cn-beijing.volces.com/api/plan/v3/embeddings/multimodal"
 ARK_NORMAL_NATIVE_URL = "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal"
 
@@ -80,6 +84,9 @@ def _make_openai_client(provider: APIProvider, handler: Callable[[httpx.Request]
         ("https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope"),
         ("https://dashscope.aliyuncs.com/compatible-mode/v1/", "dashscope"),
         ("https://dashscope.aliyuncs.com/api/v1", "dashscope"),
+        # 百炼业务空间专属域名 {WorkspaceId}.{region}.maas.aliyuncs.com
+        ("https://llm-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "dashscope"),
+        ("https://llm-abc123.ap-southeast-1.maas.aliyuncs.com/api/v1/", "dashscope"),
         ("https://ark.cn-beijing.volces.com/api/v3", "ark"),
         ("https://ark.cn-beijing.volces.com/api/plan/v3/", "ark"),
         ("https://fake.example.com/v1", None),
@@ -87,6 +94,11 @@ def _make_openai_client(provider: APIProvider, handler: Callable[[httpx.Request]
         ("https://dashscope.aliyuncs.com/compatible-mode/v2", None),
         ("https://dashscope.aliyuncs.com/api/v2", None),
         ("https://evil.com/https://dashscope.aliyuncs.com/api/v1", None),
+        ("https://llm-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v2", None),
+        # 专属域名必须恰好是 {WorkspaceId}.{region} 两级前缀，且以官方后缀结尾
+        ("https://cn-beijing.maas.aliyuncs.com/compatible-mode/v1", None),
+        ("https://a.llm-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", None),
+        ("https://llm-abc123.cn-beijing.maas.aliyuncs.com.evil.com/compatible-mode/v1", None),
         ("", None),
     ],
 )
@@ -131,9 +143,7 @@ async def test_siliconflow_url_sends_image_object_to_embeddings_endpoint() -> No
     provider = _build_provider("https://api.siliconflow.cn/v1")
     client = _make_openai_client(provider, handler)
     try:
-        response = await client.get_image_embedding(
-            _build_request("Qwen/Qwen3-VL-Embedding-8B", {"dimensions": 768})
-        )
+        response = await client.get_image_embedding(_build_request("Qwen/Qwen3-VL-Embedding-8B", {"dimensions": 768}))
     finally:
         await client.client.close()
 
@@ -187,6 +197,28 @@ async def test_dashscope_compatible_mode_url_routes_to_native_protocol() -> None
     assert response.usage.total_tokens == 103
     assert response.usage.completion_tokens == 0
     assert response.request_protocol_hash
+
+
+@pytest.mark.asyncio
+async def test_dashscope_workspace_domain_routes_to_native_protocol() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"output": {"embeddings": [{"index": 0, "embedding": [0.75]}]}})
+
+    # 业务空间专属域名与共享 DashScope 域名同属百炼，不应要求手动配置图片输入模板
+    provider = _build_provider("https://llm-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+    client = _make_openai_client(provider, handler)
+    try:
+        response = await client.get_image_embedding(_build_request("qwen3-vl-embedding"))
+    finally:
+        await client.client.close()
+
+    assert captured["url"] == DASHSCOPE_WORKSPACE_NATIVE_URL
+    assert captured["body"]["input"]["contents"][0]["image"] == _expected_data_uri()
+    assert response.embedding == [0.75]
 
 
 @pytest.mark.asyncio
@@ -290,6 +322,9 @@ def test_native_payload_rejects_reserved_key_conflicts(protocol: str, reserved_k
         # 百炼兼容层地址统一改写到 /api/v1 原生路径；原生地址派生结果一致
         ("https://dashscope.aliyuncs.com/compatible-mode/v1", DASHSCOPE_NATIVE_URL),
         ("https://dashscope.aliyuncs.com/api/v1", DASHSCOPE_NATIVE_URL),
+        # 业务空间专属域名保留自身 host，只改写到原生路径
+        ("https://llm-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", DASHSCOPE_WORKSPACE_NATIVE_URL),
+        ("https://llm-abc123.cn-beijing.maas.aliyuncs.com/api/v1", DASHSCOPE_WORKSPACE_NATIVE_URL),
     ],
 )
 def test_native_endpoint_url_derives_from_provider_base_url(base_url: str, expected_endpoint: str) -> None:

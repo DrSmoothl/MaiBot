@@ -141,7 +141,7 @@ describe('小型 UI 模块', () => {
 describe('Toaster', () => {
   it('桌面端使用右滑，并给普通、危险和自定义提示设置对应时长', () => {
     toastState.toasts = [
-      { id: 'default', title: '普通提示', description: '五秒', variant: 'default' },
+      { id: 'default', title: '普通提示', description: '四秒', variant: 'default' },
       { id: 'danger', title: '危险提示', variant: 'destructive' },
       { id: 'custom', title: '自定义提示', duration: 1234 },
     ]
@@ -149,11 +149,11 @@ describe('Toaster', () => {
 
     expect(screen.getByTestId('toast-provider')).toHaveAttribute('data-swipe', 'right')
     expect(screen.getAllByTestId('toast').map((toast) => toast.dataset.duration)).toEqual([
-      '5000',
-      '10000',
+      '4000',
+      '7500',
       '1234',
     ])
-    expect(screen.getByText('五秒')).toBeInTheDocument()
+    expect(screen.getByText('四秒')).toBeInTheDocument()
   })
 
   it('移动端使用上滑方向且始终渲染视口', () => {

@@ -46,6 +46,7 @@ export interface StageStatusEvent {
   detail: string
   round_text: string
   agent_state: string
+  wait_until?: number | null
   stage_started_at: number
   updated_at: number
   timestamp: number
@@ -63,6 +64,30 @@ export interface StageRemovedEvent {
 export interface StageSnapshotEvent {
   entries: StageStatusEvent[]
   timestamp: number
+}
+
+export interface FlowStepEvent {
+  session_id: string
+  run_id: string
+  cycle_id: number | null
+  step: string
+  title: string
+  detail: string
+  timestamp: number
+  trim?: {
+    removed_count: number
+    remaining_count: number
+    learning: {
+      status: 'pending' | 'running' | 'completed' | 'skipped' | 'cancelled' | 'failed'
+      detail: string
+      learners: {
+        name: string
+        status: 'running' | 'completed' | 'disabled' | 'failed' | 'cancelled'
+        detail: string
+        contents: string[]
+      }[]
+    }
+  }
 }
 
 export interface LlmRetryEvent {
@@ -247,6 +272,8 @@ export interface MaisakaTimingGateBlock {
 }
 
 export interface MaisakaFinalizedToolResult {
+  started_at?: number
+  ended_at?: number
   tool_call_id: string
   tool_name: string
   model_name?: string
@@ -265,6 +292,8 @@ export interface MaisakaFinalizedToolResult {
 }
 
 export interface PlannerFinalizedEvent {
+  planner_started_at?: number | null
+  planner_ended_at?: number | null
   session_id: string
   cycle_id: number
   run_id?: string
@@ -306,10 +335,12 @@ export interface ReplierResponseEvent {
 // ─── 统一事件联合类型 ─────────────────────────────────────────
 
 export type MaisakaMonitorEvent =
+  | { type: 'replay.started'; data: Record<string, never> }
   | { type: 'session.start'; data: SessionStartEvent }
   | { type: 'stage.status'; data: StageStatusEvent }
   | { type: 'stage.removed'; data: StageRemovedEvent }
   | { type: 'stage.snapshot'; data: StageSnapshotEvent }
+  | { type: 'flow.step'; data: FlowStepEvent }
   | { type: 'llm.retry'; data: LlmRetryEvent }
   | { type: 'llm.error'; data: LlmErrorEvent }
   | { type: 'message.ingested'; data: MessageIngestedEvent }
@@ -331,11 +362,8 @@ export type MaisakaEventListener = (event: MaisakaMonitorEvent) => void
 class MaisakaMonitorClient {
   private readonly plannerDecoder = new PlannerDeltaDecoder()
   private initialized = false
-  private readonly initialReplayLimit = 1000
   private listenerIdCounter = 0
   private listeners: Map<number, MaisakaEventListener> = new Map()
-  private replayCursor = 0
-  private readonly replayLimit = 10000
   private subscriptionActive = false
   private subscriptionPromise: Promise<void> | null = null
   private deferredUnsubTimer: ReturnType<typeof setTimeout> | null = null
@@ -350,13 +378,22 @@ class MaisakaMonitorClient {
         return
       }
 
-      // 先重建快照，再交给事件去重/持久化；即使基准事件已入账，也必须更新解码基准。
-      const decoded = this.plannerDecoder.decode(message)
-      if (!decoded) return
-      const event: MaisakaMonitorEvent = {
-        type: decoded.event as MaisakaMonitorEvent['type'],
-        data: decoded.data as never,
+      // 先重建快照再去重；即使基准事件已入账，也必须更新解码基准。
+      let decoded: WsEventEnvelope | null
+      try {
+        decoded = this.plannerDecoder.decode(message)
+      } catch (error) {
+        // 基准损坏后继续收增量会一直丢失内容，重连从账本恢复完整快照。
+        console.error('MaiSaka 监控增量解码失败，重新连接:', error)
+        void unifiedWsClient.restart().catch((restartError) => {
+          console.error('MaiSaka 监控重新连接失败:', restartError)
+        })
+        return
       }
+      if (!decoded && message.event !== 'planner.reset') return
+      const event: MaisakaMonitorEvent = decoded
+        ? { type: decoded.event as MaisakaMonitorEvent['type'], data: decoded.data as never }
+        : { type: 'replay.started', data: {} }
 
       this.listeners.forEach((listener) => {
         try {
@@ -372,8 +409,9 @@ class MaisakaMonitorClient {
 
   private getReplaySubscribeData(): Record<string, unknown> {
     return {
-      since_event_id: this.replayCursor,
-      replay_limit: this.replayCursor > 0 ? this.replayLimit : this.initialReplayLimit,
+      // 每次恢复都从后端账本读取，浏览器不持久化游标；中断回放也不会跳过消息。
+      since_event_id: 0,
+      replay_limit: 10000,
     }
   }
 
@@ -397,23 +435,8 @@ class MaisakaMonitorClient {
     return true
   }
 
-  private async replayFromCursor(): Promise<void> {
+  private async replayHistory(): Promise<void> {
     await unifiedWsClient.subscribe('maisaka_monitor', 'main', this.getReplaySubscribeData())
-  }
-
-  updateReplayCursor(eventId: number): void {
-    if (!Number.isFinite(eventId) || eventId <= this.replayCursor) {
-      return
-    }
-    this.replayCursor = Math.floor(eventId)
-    unifiedWsClient.updateSubscriptionData('maisaka_monitor', 'main', this.getReplaySubscribeData())
-  }
-
-  setInitialReplayCursor(eventId: number): void {
-    if (!Number.isFinite(eventId) || eventId < 0) {
-      return
-    }
-    this.replayCursor = Math.max(this.replayCursor, Math.floor(eventId))
   }
 
   async subscribe(listener: MaisakaEventListener): Promise<() => Promise<void>> {
@@ -430,7 +453,7 @@ class MaisakaMonitorClient {
     try {
       const createdSubscription = await this.ensureSubscribed()
       if (!createdSubscription) {
-        await this.replayFromCursor()
+        await this.replayHistory()
       }
     } catch (error) {
       // 订阅失败时调用方拿不到退订函数，必须在这里回收监听器

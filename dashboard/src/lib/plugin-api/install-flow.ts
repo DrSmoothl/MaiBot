@@ -71,7 +71,8 @@ export async function updatePlugin(
   pluginId: string,
   repositoryUrl: string,
   branch: string = 'main',
-  release?: { version: string } | null
+  release?: { version: string } | null,
+  signal?: AbortSignal
 ): Promise<UpdatePluginResult> {
   const result = await backendApi.post<UpdatePluginResult>('/api/webui/plugins/update', {
     body: {
@@ -81,6 +82,7 @@ export async function updatePlugin(
       ...(release === null ? {} : release || (branch === 'main' ? { version: 'latest' } : {})),
     },
     errorMessage: '更新插件失败',
+    signal,
   })
   showDependencyWarnings(result)
   return result

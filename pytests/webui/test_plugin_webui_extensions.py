@@ -14,13 +14,13 @@ from src.plugin_runtime.host.api_registry import APIRegistry
 from src.plugin_runtime.host.supervisor import PluginSupervisor
 from src.plugin_runtime.protocol.envelope import Envelope, MessageType, RegisterPluginPayload
 from src.plugin_runtime.protocol.errors import ErrorCode, RPCError
-from src.plugin_runtime.webui_schema import WebUIExtension, load_webui_extension
+from src.plugin_runtime.webui_schema import MAX_CUSTOM_DOCUMENT_BYTES, WebUIExtension, load_webui_extension
 from src.webui.routers.plugin import webui_extensions as routes
 
 
 def declaration():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_title": "统计",
         "pages": [
             {
@@ -46,6 +46,17 @@ def declaration():
     }
 
 
+def test_pagination_requires_bound_query_and_page_parameter():
+    raw = declaration()
+    raw["pages"][0]["auto_refresh"] = True
+    node = {"type": "pagination", "name": "page", "value": {"source": "summary", "field": "pagination"}}
+    raw["pages"][0]["content"] = [node]
+    assert WebUIExtension.model_validate(raw).pages[0].auto_refresh
+    del node["name"]
+    with pytest.raises(ValidationError):
+        WebUIExtension.model_validate(raw)
+
+
 @pytest.mark.parametrize("property_name", ["html", "script", "style", "className", "onClick", "href"])
 def test_rejects_executable_and_arbitrary_style_properties(property_name):
     raw = declaration()
@@ -57,7 +68,7 @@ def test_rejects_executable_and_arbitrary_style_properties(property_name):
 def test_rejects_unknown_bindings_and_duplicate_pages():
     raw = declaration()
     raw["pages"][0]["content"][0]["value"]["source"] = "other"
-    with pytest.raises(ValidationError, match="未声明的查询"):
+    with pytest.raises(ValidationError, match="未声明的数据上下文"):
         WebUIExtension.model_validate(raw)
     raw = declaration()
     raw["pages"].append(deepcopy(raw["pages"][0]))
@@ -73,6 +84,41 @@ def test_rejects_deep_component_trees():
     raw["pages"][0]["content"] = [node]
     with pytest.raises(ValidationError, match="8 层"):
         WebUIExtension.model_validate(raw)
+
+
+def detail_declaration():
+    raw = declaration()
+    page = raw["pages"][0]
+    page["actions"]["reset"]["arguments"] = {"count": {"scope": "selection", "source": "selectedRow", "field": "count"}}
+    page["content"] = [
+        {
+            "type": "table",
+            "value": {"source": "summary", "field": "rows"},
+            "columns": [{"field": "count", "label": "数量"}],
+            "selection": "selectedRow",
+            "detail": "details",
+        },
+        {
+            "type": "dialog",
+            "name": "details",
+            "label": "详情",
+            "children": [
+                {"type": "text", "value": {"scope": "selection", "source": "selectedRow", "field": "count"}},
+                {"type": "button", "label": "重置", "action": "reset", "variant": "danger"},
+            ],
+        },
+    ]
+    return raw
+
+
+def test_details_and_action_binding_roundtrip():
+    extension = WebUIExtension.model_validate(detail_declaration())
+    assert WebUIExtension.model_validate(extension.model_dump()) == extension
+    # Row fields still go through the same strict gateway scalar validation.
+    binding = extension.pages[0].actions["reset"]
+    binding.validate_args({"count": 2})
+    with pytest.raises(ValueError):
+        binding.validate_args({"count": {"count": 2}})
 
 
 def test_loader_and_registration_roundtrip(tmp_path):
@@ -257,3 +303,186 @@ async def test_host_rejects_pages_bound_to_unregistered_apis(monkeypatch):
     response = await supervisor._handle_register_plugin(envelope)
     assert response.error is not None
     assert "summary@1" in response.error["message"]
+
+
+def custom_declaration():
+    raw = declaration()
+    raw["required_capabilities"] = ["custom_pages"]
+    raw["pages"][0].update(mode="custom", entry="webui/index.html", document="<h1>Hello</h1>")
+    del raw["pages"][0]["content"]
+    return raw
+
+
+def test_custom_page_registration_roundtrip_and_capability():
+    raw = custom_declaration()
+    extension = WebUIExtension.model_validate(raw)
+    assert WebUIExtension.model_validate(extension.model_dump()) == extension
+    payload = RegisterPluginPayload(plugin_id="test.plugin", webui=extension)
+    assert RegisterPluginPayload.model_validate(payload.model_dump()).webui == extension
+    raw["required_capabilities"] = []
+    with pytest.raises(ValidationError, match="custom_pages"):
+        WebUIExtension.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"content": [{"type": "text"}]},
+        {"document": ""},
+        {"entry": None},
+        {"auto_refresh": True},
+        {"poll_interval_seconds": 3},
+        {"document": "界" * (MAX_CUSTOM_DOCUMENT_BYTES // 3 + 1)},
+    ],
+)
+def test_custom_page_rejects_invalid_or_oversized_declarations(changes):
+    raw = custom_declaration()
+    raw["pages"][0].update(changes)
+    with pytest.raises(ValidationError):
+        WebUIExtension.model_validate(raw)
+
+
+def test_custom_loader_reads_bounded_utf8_snapshot(tmp_path):
+    raw = custom_declaration()
+    del raw["pages"][0]["document"]
+    (tmp_path / "webui").mkdir()
+    entry = tmp_path / "webui/index.html"
+    entry.write_text("<script>console.log('自由页面')</script>", encoding="utf-8")
+    (tmp_path / "webui.json").write_text(json.dumps(raw), encoding="utf-8")
+    extension = load_webui_extension(str(tmp_path))
+    assert "自由页面" in extension.pages[0].document
+    revision = extension.pages[0].document_revision
+    entry.write_text("<h1>Changed</h1>", encoding="utf-8")
+    assert load_webui_extension(str(tmp_path)).pages[0].document_revision != revision
+    entry.write_bytes(b"x" * (MAX_CUSTOM_DOCUMENT_BYTES + 1))
+    with pytest.raises(ValueError, match="2 MiB"):
+        load_webui_extension(str(tmp_path))
+
+
+@pytest.mark.parametrize("entry", ["../outside.html", "C:/outside.html", "/outside.html", "webui/config.toml"])
+def test_custom_loader_rejects_outside_paths(tmp_path, entry):
+    raw = custom_declaration()
+    del raw["pages"][0]["document"]
+    raw["pages"][0]["entry"] = entry
+    (tmp_path / "webui.json").write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="相对 HTML"):
+        load_webui_extension(str(tmp_path))
+
+
+def test_custom_document_is_authenticated_json_and_unload_revokes_access(supervisor, monkeypatch):
+    extension = WebUIExtension.model_validate(custom_declaration())
+    monkeypatch.setattr(supervisor, "get_webui_extensions", lambda: {"test.plugin": extension})
+
+    def authorize(token):
+        if token != "valid-session":
+            raise HTTPException(401)
+
+    monkeypatch.setattr(routes, "require_plugin_token", authorize)
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/plugins")
+    path = "/plugins/runtime/webui/test.plugin/overview/document"
+    with TestClient(app) as client:
+        assert client.get(path).status_code == 401
+        client.cookies.set("maibot_session", "valid-session")
+        listed = client.get("/plugins/runtime/webui").json()
+        page = listed["extensions"][0]["pages"][0]
+        assert "document" not in page
+        assert page["document_revision"] == extension.pages[0].document_revision
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.json()["document"] == "<h1>Hello</h1>"
+        assert client.get(path.replace("test.plugin", "other.plugin")).status_code == 404
+        assert client.get(path.replace("overview", "other")).status_code == 404
+        monkeypatch.setattr(supervisor, "get_webui_extensions", lambda: {})
+        assert client.get(path).status_code == 404
+
+
+def test_custom_loader_bounds_page_count_before_reading_files(tmp_path):
+    raw = custom_declaration()
+    del raw["pages"][0]["document"]
+    raw["pages"] *= 21
+    (tmp_path / "webui.json").write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="20 个页面"):
+        load_webui_extension(str(tmp_path))
+
+
+def test_custom_loader_bounds_total_documents_before_registration(tmp_path):
+    raw = custom_declaration()
+    del raw["pages"][0]["document"]
+    raw["pages"] = [{**raw["pages"][0], "id": f"page{index}"} for index in range(5)]
+    (tmp_path / "webui").mkdir()
+    (tmp_path / "webui/index.html").write_bytes(b"x" * MAX_CUSTOM_DOCUMENT_BYTES)
+    (tmp_path / "webui.json").write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="总量超过 8 MiB"):
+        load_webui_extension(str(tmp_path))
+
+
+@pytest.mark.parametrize("component", ["repeat", "multi_select", "checkbox", "gallery", "upload"])
+def test_removed_components_are_rejected_without_compatibility_conversion(component):
+    raw = declaration()
+    raw["pages"][0]["content"] = [{"type": component}]
+    with pytest.raises(ValidationError):
+        WebUIExtension.model_validate(raw)
+
+
+def test_component_models_reject_unrelated_fields_even_at_old_default_values():
+    raw = declaration()
+    raw["pages"][0]["content"] = [{"type": "text", "value": "hello", "columns": None}]
+    with pytest.raises(ValidationError):
+        WebUIExtension.model_validate(raw)
+    raw["schema_version"] = 1
+    with pytest.raises(ValidationError, match="迁移声明"):
+        WebUIExtension.model_validate(raw)
+
+
+def test_structured_arguments_are_typed_bounded_and_restricted_to_custom_pages():
+    raw = custom_declaration()
+    binding = raw["pages"][0]["actions"]["reset"]
+    binding["parameters"] = {
+        "rows": {
+            "type": "array",
+            "required": True,
+            "max_items": 2,
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string", "required": True}},
+            },
+        },
+    }
+    with pytest.raises(ValidationError, match="structured_arguments"):
+        WebUIExtension.model_validate(raw)
+    raw["required_capabilities"].append("structured_arguments")
+    extension = WebUIExtension.model_validate(raw)
+    api = extension.pages[0].actions["reset"]
+    api.validate_args({"rows": [{"id": "with,comma"}]})
+    for args in [
+        {"rows": [1]},
+        {"rows": [{}]},
+        {"rows": [{"id": "x", "unknown": 1}]},
+        {"rows": [{"id": "x"}] * 3},
+        {"rows": "[]"},
+    ]:
+        with pytest.raises(ValueError):
+            api.validate_args(args)
+    raw = declaration()
+    raw["pages"][0]["actions"]["reset"] = binding
+    with pytest.raises(ValidationError, match="预置表单"):
+        WebUIExtension.model_validate(raw)
+    with pytest.raises(ValidationError):
+        routes.Invocation(args={"payload": "界" * 22000})
+    nested = None
+    for _ in range(14):
+        nested = [nested]
+    with pytest.raises(ValidationError):
+        routes.Invocation(args={"payload": nested})
+
+
+@pytest.mark.asyncio
+async def test_business_result_fields_are_opaque_to_the_gateway(supervisor):
+    result = {"success": False, "error": "task did not succeed", "navigate_page": "another"}
+    supervisor.invoke_api.return_value = SimpleNamespace(error=None, payload={"success": True, "result": result})
+    response = await routes._invoke("test.plugin", "overview", "queries", "summary", routes.Invocation())
+    assert response == {"success": True, "result": result}

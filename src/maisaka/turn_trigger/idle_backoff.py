@@ -58,10 +58,8 @@ class IdleBackoffController:
 
         self._until = time.time() + backoff_seconds
         logger.info(
-            f"{runtime.log_prefix} 连续空闲退避已更新: "
-            "来源=planner "
-            f"连续次数={self._count} "
-            f"退避={backoff_seconds:.2f} 秒"
+            f"{runtime.log_prefix} 空闲退避 来源=planner "
+            f"连续={self._count}次 等待={backoff_seconds:g}s"
         )
 
     def should_delay(self, pending_count: int) -> bool:

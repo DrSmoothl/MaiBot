@@ -525,7 +525,7 @@
 :root[data-dashboard-style='millennium']
   [data-dashboard-button='true']:is(.border-input, .bg-secondary, .bg-primary, .bg-destructive) {
   background-color: var(--mil-key);
-  border-color: transparent;
+  border-color: var(--mil-line);
   box-shadow: var(--mil-keycap);
   color: var(--mil-ink);
 }
@@ -1521,8 +1521,8 @@
   background-color: var(--mil-panel);
   background-image: var(--mil-speck);
   background-size: 5px 5px;
-  border-right: 2px solid var(--mil-line);
-  box-shadow: inset 2px 0 0 var(--mil-hi), inset -2px 0 0 var(--mil-lo);
+  border-right: 0;
+  box-shadow: none;
 }
 
 :root[data-dashboard-style='millennium'] [data-chat-workspace-sidebar='true'] > div:first-child {
@@ -2111,15 +2111,16 @@
 }
 
 /* 防滑纹是浮在标题条右上角的，给标题让出它的宽度，长标题才不会叠上去。
-   监控推理卡片使用无装饰的紧凑布局，不绘制防滑纹，避免与右侧来源标签重叠。 */
+   监控推理卡片使用无装饰的紧凑布局，不绘制防滑纹，避免与右侧来源标签重叠。
+   插件市场有最近活动标签时由标签替代防滑纹，也不再为纹样预留空间。 */
 :root[data-dashboard-style='millennium']
-  [data-dashboard-card='true']:not([data-maisaka-trace-card='true'])
+  [data-dashboard-card='true']:not([data-maisaka-trace-card='true']):not([data-plugin-recent-activity='true'])
   > [data-dashboard-card-header='true']:not(:has(button, input, [role='tablist'], [role='combobox'])) {
   padding-right: calc(0.875rem + 34px + 0.75rem);
 }
 
 :root[data-dashboard-style='millennium']
-  [data-dashboard-card='true']:not([data-maisaka-trace-card='true'])
+  [data-dashboard-card='true']:not([data-maisaka-trace-card='true']):not([data-plugin-recent-activity='true'])
   > [data-dashboard-card-header='true']:not(:has(button, input, [role='tablist'], [role='combobox']))::after {
   background: repeating-linear-gradient(90deg, var(--mil-vent) 0 2px, transparent 2px 6px);
   content: '';
@@ -2130,34 +2131,36 @@
   width: 34px;
 }
 
-/* ---------- 麦麦聊天：右侧对话区是一个模块，工具栏是一排小键帽 ---------- */
+/* ---------- 麦麦聊天：右侧对话区与侧栏平铺相接，工具栏是一排小键帽 ---------- */
 
 :root[data-dashboard-style='millennium'] [data-chat-observed-session] {
   display: flex;
   flex-direction: column;
-  padding: 1rem 1.25rem 1.5rem 1rem;
+  padding: 0;
 }
 
 :root[data-dashboard-style='millennium'] [data-chat-observed-session] > div {
   background-color: var(--mil-panel);
   background-image: var(--mil-speck);
   background-size: 5px 5px;
-  border: 2px solid var(--mil-line);
-  box-shadow:
-    inset 2px 2px 0 var(--mil-hi),
-    inset -2px -2px 0 var(--mil-lo),
-    0 5px 0 var(--mil-drop);
+  border: 0;
+  box-shadow: none;
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
-  padding: 0.75rem 0.875rem 0.875rem;
+  padding: 0;
 }
 
 :root[data-dashboard-style='millennium'] [data-maisaka-toolbar='true'] {
   background: none;
   gap: 0.5rem;
-  margin-bottom: 0.625rem;
-  padding: 0 0 4px;
+  margin-bottom: 0.25rem;
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-chat-observed-session] [data-maisaka-toolbar='true'] {
+  margin-bottom: 0;
+  padding: 0.75rem 0.75rem 0.5rem;
 }
 
 :root[data-dashboard-style='millennium']
@@ -2170,12 +2173,12 @@
   color: var(--mil-ink);
   font-size: 0.75rem;
   font-weight: 700;
-  height: 2rem;
-  padding: 0 0.625rem 3px;
+  height: 1.75rem;
+  padding: 0 0.5rem 3px;
 }
 
 :root[data-dashboard-style='millennium'] [data-maisaka-toolbar='true'] [data-dashboard-button='true'].w-6 {
-  width: 2rem;
+  width: 1.75rem;
 }
 
 :root[data-dashboard-style='millennium'] [data-maisaka-toolbar='true'] div.group span {
@@ -2183,24 +2186,56 @@
   font-weight: 700;
 }
 
-:root[data-dashboard-style='millennium'] [data-maisaka-toolbar='true'] [data-dashboard-badge='true'] {
+:root[data-dashboard-style='millennium']
+  :is([data-maisaka-toolbar='true'], [data-maisaka-floating-status='true'])
+  [data-dashboard-badge='true'] {
   font-size: 0.75rem;
   padding: 3px 8px;
 }
 
-:root[data-dashboard-style='millennium'] [data-maisaka-toolbar='true'] :is(p, span.text-muted-foreground) {
+:root[data-dashboard-style='millennium']
+  :is([data-maisaka-toolbar='true'], [data-maisaka-floating-status='true'])
+  :is(p, span.text-muted-foreground) {
   color: var(--mil-print);
   font-size: 0.75rem;
   font-weight: 700;
 }
 
-/* 对话记录屏幕：按设计稿的下沉边框 */
+:root[data-dashboard-style='millennium'] [data-maisaka-floating-status='true'] {
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-bevel);
+}
+
+/* 推理跳转沿用工具栏的小键帽，覆盖标题行对普通按钮的无框样式。 */
+:root:root[data-dashboard-style='millennium']
+  [data-maisaka-reasoning-button='true'][data-dashboard-button='true'] {
+  background-color: var(--mil-key);
+  color: var(--mil-ink);
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -5px 0 var(--mil-key-side) !important;
+  height: 1.75rem !important;
+  min-height: 1.75rem !important;
+  width: 1.75rem;
+  padding: 0 0 3px !important;
+}
+
+/* 对话记录屏幕使用与侧栏列表相同的下凹边框，留出窄边以完整显示四周阴影。 */
 :root[data-dashboard-style='millennium']
   [data-chat-observed-session]
-  [data-dashboard-card='true']:not([data-dashboard-card='true'] [data-dashboard-card='true']) {
+  [data-maisaka-timeline='true'] {
   border: 2px solid var(--mil-line);
   box-shadow: var(--mil-sunk);
-  margin: 4px;
+  margin: 4px 6px 4px 4px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-maisaka-timeline='true']
+  [data-dashboard-scrollbar='true'][data-orientation='vertical'] {
+  width: 8px;
 }
 
 /* ---------- 表格行内的操作键 ---------- */
@@ -2283,7 +2318,7 @@
 
 :root[data-dashboard-style='millennium'] [data-dashboard-button='true'][data-plugin-delete-button] {
   background-color: var(--mil-danger);
-  border-color: transparent;
+  border-color: var(--mil-line);
   box-shadow:
     inset 0 0 0 2px var(--mil-line),
     inset 0 -7px 0 var(--mil-danger-side),
@@ -2412,7 +2447,7 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   background-color: var(--mil-key);
-  border-color: transparent;
+  border-color: var(--mil-line);
   box-shadow:
     var(--mil-keycap),
     0 4px 0 var(--mil-drop);
@@ -2937,4 +2972,255 @@
 
 :root[data-dashboard-style='millennium'] [data-search-answer='true'] > .text-muted-foreground {
   color: var(--mil-screen-ink);
+}
+
+/* ---------- 日志 → 推理过程：两栏平铺，记录列表和记录内容各是一块屏幕 ---------- */
+
+/* 两栏不再套凸起外壳，内容区直接使用页面空间 */
+:root[data-dashboard-style='millennium'] [data-reasoning-process='true'] {
+  padding-bottom: 0;
+}
+
+/* 这一页原来到处是 1px 细线框：统一加粗到 2px。带语义色的边框（角色、状态）保留颜色，
+   其余换成刻线色。用 :where 压低优先级，让下面的模块、屏幕、标签规则都能覆盖。 */
+:root[data-dashboard-style='millennium']
+  [data-reasoning-process='true']
+  :where(:is(article, section, aside, div, pre, details, figure).border) {
+  border-width: 2px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-reasoning-process='true']
+  :where(
+    :is(article, section, aside, div, pre, details, figure).border:not(
+        [data-dashboard-badge='true'],
+        [class*='border-orange'],
+        [class*='border-cyan'],
+        [class*='border-emerald'],
+        [class*='border-amber'],
+        [class*='border-violet'],
+        [class*='border-indigo'],
+        [class*='border-fuchsia'],
+        [class*='border-sky'],
+        [class*='border-teal'],
+        [class*='border-destructive'],
+        [class*='border-primary'],
+        [class*='border-muted-foreground']
+      )
+  ) {
+  border-color: var(--mil-lo);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-reasoning-process='true']
+  [data-dashboard-badge='true'].text-foreground {
+  border-color: var(--mil-line);
+}
+
+/* 列表和内容两栏、重放面板：平铺在页面上，边框只留给内容屏幕 */
+:root[data-dashboard-style='millennium'] [data-reasoning-panel='true'] {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--mil-ink);
+}
+
+/* 标题条和正文共用整栏背景，只用一道刻线分隔 */
+:root[data-dashboard-style='millennium'] [data-reasoning-panel-header='true'] {
+  border-bottom: 2px solid var(--mil-lo);
+  box-shadow: none;
+}
+
+/* 记录数和页码是印在壳上的丝印小字 */
+:root[data-dashboard-style='millennium'] [data-reasoning-panel-count='true'] {
+  color: var(--mil-print);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+/* 筛选栏和翻页键与记录列表左右对齐，和屏幕之间不再画线 */
+:root[data-dashboard-style='millennium'] [data-reasoning-panel-toolbar='true'] {
+  border-bottom: 0;
+  padding: 0.5rem 0 0.125rem;
+}
+
+/* 筛选栏里的键帽和输入框统一收到小一档的高度，给下面的记录列表多留位置 */
+:root[data-dashboard-style='millennium']
+  [data-reasoning-panel-toolbar='true']
+  [data-dashboard-button='true']:is(.h-8, .h-9) {
+  font-size: 0.8125rem;
+  height: 2.25rem;
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-reasoning-panel-toolbar='true']
+  [data-dashboard-button='true'].w-8 {
+  padding-left: 0;
+  padding-right: 0;
+  width: 2.25rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-reasoning-panel-toolbar='true']
+  :is([data-dashboard-input='true'], [data-dashboard-select-trigger='true']).h-9 {
+  font-size: 0.8125rem;
+  height: 2.25rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-panel-footer='true'] {
+  border-top: 0;
+  height: auto;
+  padding: 0.125rem 0 0.5rem;
+}
+
+/* 内容背景铺满记录列表和详情滚动区，短内容下方也不露出不同底色 */
+:root[data-dashboard-style='millennium'] [data-reasoning-screen='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  /* 屏幕紧贴两栏边缘，只保留这一层边框，不再叠加下沉阴影 */
+  box-shadow: none;
+  color: var(--mil-screen-ink);
+  margin: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-screen='true'][data-reasoning-list='true'] {
+  margin: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-screen='true'] .text-foreground {
+  color: var(--mil-screen-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-screen='true'] .text-muted-foreground {
+  color: var(--mil-screen-dim);
+}
+
+/* 屏幕里的分区框用浅刻线，折叠区的分隔线是虚线 */
+:root[data-dashboard-style='millennium']
+  [data-reasoning-screen='true']
+  :where(
+    :is(article, section, div, pre, details, figure).border:not(
+        [data-dashboard-badge='true'],
+        [class*='border-orange'],
+        [class*='border-cyan'],
+        [class*='border-emerald'],
+        [class*='border-amber'],
+        [class*='border-violet'],
+        [class*='border-indigo'],
+        [class*='border-fuchsia'],
+        [class*='border-sky'],
+        [class*='border-teal'],
+        [class*='border-destructive'],
+        [class*='border-primary'],
+        [class*='border-muted-foreground']
+      )
+  ) {
+  border-color: var(--mil-rule);
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-screen='true'] .border-t {
+  border-top: 2px dashed var(--mil-rule);
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-screen='true'] .border-b {
+  border-bottom: 2px dashed var(--mil-rule);
+}
+
+/* 记录列表：一行一条，行间虚线，选中的是整行薄荷绿 */
+:root[data-dashboard-style='millennium'] [data-reasoning-list-items='true'] {
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-list-item='true'] {
+  border: 0;
+  border-bottom: 2px dashed var(--mil-rule);
+  color: var(--mil-screen-ink);
+  margin-top: 0;
+  padding: 0.625rem 0.75rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-list-item='true']:hover {
+  background-color: color-mix(in srgb, var(--mil-on) 22%, transparent);
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-list-item='true'][data-active='true'] {
+  background-color: var(--mil-on);
+  color: var(--mil-on-ink);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-reasoning-list-item='true'][data-active='true']
+  :is(.text-foreground, .text-muted-foreground) {
+  color: var(--mil-on-ink);
+}
+
+/* 「完整 Item JSON」收起时只是屏幕上一个浅刻线的小入口，不抢正文；展开后才浮成一块屏幕 */
+:root[data-dashboard-style='millennium'] [data-reasoning-item-json='true'] {
+  background-color: transparent !important;
+  border: 2px solid var(--mil-rule);
+  box-shadow: none;
+  color: var(--mil-screen-dim);
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-item-json='true']:hover {
+  color: var(--mil-screen-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-item-json='true'][data-state='open'] {
+  background-color: var(--mil-screen) !important;
+  border-color: var(--mil-line);
+  box-shadow: 6px 6px 0 var(--mil-float-shadow);
+  color: var(--mil-screen-ink);
+}
+
+/* 类型总览：每个类型是一块凸起的小模块 */
+:root[data-dashboard-style='millennium'] [data-reasoning-stage-card='true'] {
+  background-color: var(--mil-panel);
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-raise);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-reasoning-stage-card='true']:is(:hover, :focus-within) {
+  background-color: var(--mil-key-hover);
+  box-shadow: var(--mil-raise);
+}
+
+/* 屏幕里的层级只留两层：屏幕本身和带颜色的 Item 卡片。
+   「请求 Items」这类分区不再画框，改用标题和区间虚线分隔；消息前的引用竖线也去掉。 */
+:root[data-dashboard-style='millennium']
+  [data-reasoning-screen='true']
+  > div
+  > :is(section, div).border:not([class*='bg-']) {
+  border: 0;
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-reasoning-screen='true']
+  > div
+  > :is(section, div).border:not([class*='bg-']):not(:last-child) {
+  border-bottom: 2px dashed var(--mil-rule);
+  padding-bottom: 0.75rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-message-block='true'] {
+  border-left: 0;
+  padding-left: 0;
+}
+
+/* 最终输出：用底部实线和请求过程分开，不再套额外的分区框 */
+:root[data-dashboard-style='millennium'] [data-reasoning-output='true'] {
+  border-bottom: 2px solid var(--mil-line);
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.875rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-reasoning-output='true'] > section {
+  border: 0;
+  box-shadow: none;
 }
