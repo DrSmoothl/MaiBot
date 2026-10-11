@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -903,7 +903,7 @@ requires-dist = [
     { name = "json-repair", specifier = ">=0.60.1,<0.61" },
     { name = "jsonschema", specifier = ">=4.26.0,<5" },
     { name = "maibot-dashboard", specifier = "==1.9.0.dev20261011508" },
-    { name = "maibot-plugin-sdk", specifier = ">=2.10.0" },
+    { name = "maibot-plugin-sdk", specifier = ">=2.12.0" },
     { name = "maim-message", specifier = "==0.6.8" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "msgpack", specifier = ">=1.2.1" },
@@ -948,15 +948,15 @@ wheels = [
 
 [[package]]
 name = "maibot-plugin-sdk"
-version = "2.10.0"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+version = "2.12.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "msgpack" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/48/28/e4194b402b56dbdcf963a6eff14335572f24cdcac5c2b05395678f537e88/maibot_plugin_sdk-2.10.0.tar.gz", hash = "sha256:703a0eaa9811414541d7f4a87719a034dd2abaaa7a0a74f2a9b7055e0cca6946" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/36/734f9063233a428b21d95bc2cee20c607a191937e201bcb528e885837203/maibot_plugin_sdk-2.12.0.tar.gz", hash = "sha256:d7701de8c056045fff6c8deeeff96584457422c1a6755602d2fd3801bf8fb0d9", size = 94504, upload-time = "2026-10-11T13:50:52.762Z" }
 wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/76/fa/052bee3b6f321a774dee214729c75576be829d8645264b3d4b883d45e759/maibot_plugin_sdk-2.10.0-py3-none-any.whl", hash = "sha256:8ca95e7301dcdbe86360beff19aa28e36b0dd2b585648c1c56eb5729b9767a73" },
+    { url = "https://files.pythonhosted.org/packages/30/71/9f0fe4198f81513a90854603adbdaae7ebb2edf93ddcc304679276048f51/maibot_plugin_sdk-2.12.0-py3-none-any.whl", hash = "sha256:d6b401e47b866c9af626831273b0357b5c693d8a724371d5f38a876cd1661011", size = 110715, upload-time = "2026-10-11T13:50:51.189Z" },
 ]
 
 [[package]]
