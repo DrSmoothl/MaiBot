@@ -2759,7 +2759,15 @@ const MonitorTimeline = memo(function MonitorTimeline({
 
   const scrollToBottom = useCallback(
     (behavior: TimelineScrollBehavior = 'smooth') => {
-      if (visibleTimelineEntries.length > 0) {
+      if (behavior === 'auto') {
+        // 自动跟随只对齐实际底部，避免 scrollToIndex 的跨帧重试与高度测量重复拉动视口。
+        if (scrollViewport) {
+          const targetTop = Math.max(0, scrollViewport.scrollHeight - scrollViewport.clientHeight)
+          if (Math.abs(scrollViewport.scrollTop - targetTop) > 1) {
+            scrollViewport.scrollTop = targetTop
+          }
+        }
+      } else if (visibleTimelineEntries.length > 0) {
         timelineVirtualizer.scrollToIndex(visibleTimelineEntries.length - 1, {
           align: 'end',
           behavior,
@@ -2785,21 +2793,18 @@ const MonitorTimeline = memo(function MonitorTimeline({
     }
   }, [scrollViewport, timelineVirtualizer, visibleTimelineEntries.length])
 
-  // 自动滚动到底部
-  useEffect(() => {
-    if (autoScroll) {
-      requestAnimationFrame(() => scrollToBottom('auto'))
-    }
-  }, [visibleTimelineEntries.length, autoScroll, scrollToBottom])
+  const timelineTotalSize = timelineVirtualizer.getTotalSize()
 
-  useEffect(() => {
-    if (previousSelectedSessionRef.current === selectedSession) {
-      return
+  // 在绘制前跟随底部，测量后的高度变化也同步处理，避免先显示旧位置再跳动。
+  useLayoutEffect(() => {
+    if (previousSelectedSessionRef.current !== selectedSession) {
+      previousSelectedSessionRef.current = selectedSession
+      scrollAnchorRef.current = null
+      scrollToBottom('auto')
+    } else if (autoScroll) {
+      scrollToBottom('auto')
     }
-    previousSelectedSessionRef.current = selectedSession
-    setAutoScroll(true)
-    requestAnimationFrame(() => scrollToBottom('auto'))
-  }, [selectedSession, scrollToBottom])
+  }, [selectedSession, autoScroll, scrollToBottom, timelineTotalSize])
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
@@ -2962,7 +2967,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
             ) : (
               <div
                 className="relative min-w-0"
-                style={{ height: `${timelineVirtualizer.getTotalSize()}px` }}
+                style={{ height: `${timelineTotalSize}px` }}
               >
                 {virtualItems.map((virtualItem) => {
                   const entry = visibleTimelineEntries[virtualItem.index]
@@ -3007,7 +3012,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
                             : undefined
                         }
                         className={cn(
-                          'animate-in fade-in-0 slide-in-from-bottom-2 rounded-md duration-300',
+                          'rounded-md',
                           entryMessageId &&
                             focusedMessageId === entryMessageId &&
                             'bg-primary/5 ring-primary/55 ring-offset-background ring-2 ring-offset-2'
