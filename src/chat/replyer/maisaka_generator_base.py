@@ -372,15 +372,8 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         ]
         if image_targets:
             lines.append(
-                f"除了当前你输出的回复，你还会（由另一个模型控制）发送图片{self._join_chinese_items(image_targets)}。"
+                f"当前文字回复后还会另外发送图片{self._join_chinese_items(image_targets)}。"
             )
-
-        at_targets = [
-            self._format_attachment_at_target(raw_target, chat_history, reply_message)
-            for raw_target in self._normalize_attachment_items(reply_tool_args.get("attach_at"))
-        ]
-        if at_targets:
-            lines.append(f"除了当前你输出的回复，你还会（由另一个模型控制）at {self._join_chinese_items(at_targets)}。")
 
         raw_emoji = str(reply_tool_args.get("attach_emoji") or "").strip()
         if raw_emoji:
