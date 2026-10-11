@@ -279,7 +279,8 @@ def test_steering_bypasses_interrupt_limit_and_coalesces_each_request():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("enabled", [False, True])
-async def test_interrupted_planner_ingests_messages_once_and_preserves_wait_when_disabled(enabled):
+@pytest.mark.parametrize("with_partial", [False, True])
+async def test_interrupted_planner_ingests_messages_once_and_preserves_wait_when_disabled(enabled, with_partial):
     builder = Mock()
     for name in ("set_role", "set_meta", "add_text_content"):
         getattr(builder, name).return_value = builder
@@ -290,7 +291,7 @@ async def test_interrupted_planner_ingests_messages_once_and_preserves_wait_when
         "ContextItemBuilder": lambda: builder,
         "ContextItemMeta": Mock(),
         "RoleType": SimpleNamespace(Assistant="assistant"),
-        "ChatResponse": SimpleNamespace,
+        "ChatResponse": lambda **kwargs: SimpleNamespace(raw_messages=["interrupted analysis"], **kwargs),
         "PlannerInterruptResult": lambda response, extra_lines, retry_messages: SimpleNamespace(
             retry_messages=retry_messages
         ),
@@ -316,9 +317,13 @@ async def test_interrupted_planner_ingests_messages_once_and_preserves_wait_when
     )
     engine = engine_class()
     engine._runtime, engine._active_logical_turn_id = runtime, "same-turn"
-    engine._ingest_messages, engine._emit_flow_step = AsyncMock(), AsyncMock()
+    engine._ingest_messages = AsyncMock(side_effect=lambda items: runtime._chat_history.extend(items))
+    engine._emit_flow_step = AsyncMock()
     result = await engine._handle_planner_interrupt(
-        exc=ReqAbortException("new message"),
+        exc=ReqAbortException(
+            "new message",
+            partial_output=InterruptedStreamOutput("未完成的思考", "", []) if with_partial else None,
+        ),
         round_index=0,
         round_text="test",
         current_stage_started_at=time.time(),
@@ -327,6 +332,7 @@ async def test_interrupted_planner_ingests_messages_once_and_preserves_wait_when
     assert result.retry_messages == messages
     runtime._collect_pending_messages.assert_called_once()
     engine._ingest_messages.assert_awaited_once_with(messages)
+    assert runtime._chat_history == (["interrupted analysis"] if enabled and with_partial else []) + messages
     if enabled:
         runtime._wait_for_message_quiet_period.assert_not_awaited()
         engine._emit_flow_step.assert_awaited_once()

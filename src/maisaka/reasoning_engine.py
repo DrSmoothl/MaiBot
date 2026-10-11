@@ -645,6 +645,10 @@ class MaisakaReasoningEngine:
             model_name=partial_output.model_name if partial_output is not None else "",
             prompt_section=None,
         )
+        if partial_text and global_config.experimental.planner_message_steering:
+            # 保留被打断的分析，并先于下面接入的新消息写入上下文。
+            # 工具参数片段只作为文本保留，不创建可执行的 tool_call Item。
+            self._runtime._chat_history.extend(interrupted_response.raw_messages)
         extra_lines = [
             "状态：已被新消息打断",
             "打断位置：Planner 请求流式响应阶段",

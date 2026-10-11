@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 @dataclass
 class InterruptedStreamOutput:
-    """仅供诊断展示的流式片段，不作为可执行的模型响应。"""
+    """用于历史展示和继续推理的流式片段，不作为可执行的工具响应。"""
 
     reasoning: str
     content: str
