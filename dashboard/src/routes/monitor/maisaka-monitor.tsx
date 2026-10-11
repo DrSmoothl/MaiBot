@@ -2536,7 +2536,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
   const revealScrollLockRef = useRef(false)
   const previousSelectedSessionRef = useRef<string | null | undefined>(undefined)
   /** 用户向上浏览时记录视口顶部的锚点条目，列表变化后据此恢复位置，避免内容被顶走 */
-  const scrollAnchorRef = useRef<{ key: Key; offset: number } | null>(null)
+  const scrollAnchorRef = useRef<{ key: Key; start: number } | null>(null)
 
   const handleOpenReasoning = useCallback(
     (promptHtmlUri: string) => {
@@ -2661,9 +2661,8 @@ const MonitorTimeline = memo(function MonitorTimeline({
   })
 
   useLayoutEffect(() => {
-    // 只补偿完全在视口上方的条目；正在查看的条目展开时，保持按钮位置不动。
-    timelineVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
-      item.end <= (instance.scrollOffset ?? 0)
+    // 高度变化统一由下方的锚点补偿处理，避免虚拟列表与阅读位置恢复重复滚动。
+    timelineVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false
   }, [timelineVirtualizer])
 
   const messageEntryIndexes = useMemo(() => {
@@ -2824,7 +2823,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
 
       const anchorItem = timelineVirtualizer.getVirtualItems().find((item) => item.end > scrollTop)
       scrollAnchorRef.current = anchorItem
-        ? { key: anchorItem.key, offset: scrollTop - anchorItem.start }
+        ? { key: anchorItem.key, start: anchorItem.start }
         : null
 
       setAutoScroll(distanceToBottom < 80)
@@ -2833,18 +2832,20 @@ const MonitorTimeline = memo(function MonitorTimeline({
   )
 
   // 未跟随底部时，时间线头部被裁剪或上方插入新条目都会改变锚点条目的位置；
-  // 在绘制前把滚动位置补偿回去，保持用户正在浏览的内容不动
+  // 每次绘制前（包括虚拟列表重新测量后）只补偿锚点的实际位移，
+  // 保留用户尚未触发 scroll 事件的滚动量；正在查看的条目展开时也不移动视口。
   useLayoutEffect(() => {
     if (autoScroll || !scrollViewport || revealScrollLockRef.current) return
     const anchor = scrollAnchorRef.current
     if (!anchor) return
     const anchorItem = timelineVirtualizer.measurementsCache.find((item) => item.key === anchor.key)
     if (!anchorItem) return
-    const targetTop = anchorItem.start + anchor.offset
-    if (Math.abs(scrollViewport.scrollTop - targetTop) > 1) {
-      scrollViewport.scrollTop = targetTop
+    const delta = anchorItem.start - anchor.start
+    anchor.start = anchorItem.start
+    if (Math.abs(delta) > 1) {
+      scrollViewport.scrollTop += delta
     }
-  }, [autoScroll, scrollViewport, timelineVirtualizer, visibleTimelineEntries])
+  })
 
   // 统计当前会话的各事件类型计数，以及上下文构成与缓存命中情况
   const stats = useMemo(() => {
@@ -2950,7 +2951,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
             // 用户主动展开内容后停止跟随底部，避免新消息把展开入口推离视野。
             const anchor = timelineVirtualizer.getVirtualItems().find((item) => item.end > scrollViewport.scrollTop)
             scrollAnchorRef.current = anchor
-              ? { key: anchor.key, offset: scrollViewport.scrollTop - anchor.start }
+              ? { key: anchor.key, start: anchor.start }
               : null
             setAutoScroll(false)
           }}

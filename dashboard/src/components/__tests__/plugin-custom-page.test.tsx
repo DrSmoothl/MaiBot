@@ -280,14 +280,27 @@ describe('custom page bridge lifecycle', () => {
     expect(iframe.isConnected).toBe(false)
   })
 
+  it('allows a batch of 100 sequential requests without stopping the page', async () => {
+    const { port, iframe } = await start()
+    for (let id = 1; id <= 100; id++) {
+      await act(async () =>
+        port.onmessage?.({ data: { id, kind: 'queries', name: 'summary', args: {} } })
+      )
+    }
+    expect(mocks.invoke).toHaveBeenCalledTimes(100)
+    expect(port.close).not.toHaveBeenCalled()
+    expect(iframe.isConnected).toBe(true)
+  })
+
   it('stops a page that floods messages', async () => {
     const { port, iframe } = await start()
     act(() => {
-      for (let index = 0; index < 21; index++) void port.onmessage?.({ data: null })
+      for (let index = 0; index < 201; index++) void port.onmessage?.({ data: null })
     })
     expect(port.close).toHaveBeenCalled()
     expect(iframe.isConnected).toBe(false)
     expect(screen.getByText('pluginWebUI.customStopped')).toBeInTheDocument()
+    expect(screen.getByText('pluginWebUI.customStopRequestRate')).toBeInTheDocument()
   })
 
   it('removes the frame when it navigates and never reconnects its bridge', async () => {
@@ -297,6 +310,7 @@ describe('custom page bridge lifecycle', () => {
     expect(port.close).toHaveBeenCalled()
     expect(iframe.isConnected).toBe(false)
     expect(channels).toHaveLength(1)
+    expect(screen.getByText('pluginWebUI.customStopNavigation')).toBeInTheDocument()
   })
 
   it('rejects excess concurrent requests without forwarding them', async () => {

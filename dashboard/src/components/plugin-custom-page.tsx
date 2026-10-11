@@ -191,7 +191,8 @@ function CustomPageSession({
     }
   }
 
-  const stop = useCallback(() => {
+  const stop = useCallback((reason: string) => {
+    setError(reason)
     controller.current?.abort()
     port.current?.close()
     port.current = null
@@ -210,9 +211,9 @@ function CustomPageSession({
     port.current = channel.port1
     const signal = controller.current.signal
     let inflight = 0
-    let tokens = 20
+    let tokens = 200
     let refill = performance.now()
-    let layoutTokens = 20
+    let layoutTokens = 100
     let layoutRefill = refill
     const ids = new Set<number>()
     const operations = new Map<number, AbortController>()
@@ -221,10 +222,10 @@ function CustomPageSession({
       const now = performance.now()
       if (event.data?.type === 'layout') {
         if (page.layout !== 'document') return
-        layoutTokens = Math.min(20, layoutTokens + (now - layoutRefill) / 100)
+        layoutTokens = Math.min(100, layoutTokens + (now - layoutRefill) / 50)
         layoutRefill = now
         if (layoutTokens < 1) {
-          stop()
+          stop(t('pluginWebUI.customStopLayoutRate'))
           return
         }
         layoutTokens -= 1
@@ -232,16 +233,16 @@ function CustomPageSession({
         if (Number.isSafeInteger(nextHeight) && nextHeight > 0 && nextHeight <= 30000)
           setHeight(nextHeight)
         else {
-          setError('Invalid document height; use viewport layout for large or full-screen pages')
-          stop()
+          stop(t('pluginWebUI.customStopHeight'))
         }
         return
       }
-      tokens = Math.min(20, tokens + (now - refill) / 500)
+      tokens = Math.min(200, tokens + (now - refill) / 50)
       refill = now
+      // Allow bursts of 200 messages and sustain 20 per second for batch uploads.
       // Flooding closes this page's bridge instead of growing a queue in the host.
       if (tokens < 1) {
-        stop()
+        stop(t('pluginWebUI.customStopRequestRate'))
         return
       }
       tokens -= 1
@@ -255,7 +256,7 @@ function CustomPageSession({
         const request = parseCustomPageRequest(event.data, page)
         id = request.id
         if (ids.has(id)) {
-          stop()
+          stop(t('pluginWebUI.customStopDuplicateId'))
           return
         }
         if (inflight >= 2) throw new Error('Concurrency limit reached')
@@ -351,18 +352,17 @@ function CustomPageSession({
       '*',
       [channel.port2]
     )
-  }, [page, pages, pageState, pluginId, stop])
+  }, [page, pages, pageState, pluginId, stop, t])
 
   useEffect(() => {
     if (!source) return
     const timer = window.setTimeout(() => {
       if (!connected.current) {
-        setError('Page bridge did not initialize within 10 seconds')
-        stop()
+        stop(t('pluginWebUI.customStopTimeout'))
       }
     }, 10000)
     return () => window.clearTimeout(timer)
-  }, [source, stop])
+  }, [source, stop, t])
 
   useEffect(() => {
     const ready = (event: MessageEvent) => {
@@ -411,7 +411,11 @@ function CustomPageSession({
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-lg font-semibold">{page.title}</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={stop} disabled={stopped}>
+          <Button
+            variant="outline"
+            onClick={() => stop(t('pluginWebUI.customStopManual'))}
+            disabled={stopped}
+          >
             {t('pluginWebUI.customStop')}
           </Button>
           <Button variant="outline" onClick={() => void reload()} disabled={reloading}>
@@ -438,7 +442,7 @@ function CustomPageSession({
             allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'"
             srcDoc={source}
             onLoad={() => {
-              if (loaded.current) stop()
+              if (loaded.current) stop(t('pluginWebUI.customStopNavigation'))
               loaded.current = true
             }}
             style={{
