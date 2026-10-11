@@ -205,17 +205,21 @@ def test_retro_visual_request_keeps_original_image(
         normal_images = [part for item in normal_items for part in item.parts if isinstance(part, ContextImagePart)]
         assert images == normal_images
         image_index = next(i for i, part in enumerate(items[1].parts) if isinstance(part, ContextImagePart))
-        assert "[图片：测试原图]" in items[1].parts[image_index - 1].text
+        assert "[图片]" in items[1].parts[image_index - 1].text
         assert "这张图什么意思" not in items[1].parts[image_index - 1].text
         assert "这张图什么意思" in items[1].parts[image_index + 1].text
     assert isinstance(items[1].parts[-1], ContextTextPart)
     assert "解释图片" in items[1].parts[-1].text
     text = read_item_text(items[1])
-    assert "[回复了小明的消息: [图片：测试原图]]" in text
-    assert "小明[回复了小明的消息: [图片：测试原图]] 说：这张图什么意思" in text
+    expected_content = "[图片]" if images else "[图片：测试原图]"
+    assert f"[回复了小明的消息: {expected_content}]" in text
+    assert f"小明[回复了小明的消息: {expected_content}] 说：这张图什么意思" in text
+    if images:
+        assert "测试原图" not in text
     assert "[发言内容]" not in text
     image_speaker = f"{global_config.bot.nickname}(你)" if image_source == "guided_reply" else "小明"
-    assert text.count(f"[12:30:00] {image_speaker}说：[图片：测试原图]") == 1
+    assert text.count(f"[12:30:00] {image_speaker}说：{expected_content}") == 1
+    assert image_message.original_message.raw_message.components[0].content == "[图片：测试原图]"
 
 
 @pytest.mark.parametrize("locale", RETRO_LOCALES)
@@ -247,12 +251,51 @@ def test_retro_images_stay_between_history_messages_in_single_user(
     assert [type(part) for part in parts] == [
         ContextTextPart, ContextImagePart, ContextTextPart, ContextImagePart, ContextTextPart,
     ]
-    assert parts[0].text.index("FIRST_MESSAGE") < parts[0].text.index("FIRST_IMAGE")
-    assert parts[2].text.index("MIDDLE_MESSAGE") < parts[2].text.index("SECOND_IMAGE")
+    assert parts[0].text.index("FIRST_MESSAGE") < parts[0].text.index("[图片]")
+    assert parts[2].text.index("MIDDLE_MESSAGE") < parts[2].text.index("[图片]")
     assert parts[4].text.index("LAST_MESSAGE") < parts[4].text.index("FINAL_REPLY_REFERENCE")
     text = read_item_text(items[1])
-    for marker in ("FIRST_MESSAGE", "FIRST_IMAGE", "MIDDLE_MESSAGE", "SECOND_IMAGE", "LAST_MESSAGE"):
+    for marker in ("FIRST_MESSAGE", "MIDDLE_MESSAGE", "LAST_MESSAGE"):
         assert text.count(marker) == 1
+    assert "FIRST_IMAGE" not in text
+    assert "SECOND_IMAGE" not in text
+
+
+@pytest.mark.parametrize("component_type", [ImageComponent, EmojiComponent])
+@pytest.mark.parametrize("max_images", [0, 1, 2])
+@pytest.mark.parametrize("has_original", [False, True])
+def test_retro_visual_descriptions_follow_actual_media_quota(
+    component_type: Any, max_images: int, has_original: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generator = build_retro_generator(is_group_session=True)
+    isolate_retro_blocks(generator, monkeypatch)
+    monkeypatch.setattr(retro_prompt, "is_bot_self", lambda platform, user_id: False)
+    monkeypatch.setattr(global_config.visual, "max_image_num", max_images)
+    image_bytes = BytesIO()
+    Image.new("RGB", (2, 2)).save(image_bytes, format="PNG")
+    # 同一发言中重复的图片数据仍分别占配额，描述不能按 hash 一并删除。
+    message = build_original_history([
+        TextComponent("看看这两张"),
+        component_type(binary_hash="old", binary_data=image_bytes.getvalue(), content="OLD_DESCRIPTION"),
+        component_type(binary_hash="new", binary_data=image_bytes.getvalue(), content="NEW_DESCRIPTION"),
+        component_type(binary_hash="missing", content="MISSING_DESCRIPTION"),
+    ])
+    target = message.original_message
+    if not has_original:
+        message.original_message = None
+        message.visible_text = "[小明]看看这两张OLD_DESCRIPTIONNEW_DESCRIPTIONMISSING_DESCRIPTION"
+    items = generator._build_retro_request_messages(
+        chat_history=[message], reply_message=target, reply_reason="回答",
+        enable_visual_message=True,
+    )
+    text = read_item_text(items[1])
+    assert "看看这两张" in text
+    assert ("OLD_DESCRIPTION" in text) == (max_images < 2)
+    assert ("NEW_DESCRIPTION" in text) == (max_images == 0)
+    assert "MISSING_DESCRIPTION" in text
+    assert sum(isinstance(part, ContextImagePart) for part in items[1].parts) == max_images
+    assert message.raw_message.components[1].content == "OLD_DESCRIPTION"
+    assert message.raw_message.components[2].content == "NEW_DESCRIPTION"
 
 
 def read_item_text(item: Any) -> str:

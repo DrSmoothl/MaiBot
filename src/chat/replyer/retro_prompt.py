@@ -12,25 +12,42 @@
 
 from __future__ import annotations
 
+from copy import copy
+from dataclasses import replace
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import get_chat_type_and_target_info, is_bot_self
-from src.common.data_models.message_component_data_model import MessageSequence, ReplyComponent
+from src.common.data_models.message_component_data_model import (
+    EmojiComponent,
+    ImageComponent,
+    MessageSequence,
+    ReplyComponent,
+    TextComponent,
+)
 from src.common.utils.math_utils import translate_timestamp_to_human_readable
 from src.config.config import global_config
-from src.llm_models.payload_content.context_item import ContextImagePart, ContextItem, ContextItemBuilder, RoleType, UserMessageItem
+from src.llm_models.payload_content.context_item import (
+    ContextImagePart,
+    ContextItem,
+    ContextItemBuilder,
+    RoleType,
+    UserMessageItem,
+)
 from src.maisaka.context.history import build_session_message_visible_text
-from src.maisaka.context.message_adapter import parse_speaker_content
+from src.maisaka.context.message_adapter import (
+    build_visible_text_from_sequence,
+    format_speaker_content,
+    parse_speaker_content,
+)
 from src.maisaka.context.messages import (
     LLMContextMessage,
     ModelOutputContextMessage,
     SessionBackedMessage,
     build_context_items_from_history_entry,
 )
-from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 
 RETRO_GROUP_PROMPT = "retro_replyer"
 """群聊复古模板名。"""
@@ -79,6 +96,23 @@ class RetroReplyPromptMixin:
             if not isinstance(message, ModelOutputContextMessage)
             and not self._is_replyer_filtered_history_message(message)
         ]
+        visual_parts: Dict[int, List[ContextImagePart]] = {}
+        if enable_visual_message:
+            chat_history, visual_parts = self._prepare_retro_visual_history(chat_history)
+            # 目标消息和引用共用去掉视觉描述后的副本，不修改真实消息及其缓存。
+            if reply_message is not None:
+                for message_index, message in enumerate(chat_history):
+                    if (
+                        isinstance(message, SessionBackedMessage)
+                        and message_index in visual_parts
+                        and message.message_id == reply_message.message_id
+                    ):
+                        if message.original_message is not None:
+                            reply_message = message.original_message
+                        else:
+                            reply_message = copy(reply_message)
+                            reply_message.raw_message = message.raw_message
+                        break
         prompt_name = self._select_retro_prompt_name(
             reply_message=reply_message,
             stream_id=stream_id,
@@ -113,7 +147,7 @@ class RetroReplyPromptMixin:
                 if isinstance(message, SessionBackedMessage) and message.message_id
             }
             history_started = False
-            for message in chat_history:
+            for message_index, message in enumerate(chat_history):
                 if not isinstance(message, SessionBackedMessage):
                     continue
                 history_line = self._render_retro_history_line(message, history_by_id)
@@ -121,12 +155,8 @@ class RetroReplyPromptMixin:
                     continue
                 pending_text += ("\n" if history_started else "") + history_line
                 history_started = True
-                for item in build_context_items_from_history_entry(message, enable_visual_message=True):
-                    if not isinstance(item, UserMessageItem):
-                        continue
-                    image_parts = [part for part in item.parts if isinstance(part, ContextImagePart)]
-                    if not image_parts:
-                        continue
+                image_parts = visual_parts.get(message_index, [])
+                if image_parts:
                     # 在历史发言处插入图片，模板后半段的回复指令始终保持在最后。
                     user_builder.add_text_content(pending_text)
                     pending_text = ""
@@ -139,9 +169,77 @@ class RetroReplyPromptMixin:
             ContextItemBuilder().set_role(RoleType.System).add_text_content(system_prompt).build(),
             user_builder.build(),
         ]
-        if enable_visual_message:
-            return limit_latest_images_in_messages(items, max_image_num=global_config.visual.max_image_num)
         return items
+
+    @staticmethod
+    def _prepare_retro_visual_history(
+        chat_history: List[LLMContextMessage],
+    ) -> Tuple[List[LLMContextMessage], Dict[int, List[ContextImagePart]]]:
+        """先确定实际发送的图片，仅在本次模板副本中去掉对应的图片和表情包描述。"""
+
+        candidates: List[Tuple[int, int, ContextImagePart]] = []
+        for message_index, message in enumerate(chat_history):
+            if not isinstance(message, SessionBackedMessage):
+                continue
+            media_index = -1
+            for component in message.raw_message.components:
+                if not isinstance(component, (ImageComponent, EmojiComponent)):
+                    continue
+                media_index += 1
+                component_message = replace(message, raw_message=MessageSequence([component]))
+                for item in build_context_items_from_history_entry(component_message, enable_visual_message=True):
+                    if isinstance(item, UserMessageItem):
+                        candidates.extend(
+                            (message_index, media_index, part)
+                            for part in item.parts
+                            if isinstance(part, ContextImagePart)
+                        )
+
+        image_limit = max(0, int(global_config.visual.max_image_num))
+        retained = candidates[-image_limit:] if image_limit else []
+        visual_parts: Dict[int, List[ContextImagePart]] = {}
+        visual_indices: Dict[int, Set[int]] = {}
+        for message_index, media_index, part in retained:
+            visual_parts.setdefault(message_index, []).append(part)
+            visual_indices.setdefault(message_index, set()).add(media_index)
+
+        def without_visual_descriptions(sequence: MessageSequence, sent_indices: Set[int]) -> MessageSequence:
+            # 保留媒体类型标记；未发送的媒体仍使用原描述，包括超出图片配额的旧图片。
+            components = []
+            media_index = 0
+            for component in sequence.components:
+                if isinstance(component, (ImageComponent, EmojiComponent)):
+                    if media_index in sent_indices:
+                        components.append(
+                            TextComponent("[表情包]" if isinstance(component, EmojiComponent) else "[图片]")
+                        )
+                    else:
+                        components.append(component)
+                    media_index += 1
+                else:
+                    components.append(component)
+            return MessageSequence(components)
+
+        rendered_history: List[LLMContextMessage] = []
+        for message_index, message in enumerate(chat_history):
+            if not isinstance(message, SessionBackedMessage) or message_index not in visual_indices:
+                rendered_history.append(message)
+                continue
+            sent_indices = visual_indices[message_index]
+            sequence = without_visual_descriptions(message.raw_message, sent_indices)
+            original = message.original_message
+            if original is not None:
+                original = copy(original)
+                original.raw_message = without_visual_descriptions(original.raw_message, sent_indices)
+                visible_text = build_session_message_visible_text(original)
+            else:
+                speaker, _ = parse_speaker_content(message.processed_plain_text)
+                _, content = parse_speaker_content(build_visible_text_from_sequence(sequence))
+                visible_text = format_speaker_content(speaker or "", content)
+            rendered_history.append(
+                replace(message, raw_message=sequence, original_message=original, visible_text=visible_text)
+            )
+        return rendered_history, visual_parts
 
     def _select_retro_prompt_name(
         self,
@@ -370,7 +468,9 @@ class RetroReplyPromptMixin:
                 target_content = component.target_message_content or ""
             target_name = target_speaker or component.target_message_id
             target_content = target_content.strip()
-            reference = f"[回复了{target_name}的消息: {target_content}]" if target_content else f"[回复了{target_name}的消息]"
+            reference = (
+                f"[回复了{target_name}的消息: {target_content}]" if target_content else f"[回复了{target_name}的消息]"
+            )
             references.append(reference)
 
         return references
