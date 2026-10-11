@@ -1308,6 +1308,7 @@ class PluginRunner:
         self._rpc_client.register_method("plugin.inspect_config", self._handle_inspect_plugin_config)
         self._rpc_client.register_method("plugin.validate_config", self._handle_validate_plugin_config)
         self._rpc_client.register_method("plugin.reload", self._handle_reload_plugin)
+        self._rpc_client.register_method("plugin.webui.reload_documents", self._handle_reload_webui_documents)
         self._rpc_client.register_method("plugin.reload_batch", self._handle_reload_plugins)
         self._rpc_client.register_method("plugin.recover", self._handle_reload_plugins)
         self._rpc_client.register_method("plugin.unload_batch", self._handle_unload_plugins)
@@ -2488,6 +2489,24 @@ class PluginRunner:
             changed=inspection_result.changed,
         )
         return envelope.make_response(payload=result.model_dump())
+
+    async def _handle_reload_webui_documents(self, envelope: Envelope) -> Envelope:
+        """只重读已加载插件的页面文件，不触发插件卸载或训练任务重启。"""
+        meta = self._loader.get_plugin(envelope.plugin_id)
+        if meta is None:
+            return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, "插件未加载")
+        async with self._reload_lock:
+            try:
+                extension = await asyncio.to_thread(load_webui_extension, meta.plugin_dir)
+                if extension is None:
+                    raise ValueError("插件未声明 WebUI")
+                documents = [
+                    {"id": page.id, "entry": page.entry, "document": page.document}
+                    for page in extension.pages if page.mode == "custom"
+                ]
+                return envelope.make_response(payload={"documents": documents})
+            except (ValueError, OSError) as exc:
+                return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, str(exc))
 
     async def _handle_reload_plugin(self, envelope: Envelope) -> Envelope:
         """处理按插件 ID 的精确重载请求。

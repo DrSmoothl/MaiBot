@@ -6,102 +6,130 @@ import { onBackendUrlChanged } from '@/lib/api-base'
 import { resolveApiPath } from '@/lib/api-base'
 
 export type Scalar = string | number | boolean | null
+export type JSONValue = Scalar | JSONValue[] | { [key: string]: JSONValue }
+export type APIArguments = Record<string, JSONValue>
 export interface DataReference {
-  scope?: 'query' | 'selection' | 'item'
+  scope?: 'query' | 'selection'
   source: string
   field: string
 }
 export interface Parameter {
-  type: 'string' | 'integer' | 'number' | 'boolean'
+  type: 'string' | 'integer' | 'number' | 'boolean' | 'array' | 'object'
   required: boolean
   max_length: number
   minimum: number | null
   maximum: number | null
   choices: Scalar[]
+  items?: Parameter | null
+  properties?: Record<string, Parameter>
+  max_items?: number
 }
 export interface APIBinding {
   api: string
   version: string
   parameters: Record<string, Parameter>
   confirmation: string | null
-  arguments?: Record<string, DataReference>
-  clear_selection?: string | null
 }
-export interface WebUINode {
-  type:
-    | 'stack'
-    | 'grid'
-    | 'card'
-    | 'tabs'
-    | 'text'
-    | 'stat'
-    | 'progress'
-    | 'table'
-    | 'chart'
-    | 'gallery'
-    | 'image'
-    | 'pagination'
-    | 'input'
-    | 'select'
-    | 'multi_select'
-    | 'checkbox'
-    | 'switch'
-    | 'date'
-    | 'button'
-    | 'dialog'
-    | 'collapsible'
-    | 'repeat'
-    | 'upload'
-  label: string | null
-  value: Scalar | DataReference
-  children: WebUINode[]
-  columns: number | Array<{ field: string; label: string }> | null
-  name: string | null
-  options: Array<{ label: string; value: string }>
-  action: string | null
-  variant: 'primary' | 'danger' | 'muted'
-  chart_type: 'line' | 'bar'
-  x: string | null
-  y: string | null
-  selection?: string | null
-  detail?: string | null
-  max_items?: number
-  default_open?: boolean
-  image_max_edge?: number | null
-  compact?: boolean
-  manual_upload?: boolean
-  submit_label?: string | null
-  when?: VisibilityCondition | null
-  disabled_when?: VisibilityCondition | null
-  disabled_reason?: string | null
-  presentation?: 'dropdown' | 'buttons'
+export interface DeclarativeBinding extends APIBinding {
+  arguments?: Record<string, DataReference>
 }
 export interface VisibilityCondition {
   reference: DataReference
   operator: 'truthy' | 'empty' | 'not_empty' | 'equals'
   expected: Scalar
 }
+interface Node {
+  label?: string | null
+  when?: VisibilityCondition | null
+}
+interface InteractiveNode extends Node {
+  disabled_when?: VisibilityCondition | null
+  disabled_reason?: string | null
+}
+export type WebUINode =
+  | (Node & { type: 'stack' | 'card' | 'tabs'; children: WebUINode[] })
+  | (Node & { type: 'grid'; columns: number; children: WebUINode[] })
+  | (Node & { type: 'collapsible'; label: string; default_open?: boolean; children: WebUINode[] })
+  | (Node & { type: 'dialog'; name: string; label: string; children: WebUINode[] })
+  | (Node & { type: 'text'; value: Scalar | DataReference; format?: 'plain' | 'log' })
+  | (Node & { type: 'stat'; value: Scalar | DataReference })
+  | (Node & { type: 'progress'; value: number | DataReference })
+  | (Node & { type: 'image'; value: DataReference })
+  | (Node & {
+      type: 'table'
+      value: DataReference
+      columns: Array<{ field: string; label: string }>
+      selection?: string | null
+      detail?: string | null
+    })
+  | (Node & {
+      type: 'chart'
+      value: DataReference
+      chart_type?: 'line' | 'bar'
+      x: string
+      y: string
+    })
+  | (Node & { type: 'pagination'; value: DataReference; name: string })
+  | (InteractiveNode & { type: 'input'; name: string; value: string | number | null })
+  | (InteractiveNode & { type: 'date'; name: string; value: string | null })
+  | (InteractiveNode & { type: 'switch'; name: string; value: boolean })
+  | (InteractiveNode & {
+      type: 'select'
+      name: string
+      value: string | null
+      options: Array<{ label: string; value: string }>
+    })
+  | (InteractiveNode & {
+      type: 'button'
+      label: string
+      action: string
+      variant?: 'primary' | 'danger' | 'muted'
+    })
+
 export interface DataContexts {
   selection?: Record<string, unknown>
-  item?: Record<string, unknown>
 }
-export interface WebUIPage {
-  poll_interval_seconds?: number
-  auto_refresh?: boolean
+interface Page {
   id: string
   title: string
   description: string
   placement: 'sidebar' | 'workspace'
   icon: keyof typeof extensionIcons
-  queries: Record<string, APIBinding>
-  actions: Record<string, APIBinding>
+}
+export interface DeclarativePage extends Page {
+  mode: 'declarative'
+  poll_interval_seconds?: number
+  auto_refresh?: boolean
+  queries: Record<string, DeclarativeBinding>
+  actions: Record<string, DeclarativeBinding>
   content: WebUINode[]
 }
+export interface CustomPage extends Page {
+  mode: 'custom'
+  entry: string
+  document_revision: string
+  layout: 'document' | 'viewport'
+  uploads: Record<string, { action: string; image_max_edge?: number | null }>
+  queries: Record<string, APIBinding>
+  actions: Record<string, APIBinding>
+}
+export type WebUIPage = DeclarativePage | CustomPage
 export interface WebUIExtension {
+  schema_version: 2
   required_capabilities?: string[]
   plugin_id: string
   workspace_title: string | null
   pages: WebUIPage[]
+  compatibility_error?: string
+}
+export const WEBUI_CAPABILITIES = [
+  'declarative_basic',
+  'custom_pages',
+  'image_upload',
+  'structured_arguments',
+]
+export function nodeChildren(node: WebUINode): WebUINode[] {
+  return 'children' in node ? node.children : []
 }
 export const extensionIcons = {
   puzzle: Puzzle,
@@ -169,14 +197,27 @@ export function refreshPluginWebUI(ensureFresh = false): Promise<void> {
   if (pending) return ensureFresh ? pending.then(() => refreshPluginWebUI()) : pending
   const current = generation
   pending = backendApi
-    .get<{ extensions: WebUIExtension[]; capabilities?: string[] }>('/api/webui/plugins/runtime/webui')
+    .get<{ schema_version: number; extensions: WebUIExtension[]; capabilities: string[] }>(
+      '/api/webui/plugins/runtime/webui'
+    )
     .then((response) => {
       if (current === generation) {
+        if (response.schema_version !== 2)
+          throw new Error(
+            'Plugin WebUI requires protocol 2; upgrade the host and dashboard together'
+          )
         // 未变更的声明保留引用，注册表轮询不会中断页面中进行的操作或重置表单。
         const extensions = response.extensions.map((extension) => {
-          const unsupported = (extension.required_capabilities ?? []).filter(capability =>
-            !(response.capabilities ?? []).includes(capability))
-          if (unsupported.length) throw new Error(`Host does not support ${unsupported.join(', ')}; upgrade host and SDK`)
+          const unsupported = (extension.required_capabilities ?? []).filter(
+            (capability) =>
+              !response.capabilities.includes(capability) ||
+              !WEBUI_CAPABILITIES.includes(capability)
+          )
+          if (unsupported.length)
+            return {
+              ...extension,
+              compatibility_error: `Unsupported WebUI capabilities: ${unsupported.join(', ')}`,
+            }
           const previous = state.extensions.find((item) => item.plugin_id === extension.plugin_id)
           return previous && JSON.stringify(previous) === JSON.stringify(extension)
             ? previous
@@ -274,7 +315,7 @@ export async function invokePluginWebUI(
   pageId: string,
   kind: 'queries' | 'actions',
   name: string,
-  args: Record<string, Scalar>,
+  args: APIArguments,
   confirmed = false,
   signal?: AbortSignal
 ): Promise<unknown> {
@@ -290,24 +331,34 @@ export async function invokePluginWebUI(
 }
 
 export async function uploadPluginWebUI(
-  pluginId: string, pageId: string, name: string, file: File,
-  args: Record<string, Scalar>, onProgress: (percent: number) => void, signal?: AbortSignal
+  pluginId: string,
+  pageId: string,
+  name: string,
+  file: File,
+  args: APIArguments,
+  onProgress: (percent: number) => void,
+  signal?: AbortSignal,
+  confirmed = false
 ): Promise<unknown> {
   const path = [pluginId, pageId, 'uploads', name].map(encodeURIComponent).join('/')
   const url = await resolveApiPath(`/api/webui/plugins/runtime/webui/${path}`)
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     const abort = () => xhr.abort()
-    if (signal?.aborted) { reject(new DOMException('Upload cancelled', 'AbortError')); return }
+    if (signal?.aborted) {
+      reject(new DOMException('Upload cancelled', 'AbortError'))
+      return
+    }
     signal?.addEventListener('abort', abort, { once: true })
     xhr.onloadend = () => signal?.removeEventListener('abort', abort)
-    xhr.onabort = () => reject(new DOMException('Upload cancelled; received files remain saved', 'AbortError'))
+    xhr.onabort = () =>
+      reject(new DOMException('Upload cancelled; received files remain saved', 'AbortError'))
     xhr.open('POST', url)
     xhr.withCredentials = true
     xhr.timeout = 120000
     xhr.ontimeout = () => reject(new Error('Upload timed out; check the result before retrying'))
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 100))
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100))
     }
     xhr.onerror = () => reject(new Error('Upload connection failed'))
     xhr.onload = () => {
@@ -318,16 +369,21 @@ export async function uploadPluginWebUI(
           try {
             const errorBody = JSON.parse(xhr.responseText)
             if (typeof errorBody.detail === 'string') detail = errorBody.detail
-          } catch { /* Servers may return plain text for an internal error. */ }
+          } catch {
+            /* Servers may return plain text for an internal error. */
+          }
           throw new Error(detail)
         }
         const body = JSON.parse(xhr.responseText)
         resolve(body.result)
-      } catch (error) { reject(error) }
+      } catch (error) {
+        reject(error)
+      }
     }
     const form = new FormData()
     form.append('file', file)
     form.append('args', JSON.stringify(args))
+    form.append('confirmed', String(confirmed))
     xhr.send(form)
   })
 }
@@ -337,12 +393,7 @@ export function resolveReference(
   data: Record<string, unknown>,
   contexts: DataContexts = {}
 ): unknown {
-  const source =
-    reference.scope === 'selection'
-      ? contexts.selection
-      : reference.scope === 'item'
-        ? contexts.item
-        : data
+  const source = reference.scope === 'selection' ? contexts.selection : data
   if (reference.scope === 'selection' && (!source || !Object.hasOwn(source, reference.source)))
     return null
   if (!source || !Object.hasOwn(source, reference.source))
@@ -362,6 +413,7 @@ export function resolveNodeValue(
   data: Record<string, unknown>,
   contexts: DataContexts = {}
 ): unknown {
+  if (!('value' in node)) return null
   return node.value !== null && typeof node.value === 'object'
     ? resolveReference(node.value, data, contexts)
     : node.value
@@ -375,7 +427,11 @@ export function nodeVisible(
   return !node.when || conditionMatches(node.when, data, contexts)
 }
 
-export function conditionMatches(condition: VisibilityCondition, data: Record<string, unknown>, contexts: DataContexts = {}): boolean {
+export function conditionMatches(
+  condition: VisibilityCondition,
+  data: Record<string, unknown>,
+  contexts: DataContexts = {}
+): boolean {
   const value = resolveReference(condition.reference, data, contexts)
   const empty =
     value == null ||
@@ -394,30 +450,13 @@ export function conditionMatches(condition: VisibilityCondition, data: Record<st
   }
 }
 
-/** Bound the expanded tree before React mounts it, including nested loops. */
-export function validateRenderSize(
-  nodes: WebUINode[],
-  data: Record<string, unknown>,
-  contexts: DataContexts = {},
-  openDialog: string | null = null
-): void {
+/** Reject oversized declarations before mounting, independently of visibility. */
+export function validateRenderSize(nodes: WebUINode[]): void {
   let count = 0
-  const visit = (children: WebUINode[], context: DataContexts, depth: number) => {
-    for (const node of children) {
-      if (++count > 1000 || depth > 8) throw new Error('Expanded component tree exceeds limits')
-      if (!nodeVisible(node, data, context)) continue
-      if (node.type === 'dialog' && node.name !== openDialog) continue
-      if (node.type === 'repeat') {
-        const rows = resolveNodeValue(node, data, context)
-        if (!Array.isArray(rows)) throw new Error('Repeat data must be an array')
-        for (const row of rows.slice(0, node.max_items ?? 50))
-          visit(
-            node.children,
-            { ...context, item: { ...context.item, [node.name!]: row } },
-            depth + 1
-          )
-      } else visit(node.children, context, depth + 1)
-    }
+  const pending = nodes.map((node) => ({ node, depth: 1 }))
+  while (pending.length) {
+    const { node, depth } = pending.pop()!
+    if (++count > 200 || depth > 8) throw new Error('Component tree exceeds limits')
+    pending.push(...nodeChildren(node).map((child) => ({ node: child, depth: depth + 1 })))
   }
-  visit(nodes, contexts, 1)
 }

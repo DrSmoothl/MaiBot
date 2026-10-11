@@ -2,24 +2,76 @@ import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { backendApi } from '@/lib/http'
-import { extensionPath, invokePluginWebUI, refreshPluginWebUI, usePluginWebUI, visibleExtensions } from '@/lib/plugin-webui'
+import {
+  extensionPath,
+  invokePluginWebUI,
+  refreshPluginWebUI,
+  usePluginWebUI,
+  visibleExtensions,
+} from '@/lib/plugin-webui'
 import type { WebUIExtension } from '@/lib/plugin-webui'
 
 vi.mock('@/lib/http', () => ({ backendApi: { post: vi.fn(), get: vi.fn() } }))
 
 describe('plugin WebUI gateway', () => {
   it('preserves unchanged declarations during navigation registry refresh', async () => {
-    const extension: WebUIExtension = { plugin_id: 'stable.plugin', workspace_title: 'Statistics', pages: [] }
-    vi.mocked(backendApi.get).mockResolvedValue({ extensions: [extension] })
+    const extension: WebUIExtension = {
+      schema_version: 2,
+      plugin_id: 'stable.plugin',
+      workspace_title: 'Statistics',
+      pages: [],
+    }
+    vi.mocked(backendApi.get).mockResolvedValue({
+      schema_version: 2,
+      capabilities: [],
+      extensions: [extension],
+    })
     const hook = renderHook(() => usePluginWebUI())
-    await act(async () => { await refreshPluginWebUI() })
+    await act(async () => {
+      await refreshPluginWebUI()
+    })
     const previous = hook.result.current.extensions[0]
-    vi.mocked(backendApi.get).mockResolvedValue({ extensions: [structuredClone(extension)] })
-    await act(async () => { await refreshPluginWebUI() })
+    vi.mocked(backendApi.get).mockResolvedValue({
+      schema_version: 2,
+      capabilities: [],
+      extensions: [structuredClone(extension)],
+    })
+    await act(async () => {
+      await refreshPluginWebUI()
+    })
     expect(hook.result.current.extensions[0]).toBe(previous)
-    vi.mocked(backendApi.get).mockResolvedValue({ extensions: [{ ...extension, workspace_title: 'New title' }] })
-    await act(async () => { await refreshPluginWebUI() })
+    vi.mocked(backendApi.get).mockResolvedValue({
+      schema_version: 2,
+      capabilities: [],
+      extensions: [{ ...extension, workspace_title: 'New title' }],
+    })
+    await act(async () => {
+      await refreshPluginWebUI()
+    })
     expect(hook.result.current.extensions[0]).not.toBe(previous)
+  })
+  it('isolates unsupported capabilities to the affected plugin', async () => {
+    vi.mocked(backendApi.get).mockResolvedValue({
+      schema_version: 2,
+      capabilities: [],
+      extensions: [
+        {
+          schema_version: 2,
+          plugin_id: 'unsupported',
+          pages: [],
+          required_capabilities: ['future_feature'],
+        },
+        { schema_version: 2, plugin_id: 'supported', pages: [], required_capabilities: [] },
+      ],
+    })
+    const hook = renderHook(() => usePluginWebUI())
+    await act(async () => {
+      await refreshPluginWebUI()
+    })
+    expect(hook.result.current.error).toBeNull()
+    expect(hook.result.current.extensions[0].compatibility_error).toContain('future_feature')
+    expect(hook.result.current.extensions[1].compatibility_error).toBeUndefined()
+    hook.unmount()
   })
   it('encodes plugin and page identity into the dedicated gateway path', async () => {
     vi.mocked(backendApi.post).mockResolvedValue({ result: { count: 2 } })
@@ -38,6 +90,7 @@ describe('plugin WebUI gateway', () => {
 
   it('hides and orders entries without altering registered declarations', () => {
     const extensions: WebUIExtension[] = ['a', 'b', 'c'].map((plugin_id) => ({
+      schema_version: 2,
       plugin_id,
       workspace_title: null,
       pages: [],

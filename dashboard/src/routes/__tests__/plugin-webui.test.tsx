@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { WebUIExtension, WebUIPage, WebUINode } from '@/lib/plugin-webui'
+import type { WebUIExtension, DeclarativePage, WebUINode } from '@/lib/plugin-webui'
 import { PluginWebUIPage } from '@/routes/plugin-webui'
 
 const mocks = vi.hoisted(() => ({ extensions: [] as WebUIExtension[], invoke: vi.fn() }))
@@ -22,25 +22,12 @@ vi.mock('@/lib/plugin-webui', async (importOriginal) => ({
 }))
 
 function node(overrides: Partial<WebUINode>): WebUINode {
-  return {
-    type: 'text',
-    label: null,
-    value: null,
-    children: [],
-    columns: null,
-    name: null,
-    options: [],
-    action: null,
-    variant: 'primary',
-    chart_type: 'line',
-    x: null,
-    y: null,
-    ...overrides,
-  }
+  return { type: 'text', value: null, ...overrides } as WebUINode
 }
-function page(overrides: Partial<WebUIPage> = {}): WebUIPage {
+function page(overrides: Partial<DeclarativePage> = {}): DeclarativePage {
   return {
     id: 'overview',
+    mode: 'declarative',
     title: 'Overview',
     description: '',
     placement: 'workspace',
@@ -53,8 +40,10 @@ function page(overrides: Partial<WebUIPage> = {}): WebUIPage {
     ...overrides,
   }
 }
-function install(value: WebUIPage) {
-  mocks.extensions = [{ plugin_id: 'test.plugin', workspace_title: 'Statistics', pages: [value] }]
+function install(value: DeclarativePage) {
+  mocks.extensions = [
+    { schema_version: 2, plugin_id: 'test.plugin', workspace_title: 'Statistics', pages: [value] },
+  ]
 }
 
 describe('plugin page lifecycle', () => {

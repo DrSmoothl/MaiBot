@@ -1,5 +1,8 @@
 {
   "pluginWebUI": {
+    "customReload": "Reload page",
+    "customStop": "Stop page",
+    "customStopped": "Page stopped. Reopen it to run again.",
     "workspaceOrder": "Top tab order",
     "workspaceOrderHint": "Visible plugins follow this order. Up to two tabs appear in the header; the rest are in the adjacent More menu. The active plugin stays visible. Changes apply immediately and are saved in this browser.",
     "galleryLayout": "Gallery layout",

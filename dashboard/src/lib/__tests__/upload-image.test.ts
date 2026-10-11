@@ -19,6 +19,13 @@ function encoder() {
 }
 
 describe('upload image preprocessing', () => {
+  it('rejects excessive source pixels before allocating a canvas and releases the bitmap', async () => {
+    const image = bitmap(12000, 12000)
+    const create = vi.spyOn(document, 'createElement')
+    await expect(prepareUploadImage(new File(['source'], 'huge.png'), 4000)).rejects.toThrow('1 亿像素')
+    expect(create).not.toHaveBeenCalled()
+    expect(image.close).toHaveBeenCalledOnce()
+  })
   it('preserves small files with acceptable dimensions', async () => {
     const image = bitmap(320, 720)
     const file = new File(['source'], 'x.png', { type: 'image/png' })

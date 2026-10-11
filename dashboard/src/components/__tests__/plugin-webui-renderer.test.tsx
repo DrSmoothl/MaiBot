@@ -1,190 +1,93 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { PluginWebUIRenderer } from '@/components/plugin-webui-renderer'
 import { resolveNodeValue, validateRenderSize } from '@/lib/plugin-webui'
-import type { Scalar, WebUINode } from '@/lib/plugin-webui'
+import type { WebUINode } from '@/lib/plugin-webui'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
-beforeAll(() => {
-  URL.createObjectURL = vi.fn(() => 'blob:preview')
-  URL.revokeObjectURL = vi.fn()
-})
 
-function node(overrides: Partial<WebUINode>): WebUINode {
-  return {
-    type: 'text',
-    label: null,
-    value: null,
-    children: [],
-    columns: null,
-    name: null,
-    options: [],
-    action: null,
-    variant: 'primary',
-    chart_type: 'line',
-    x: null,
-    y: null,
-    ...overrides,
-  }
-}
+const callbacks = () => ({ values: {}, busy: false, onChange: vi.fn(), onAction: vi.fn() })
 
-describe('plugin WebUI renderer', () => {
-  it('keeps unavailable actions visible with an explanation', () => {
-    render(<PluginWebUIRenderer nodes={[node({type: 'button', label: 'Train', action: 'train',
-      disabled_when: {reference: {source: 'runtime', field: 'ready'}, operator: 'equals', expected: false}, disabled_reason: 'Add negative examples first'})]}
-      data={{runtime: {ready: false}}} values={{}} busy={false} onChange={vi.fn()} onAction={vi.fn()} />)
-    expect(screen.getByRole('button', {name: 'Train'})).toBeDisabled()
-    expect(screen.getByText('Add negative examples first')).toBeInTheDocument()
-  })
-
-  it('cancels an upload batch and retries only unsuccessful files with frozen arguments', async () => {
-    let attempts = 0
-    const upload = vi.fn((_name: string, _file: File, _progress: (percent: number) => void,
-      _values?: Record<string, Scalar>, signal?: AbortSignal) => {
-      if (++attempts === 1) return Promise.resolve({message: 'Server accepted'})
-      if (attempts === 2) return new Promise((_resolve, reject) => signal!.addEventListener('abort', () => reject(new Error('Cancelled')), {once: true}))
-      return Promise.resolve({})
-    })
-    render(<PluginWebUIRenderer nodes={[node({type: 'upload', label: 'Files', action: 'upload', manual_upload: true})]}
-      data={{}} values={{identity: 'other'}} busy={false} onChange={vi.fn()} onAction={vi.fn()} onUpload={upload} />)
-    const files = ['a.png', 'b.png', 'c.png'].map(name => new File(['image'], name, {type: 'image/png'}))
-    fireEvent.change(screen.getByLabelText('Files'), {target: {files}})
-    fireEvent.click(screen.getByRole('button', {name: '开始上传'}))
-    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2))
-    fireEvent.click(screen.getByRole('button', {name: '取消上传'}))
-    await waitFor(() => expect(screen.getByRole('button', {name: '重试失败及未发送文件'})).toBeInTheDocument())
-    expect(screen.getByText('Server accepted')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', {name: '重试失败及未发送文件'}))
-    await waitFor(() => expect(upload).toHaveBeenCalledTimes(4))
-    expect(upload.mock.calls.slice(2).map(call => call[1].name)).toEqual(['b.png', 'c.png'])
-    expect(upload.mock.calls[2][3]).toEqual({identity: 'other'})
-  })
-  it('renders progress and button choices with dynamic action labels', () => {
-    const change = vi.fn()
-    render(<PluginWebUIRenderer nodes={[
-      node({type: 'progress', label: 'Training progress', value: 42}),
-      node({type: 'select', presentation: 'buttons', name: 'identity', label: 'Identity', value: 'self', options: [{label: 'Self',value: 'self'},{label: 'Other',value: 'other'}]}),
-      node({type: 'button', label: 'Manage', action: 'manage', value: {source: 'runtime', field: 'label'}}),
-    ]} data={{runtime: {label: 'Uninstall CPU'}}} values={{identity: 'self'}} busy={false} onChange={change} onAction={vi.fn()} />)
-    expect(screen.getByRole('progressbar', {name: 'Training progress'})).toHaveAttribute('value', '42')
-    expect(screen.getByRole('radio', {name: 'Self'})).toHaveAttribute('aria-checked', 'true')
-    fireEvent.click(screen.getByRole('radio', {name: 'Other'}))
-    expect(change).toHaveBeenCalledWith('identity', 'other')
-    expect(screen.getByRole('button', {name: 'Uninstall CPU'})).toBeInTheDocument()
-  })
-  it('selects files inside the upload dialog and waits for explicit upload', async () => {
-    const upload = vi.fn().mockResolvedValue({ added: true })
-    render(<PluginWebUIRenderer nodes={[node({type: 'button', label: 'Upload pictures', detail: 'upload'}), node({type: 'dialog', name: 'upload', label: 'Upload pictures', children: [
-      node({type: 'upload', label: 'Choose files', action: 'upload', manual_upload: true})
-    ]})]} data={{}} values={{upload_label: 'other'}} busy={false} onChange={vi.fn()} onAction={vi.fn()} onUpload={upload} />)
-    expect(screen.queryByLabelText('Choose files')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', {name: 'Upload pictures'}))
-    const file = new File(['image'], 'sample.png', {type: 'image/png'})
-    fireEvent.change(screen.getByLabelText('Choose files'), {target: {files: [file]}})
-    expect(upload).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', {name: '开始上传'}))
-    await waitFor(() => expect(upload).toHaveBeenCalledWith('upload', file, expect.any(Function), {upload_label: 'other'}, expect.any(AbortSignal)))
-    await waitFor(() => expect(screen.getByText('sample.png: 100%')).toBeInTheDocument())
-  })
-
-  it('opens an ordinary dialog containing a button selection', () => {
-    const change = vi.fn()
-    render(<PluginWebUIRenderer nodes={[
-      node({type: 'button', label: 'Choose identity', detail: 'identity'}),
-      node({type: 'dialog', name: 'identity', label: 'Identity', children: [node({type: 'select', presentation: 'buttons', name: 'label', value: 'self', options: [{label: 'Bot', value: 'self'}, {label: 'Other', value: 'other'}]})]})
-    ]} data={{}} values={{label: 'self'}} busy={false} onChange={change} onAction={vi.fn()} />)
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', {name: 'Choose identity'}))
-    fireEvent.click(screen.getByRole('radio', {name: 'Other'}))
-    expect(change).toHaveBeenCalledWith('label', 'other')
-  })
-
-  it('keeps multi-selection across pages and clears after a successful batch', () => {
-    const action = vi.fn()
-    const nodes = [node({type: 'multi_select', selection: 'batch', value: {source: 'pictures', field: 'rows'}}),
-      node({type: 'repeat', name: 'picture', value: {source: 'pictures', field: 'rows'}, children: [node({type: 'checkbox', selection: 'batch', value: {scope: 'item', source: 'picture', field: 'id'}})]}),
-      node({type: 'button', action: 'apply', label: 'Apply'})]
-    const props = {nodes, values: {}, busy: false, onChange: vi.fn(), onAction: action}
-    const view = render(<PluginWebUIRenderer {...props} data={{pictures: {rows: [{id: 'one'}]}}} selectionRevision={0} />)
-    fireEvent.click(screen.getByRole('checkbox'))
-    view.rerender(<PluginWebUIRenderer {...props} data={{pictures: {rows: [{id: 'two'}]}}} selectionRevision={1} />)
-    fireEvent.click(screen.getByRole('checkbox'))
-    fireEvent.click(screen.getByRole('button', {name: 'Apply'}))
-    expect(action.mock.calls[0][1].selection.batch).toEqual({ids: 'one,two', count: 2})
-    view.rerender(<PluginWebUIRenderer {...props} data={{pictures: {rows: [{id: 'two'}]}}} selectionRevision={2} clearSelection="batch" />)
-    expect(screen.getByRole('checkbox')).not.toBeChecked()
-  })
-
-  it('renders plugin text as text without interpreting HTML', () => {
-    const content = '<img src=x onerror=alert(1)>'
+describe('simple plugin components', () => {
+  it('renders text as text, including log output', () => {
+    const text = '<img src=x onerror=alert(1)>'
     const { container } = render(
       <PluginWebUIRenderer
-        nodes={[node({ value: content })]}
+        nodes={[
+          { type: 'text', value: text },
+          { type: 'text', label: 'Log', value: text, format: 'log' },
+        ]}
         data={{}}
-        values={{}}
-        busy={false}
-        onChange={vi.fn()}
-        onAction={vi.fn()}
+        {...callbacks()}
       />
     )
-    expect(screen.getByText(content)).toBeInTheDocument()
+    expect(screen.getByText(text, { selector: 'p' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Log')).toHaveValue(text)
+    expect(screen.getByLabelText('Log')).toHaveAttribute('readonly')
     expect(container.querySelector('img')).toBeNull()
   })
 
-  it('resolves only own data fields and exposes invalid bindings', () => {
-    const reference = node({ value: { source: 'summary', field: 'totals.count' } })
-    expect(resolveNodeValue(reference, { summary: { totals: { count: 4 } } })).toBe(4)
-    expect(() => resolveNodeValue(reference, { summary: {} })).toThrow('Missing data field')
+  it('resolves only own properties and distinguishes unselected rows from invalid queries', () => {
+    const node: WebUINode = { type: 'text', value: { source: 'summary', field: 'totals.count' } }
+    expect(resolveNodeValue(node, { summary: { totals: { count: 4 } } })).toBe(4)
+    expect(() => resolveNodeValue(node, { summary: {} })).toThrow('Missing data field')
     expect(() =>
-      resolveNodeValue(node({ value: { source: 'summary', field: 'toString' } }), { summary: {} })
+      resolveNodeValue({ type: 'text', value: { source: 'toString', field: '' } }, {})
+    ).toThrow('Missing data source')
+    expect(() =>
+      resolveNodeValue(
+        { type: 'text', value: { source: 'summary', field: 'toString' } },
+        { summary: {} }
+      )
     ).toThrow('Missing data field')
+    expect(
+      resolveNodeValue(
+        { type: 'text', value: { scope: 'selection', source: 'row', field: 'id' } },
+        {}
+      )
+    ).toBeNull()
   })
 
-  it('dispatches declared actions and disables buttons during requests', () => {
-    const onAction = vi.fn()
-    const nodes = [node({ type: 'button', label: 'Recalculate', action: 'recalculate' })]
-    const { rerender } = render(
-      <PluginWebUIRenderer
-        nodes={nodes}
-        data={{}}
-        values={{}}
-        busy={false}
-        onChange={vi.fn()}
-        onAction={onAction}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }))
-    expect(onAction).toHaveBeenCalledWith('recalculate', { selection: {}, item: undefined })
-    rerender(
-      <PluginWebUIRenderer
-        nodes={nodes}
-        data={{}}
-        values={{}}
-        busy
-        onChange={vi.fn()}
-        onAction={onAction}
-      />
-    )
-    expect(screen.getByRole('button', { name: 'Recalculate' })).toBeDisabled()
+  it('disables declared actions while busy or when the condition matches', () => {
+    const action = vi.fn()
+    const nodes: WebUINode[] = [
+      {
+        type: 'button',
+        label: 'Run',
+        action: 'run',
+        disabled_when: {
+          reference: { source: 'status', field: 'ready' },
+          operator: 'equals',
+          expected: false,
+        },
+        disabled_reason: 'Not ready',
+      },
+    ]
+    const props = { nodes, ...callbacks(), onAction: action }
+    const view = render(<PluginWebUIRenderer {...props} data={{ status: { ready: true } }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    expect(action).toHaveBeenCalledWith('run', { selection: {} })
+    view.rerender(<PluginWebUIRenderer {...props} data={{ status: { ready: false } }} />)
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled()
+    expect(screen.getByText('Not ready')).toBeInTheDocument()
+    view.rerender(<PluginWebUIRenderer {...props} busy data={{ status: { ready: true } }} />)
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled()
   })
 
-  it('paginates tables instead of rendering unbounded result rows', () => {
-    const rows = Array.from({ length: 60 }, (_, i) => ({ name: `row-${i}` }))
+  it('paginates tables without mounting the whole response', () => {
+    const rows = Array.from({ length: 60 }, (_, i) => ({ name: 'row-' + i }))
     render(
       <PluginWebUIRenderer
         nodes={[
-          node({
+          {
             type: 'table',
             value: { source: 'rows', field: '' },
             columns: [{ field: 'name', label: 'Name' }],
-          }),
+          },
         ]}
         data={{ rows }}
-        values={{}}
-        busy={false}
-        onChange={vi.fn()}
-        onAction={vi.fn()}
+        {...callbacks()}
       />
     )
     expect(screen.getByText('row-0')).toBeInTheDocument()
@@ -193,163 +96,90 @@ describe('plugin WebUI renderer', () => {
     expect(screen.getByText('row-50')).toBeInTheDocument()
     expect(screen.queryByText('row-0')).not.toBeInTheDocument()
   })
-})
 
-describe('plugin gallery', () => {
-  it('renders bounded raster previews and secure artwork links as plain text', () => {
-    const { container } = render(
-      <PluginWebUIRenderer
-        nodes={[node({ type: 'gallery', columns: 3, value: { source: 'images', field: '' } })]}
-        data={{
-          images: [
-            {
-              title: '<script>alert(1)</script>',
-              thumbnail: 'data:image/jpeg;base64,aGVsbG8=',
-              url: 'https://www.pixiv.net/artworks/1',
-              badge: '模型优秀',
-            },
-            {
-              title: 'SVG',
-              thumbnail: 'data:image/svg+xml;base64,aGVsbG8=',
-              url: 'javascript:alert(1)',
-            },
-            {
-              title: 'Oversized',
-              thumbnail: 'data:image/jpeg;base64,' + 'a'.repeat(25000),
-              url: 'https://user:secret@example.com/',
-            },
-            { title: 'Remote', thumbnail: 'https://example.com/tracking.jpg' },
+  it('invalidates selected records and details when the data snapshot changes', () => {
+    const row = { name: 'Alice', id: 9 }
+    const props = {
+      ...callbacks(),
+      nodes: [
+        {
+          type: 'table',
+          selection: 'record',
+          detail: 'details',
+          value: { source: 'rows', field: '' },
+          columns: [{ field: 'name', label: 'Name' }],
+        },
+        {
+          type: 'dialog',
+          name: 'details',
+          label: 'Details',
+          children: [
+            { type: 'text', value: { scope: 'selection', source: 'record', field: 'name' } },
+            { type: 'button', label: 'Remove', action: 'remove' },
           ],
-        }}
-        values={{}}
-        busy={false}
-        onChange={vi.fn()}
-        onAction={vi.fn()}
-      />
+        },
+      ] as WebUINode[],
+    }
+    const view = render(
+      <PluginWebUIRenderer {...props} data={{ rows: [row] }} selectionRevision={0} />
     )
-    expect(container.querySelectorAll('img')).toHaveLength(1)
-    expect(container.querySelectorAll('a')).toHaveLength(1)
-    expect(container.querySelector('a')).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(screen.getByText('<script>alert(1)</script>')).toBeInTheDocument()
-    expect(container.querySelector('script')).toBeNull()
-  })
-})
-
-describe('details and dynamic content', () => {
-  it('opens selected row details with keyboard and dispatches its context', () => {
-    const onAction = vi.fn()
-    const row = { name: 'Alice', message: '<script>full message</script>', id: 9 }
-    render(
-      <PluginWebUIRenderer
-        nodes={[
-          node({
-            type: 'table',
-            selection: 'record',
-            detail: 'details',
-            value: { source: 'summary', field: 'rows' },
-            columns: [{ field: 'name', label: 'Name' }],
-          }),
-          node({
-            type: 'dialog',
-            name: 'details',
-            label: 'Record detail',
-            children: [
-              node({ value: { scope: 'selection', source: 'record', field: 'message' } }),
-              node({ type: 'button', label: 'Remove', action: 'remove' }),
-            ],
-          }),
-        ]}
-        data={{ summary: { rows: [row] } }}
-        values={{}}
-        busy={false}
-        onChange={vi.fn()}
-        onAction={onAction}
-      />
-    )
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     fireEvent.keyDown(screen.getByText('Alice').closest('tr')!, { key: 'Enter' })
-    expect(screen.getByRole('dialog')).toHaveTextContent('<script>full message</script>')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Alice')
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
-    expect(onAction).toHaveBeenCalledWith('remove', { selection: { record: row }, item: undefined })
-    expect(document.querySelector('script')).toBeNull()
+    expect(props.onAction).toHaveBeenCalledWith('remove', { selection: { record: row } })
+    view.rerender(<PluginWebUIRenderer {...props} data={{ rows: [] }} selectionRevision={1} />)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByText('Alice')).not.toBeInTheDocument()
   })
 
-  it('renders bounded array cards, controls empty state and expands sections', () => {
-    const nodes = [
-      node({
+  it('supports simple visibility and collapsible content', () => {
+    const nodes: WebUINode[] = [
+      {
         type: 'text',
-        value: 'No rows',
-        when: {
-          reference: { source: 'summary', field: 'rows' },
-          operator: 'empty',
-          expected: null,
-        },
-      }),
-      node({
+        value: 'No records',
+        when: { reference: { source: 'rows', field: '' }, operator: 'empty', expected: null },
+      },
+      {
         type: 'collapsible',
-        label: 'Expand cards',
-        when: {
-          reference: { source: 'summary', field: 'rows' },
-          operator: 'not_empty',
-          expected: null,
-        },
-        children: [
-          node({
-            type: 'repeat',
-            name: 'entry',
-            max_items: 2,
-            value: { source: 'summary', field: 'rows' },
-            children: [
-              node({
-                type: 'card',
-                children: [node({ value: { scope: 'item', source: 'entry', field: 'name' } })],
-              }),
-            ],
-          }),
-        ],
-      }),
+        label: 'Details',
+        children: [{ type: 'text', value: 'Detail content' }],
+        when: { reference: { source: 'rows', field: '' }, operator: 'not_empty', expected: null },
+      },
     ]
-    const props = { nodes, values: {}, busy: false, onChange: vi.fn(), onAction: vi.fn() }
-    const view = render(<PluginWebUIRenderer {...props} data={{ summary: { rows: [] } }} />)
-    expect(screen.getByText('No rows')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Expand cards' })).not.toBeInTheDocument()
-    view.rerender(
-      <PluginWebUIRenderer
-        {...props}
-        data={{ summary: { rows: [{ name: 'First' }, { name: 'Second' }, { name: 'Third' }] } }}
-      />
-    )
-    expect(screen.queryByText('No rows')).not.toBeInTheDocument()
-    expect(screen.queryByText('First')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Expand cards' }))
-    expect(screen.getByText('First')).toBeInTheDocument()
-    expect(screen.getByText('Second')).toBeInTheDocument()
-    expect(screen.queryByText('Third')).not.toBeInTheDocument()
+    const props = { nodes, ...callbacks() }
+    const view = render(<PluginWebUIRenderer {...props} data={{ rows: [] }} />)
+    expect(screen.getByText('No records')).toBeInTheDocument()
+    view.rerender(<PluginWebUIRenderer {...props} data={{ rows: [{}] }} />)
+    expect(screen.queryByText('No records')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }))
+    expect(screen.getByText('Detail content')).toBeInTheDocument()
   })
 
-  it('rejects nested repeat amplification and inherited source properties', () => {
-    const inner = node({
-      type: 'repeat',
-      name: 'inner',
-      max_items: 100,
-      value: { source: 'rows', field: '' },
-      children: [node({ value: 'item' })],
-    })
-    const outer = node({
-      type: 'repeat',
-      name: 'outer',
-      max_items: 100,
-      value: { source: 'rows', field: '' },
-      children: [inner],
-    })
+  it('rejects invalid images instead of treating them as missing data', () => {
+    const props = {
+      nodes: [{ type: 'image', value: { source: 'image', field: '' } }] as WebUINode[],
+      ...callbacks(),
+    }
+    const view = render(<PluginWebUIRenderer {...props} data={{ image: null }} />)
+    expect(screen.getByText('pluginWebUI.empty')).toBeInTheDocument()
+    view.unmount()
     expect(() =>
-      validateRenderSize([outer], { rows: Array.from({ length: 100 }, () => ({})) })
+      render(<PluginWebUIRenderer {...props} data={{ image: 'https://example.test/image.jpg' }} />)
+    ).toThrow('bounded JPEG')
+  })
+
+  it('rejects oversized trees and unknown components', () => {
+    expect(() =>
+      validateRenderSize(Array.from({ length: 201 }, () => ({ type: 'text', value: 'x' })))
     ).toThrow('exceeds limits')
-    expect(() => resolveNodeValue(node({ value: { source: 'toString', field: '' } }), {})).toThrow(
-      'Missing data source'
-    )
-    expect(
-      resolveNodeValue(node({ value: { scope: 'selection', source: 'record', field: 'name' } }), {})
-    ).toBeNull()
+    expect(() =>
+      render(
+        <PluginWebUIRenderer
+          {...callbacks()}
+          data={{}}
+          nodes={[{ type: 'repeat' } as unknown as WebUINode]}
+        />
+      )
+    ).toThrow('Unsupported component')
   })
 })

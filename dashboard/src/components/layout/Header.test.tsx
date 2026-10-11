@@ -250,8 +250,8 @@ function makeProps(
 
 describe('Header', () => {
   it('插件顶部标签保留原始标题并通过宿主工作区切换导航', () => {
-    const extension: WebUIExtension = { plugin_id: 'test.plugin', workspace_title: '消息统计', pages: [{
-      id: 'overview', title: '概览', description: '', placement: 'workspace', icon: 'chart', queries: {}, actions: {}, content: [],
+    const extension: WebUIExtension = { schema_version: 2, plugin_id: 'test.plugin', workspace_title: '消息统计', pages: [{
+      id: 'overview', mode: 'declarative', title: '概览', description: '', placement: 'workspace', icon: 'chart', queries: {}, actions: {}, content: [],
     }] }
     const props = makeProps({ extensions: [extension] })
     render(<Header {...props} />)
@@ -260,13 +260,14 @@ describe('Header', () => {
     expect(mocks.t).not.toHaveBeenCalledWith('消息统计')
   })
 
-  it('当前插件工作区保持可见，其余插件收进更多菜单', () => {
-    const extensions: WebUIExtension[] = ['first', 'second'].map((plugin_id) => ({ plugin_id, workspace_title: plugin_id, pages: [{
-      id: 'overview', title: 'Overview', description: '', placement: 'workspace', icon: 'puzzle', queries: {}, actions: {}, content: [],
+  it('最多展示两个插件工作区，当前工作区保持可见，其余进入更多菜单', () => {
+    const extensions: WebUIExtension[] = ['first', 'second', 'third'].map((plugin_id) => ({ schema_version: 2, plugin_id, workspace_title: plugin_id, pages: [{
+      id: 'overview', mode: 'declarative', title: 'Overview', description: '', placement: 'workspace', icon: 'puzzle', queries: {}, actions: {}, content: [],
     }] }))
-    render(<Header {...makeProps({ extensions, workspaceMode: 'plugin:second' })} />)
-    expect(screen.getByRole('tab', { name: 'second' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'first' })).not.toBeInTheDocument()
+    render(<Header {...makeProps({ extensions, workspaceMode: 'plugin:third' })} />)
+    expect(screen.getByRole('tab', { name: 'first' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'third' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'second' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'pluginWebUI.more' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'a11y.closeMenu' })).not.toHaveClass('hidden')
   })

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, useState } from 'react'
+import { createContext, useContext, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 
@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
@@ -26,10 +27,14 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { conditionMatches, nodeVisible, resolveNodeValue, validateRenderSize } from '@/lib/plugin-webui'
+import {
+  conditionMatches,
+  nodeChildren,
+  nodeVisible,
+  resolveNodeValue,
+  validateRenderSize,
+} from '@/lib/plugin-webui'
 import type { DataContexts, Scalar, WebUINode } from '@/lib/plugin-webui'
-import { prepareUploadImage } from '@/lib/upload-image'
-import type { PreparedImage } from '@/lib/upload-image'
 
 interface RendererProps {
   nodes: WebUINode[]
@@ -38,24 +43,14 @@ interface RendererProps {
   busy: boolean
   pendingData?: boolean
   selectionRevision?: number
-  clearSelection?: string | null
-  galleryPreferences?: Record<string, string>
   onChange: (name: string, value: Scalar) => void
   onAction: (name: string, contexts?: DataContexts) => void
-  onUpload?: (name: string, file: File, progress: (percent: number) => void, values?: Record<string, Scalar>, signal?: AbortSignal) => Promise<unknown>
-  onUploadComplete?: () => Promise<void>
-  items?: Record<string, unknown>
-  compact?: boolean
 }
-
 interface InteractionState {
   selection: Record<string, unknown>
   openDialog: string | null
   select: (name: string, row: Record<string, unknown>, detail?: string | null) => void
-  open: (name: string) => void
   close: () => void
-  multiple: Record<string, string[]>
-  updateMultiple: (name: string, ids: string[]) => void
 }
 const InteractionContext = createContext<InteractionState | null>(null)
 
@@ -65,139 +60,43 @@ function display(value: unknown): string {
   return String(value)
 }
 
-// Gallery previews are bounded raster data, never plugin-supplied HTML or remote tracking URLs.
-function galleryThumbnail(value: unknown): string | undefined {
-  return typeof value === 'string' &&
-    value.length <= 24000 &&
-    /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)
-    ? value
-    : undefined
-}
-
-function galleryLink(value: unknown): string | undefined {
-  if (typeof value !== 'string' || value.length > 2000) return undefined
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.username && !url.password ? url.href : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function UploadControl({ label, action, busy, upload, complete, maxEdge, manual, values, submitLabel }: {
-  label: string; action: string; busy: boolean; upload: RendererProps['onUpload']; complete: RendererProps['onUploadComplete']; maxEdge?: number | null; manual?: boolean; values: Record<string, Scalar>; submitLabel?: string | null
-}) {
-  const id = useId()
-  const [running, setRunning] = useState(false)
-  const controller = useRef<AbortController | null>(null)
-  const retry = useRef<{ files: File[]; values: Record<string, Scalar> }>({ files: [], values: {} })
-  useEffect(() => () => controller.current?.abort(), [])
-  const [files, setFiles] = useState<File[]>([])
-  const input = useRef<HTMLInputElement>(null)
-  const [previews, setPreviews] = useState<string[]>([])
-  useEffect(() => {
-    const urls = files.map(file => URL.createObjectURL(file))
-    setPreviews(urls)
-    return () => urls.forEach(url => URL.revokeObjectURL(url))
-  }, [files])
-  const [status, setStatus] = useState<Array<{ name: string; progress: number; error?: string; note?: string }>>([])
-  const start = async (files: File[], batchValues = { ...values }) => {
-    const operation = new AbortController()
-    controller.current = operation
-    const failed: File[] = []
-    retry.current = { files: [], values: batchValues }
-    setStatus(files.map(file => ({ name: file.name, progress: 0 })))
-    setRunning(true)
-    const update = (index: number, change: { progress?: number; error?: string; note?: string }) =>
-      setStatus(rows => rows.map((row, i) => i === index ? { ...row, ...change } : row))
-    try {
-      for (const [index, file] of files.entries()) {
-        if (operation.signal.aborted) {
-          failed.push(file)
-          update(index, { error: '已取消，未发送' })
-          continue
-        }
-        try {
-          const prepared: PreparedImage = maxEdge ? await prepareUploadImage(file, maxEdge) : { file }
-          if (operation.signal.aborted) throw new DOMException('已取消', 'AbortError')
-          if (prepared.file.size > 20 * 1024 * 1024) throw new Error('File exceeds 20 MiB')
-          if (prepared.note) update(index, { note: prepared.note })
-          const response = await upload!(action, prepared.file, percent => update(index, { progress: percent }), batchValues, operation.signal)
-          if (response && typeof response === 'object' && 'message' in response && typeof response.message === 'string')
-            update(index, { note: [prepared.note, response.message].filter(Boolean).join(' · ') })
-          update(index, { progress: 100 })
-        } catch (error) { failed.push(file); update(index, { error: String(error) }) }
-      }
-      retry.current = { files: failed, values: batchValues }
-      await complete?.()
-    } finally { setRunning(false) }
-  }
-  return <div className="space-y-2">
-    <Label htmlFor={id}>{label}</Label>
-    {!upload && <p role="alert">Host does not support file_upload</p>}
-    {manual && <div className="rounded-md border-2 border-dashed p-5 text-center space-y-2"
-      onDragOver={event => event.preventDefault()} onDrop={event => {
-        event.preventDefault()
-        if (!busy && !running && upload) { setFiles(Array.from(event.dataTransfer.files)); setStatus([]) }
-      }}><Button variant="outline" disabled={busy || running || !upload} onClick={() => input.current?.click()}>选择图片</Button>
-      <p className="text-xs text-muted-foreground">也可以将多张图片拖到这里</p></div>}
-    <Input ref={input} className={manual ? 'hidden' : undefined} id={id} type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={busy || running || !upload}
-      onChange={async (event) => {
-        const selected = Array.from(event.target.files ?? [])
-        event.target.value = ''
-        if (manual) { setFiles(selected); setStatus([]) }
-        else await start(selected)
-      }} />
-    {manual && <>
-      <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">{files.map((file,index) =>
-        <div key={index} className="border rounded p-1 text-xs">
-          {previews[index] && <img className="h-24 w-full object-contain" src={previews[index]} alt={file.name} />}
-          <p className="truncate" title={file.name}>{file.name}</p>
-          <Button size="sm" variant="ghost" disabled={running} onClick={() => setFiles(previous => previous.filter((_,i) => i!==index))}>移除</Button>
-        </div>)}</div>
-      <p className="text-sm text-muted-foreground">已选 {files.length} 个文件，确认后点击{submitLabel ?? '开始上传'}。</p>
-      <Button disabled={busy || running || !upload || files.length === 0} onClick={async () => {
-        const selected = files
-        setFiles([])
-        await start(selected)
-      }}>{submitLabel ?? '开始上传'}</Button>
-    </>}
-    {running && <Button variant="outline" onClick={() => controller.current?.abort()}>取消上传</Button>}
-    {!running && retry.current.files.length > 0 && <Button variant="outline" disabled={busy || !upload}
-      onClick={() => void start(retry.current.files, retry.current.values)}>重试失败及未发送文件</Button>}
-    <p className="text-xs text-muted-foreground">关闭弹窗会取消尚未完成的上传；服务器已接收的文件保留，重试可能复用已有文件。</p>
-    {status.map((row, index) => <div key={index} role={row.error ? 'alert' : 'status'}>
-      {row.name}: {row.error ?? `${row.progress}%`}
-      {row.note && <span className="ml-2 text-muted-foreground">{row.note}</span>}
-      {!row.error && <progress max={100} value={row.progress} aria-label={row.name} />}
-    </div>)}
-  </div>
+// Missing images are empty; malformed/oversized data is an explicit rendering error.
+function imageSource(value: unknown): string | null {
+  if (value === null) return null
+  if (
+    typeof value !== 'string' ||
+    value.length > 24000 ||
+    !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)
+  )
+    throw new Error('Image must be a bounded JPEG, PNG or WebP data URL')
+  return value
 }
 
 function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node: WebUINode }) {
   const { t } = useTranslation()
   const id = useId()
   const [tablePage, setTablePage] = useState(0)
-  const [expanded, setExpanded] = useState(node.default_open ?? false)
+  const [expanded, setExpanded] = useState(node.type === 'collapsible' && !!node.default_open)
   const interaction = useContext(InteractionContext)!
-  const contexts: DataContexts = { selection: interaction.selection, item: props.items }
-  const galleryKey =
-    node.value !== null && typeof node.value === 'object'
-      ? `${node.value.source}.${node.value.field}`
-      : ''
-  const [galleryColumns, setGalleryColumns] = useState(
-    () => props.galleryPreferences?.[galleryKey] ?? String(node.columns ?? 'auto')
-  )
-  const awaitingData = props.pendingData && node.value !== null && typeof node.value === 'object'
+  const contexts: DataContexts = { selection: interaction.selection }
+  const awaitingData =
+    props.pendingData && 'value' in node && node.value !== null && typeof node.value === 'object'
   const visible = props.pendingData && node.when ? false : nodeVisible(node, props.data, contexts)
   const value = awaitingData || !visible ? null : resolveNodeValue(node, props.data, contexts)
-  const children = <NodesRenderer {...props} compact={props.compact || node.compact} nodes={node.children} />
-  const fieldValue = node.name === null ? null : props.values[node.name]
+  const children = <NodesRenderer {...props} nodes={nodeChildren(node)} />
+  const fieldValue = 'name' in node ? props.values[node.name] : null
   const change = (next: Scalar) => {
-    if (node.name !== null) props.onChange(node.name, next)
+    if ('name' in node) props.onChange(node.name, next)
   }
-  const disabledByRule = !props.pendingData && !!node.disabled_when && conditionMatches(node.disabled_when, props.data, contexts)
-  const disabled = props.busy || (!!props.pendingData && !!node.disabled_when) || disabledByRule
+  const disabledByRule =
+    !props.pendingData &&
+    'disabled_when' in node &&
+    !!node.disabled_when &&
+    conditionMatches(node.disabled_when, props.data, contexts)
+  const disabled =
+    props.busy ||
+    (!!props.pendingData && 'disabled_when' in node && !!node.disabled_when) ||
+    disabledByRule
   const heading = node.label ? <Label htmlFor={id}>{node.label}</Label> : null
 
   if (!visible) return null
@@ -211,40 +110,37 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
 
   switch (node.type) {
     case 'progress': {
-      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) throw new Error('Invalid progress percentage')
-      return <div className="space-y-1"><div className="flex justify-between text-xs">{heading}<span>{value}%</span></div>
-        <progress className="w-full h-2 accent-primary" value={value} max={100} aria-label={node.label ?? '进度'} /></div>
-    }
-    case 'checkbox': {
-      const ids = interaction.multiple[node.selection!] ?? []
-      const imageId = String(value)
-      return <label className="flex items-center gap-2 text-xs">
-        <input type="checkbox" disabled={disabled || (!ids.includes(imageId) && ids.length >= 1000)}
-          checked={ids.includes(imageId)} onChange={event => interaction.updateMultiple(node.selection!,
-            event.target.checked ? [...ids, imageId] : ids.filter(id => id !== imageId))} />
-        {node.label ?? '选择'}
-      </label>
-    }
-    case 'multi_select': {
-      if (!Array.isArray(value)) throw new Error('Multi-select data must be an array')
-      const ids = interaction.multiple[node.selection!] ?? []
-      return <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm">已选 {ids.length} 项（跨页保留，每批最多1000项）</span>
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() =>
-          interaction.updateMultiple(node.selection!, [...new Set([...ids, ...value.map(row => String(row.id))])].slice(0, 1000))}>全选本页</Button>
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() =>
-          interaction.updateMultiple(node.selection!, ids.filter(id => !value.some(row => String(row.id) === id)))}>取消本页</Button>
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() => interaction.updateMultiple(node.selection!, [])}>清空选择</Button>
-      </div>
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100)
+        throw new Error('Invalid progress percentage')
+      return (
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs">
+            {heading}
+            <span>{value}%</span>
+          </div>
+          <progress
+            className="accent-primary h-2 w-full"
+            value={value}
+            max={100}
+            aria-label={node.label ?? '进度'}
+          />
+        </div>
+      )
     }
     case 'image': {
-      const source = galleryThumbnail(value)
-      return source ? <img src={source} alt={node.label ?? ''} loading="lazy" decoding="async"
-        className={`${props.compact ? 'h-40' : 'h-72'} w-full object-contain bg-muted rounded-md`} /> :
+      const source = imageSource(value)
+      return source ? (
+        <img
+          src={source}
+          alt={node.label ?? ''}
+          loading="lazy"
+          decoding="async"
+          className="bg-muted h-72 w-full rounded-md object-contain"
+        />
+      ) : (
         <p className="text-muted-foreground text-sm">{t('pluginWebUI.empty')}</p>
+      )
     }
-    case 'upload':
-      return <UploadControl label={node.label!} action={node.action!} busy={disabled} upload={props.onUpload} complete={props.onUploadComplete} maxEdge={node.image_max_edge} manual={node.manual_upload} values={props.values} submitLabel={node.submit_label} />
     case 'dialog':
       return (
         <Dialog
@@ -270,21 +166,6 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
           <CollapsibleContent className="space-y-4">{children}</CollapsibleContent>
         </Collapsible>
       )
-    case 'repeat': {
-      if (!Array.isArray(value)) throw new Error('Repeat data must be an array')
-      return (
-        <>
-          {value.slice(0, node.max_items ?? 50).map((item, index) => (
-            <NodesRenderer
-              key={index}
-              {...props}
-              items={{ ...props.items, [node.name!]: item }}
-              nodes={node.children}
-            />
-          ))}
-        </>
-      )
-    }
     case 'stack':
       return (
         <section className="space-y-4">
@@ -303,7 +184,7 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
         <section>
           {heading}
           <div
-            className={props.compact ? `grid gap-1 ${({1:'grid-cols-1',2:'grid-cols-2',3:'grid-cols-3',4:'grid-cols-4'})[node.columns as 1|2|3|4]}` : `grid grid-cols-1 gap-4 ${columns[node.columns as keyof typeof columns]}`}
+            className={`grid grid-cols-1 gap-4 ${columns[node.columns as keyof typeof columns]}`}
           >
             {children}
           </div>
@@ -312,13 +193,13 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
     }
     case 'card':
       return (
-        <Card className={node.compact ? 'py-0 gap-0' : undefined}>
+        <Card>
           {node.label && (
             <CardHeader>
               <CardTitle>{node.label}</CardTitle>
             </CardHeader>
           )}
-          <CardContent className={node.compact ? 'p-2 sm:p-2 space-y-1' : 'space-y-4 pt-6'}>{children}</CardContent>
+          <CardContent className="space-y-4 pt-6">{children}</CardContent>
         </Card>
       )
     case 'tabs':
@@ -339,8 +220,23 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
         </Tabs>
       )
     case 'text':
+      if (node.format === 'log')
+        return (
+          <div className="space-y-2">
+            {heading}
+            <Textarea
+              id={id}
+              readOnly
+              autoResize={false}
+              data-dashboard-input="true"
+              aria-label={node.label ?? '日志'}
+              value={display(value)}
+              className="bg-muted/40 h-64 resize-y font-mono text-xs leading-relaxed shadow-inner"
+            />
+          </div>
+        )
       return (
-        <div className={props.compact ? 'space-y-0 text-xs' : 'space-y-2'}>
+        <div className="space-y-2">
           {heading}
           <p className="text-muted-foreground break-words whitespace-pre-wrap">{display(value)}</p>
         </div>
@@ -390,11 +286,6 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
         </div>
       )
     case 'select':
-      if (node.presentation === 'buttons') return <fieldset className="space-y-2"><legend className="text-sm">{node.label}</legend>
-        <div className="flex flex-wrap gap-2" role="radiogroup">{node.options.map(option => <Button key={option.value} type="button" role="radio"
-          aria-checked={fieldValue===option.value} variant={fieldValue===option.value?'default':'outline'} disabled={disabled}
-          onClick={() => change(option.value)}>{option.label}</Button>)}</div>
-        {disabledByRule && node.disabled_reason && <p className="text-xs text-muted-foreground">{node.disabled_reason}</p>}</fieldset>
       return (
         <div className="space-y-2">
           {heading}
@@ -418,24 +309,26 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
       )
     case 'button':
       return (
-        <div className="inline-flex flex-col gap-1"><Button
-          size={props.compact ? 'sm' : 'default'}
-          className={props.compact ? 'h-7 px-1 text-xs' : undefined}
-          disabled={disabled}
-          variant={
-            node.variant === 'danger'
-              ? 'destructive'
-              : node.variant === 'muted'
-                ? 'secondary'
-                : 'default'
-          }
-          onClick={() => {
-            if (node.detail) interaction.open(node.detail)
-            else if (node.action !== null) props.onAction(node.action, contexts)
-          }}
-        >
-          {node.value === null || node.value === undefined ? node.label : display(value)}
-        </Button>{disabledByRule && node.disabled_reason && <span className="text-xs text-muted-foreground">{node.disabled_reason}</span>}</div>
+        <div className="inline-flex flex-col gap-1">
+          <Button
+            disabled={disabled}
+            variant={
+              node.variant === 'danger'
+                ? 'destructive'
+                : node.variant === 'muted'
+                  ? 'secondary'
+                  : 'default'
+            }
+            onClick={() => {
+              props.onAction(node.action, contexts)
+            }}
+          >
+            {node.label}
+          </Button>
+          {disabledByRule && node.disabled_reason && (
+            <span className="text-muted-foreground text-xs">{node.disabled_reason}</span>
+          )}
+        </div>
       )
     case 'pagination': {
       if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -481,102 +374,6 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
             </Button>
           </div>
         </nav>
-      )
-    }
-    case 'gallery': {
-      if (
-        !Array.isArray(value) ||
-        value.length > 24 ||
-        value.some((row) => row === null || typeof row !== 'object' || Array.isArray(row))
-      )
-        throw new Error('Gallery data must be an array of at most 24 objects')
-      const columns = {
-        1: 'md:grid-cols-1',
-        2: 'sm:grid-cols-2',
-        3: 'sm:grid-cols-2 lg:grid-cols-3',
-        4: 'sm:grid-cols-2 lg:grid-cols-4',
-      }
-      return (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            {heading}
-            <Select
-              value={galleryColumns}
-              onValueChange={(next) => {
-                if (props.galleryPreferences) props.galleryPreferences[galleryKey] = next
-                setGalleryColumns(next)
-              }}
-            >
-              <SelectTrigger aria-label={t('pluginWebUI.galleryLayout')} className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">{t('pluginWebUI.galleryAuto')}</SelectItem>
-                {[1, 2, 3, 4].map((count) => (
-                  <SelectItem key={count} value={String(count)}>
-                    {t('pluginWebUI.galleryColumns', { count })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div
-            className={`grid gap-4 ${galleryColumns === 'auto' ? '' : 'grid-cols-1 ' + columns[Number(galleryColumns) as keyof typeof columns]}`}
-            style={
-              galleryColumns === 'auto'
-                ? { gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))' }
-                : undefined
-            }
-          >
-            {(value as Record<string, unknown>[]).map((row, index) => {
-              const thumbnail = galleryThumbnail(row.thumbnail)
-              const href = galleryLink(row.url)
-              return (
-                <Card key={index} className="overflow-hidden py-0">
-                  <div className="bg-muted flex h-56 items-center justify-center">
-                    {thumbnail ? (
-                      <img
-                        src={thumbnail}
-                        alt={display(row.title)}
-                        loading="lazy"
-                        decoding="async"
-                        className="h-full w-full object-contain"
-                      />
-                    ) : (
-                      <p className="text-muted-foreground text-sm">{t('pluginWebUI.empty')}</p>
-                    )}
-                  </div>
-                  <CardContent className="space-y-2 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="bg-muted rounded-full px-2 py-1 text-xs">
-                        {display(row.badge)}
-                      </span>
-                      <span className="text-muted-foreground text-xs">{display(row.subtitle)}</span>
-                    </div>
-                    <p className="truncate font-medium" title={display(row.title)}>
-                      {display(row.title)}
-                    </p>
-                    <p className="text-muted-foreground truncate text-sm">{display(row.author)}</p>
-                    <p className="text-muted-foreground text-xs">{display(row.description)}</p>
-                    {href && (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary text-sm underline underline-offset-4"
-                      >
-                        {href}
-                      </a>
-                    )}
-                  </CardContent>
-                </Card>
-              )
-            })}
-          </div>
-          {value.length === 0 && (
-            <p className="text-muted-foreground text-sm">{t('pluginWebUI.empty')}</p>
-          )}
-        </section>
       )
     }
     case 'table': {
@@ -705,14 +502,21 @@ function NodeRenderer({ node, ...props }: Omit<RendererProps, 'nodes'> & { node:
             ) : (
               <LineChart data={value}>
                 {chartChildren}
-                <Line dataKey={y} stroke={`var(--color-${y})`} strokeWidth={2}
-                  dot={{ r: 3, fill: `var(--color-${y})` }} isAnimationActive={false} />
+                <Line
+                  dataKey={y}
+                  stroke={`var(--color-${y})`}
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: `var(--color-${y})` }}
+                  isAnimationActive={false}
+                />
               </LineChart>
             )}
           </ChartContainer>
         </div>
       )
     }
+    default:
+      throw new Error('Unsupported component; migrate complex UI to a custom page')
   }
 }
 
@@ -727,28 +531,28 @@ function NodesRenderer({ nodes, ...props }: RendererProps) {
 }
 
 export function PluginWebUIRenderer(props: RendererProps) {
-  const [selection, setSelection] = useState<Record<string, unknown>>({})
-  const [multiple, setMultiple] = useState<Record<string, string[]>>({})
-  const [openDialog, setOpenDialog] = useState<string | null>(null)
-  const combinedSelection = { ...selection, ...Object.fromEntries(Object.entries(multiple).map(([name, ids]) => [name, { ids: ids.join(','), count: ids.length }])) }
-  useEffect(() => {
-    if (props.clearSelection) setMultiple(previous => ({ ...previous, [props.clearSelection!]: [] }))
-  }, [props.selectionRevision])
-  if (!props.pendingData)
-    validateRenderSize(props.nodes, props.data, { selection: combinedSelection, item: props.items }, openDialog)
+  const revision = props.selectionRevision ?? 0
+  const [state, setState] = useState<{
+    revision: number
+    selection: Record<string, unknown>
+    openDialog: string | null
+  }>({ revision, selection: {}, openDialog: null })
+  // Row details belong to a query snapshot. Invalidate synchronously before children render.
+  const current =
+    state.revision === revision ? state : { revision, selection: {}, openDialog: null }
+  validateRenderSize(props.nodes)
   return (
     <InteractionContext.Provider
       value={{
-        selection: combinedSelection,
-        multiple,
-        updateMultiple: (name, ids) => setMultiple(previous => ({ ...previous, [name]: ids })),
-        openDialog,
-        select: (name, row, detail) => {
-          setSelection((previous) => ({ ...previous, [name]: row }))
-          if (detail) setOpenDialog(detail)
-        },
-        open: name => setOpenDialog(name),
-        close: () => setOpenDialog(null),
+        selection: current.selection,
+        openDialog: current.openDialog,
+        select: (name, row, detail) =>
+          setState({
+            revision,
+            selection: { ...current.selection, [name]: row },
+            openDialog: detail ?? null,
+          }),
+        close: () => setState({ ...current, openDialog: null }),
       }}
     >
       <NodesRenderer {...props} />

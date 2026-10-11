@@ -191,8 +191,11 @@ export function usePluginList() {
     const requestId = ++installedRequestRef.current
     if (!background) setLoading(true)
     try {
-      // 列表与导航同步刷新，启停操作和运行时注册通知都会更新顶部及侧栏入口。
-      const [allInstalled] = await Promise.all([getInstalledPlugins(), refreshPluginWebUI(true)])
+      // 启停和状态通知同步刷新列表及导航，跳过缓存以获取最新运行状态。
+      const [allInstalled] = await Promise.all([
+        getInstalledPlugins({ forceRefresh: true }),
+        refreshPluginWebUI(true),
+      ])
       if (requestId !== installedRequestRef.current) return
       const installed = adapterOnly
         ? allInstalled.filter((plugin) => getPluginType(plugin) === 'adapter')
@@ -236,14 +239,11 @@ export function usePluginList() {
       pending = true
       if (refreshing) return
       refreshing = true
-      try {
-        while (pending && !cancelled) {
-          pending = false
-          await refreshPlugins(true)
-        }
-      } finally {
-        refreshing = false
+      while (pending && !cancelled) {
+        pending = false
+        await refreshPlugins(true)
       }
+      refreshing = false
     }
     const removeListener = unifiedWsClient.addEventListener((message) => {
       if (message.domain === 'plugin_runtime' && message.topic === 'main') {

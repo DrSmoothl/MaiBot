@@ -10,6 +10,7 @@ export async function prepareUploadImage(file: File, maxEdge: number): Promise<P
   if (!Number.isInteger(maxEdge) || maxEdge < 1) throw new Error('Invalid image size limit')
   const bitmap = await createImageBitmap(file)
   try {
+    if (bitmap.width * bitmap.height > 100_000_000) throw new Error('原图超过 1 亿像素，请缩小后重试')
     if (bitmap.width <= maxEdge && bitmap.height <= maxEdge && file.size <= MAX_UPLOAD_BYTES) return { file }
     const scale = Math.min(1, maxEdge / bitmap.width, maxEdge / bitmap.height)
     const canvas = document.createElement('canvas')

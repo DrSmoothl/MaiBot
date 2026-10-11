@@ -70,7 +70,7 @@ from src.plugin_runtime.protocol.envelope import (
 from src.plugin_runtime.protocol.codec import MsgPackCodec
 from src.plugin_runtime.protocol.errors import ErrorCode, RPCError
 from src.plugin_runtime.transport.factory import create_transport_server
-from src.plugin_runtime.webui_schema import WebUIExtension
+from src.plugin_runtime.webui_schema import WebUIExtension, replace_webui_documents
 from src.services.bot_account_service import (
     BOT_ACCOUNT_SOURCE_READY,
     AdapterAccountIdentity,
@@ -1267,6 +1267,25 @@ class PluginRunnerSupervisor:
                 "removed_registration": removed_registration,
             }
         )
+
+    async def reload_webui_documents(self, plugin_id: str) -> None:
+        """刷新页面文档，保持已注册 API 绑定和插件实例不变。"""
+        registration = self._registered_plugins.get(plugin_id)
+        if registration is None or registration.webui is None:
+            raise ValueError("插件 WebUI 已下线")
+        response = await self._rpc_server.send_request(
+            "plugin.webui.reload_documents", plugin_id=plugin_id, timeout_ms=10000,
+        )
+        if response.error:
+            raise ValueError(response.error.get("message", "页面文件读取失败"))
+        if self._registered_plugins.get(plugin_id) is not registration:
+            raise ValueError("插件已发生重载，请重试")
+        original = registration.webui
+        # Runner 返回值仍是不可信输入；重新校验完整快照后一次性替换。
+        updated = await asyncio.to_thread(replace_webui_documents, original, response.payload)
+        if self._registered_plugins.get(plugin_id) is not registration or registration.webui is not original:
+            raise ValueError("插件页面已发生重载，请重试")
+        registration.webui = updated
 
     def get_webui_extensions(self) -> Dict[str, WebUIExtension]:
         """读取当前已注册插件的 WebUI 声明；卸载和重载沿用注册表生命周期。"""
