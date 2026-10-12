@@ -956,6 +956,19 @@ class ExperimentalConfig(ConfigBase):
     )
     """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
 
+    planner_unsent_reply_retry: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "回复丢失提醒重试",
+                "en_US": "Unsent reply retry",
+                "ja_JP": "未送信返信のリトライ",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """Planner 在分析里写了要回复、却没有调用任何工具就结束时，提醒一次并让它重新决策；每个回合最多重试一次。"""
+
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""
 
