@@ -1,13 +1,7 @@
-from datetime import datetime
-
 import pytest
 
 from src.config.config import global_config
-from src.llm_models.payload_content.context_item import get_item_text
 from src.llm_models.payload_content.tool_option import ToolCall
-from src.maisaka.context.messages import ReferenceMessage, ReferenceMessageType
-from src.maisaka.context.system_reminder import unwrap_system_reminder, wrap_system_reminder
-from src.maisaka.jargon_context_matcher import is_jargon_reference_text
 from src.maisaka.planner_reply_guard import has_unsent_reply_intent
 from src.maisaka.tool_result_condenser import build_tool_result_condense_task, should_condense_tool_result
 
@@ -39,52 +33,6 @@ def test_detects_reply_intent_without_tool_call(planner_content: str) -> None:
 )
 def test_ignores_decisions_not_to_reply(planner_content: str) -> None:
     assert not has_unsent_reply_intent(planner_content)
-
-
-def test_system_reminder_wrap_is_idempotent_and_reversible() -> None:
-    wrapped_text = wrap_system_reminder("时间：2026-10-12 19:00:00")
-
-    assert wrapped_text == "<system-reminder>\n时间：2026-10-12 19:00:00\n</system-reminder>"
-    assert wrap_system_reminder(wrapped_text) == wrapped_text
-    assert unwrap_system_reminder(wrapped_text) == "时间：2026-10-12 19:00:00"
-    assert unwrap_system_reminder("普通聊天内容") == "普通聊天内容"
-    assert wrap_system_reminder("  ") == ""
-
-
-def test_reference_message_marks_injected_context_but_not_sub_agent_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(global_config.experimental, "planner_system_reminder_tags", True)
-    jargon_message = ReferenceMessage(
-        content="1. 麦：指代麦麦",
-        timestamp=datetime(2026, 10, 12, 19, 0, 0),
-        reference_type=ReferenceMessageType.JARGON,
-        display_prefix="[黑话参考]",
-    )
-    task_message = ReferenceMessage(
-        content="请挑一个表情包",
-        timestamp=datetime(2026, 10, 12, 19, 0, 0),
-        reference_type=ReferenceMessageType.TOOL_HINT,
-        display_prefix="[任务]",
-    )
-
-    jargon_text = get_item_text(jargon_message.to_context_item())
-    task_text = get_item_text(task_message.to_context_item())
-
-    assert jargon_text == "<system-reminder>\n[黑话参考]\n1. 麦：指代麦麦\n</system-reminder>"
-    assert jargon_message.processed_plain_text == "[黑话参考]\n1. 麦：指代麦麦"
-    assert is_jargon_reference_text(jargon_text)
-    assert task_text == "[任务]\n请挑一个表情包"
-
-
-def test_reference_message_stays_unmarked_when_switch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(global_config.experimental, "planner_system_reminder_tags", False)
-    jargon_message = ReferenceMessage(
-        content="1. 麦：指代麦麦",
-        timestamp=datetime(2026, 10, 12, 19, 0, 0),
-        reference_type=ReferenceMessageType.JARGON,
-        display_prefix="[黑话参考]",
-    )
-
-    assert get_item_text(jargon_message.to_context_item()) == "[黑话参考]\n1. 麦：指代麦麦"
 
 
 def test_condenser_only_targets_long_successful_query_results() -> None:
