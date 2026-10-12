@@ -543,14 +543,8 @@ class AdapterPolicyManager:
         if not self._policy_path.exists():
             return {}
 
-        try:
-            with self._policy_path.open("r", encoding="utf-8") as policy_file:
-                loaded = tomlkit.load(policy_file).unwrap()
-        except Exception as exc:
-            logger.warning(f"读取适配器策略失败，统一策略本次不生效: {exc}")
-            return {}
-
-        return loaded if isinstance(loaded, dict) else {}
+        with self._policy_path.open("r", encoding="utf-8") as policy_file:
+            return tomlkit.load(policy_file).unwrap()
 
     def _load_policy_doc(self) -> Any:
         """读取可写 TOML 文档；不存在时创建空文档。"""
