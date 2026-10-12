@@ -182,7 +182,12 @@ class CommandEntry(ComponentEntry):
 
 
 class ToolEntry(ComponentEntry):
-    """Tool 组件条目"""
+    """Tool 组件条目。
+
+    SDK 声明示例：@Tool("name", platforms="telegram") 或
+    @Tool("name", platforms=["telegram", "qq"])；省略、None、[] 表示不限平台。
+    平台限制与 chat_scope、allowed_session 共同生效，不是模型调用参数。
+    """
 
     def __init__(
         self,
@@ -193,6 +198,16 @@ class ToolEntry(ComponentEntry):
         chat_scope: str = "all",
         allowed_session: Optional[List[str]] = None,
     ) -> None:
+        raw_platforms = metadata.get("platforms")
+        if raw_platforms is None:
+            raw_platforms = []
+        elif isinstance(raw_platforms, str):
+            raw_platforms = [raw_platforms]
+        if not isinstance(raw_platforms, list) or any(
+            not isinstance(platform, str) or not platform.strip() for platform in raw_platforms
+        ):
+            raise ValueError("Tool platforms 必须是非空平台名称字符串或字符串列表；省略、None 或 [] 表示不限平台")
+        self.platforms: Set[str] = {platform.strip().lower() for platform in raw_platforms}
         self.description: str = str(
             metadata.get("description", "") or metadata.get("brief_description", "") or f"工具 {name}"
         ).strip()
@@ -929,6 +944,10 @@ class ComponentRegistry:
         group_id: Optional[str] = None,
         platform: Optional[str] = None,
     ):
+        # 无上下文的查询用于组件清单；有平台上下文时过滤 Tool 的适用平台。
+        if isinstance(component, ToolEntry) and component.platforms and platform is not None:
+            if platform.strip().lower() not in component.platforms:
+                return False
         if session_id and session_id in component.disabled_session:
             return False
         if is_group_chat is not None:
