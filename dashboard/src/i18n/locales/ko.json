@@ -1573,5 +1573,17 @@
       "costTrend": "API 비용 트렌드 차트, 최근 시간대별 API 호출 비용 변화 표시",
       "tokenUsage": "토큰 소비 트렌드 차트, 최근 시간대별 토큰 사용량 변화 표시"
     }
+  },
+  "mobileNav": {
+    "label": "주 탐색",
+    "home": "홈",
+    "chat": "채팅",
+    "manage": "관리",
+    "observe": "관찰",
+    "me": "내 정보",
+    "search": "검색"
+  },
+  "manage": {
+    "searchPlaceholder": "페이지 또는 설정 검색"
   }
 }

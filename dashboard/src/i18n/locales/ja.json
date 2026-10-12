@@ -1526,5 +1526,17 @@
       "costTrend": "APIコストトレンドチャート、直近のAPI呼び出しコスト変化を表示",
       "tokenUsage": "Token消費トレンドチャート、直近のToken使用量変化を表示"
     }
+  },
+  "mobileNav": {
+    "label": "メインナビゲーション",
+    "home": "ホーム",
+    "chat": "チャット",
+    "manage": "管理",
+    "observe": "観察",
+    "me": "マイページ",
+    "search": "検索"
+  },
+  "manage": {
+    "searchPlaceholder": "ページや設定を検索"
   }
 }

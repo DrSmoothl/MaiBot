@@ -1590,5 +1590,17 @@
       "costTrend": "API花费趋势图，显示最近若干小时的API调用成本变化",
       "tokenUsage": "Token消耗趋势图，显示最近若干小时的Token使用量变化"
     }
+  },
+  "mobileNav": {
+    "label": "主导航",
+    "home": "首页",
+    "chat": "聊天",
+    "manage": "管理",
+    "observe": "观察",
+    "me": "我的",
+    "search": "搜索"
+  },
+  "manage": {
+    "searchPlaceholder": "搜索页面或设置项"
   }
 }

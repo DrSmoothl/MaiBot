@@ -198,6 +198,13 @@ const plannerMonitorRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/monitor/index.tsx'), 'PlannerMonitorPage'),
 })
 
+// 移动端管理页路由：底部标签栏「管理」，汇总侧栏的全部入口
+const manageRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/manage',
+  component: lazyRouteComponent(() => import('./routes/manage'), 'ManagePage'),
+})
+
 // 本地聊天室路由
 const chatRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -391,6 +398,7 @@ const routeTree = rootRoute.addChildren([
     plannerMonitorRoute,
     chatManagementRoute,
     chatRoute,
+    manageRoute,
     settingsRoute,
     packMarketRoute,
     packDetailRoute,

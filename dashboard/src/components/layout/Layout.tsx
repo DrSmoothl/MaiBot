@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRouter, useRouterState } from '@tanstack/react-router'
-import { AnimatePresence, motion } from 'motion/react'
+import { motion } from 'motion/react'
 
 import { BackgroundLayer } from '@/components/background-layer'
 import { BackToTop } from '@/components/back-to-top'
@@ -26,6 +26,8 @@ import {
   visibleExtensions,
 } from '@/lib/plugin-webui'
 import { Header } from './Header'
+import { MobileNavContext } from './mobile-nav-context'
+import { MobileTabBar } from './MobileTabBar'
 import { Sidebar } from './Sidebar'
 import type { LayoutProps, MenuSection, WorkspaceMode } from './types'
 import { useMenuSections } from './use-menu-sections'
@@ -97,7 +99,6 @@ export function Layout({ children }: LayoutProps) {
     loadStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true)
   )
   const [skipSidebarResizeAnimation, setSkipSidebarResizeAnimation] = useState(false)
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [topbarCollapsed, setTopbarCollapsed] = useState(() =>
     loadStoredBoolean(TOPBAR_COLLAPSED_STORAGE_KEY, false)
@@ -168,7 +169,6 @@ export function Layout({ children }: LayoutProps) {
         setSkipSidebarResizeAnimation(false)
         setSidebarOpen(false)
         setTopbarCollapsed(true)
-        setMobileMenuOpen(false)
         return
       }
 
@@ -306,7 +306,6 @@ export function Layout({ children }: LayoutProps) {
       return
     }
 
-    setMobileMenuOpen(false)
     setSkipSidebarResizeAnimation(false)
     setWorkspaceTransitionTarget(to === '/logs' ? 'logs' : workspaceForPath(to))
 
@@ -349,6 +348,10 @@ export function Layout({ children }: LayoutProps) {
   // 日志视图切换挂在顶栏里，不随页面容器移动；让它与页面同步退场/入场，避免突兀地出现或消失。
   const logSwitcherHidden =
     workspaceTransitionStage !== 'idle' && workspaceTransitionStage !== 'page-enter'
+  const mobileNavValue = useMemo(
+    () => ({ menuSections, openSearch: () => setSearchOpen(true) }),
+    [menuSections]
+  )
   const handleSidebarFix = () => {
     // 悬浮展开已处于完整宽度；固定时跳过占位宽度过渡，避免已经展开的侧栏出现二次动画。
     setSkipSidebarResizeAnimation(true)
@@ -413,41 +416,15 @@ export function Layout({ children }: LayoutProps) {
                 <Sidebar
                   menuSections={menuSections}
                   sidebarOpen={effectiveSidebarOpen}
-                  mobileMenuOpen={mobileMenuOpen}
+                  mobileMenuOpen={false}
                   topbarCollapsed={topbarCollapsed}
-                  onMobileMenuClose={() => setMobileMenuOpen(false)}
+                  onMobileMenuClose={() => {}}
                   onSidebarFix={handleSidebarFix}
                 />
               </motion.div>
             </motion.div>
           )}
 
-          {/* 移动端 Sidebar 走自己的 fixed 定位，通过 mobileMenuOpen 控制显隐 */}
-          <div className="lg:hidden">
-            <Sidebar
-              menuSections={menuSections}
-              sidebarOpen={effectiveSidebarOpen}
-              mobileMenuOpen={mobileMenuOpen}
-              topbarCollapsed={topbarCollapsed}
-              onMobileMenuClose={() => setMobileMenuOpen(false)}
-              onSidebarFix={handleSidebarFix}
-            />
-          </div>
-
-          {/* Mobile overlay */}
-          <AnimatePresence>
-            {mobileMenuOpen && (
-              <motion.div
-                aria-hidden="true"
-                className="fixed inset-0 z-40 bg-black/50 lg:hidden"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18 }}
-                onClick={() => setMobileMenuOpen(false)}
-              />
-            )}
-          </AnimatePresence>
           {/* Main content */}
           <motion.div
             layout={false}
@@ -466,11 +443,9 @@ export function Layout({ children }: LayoutProps) {
               logSwitcherHidden={logSwitcherHidden}
               sidebarUnderlay={sidebarUnderlay}
               sidebarOpen={effectiveSidebarOpen}
-              mobileMenuOpen={mobileMenuOpen}
               searchOpen={searchOpen}
               actualTheme={actualTheme}
               onSidebarToggle={handleSidebarModeToggle}
-              onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
               onSearchOpenChange={setSearchOpen}
               onThemeChange={setTheme}
               onTopbarToggle={() => setTopbarCollapsed(!topbarCollapsed)}
@@ -486,6 +461,8 @@ export function Layout({ children }: LayoutProps) {
               tabIndex={-1}
               className={cn(
                 'relative isolate min-h-0 flex-1 outline-none',
+                // 移动端给底部标签栏让出位置
+                'max-lg:pb-[calc(env(safe-area-inset-bottom)+96px)]',
                 workspaceTransitionStage !== 'idle'
                   ? 'overflow-hidden'
                   : isSettingsWorkspace
@@ -511,9 +488,15 @@ export function Layout({ children }: LayoutProps) {
                 animate={pageHidden ? 'exit' : 'animate'}
                 transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
               >
-                {children}
+                <MobileNavContext.Provider value={mobileNavValue}>{children}</MobileNavContext.Provider>
               </motion.div>
             </main>
+
+            {/* 移动端底部标签栏，取代侧栏和汉堡菜单 */}
+            <MobileTabBar
+              millennium={themeConfig.dashboardStyle === 'millennium'}
+              onSearch={() => setSearchOpen(true)}
+            />
 
             {/* Back to Top Button */}
             {showBackToTop && <BackToTop />}

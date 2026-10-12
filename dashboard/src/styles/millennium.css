@@ -3232,3 +3232,58 @@
   border: 0;
   box-shadow: none;
 }
+
+/* ---------- 移动端底部标签栏：机壳下沿上一排键帽，选中的是按下去的绿键 ---------- */
+
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar='true'] {
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  border-top: 2px solid var(--mil-line);
+  bottom: 0;
+  box-shadow: inset 0 2px 0 var(--mil-hi);
+  height: auto;
+  left: 0;
+  padding: 10px 10px calc(env(safe-area-inset-bottom) + 12px);
+  right: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar-tabs='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: none;
+  box-shadow: none;
+  gap: 6px;
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-tab='true'] {
+  background-color: var(--mil-key);
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  height: 58px;
+  padding-bottom: 7px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-tab='true'][data-active='true'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}
+
+/* 管理页的入口键帽：沿用侧栏键位的材质，文字靠左排 */
+:root[data-dashboard-style='millennium'] [data-manage-page='true'] [data-dashboard-nav-item='true'] {
+  color: var(--mil-ink);
+  text-decoration: none;
+}
+
+/* 手机上的底部弹层：拖动条画成一段散热栅格 */
+:root[data-dashboard-style='millennium'] [data-dialog-grabber='true'] {
+  background: repeating-linear-gradient(90deg, var(--mil-vent) 0 2px, transparent 2px 6px);
+  height: 8px;
+  width: 56px;
+}

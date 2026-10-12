@@ -1593,5 +1593,17 @@
       "costTrend": "API cost trend chart showing API call cost changes over recent hours",
       "tokenUsage": "Token usage trend chart showing token consumption over recent hours"
     }
+  },
+  "mobileNav": {
+    "label": "Main navigation",
+    "home": "Home",
+    "chat": "Chat",
+    "manage": "Manage",
+    "observe": "Monitor",
+    "me": "Me",
+    "search": "Search"
+  },
+  "manage": {
+    "searchPlaceholder": "Search pages or settings"
   }
 }
