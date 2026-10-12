@@ -334,6 +334,56 @@ export interface ReplierResponseEvent {
 
 // ─── 统一事件联合类型 ─────────────────────────────────────────
 
+/** 子代理任务开始；call_id 是 Planner 发起这次派发的工具调用 id */
+export interface SubagentStartedEvent {
+  session_id: string
+  task_id: string
+  call_id: string
+  description: string
+  granted_tools: string[]
+  /** 是否在后台运行（开启高级子代理） */
+  background: boolean
+  max_rounds: number
+  timestamp: number
+}
+
+/** 子代理一轮模型输出 */
+export interface SubagentRoundEvent {
+  session_id: string
+  task_id: string
+  round_index: number
+  content: string
+  tool_calls: MaisakaToolCall[]
+  timestamp: number
+}
+
+/** 子代理内部一次工具调用的结果摘要 */
+export interface SubagentToolResultEvent {
+  session_id: string
+  task_id: string
+  round_index: number
+  call_id: string
+  tool_name: string
+  success: boolean
+  summary: string
+  duration_ms: number
+  timestamp: number
+}
+
+export type SubagentTaskStatus = 'running' | 'completed' | 'failed' | 'stopped'
+
+/** 子代理任务结束：完成、失败或被终止 */
+export interface SubagentFinishedEvent {
+  session_id: string
+  task_id: string
+  status: SubagentTaskStatus
+  conclusion: string
+  error_message: string
+  tool_usage: Record<string, number>
+  duration_ms: number
+  timestamp: number
+}
+
 export type MaisakaMonitorEvent =
   | { type: 'replay.started'; data: Record<string, never> }
   | { type: 'session.start'; data: SessionStartEvent }
@@ -354,6 +404,10 @@ export type MaisakaMonitorEvent =
   | { type: 'tool.execution'; data: ToolExecutionEvent }
   | { type: 'replier.request'; data: ReplierRequestEvent }
   | { type: 'replier.response'; data: ReplierResponseEvent }
+  | { type: 'subagent.started'; data: SubagentStartedEvent }
+  | { type: 'subagent.round'; data: SubagentRoundEvent }
+  | { type: 'subagent.tool_result'; data: SubagentToolResultEvent }
+  | { type: 'subagent.finished'; data: SubagentFinishedEvent }
 
 export type MaisakaEventListener = (event: MaisakaMonitorEvent) => void
 

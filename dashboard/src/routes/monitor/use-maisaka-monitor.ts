@@ -5,7 +5,15 @@
  */
 import { useSyncExternalStore } from 'react'
 
-import type { MaisakaMonitorEvent } from '@/lib/maisaka-monitor-client'
+import type {
+  MaisakaMonitorEvent,
+  MaisakaToolCall,
+  SubagentFinishedEvent,
+  SubagentRoundEvent,
+  SubagentStartedEvent,
+  SubagentTaskStatus,
+  SubagentToolResultEvent,
+} from '@/lib/maisaka-monitor-client'
 import { maisakaMonitorClient } from '@/lib/maisaka-monitor-client'
 
 /** 单条时间线事件（前端视图模型） */
@@ -47,6 +55,45 @@ export interface StageStatusInfo {
   stageStartedAt: number
   updatedAt: number
 }
+
+/** 子代理一轮里的一次工具调用及其结果 */
+export interface SubagentToolCallInfo {
+  call: MaisakaToolCall
+  result?: { success: boolean; summary: string; durationMs: number }
+}
+
+/** 子代理的一轮模型输出 */
+export interface SubagentRoundInfo {
+  roundIndex: number
+  content: string
+  timestamp: number
+  toolCalls: SubagentToolCallInfo[]
+}
+
+/** 一个子代理任务的完整运行情况（由 subagent.* 事件累积而成） */
+export interface SubagentTaskInfo {
+  /** 前端唯一键：后端任务 id 在重启后会从头编号，所以带上开始时间 */
+  key: string
+  taskId: string
+  sessionId: string
+  /** Planner 发起这次派发的工具调用 id，用于从时间线卡片定位到任务 */
+  callId: string
+  description: string
+  grantedTools: string[]
+  background: boolean
+  maxRounds: number
+  status: SubagentTaskStatus
+  startedAt: number
+  finishedAt?: number
+  durationMs?: number
+  rounds: SubagentRoundInfo[]
+  toolUsage: Record<string, number>
+  conclusion: string
+  errorMessage: string
+}
+
+/** 每个会话保留的子代理任务数量上限 */
+const MAX_SUBAGENT_TASKS_PER_SESSION = 50
 
 /** 前端内存中最多恢复/展示的时间线条目数，避免一次渲染过多节点。 */
 const MAX_TIMELINE_ENTRIES = 3000
@@ -92,6 +139,8 @@ const mutableEntryIds = new Map<string, string>()
 let cachedLatestMessages = new Map<string, TimelineEntry>()
 let cachedSessions: Map<string, SessionInfo> = new Map()
 let cachedStageStatuses: Map<string, StageStatusInfo> = new Map()
+const emptySubagentTasks: SubagentTaskInfo[] = []
+let cachedSubagentTasks: Map<string, SubagentTaskInfo[]> = new Map()
 let cachedSelectedSession: string | null = null
 const cachedSeenEventIds = new Set<number>()
 let cachedConnected = false
@@ -402,6 +451,130 @@ function updateTimelineMessageContent(event: MaisakaMonitorEvent, sessionId: str
   return true
 }
 
+function isSubagentEvent(event: MaisakaMonitorEvent) {
+  return event.type.startsWith('subagent.')
+}
+
+/** 替换某个会话里最近一个同 id 任务；找不到说明开始事件已被裁掉，直接忽略。 */
+function updateLatestSubagentTask(
+  sessionId: string,
+  taskId: string,
+  update: (task: SubagentTaskInfo) => SubagentTaskInfo
+) {
+  const tasks = cachedSubagentTasks.get(sessionId)
+  if (!tasks) return
+  let index = -1
+  for (let cursor = tasks.length - 1; cursor >= 0; cursor -= 1) {
+    if (tasks[cursor].taskId === taskId) {
+      index = cursor
+      break
+    }
+  }
+  if (index < 0) return
+  const nextTasks = tasks.slice()
+  nextTasks[index] = update(tasks[index])
+  cachedSubagentTasks = new Map(cachedSubagentTasks).set(sessionId, nextTasks)
+}
+
+/** 子代理事件只累积成任务状态，供右侧栏展示，不进入主时间线。 */
+function applySubagentEvent(event: MaisakaMonitorEvent, sessionId: string) {
+  if (event.type === 'subagent.started') {
+    const data = event.data as SubagentStartedEvent
+    const task: SubagentTaskInfo = {
+      key: data.task_id + '@' + data.timestamp,
+      taskId: data.task_id,
+      sessionId,
+      callId: data.call_id,
+      description: data.description,
+      grantedTools: data.granted_tools ?? [],
+      background: data.background,
+      maxRounds: data.max_rounds,
+      status: 'running',
+      startedAt: data.timestamp,
+      rounds: [],
+      toolUsage: {},
+      conclusion: '',
+      errorMessage: '',
+    }
+    const tasks = [...(cachedSubagentTasks.get(sessionId) ?? emptySubagentTasks), task]
+    cachedSubagentTasks = new Map(cachedSubagentTasks).set(
+      sessionId,
+      tasks.slice(-MAX_SUBAGENT_TASKS_PER_SESSION)
+    )
+    return
+  }
+
+  if (event.type === 'subagent.round') {
+    const data = event.data as SubagentRoundEvent
+    updateLatestSubagentTask(sessionId, data.task_id, (task) => ({
+      ...task,
+      rounds: [
+        ...task.rounds,
+        {
+          roundIndex: data.round_index,
+          content: data.content,
+          timestamp: data.timestamp,
+          toolCalls: (data.tool_calls ?? []).map((call) => ({ call })),
+        },
+      ],
+    }))
+    return
+  }
+
+  if (event.type === 'subagent.tool_result') {
+    const data = event.data as SubagentToolResultEvent
+    updateLatestSubagentTask(sessionId, data.task_id, (task) => ({
+      ...task,
+      toolUsage: { ...task.toolUsage, [data.tool_name]: (task.toolUsage[data.tool_name] ?? 0) + 1 },
+      rounds: task.rounds.map((round) =>
+        round.roundIndex !== data.round_index
+          ? round
+          : {
+              ...round,
+              toolCalls: round.toolCalls.map((toolCall) =>
+                toolCall.call.id !== data.call_id
+                  ? toolCall
+                  : {
+                      ...toolCall,
+                      result: {
+                        success: data.success,
+                        summary: data.summary,
+                        durationMs: data.duration_ms,
+                      },
+                    }
+              ),
+            }
+      ),
+    }))
+    return
+  }
+
+  if (event.type === 'subagent.finished') {
+    const data = event.data as SubagentFinishedEvent
+    updateLatestSubagentTask(sessionId, data.task_id, (task) => ({
+      ...task,
+      status: data.status,
+      finishedAt: data.timestamp,
+      durationMs: data.duration_ms,
+      toolUsage: data.tool_usage ?? task.toolUsage,
+      conclusion: data.conclusion,
+      errorMessage: data.error_message,
+    }))
+  }
+}
+
+/** 会话重新启动说明上一个进程里的子代理已经不在了，把还显示为运行中的任务标记为已终止。 */
+function stopStaleSubagentTasks(sessionId: string, timestamp: number) {
+  const tasks = cachedSubagentTasks.get(sessionId)
+  if (!tasks?.some((task) => task.status === 'running')) return
+  cachedSubagentTasks = new Map(cachedSubagentTasks).set(
+    sessionId,
+    tasks.map((task) =>
+      task.status === 'running' ? { ...task, status: 'stopped', finishedAt: timestamp } : task
+    )
+  )
+}
+
 function handleMonitorEvent(event: MaisakaMonitorEvent) {
   if (event.type === 'replay.started') {
     monitorInitialSyncPending = true
@@ -450,6 +623,18 @@ function applyMonitorEvent(event: MaisakaMonitorEvent) {
 
     notifyStoreListeners()
     return
+  }
+
+  if (isSubagentEvent(event)) {
+    applySubagentEvent(event, sessionId)
+    updateSessionInfo(event, sessionId, timestamp)
+
+    notifyStoreListeners()
+    return
+  }
+
+  if (event.type === 'session.start') {
+    stopStaleSubagentTasks(sessionId, timestamp)
   }
 
   if (event.type === 'message.updated') {
@@ -582,6 +767,7 @@ function clearTimeline() {
   cachedLatestMessages = new Map()
   cachedSessions = new Map()
   cachedStageStatuses = new Map()
+  cachedSubagentTasks = new Map()
   cachedSelectedSession = null
   pendingReplayEvents = []
   notifyStoreListeners()
@@ -602,6 +788,9 @@ function getSessionSnapshot() {
     selectedStageStatus: cachedSelectedSession
       ? cachedStageStatuses.get(cachedSelectedSession)
       : undefined,
+    subagentTasks: cachedSelectedSession
+      ? (cachedSubagentTasks.get(cachedSelectedSession) ?? emptySubagentTasks)
+      : emptySubagentTasks,
     clearTimeline,
   }
 }
@@ -627,7 +816,8 @@ function publishSnapshots() {
   if (
     nextSession.timeline !== sessionSnapshot.timeline ||
     nextSession.selectedSession !== sessionSnapshot.selectedSession ||
-    nextSession.selectedStageStatus !== sessionSnapshot.selectedStageStatus
+    nextSession.selectedStageStatus !== sessionSnapshot.selectedStageStatus ||
+    nextSession.subagentTasks !== sessionSnapshot.subagentTasks
   ) {
     sessionSnapshot = nextSession
   }

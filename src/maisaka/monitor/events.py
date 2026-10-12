@@ -685,3 +685,111 @@ async def emit_planner_snapshot(
             "end_detail": end_detail,
         },
     })
+
+
+# 子代理事件里单段文字、单条工具结果摘要的上限，避免观察事件体积过大
+SUBAGENT_EVENT_TEXT_MAX_CHARS = 2000
+SUBAGENT_EVENT_TOOL_SUMMARY_MAX_CHARS = 600
+
+
+def _clip_subagent_event_text(text: str, max_chars: int) -> str:
+    """截断子代理事件里的长文本，并标明被省略的字数。"""
+
+    normalized_text = str(text or "")
+    if len(normalized_text) <= max_chars:
+        return normalized_text
+    return f"{normalized_text[:max_chars]}…（已省略 {len(normalized_text) - max_chars} 字）"
+
+
+async def emit_subagent_started(
+    *,
+    session_id: str,
+    task_id: str,
+    call_id: str,
+    description: str,
+    granted_tools: List[str],
+    background: bool,
+    max_rounds: int,
+) -> None:
+    """广播子代理任务开始；call_id 是 Planner 发起这次派发的工具调用 id。"""
+
+    await _broadcast("subagent.started", {
+        "session_id": session_id,
+        "task_id": task_id,
+        "call_id": call_id,
+        "description": _clip_subagent_event_text(description, SUBAGENT_EVENT_TEXT_MAX_CHARS),
+        "granted_tools": list(granted_tools),
+        "background": background,
+        "max_rounds": max_rounds,
+        "timestamp": time.time(),
+    })
+
+
+async def emit_subagent_round(
+    *,
+    session_id: str,
+    task_id: str,
+    round_index: int,
+    content: str,
+    tool_calls: List[Any],
+) -> None:
+    """广播子代理一轮模型输出：这一轮的文字和它发起的工具调用。"""
+
+    await _broadcast("subagent.round", {
+        "session_id": session_id,
+        "task_id": task_id,
+        "round_index": round_index,
+        "content": _clip_subagent_event_text(content, SUBAGENT_EVENT_TEXT_MAX_CHARS),
+        "tool_calls": _serialize_tool_calls_from_objects(tool_calls),
+        "timestamp": time.time(),
+    })
+
+
+async def emit_subagent_tool_result(
+    *,
+    session_id: str,
+    task_id: str,
+    round_index: int,
+    call_id: str,
+    tool_name: str,
+    success: bool,
+    summary: str,
+    duration_ms: float,
+) -> None:
+    """广播子代理内部一次工具调用的结果摘要。"""
+
+    await _broadcast("subagent.tool_result", {
+        "session_id": session_id,
+        "task_id": task_id,
+        "round_index": round_index,
+        "call_id": call_id,
+        "tool_name": tool_name,
+        "success": success,
+        "summary": _clip_subagent_event_text(summary, SUBAGENT_EVENT_TOOL_SUMMARY_MAX_CHARS),
+        "duration_ms": float(duration_ms),
+        "timestamp": time.time(),
+    })
+
+
+async def emit_subagent_finished(
+    *,
+    session_id: str,
+    task_id: str,
+    status: str,
+    conclusion: str,
+    error_message: str,
+    tool_usage: Dict[str, int],
+    duration_ms: float,
+) -> None:
+    """广播子代理任务结束：完成、失败或被终止。"""
+
+    await _broadcast("subagent.finished", {
+        "session_id": session_id,
+        "task_id": task_id,
+        "status": status,
+        "conclusion": _clip_subagent_event_text(conclusion, SUBAGENT_EVENT_TEXT_MAX_CHARS),
+        "error_message": error_message,
+        "tool_usage": dict(tool_usage),
+        "duration_ms": float(duration_ms),
+        "timestamp": time.time(),
+    })

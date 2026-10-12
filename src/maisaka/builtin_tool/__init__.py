@@ -11,8 +11,6 @@ from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 from src.maisaka.focus import focus_mode_manager
 
 from .context import BuiltinToolRuntimeContext
-from .delegate import get_tool_spec as get_delegate_tool_spec
-from .delegate import handle_tool as handle_delegate_tool
 from .fetch_history import get_tool_spec as get_fetch_history_tool_spec
 from .fetch_history import handle_tool as handle_fetch_history_tool
 from .query_memory import get_tool_spec as get_query_memory_tool_spec
@@ -29,6 +27,12 @@ from .send_emoji import get_tool_spec as get_send_emoji_tool_spec
 from .send_emoji import handle_tool as handle_send_emoji_tool
 from .show_emoji_list import get_tool_spec as get_show_emoji_list_tool_spec
 from .show_emoji_list import handle_tool as handle_show_emoji_list_tool
+from .subagent import get_status_tool_spec as get_subagent_status_tool_spec
+from .subagent import get_stop_tool_spec as get_subagent_stop_tool_spec
+from .subagent import get_tool_spec as get_subagent_tool_spec
+from .subagent import handle_status_tool as handle_subagent_status_tool
+from .subagent import handle_stop_tool as handle_subagent_stop_tool
+from .subagent import handle_tool as handle_subagent_tool
 from .switch_chat import get_tool_spec as get_switch_chat_tool_spec
 from .switch_chat import handle_tool as handle_switch_chat_tool
 from .tool_search import get_tool_spec as get_tool_search_tool_spec
@@ -112,7 +116,9 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("send_emoji", get_send_emoji_tool_spec, handle_send_emoji_tool, stage="action"),
     BuiltinToolEntry("show_emoji_list", get_show_emoji_list_tool_spec, handle_show_emoji_list_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),
-    BuiltinToolEntry("delegate", get_delegate_tool_spec, handle_delegate_tool, stage="action"),
+    BuiltinToolEntry("subagent", get_subagent_tool_spec, handle_subagent_tool, stage="action"),
+    BuiltinToolEntry("subagent_status", get_subagent_status_tool_spec, handle_subagent_status_tool, stage="action"),
+    BuiltinToolEntry("subagent_stop", get_subagent_stop_tool_spec, handle_subagent_stop_tool, stage="action"),
     BuiltinToolEntry(
         "read_tool_result",
         get_read_tool_result_tool_spec,
@@ -157,8 +163,11 @@ def _is_builtin_tool_enabled_by_config(entry: BuiltinToolEntry) -> bool:
         return not global_config.emoji.use_new_send_logic
     if entry.name in {"fetch_history", "switch_chat"}:
         return bool(global_config.experimental.focus_mode)
-    if entry.name == "delegate":
-        return global_config.experimental.planner_delegate
+    if entry.name == "subagent":
+        return global_config.experimental.planner_subagent
+    if entry.name in {"subagent_status", "subagent_stop"}:
+        # 只有后台子代理才有需要查看和终止的任务
+        return global_config.experimental.planner_subagent and global_config.experimental.advanced_sub_agent
     if entry.name == "read_tool_result":
         # 只有开启超长结果整理时才会有被暂存的原文可读
         return global_config.experimental.tool_result_condense

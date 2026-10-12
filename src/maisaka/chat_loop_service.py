@@ -825,6 +825,7 @@ class MaisakaChatLoopService:
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
             "query_memory_rule": self._build_query_memory_rule(),
+            "subagent_rule": self._build_subagent_rule(),
         }
 
     @staticmethod
@@ -903,6 +904,28 @@ class MaisakaChatLoopService:
                 "zh-CN": "- query_memory()：当对方提到“之前”“上次”“最近”“还记得吗”“我喜欢”“我说过”等信号，或回复依赖长期偏好、先前承诺、共同经历、人物长期信息时，可以更积极检索。",
             }
         )
+
+    def _build_subagent_rule(self) -> str:
+        """开启子代理时说明何时该把任务交给 subagent；未开启时为空，不占提示词。"""
+
+        if not global_config.experimental.planner_subagent:
+            return ""
+        rule = self._localized_text(
+            {
+                "en-US": "- subagent(): When something needs looking up before you can answer or judge it (reading docs, searching the web, checking version or plugin information, finding images, verifying a claim, and so on), prefer handing it to a sub-agent: state clearly what to find out and grant it the tools it may need. It only hands you its conclusion. Call a tool directly only for things that take a single step.",
+                "ja-JP": "- subagent()：答えたり判断したりする前に調べものが必要なこと（ドキュメントの確認、ウェブ検索、バージョンやプラグイン情報の確認、画像探し、ある主張の検証など）は、サブエージェントに任せることを優先してください。何を調べるかを明確に書き、使えそうなツールを許可します。サブエージェントは結論だけをあなたに渡します。一手で済むことだけ、該当するツールを直接呼び出してください。",
+                "zh-CN": "- subagent()：遇到需要查资料才能回答或判断的事（查文档、搜网页、查版本或插件信息、找图、核实某个说法等），优先交给子代理：写清楚要查什么，把用得上的工具授权给它；它查完只把结论交给你。只有一步就能完成的事才直接调用对应工具。",
+            }
+        )
+        if global_config.experimental.advanced_sub_agent:
+            rule += self._localized_text(
+                {
+                    "en-US": " The sub-agent runs in the background: after dispatching it you do not need to wait and can keep chatting; its conclusion will be sent back to you later.",
+                    "ja-JP": "サブエージェントはバックグラウンドで動作します。依頼したあとは待つ必要はなく、会話を続けてかまいません。結論は後であなたに返されます。",
+                    "zh-CN": "子代理在后台运行，派发后不用等它，可以继续聊天，结论稍后会送回给你。",
+                }
+            )
+        return f"\n{rule}"
 
     def _build_current_chat_attention_tail_message(self) -> str:
         """构建追加到请求末尾的当前聊天专属注意事项。"""

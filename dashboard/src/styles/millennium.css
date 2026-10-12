@@ -1527,7 +1527,7 @@
 
 :root[data-dashboard-style='millennium'] [data-chat-workspace-sidebar='true'] > div:first-child {
   border-bottom: 0;
-  padding: 0.75rem 0.75rem 0.25rem;
+  padding: 0.75rem 0.5rem 0.25rem;
 }
 
 :root[data-dashboard-style='millennium'] [data-chat-sidebar-list='true'] {
@@ -2002,8 +2002,8 @@
 
 :root[data-dashboard-style='millennium'] [data-chat-sidebar-list='true'] section {
   border-color: transparent;
-  margin-left: 0.75rem;
-  margin-right: 0.75rem;
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
 }
 
 /* 分组标题是印在壳上的丝印小字 */
@@ -2236,6 +2236,14 @@
   [data-maisaka-timeline='true']
   [data-dashboard-scrollbar='true'][data-orientation='vertical'] {
   width: 8px;
+}
+
+/* Planner 卡片和它下面的工具调用属于同一轮，中间不画标题区的底边线 */
+:root[data-dashboard-style='millennium']
+  [data-maisaka-planner-card='true']
+  > [data-dashboard-card-header='true'] {
+  border-bottom: 0;
+  box-shadow: none;
 }
 
 /* ---------- 表格行内的操作键 ---------- */

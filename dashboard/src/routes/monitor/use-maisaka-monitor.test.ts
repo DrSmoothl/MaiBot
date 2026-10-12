@@ -1182,6 +1182,105 @@ describe('内存裁剪', () => {
   })
 })
 
+describe('子代理任务', () => {
+  it('子代理事件累积成任务状态，不进入主时间线', async () => {
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule)
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 1 }))
+    emitMonitorEvent('subagent.started', {
+      event_id: 2,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      call_id: 'call-1',
+      description: '查部署要求',
+      granted_tools: ['docs_search'],
+      background: true,
+      max_rounds: 5,
+      timestamp: 110,
+    })
+    emitMonitorEvent('subagent.round', {
+      event_id: 3,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      round_index: 1,
+      content: '先查文档',
+      tool_calls: [{ id: 'tool-1', name: 'docs_search', arguments: { query: '部署' } }],
+      timestamp: 111,
+    })
+    emitMonitorEvent('subagent.tool_result', {
+      event_id: 4,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      round_index: 1,
+      call_id: 'tool-1',
+      tool_name: 'docs_search',
+      success: true,
+      summary: '文档内容',
+      duration_ms: 320,
+      timestamp: 112,
+    })
+
+    expect(view.result.current.allTimeline).toHaveLength(1)
+    const runningTask = view.result.current.subagentTasks[0]
+    expect(runningTask).toMatchObject({
+      taskId: 'subagent-1',
+      callId: 'call-1',
+      status: 'running',
+      background: true,
+      toolUsage: { docs_search: 1 },
+    })
+    expect(runningTask.rounds[0].toolCalls[0].result).toEqual({
+      success: true,
+      summary: '文档内容',
+      durationMs: 320,
+    })
+
+    emitMonitorEvent('subagent.finished', {
+      event_id: 5,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      status: 'completed',
+      conclusion: '部署需要 Python 3.12。',
+      error_message: '',
+      tool_usage: { docs_search: 1 },
+      duration_ms: 2400,
+      timestamp: 113,
+    })
+
+    expect(view.result.current.subagentTasks[0]).toMatchObject({
+      status: 'completed',
+      conclusion: '部署需要 Python 3.12。',
+      durationMs: 2400,
+    })
+    expect(view.result.current.allTimeline).toHaveLength(1)
+  })
+
+  it('重启后任务 id 重新编号时各自成为独立任务，遗留的运行中任务标记为已终止', async () => {
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule)
+    const started = {
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      call_id: 'call-1',
+      description: '任务',
+      granted_tools: ['docs_search'],
+      background: true,
+      max_rounds: 5,
+    }
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 1 }))
+    emitMonitorEvent('subagent.started', { ...started, event_id: 2, timestamp: 110 })
+    emitMonitorEvent('session.start', { event_id: 3, session_id: 'session-a', timestamp: 200 })
+    emitMonitorEvent('subagent.started', { ...started, event_id: 4, call_id: 'call-2', timestamp: 210 })
+
+    const tasks = view.result.current.subagentTasks
+    expect(tasks.map((task) => [task.callId, task.status])).toEqual([
+      ['call-1', 'stopped'],
+      ['call-2', 'running'],
+    ])
+    expect(new Set(tasks.map((task) => task.key)).size).toBe(2)
+  })
+})
+
 describe('订阅进行中的共享与 SSR 短路', () => {
   it('订阅 Promise 未完成时第二个消费者不重复发起订阅', async () => {
     const deferred = createDeferred<() => Promise<void>>()

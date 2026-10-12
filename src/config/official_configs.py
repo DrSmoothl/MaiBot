@@ -996,7 +996,7 @@ class ExperimentalConfig(ConfigBase):
     )
     """工具结果达到多少字时才触发整理，仅在开启“超长工具结果整理”时生效；调低会更频繁地整理，调高则更多原文留在上下文里。"""
 
-    planner_delegate: bool = Field(
+    planner_subagent: bool = Field(
         default=False,
         json_schema_extra={
             "label": {
@@ -1007,7 +1007,20 @@ class ExperimentalConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """给 Planner 提供 delegate 工具：把自包含的查询或整理任务交给子代理，子代理在独立上下文里多轮调用被授权的工具，只把结论交还给 Planner。"""
+    """给 Planner 提供 subagent 工具：把自包含的查询或整理任务交给子代理，子代理在独立上下文里多轮调用被授权的工具，只把结论交还给 Planner。"""
+
+    advanced_sub_agent: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "高级子代理",
+                "en_US": "Advanced sub-agents",
+                "ja_JP": "高度なサブエージェント",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """子代理改为在后台运行：派发后立刻返回任务 id，麦麦可以继续聊天，子代理结束时结论作为一条新消息送回并唤醒 Planner；同时提供查看和终止后台任务的工具。需要先开启“子代理任务派发”。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""

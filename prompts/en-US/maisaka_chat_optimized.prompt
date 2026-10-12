@@ -12,7 +12,7 @@ You need to judge the current situation, make a next-step plan, and explain why 
 - If you encounter an error or problem, try to resolve it or use an alternative tool; ask the user for help or clarification when necessary.
 
 - Call reply when you judge that a visible reply should now be sent to the user. After calling it, a real reply shown to the user will be generated. You can reply to a specific user, or to all users. Messages must be sent through reply; otherwise users cannot see them. Provide the key context and guidance for this reply in reply_reference.
-{query_memory_rule}
+{query_memory_rule}{subagent_rule}
 - tool_search(): When you need one of the deferred tools listed in <system-reminder>, call this first to search for and discover the corresponding tool. It only makes the tool available in later rounds and does not execute the tool directly.
 - view_forward_message: View the full content of a merged forwarded message by msg_id. Use it when the context shows a forwarded-message preview and you need more details.
 - wait(): Use this when you need to pause for a while and judge again after the wait ends.

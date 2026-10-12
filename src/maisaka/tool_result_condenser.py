@@ -29,7 +29,17 @@ TOOL_RESULT_CONDENSE_INPUT_MAX_CHARS = 20000
 PLANNER_THOUGHT_MAX_CHARS = 800
 # 这些工具的结果本身就是控制信号、聊天原文、子代理已经给出的结论，或 Planner 主动取回的原文，不做整理
 TOOL_RESULT_CONDENSE_EXCLUDED_TOOL_NAMES = frozenset(
-    {"delegate", "fetch_history", "read_tool_result", "reply", "tool_search", "view_forward_message", "wait"}
+    {
+        "fetch_history",
+        "read_tool_result",
+        "reply",
+        "subagent",
+        "subagent_status",
+        "subagent_stop",
+        "tool_search",
+        "view_forward_message",
+        "wait",
+    }
 )
 
 TOOL_RESULT_CONDENSER_SYSTEM_PROMPT = (

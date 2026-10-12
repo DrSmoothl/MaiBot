@@ -78,6 +78,8 @@ import type {
 } from '@/lib/maisaka-monitor-client'
 import type { SessionInfo, StageStatusInfo, TimelineEntry } from './use-maisaka-monitor'
 import { StageStatusLabel } from './StageStatusLabel'
+import { SubagentPanel, SubagentToggleButton } from './subagent-panel'
+import { openSubagentPanel } from './subagent-panel-state'
 import { useMaisakaMonitorOverview, useMaisakaMonitorSession } from './use-maisaka-monitor'
 
 // ─── 工具函数 ──────────────────────────────────────────────────
@@ -693,6 +695,7 @@ function MonitorStatusActions({
         </Tooltip>
       </TooltipProvider>
       <ActiveContextPopover sessionId={sessionId} />
+      <SubagentToggleButton />
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <Button
           variant="ghost"
@@ -1333,7 +1336,11 @@ function PlannerFinalizedCard({
   const canOpenReasoning = Boolean(promptHtmlUri && parsePromptHtmlReasoningTarget(promptHtmlUri))
 
   return (
-    <Card data-maisaka-trace-card="true" className="border-l-4 border-l-emerald-500/60">
+    <Card
+      data-maisaka-trace-card="true"
+      data-maisaka-planner-card="true"
+      className="border-l-4 border-l-emerald-500/60"
+    >
       <CardHeader className="space-y-2 px-4 py-2">
         <div data-maisaka-trace-meta="true" className="flex flex-wrap items-center gap-2">
           <Brain className="h-4 w-4 text-emerald-500" />
@@ -1368,10 +1375,9 @@ function PlannerFinalizedCard({
           )}
         </div>
 
-        {planner?.content ? (
+        {/* 没有文本内容时只保留标题行，后面直接跟工具 */}
+        {planner?.content && (
           <CollapsibleText text={planner.content} maxLines={6} className="text-foreground/90" />
-        ) : (
-          <p className="text-muted-foreground text-sm">planner 本轮没有文本内容</p>
         )}
       </CardHeader>
     </Card>
@@ -1840,6 +1846,17 @@ function PlannerToolResultCard({
       )}
 
       <div className="space-y-1.5">
+        {tool.tool_name === 'subagent' && (
+          <button
+            type="button"
+            className="text-primary flex items-center gap-1 text-[11px] hover:underline"
+            onClick={() => openSubagentPanel(tool.tool_call_id)}
+            title="在右侧栏查看这个子代理的运行过程"
+          >
+            <Bot className="h-3 w-3" />
+            查看子代理运行过程
+          </button>
+        )}
         {tool.tool_name === 'reply' && (
           <ReplyToolArguments tool={tool} messages={messages} onJumpToMessage={onJumpToMessage} />
         )}
@@ -3127,12 +3144,13 @@ export const MaisakaMonitor = memo(function MaisakaMonitor({
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col',
+        'relative flex min-w-0 flex-col',
         embedded ? 'h-full min-h-0 p-2 sm:p-3' : 'gap-4 lg:h-[calc(100vh-116px)] lg:flex-row'
       )}
     >
       {!embedded && <MonitorSidebar />}
       <MonitorTimeline embedded={embedded} reasoningReturnTo={reasoningReturnTo} />
+      <SubagentPanel embedded={embedded} />
     </div>
   )
 })
