@@ -878,6 +878,12 @@ export function PluginDetailPage({
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-3">
+                    <div className="flex items-start gap-2 text-sm">
+                      <Tag className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+                      <span className="shrink-0 text-muted-foreground">插件 ID:</span>
+                      <span className="min-w-0 break-all font-mono font-medium select-all">{plugin.id}</span>
+                    </div>
+
                     <div className="flex items-center gap-2 text-sm">
                       <User className="h-4 w-4 text-muted-foreground" />
                       <span className="text-muted-foreground">作者:</span>
