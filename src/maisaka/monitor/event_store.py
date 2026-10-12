@@ -13,6 +13,7 @@ import time
 from src.common.database.database import get_db_session
 from src.common.database.database_model import ImageType, Images, MaisakaMonitorEventRecord
 from src.common.logger import get_logger
+from src.maisaka.monitor.planner_delta import PLANNER_EVENTS
 
 logger = get_logger("maisaka_monitor_event_store")
 
@@ -83,7 +84,12 @@ def replay_monitor_events(*, since_event_id: int = 0, limit: int = DEFAULT_REPLA
             )
             records = list(reversed(session.exec(statement).all()))
 
-    return [_record_to_replay_event(record) for record in records]
+    events = [_record_to_replay_event(record) for record in records]
+    valid_events = [event for event in events if _is_replayable_event(event)]
+    skipped_count = len(events) - len(valid_events)
+    if skipped_count > 0:
+        logger.warning(f"回放时跳过 {skipped_count} 条缺少 run_id 的旧版 Planner 事件")
+    return valid_events
 
 
 def cleanup_monitor_events(session: Optional[Session] = None) -> int:
@@ -125,6 +131,14 @@ def sanitize_monitor_payload(payload: dict[str, Any], *, session: Optional[Sessi
     if not isinstance(cleaned, dict):
         raise TypeError("麦麦观察事件 payload 必须是字典")
     return cleaned
+
+
+def _is_replayable_event(event: dict[str, Any]) -> bool:
+    """旧版本写入的 Planner 事件没有 run_id，无法做增量编码，回放时丢弃。"""
+
+    if event["event"] not in PLANNER_EVENTS:
+        return True
+    return bool(event["data"].get("run_id"))
 
 
 def _record_to_replay_event(record: MaisakaMonitorEventRecord) -> dict[str, Any]:
