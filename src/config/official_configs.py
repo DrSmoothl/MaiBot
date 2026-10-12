@@ -956,6 +956,19 @@ class ExperimentalConfig(ConfigBase):
     )
     """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
 
+    planner_system_reminder_tags: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "注入内容来源标记",
+                "en_US": "Injected context source tags",
+                "ja_JP": "注入コンテキストの出所タグ",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """把黑话参考、记忆、人物画像、时间等系统注入 Planner 的内容统一包在 <system-reminder> 标签里，帮助模型把它们和聊天中真实的发言区分开。"""
+
     planner_unsent_reply_retry: bool = Field(
         default=False,
         json_schema_extra={
@@ -996,6 +1009,19 @@ class ExperimentalConfig(ConfigBase):
         },
     )
     """工具结果达到多少字时才触发整理，仅在开启“超长工具结果整理”时生效；调低会更频繁地整理，调高则更多原文留在上下文里。"""
+
+    planner_delegate: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "子代理任务派发",
+                "en_US": "Delegate tasks to sub-agents",
+                "ja_JP": "サブエージェントへのタスク委任",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """给 Planner 提供 delegate 工具：把自包含的查询或整理任务交给子代理，子代理在独立上下文里多轮调用被授权的工具，只把结论交还给 Planner。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""
