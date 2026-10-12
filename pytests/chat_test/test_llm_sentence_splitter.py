@@ -51,8 +51,7 @@ async def test_llm_splitter_rejects_rewritten_text(monkeypatch) -> None:
 @pytest.mark.parametrize(
     "text,payload,index,returned",
     [
-        ("喵～", '["喵~"]', 1, "喵~"),
-        ("第一句 第二句", '["第一句", "第二句"]', 3, "第一句第二句"),
+        ("喵啊", '["喵哦"]', 1, "喵哦"),
         ("原始文本", '["原始"]', 2, "原始"),
         ("原始", '["原始文本"]', 2, "原始文本"),
     ],
@@ -89,7 +88,7 @@ async def test_llm_splitter_accepts_newline_changes(monkeypatch, newline: str) -
 
     monkeypatch.setattr(llm_sentence_splitter, "LLMServiceClient", _client_returning('["？\\n", "恋爱企划"]'))
 
-    assert await llm_sentence_splitter.split_text_with_llm("？恋爱企划") == [("？\n", ""), ("恋爱企划", "")]
+    assert await llm_sentence_splitter.split_text_with_llm("？恋爱企划") == [("？", ""), ("恋爱企划", "")]
 
 
 @pytest.mark.asyncio
@@ -106,3 +105,19 @@ async def test_llm_splitter_rejects_unknown_string_payload(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="不是合法 JSON 数组"):
         await llm_sentence_splitter.split_text_with_llm("今天还挺好的")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text,payload,expected",
+    [
+        ("修什么修 修坏了就完了", '["修什么修", "修坏了就完了"]', [("修什么修", ""), ("修坏了就完了", "")]),
+        ("我key的model。好的", '["我 key 的 model。", "好的"]', [("我key的model。", ""), ("好的", "")]),
+        ("喵～你好，世界。", '["喵~", "你好,世界."]', [("喵～", ""), ("你好，世界。", "")]),
+        ("a  b，  c d", '["a b，", "c  d"]', [("a  b", "，  "), ("c d", "")]),
+    ],
+)
+async def test_llm_splitter_ignores_whitespace_changes(monkeypatch, text, payload, expected) -> None:
+    monkeypatch.setattr(llm_sentence_splitter, "LLMServiceClient", _client_returning(payload))
+
+    assert await llm_sentence_splitter.split_text_with_llm(text) == expected
