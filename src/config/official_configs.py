@@ -797,20 +797,6 @@ class ChatConfig(ConfigBase):
     )
     """私聊回复时参考的最近消息数量。"""
 
-    enable_context_optimization: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "优化上下文",
-                "en_US": "Optimize context",
-                "ja_JP": "コンテキスト最適化",
-            },
-            "x-widget": "switch",
-            "x-row": "chat-context-controls",
-        },
-    )
-    """压缩部分上下文，减少模型消耗；一般建议开启。"""
-
     mid_term_memory: bool = Field(
         default=True,
         json_schema_extra={

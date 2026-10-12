@@ -1335,7 +1335,6 @@ class MaisakaReasoningEngine:
         process_result = process_chat_history_after_cycle(
             self._runtime._chat_history,
             max_context_size=self._runtime._max_context_size,
-            enable_context_optimization=global_config.chat.enable_context_optimization,
             pending_call_ids=self._runtime._get_pending_wait_tool_call_ids(),
         )
         if process_result.changed_count <= 0:

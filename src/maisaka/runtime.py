@@ -1594,9 +1594,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         }
         discovered_tool_names: set[str] = set()
         for message in selected_history:
-            if isinstance(message, SessionBackedMessage) and message.source_kind == "optimized_tool_history":
-                discovered_tool_names.update(self._parse_folded_tool_search_result_tool_names(message.visible_text))
-                continue
             if not isinstance(message, ToolResultMessage):
                 continue
             if message.tool_name != "tool_search" or message.tool_call_id not in tool_search_call_ids:
@@ -1631,21 +1628,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             if normalized_name in self.deferred_tool_specs_by_name:
                 discovered_tool_names.add(normalized_name)
 
-        return discovered_tool_names
-
-    def _parse_folded_tool_search_result_tool_names(self, content: str) -> set[str]:
-        """从优化上下文折叠后的 tool_search 文本中恢复已发现工具名。"""
-
-        discovered_tool_names: set[str] = set()
-        for raw_line in content.splitlines():
-            normalized_line = raw_line.strip()
-            if not normalized_line.startswith("- tool_search:"):
-                continue
-            raw_names = normalized_line.removeprefix("- tool_search:").split("(", 1)[0]
-            for raw_tool_name in raw_names.split(","):
-                normalized_name = raw_tool_name.strip()
-                if normalized_name in self.deferred_tool_specs_by_name:
-                    discovered_tool_names.add(normalized_name)
         return discovered_tool_names
 
     def get_discovered_deferred_tool_specs(self) -> list[ToolSpec]:
