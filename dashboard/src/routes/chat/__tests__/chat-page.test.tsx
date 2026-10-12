@@ -253,8 +253,11 @@ vi.mock('../ChatWorkspaceSidebar', () => ({
 }))
 
 // 移动端标签条与侧边栏功能重复，桩成空组件避免重复节点干扰断言
-vi.mock('../ChatTabBar', () => ({
-  ChatTabBar: () => null,
+vi.mock('../MobileChat', () => ({
+  MobileChatList: () => null,
+  MobileChatRoomBar: () => null,
+  MobileChatRoomObservedAvatar: () => null,
+  MobileChatRoomTabAvatar: () => null,
 }))
 
 // 聊天流设置弹窗：只暴露打开状态与传入的聊天流信息

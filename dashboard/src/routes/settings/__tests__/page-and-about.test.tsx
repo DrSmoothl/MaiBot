@@ -22,6 +22,7 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 vi.mock('../AppearanceTab', () => ({ AppearanceTab: () => <div>外观页内容</div> }))
 vi.mock('../SecurityTab', () => ({ SecurityTab: () => <div>安全页内容</div> }))
 vi.mock('../OtherTab', () => ({ OtherTab: () => <div>其他页内容</div> }))
+vi.mock('../MobileAccountCard', () => ({ MobileAccountCard: () => null }))
 
 beforeEach(() => {
   routerState.searchStr = ''

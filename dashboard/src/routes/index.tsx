@@ -25,6 +25,7 @@ import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
+import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { ThemeProviderContext } from '@/lib/theme-context'
 import { openUpdateNotice } from '@/lib/update-notice-events'
@@ -163,7 +164,7 @@ function BotStatusFlipCard({
     >
       <motion.div
         data-maibot-status-rotor="true"
-        className="relative z-10 h-full min-h-[136px] w-full [transform-style:preserve-3d] [will-change:transform]"
+        className="relative z-10 h-full min-h-[136px] w-full [will-change:transform] [transform-style:preserve-3d]"
         animate={{ rotateY: prefersReducedMotion ? 0 : isFlipped ? 180 : 0 }}
         transition={{ duration: prefersReducedMotion ? 0 : 0.46, ease: [0.22, 1, 0.36, 1] }}
       >
@@ -341,7 +342,7 @@ function compareVersions(left: string, right: string): number {
 }
 
 function IndexPageContent() {
-  const { t } = useTranslation()
+  const { i18n, t } = useTranslation()
   const { themeConfig } = useContext(ThemeProviderContext)
   const { triggerRestart, isRestarting } = useRestart()
 
@@ -547,7 +548,10 @@ function IndexPageContent() {
       source: 'builtin',
       render: () => (
         <Card className="h-full">
-          <CardContent data-home-titleless-content="true" className="relative flex flex-col justify-center py-3 sm:py-3">
+          <CardContent
+            data-home-titleless-content="true"
+            className="relative flex flex-col justify-center py-3 sm:py-3"
+          >
             {selectedQuickShortcuts.length === 0 ? (
               <div className="text-muted-foreground flex flex-col gap-3 rounded-lg border border-dashed p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
                 <span>{t('home.quickActions.empty')}</span>
@@ -964,6 +968,25 @@ function IndexPageContent() {
             </CardContent>
           </Card>
         )}
+        <MobilePageHeader
+          hideInMillennium
+          eyebrow={new Intl.DateTimeFormat(i18n.resolvedLanguage ?? i18n.language, {
+            month: 'long',
+            day: 'numeric',
+            weekday: 'long',
+          }).format(new Date())}
+          title={t('home.mobile.title')}
+          trailing={
+            <Link
+              to="/settings"
+              data-home-avatar-entry="true"
+              aria-label={t('home.mobile.openSettings')}
+              className="bg-muted text-foreground flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold"
+            >
+              {t('mobileNav.botInitial')}
+            </Link>
+          }
+        />
         <div
           data-home-command-strip="true"
           className={cn(

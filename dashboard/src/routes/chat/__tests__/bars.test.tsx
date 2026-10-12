@@ -4,16 +4,21 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
+import { ThemeProviderContext } from '@/lib/theme-context'
+import type { ThemeProviderState } from '@/lib/theme-context'
+import { DEFAULT_DASHBOARD_STYLE_CONFIG } from '@/lib/theme/tokens'
+import type { DashboardStyle } from '@/lib/theme/tokens'
 import type { UserEmojiItem } from '@/lib/user-emoji-api'
 
 import { ChatComposer } from '../ChatComposer'
-import { ChatTabBar } from '../ChatTabBar'
+import { MobileChatList, MobileChatRoomBar } from '../MobileChat'
 import type { ChatImageAttachment, ChatTab } from '../types'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: { label?: string; name?: string }) =>
       options?.label ? `${key}:${options.label}` : options?.name ? `${key}:${options.name}` : key,
+    i18n: { language: 'zh', resolvedLanguage: 'zh' },
   }),
 }))
 
@@ -240,216 +245,177 @@ describe('ChatComposer', () => {
   })
 })
 
-describe('ChatTabBar', () => {
-  it('切换和关闭非默认标签，默认标签不提供关闭按钮', async () => {
-    const user = userEvent.setup()
-    const onSwitch = vi.fn()
-    const onClose = vi.fn()
+function makeThemeState(dashboardStyle: DashboardStyle): ThemeProviderState {
+  return {
+    theme: 'light',
+    resolvedTheme: 'light',
+    setTheme: () => undefined,
+    themeConfig: {
+      selectedPreset: 'light',
+      accentColor: '',
+      styleTokenOverrides: {},
+      styleCustomCSS: {},
+      dashboardStyle,
+      styleBackgroundConfig: {},
+      styleConfig: DEFAULT_DASHBOARD_STYLE_CONFIG,
+    },
+    updateThemeConfig: () => undefined,
+    resetTheme: () => undefined,
+  }
+}
+
+describe('MobileChatList', () => {
+  const observedSession = {
+    sessionId: 'observed-a',
+    sessionName: '测试观察群',
+    isGroupChat: true,
+    groupId: 'group-a',
+    platform: 'qq',
+    lastActivity: 1,
+    eventCount: 2,
+  }
+
+  function renderList(
+    overrides: Partial<Parameters<typeof MobileChatList>[0]> = {},
+    dashboardStyle: DashboardStyle = 'modern'
+  ) {
+    const props = {
+      tabs: [
+        makeTab('webui-default'),
+        makeTab('virtual-a', {
+          type: 'virtual' as const,
+          label: '小明的私聊',
+          virtualConfig: {
+            platform: 'qq',
+            personId: 'person-a',
+            userId: 'user-a',
+            userName: '小明',
+            groupName: '',
+            groupId: '',
+          },
+        }),
+      ],
+      observedSessions: new Map([['observed-a', observedSession]]),
+      observedStageStatuses: new Map(),
+      observedLatestMessages: new Map(),
+      onOpenTab: vi.fn(),
+      onOpenObserved: vi.fn(),
+      onOpenObservedSettings: vi.fn(),
+      onClose: vi.fn(),
+      ...overrides,
+    }
     render(
-      <ChatTabBar
-        tabs={[
-          makeTab('webui-default'),
-          makeTab('virtual-a', {
-            type: 'virtual',
-            label: '小明的私聊',
-            virtualConfig: {
-              platform: 'qq',
-              personId: 'person-a',
-              userId: 'user-a',
-              userName: '小明',
-              groupName: '',
-              groupId: '',
-            },
-          }),
-        ]}
-        activeTabId="virtual-a"
-        activeObservedSessionId={null}
-        observedSessions={new Map()}
-        userId="user-a"
-        userName="小明"
-        isUploadingUserAvatar={false}
-        onSwitch={onSwitch}
-        onSelectObserved={vi.fn()}
-        onOpenObservedSettings={vi.fn()}
-        onClose={onClose}
-        onUpdateUserAvatar={vi.fn(async () => {})}
+      <ThemeProviderContext.Provider value={makeThemeState(dashboardStyle)}>
+        <MobileChatList {...props} />
+      </ThemeProviderContext.Provider>
+    )
+    return props
+  }
+
+  it('千禧风格把两组会话上下排列并提供搜索', async () => {
+    const user = userEvent.setup()
+    renderList({}, 'millennium')
+
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /测试观察群/ })).toBeInTheDocument()
+    await user.type(screen.getByRole('searchbox'), '观察')
+    expect(screen.queryByRole('button', { name: /小明的私聊/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /测试观察群/ })).toBeInTheDocument()
+  })
+
+  it('点按本地会话进入对话，只有非默认会话可以关闭', async () => {
+    const user = userEvent.setup()
+    const props = renderList()
+
+    await user.click(screen.getByRole('button', { name: /小明的私聊/ }))
+    expect(props.onOpenTab).toHaveBeenCalledWith('virtual-a')
+
+    await user.click(screen.getByRole('button', { name: 'chat.mobile.close' }))
+    expect(props.onClose).toHaveBeenCalledWith('virtual-a')
+    expect(screen.getAllByRole('button', { name: 'chat.mobile.close' })).toHaveLength(1)
+  })
+
+  it('分段切换到麦麦的聊天流后可以进入观察或打开设置', async () => {
+    const user = userEvent.setup()
+    const props = renderList()
+
+    expect(screen.queryByRole('button', { name: /测试观察群/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'chat.sidebar.observedChats' }))
+    await user.click(screen.getByRole('button', { name: /测试观察群/ }))
+    expect(props.onOpenObserved).toHaveBeenCalledWith('observed-a')
+
+    await user.click(screen.getByRole('button', { name: 'chat.mobile.settings' }))
+    expect(props.onOpenObservedSettings).toHaveBeenCalledWith('observed-a')
+  })
+
+  it('聊天流加载失败时显示错误提示', async () => {
+    const user = userEvent.setup()
+    renderList({ observedSessions: new Map(), observedSessionsError: true })
+
+    await user.click(screen.getByRole('tab', { name: 'chat.sidebar.observedChats' }))
+    expect(screen.getByText('chat.sidebar.loadObservedChatsFailed')).toBeInTheDocument()
+  })
+})
+
+describe('MobileChatRoomBar', () => {
+  it('返回会话列表并打开观察聊天流设置', async () => {
+    const user = userEvent.setup()
+    const onBack = vi.fn()
+    const onOpenSettings = vi.fn()
+    render(
+      <MobileChatRoomBar
+        title="测试观察群"
+        subtitle="规划中"
+        online
+        avatar={null}
+        onBack={onBack}
+        onOpenSettings={onOpenSettings}
       />
     )
 
-    await user.click(screen.getByRole('button', { name: '小明的私聊' }))
-    expect(onSwitch).toHaveBeenCalledWith('virtual-a')
-    await user.click(
-      screen.getByRole('button', {
-        name: 'chat.sidebar.closeConversation:小明的私聊',
-      })
-    )
-    expect(onClose).toHaveBeenCalledWith('virtual-a', expect.anything())
-    expect(
-      screen.queryByRole('button', {
-        name: 'chat.sidebar.closeConversation:机器人-webui-default',
-      })
-    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'chat.mobile.back' }))
+    expect(onBack).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'chat.sidebar.openSettings:测试观察群' }))
+    expect(onOpenSettings).toHaveBeenCalled()
   })
 
-  it('选择头像文件并在上传期间禁用入口', async () => {
-    const onUpdateUserAvatar = vi.fn(async () => {})
+  it('选择头像文件并在上传期间禁用入口，空文件不会上传', () => {
+    const onUpdate = vi.fn(async () => {})
+    const userAvatar = {
+      userId: 'user-a',
+      userName: '小明',
+      userAvatarVersion: 2,
+      isUploading: false,
+      onUpdate,
+    }
     const { container, rerender } = render(
-      <ChatTabBar
-        tabs={[makeTab('webui-default')]}
-        activeTabId="webui-default"
-        activeObservedSessionId={null}
-        observedSessions={new Map()}
-        userId="user-a"
-        userName="小明"
-        userAvatarVersion={2}
-        isUploadingUserAvatar={false}
-        onSwitch={vi.fn()}
-        onSelectObserved={vi.fn()}
-        onOpenObservedSettings={vi.fn()}
-        onClose={vi.fn()}
-        onUpdateUserAvatar={onUpdateUserAvatar}
+      <MobileChatRoomBar
+        title="麦麦"
+        subtitle="chat.sidebar.online"
+        online
+        avatar={null}
+        onBack={vi.fn()}
+        userAvatar={userAvatar}
       />
     )
     expect(useResolvedAvatarUrl).toHaveBeenCalledWith('webui', 'user-a', 'user', 2)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [] } })
+    expect(onUpdate).not.toHaveBeenCalled()
     const file = new File(['avatar'], 'avatar.png', { type: 'image/png' })
-    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
-      target: { files: [file] },
-    })
-    expect(onUpdateUserAvatar).toHaveBeenCalledWith(file)
+    fireEvent.change(input, { target: { files: [file] } })
+    expect(onUpdate).toHaveBeenCalledWith(file)
 
     rerender(
-      <ChatTabBar
-        tabs={[makeTab('webui-default')]}
-        activeTabId="webui-default"
-        activeObservedSessionId={null}
-        observedSessions={new Map()}
-        userId="user-a"
-        userName="小明"
-        isUploadingUserAvatar
-        onSwitch={vi.fn()}
-        onSelectObserved={vi.fn()}
-        onOpenObservedSettings={vi.fn()}
-        onClose={vi.fn()}
-        onUpdateUserAvatar={onUpdateUserAvatar}
+      <MobileChatRoomBar
+        title="麦麦"
+        subtitle="chat.sidebar.online"
+        online
+        avatar={null}
+        onBack={vi.fn()}
+        userAvatar={{ ...userAvatar, isUploading: true }}
       />
     )
     expect(screen.getByRole('button', { name: 'chat.sidebar.editAvatar' })).toBeDisabled()
-  })
-
-  it('移动端切换条同时展示并选择只读观察聊天流', async () => {
-    const user = userEvent.setup()
-    const onSelectObserved = vi.fn()
-    const onOpenObservedSettings = vi.fn()
-    render(
-      <ChatTabBar
-        tabs={[makeTab('webui-default')]}
-        activeTabId="webui-default"
-        activeObservedSessionId="observed-a"
-        observedSessions={
-          new Map([
-            [
-              'observed-a',
-              {
-                sessionId: 'observed-a',
-                sessionName: '测试观察群',
-                isGroupChat: true,
-                groupId: 'group-a',
-                platform: 'qq',
-                lastActivity: 1,
-                eventCount: 2,
-              },
-            ],
-          ])
-        }
-        userId="user-a"
-        userName="小明"
-        isUploadingUserAvatar={false}
-        onSwitch={vi.fn()}
-        onSelectObserved={onSelectObserved}
-        onOpenObservedSettings={onOpenObservedSettings}
-        onClose={vi.fn()}
-        onUpdateUserAvatar={vi.fn(async () => {})}
-      />
-    )
-
-    await user.click(
-      screen.getByRole('button', { name: /^测试观察群chat\.sidebar\.observedBadge/ })
-    )
-    expect(onSelectObserved).toHaveBeenCalledWith('observed-a')
-    await user.click(screen.getByRole('button', { name: 'chat.sidebar.openSettings:测试观察群' }))
-    expect(onOpenObservedSettings).toHaveBeenCalledWith('observed-a')
-    expect(screen.getByLabelText('chat.sidebar.observedBadge')).toBeInTheDocument()
-  })
-
-  it('空会话列表只保留头像入口，空文件不会上传', () => {
-    const onUpdateUserAvatar = vi.fn(async () => {})
-    const { container } = render(
-      <ChatTabBar
-        tabs={[]}
-        activeTabId="webui-default"
-        activeObservedSessionId={null}
-        observedSessions={new Map()}
-        userId="user-a"
-        userName="小明"
-        isUploadingUserAvatar={false}
-        onSwitch={vi.fn()}
-        onSelectObserved={vi.fn()}
-        onOpenObservedSettings={vi.fn()}
-        onClose={vi.fn()}
-        onUpdateUserAvatar={onUpdateUserAvatar}
-      />
-    )
-
-    expect(screen.getByRole('button', { name: 'chat.sidebar.editAvatar' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^标签-/ })).not.toBeInTheDocument()
-
-    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
-      target: { files: [] },
-    })
-    expect(onUpdateUserAvatar).not.toHaveBeenCalled()
-  })
-
-  it('未连接标签仍可切换，私聊观察流走独立入口', async () => {
-    const user = userEvent.setup()
-    const onSwitch = vi.fn()
-    const onSelectObserved = vi.fn()
-    render(
-      <ChatTabBar
-        tabs={[makeTab('webui-default', { isConnected: false })]}
-        activeTabId="virtual-a"
-        activeObservedSessionId={null}
-        observedSessions={
-          new Map([
-            [
-              'observed-private',
-              {
-                sessionId: 'observed-private',
-                sessionName: '小明的私聊',
-                isGroupChat: false,
-                groupId: '',
-                platform: 'qq',
-                lastActivity: 1,
-                eventCount: 1,
-              },
-            ],
-          ])
-        }
-        userId="user-a"
-        userName="小明"
-        isUploadingUserAvatar={false}
-        onSwitch={onSwitch}
-        onSelectObserved={onSelectObserved}
-        onOpenObservedSettings={vi.fn()}
-        onClose={vi.fn()}
-        onUpdateUserAvatar={vi.fn(async () => {})}
-      />
-    )
-
-    await user.click(screen.getByRole('button', { name: '机器人-webui-default' }))
-    expect(onSwitch).toHaveBeenCalledWith('webui-default')
-    await user.click(
-      screen.getByRole('button', { name: /^小明的私聊chat\.sidebar\.observedBadge/ })
-    )
-    expect(onSelectObserved).toHaveBeenCalledWith('observed-private')
   })
 })

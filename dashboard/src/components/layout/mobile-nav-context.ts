@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 
 import type { MenuSection } from './types'
 
@@ -7,15 +7,27 @@ export interface MobileNavContextValue {
   menuSections: MenuSection[]
   /** 打开全局搜索 */
   openSearch: () => void
+  /** 全屏子页面（如聊天对话页）请求隐藏底部标签栏 */
+  setTabBarHidden: (hidden: boolean) => void
 }
 
 export const MobileNavContext = createContext<MobileNavContextValue>({
   menuSections: [],
   openSearch: () => {},
+  setTabBarHidden: () => {},
 })
 
 export function useMobileNav(): MobileNavContextValue {
   return useContext(MobileNavContext)
+}
+
+/** 页面处于全屏子页面时隐藏底部标签栏，离开页面后自动恢复 */
+export function useHideMobileTabBar(hidden: boolean) {
+  const { setTabBarHidden } = useMobileNav()
+  useEffect(() => {
+    setTabBarHidden(hidden)
+    return () => setTabBarHidden(false)
+  }, [hidden, setTabBarHidden])
 }
 
 /** 「观察」标签覆盖的页面：麦麦观察、日志、推理过程与详细统计 */

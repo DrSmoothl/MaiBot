@@ -354,6 +354,11 @@
       "sessionUnavailable": "Cannot open the chat session. Please try again later.",
       "virtualTabCreated": "Virtual identity tab",
       "virtualTabCreatedDesc": "Created a chat for {{label}}"
+    },
+    "mobile": {
+      "back": "Back to conversations",
+      "close": "Close",
+      "settings": "Settings"
     }
   },
   "layout": {
@@ -1592,6 +1597,10 @@
       "requestTrend": "Hourly request trend chart showing request count changes over recent hours",
       "costTrend": "API cost trend chart showing API call cost changes over recent hours",
       "tokenUsage": "Token usage trend chart showing token consumption over recent hours"
+    },
+    "mobile": {
+      "title": "MaiBot",
+      "openSettings": "Me & WebUI settings"
     }
   },
   "mobileNav": {
@@ -1601,7 +1610,14 @@
     "manage": "Manage",
     "observe": "Monitor",
     "me": "Me",
-    "search": "Search"
+    "search": "Search",
+    "live": "MaiBot live",
+    "botInitial": "M",
+    "observeLive": "Live",
+    "observeLogs": "Logs",
+    "observeReasoning": "Reasoning",
+    "backHome": "Back to home",
+    "backManage": "Back to manage"
   },
   "manage": {
     "searchPlaceholder": "Search pages or settings"

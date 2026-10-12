@@ -686,7 +686,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'h-8 min-w-0 w-full justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
+                      'h-8 w-full min-w-0 justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
                       !dateFrom && 'text-muted-foreground'
                     )}
                   >
@@ -713,7 +713,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'h-8 min-w-0 w-full justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
+                      'h-8 w-full min-w-0 justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
                       !dateTo && 'text-muted-foreground'
                     )}
                   >
@@ -1155,7 +1155,8 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
         <div id={toolbarContainerId} className="flex min-w-0 flex-1 justify-end" />
       </div>
       {showSwitchHint && (
-        <div className="shrink-0 border-b px-3 py-2 lg:px-4">
+        // 提示说的是桌面顶栏左上角的切换，手机上切换就在页面顶部，不需要这条提示
+        <div className="shrink-0 border-b px-3 py-2 max-lg:hidden lg:px-4">
           <div className="border-primary/30 bg-primary/5 flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-foreground font-medium">小提示</span>

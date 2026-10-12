@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import { AboutTab } from './AboutTab'
 import { AppearanceTab } from './AppearanceTab'
+import { MobileAccountCard } from './MobileAccountCard'
 import { OtherTab } from './OtherTab'
 import { SecurityTab } from './SecurityTab'
 
@@ -38,11 +39,9 @@ export function SettingsPage() {
   return (
     <div className="min-w-0 p-4 sm:p-6">
       {/* WebUI 设置标签页 */}
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="min-w-0 w-full">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full min-w-0">
         <div className="-mx-1 shrink-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:overflow-visible sm:p-0">
-          <TabsList
-            className="inline-grid h-auto w-max min-w-full grid-cols-4 gap-1 p-1 sm:w-full"
-          >
+          <TabsList className="inline-grid h-auto w-max min-w-full grid-cols-4 gap-1 p-1 sm:w-full">
             <TabsTrigger
               data-dashboard-settings-tabs="true"
               value="appearance"
@@ -94,6 +93,8 @@ export function SettingsPage() {
           <TabsContent value="about" className="mt-0">
             <AboutTab />
           </TabsContent>
+
+          <MobileAccountCard />
         </div>
       </Tabs>
     </div>

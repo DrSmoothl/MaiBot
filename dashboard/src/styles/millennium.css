@@ -3287,3 +3287,199 @@
   height: 8px;
   width: 56px;
 }
+
+/* ---------- 手机端页面大标题：像素字丝印 ---------- */
+
+:root[data-dashboard-style='millennium'] [data-mobile-large-title='true'] {
+  color: var(--mil-ink);
+  font-family: var(--mil-font-pixel);
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* ---------- 手机端聊天：会话各在一块下沉屏幕里，对话页顶栏是一排键帽 ---------- */
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-list='true'] {
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-search='true'],
+:root[data-dashboard-style='millennium'] [data-mobile-chat-screen='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-sunk);
+  color: var(--mil-screen-ink);
+  margin: 4px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-search='true'] {
+  margin: 0 4px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-section-title='true'] {
+  align-items: center;
+  color: var(--mil-print);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  letter-spacing: 0.14em;
+  padding: 3px 8px 6px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-swipe-row='true'] > div:last-child {
+  background-color: var(--mil-screen);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-mobile-chat-swipe-row='true']
+  + [data-mobile-chat-swipe-row='true'] {
+  border-top: 2px dashed var(--mil-rule);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-row='true'] {
+  height: 62px;
+  padding: 0 10px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-row='true'] > span:last-child {
+  box-shadow: none;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-mobile-chat-row='true']
+  [data-mobile-chat-avatar='true'] {
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  height: 40px;
+  width: 40px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-mobile-chat-row='true']
+  [data-mobile-chat-avatar='true']
+  * {
+  border-radius: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-badge='true'] {
+  background: var(--mil-key);
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  color: var(--mil-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-row-action] {
+  background-color: var(--mil-key);
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-row-action='destructive'] {
+  background-color: var(--mil-danger);
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -7px 0 var(--mil-danger-side);
+  color: #fff;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-bar='true'] {
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  border-bottom: 2px solid var(--mil-line);
+  box-shadow:
+    inset 0 2px 0 var(--mil-hi),
+    inset 0 -2px 0 var(--mil-lo),
+    0 5px 0 var(--mil-drop);
+  padding-bottom: 10px;
+  position: relative;
+  z-index: 2;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-button='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 46px;
+  padding-bottom: 5px;
+  width: 46px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-button='true'] * {
+  border-radius: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-title='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: none;
+  box-shadow: none;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-title='true'] b {
+  font-family: var(--mil-font-pixel);
+  font-size: 22px;
+  font-weight: 400;
+}
+
+/* 千禧对话页顶栏只留像素字会话名与指示灯，不放头像 */
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-title='true'] > span:first-child {
+  display: none;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-led='true'] {
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  height: 8px;
+  width: 8px;
+}
+
+/* 手机页头的返回键与分段切换：键帽，选中的是按下去的绿键 */
+:root[data-dashboard-style='millennium'] [data-mobile-page-back='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 46px;
+  padding-bottom: 5px;
+  width: 46px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-segmented='true'] {
+  background: none;
+  border-radius: 0;
+  gap: 8px;
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-segmented='true'] > * {
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 46px;
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-segmented='true'] > [data-active='true'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}

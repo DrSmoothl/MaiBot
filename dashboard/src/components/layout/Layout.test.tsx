@@ -177,6 +177,10 @@ vi.mock('./Header', () => ({
     </div>
   ),
 }))
+vi.mock('./MobileRouteHeader', () => ({
+  MobileRouteHeader: () => null,
+}))
+
 vi.mock('./MobileTabBar', () => ({
   MobileTabBar: ({ millennium, onSearch }: { millennium: boolean; onSearch: () => void }) => (
     <nav data-testid="mobile-tabbar" data-millennium={String(millennium)}>

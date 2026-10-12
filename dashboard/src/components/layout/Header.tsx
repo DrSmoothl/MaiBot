@@ -51,15 +51,9 @@ import { cn } from '@/lib/utils'
 import { extensionIcons, extensionPath, extensionWorkspace } from '@/lib/plugin-webui'
 import type { WebUIExtension } from '@/lib/plugin-webui'
 
+import { LANGUAGE_CODES, LANGUAGE_NAMES } from './language-options'
 import type { WorkspaceMode } from './types'
 
-const LANGUAGE_CODES = ['zh', 'en', 'ja', 'ko'] as const
-const LANGUAGE_NAMES: Record<(typeof LANGUAGE_CODES)[number], string> = {
-  zh: '中文',
-  en: 'English',
-  ja: '日本語',
-  ko: '한국어',
-}
 const LOG_WORKSPACE_COMPACT_GAP = 12
 const LOG_WORKSPACE_EXPAND_GAP = 96
 const WORKSPACE_HOVER_LEAVE_DELAY_MS = 600
@@ -85,6 +79,8 @@ interface HeaderProps {
   extensions?: WebUIExtension[]
   /** 工作区切换动画期间隐藏日志视图切换，让它随页面一起淡入淡出 */
   logSwitcherHidden?: boolean
+  /** 手机上进入全屏子页面（如聊天对话页）时整条顶栏让位给页面自己的顶栏 */
+  mobileHidden?: boolean
   /** 侧栏滑入/滑出期间让顶栏延伸到侧栏下方，顶栏自身保持不动 */
   sidebarUnderlay?: boolean
   sidebarOpen: boolean
@@ -104,6 +100,7 @@ type HeaderActionId = 'settings' | 'docs' | 'language' | 'theme' | 'logout' | 'e
 export function Header({
   extensions = [],
   logSwitcherHidden = false,
+  mobileHidden = false,
   sidebarUnderlay = false,
   sidebarOpen,
   searchOpen,
@@ -333,8 +330,9 @@ export function Header({
       className={cn(
         'sticky top-0 isolate z-30 min-w-0 overflow-visible',
         topbarCollapsed ? 'h-4' : 'flex h-[42px] flex-col border-b px-3 backdrop-blur-md sm:px-4',
-        // 手机上的原版顶栏不画分隔线，内容滚动时从磨砂底下穿过
-        !topbarCollapsed && themeConfig.dashboardStyle !== 'millennium' && 'max-lg:border-b-0',
+        // 手机上的原版风格不显示顶栏：页面自带大标题，搜索与设置分别由标签栏和首页头像承担；
+        // 进入全屏子页面时千禧风格的顶栏也让位
+        (mobileHidden || themeConfig.dashboardStyle !== 'millennium') && 'max-lg:hidden',
         topbarCollapsed || inheritsPageBackground ? 'bg-transparent' : 'bg-background'
       )}
     >

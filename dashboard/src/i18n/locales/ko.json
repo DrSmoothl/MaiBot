@@ -334,6 +334,11 @@
       "sessionUnavailable": "채팅 세션을 열 수 없습니다. 잠시 후 다시 시도하세요.",
       "virtualTabCreated": "가상 신분 탭",
       "virtualTabCreatedDesc": "{{label}} 대화를 만들었습니다"
+    },
+    "mobile": {
+      "back": "대화 목록으로",
+      "close": "닫기",
+      "settings": "설정"
     }
   },
   "layout": {
@@ -1572,6 +1577,10 @@
       "requestTrend": "시간별 요청 트렌드 차트, 최근 시간대별 요청 수 변화 표시",
       "costTrend": "API 비용 트렌드 차트, 최근 시간대별 API 호출 비용 변화 표시",
       "tokenUsage": "토큰 소비 트렌드 차트, 최근 시간대별 토큰 사용량 변화 표시"
+    },
+    "mobile": {
+      "title": "MaiBot",
+      "openSettings": "내 정보 및 WebUI 설정"
     }
   },
   "mobileNav": {
@@ -1581,7 +1590,14 @@
     "manage": "관리",
     "observe": "관찰",
     "me": "내 정보",
-    "search": "검색"
+    "search": "검색",
+    "live": "MaiBot 실시간",
+    "botInitial": "M",
+    "observeLive": "실시간",
+    "observeLogs": "로그",
+    "observeReasoning": "추론 과정",
+    "backHome": "홈으로",
+    "backManage": "관리로"
   },
   "manage": {
     "searchPlaceholder": "페이지 또는 설정 검색"

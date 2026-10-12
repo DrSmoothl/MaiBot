@@ -7,6 +7,8 @@ import {
   ChatStreamSettingsDialog,
   type ChatStreamSettingsTarget,
 } from '@/components/chat-stream-settings-dialog'
+import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { useToast } from '@/hooks/use-toast'
 import { uploadWebuiUserAvatar } from '@/lib/avatar-url'
 import { chatWsClient } from '@/lib/chat-ws-client'
@@ -21,13 +23,20 @@ import {
   type StageStatusEvent,
 } from '@/lib/maisaka-monitor-client'
 import { loadUserEmojiPayload, type UserEmojiItem } from '@/lib/user-emoji-api'
+import { cn } from '@/lib/utils'
 import { MaisakaMonitor } from '@/routes/monitor/maisaka-monitor'
+import { StageStatusLabel } from '@/routes/monitor/StageStatusLabel'
 import { useMaisakaMonitorOverview, type SessionInfo } from '@/routes/monitor/use-maisaka-monitor'
 
 import { ChatComposer } from './ChatComposer'
-import { ChatTabBar } from './ChatTabBar'
 import { ChatWorkspaceSidebar } from './ChatWorkspaceSidebar'
 import { MessageList } from './MessageList'
+import {
+  MobileChatList,
+  MobileChatRoomBar,
+  MobileChatRoomObservedAvatar,
+  MobileChatRoomTabAvatar,
+} from './MobileChat'
 import type {
   ChatImageAttachment,
   ChatIncomingImage,
@@ -41,6 +50,7 @@ import type {
   WsMessage,
 } from './types'
 import {
+  getChatTabDisplayName,
   getOrCreateUserId,
   getStoredUserAvatarVersion,
   getStoredUserName,
@@ -344,6 +354,20 @@ export function ChatPage() {
   const [activeObservedSessionId, setActiveObservedSessionId] = useState(
     getRequestedObservedSessionId
   )
+
+  const activeObservedSession = activeObservedSessionId
+    ? knownSessions.get(activeObservedSessionId)
+    : undefined
+  const activeObservedStatus = activeObservedSessionId
+    ? observedStageStatuses.get(activeObservedSessionId)
+    : undefined
+
+  // 手机端（md 以下）先显示会话列表，点进会话后进入全屏对话页并隐藏底部标签栏
+  const isMobileChat = useMediaQuery('(max-width: 767.98px)')
+  const [mobileRoomOpen, setMobileRoomOpen] = useState(
+    () => getRequestedObservedSessionId() !== null
+  )
+  useHideMobileTabBar(isMobileChat && mobileRoomOpen)
 
   // 当前活动标签页
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0]
@@ -1145,9 +1169,32 @@ export function ChatPage() {
         />
       </motion.div>
 
+      {/* 移动端：会话列表（未进入对话时） */}
+      {!mobileRoomOpen && (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:hidden">
+          <MobileChatList
+            tabs={tabs}
+            observedSessions={knownSessions}
+            observedSessionsError={knownChatStreamsError}
+            observedStageStatuses={observedStageStatuses}
+            observedLatestMessages={observedLatestMessages}
+            onOpenTab={(tabId) => {
+              switchTab(tabId)
+              setMobileRoomOpen(true)
+            }}
+            onOpenObserved={(sessionId) => {
+              selectObservedSession(sessionId)
+              setMobileRoomOpen(true)
+            }}
+            onOpenObservedSettings={openObservedSettings}
+            onClose={(tabId) => closeTab(tabId)}
+          />
+        </div>
+      )}
+
       {/* 主聊天区 */}
       <motion.div
-        className="flex min-w-0 flex-1 flex-col"
+        className={cn('flex min-w-0 flex-1 flex-col', !mobileRoomOpen && 'max-md:hidden')}
         variants={{
           initial: { opacity: 0, y: '100%' },
           animate: { opacity: 1, y: 0 },
@@ -1159,23 +1206,47 @@ export function ChatPage() {
         }}
         transition={{ type: 'spring', stiffness: 360, damping: 30, mass: 0.75 }}
       >
-        {/* 移动端会话切换条 */}
+        {/* 移动端对话页顶栏：返回列表、会话名片与单个操作 */}
         <div className="md:hidden">
-          <ChatTabBar
-            tabs={tabs}
-            activeTabId={activeTabId}
-            activeObservedSessionId={activeObservedSessionId}
-            observedSessions={knownSessions}
-            userId={userId}
-            userName={userName}
-            userAvatarVersion={userAvatarVersion}
-            isUploadingUserAvatar={isUploadingUserAvatar}
-            onSwitch={switchTab}
-            onSelectObserved={selectObservedSession}
-            onOpenObservedSettings={openObservedSettings}
-            onClose={closeTab}
-            onUpdateUserAvatar={handleUpdateUserAvatar}
-          />
+          {activeObservedSessionId ? (
+            <MobileChatRoomBar
+              title={activeObservedSession?.sessionName ?? activeObservedSessionId}
+              subtitle={
+                activeObservedStatus ? (
+                  <StageStatusLabel status={activeObservedStatus} />
+                ) : (
+                  t('chat.sidebar.observedBadge')
+                )
+              }
+              online={activeObservedStatus !== undefined}
+              avatar={
+                activeObservedSession ? (
+                  <MobileChatRoomObservedAvatar session={activeObservedSession} />
+                ) : null
+              }
+              onBack={() => setMobileRoomOpen(false)}
+              onOpenSettings={() => openObservedSettings(activeObservedSessionId)}
+            />
+          ) : (
+            activeTab && (
+              <MobileChatRoomBar
+                title={getChatTabDisplayName(activeTab, t('chat.botNameFallback'))}
+                subtitle={
+                  activeTab.isConnected ? t('chat.sidebar.online') : t('chat.sidebar.offline')
+                }
+                online={activeTab.isConnected}
+                avatar={<MobileChatRoomTabAvatar tab={activeTab} />}
+                onBack={() => setMobileRoomOpen(false)}
+                userAvatar={{
+                  userId,
+                  userName,
+                  userAvatarVersion,
+                  isUploading: isUploadingUserAvatar,
+                  onUpdate: handleUpdateUserAvatar,
+                }}
+              />
+            )
+          )}
         </div>
 
         {activeObservedSessionId ? (

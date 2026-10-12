@@ -354,6 +354,11 @@
       "sessionUnavailable": "无法建立聊天会话，请稍后重试",
       "virtualTabCreated": "虚拟身份标签页",
       "virtualTabCreatedDesc": "已创建 {{label}} 的对话"
+    },
+    "mobile": {
+      "back": "返回会话列表",
+      "close": "关闭",
+      "settings": "设置"
     }
   },
   "layout": {
@@ -1589,6 +1594,10 @@
       "requestTrend": "每小时请求量趋势图，显示最近若干小时的请求次数变化",
       "costTrend": "API花费趋势图，显示最近若干小时的API调用成本变化",
       "tokenUsage": "Token消耗趋势图，显示最近若干小时的Token使用量变化"
+    },
+    "mobile": {
+      "title": "麦麦",
+      "openSettings": "我的与 WebUI 设置"
     }
   },
   "mobileNav": {
@@ -1598,7 +1607,14 @@
     "manage": "管理",
     "observe": "观察",
     "me": "我的",
-    "search": "搜索"
+    "search": "搜索",
+    "live": "麦麦实时",
+    "botInitial": "麦",
+    "observeLive": "实时",
+    "observeLogs": "日志",
+    "observeReasoning": "推理过程",
+    "backHome": "返回首页",
+    "backManage": "返回管理"
   },
   "manage": {
     "searchPlaceholder": "搜索页面或设置项"

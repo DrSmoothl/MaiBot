@@ -287,6 +287,11 @@
       "sessionUnavailable": "チャットセッションを開始できません。しばらくしてから再試行してください",
       "virtualTabCreated": "仮想身份タブ",
       "virtualTabCreatedDesc": "{{label}} の会話を作成しました"
+    },
+    "mobile": {
+      "back": "会話一覧に戻る",
+      "close": "閉じる",
+      "settings": "設定"
     }
   },
   "layout": {
@@ -1525,6 +1530,10 @@
       "requestTrend": "時間ごとのリクエスト数トレンドチャート、直近のリクエスト数変化を表示",
       "costTrend": "APIコストトレンドチャート、直近のAPI呼び出しコスト変化を表示",
       "tokenUsage": "Token消費トレンドチャート、直近のToken使用量変化を表示"
+    },
+    "mobile": {
+      "title": "MaiBot",
+      "openSettings": "マイページと WebUI 設定"
     }
   },
   "mobileNav": {
@@ -1534,7 +1543,14 @@
     "manage": "管理",
     "observe": "観察",
     "me": "マイページ",
-    "search": "検索"
+    "search": "検索",
+    "live": "MaiBot リアルタイム",
+    "botInitial": "麦",
+    "observeLive": "リアルタイム",
+    "observeLogs": "ログ",
+    "observeReasoning": "推論過程",
+    "backHome": "ホームに戻る",
+    "backManage": "管理に戻る"
   },
   "manage": {
     "searchPlaceholder": "ページや設定を検索"
