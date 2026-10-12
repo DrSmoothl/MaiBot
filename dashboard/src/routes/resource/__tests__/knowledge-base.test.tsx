@@ -33,15 +33,6 @@ vi.mock('@/hooks/use-toast', () => ({
   useToast: () => ({ toast: toastMock }),
 }))
 
-vi.mock('@/components', () => ({
-  CodeEditor: ({ value }: { value: string }) => <pre data-testid="code-editor">{value}</pre>,
-  MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
-}))
-
-vi.mock('@/components/memory/MemoryConfigEditor', () => ({
-  MemoryConfigEditor: () => <div data-testid="memory-config-editor">memory-config-editor</div>,
-}))
-
 vi.mock('@/components/memory/MemoryDeleteDialog', () => ({
   MemoryDeleteDialog: ({
     open,

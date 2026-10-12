@@ -7,7 +7,6 @@ import { useResolvedAvatarUrl } from '@/lib/avatar-url'
 import type { UserEmojiItem } from '@/lib/user-emoji-api'
 
 import { ChatComposer } from '../ChatComposer'
-import { ChatHeaderBar } from '../ChatHeaderBar'
 import { ChatTabBar } from '../ChatTabBar'
 import type { ChatImageAttachment, ChatTab } from '../types'
 
@@ -452,109 +451,5 @@ describe('ChatTabBar', () => {
       screen.getByRole('button', { name: /^小明的私聊chat\.sidebar\.observedBadge/ })
     )
     expect(onSelectObserved).toHaveBeenCalledWith('observed-private')
-  })
-})
-
-describe('ChatHeaderBar', () => {
-  it.each([
-    [true, false, 'chat.status.connected'],
-    [false, true, 'chat.status.connecting'],
-    [false, false, 'chat.status.disconnected'],
-  ])('按连接状态显示对应文案', (isConnected, isConnecting, expected) => {
-    render(
-      <ChatHeaderBar
-        activeTab={makeTab('tab-a', { isConnected })}
-        botDisplayName="麦麦"
-        isConnecting={isConnecting}
-        isLoadingHistory={false}
-        onReconnect={vi.fn()}
-      />
-    )
-    expect(screen.getByText(expected)).toBeInTheDocument()
-  })
-
-  it('虚拟会话显示身份和群聊信息，重连按钮调用回调', async () => {
-    const user = userEvent.setup()
-    const onReconnect = vi.fn()
-    render(
-      <ChatHeaderBar
-        activeTab={makeTab('virtual-a', {
-          type: 'virtual',
-          virtualConfig: {
-            platform: 'qq',
-            personId: 'person-a',
-            userId: 'user-a',
-            userName: '小明',
-            groupName: '测试群',
-            groupId: 'group-a',
-          },
-        })}
-        botDisplayName="麦麦"
-        isConnecting={false}
-        isLoadingHistory
-        onReconnect={onReconnect}
-      />
-    )
-    expect(screen.getByText('小明')).toBeInTheDocument()
-    expect(screen.getByText('qq')).toBeInTheDocument()
-    expect(screen.getByText('测试群')).toBeInTheDocument()
-    expect(useResolvedAvatarUrl).toHaveBeenCalledWith('qq', '10001')
-    await user.click(screen.getByRole('button', { name: 'chat.actions.reconnect' }))
-    expect(onReconnect).toHaveBeenCalledOnce()
-  })
-
-  it('连接中禁用重连按钮', () => {
-    render(
-      <ChatHeaderBar
-        activeTab={undefined}
-        botDisplayName="麦麦"
-        isConnecting
-        isLoadingHistory={false}
-        onReconnect={vi.fn()}
-      />
-    )
-    expect(screen.getByRole('button', { name: 'chat.actions.reconnect' })).toBeDisabled()
-  })
-
-  it('无活动会话按断开展示，允许重连且不显示虚拟身份', () => {
-    render(
-      <ChatHeaderBar
-        activeTab={undefined}
-        botDisplayName="麦麦"
-        isConnecting={false}
-        isLoadingHistory={false}
-        onReconnect={vi.fn()}
-      />
-    )
-    expect(screen.getByText('麦麦')).toBeInTheDocument()
-    expect(screen.getByText('chat.status.disconnected')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'chat.actions.reconnect' })).toBeEnabled()
-    expect(screen.queryByText('qq')).not.toBeInTheDocument()
-  })
-
-  it('虚拟私聊不展示空群名，加载历史时显示等待指示', () => {
-    render(
-      <ChatHeaderBar
-        activeTab={makeTab('virtual-a', {
-          type: 'virtual',
-          virtualConfig: {
-            platform: 'qq',
-            personId: 'person-a',
-            userId: 'user-a',
-            userName: '小明',
-            groupName: '',
-            groupId: '',
-          },
-        })}
-        botDisplayName="麦麦"
-        isConnecting={false}
-        isLoadingHistory
-        onReconnect={vi.fn()}
-      />
-    )
-    expect(screen.getByText('小明')).toBeInTheDocument()
-    expect(screen.getByText('qq')).toBeInTheDocument()
-    expect(screen.queryByText('测试群')).not.toBeInTheDocument()
-    expect(document.querySelector('.animate-spin')).toBeInTheDocument()
   })
 })

@@ -72,7 +72,7 @@ async def _load_emoji_bytes(emoji: MaiEmoji) -> bytes:
 def _get_emoji_candidate_count() -> int:
     """获取本次表情包候选数量配置。"""
 
-    configured_count = int(getattr(global_config.emoji, "emoji_send_num", 25))
+    configured_count = global_config.emoji.emoji_send_num
     return max(1, min(configured_count, _EMOJI_MAX_CANDIDATE_COUNT))
 
 

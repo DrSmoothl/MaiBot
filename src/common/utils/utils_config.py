@@ -601,10 +601,10 @@ class AMemorixConfigUtils:
         if not clean_session_id:
             return set()
 
-        shared_groups = getattr(global_config.a_memorix, "shared_memory_groups", []) or []
+        shared_groups = global_config.a_memorix.shared_memory_groups
         resolved_session_ids: set[str] = set()
         for group in shared_groups:
-            targets = getattr(group, "targets", []) or []
+            targets = group.targets
             group_session_ids: set[str] = set()
             for target in targets:
                 group_session_ids.update(ChatConfigUtils.get_target_session_ids(target))

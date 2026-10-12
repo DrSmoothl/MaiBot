@@ -65,7 +65,7 @@ def parse_platform_accounts(platforms: list[str]) -> dict[str, str]:
 
 
 def _get_configured_qq_account() -> str:
-    qq_account = str(getattr(global_config.bot, "qq_account", "")).strip()
+    qq_account = global_config.bot.qq_account.strip()
     if qq_account in {"", "0"}:
         return ""
     return qq_account
@@ -94,7 +94,7 @@ def get_configured_bot_accounts() -> dict[str, str]:
         primary_platform = str(global_config.bot.platform or "qq").strip().lower()
         bot_accounts[primary_platform] = qq_account
 
-    platforms_list = getattr(global_config.bot, "platforms", []) or []
+    platforms_list = global_config.bot.platforms
     platform_accounts = parse_platform_accounts(platforms_list)
 
     for platform_name, account in platform_accounts.items():
@@ -153,8 +153,8 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
 
     current_accounts = get_bot_accounts(platform)
 
-    nickname = str(global_config.bot.nickname or "")
-    alias_names = list(getattr(global_config.bot, "alias_names", []) or [])
+    nickname = global_config.bot.nickname
+    alias_names = global_config.bot.alias_names
     keywords = [nickname] + alias_names
 
     reply_probability = 0.0
