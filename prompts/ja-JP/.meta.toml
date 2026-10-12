@@ -118,6 +118,11 @@ display_name = "Focus Planner"
 advanced = true
 description = "Focus モード用の Maisaka 計画テンプレート。現在注目しているチャットとチャット横断概要をもとに次の行動を選択する。"
 
+[maisaka_chat_optimized]
+display_name = "Planner（最適化版）"
+advanced = true
+description = "実験機能 experimental.planner_optimized_prompt を有効にしたときに使う Maisaka メイン計画テンプレート。ボット自身を二人称で記述し、タスク説明を簡潔にしている。Focus モードでは引き続き Focus Planner を使う。"
+
 [maisaka_timing_gate]
 display_name = "Timing Gate"
 advanced = false

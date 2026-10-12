@@ -942,6 +942,19 @@ class ExperimentalConfig(ConfigBase):
     )
     """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
 
+    planner_optimized_prompt: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "优化 Planner 提示词",
+                "en_US": "Optimized planner prompt",
+                "ja_JP": "Planner プロンプトの最適化",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """Planner 改用优化版提示词：以“你的名字是……”的第二人称描述麦麦自己，去掉“替麦麦做决策”的旁观者设定并精简任务说明。Focus 模式仍使用原提示词。"""
+
     planner_unsent_reply_retry: bool = Field(
         default=False,
         json_schema_extra={

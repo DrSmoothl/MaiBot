@@ -118,6 +118,11 @@ display_name = "Focus 规划器"
 advanced = true
 description = "Focus 模式下的 Maisaka 规划模板，负责基于当前关注聊天和跨聊天概览选择下一步行动。"
 
+[maisaka_chat_optimized]
+display_name = "规划器（优化版）"
+advanced = true
+description = "开启实验功能 experimental.planner_optimized_prompt 后使用的 Maisaka 主规划模板，以第二人称描述麦麦自己并精简了任务说明；Focus 模式仍使用 Focus 规划器。"
+
 [maisaka_timing_gate]
 display_name = "时机"
 advanced = true
