@@ -969,6 +969,34 @@ class ExperimentalConfig(ConfigBase):
     )
     """Planner 在分析里写了要回复、却没有调用任何工具就结束时，提醒一次并让它重新决策；每个回合最多重试一次。"""
 
+    tool_result_condense: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "超长工具结果整理",
+                "en_US": "Condense long tool results",
+                "ja_JP": "長いツール結果の要約",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """工具返回的结果超过阈值字数时，先交给子代理按 Planner 当前意图整理成结论再写入上下文，减少后续每轮的上下文占用；会多一次模型请求。"""
+
+    tool_result_condense_threshold: int = Field(
+        default=3000,
+        ge=500,
+        json_schema_extra={
+            "advanced": True,
+            "x-widget": "input",
+            "label": {
+                "zh_CN": "工具结果整理阈值",
+                "en_US": "Tool result condense threshold",
+                "ja_JP": "ツール結果要約のしきい値",
+            },
+        },
+    )
+    """工具结果达到多少字时才触发整理，仅在开启“超长工具结果整理”时生效；调低会更频繁地整理，调高则更多原文留在上下文里。"""
+
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""
 

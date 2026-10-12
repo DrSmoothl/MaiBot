@@ -9,11 +9,7 @@ from src.maisaka.context.messages import ReferenceMessage, ReferenceMessageType
 from src.maisaka.context.system_reminder import unwrap_system_reminder, wrap_system_reminder
 from src.maisaka.jargon_context_matcher import is_jargon_reference_text
 from src.maisaka.planner_reply_guard import has_unsent_reply_intent
-from src.maisaka.tool_result_condenser import (
-    TOOL_RESULT_CONDENSE_MIN_CHARS,
-    build_tool_result_condense_task,
-    should_condense_tool_result,
-)
+from src.maisaka.tool_result_condenser import build_tool_result_condense_task, should_condense_tool_result
 
 
 @pytest.mark.parametrize(
@@ -92,7 +88,7 @@ def test_reference_message_stays_unmarked_when_switch_is_off(monkeypatch: pytest
 
 
 def test_condenser_only_targets_long_successful_query_results() -> None:
-    long_result = "x" * TOOL_RESULT_CONDENSE_MIN_CHARS
+    long_result = "x" * global_config.experimental.tool_result_condense_threshold
 
     assert should_condense_tool_result("maibot_release_info", long_result, success=True)
     assert not should_condense_tool_result("maibot_release_info", long_result[:-1], success=True)
@@ -109,3 +105,10 @@ def test_condense_task_is_self_contained() -> None:
     assert '"keyword": "pixiv"' in task_text
     assert "想找一个 pixiv 相关的插件推荐给群友" in task_text
     assert "<原始结果>\n插件A\n插件B\n</原始结果>" in task_text
+
+
+def test_condenser_threshold_follows_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(global_config.experimental, "tool_result_condense_threshold", 800)
+
+    assert should_condense_tool_result("maibot_release_info", "x" * 800, success=True)
+    assert not should_condense_tool_result("maibot_release_info", "x" * 799, success=True)

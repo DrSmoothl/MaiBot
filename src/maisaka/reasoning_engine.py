@@ -53,6 +53,7 @@ from src.maisaka.builtin_tool import (
 )
 from .chat_loop_service import ChatResponse
 from .planner_reply_guard import has_unsent_reply_intent
+from .tool_result_condenser import condense_tool_result, should_condense_tool_result
 from src.maisaka.visual.chat_history_refresher import (
     has_pending_image_recognition,
     log_pending_image_recognition_before_text_planner,
@@ -1604,12 +1605,14 @@ class MaisakaReasoningEngine:
         result: ToolExecutionResult,
         *,
         append_post_history: bool = True,
+        condensed_content: str | None = None,
     ) -> None:
         """将统一工具执行结果写回 Maisaka 历史。
 
         Args:
             tool_call: 原始工具调用对象。
             result: 统一工具执行结果。
+            condensed_content: 子代理整理后的结果文本；提供时代替原始结果文本写入历史。
         """
 
         if (
@@ -1619,7 +1622,11 @@ class MaisakaReasoningEngine:
         ):
             return
 
-        history_content = self._build_tool_result_history_content(tool_call, result)
+        history_content = self._build_tool_result_history_content(
+            tool_call,
+            result,
+            condensed_content=condensed_content,
+        )
         if not history_content:
             history_content = "工具执行成功。" if result.success else f"工具 {tool_call.func_name} 执行失败。"
 
@@ -1755,10 +1762,16 @@ class MaisakaReasoningEngine:
             label_parts.append(f"source_url={source_url}")
         return " / ".join(label_parts)
 
-    def _build_tool_result_history_content(self, tool_call: ToolCall, result: ToolExecutionResult) -> str:
+    def _build_tool_result_history_content(
+        self,
+        tool_call: ToolCall,
+        result: ToolExecutionResult,
+        *,
+        condensed_content: str | None = None,
+    ) -> str:
         """构造纯文本 tool result，并在其中引用拆分出去的媒体索引。"""
 
-        history_content = result.get_history_content()
+        history_content = result.get_history_content() if condensed_content is None else condensed_content
         media_items = self._iter_tool_result_media_items(result)
         if not media_items:
             return history_content
@@ -2101,7 +2114,30 @@ class MaisakaReasoningEngine:
                 result,
                 tool_spec_map.get(invocation.tool_name),
             )
-            self._append_tool_execution_result(tool_call, result, append_post_history=False)
+            # 超长结果先交给子代理按当前意图整理，Planner 历史里只留整理后的结论
+            condensed_content: str | None = None
+            raw_history_content = result.get_history_content()
+            if global_config.experimental.tool_result_condense and should_condense_tool_result(
+                invocation.tool_name,
+                raw_history_content,
+                success=result.success,
+            ):
+                self._runtime._update_stage_status(
+                    f"工具结果整理 · {invocation.tool_name}",
+                    f"原始结果 {len(raw_history_content)} 字",
+                )
+                condensed_content = await condense_tool_result(
+                    self._runtime,
+                    tool_call,
+                    raw_history_content,
+                    latest_thought,
+                )
+            self._append_tool_execution_result(
+                tool_call,
+                result,
+                append_post_history=False,
+                condensed_content=condensed_content,
+            )
             deferred_post_history_messages.extend(
                 message for message in result.post_history_messages if isinstance(message, LLMContextMessage)
             )

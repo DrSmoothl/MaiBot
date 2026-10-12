@@ -19,6 +19,8 @@ from .query_image_memory import get_tool_spec as get_query_image_memory_tool_spe
 from .query_image_memory import handle_tool as handle_query_image_memory_tool
 from .query_person_profile import get_tool_spec as get_query_person_profile_tool_spec
 from .query_person_profile import handle_tool as handle_query_person_profile_tool
+from .read_tool_result import get_tool_spec as get_read_tool_result_tool_spec
+from .read_tool_result import handle_tool as handle_read_tool_result_tool
 from .reply import get_tool_spec as get_reply_tool_spec
 from .reply import handle_tool as handle_reply_tool
 from .send_emoji import get_tool_spec as get_send_emoji_tool_spec
@@ -109,6 +111,12 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("show_emoji_list", get_show_emoji_list_tool_spec, handle_show_emoji_list_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),
     BuiltinToolEntry(
+        "read_tool_result",
+        get_read_tool_result_tool_spec,
+        handle_read_tool_result_tool,
+        stage="action",
+    ),
+    BuiltinToolEntry(
         "fetch_history",
         get_fetch_history_tool_spec,
         handle_fetch_history_tool,
@@ -146,6 +154,9 @@ def _is_builtin_tool_enabled_by_config(entry: BuiltinToolEntry) -> bool:
         return not global_config.emoji.use_new_send_logic
     if entry.name in {"fetch_history", "switch_chat"}:
         return bool(global_config.experimental.focus_mode)
+    if entry.name == "read_tool_result":
+        # 只有开启超长结果整理时才会有被暂存的原文可读
+        return global_config.experimental.tool_result_condense
     return True
 
 
