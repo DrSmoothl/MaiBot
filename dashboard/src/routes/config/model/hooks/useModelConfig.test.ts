@@ -93,6 +93,7 @@ function model(name: string, apiProvider = 'main', extra: Partial<ModelInfo> = {
   return {
     name,
     model_identifier: `${name}-id`,
+    model_type: 'llm',
     api_provider: apiProvider,
     price_in: 1,
     price_out: 2,
@@ -717,6 +718,7 @@ describe('useModelConfig 模型编辑与校验', () => {
       result.current.setEditingModel({
         name: '   ',
         model_identifier: '',
+        model_type: 'llm',
         api_provider: '',
         price_in: 0,
         price_out: 0,
@@ -735,6 +737,7 @@ describe('useModelConfig 模型编辑与校验', () => {
       result.current.setEditingModel({
         name: 'CHAT',
         model_identifier: 'new-id',
+        model_type: 'llm',
         api_provider: 'main',
         price_in: 0,
         price_out: 0,
@@ -765,6 +768,7 @@ describe('useModelConfig 模型编辑与校验', () => {
       result.current.setEditingModel({
         name: 'vision',
         model_identifier: 'vision-id',
+        model_type: 'llm',
         api_provider: 'spare',
         price_in: null,
         price_out: null,
@@ -1319,7 +1323,7 @@ describe('useModelConfig 提供商编辑与级联删除', () => {
     unmount()
   })
 
-  it('重命名仍被模型引用的提供商时中止保存并打开级联确认', async () => {
+  it('重命名仍被模型引用的提供商时迁移模型引用并一起保存', async () => {
     const { result, unmount } = await renderLoadedHook()
 
     await act(async () => {
@@ -1332,15 +1336,12 @@ describe('useModelConfig 提供商编辑与级联删除', () => {
       )
     })
 
-    expect(updateModelConfigMock).not.toHaveBeenCalled()
-    expect(result.current.providerDialogOpen).toBe(false)
-    expect(result.current.editingProvider).toBeNull()
-    expect(result.current.deleteConfirmState.isOpen).toBe(true)
-    expect(result.current.deleteConfirmState.context).toBe('manual')
-    expect(result.current.deleteConfirmState.providersToDelete).toEqual(['main'])
-    expect(result.current.deleteConfirmState.affectedModels.map((item) => item.name)).toEqual([
-      'chat',
-    ])
+    expect(updateModelConfigMock).toHaveBeenCalledTimes(1)
+    expect(result.current.deleteConfirmState.isOpen).toBe(false)
+    expect(result.current.apiProviders[0].name).toBe('renamed-main')
+    expect(result.current.models.find((item) => item.name === 'chat')?.api_provider).toBe(
+      'renamed-main'
+    )
     unmount()
   })
 
