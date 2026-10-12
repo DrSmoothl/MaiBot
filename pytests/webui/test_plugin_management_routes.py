@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, Generator, List, Optional, Tuple
+from unittest.mock import AsyncMock, Mock
 
 import asyncio
 import json
@@ -26,6 +27,29 @@ from src.webui.routers.plugin import config_routes as config_routes_module
 from src.webui.routers.plugin import icon_routes as icon_routes_module
 from src.webui.routers.plugin import management as management_module
 from src.webui.routers.plugin import support as support_module
+
+
+@pytest.mark.parametrize("contents", [b"{invalid json", b"\xff", b"[]"])
+def test_invalid_manifest_preserves_diagnostics(tmp_path: Path, monkeypatch, contents: bytes) -> None:
+    manifest_path = tmp_path / "_manifest.json"
+    manifest_path.write_bytes(contents)
+    logger = Mock()
+    monkeypatch.setattr(support_module, "logger", logger)
+
+    assert support_module.load_manifest_json(manifest_path) is None
+    logger.warning.assert_called_once()
+    assert str(manifest_path) in logger.warning.call_args.args[0]
+    if contents != b"[]":
+        assert logger.warning.call_args.kwargs["exc_info"] is True
+
+
+def test_manifest_loader_does_not_hide_unexpected_errors(tmp_path: Path, monkeypatch) -> None:
+    manifest_path = tmp_path / "_manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(support_module.json, "load", Mock(side_effect=RuntimeError("unexpected loader failure")))
+
+    with pytest.raises(RuntimeError, match="unexpected loader failure"):
+        support_module.load_manifest_json(manifest_path)
 
 
 @pytest.fixture
@@ -145,11 +169,12 @@ def test_toggle_plugin_applies_enabled_state_before_returning(client: TestClient
         config_data: Optional[Dict[str, Any]] = None,
         *,
         use_provided_config: bool = False,
-    ) -> SimpleNamespace:
+    ) -> InspectPluginConfigResultPayload:
         assert plugin_id == "test.demo"
         assert config_data is None
         assert use_provided_config is False
-        return SimpleNamespace(
+        return InspectPluginConfigResultPayload(
+            success=True,
             enabled=False,
             normalized_config={"plugin": {"enabled": False}},
         )
@@ -181,6 +206,12 @@ def test_toggle_plugin_applies_enabled_state_before_returning(client: TestClient
 
 
 def test_toggle_exposes_runtime_failure_instead_of_reporting_success(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(
+        config_routes_module,
+        "_inspect_plugin_config_via_runtime",
+        AsyncMock(return_value=InspectPluginConfigResultPayload(success=True)),
+    )
+
     async def fail(plugin_id, write_config):
         await write_config()
         raise RuntimeError("模拟插件加载失败")
@@ -426,7 +457,7 @@ def test_get_plugin_icon_rejects_manifest_declared_parent_path(client: TestClien
     assert response.status_code == 400
 
 
-def test_install_plugin_preserves_manifest_declared_id(client: TestClient, monkeypatch):
+def test_install_plugin_rejects_mismatching_manifest_id(client: TestClient, monkeypatch):
     class FakeGitMirrorService:
         async def clone_repository(self, **kwargs):
             target_path = kwargs["target_path"]
@@ -456,14 +487,12 @@ def test_install_plugin_preserves_manifest_declared_id(client: TestClient, monke
         },
     )
 
-    assert response.status_code == 200
-    plugin_path = support_module.resolve_installed_plugin_path("author.declared")
-    assert plugin_path is not None
-    manifest = json.loads((plugin_path / "_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["id"] == "author.declared"
+    assert response.status_code == 400
+    assert "插件 ID 不匹配" in response.json()["detail"]
+    assert not support_module.get_plugin_candidate_paths("market.plugin")[0].exists()
 
 
-def test_install_plugin_backfills_missing_manifest_id(client: TestClient, monkeypatch):
+def test_install_plugin_rejects_missing_manifest_id(client: TestClient, monkeypatch):
     class FakeGitMirrorService:
         async def clone_repository(self, **kwargs):
             target_path = kwargs["target_path"]
@@ -492,11 +521,9 @@ def test_install_plugin_backfills_missing_manifest_id(client: TestClient, monkey
         },
     )
 
-    assert response.status_code == 200
-    plugin_path = support_module.resolve_installed_plugin_path("market.legacy")
-    assert plugin_path is not None
-    manifest = json.loads((plugin_path / "_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["id"] == "market.legacy"
+    assert response.status_code == 400
+    assert "缺少必需字段: id" in response.json()["detail"]
+    assert not support_module.get_plugin_candidate_paths("market.legacy")[0].exists()
 
 
 def test_install_plugin_cleans_config_only_residue(client: TestClient, monkeypatch):

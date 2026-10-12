@@ -236,7 +236,6 @@ MODULE_ALIASES = {
     # 聊天、学习与表达
     "chat_message": "聊天消息",
     "emoji_maisaka_tool": "表情包工具",
-    "event_helpers": "聊天事件工具",
     "heartflow": "心流管理",
     "image_receive_compressor": "接收图片压缩",
     "jargon": "黑话学习",

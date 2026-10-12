@@ -842,8 +842,6 @@ def _collect_installed_plugins(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                         "release": read_release_receipt(plugin_path),
                     }
                 )
-            except json.JSONDecodeError as e:
-                logger.warning(f"插件 {folder_name} 的 _manifest.json 解析失败: {e}")
             except Exception as e:
                 logger.error(f"读取插件 {folder_name} 信息时出错: {e}")
 

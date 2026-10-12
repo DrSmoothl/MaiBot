@@ -227,17 +227,13 @@ async def build_person_profile_injection_messages(
     """构造注入 planner 的一次性人物画像内部参考消息。"""
 
     integration_config = global_config.a_memorix.integration
-    if not bool(getattr(integration_config, "enable_person_profile_injection", True)):
+    if not integration_config.enable_person_profile_injection:
         return []
 
-    try:
-        max_profiles = int(getattr(integration_config, "person_profile_injection_max_profiles", 3) or 3)
-    except (TypeError, ValueError):
-        max_profiles = 3
     candidates = collect_person_profile_candidates(
         anchor_message,
         pending_messages,
-        max_profiles=max(1, max_profiles),
+        max_profiles=integration_config.person_profile_injection_max_profiles,
     )
     if not candidates:
         return []

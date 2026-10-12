@@ -16,11 +16,9 @@ import { useToast } from '@/hooks/use-toast'
 import { RestartProvider } from '@/lib/restart-context'
 import {
   checkGitStatus,
-  checkPluginInstalled,
   connectPluginProgressWebSocket,
   fetchPluginList,
   getCachedPluginList,
-  getInstalledPluginVersion,
   getInstalledPlugins,
   getMaimaiVersion,
   installPlugin,
@@ -322,14 +320,12 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     installed: InstalledPlugin[]
   ): PluginInfo[] => {
     const mergedData: PluginInfo[] = marketPlugins.map(plugin => {
-      const installedPlugin = installed.find(item => item.id === plugin.id || item.manifest?.id === plugin.id)
-      const isInstalled = Boolean(installedPlugin) || checkPluginInstalled(plugin.id, installed)
-      const installedVersion = installedPlugin?.manifest?.version ?? getInstalledPluginVersion(plugin.id, installed)
+      const installedPlugin = installed.find(item => item.id === plugin.id || item.manifest.id === plugin.id)
 
       return {
         ...plugin,
-        installed: isInstalled,
-        installed_version: installedVersion,
+        installed: Boolean(installedPlugin),
+        installed_version: installedPlugin?.manifest.version,
         installed_release: installedPlugin?.release,
       }
     })
@@ -470,13 +466,11 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
           setError(null)
           // 插件中心的复合列表直接携带统计；GitHub 模式仍单独请求统计摘要。
           // 清单失败时不等待统计请求，保证错误提示及时返回。
-          const [gitStatus, maimaiVersion, marketResult, installed] = await Promise.all([
+          const [gitStatus, maimaiVersion, marketPlugins, installed] = await Promise.all([
             checkGitStatus(),
             getMaimaiVersion(),
-            // 市场清单失败需保留原有「setError + toast + 中断」行为，故就地收敛为判别结果，避免 Promise.all 整体 reject
-            fetchPluginList({ compatibleOnly: showCompatibleOnly })
-              .then((data) => ({ ok: true as const, data }))
-              .catch((err) => ({ ok: false as const, error: err instanceof Error ? err.message : '加载失败' })),
+            // 市场清单与安装状态查询失败时，统一交给外层错误处理。
+            fetchPluginList({ compatibleOnly: showCompatibleOnly }),
             getInstalledPlugins(),
           ])
           if (isUnmounted) {
@@ -494,34 +488,30 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
           setMaimaiVersion(maimaiVersion)
 
-          if (!marketResult.ok) {
-            setError(marketResult.error)
-            toast({
-              title: '加载失败',
-              description: marketResult.error,
-              variant: 'destructive',
-            })
-            return
-          }
-
           console.info('插件市场已获取')
           setInstalledPlugins(installed)
-          const mergedData = mergeInstalledPluginInfo(marketResult.data, installed)
+          const mergedData = mergeInstalledPluginInfo(marketPlugins, installed)
 
           setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary ?? {}))
           setPlugins(mergedData)
-          const bundledStats = Object.fromEntries(marketResult.data
+          const bundledStats = Object.fromEntries(marketPlugins
             .filter((plugin) => plugin.marketplace_stats)
             .map((plugin) => [plugin.id, plugin.marketplace_stats!]))
           // 统计是附加信息；请求失败时明确记录错误，保留已经加载的市场清单。
           try {
-            const statsSummary = marketResult.data.some((plugin) => plugin.market_data_source === 'service')
+            const statsSummary = marketPlugins.some((plugin) => plugin.market_data_source === 'service')
               ? bundledStats
               : await getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
             setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
             console.info('插件市场已更新')
           } catch (error) {
             console.warn('刷新插件统计失败:', error)
+          }
+        } catch (error) {
+          if (!isUnmounted) {
+            const message = error instanceof Error ? error.message : '加载插件失败'
+            setError(message)
+            toast({ title: '加载失败', description: message, variant: 'destructive' })
           }
         } finally {
           if (!isUnmounted) {
@@ -821,14 +811,13 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
       setPlugins(prevPlugins =>
         prevPlugins.map(p => {
           if (p.id === installingPlugin.id) {
-            const isInstalled = checkPluginInstalled(p.id, installed)
-            const installedVersion = getInstalledPluginVersion(p.id, installed)
-            
+            const installedPlugin = installed.find((item) => item.id === p.id)
+
             return {
               ...p,
-              installed: isInstalled,
-              installed_version: installedVersion,
-              installed_release: installed.find((item) => item.id === p.id)?.release,
+              installed: Boolean(installedPlugin),
+              installed_version: installedPlugin?.manifest.version,
+              installed_release: installedPlugin?.release,
             }
           }
           return p
@@ -876,14 +865,13 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
       setPlugins(prevPlugins =>
         prevPlugins.map(p => {
           if (p.id === plugin.id) {
-            const isInstalled = checkPluginInstalled(p.id, installed)
-            const installedVersion = getInstalledPluginVersion(p.id, installed)
-            
+            const installedPlugin = installed.find((item) => item.id === p.id)
+
             return {
               ...p,
-              installed: isInstalled,
-              installed_version: installedVersion,
-              installed_release: installed.find((item) => item.id === p.id)?.release,
+              installed: Boolean(installedPlugin),
+              installed_version: installedPlugin?.manifest.version,
+              installed_release: installedPlugin?.release,
             }
           }
           return p
@@ -961,14 +949,13 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
       setPlugins(prevPlugins =>
         prevPlugins.map(p => {
           if (p.id === plugin.id) {
-            const isInstalled = checkPluginInstalled(p.id, installed)
-            const installedVersion = getInstalledPluginVersion(p.id, installed)
-            
+            const installedPlugin = installed.find((item) => item.id === p.id)
+
             return {
               ...p,
-              installed: isInstalled,
-              installed_version: installedVersion,
-              installed_release: installed.find((item) => item.id === p.id)?.release,
+              installed: Boolean(installedPlugin),
+              installed_version: installedPlugin?.manifest.version,
+              installed_release: installedPlugin?.release,
             }
           }
           return p
