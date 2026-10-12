@@ -1,4 +1,4 @@
-from typing import Dict, Final, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import re
 
@@ -23,31 +23,6 @@ REPLY_TRIGGER_MODE_OPTION_LABELS = {
     "frequency": "频率触发",
     "dynamic": "动态触发",
 }
-
-EMOTION_TRAIT_OPTION_LABELS = {
-    "rational_calm": "理性冷静",
-    "neutral": "中性",
-    "sentimental": "多愁善感",
-}
-
-EMOTION_TRAIT_OPTION_DESCRIPTIONS = {
-    "rational_calm": "情绪表达更克制，优先保持客观、清晰和稳定。",
-    "neutral": "不追加额外情绪特点描述，完全使用原人格设定。",
-    "sentimental": "情绪表达更细腻敏感，更容易被聊天氛围触动。",
-}
-
-PERSONALITY_EMOTION_SUFFIXES: Final[dict[str, str]] = {
-    "rational_calm": "你整体理性冷静，回应时更偏向客观、克制和清晰判断，少用强烈情绪表达。",
-    "neutral": "",
-    "sentimental": "你更敏感细腻，容易被聊天氛围触动，会自然表现出一点惆怅、共情或情绪波动，但不要过度煽情。",
-}
-
-
-def build_personality_emotion_suffix(emotion_trait: str) -> str:
-    """根据实验性情绪特点档位生成追加到人格后的提示词。"""
-
-    return PERSONALITY_EMOTION_SUFFIXES[emotion_trait]
-
 
 ATTENTION_DRIFT_LEVEL_OPTION_LABELS = {
     "subtle": "轻微漂移",
@@ -980,23 +955,6 @@ class ExperimentalConfig(ConfigBase):
         },
     )
     """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
-
-    emotion_trait: Literal["rational_calm", "neutral", "sentimental"] = Field(
-        default="neutral",
-        json_schema_extra={
-            "label": {
-                "zh_CN": "情绪特点",
-                "en_US": "Emotion trait",
-                "ja_JP": "感情特徴",
-            },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-option-labels": EMOTION_TRAIT_OPTION_LABELS,
-            "x-option-descriptions": EMOTION_TRAIT_OPTION_DESCRIPTIONS,
-        },
-    )
-    """实验性人格情绪特点；理性冷静和多愁善感会追加人格后缀，中性不追加内容。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""

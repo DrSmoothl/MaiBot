@@ -71,6 +71,8 @@ from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
+from .attention_drift import build_attention_drift_prompt_block
+
 PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "emotion": "emoji.selector",
@@ -755,7 +757,11 @@ class MaisakaChatLoopService:
     def _build_chat_system_prompt(self, tools_section: str = "") -> str:
         """基于当前配置实时构造主聊天系统提示词。"""
 
-        return load_prompt(self._get_chat_prompt_name(), **self.build_prompt_template_context(tools_section))
+        system_prompt = load_prompt(self._get_chat_prompt_name(), **self.build_prompt_template_context(tools_section))
+        # 每轮读取实验开关，普通与专注模式共用同一份本地化风格指令。
+        if attention_drift := build_attention_drift_prompt_block():
+            system_prompt += f"\n\n{attention_drift}"
+        return system_prompt
 
     @staticmethod
     def _build_planner_final_user_reminder() -> str:
