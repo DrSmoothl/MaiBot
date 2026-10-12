@@ -38,6 +38,7 @@ import { useToast } from '@/hooks/use-toast'
 import type { ConfigSchema } from '@/types/config-schema'
 
 import type { ModelInfo, ModelPricePeriod, ModelTaskConfig, ProviderConfig, TaskConfig } from '../types'
+import { serializeModel } from '../serializeModel'
 import type { APIProvider, DeleteConfirmState } from '../../modelProvider/types'
 import { cleanProviderData } from '../../modelProvider/utils'
 import { useModelAutoSave } from './useModelAutoSave'
@@ -414,6 +415,11 @@ export function useModelConfig() {
       }
       const config = unwrapModelConfig(result.value)
       const modelList = (config.models as ModelInfo[]) || []
+      for (const model of modelList) {
+        if (!['llm', 'embedding', 'image_embedding'].includes(model.model_type)) {
+          throw new Error(`模型 ${model.name} 缺少或包含无效的 model_type，请检查配置升级是否完成`)
+        }
+      }
       setModels(modelList)
       setModelNames(modelList.map((m) => m.name))
 
@@ -476,32 +482,6 @@ export function useModelConfig() {
     },
     [providerConfigs]
   )
-
-  // 清理模型中的 null 值（TOML 不支持 null）
-  // 缓存价格留空按输入价格解析：0 表示缓存命中免费，与留空是两种含义
-  const cleanModelForSave = useCallback((model: ModelInfo): ModelInfo => {
-    const cleaned: ModelInfo = {
-      model_identifier: model.model_identifier,
-      name: model.name,
-      api_provider: model.api_provider,
-      price_in: model.price_in ?? 0,
-      price_out: model.price_out ?? 0,
-      cache_price_in: model.cache_price_in ?? model.price_in ?? 0,
-      price_periods: model.price_periods?.map((period) => ({ ...period })),
-      send_temperature: model.send_temperature ?? true,
-      visual: model.visual ?? false,
-      force_stream_mode: model.force_stream_mode ?? false,
-      extra_params: model.extra_params ?? {},
-    }
-    // 只有在有值时才添加可选字段
-    if (model.temperature != null) {
-      cleaned.temperature = model.temperature
-    }
-    if (model.max_tokens != null) {
-      cleaned.max_tokens = model.max_tokens
-    }
-    return cleaned
-  }, [])
 
   // ---- 提供商状态同步 / 级联删除 ----
   const syncProviderState = useCallback((nextProviders: APIProvider[]) => {
@@ -603,7 +583,7 @@ export function useModelConfig() {
       const savePromise = enqueueConfigWrite(async () => {
         const config = unwrapModelConfig(await getModelConfig())
         config.api_providers = nextApiProviders.map(cleanProviderData)
-        config.models = nextModels.map(cleanModelForSave)
+        config.models = nextModels.map(serializeModel)
         config.model_task_config = nextTaskConfig
         await updateModelConfig(config)
       })
@@ -618,7 +598,6 @@ export function useModelConfig() {
       }
     },
     [
-      cleanModelForSave,
       commitProviderSaveBarrier,
       commitSaveBarrier,
       enqueueConfigWrite,
@@ -935,7 +914,8 @@ export function useModelConfig() {
       model: ModelInfo | null,
       index: number | null,
       onOpened?: () => void,
-      preferredProvider?: string
+      preferredProvider?: string,
+      modelType: ModelInfo['model_type'] = 'llm'
     ) => {
       // 清除表单验证错误
       setFormErrors({})
@@ -948,6 +928,7 @@ export function useModelConfig() {
           price_periods: model.price_periods?.map((period) => ({ ...period })),
         } : {
           model_identifier: '',
+          model_type: modelType,
           name: '',
           api_provider: defaultProvider,
           price_in: 0,
@@ -1097,29 +1078,7 @@ export function useModelConfig() {
     // 清除错误状态
     setFormErrors({})
 
-    // 填充空值的默认值，并移除 null 值的可选字段（TOML 不支持 null）
-    // 缓存价格留空按输入价格解析：0 表示缓存命中免费，与留空是两种含义
-    const modelToSave: ModelInfo = {
-      model_identifier: editingModel.model_identifier,
-      name: editingModel.name,
-      api_provider: editingModel.api_provider,
-      price_in: editingModel.price_in ?? 0,
-      price_out: editingModel.price_out ?? 0,
-      cache_price_in: editingModel.cache_price_in ?? editingModel.price_in ?? 0,
-      price_periods: editingModel.price_periods?.map((period) => ({ ...period })),
-      send_temperature: editingModel.send_temperature ?? true,
-      visual: editingModel.visual ?? false,
-      force_stream_mode: editingModel.force_stream_mode ?? false,
-      extra_params: editingModel.extra_params ?? {},
-    }
-
-    // 只有在有值时才添加可选字段
-    if (editingModel.temperature != null) {
-      modelToSave.temperature = editingModel.temperature
-    }
-    if (editingModel.max_tokens != null) {
-      modelToSave.max_tokens = editingModel.max_tokens
-    }
+    const modelToSave = serializeModel(editingModel)
 
     let newModels: ModelInfo[]
     let oldModelName: string | null = null

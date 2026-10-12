@@ -619,7 +619,37 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         migrate=_merge_wildcard_learning_rules_into_defaults,
     ),
 )
-MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = ()
+
+
+def _label_legacy_model_types(data: Dict[str, Any]) -> List[str]:
+    """仅升级时沿用旧模型测试的名称与任务规则，为缺少类型的模型打标签。"""
+    tasks = data.get("model_task_config", {})
+    text_models = set(tasks.get("embedding", {}).get("model_list", []))
+    image_models = set(tasks.get("image_embedding", {}).get("model_list", []))
+    reasons: List[str] = []
+    for index, model in enumerate(data["models"]):
+        # 已显式选择的类型不被旧推断规则覆盖，包括非法值，交由配置校验报错。
+        if "model_type" in model:
+            continue
+        name = model["name"]
+        identifiers = (name.lower(), model["model_identifier"].lower())
+        is_embedding = name in text_models or name in image_models or any("embed" in value for value in identifiers)
+        if is_embedding:
+            is_image = name in image_models or any("vision" in value or "vl-embedding" in value for value in identifiers)
+            model["model_type"] = "image_embedding" if is_image else "embedding"
+        else:
+            model["model_type"] = "llm"
+        reasons.append(f"models[{index}].model_type")
+    return reasons
+
+
+MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
+    ConfigUpgradeHook(
+        target_version="1.17.17",
+        config_names=("model_config.toml",),
+        migrate=_label_legacy_model_types,
+    ),
+)
 
 
 def apply_config_upgrade_hooks(

@@ -69,6 +69,8 @@ export const TASK_CONFIGS = [
     key: 'image_embedding' as const,
     title: '图片嵌入模型 (image_embedding)',
     description: '用于图片向量化，必须实现图片输入到向量的协议',
+    hideTemperature: true,
+    hideMaxTokens: true,
     hideSelectionStrategy: true,
     singleModel: true,
   },
@@ -78,6 +80,7 @@ export const TASK_CONFIGS = [
  * 默认模型信息
  */
 export const DEFAULT_MODEL_INFO = {
+  model_type: 'llm',
   model_identifier: '',
   name: '',
   api_provider: '',

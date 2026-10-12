@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, List, Tuple
+from typing import Any, List, Literal, Tuple
 
 from src.common.i18n import t
 
@@ -237,6 +237,11 @@ class ModelInfo(ConfigBase):
 
     _validate_any: bool = False
     suppress_any_warning: bool = True
+
+    model_type: Literal["llm", "embedding", "image_embedding"] = Field(
+        json_schema_extra={"x-widget": "select"},
+    )
+    """模型类型：LLM、文本嵌入或图片嵌入；必填，旧配置由版本升级钩子一次性标注。"""
 
     model_identifier: str = Field(
         default="",
@@ -531,7 +536,7 @@ class ModelTaskConfig(ConfigBase):
             "x-widget": "custom",
         },
     )
-    """嵌入模型，需要文本嵌入类型的模型，不可使用LLM"""
+    """嵌入模型；可选择文本或图片嵌入类型，不可使用 LLM，所选模型需支持文本向量化"""
 
     image_embedding: TaskConfig = Field(
         default_factory=TaskConfig,
@@ -540,4 +545,4 @@ class ModelTaskConfig(ConfigBase):
             "advanced": True,
         },
     )
-    """图片嵌入模型；留空时不启用图片嵌入，所选模型必须实现图片输入到向量的协议"""
+    """图片嵌入模型；可选择文本或图片嵌入类型，不可使用 LLM，留空时不启用；所选模型必须实现图片输入到向量的协议"""
