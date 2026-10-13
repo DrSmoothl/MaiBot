@@ -3265,6 +3265,12 @@
   font-weight: 700;
   height: 58px;
   padding-bottom: 7px;
+  /* 切换标签时键帽按下 / 弹起有过渡 */
+  transition:
+    background-color 0.12s steps(2),
+    box-shadow 0.12s steps(2),
+    padding 0.12s steps(2),
+    transform 0.12s steps(2);
 }
 
 :root[data-dashboard-style='millennium'] [data-mobile-tab='true'][data-active='true'] {
@@ -3688,4 +3694,9 @@
   height: 46px;
   padding-bottom: 5px;
   width: 46px;
+}
+
+/* 千禧标签栏的选中态是按下去的键帽，不用滑动底板 */
+:root[data-dashboard-style='millennium'] [data-mobile-tab-indicator='true'] {
+  display: none;
 }

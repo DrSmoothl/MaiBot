@@ -8,6 +8,7 @@ import {
   ChatStreamSettingsDialog,
   type ChatStreamSettingsTarget,
 } from '@/components/chat-stream-settings-dialog'
+import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
 import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useToast } from '@/hooks/use-toast'
@@ -37,6 +38,7 @@ import {
   MobileChatRoomBar,
   MobileChatRoomObservedAvatar,
   MobileChatRoomTabAvatar,
+  MobileFloatingHeader,
 } from './MobileChat'
 import type {
   ChatImageAttachment,
@@ -365,6 +367,8 @@ export function ChatPage() {
 
   // 手机端（md 以下）先显示会话列表，点进会话后进入全屏对话页并隐藏底部标签栏
   const isMobileChat = useMediaQuery('(max-width: 767.98px)')
+  // 手机端观察页的工具栏挂到悬浮顶栏里
+  const [observedToolbarSlot, setObservedToolbarSlot] = useState<HTMLDivElement | null>(null)
   const [mobileRoomOpen, setMobileRoomOpen] = useState(
     () => getRequestedObservedSessionId() !== null
   )
@@ -1220,55 +1224,62 @@ export function ChatPage() {
         }}
         transition={{ type: 'spring', stiffness: 360, damping: 30, mass: 0.75 }}
       >
-        {/* 移动端对话页顶栏：返回列表、会话名片与单个操作 */}
+        {/* 移动端对话页顶栏：返回列表、会话名片与单个操作；观察页的顶栏悬浮在时间线上方 */}
         <div className="md:hidden">
-          {activeObservedSessionId ? (
+          {!activeObservedSessionId && activeTab && (
             <MobileChatRoomBar
-              title={activeObservedSession?.sessionName ?? activeObservedSessionId}
+              title={getChatTabDisplayName(activeTab, t('chat.botNameFallback'))}
               subtitle={
-                activeObservedStatus ? (
-                  <StageStatusLabel status={activeObservedStatus} />
-                ) : (
-                  t('chat.sidebar.observedBadge')
-                )
+                activeTab.isConnected ? t('chat.sidebar.online') : t('chat.sidebar.offline')
               }
-              online={activeObservedStatus !== undefined}
-              avatar={
-                activeObservedSession ? (
-                  <MobileChatRoomObservedAvatar session={activeObservedSession} />
-                ) : null
-              }
+              online={activeTab.isConnected}
+              avatar={<MobileChatRoomTabAvatar tab={activeTab} />}
               onBack={() => setMobileRoomOpen(false)}
-              onOpenSettings={() => openObservedSettings(activeObservedSessionId)}
+              userAvatar={{
+                userId,
+                userName,
+                userAvatarVersion,
+                isUploading: isUploadingUserAvatar,
+                onUpdate: handleUpdateUserAvatar,
+              }}
             />
-          ) : (
-            activeTab && (
-              <MobileChatRoomBar
-                title={getChatTabDisplayName(activeTab, t('chat.botNameFallback'))}
-                subtitle={
-                  activeTab.isConnected ? t('chat.sidebar.online') : t('chat.sidebar.offline')
-                }
-                online={activeTab.isConnected}
-                avatar={<MobileChatRoomTabAvatar tab={activeTab} />}
-                onBack={() => setMobileRoomOpen(false)}
-                userAvatar={{
-                  userId,
-                  userName,
-                  userAvatarVersion,
-                  isUploading: isUploadingUserAvatar,
-                  onUpdate: handleUpdateUserAvatar,
-                }}
-              />
-            )
           )}
         </div>
 
         {activeObservedSessionId ? (
-          <div className="min-h-0 min-w-0 flex-1" data-chat-observed-session>
+          <div className="relative min-h-0 min-w-0 flex-1" data-chat-observed-session>
             <MaisakaMonitor
               embedded
               reasoningReturnTo={`/chat?observe=${encodeURIComponent(activeObservedSessionId)}`}
+              floatingToolbarContainer={isMobileChat ? observedToolbarSlot : undefined}
             />
+            {isMobileChat && (
+              <MobileFloatingHeader>
+                <MobileChatRoomBar
+                  title={activeObservedSession?.sessionName ?? activeObservedSessionId}
+                  subtitle={
+                    activeObservedStatus ? (
+                      <StageStatusLabel status={activeObservedStatus} />
+                    ) : (
+                      t('chat.sidebar.observedBadge')
+                    )
+                  }
+                  online={activeObservedStatus !== undefined}
+                  avatar={
+                    activeObservedSession ? (
+                      <MobileChatRoomObservedAvatar session={activeObservedSession} />
+                    ) : null
+                  }
+                  onBack={() => setMobileRoomOpen(false)}
+                  onOpenSettings={() => openObservedSettings(activeObservedSessionId)}
+                />
+                <div
+                  ref={setObservedToolbarSlot}
+                  data-mobile-floating-toolbar="true"
+                  className={cn('mx-3 mb-2 overflow-hidden rounded-full', MOBILE_GLASS_CLASS)}
+                />
+              </MobileFloatingHeader>
+            )}
           </div>
         ) : (
           <>

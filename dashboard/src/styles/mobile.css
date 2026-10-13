@@ -25,6 +25,85 @@
   --m-ok: #30d158;
 }
 
+/*
+ * 液态玻璃（iOS 26 Liquid Glass 的网页近似）。
+ * 放在 utilities 层里，与之前的 Tailwind 工具类处于同一层级，各风格的皮肤规则照旧可以覆盖它。
+ * - 底色很淡，主要靠背后内容的模糊与提饱和显出材质；
+ * - 一圈 0.5px 亮边，上沿和左沿更亮，像光从上方打在玻璃边缘；
+ * - 内侧柔光表现厚度，外投影只有一层很轻的漫射。
+ * - 按下时整体略微放大，接近原生按钮的弹性反馈。
+ */
+@layer utilities {
+  .m-glass,
+  .m-glass-mobile {
+    --m-glass-tint: rgb(255 255 255 / 0.62);
+    --m-glass-tint-edge: rgb(255 255 255 / 0.42);
+    --m-glass-rim: rgb(255 255 255 / 0.95);
+    --m-glass-rim-soft: rgb(255 255 255 / 0.45);
+    --m-glass-edge: rgb(0 0 0 / 0.07);
+    --m-glass-glow: rgb(255 255 255 / 0.35);
+    --m-glass-shadow: 0 8px 28px rgb(0 0 0 / 0.1), 0 1px 4px rgb(0 0 0 / 0.05);
+  }
+
+  .dark .m-glass,
+  .dark .m-glass-mobile {
+    --m-glass-tint: rgb(44 44 48 / 0.62);
+    --m-glass-tint-edge: rgb(44 44 48 / 0.44);
+    --m-glass-rim: rgb(255 255 255 / 0.32);
+    --m-glass-rim-soft: rgb(255 255 255 / 0.12);
+    --m-glass-edge: rgb(0 0 0 / 0.35);
+    --m-glass-glow: rgb(255 255 255 / 0.06);
+    --m-glass-shadow: 0 8px 28px rgb(0 0 0 / 0.45), 0 1px 4px rgb(0 0 0 / 0.3);
+  }
+
+  .m-glass {
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(180%);
+    background-color: transparent;
+    background-image: linear-gradient(
+      160deg,
+      var(--m-glass-tint) 0%,
+      var(--m-glass-tint-edge) 55%,
+      var(--m-glass-tint) 100%
+    );
+    box-shadow:
+      inset 0 0 0 0.5px var(--m-glass-edge),
+      inset 0 1px 0 var(--m-glass-rim),
+      inset 1px 0 0 var(--m-glass-rim-soft),
+      inset -1px 0 0 var(--m-glass-rim-soft),
+      inset 0 -1px 0 var(--m-glass-rim-soft),
+      inset 0 0 14px var(--m-glass-glow),
+      var(--m-glass-shadow);
+    transition: scale 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  :is(button, a).m-glass:active {
+    scale: 1.06;
+  }
+
+  @media (max-width: 1023.98px) {
+    .m-glass-mobile {
+      -webkit-backdrop-filter: blur(22px) saturate(180%);
+      backdrop-filter: blur(22px) saturate(180%);
+      background-color: transparent;
+      background-image: linear-gradient(
+        160deg,
+        var(--m-glass-tint) 0%,
+        var(--m-glass-tint-edge) 55%,
+        var(--m-glass-tint) 100%
+      );
+      box-shadow:
+        inset 0 0 0 0.5px var(--m-glass-edge),
+        inset 0 1px 0 var(--m-glass-rim),
+        inset 1px 0 0 var(--m-glass-rim-soft),
+        inset -1px 0 0 var(--m-glass-rim-soft),
+        inset 0 -1px 0 var(--m-glass-rim-soft),
+        inset 0 0 14px var(--m-glass-glow),
+        var(--m-glass-shadow);
+    }
+  }
+}
+
 @media (max-width: 1023.98px) {
   /* ---------- 页面与卡片 ---------- */
 
@@ -419,4 +498,23 @@
     background-color: var(--m-ink);
     color: var(--m-card);
   }
+}
+
+/* 观察页悬浮顶栏里的工具栏：玻璃胶囊自己是底，工具栏本身不再叠底色 */
+[data-mobile-floating-toolbar='true'] [data-maisaka-toolbar='true'] {
+  background: transparent;
+  margin: 0;
+  padding: 6px 10px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-floating-toolbar='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  border-bottom: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: 0 5px 0 var(--mil-drop);
+  margin: 0;
 }

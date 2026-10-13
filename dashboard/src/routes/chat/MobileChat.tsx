@@ -9,7 +9,8 @@ import {
   UserRound,
   UsersRound,
 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { motion } from 'motion/react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -26,6 +27,87 @@ import { getChatTabDisplayName } from './utils'
 /** 左滑露出的操作按钮宽度 */
 const SWIPE_ACTION_WIDTH = 76
 const SWIPE_OPEN_THRESHOLD = 40
+
+/** 顶栏随滚动隐藏前需要的最小滚动距离 */
+const FLOATING_HEADER_SCROLL_DELTA = 6
+/** 手指或滚轮操作后这段时间内的滚动才算用户滚动；自动跟随新消息不收起顶栏 */
+const FLOATING_HEADER_GESTURE_MS = 600
+
+interface MobileFloatingHeaderProps {
+  children: ReactNode
+}
+
+/**
+ * 对话页的悬浮顶栏：盖在内容上方，内容从它下面滚过。
+ * 向下浏览时上滑收起，向上回滚时滑回；高度写到父元素的 `--observe-header-h`，供内容留出顶部空间。
+ */
+export function MobileFloatingHeader({ children }: MobileFloatingHeaderProps) {
+  const headerRef = useRef<HTMLElement>(null)
+  const [hidden, setHidden] = useState(false)
+  const [height, setHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    const header = headerRef.current
+    const container = header?.parentElement
+    if (!header || !container) return
+    const update = () => {
+      setHeight(header.offsetHeight)
+      container.style.setProperty('--observe-header-h', `${header.offsetHeight}px`)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(header)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const container = headerRef.current?.parentElement
+    if (!container) return
+    let lastGestureAt = 0
+    const lastScrollTops = new WeakMap<EventTarget, number>()
+    const markGesture = () => {
+      lastGestureAt = Date.now()
+    }
+    const handleScroll = (event: Event) => {
+      const target = event.target
+      if (!(target instanceof HTMLElement) || headerRef.current?.contains(target)) return
+      const scrollTop = target.scrollTop
+      const previous = lastScrollTops.get(target) ?? scrollTop
+      lastScrollTops.set(target, scrollTop)
+      // 回到顶部附近始终显示
+      if (scrollTop <= 8) {
+        setHidden(false)
+        return
+      }
+      if (Date.now() - lastGestureAt > FLOATING_HEADER_GESTURE_MS) return
+      const delta = scrollTop - previous
+      if (delta > FLOATING_HEADER_SCROLL_DELTA) setHidden(true)
+      else if (delta < -FLOATING_HEADER_SCROLL_DELTA) setHidden(false)
+    }
+    container.addEventListener('touchmove', markGesture, { passive: true })
+    container.addEventListener('wheel', markGesture, { passive: true })
+    container.addEventListener('scroll', handleScroll, { capture: true, passive: true })
+    return () => {
+      container.removeEventListener('touchmove', markGesture)
+      container.removeEventListener('wheel', markGesture)
+      container.removeEventListener('scroll', handleScroll, { capture: true })
+    }
+  }, [])
+
+  return (
+    <motion.header
+      ref={headerRef}
+      data-mobile-floating-header="true"
+      data-hidden={hidden ? 'true' : 'false'}
+      initial={false}
+      animate={{ y: hidden ? -height : 0, opacity: hidden ? 0 : 1 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 38, mass: 0.8 }}
+      className="pointer-events-none absolute inset-x-0 top-0 z-30 [&>*]:pointer-events-auto"
+    >
+      {children}
+    </motion.header>
+  )
+}
 
 /** 会话行的时间：今天显示时刻，昨天显示「昨天」，更早显示日期 */
 function formatRowTime(seconds: number | undefined, language: string): string {

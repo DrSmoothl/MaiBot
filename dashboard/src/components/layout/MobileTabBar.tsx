@@ -232,16 +232,36 @@ function TabBarDock({ onSearch }: Pick<MobileTabBarProps, 'onSearch'>) {
                           aria-label={collapsed ? t(labelKey) : undefined}
                           onClick={collapsed ? (event) => event.preventDefault() : undefined}
                           className={cn(
-                            'flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[10px] font-semibold transition-colors',
-                            active ? 'bg-foreground/[0.06] text-primary' : 'text-foreground'
+                            'relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[10px] font-semibold transition-colors duration-300',
+                            active ? 'text-primary' : 'text-foreground'
                           )}
                         >
-                          <Icon
-                            className="h-[22px] w-[22px]"
-                            strokeWidth={1.7}
-                            aria-hidden="true"
-                          />
-                          {!collapsed && <span className="truncate">{t(labelKey)}</span>}
+                          {/* 选中底板在标签之间滑动，切换标签时连续过渡 */}
+                          {active && (
+                            <motion.span
+                              layoutId="mobile-tab-indicator"
+                              transition={DOCK_SPRING}
+                              data-mobile-tab-indicator="true"
+                              aria-hidden="true"
+                              className="bg-foreground/[0.07] absolute inset-0 rounded-full"
+                            />
+                          )}
+                          <motion.span
+                            key={active ? 'active' : 'idle'}
+                            initial={active ? { scale: 0.82 } : false}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', stiffness: 520, damping: 18 }}
+                            className="relative flex"
+                          >
+                            <Icon
+                              className="h-[22px] w-[22px]"
+                              strokeWidth={active ? 2 : 1.7}
+                              aria-hidden="true"
+                            />
+                          </motion.span>
+                          {!collapsed && (
+                            <span className="relative truncate">{t(labelKey)}</span>
+                          )}
                         </Link>
                       </motion.div>
                     )

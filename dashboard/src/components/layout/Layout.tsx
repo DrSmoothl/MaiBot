@@ -89,8 +89,10 @@ export function Layout({ children }: LayoutProps) {
   // 麦麦聊天已并入麦麦设置侧边栏，/chat 属于设置工作区
   const workspaceMode: WorkspaceMode = isLogsPath ? 'logs' : workspaceForPath(pathname)
   const isSettingsWorkspace = workspaceMode !== 'logs'
-  const showBackToTop =
+  // 聊天与规划监控自己管理滚动区域，其余设置页按内容撑高、由 main 滚动
+  const isScrollablePage =
     isSettingsWorkspace && pathname !== '/chat' && pathname !== '/planner-monitor'
+  const showBackToTop = isScrollablePage
 
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     loadStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true)
@@ -490,7 +492,7 @@ export function Layout({ children }: LayoutProps) {
                   // 手机上页头与页面上下排列，页面占满剩余高度
                   'max-lg:flex max-lg:flex-col',
                   // 可滚动工作区在手机上按内容撑高，滚动容器底部的留白才不会被溢出内容越过
-                  isSettingsWorkspace && 'min-h-full max-lg:h-auto',
+                  isScrollablePage && 'min-h-full max-lg:h-auto',
                   targetWorkspaceWaiting && 'invisible'
                 )}
                 variants={{
@@ -518,7 +520,7 @@ export function Layout({ children }: LayoutProps) {
                   <div
                     className={cn(
                       'lg:contents',
-                      isSettingsWorkspace ? 'flex-[1_0_auto]' : 'min-h-0 flex-1'
+                      isScrollablePage ? 'flex-[1_0_auto]' : 'min-h-0 flex-1'
                     )}
                   >
                     {children}
