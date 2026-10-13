@@ -159,6 +159,9 @@ function setupMonitorState(overrides: MonitorStateOverrides = {}) {
     connected: overrides.connected ?? true,
     subagentTasks: [],
     clearTimeline: hookActions.clearTimeline,
+    historyLoading: false,
+    hasMoreHistory: false,
+    loadOlderHistory: vi.fn(),
   }
   monitorHookMocks.useMaisakaMonitor.mockReturnValue(state)
   act(() => monitorHookMocks.listeners.forEach((listener) => listener()))

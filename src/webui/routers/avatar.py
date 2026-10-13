@@ -5,17 +5,21 @@ from typing import Literal
 from urllib.parse import quote
 import asyncio
 import mimetypes
+import os
 import re
 import time
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 
 from src.common.runtime_loop import run_on_main_loop
 from src.platform_io.avatar import avatar_service, validate_avatar_target
 from src.webui.dependencies import require_auth
 
 router = APIRouter(prefix="/avatar", tags=["avatar"], dependencies=[Depends(require_auth)])
+
+# 浏览器直接复用已下载头像的最长时间；超过后带 ETag 校验，头像未变只返回 304。
+AVATAR_BROWSER_MAX_AGE = 3 * 60 * 60
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AVATAR_CACHE_ROOT = (PROJECT_ROOT / "data" / "avatar").resolve()
@@ -168,6 +172,24 @@ async def update_webui_user_avatar(
     }
 
 
+def _etag_matches(if_none_match: str, etag: str) -> bool:
+    """判断 If-None-Match 是否命中当前 ETag；条件请求按弱比较处理，忽略 ``W/`` 前缀。"""
+    candidates = {candidate.strip().removeprefix("W/") for candidate in if_none_match.split(",")}
+    return "*" in candidates or etag in candidates
+
+
+def _no_avatar_response(status: str, cache_control: str) -> Response:
+    """目标没有头像是正常状态而非错误：返回空响应，前端据此显示默认头像，浏览器不会记为请求失败。"""
+    return Response(
+        status_code=204,
+        headers={
+            "Cache-Control": cache_control,
+            "X-Avatar-Status": status,
+            "X-Robots-Tag": "noindex, nofollow",
+        },
+    )
+
+
 @router.get("")
 async def get_webui_avatar(
     platform: str = Query(...),
@@ -176,6 +198,7 @@ async def get_webui_avatar(
     account_id: str = Query(default=""),
     scope: str = Query(default=""),
     force_refresh: bool = Query(default=False),
+    if_none_match: str | None = Header(default=None),
 ):
     """通过统一头像服务读取独立图片；本地上传头像不应用远程过期规则。"""
     if bool(group_id) == bool(user_id):
@@ -189,7 +212,7 @@ async def get_webui_avatar(
     if normalized_platform == WEBUI_AVATAR_PLATFORM:
         cache_path = await asyncio.to_thread(_find_cached_avatar_path, normalized_platform, target_id, target_type)
         if cache_path is None:
-            raise HTTPException(status_code=404, detail="当前用户没有本地头像")
+            return _no_avatar_response("missing", "private, no-cache")
         cache_control = "private, no-cache"
     else:
         try:
@@ -206,21 +229,21 @@ async def get_webui_avatar(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"头像获取失败：{type(exc).__name__}: {exc}") from exc
         if result.status != "available":
-            raise HTTPException(
-                status_code=404,
-                detail={"status": result.status},
-                headers={"Cache-Control": "private, max-age=300"},
-            )
+            return _no_avatar_response(result.status, "private, max-age=300")
         cache_path = result.path
         # 浏览器缓存不能超过服务端剩余有效期，强制刷新响应不允许复用。
-        max_age = max(0, min(300, int(result.expires_at - time.time())))
+        max_age = max(0, min(AVATAR_BROWSER_MAX_AGE, int(result.expires_at - time.time())))
         cache_control = "private, no-store" if force_refresh else f"private, max-age={max_age}"
     media_type = mimetypes.guess_type(str(cache_path))[0] or "image/jpeg"
-    return FileResponse(
-        cache_path,
-        media_type=media_type,
-        headers={
-            "Cache-Control": cache_control,
-            "X-Robots-Tag": "noindex, nofollow",
-        },
-    )
+    headers = {
+        "Cache-Control": cache_control,
+        "X-Robots-Tag": "noindex, nofollow",
+    }
+    # 提前取文件状态，让响应在构造时就带上 ETag，才能与请求头比对。
+    stat_result = await asyncio.to_thread(os.stat, cache_path)
+    response = FileResponse(cache_path, media_type=media_type, headers=headers, stat_result=stat_result)
+    etag = response.headers["etag"]
+    if not force_refresh and if_none_match is not None and _etag_matches(if_none_match, etag):
+        # 浏览器缓存过期后只需确认头像没变，不必重新下载整张图片。
+        return Response(status_code=304, headers={**headers, "ETag": etag})
+    return response

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { resolveApiPath } from '@/lib/api-base'
 import { backendApi } from '@/lib/http'
+import { isElectron } from '@/lib/runtime'
 import { getSetting } from '@/lib/settings-manager'
 
 export type AvatarTargetType = 'user' | 'group'
@@ -75,28 +76,31 @@ export function useResolvedAvatarUrl(
     () => buildWebuiAvatarPath(platform, targetId, targetType, version, { accountId, scope }),
     [platform, targetId, targetType, version, accountId, scope]
   )
-  const [avatarUrl, setAvatarUrl] = useState<string | undefined>()
   const canResolve = Boolean(avatarFetchEnabled && avatarPath)
-  if (!canResolve && avatarUrl !== undefined) {
-    setAvatarUrl(undefined)
-  }
+  // 浏览器里接口与页面同源，路径本身就是地址，首帧即可给出，已缓存的头像不会先闪一下默认头像；
+  // 只有 Electron 需要向主进程异步查询后端地址。
+  const needsAsyncResolve = canResolve && isElectron()
+  const [resolved, setResolved] = useState<{ path: string; url: string }>()
 
   useEffect(() => {
-    if (!canResolve || !avatarPath) {
+    if (!needsAsyncResolve || !avatarPath) {
       return
     }
 
     let ignore = false
     resolveApiPath(avatarPath).then((resolvedPath) => {
-      if (!ignore) setAvatarUrl(resolvedPath)
+      if (!ignore) setResolved({ path: avatarPath, url: resolvedPath })
     })
 
     return () => {
       ignore = true
     }
-  }, [avatarPath, canResolve])
+  }, [avatarPath, needsAsyncResolve])
 
-  return avatarUrl
+  if (!canResolve || !avatarPath) return undefined
+  if (!needsAsyncResolve) return avatarPath
+  // 目标切换后旧地址不再适用，等新地址解析完成。
+  return resolved?.path === avatarPath ? resolved.url : undefined
 }
 
 interface WebuiUserAvatarUploadResponse {

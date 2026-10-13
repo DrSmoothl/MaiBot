@@ -10,6 +10,7 @@ import { RestartOverlay } from '@/components/restart-overlay'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { CHART_INITIAL_DIMENSION } from '@/components/ui/chart'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
@@ -261,7 +262,7 @@ function BotStatusFlipCard({
                 aria-label={t('home.botStatus.recentOnlineChart')}
                 className="mt-1 min-h-0 flex-1"
               >
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" initialDimension={CHART_INITIAL_DIMENSION}>
                   <BarChart
                     data={recentOnlineData}
                     margin={{ top: 5, right: 0, bottom: 0, left: 0 }}
