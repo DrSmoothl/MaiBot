@@ -54,6 +54,7 @@ import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { logWebSocket, type LogEntry } from '@/lib/log-websocket'
+import { useVirtualizerUnmountGuard } from '@/lib/use-virtualizer-unmount-guard'
 import { getSetting, setSetting } from '@/lib/settings-manager'
 import { cn } from '@/lib/utils'
 
@@ -472,6 +473,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
     estimateSize: () => estimatedRowHeight,
     overscan: 50, // 增加预渲染数量以减少快速滚动时的空白
   })
+  useVirtualizerUnmountGuard(rowVirtualizer)
 
   // 用于追踪是否是程序触发的滚动
   const isAutoScrollingRef = useRef(false)

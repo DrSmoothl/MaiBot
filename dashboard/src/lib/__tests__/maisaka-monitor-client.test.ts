@@ -58,15 +58,12 @@ describe('maisakaMonitorClient', () => {
     vi.useRealTimers()
   })
 
-  it('首次订阅时注册底层事件监听并携带初始补发参数订阅 maisaka_monitor 主题', async () => {
+  it('首次订阅时注册底层事件监听并以分页模式订阅 maisaka_monitor 主题', async () => {
     await client.subscribe(vi.fn())
 
     expect(wsMocks.addEventListener).toHaveBeenCalledTimes(1)
     expect(wsMocks.subscribe).toHaveBeenCalledTimes(1)
-    expect(wsMocks.subscribe).toHaveBeenCalledWith('maisaka_monitor', 'main', {
-      since_event_id: 0,
-      replay_limit: 10000,
-    })
+    expect(wsMocks.subscribe).toHaveBeenCalledWith('maisaka_monitor', 'main', { mode: 'paged' })
   })
 
   it('只转发 maisaka_monitor 域的事件，并把 event/data 映射为监控事件', async () => {
@@ -202,21 +199,15 @@ describe('maisakaMonitorClient', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
-  it('重新订阅仍从账本回放，避免中断补发跳过历史', async () => {
+  it('重新订阅仍以分页模式同步概要，历史由分页接口按需拉取', async () => {
     await client.subscribe(vi.fn())
-    expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', {
-      since_event_id: 0,
-      replay_limit: 10000,
-    })
+    expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', { mode: 'paged' })
 
     await client.subscribe(vi.fn())
 
-    // 没有浏览器游标，重复订阅始终回放完整保留窗口。
+    // 重复订阅只重新同步概要与阶段快照，不再整段回放。
     expect(wsMocks.subscribe).toHaveBeenCalledTimes(2)
-    expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', {
-      since_event_id: 0,
-      replay_limit: 10000,
-    })
+    expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', { mode: 'paged' })
   })
 
   it('最后一个监听器移除后延迟 200ms 才真正退订，随后订阅会重建', async () => {
@@ -234,10 +225,7 @@ describe('maisakaMonitorClient', () => {
     // 真正退订后再次订阅会重新建立订阅（初始游标参数）
     await client.subscribe(vi.fn())
     expect(wsMocks.subscribe).toHaveBeenCalledTimes(2)
-    expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', {
-      since_event_id: 0,
-      replay_limit: 10000,
-    })
+    expect(wsMocks.subscribe).toHaveBeenLastCalledWith('maisaka_monitor', 'main', { mode: 'paged' })
   })
 
   it('延迟退订窗口内重新订阅会取消退订（StrictMode 快速卸载重挂载场景）', async () => {

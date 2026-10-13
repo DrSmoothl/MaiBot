@@ -14,6 +14,8 @@ import { useTranslation } from 'react-i18next'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
+import { ImageGalleryProvider, type GalleryImage } from '@/components/image-gallery'
+import { useVirtualizerUnmountGuard } from '@/lib/use-virtualizer-unmount-guard'
 import { cn } from '@/lib/utils'
 
 import { ChatScrollContext, type ChatScrollContextValue } from './ChatScrollContext'
@@ -168,6 +170,25 @@ export function MessageList({
   runtimeStatus,
 }: MessageListProps) {
   const { t } = useTranslation()
+  // 当前会话里的图片与表情，按出现顺序排列，供大图预览切换上一张/下一张。
+  const galleryImages = useMemo(() => {
+    const images = new Map<string, GalleryImage>()
+    for (const message of messages) {
+      if (message.message_type !== 'rich') continue
+      for (const segment of message.segments ?? []) {
+        if (segment.type !== 'image' && segment.type !== 'emoji') continue
+        const src = String(segment.data)
+        if (!images.has(src)) {
+          images.set(src, {
+            src,
+            alt: segment.type === 'emoji' ? t('chat.media.emoji') : t('chat.media.image'),
+          })
+        }
+      }
+    }
+    return Array.from(images.values())
+  }, [messages, t])
+
   const viewportRef = useRef<HTMLDivElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -251,6 +272,7 @@ export function MessageList({
     overscan: 8,
     rangeExtractor,
   })
+  useVirtualizerUnmountGuard(rowVirtualizer)
   const virtualListSize = rowVirtualizer.getTotalSize()
 
   useLayoutEffect(() => {
@@ -391,6 +413,7 @@ export function MessageList({
   }
 
   return (
+    <ImageGalleryProvider images={galleryImages}>
     <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
       <ScrollArea
         className="h-full w-full"
@@ -542,5 +565,6 @@ export function MessageList({
         </ChatScrollContext.Provider>
       </ScrollArea>
     </div>
+    </ImageGalleryProvider>
   )
 }

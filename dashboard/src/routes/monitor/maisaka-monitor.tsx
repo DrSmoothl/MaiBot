@@ -45,16 +45,22 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import type { Key, ReactNode } from 'react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  EnsureImageGallery,
+  ImageGalleryProvider,
+  useImageGallery,
+  type GalleryImage,
+} from '@/components/image-gallery'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useResolvedAvatarUrl, type AvatarTargetType } from '@/lib/avatar-url'
+import { useVirtualizerUnmountGuard } from '@/lib/use-virtualizer-unmount-guard'
 import { useToast } from '@/hooks/use-toast'
 import { backendApi } from '@/lib/http'
 import { cn } from '@/lib/utils'
@@ -924,7 +930,33 @@ function buildMessageMediaKey(media: MaisakaMessageMedia, index: number) {
   return `${media.kind}:${media.hash}:${media.index ?? index}`
 }
 
+/** 可放大查看的媒体对应的图库条目；内联数据直接显示，远端原文件需带登录态读取。 */
+function toGalleryImage(item: MaisakaMessageMedia): GalleryImage | null {
+  const inlineSource = item.data_url?.trim() ?? ''
+  const remoteSource = item.url.trim()
+  if (!inlineSource && !remoteSource) return null
+  const label = item.kind === 'emoji' ? '表情包' : '图片'
+  return { src: inlineSource || remoteSource, alt: `${label}大图`, authenticated: !inlineSource }
+}
+
 function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
+  const galleryImage = useMemo(() => toGalleryImage(item), [item])
+  if (!galleryImage) return <MessageMediaItemBody item={item} />
+  return (
+    <EnsureImageGallery image={galleryImage}>
+      <MessageMediaItemBody item={item} galleryImage={galleryImage} />
+    </EnsureImageGallery>
+  )
+}
+
+function MessageMediaItemBody({
+  item,
+  galleryImage,
+}: {
+  item: MaisakaMessageMedia
+  galleryImage?: GalleryImage
+}) {
+  const gallery = useImageGallery()
   const inlineSource = item.data_url?.trim() ?? ''
   const remoteSource = item.url.trim()
   const canShowOriginal = Boolean(inlineSource || remoteSource)
@@ -936,7 +968,6 @@ function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
     showOriginal && !inlineSource ? 'loading' : 'idle'
   )
   const [loadRequestId, setLoadRequestId] = useState(showOriginal && !inlineSource ? 1 : 0)
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const label = item.kind === 'emoji' ? '表情包' : '图片'
 
   useEffect(() => {
@@ -985,7 +1016,7 @@ function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
             title={`放大查看${label}`}
             aria-label={`放大查看${label}`}
             disabled={!resolvedSource}
-            onClick={() => setIsPreviewOpen(true)}
+            onClick={() => galleryImage && gallery?.open(galleryImage)}
           >
             {resolvedSource ? (
               <img
@@ -1042,19 +1073,6 @@ function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
           </button>
         )}
       </div>
-      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="border-0 bg-black/95 p-2 text-white shadow-2xl [--dialog-width:72rem]">
-          <DialogTitle className="sr-only">{label}预览</DialogTitle>
-          <DialogDescription className="sr-only">正在查看放大的{label}。</DialogDescription>
-          <div className="flex max-h-[calc(100vh-3rem)] min-h-0 w-full items-center justify-center">
-            <img
-              src={resolvedSource}
-              alt={`${label}大图`}
-              className="max-h-[calc(100vh-4rem)] max-w-full rounded-md object-contain"
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   )
 }
@@ -2536,13 +2554,24 @@ function useActiveToolVisible(viewport: HTMLDivElement | null, toolCallId?: stri
   return visibility.id === toolCallId && visibility.visible
 }
 
+/** 距时间线顶部多近时开始拉取更早的一页 */
+const HISTORY_LOAD_THRESHOLD_PX = 200
+
 const MonitorTimeline = memo(function MonitorTimeline({
   embedded = false,
   reasoningReturnTo,
 }: MaisakaMonitorProps) {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const { timeline, selectedSession, selectedStageStatus, clearTimeline } = useMaisakaMonitorSession()
+  const {
+    timeline,
+    selectedSession,
+    selectedStageStatus,
+    clearTimeline,
+    historyLoading,
+    hasMoreHistory,
+    loadOlderHistory,
+  } = useMaisakaMonitorSession()
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null)
@@ -2647,6 +2676,19 @@ const MonitorTimeline = memo(function MonitorTimeline({
     return visibleEntries
   }, [timeline])
 
+  // 当前时间线里可放大的图片，按出现顺序排列，供大图预览切换上一张/下一张。
+  const galleryImages = useMemo(() => {
+    const images = new Map<string, GalleryImage>()
+    for (const entry of visibleTimelineEntries) {
+      if (!isMessageTimelineEntry(entry)) continue
+      for (const media of (entry.data as MonitorMessage).media ?? []) {
+        const image = toGalleryImage(media)
+        if (image && !images.has(image.src)) images.set(image.src, image)
+      }
+    }
+    return Array.from(images.values())
+  }, [visibleTimelineEntries])
+
   const latestPlannerEntry = useMemo(() => {
     for (let index = timeline.length - 1; index >= 0; index -= 1) {
       const entry = timeline[index]
@@ -2676,6 +2718,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
     getItemKey: (index) => visibleTimelineEntries[index]?.id ?? index,
     overscan: 8,
   })
+  useVirtualizerUnmountGuard(timelineVirtualizer)
 
   useLayoutEffect(() => {
     // 高度变化统一由下方的锚点补偿处理，避免虚拟列表与阅读位置恢复重复滚动。
@@ -2844,9 +2887,22 @@ const MonitorTimeline = memo(function MonitorTimeline({
         : null
 
       setAutoScroll(distanceToBottom < 80)
+
+      // 滚到顶部附近时拉取更早的一页；插入后由下方的锚点补偿保持阅读位置。
+      if (scrollTop < HISTORY_LOAD_THRESHOLD_PX && hasMoreHistory && !historyLoading) {
+        loadOlderHistory()
+      }
     },
-    [scrollViewport, timelineVirtualizer]
+    [hasMoreHistory, historyLoading, loadOlderHistory, scrollViewport, timelineVirtualizer]
   )
+
+  // 一页里可见条目太少、撑不满视口时无法滚动触顶，直接继续向前加载。
+  useEffect(() => {
+    if (!scrollViewport || !hasMoreHistory || historyLoading) return
+    if (scrollViewport.scrollHeight <= scrollViewport.clientHeight + HISTORY_LOAD_THRESHOLD_PX) {
+      loadOlderHistory()
+    }
+  }, [scrollViewport, hasMoreHistory, historyLoading, loadOlderHistory, timelineTotalSize])
 
   // 未跟随底部时，时间线头部被裁剪或上方插入新条目都会改变锚点条目的位置；
   // 每次绘制前（包括虚拟列表重新测量后）只补偿锚点的实际位移，
@@ -2937,6 +2993,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
 
   // 主时间线区域
   return (
+    <ImageGalleryProvider images={galleryImages}>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* 时间线 */}
       <StageStatusPanel
@@ -2974,6 +3031,16 @@ const MonitorTimeline = memo(function MonitorTimeline({
           }}
         >
           <div className="min-w-0 p-4">
+            {visibleTimelineEntries.length > 0 && (
+              // 固定高度：文案切换不改变下方条目的位置，避免加载前后视口跳动。
+              <p className="text-muted-foreground h-7 text-center text-xs">
+                {historyLoading
+                  ? '正在加载更早的记录…'
+                  : hasMoreHistory
+                    ? '上滑加载更早的记录'
+                    : '没有更早的记录了'}
+              </p>
+            )}
             {visibleTimelineEntries.length === 0 ? (
               <div className="text-muted-foreground flex flex-col items-center justify-center gap-3 py-20">
                 <Clock className="h-10 w-10 opacity-30" />
@@ -3067,6 +3134,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
         </AnimatePresence>
       </Card>
     </div>
+    </ImageGalleryProvider>
   )
 })
 
