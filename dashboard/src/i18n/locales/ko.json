@@ -1588,18 +1588,22 @@
     "home": "홈",
     "chat": "채팅",
     "manage": "관리",
-    "observe": "관찰",
     "me": "내 정보",
     "search": "검색",
     "live": "MaiBot 실시간",
     "botInitial": "M",
-    "observeLive": "실시간",
-    "observeLogs": "로그",
-    "observeReasoning": "추론 과정",
     "backHome": "홈으로",
     "backManage": "관리로"
   },
   "manage": {
-    "searchPlaceholder": "페이지 또는 설정 검색"
+    "searchPlaceholder": "페이지 또는 설정 검색",
+    "groups": {
+      "runtime": "실행 기록"
+    }
+  },
+  "dynamicForm": {
+    "mobileTextEmpty": "비어 있음",
+    "mobileTextCancel": "취소",
+    "mobileTextDone": "완료"
   }
 }

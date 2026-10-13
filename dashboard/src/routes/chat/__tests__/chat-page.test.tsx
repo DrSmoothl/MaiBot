@@ -103,6 +103,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => mocks.navigate,
+  useRouterState: ({ select }: { select: (state: { location: { searchStr: string } }) => unknown }) =>
+    select({ location: { searchStr: window.location.search } }),
 }))
 
 // t 必须是稳定引用，直接返回 key；带 count 的场景拼接 count 便于断言

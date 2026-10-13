@@ -620,7 +620,8 @@ export function PromptManagementPage() {
     <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center justify-between gap-2">
-          <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">Prompt管理</h1>
+          {/* 手机页头已经显示标题 */}
+          <h1 className="text-xl font-bold max-lg:hidden sm:text-2xl md:text-3xl">Prompt管理</h1>
         </div>
         <div className="flex min-w-0 items-center gap-1.5 sm:flex-wrap sm:gap-2">
           <Select value={language} onValueChange={handleLanguageChange} disabled={loadingCatalog}>

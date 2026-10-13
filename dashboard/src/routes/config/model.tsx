@@ -77,11 +77,13 @@ import {
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { HelpTooltip } from '@/components/ui/help-tooltip'
+import { MobileAddMenu } from '@/components/layout/MobileAddMenu'
+import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { ExtraParamsDialog } from '@/components/ui/extra-params-dialog'
 import { TaskConfigCard, ModelTable, ModelCardList } from './model/components'
-import { AddModelMenu, type ModelCreationType } from './model/components/AddModelMenu'
+import type { ModelCreationType } from './model/components/AddModelMenu'
 import { EmbeddingBuildProgress } from './model/components/EmbeddingBuildProgress'
 import { TaskRuntimeSummary } from './model/components/TaskRuntimeSummary'
 import { TASK_CONFIGS } from './model/constants'
@@ -840,12 +842,7 @@ function ModelConfigPageContent() {
                   className="pl-9"
                 />
               </div>
-              {/* 桌面端时添加模型按钮位于表格表头，此处仅在移动端卡片视图显示。
-                  data-tour 引导目标只在桌面端表头按钮上，避免 Joyride 定位到隐藏元素 */}
-              <AddModelMenu
-                onAdd={openAddModelDialog}
-                className="w-full shrink-0 sm:w-auto md:hidden"
-              />
+              {/* 桌面端添加模型按钮位于表格表头；手机上由页头右上角的「+」添加 */}
               {searchQuery && (
                 <p className="text-sm text-muted-foreground whitespace-nowrap">
                   找到 {filteredModels.length} 个结果
@@ -2475,6 +2472,17 @@ function ModelConfigPageContent() {
       </AlertDialog>
 
       {/* 重启遮罩层 */}
+      {/* 手机页头右上角的「+」：添加模型与厂商 */}
+      <MobileHeaderActions>
+        <MobileAddMenu
+          label="添加"
+          items={[
+            { label: '添加 LLM 模型', onSelect: () => openAddModelDialog('llm') },
+            { label: '添加嵌入模型', onSelect: () => openAddModelDialog('embedding') },
+            { label: '添加厂商', onSelect: () => openProviderDialog(null, null) },
+          ]}
+        />
+      </MobileHeaderActions>
       <RestartOverlay />
       </div>
     </div>

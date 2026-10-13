@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowUpDown, Plus, Search, Trash2, X } from 'lucide-react'
+import { ArrowUpDown, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
@@ -34,6 +35,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
+import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
+import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
+import {
+  useHideMobileTabBar,
+  useMobileTitleOverride,
+} from '@/components/layout/mobile-nav-context'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
 import {
@@ -44,11 +52,13 @@ import {
   getEmojiStats,
   registerEmoji,
 } from '@/lib/emoji-api'
+import { cn } from '@/lib/utils'
 import type { Emoji, EmojiStats, EmojiStatus } from '@/types/emoji'
 
 import { EmojiCacheMaintenancePanel } from './EmojiCacheMaintenancePanel'
 import { EmojiDetailDialog, EmojiEditDialog, EmojiUploadDialog } from './EmojiDialogs'
 import { EmojiList } from './EmojiList'
+import { MobileEmojiGrid } from './MobileEmojiGrid'
 
 // 页面可见时每 10 秒同步后台收录和使用状态，离开页面后停止轮询。
 const EMOJI_REFRESH_INTERVAL = 10_000
@@ -70,6 +80,11 @@ export function EmojiManagementPage() {
   const [jumpToPage, setJumpToPage] = useState('')
   const [cardSize, setCardSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  // 手机端：长按进入多选，筛选收进底部弹层
+  const isMobile = useMediaQuery('(max-width: 1023.98px)')
+  const [mobileSelecting, setMobileSelecting] = useState(false)
+  const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
+  const selecting = isMobile && mobileSelecting
 
   const { toast } = useToast()
 
@@ -110,6 +125,15 @@ export function EmojiManagementPage() {
     refetchInterval: EMOJI_REFRESH_INTERVAL,
   })
   const stats: EmojiStats | null = statsQuery.data?.data ?? null
+
+  // 多选时页头标题换成已选数量，底部换成批量操作栏
+  useMobileTitleOverride(selecting ? `已选择 ${list.selectedCount} 项` : null)
+  useHideMobileTabBar(selecting)
+
+  const exitMobileSelecting = () => {
+    list.clearSelection()
+    setMobileSelecting(false)
+  }
 
   // 查看详情
   const handleViewDetail = async (emoji: Emoji) => {
@@ -199,7 +223,25 @@ export function EmojiManagementPage() {
         description: result.message,
       })
       list.clearSelection()
+      setMobileSelecting(false)
       setBatchDeleteDialogOpen(false)
+      list.invalidate()
+    },
+  })
+
+  // 手机多选：批量注册 / 封禁，逐个调用单项接口
+  const batchStatusMutation = useMutation({
+    mutationFn: async ({ ids, action }: { ids: number[]; action: 'register' | 'ban' }) => {
+      await Promise.all(ids.map((id) => (action === 'register' ? registerEmoji(id) : banEmoji(id))))
+      return action
+    },
+    meta: { errorTitle: '批量操作失败' },
+    onSuccess: (action, { ids }) => {
+      toast({
+        title: '成功',
+        description: `已${action === 'register' ? '注册' : '封禁'} ${ids.length} 个表情包`,
+      })
+      exitMobileSelecting()
       list.invalidate()
     },
   })
@@ -236,11 +278,54 @@ export function EmojiManagementPage() {
     : []
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col p-4 sm:p-6">
+    <div className="flex h-[calc(100vh-4rem)] flex-col p-4 max-lg:h-auto max-lg:px-0 max-lg:pt-1 sm:p-6">
       <ScrollArea className="flex-1">
-        <div className="space-y-4 pr-4 sm:space-y-6">
+        {/* 手机上滚动区满宽、内容自己留边距，满宽网格就不会撑出横向滚动 */}
+        <div className="space-y-4 pr-4 max-lg:px-4 sm:space-y-6">
+          {/* 手机：搜索 + 状态胶囊；排序、格式等收进筛选弹层 */}
+          {isMobile && (
+            <div data-mobile-emoji-toolbar="true" className="space-y-3">
+              <div className="relative">
+                <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                <Input
+                  value={list.searchInput}
+                  onChange={(event) => list.setSearchInput(event.target.value)}
+                  placeholder="搜索 tag、描述或哈希..."
+                  aria-label="搜索表情包"
+                  className="h-10 rounded-xl pl-9"
+                />
+              </div>
+              {stats && (
+                <nav
+                  aria-label="表情包状态"
+                  data-mobile-pill-nav="true"
+                  className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none]"
+                >
+                  {statusOptions.map((option) => {
+                    const active = list.filters.status === option.value
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={active}
+                        data-active={active ? 'true' : 'false'}
+                        onClick={() => list.setFilter('status', option.value)}
+                        className={cn(
+                          'h-9 shrink-0 rounded-full px-4 text-[15px]',
+                          active ? 'bg-foreground text-background font-semibold' : 'bg-card'
+                        )}
+                      >
+                        {option.label} {option.count}
+                      </button>
+                    )
+                  })}
+                </nav>
+              )}
+            </div>
+          )}
+
           {/* 筛选和排序 */}
-          <Card>
+          <Card className="max-lg:hidden">
             <CardHeader className="space-y-3">
               <div className="grid grid-cols-2 items-end gap-4 [&>div]:min-w-0 lg:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto_5rem_auto]">
                 <div className="space-y-2">
@@ -393,7 +478,7 @@ export function EmojiManagementPage() {
           </Card>
 
           {/* 选择操作栏独立于筛选卡片，滚动到列表后仍保持吸顶。 */}
-          {list.selectedCount > 0 && (
+          {list.selectedCount > 0 && !isMobile && (
             <Card className="sticky top-0 z-20">
               <div className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
                 <span className="text-muted-foreground text-sm">
@@ -414,8 +499,27 @@ export function EmojiManagementPage() {
             </Card>
           )}
 
+          {/* 手机：满宽三列网格，点按看详情、长按多选 */}
+          {isMobile && !list.isError && (
+            <MobileEmojiGrid
+              emojiList={emojiList}
+              total={total}
+              page={page}
+              pageSize={pageSize}
+              selecting={selecting}
+              selectedIds={list.selectedIds}
+              onPageChange={list.goToPage}
+              onOpen={handleViewDetail}
+              onStartSelecting={(id) => {
+                setMobileSelecting(true)
+                if (!list.isSelected(id)) list.toggle(id)
+              }}
+              onToggleSelect={list.toggle}
+            />
+          )}
+
           {/* 表情包卡片列表 */}
-          <Card>
+          <Card className={cn(isMobile && !list.isError && 'hidden')}>
             <CardHeader className="pb-3">
               <CardDescription>
                 {searchKeyword
@@ -467,6 +571,52 @@ export function EmojiManagementPage() {
             emoji={selectedEmoji}
             open={detailDialogOpen}
             onOpenChange={setDetailDialogOpen}
+            actions={
+              isMobile && selectedEmoji ? (
+                <div className="grid w-full grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setDetailDialogOpen(false)
+                      handleEdit(selectedEmoji)
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  {selectedEmoji.status !== 'adopted' ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setDetailDialogOpen(false)
+                        handleRegister(selectedEmoji)
+                      }}
+                    >
+                      注册
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setDetailDialogOpen(false)
+                        handleBan(selectedEmoji)
+                      }}
+                    >
+                      封禁
+                    </Button>
+                  )}
+                  <Button
+                    variant="destructive"
+                    className="col-span-2"
+                    onClick={() => {
+                      setDetailDialogOpen(false)
+                      handleDelete(selectedEmoji)
+                    }}
+                  >
+                    删除
+                  </Button>
+                </div>
+              ) : undefined
+            }
           />
 
           {/* 编辑对话框 */}
@@ -485,6 +635,166 @@ export function EmojiManagementPage() {
           />
         </div>
       </ScrollArea>
+
+      {/* 手机页头右上角：多选时为全选 / 完成，平时为筛选与新增 */}
+      <MobileHeaderActions>
+        {selecting ? (
+          <>
+            <button
+              type="button"
+              onClick={list.toggleAll}
+              data-mobile-header-text-button="true"
+              className={cn('h-11 rounded-full px-4 text-[15px]', MOBILE_GLASS_CLASS)}
+            >
+              全选
+            </button>
+            <button
+              type="button"
+              onClick={exitMobileSelecting}
+              data-mobile-header-text-button="primary"
+              className="bg-foreground text-background h-11 rounded-full px-4 text-[15px] font-semibold"
+            >
+              完成
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              aria-label="筛选与排序"
+              onClick={() => setMobileFilterOpen(true)}
+              data-mobile-header-icon-button="true"
+              className={cn('flex h-11 w-11 items-center justify-center rounded-full', MOBILE_GLASS_CLASS)}
+            >
+              <SlidersHorizontal className="h-5 w-5" strokeWidth={1.7} />
+            </button>
+            <button
+              type="button"
+              aria-label="新增表情包"
+              onClick={() => setUploadDialogOpen(true)}
+              data-mobile-header-button="true"
+              className={cn('flex h-11 w-11 items-center justify-center rounded-full', MOBILE_GLASS_CLASS)}
+            >
+              <Plus className="h-[22px] w-[22px]" strokeWidth={1.7} />
+            </button>
+          </>
+        )}
+      </MobileHeaderActions>
+
+      {/* 手机多选的批量操作栏，占据底部标签栏的位置；页面外层有 transform，需挂到 body 上才能贴底 */}
+      {selecting &&
+        createPortal(
+        <div
+          role="toolbar"
+          aria-label="批量操作"
+          data-mobile-batch-toolbar="true"
+          className={cn(
+            'fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+14px)] z-40 grid h-[62px] grid-cols-3 items-center rounded-full px-2',
+            MOBILE_GLASS_CLASS
+          )}
+        >
+          {[
+            { key: 'register', label: '注册' },
+            { key: 'ban', label: '禁用' },
+            { key: 'delete', label: '删除' },
+          ].map((action) => (
+            <button
+              key={action.key}
+              type="button"
+              data-mobile-batch-action={action.key}
+              disabled={list.selectedCount === 0 || batchStatusMutation.isPending}
+              onClick={() => {
+                const ids = Array.from(list.selectedIds)
+                if (action.key === 'delete') setBatchDeleteDialogOpen(true)
+                else
+                  batchStatusMutation.mutate({
+                    ids,
+                    action: action.key as 'register' | 'ban',
+                  })
+              }}
+              className={cn(
+                'h-12 rounded-full text-[15px] font-medium disabled:opacity-40',
+                action.key === 'delete' && 'text-[#ff3b30]'
+              )}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>,
+          document.body
+        )}
+
+      {/* 手机筛选弹层：排序、格式与每页数量 */}
+      <Dialog open={mobileFilterOpen} onOpenChange={setMobileFilterOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>筛选与排序</DialogTitle>
+            <DialogDescription className="sr-only">调整表情包的排序、格式与每页数量</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>排序方式</Label>
+              <div className="flex gap-2">
+                <Select value={list.filters.sortBy} onValueChange={(value) => list.setFilter('sortBy', value)}>
+                  <SelectTrigger aria-label="排序字段" className="min-w-0 flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="usage_count">使用次数</SelectItem>
+                    <SelectItem value="register_time">注册时间</SelectItem>
+                    <SelectItem value="record_time">记录时间</SelectItem>
+                    <SelectItem value="last_used_time">最后使用</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0 gap-1.5"
+                  onClick={() =>
+                    list.setFilter('sortOrder', list.filters.sortOrder === 'desc' ? 'asc' : 'desc')
+                  }
+                >
+                  <ArrowUpDown className="h-4 w-4" />
+                  {list.filters.sortOrder === 'desc' ? '倒序' : '正序'}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>格式</Label>
+              <Select value={list.filters.format} onValueChange={(value) => list.setFilter('format', value)}>
+                <SelectTrigger aria-label="格式">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部</SelectItem>
+                  {formatOptions.map((format) => (
+                    <SelectItem key={format} value={format}>
+                      {format.toUpperCase()} ({stats?.formats[format]})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>每页显示</Label>
+              <Select value={pageSize.toString()} onValueChange={(value) => list.setPageSize(parseInt(value))}>
+                <SelectTrigger aria-label="每页显示">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="40">40</SelectItem>
+                  <SelectItem value="60">60</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setMobileFilterOpen(false)}>完成</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 批量删除确认对话框 */}
       <AlertDialog open={batchDeleteDialogOpen} onOpenChange={setBatchDeleteDialogOpen}>

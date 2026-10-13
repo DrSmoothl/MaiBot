@@ -1,27 +1,17 @@
 import { Link } from '@tanstack/react-router'
-import { ChevronRight, Search, Settings } from 'lucide-react'
+import { ChevronRight, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { HTMLAttributes, ReactNode } from 'react'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useTheme } from '@/components/use-theme'
+import { MOBILE_EXTRA_MANAGE_SECTIONS } from '@/components/layout/mobile-manage-sections'
 import { useMobileNav } from '@/components/layout/mobile-nav-context'
 import type { MenuItem, MenuSection } from '@/components/layout/types'
 import { cn } from '@/lib/utils'
 
 // 首页、聊天已经在底部标签栏里，管理页不再重复列出。
 const TAB_PATHS = new Set(['/', '/chat'])
-
-const SYSTEM_SECTION: MenuSection = {
-  title: 'sidebar.groups.system',
-  items: [
-    {
-      icon: (props) => <Settings strokeWidth={1.7} {...props} />,
-      label: 'sidebar.menu.settings',
-      path: '/settings',
-    },
-  ],
-}
 
 interface ManageItemLinkProps extends HTMLAttributes<HTMLAnchorElement> {
   item: MenuItem
@@ -54,7 +44,7 @@ export function ManagePage() {
   const { menuSections, openSearch } = useMobileNav()
   const millennium = themeConfig.dashboardStyle === 'millennium'
 
-  const sections = [...menuSections, SYSTEM_SECTION]
+  const sections = [...menuSections, ...MOBILE_EXTRA_MANAGE_SECTIONS]
     .map((section) => ({
       ...section,
       items: section.items.filter((item) => !TAB_PATHS.has(item.path)),
@@ -67,7 +57,9 @@ export function ManagePage() {
 
   return (
     <div data-manage-page="true" className="mx-auto w-full max-w-2xl space-y-6 p-4 sm:p-6">
-      <h1 className="px-1 text-3xl font-bold tracking-tight">{t('mobileNav.manage')}</h1>
+      <h1 data-mobile-large-title="true" className="px-1 text-3xl font-bold tracking-tight">
+        {t('mobileNav.manage')}
+      </h1>
 
       <button
         type="button"

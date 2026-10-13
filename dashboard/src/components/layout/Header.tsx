@@ -79,8 +79,6 @@ interface HeaderProps {
   extensions?: WebUIExtension[]
   /** 工作区切换动画期间隐藏日志视图切换，让它随页面一起淡入淡出 */
   logSwitcherHidden?: boolean
-  /** 手机上进入全屏子页面（如聊天对话页）时整条顶栏让位给页面自己的顶栏 */
-  mobileHidden?: boolean
   /** 侧栏滑入/滑出期间让顶栏延伸到侧栏下方，顶栏自身保持不动 */
   sidebarUnderlay?: boolean
   sidebarOpen: boolean
@@ -100,7 +98,6 @@ type HeaderActionId = 'settings' | 'docs' | 'language' | 'theme' | 'logout' | 'e
 export function Header({
   extensions = [],
   logSwitcherHidden = false,
-  mobileHidden = false,
   sidebarUnderlay = false,
   sidebarOpen,
   searchOpen,
@@ -330,9 +327,8 @@ export function Header({
       className={cn(
         'sticky top-0 isolate z-30 min-w-0 overflow-visible',
         topbarCollapsed ? 'h-4' : 'flex h-[42px] flex-col border-b px-3 backdrop-blur-md sm:px-4',
-        // 手机上的原版风格不显示顶栏：页面自带大标题，搜索与设置分别由标签栏和首页头像承担；
-        // 进入全屏子页面时千禧风格的顶栏也让位
-        (mobileHidden || themeConfig.dashboardStyle !== 'millennium') && 'max-lg:hidden',
+        // 手机上不显示顶栏：页面自带大标题，搜索与设置分别由标签栏和首页头像承担
+        'max-lg:hidden',
         topbarCollapsed || inheritsPageBackground ? 'bg-transparent' : 'bg-background'
       )}
     >

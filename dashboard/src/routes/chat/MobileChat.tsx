@@ -9,14 +9,13 @@ import {
   UserRound,
   UsersRound,
 } from 'lucide-react'
-import { useContext, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useResolvedAvatarUrl } from '@/lib/avatar-url'
-import { ThemeProviderContext } from '@/lib/theme-context'
 import { cn } from '@/lib/utils'
 import type { SessionInfo, StageStatusInfo } from '@/routes/monitor/use-maisaka-monitor'
 import { StageStatusLabel } from '@/routes/monitor/StageStatusLabel'
@@ -271,8 +270,6 @@ export function MobileChatList({
   onClose,
 }: MobileChatListProps) {
   const { t, i18n } = useTranslation()
-  const { themeConfig } = useContext(ThemeProviderContext)
-  const millennium = themeConfig.dashboardStyle === 'millennium'
   const [segment, setSegment] = useState<ChatListSegment>('local')
   const [query, setQuery] = useState('')
   const language = i18n.resolvedLanguage ?? i18n.language
@@ -289,13 +286,12 @@ export function MobileChatList({
       (session) => !normalizedQuery || session.sessionName.toLowerCase().includes(normalizedQuery)
     )
 
-  // 原版风格用分段控件二选一；千禧风格把两组上下排在各自的屏幕里
-  const showLocal = millennium || segment === 'local'
-  const showObserved = millennium || segment === 'observed'
+  // 分段控件二选一；千禧风格的分段画成键帽，会话列表画成下沉屏幕
+  const showLocal = segment === 'local'
+  const showObserved = segment === 'observed'
 
   const localSection = (
     <section data-mobile-chat-section="local" aria-label={t('chat.sidebar.myChats')}>
-      {millennium && <h2 data-mobile-chat-section-title="true">{t('chat.sidebar.myChats')}</h2>}
       <div data-mobile-chat-screen="true">
         {visibleTabs.map((tab) => {
           const displayName = getChatTabDisplayName(tab, t('chat.botNameFallback'))
@@ -332,14 +328,6 @@ export function MobileChatList({
 
   const observedSection = (
     <section data-mobile-chat-section="observed" aria-label={t('chat.sidebar.observedChats')}>
-      {millennium && (
-        <h2 data-mobile-chat-section-title="true">
-          {t('chat.sidebar.observedChats')}
-          <span className="ml-auto">
-            {t('chat.sidebar.subtitle', { count: visibleObserved.length })}
-          </span>
-        </h2>
-      )}
       <div data-mobile-chat-screen="true">
         {observedSessionsError ? (
           <p className="text-destructive px-5 py-4 text-sm">
@@ -375,7 +363,6 @@ export function MobileChatList({
                 <ChatRow
                   avatar={<ObservedAvatar session={session} />}
                   title={session.sessionName}
-                  badge={millennium ? t('chat.sidebar.observedBadge') : undefined}
                   preview={preview}
                   time={formatRowTime(session.lastActivity, language)}
                   onOpen={() => onOpenObserved(session.sessionId)}
@@ -399,43 +386,42 @@ export function MobileChatList({
         </h1>
       </div>
       <div className="px-4">
-        {millennium ? (
-          <label data-mobile-chat-search="true" className="flex h-11 items-center gap-2 px-3">
-            <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('chat.sidebar.searchPlaceholder')}
-              aria-label={t('chat.sidebar.searchPlaceholder')}
-              className="min-w-0 flex-1 bg-transparent text-[15px] outline-none"
-            />
-          </label>
-        ) : (
-          <div
-            role="tablist"
-            aria-label={t('chat.sidebar.conversations')}
-            data-mobile-segmented="true"
-            className="bg-muted grid grid-cols-2 rounded-[10px] p-0.5"
-          >
-            {(['local', 'observed'] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={segment === value}
-                onClick={() => setSegment(value)}
-                className={cn(
-                  'h-[30px] rounded-lg text-sm',
-                  segment === value &&
-                    'bg-background font-semibold shadow-[0_1px_3px_rgb(0_0_0/0.12)]'
-                )}
-              >
-                {value === 'local' ? t('chat.sidebar.myChats') : t('chat.sidebar.observedChats')}
-              </button>
-            ))}
-          </div>
-        )}
+        <label data-mobile-chat-search="true" className="bg-muted flex h-10 items-center gap-2 rounded-xl px-3">
+          <Search className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('chat.sidebar.searchPlaceholder')}
+            aria-label={t('chat.sidebar.searchPlaceholder')}
+            className="min-w-0 flex-1 bg-transparent text-[15px] outline-none"
+          />
+        </label>
+      </div>
+      <div className="px-4">
+        <div
+          role="tablist"
+          aria-label={t('chat.sidebar.conversations')}
+          data-mobile-segmented="true"
+          className="bg-muted grid grid-cols-2 rounded-[10px] p-0.5"
+        >
+          {(['local', 'observed'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={segment === value}
+              data-active={segment === value ? 'true' : 'false'}
+              onClick={() => setSegment(value)}
+              className={cn(
+                'h-[30px] rounded-lg text-sm',
+                segment === value && 'bg-background font-semibold shadow-[0_1px_3px_rgb(0_0_0/0.12)]'
+              )}
+            >
+              {value === 'local' ? t('chat.sidebar.myChats') : t('chat.sidebar.observedChats')}
+            </button>
+          ))}
+        </div>
       </div>
       {showLocal && localSection}
       {showObserved && observedSection}

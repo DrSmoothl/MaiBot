@@ -1541,18 +1541,22 @@
     "home": "ホーム",
     "chat": "チャット",
     "manage": "管理",
-    "observe": "観察",
     "me": "マイページ",
     "search": "検索",
     "live": "MaiBot リアルタイム",
     "botInitial": "麦",
-    "observeLive": "リアルタイム",
-    "observeLogs": "ログ",
-    "observeReasoning": "推論過程",
     "backHome": "ホームに戻る",
     "backManage": "管理に戻る"
   },
   "manage": {
-    "searchPlaceholder": "ページや設定を検索"
+    "searchPlaceholder": "ページや設定を検索",
+    "groups": {
+      "runtime": "実行記録"
+    }
+  },
+  "dynamicForm": {
+    "mobileTextEmpty": "未入力",
+    "mobileTextCancel": "キャンセル",
+    "mobileTextDone": "完了"
   }
 }

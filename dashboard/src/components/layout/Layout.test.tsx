@@ -182,8 +182,8 @@ vi.mock('./MobileRouteHeader', () => ({
 }))
 
 vi.mock('./MobileTabBar', () => ({
-  MobileTabBar: ({ millennium, onSearch }: { millennium: boolean; onSearch: () => void }) => (
-    <nav data-testid="mobile-tabbar" data-millennium={String(millennium)}>
+  MobileTabBar: ({ onSearch }: { onSearch: () => void }) => (
+    <nav data-testid="mobile-tabbar">
       <button type="button" onClick={onSearch}>
         底部搜索
       </button>
@@ -563,7 +563,7 @@ describe('Layout 壳层、快捷键与公告入口', () => {
       </Layout>
     )
 
-    expect(screen.getByTestId('mobile-tabbar')).toHaveAttribute('data-millennium', 'false')
+    expect(screen.getByTestId('mobile-tabbar')).toBeInTheDocument()
     expect(getHeader()).toHaveAttribute('data-search-open', 'false')
     fireEvent.click(screen.getByRole('button', { name: '底部搜索' }))
     expect(getHeader()).toHaveAttribute('data-search-open', 'true')

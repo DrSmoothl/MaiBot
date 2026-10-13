@@ -1605,18 +1605,22 @@
     "home": "首页",
     "chat": "聊天",
     "manage": "管理",
-    "observe": "观察",
     "me": "我的",
     "search": "搜索",
     "live": "麦麦实时",
     "botInitial": "麦",
-    "observeLive": "实时",
-    "observeLogs": "日志",
-    "observeReasoning": "推理过程",
     "backHome": "返回首页",
     "backManage": "返回管理"
   },
   "manage": {
-    "searchPlaceholder": "搜索页面或设置项"
+    "searchPlaceholder": "搜索页面或设置项",
+    "groups": {
+      "runtime": "运行记录"
+    }
+  },
+  "dynamicForm": {
+    "mobileTextEmpty": "未填写",
+    "mobileTextCancel": "取消",
+    "mobileTextDone": "完成"
   }
 }

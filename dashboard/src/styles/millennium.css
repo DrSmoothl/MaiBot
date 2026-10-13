@@ -3323,17 +3323,6 @@
   margin: 0 4px;
 }
 
-:root[data-dashboard-style='millennium'] [data-mobile-chat-section-title='true'] {
-  align-items: center;
-  color: var(--mil-print);
-  display: flex;
-  font-size: 12px;
-  font-weight: 700;
-  gap: 8px;
-  letter-spacing: 0.14em;
-  padding: 3px 8px 6px;
-}
-
 :root[data-dashboard-style='millennium'] [data-mobile-chat-swipe-row='true'] > div:last-child {
   background-color: var(--mil-screen);
 }
@@ -3482,4 +3471,228 @@
   color: var(--mil-on-ink);
   padding-bottom: 2px;
   transform: translateY(2px);
+}
+
+/* 手机端设置分区胶囊：一排键帽 */
+:root[data-dashboard-style='millennium'] [data-mobile-pill-nav='true'] button {
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 46px;
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-pill-nav='true'] button[data-active='true'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}
+
+/* 长文本字段的列表行与编辑弹层 */
+:root[data-dashboard-style='millennium'] [data-mobile-text-sheet-card='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: var(--mil-sunk);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-sheet-button] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 46px;
+  padding-bottom: 5px;
+  width: 46px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-sheet-button='confirm'] {
+  background-color: var(--mil-hot);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-hot-side);
+  color: var(--mil-hot-ink);
+}
+
+/* 手机页头右上角的「+」：珊瑚橙主操作键，展开时不旋转 */
+:root[data-dashboard-style='millennium'] [data-mobile-header-button='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-hot);
+  border-radius: 0;
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-hot-side), inset 4px 4px 0 rgb(255 255 255 / 0.28);
+  color: var(--mil-hot-ink);
+  height: 46px;
+  padding-bottom: 5px;
+  transform: none;
+  width: 46px;
+}
+
+/* 手机页头右上角的文字键与图标键 */
+:root[data-dashboard-style='millennium'] [data-mobile-header-text-button],
+:root[data-dashboard-style='millennium'] [data-mobile-header-icon-button='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 46px;
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-header-icon-button='true'] {
+  width: 46px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-header-text-button='primary'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}
+
+/* 手机表情包网格：卡片之间留缝，每张是一块下沉屏幕 */
+:root[data-dashboard-style='millennium'] [data-mobile-emoji-grid='true'] {
+  gap: 10px;
+  margin: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-emoji-tile='true'] {
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-sunk);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-emoji-tile='true'] > span:last-child {
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-emoji-tile='true'][data-selected='true'] > span:last-child {
+  background-color: var(--mil-on);
+  color: var(--mil-on-ink);
+}
+
+/* 手机多选批量操作栏：浮起的面板上一排键帽，删除是红键 */
+:root[data-dashboard-style='millennium'] [data-mobile-batch-toolbar='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: var(--mil-float);
+  gap: 8px;
+  height: auto;
+  padding: 10px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-batch-action] {
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 46px;
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-batch-action='register'] {
+  background-color: var(--mil-hot);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-hot-side);
+  color: var(--mil-hot-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-batch-action='delete'] {
+  background-color: var(--mil-danger);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-danger-side);
+  color: #fff;
+}
+
+/* 手机表达方式卡片审核：通过是绿键，拒绝是红键 */
+:root[data-dashboard-style='millennium'] [data-quick-review-action] {
+  border: 0;
+  border-radius: 0;
+  height: 52px;
+  padding-bottom: 5px;
+  width: 96px;
+}
+
+:root[data-dashboard-style='millennium'] [data-quick-review-action='reject'] {
+  background-color: var(--mil-danger);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-danger-side);
+  color: #fff;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-shell='true'] [data-quick-review-action='approve'] {
+  background-color: var(--mil-on) !important;
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-on-side) !important;
+  color: var(--mil-on-ink) !important;
+}
+
+/* ---------- 手机标签栏的其余部件：与原版结构相同，只换成机壳材质 ---------- */
+
+/* 麦麦实时条：一块下沉的小屏幕 */
+:root[data-dashboard-style='millennium'] [data-mobile-live-strip='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: var(--mil-sunk);
+  color: var(--mil-screen-ink);
+  height: 50px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-live-strip='true'] > span:first-child {
+  background-color: var(--mil-led);
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  color: var(--mil-line);
+  font-family: var(--mil-font-pixel);
+  height: 32px;
+  width: 32px;
+}
+
+/* 搜索键与收起后的当前标签键 */
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar-search='true'],
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar-expand='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 58px;
+  padding-bottom: 7px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar-expand='true'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+}
+
+/* 首页右上角的头像入口：一枚键帽 */
+:root[data-dashboard-style='millennium'] [data-home-avatar-entry='true'] {
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-family: var(--mil-font-pixel);
+  height: 46px;
+  padding-bottom: 5px;
+  width: 46px;
 }

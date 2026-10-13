@@ -9,12 +9,18 @@ export interface MobileNavContextValue {
   openSearch: () => void
   /** 全屏子页面（如聊天对话页）请求隐藏底部标签栏 */
   setTabBarHidden: (hidden: boolean) => void
+  /** 手机页头右上角的操作区，页面用 MobileHeaderActions 把按钮渲染进去 */
+  headerActionsElement: HTMLElement | null
+  /** 页面临时替换手机页头的大标题（如多选时的「已选择 N 项」），null 表示用菜单名 */
+  setTitleOverride: (title: string | null) => void
 }
 
 export const MobileNavContext = createContext<MobileNavContextValue>({
   menuSections: [],
   openSearch: () => {},
   setTabBarHidden: () => {},
+  headerActionsElement: null,
+  setTitleOverride: () => {},
 })
 
 export function useMobileNav(): MobileNavContextValue {
@@ -30,16 +36,22 @@ export function useHideMobileTabBar(hidden: boolean) {
   }, [hidden, setTabBarHidden])
 }
 
-/** 「观察」标签覆盖的页面：麦麦观察、日志、推理过程与详细统计 */
-const OBSERVE_PATH_PREFIXES = ['/planner-monitor', '/logs', '/reasoning-process', '/statistics']
+/** 页面挂载期间用 title 替换手机页头的大标题，传 null 恢复菜单名 */
+export function useMobileTitleOverride(title: string | null) {
+  const { setTitleOverride } = useMobileNav()
+  useEffect(() => {
+    setTitleOverride(title)
+    return () => setTitleOverride(null)
+  }, [title, setTitleOverride])
+}
 
-export type MobileTab = 'home' | 'chat' | 'manage' | 'observe' | 'me'
+export type MobileTab = 'home' | 'chat' | 'manage' | 'me'
 
 /** 根据当前路径判断底部标签栏的选中项；不属于其它标签的页面都归到「管理」 */
 export function resolveMobileTab(pathname: string): MobileTab {
   if (pathname === '/') return 'home'
-  if (pathname === '/chat') return 'chat'
+  // 观察聊天流就在聊天里，单独的麦麦观察页也归到「聊天」
+  if (pathname === '/chat' || pathname.startsWith('/planner-monitor')) return 'chat'
   if (pathname === '/settings') return 'me'
-  if (OBSERVE_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return 'observe'
   return 'manage'
 }

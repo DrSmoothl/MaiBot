@@ -327,4 +327,96 @@
     color: var(--m-muted) !important;
     font-size: 14px !important;
   }
+
+  /* ---------- 配置表单（麦麦设置、模型等） ---------- */
+
+  /* 分组标题用正文黑，不再整片主题色 */
+  :root[data-dashboard-style='modern'] [data-dashboard-main='true'] [data-dashboard-card-header='true'] .text-primary {
+    color: var(--m-ink);
+  }
+
+  :root[data-dashboard-style='modern'] [data-config-field-path] [data-dashboard-card-title='true'] {
+    font-size: 17px;
+  }
+
+  /* 吸顶的分区导航与灰底页面融为一体 */
+  :root[data-dashboard-style='modern'] [data-config-section-navigation='true'] {
+    background-color: var(--m-page);
+  }
+
+  /* 字段之间用 0.5px 细线分隔，像 iOS 的分组列表 */
+  :root[data-dashboard-style='modern'] [data-config-field-path] [data-dynamic-field] + [data-dynamic-field],
+  :root[data-dashboard-style='modern'] [data-config-field-path] [data-config-row] + [data-config-row] {
+    border-top: 0.5px solid var(--m-hairline);
+    padding-top: 10px;
+  }
+
+  :root[data-dashboard-style='modern'] [data-mobile-pill-nav='true'] button[data-active='false'] {
+    background-color: var(--m-card);
+  }
+
+  /* 长文本编辑弹层：灰底上一张白卡片 */
+  :root[data-dashboard-style='modern'] [data-mobile-text-sheet='true'] {
+    background-color: var(--m-page);
+  }
+
+  /* 模型管理：选中的厂商用黑底，不再整块主题色 */
+  :root[data-dashboard-style='modern'] [data-model-config-page='true'] .bg-primary {
+    background-color: var(--m-ink);
+    color: var(--m-card);
+  }
+
+  /* ---------- 表达方式卡片审核 ---------- */
+
+  :root[data-dashboard-style='modern'] [data-quick-review-card] {
+    border: 0;
+    border-radius: 30px;
+    box-shadow: 0 20px 50px rgb(0 0 0 / 0.1);
+    padding: 28px;
+  }
+
+  :root[data-dashboard-style='modern'] [data-quick-review-card] [data-quick-review-situation='true'] {
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  :root[data-dashboard-style='modern'] [data-quick-review-card] [data-quick-review-situation='true'] p {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+  }
+
+  :root[data-dashboard-style='modern'] [data-quick-review-actions='true'] {
+    gap: 24px;
+    padding-bottom: calc(env(safe-area-inset-bottom) + 12px);
+  }
+
+  :root[data-dashboard-style='modern'] [data-quick-review-action] {
+    border: 0;
+    height: 66px;
+    width: 66px;
+  }
+
+  :root[data-dashboard-style='modern'] [data-quick-review-action='reject'] {
+    -webkit-backdrop-filter: blur(28px) saturate(1.8);
+    backdrop-filter: blur(28px) saturate(1.8);
+    background: rgb(252 252 253 / 0.72);
+    box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.07), 0 10px 30px rgb(0 0 0 / 0.07);
+    color: #ff3b30;
+  }
+
+  :root[data-dashboard-style='modern'] [data-quick-review-action='approve'] {
+    background: var(--m-ink);
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.18);
+    color: var(--m-card);
+  }
+
+  /* 主按钮与选中项用黑色：麦麦橙只留给选中标签和状态点 */
+  :root[data-dashboard-style='modern'] [data-dashboard-main='true'] .bg-primary,
+  :root[data-dashboard-style='modern'] [data-dashboard-dialog-content='true'] .bg-primary {
+    background-color: var(--m-ink);
+    color: var(--m-card);
+  }
 }

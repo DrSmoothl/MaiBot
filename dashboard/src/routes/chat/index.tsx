@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useRouterState } from '@tanstack/react-router'
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -368,6 +369,19 @@ export function ChatPage() {
     () => getRequestedObservedSessionId() !== null
   )
   useHideMobileTabBar(isMobileChat && mobileRoomOpen)
+
+  // 「麦麦实时」条等入口通过 ?observe= 直达某个聊天流；已在聊天页时也要跟着切换
+  const observeParam = useRouterState({
+    select: (state) => new URLSearchParams(state.location.searchStr).get('observe'),
+  })
+  const [handledObserveParam, setHandledObserveParam] = useState(observeParam)
+  if (observeParam !== handledObserveParam) {
+    setHandledObserveParam(observeParam)
+    if (observeParam) {
+      setActiveObservedSessionId(observeParam)
+      setMobileRoomOpen(true)
+    }
+  }
 
   // 当前活动标签页
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0]

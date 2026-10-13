@@ -969,7 +969,6 @@ function IndexPageContent() {
           </Card>
         )}
         <MobilePageHeader
-          hideInMillennium
           eyebrow={new Intl.DateTimeFormat(i18n.resolvedLanguage ?? i18n.language, {
             month: 'long',
             day: 'numeric',

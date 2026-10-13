@@ -312,15 +312,14 @@ describe('MobileChatList', () => {
     return props
   }
 
-  it('千禧风格把两组会话上下排列并提供搜索', async () => {
+  it('两种风格都用分段切换，并可按名称搜索会话', async () => {
     const user = userEvent.setup()
     renderList({}, 'millennium')
 
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'chat.sidebar.observedChats' }))
     expect(screen.getByRole('button', { name: /测试观察群/ })).toBeInTheDocument()
-    await user.type(screen.getByRole('searchbox'), '观察')
-    expect(screen.queryByRole('button', { name: /小明的私聊/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /测试观察群/ })).toBeInTheDocument()
+    await user.type(screen.getByRole('searchbox'), '不存在')
+    expect(screen.queryByRole('button', { name: /测试观察群/ })).not.toBeInTheDocument()
   })
 
   it('点按本地会话进入对话，只有非默认会话可以关闭', async () => {

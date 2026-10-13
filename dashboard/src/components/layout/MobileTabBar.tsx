@@ -1,14 +1,10 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import {
-  Activity,
   ChevronRight,
-  Eye,
   House,
   LayoutGrid,
   MessageCircle,
   Search,
-  SlidersHorizontal,
-  UserRound,
 } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -30,21 +26,12 @@ interface MobileTabDef {
   icon: LucideIcon
 }
 
-// 原版风格：四个标签 + 独立的搜索按钮；「我的」从首页头像进入。
-const GLASS_TABS: MobileTabDef[] = [
+// 三个标签 + 独立的搜索键；「我的」从首页头像进入。两种风格结构相同，千禧风格只换外观（键帽）。
+// 观察麦麦的聊天流就在「聊天」里，不再单独设标签。
+const TABS: MobileTabDef[] = [
   { tab: 'home', to: '/', labelKey: 'mobileNav.home', icon: House },
   { tab: 'chat', to: '/chat', labelKey: 'mobileNav.chat', icon: MessageCircle },
   { tab: 'manage', to: '/manage', labelKey: 'mobileNav.manage', icon: LayoutGrid },
-  { tab: 'observe', to: '/planner-monitor', labelKey: 'mobileNav.observe', icon: Activity },
-]
-
-// 千禧风格：一排五个键帽，搜索留在顶栏；图标沿用千禧图标集能顶替的图标名。
-const KEYCAP_TABS: MobileTabDef[] = [
-  { tab: 'home', to: '/', labelKey: 'mobileNav.home', icon: House },
-  { tab: 'chat', to: '/chat', labelKey: 'mobileNav.chat', icon: MessageCircle },
-  { tab: 'manage', to: '/manage', labelKey: 'mobileNav.manage', icon: SlidersHorizontal },
-  { tab: 'observe', to: '/planner-monitor', labelKey: 'mobileNav.observe', icon: Eye },
-  { tab: 'me', to: '/settings', labelKey: 'mobileNav.me', icon: UserRound },
 ]
 
 // 与 Tailwind 的 lg 断点对齐：桌面端完全不挂载标签栏，也就不会订阅麦麦实时状态。
@@ -57,7 +44,6 @@ const SCROLL_DELTA_THRESHOLD = 6
 const DOCK_HEIGHT_CSS_VAR = '--mobile-dock-height'
 
 interface MobileTabBarProps {
-  millennium: boolean
   hidden?: boolean
   onSearch: () => void
 }
@@ -72,7 +58,7 @@ export function MobileTabBar(props: MobileTabBarProps) {
   }, [isMobile, props.hidden])
 
   if (!isMobile || props.hidden) return null
-  return props.millennium ? <KeycapTabBar /> : <GlassTabBar {...props} />
+  return <TabBarDock onSearch={props.onSearch} />
 }
 
 /** 记录底部浮层的实际高度，供页面留白使用 */
@@ -141,7 +127,7 @@ function pickLatestStageStatus(stageStatuses: Map<string, StageStatusInfo>) {
   return latest
 }
 
-function GlassTabBar({ onSearch }: MobileTabBarProps) {
+function TabBarDock({ onSearch }: Pick<MobileTabBarProps, 'onSearch'>) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
@@ -150,22 +136,22 @@ function GlassTabBar({ onSearch }: MobileTabBarProps) {
   const [collapsed, setCollapsed] = useCollapseOnScroll(pathname)
   const { sessions, stageStatuses, setSelectedSession } = useMaisakaMonitorOverview()
   const latestStatus = pickLatestStageStatus(stageStatuses)
-  // 观察页本身就展示实时状态，不再重复显示附件条
-  const showLive = latestStatus !== undefined && activeTab !== 'observe'
+  const showLive = latestStatus !== undefined
   const liveSessionName = latestStatus
     ? (sessions.get(latestStatus.sessionId)?.sessionName ??
       latestStatus.sessionName ??
       latestStatus.sessionId.slice(0, 8))
     : ''
-  const activeDef = GLASS_TABS.find((def) => def.tab === activeTab) ?? GLASS_TABS[0]
+  const activeDef = TABS.find((def) => def.tab === activeTab) ?? TABS[0]
   const ActiveIcon = activeDef.icon
 
   useDockHeight(dockRef)
 
   const openLive = () => {
     if (!latestStatus) return
+    // 直接进入聊天里这个聊天流的观察对话页
     setSelectedSession(latestStatus.sessionId)
-    void navigate({ to: '/planner-monitor' })
+    void navigate({ to: '/chat', search: { observe: latestStatus.sessionId } })
   }
 
   const liveStrip = latestStatus && (
@@ -240,9 +226,9 @@ function GlassTabBar({ onSearch }: MobileTabBarProps) {
         <nav aria-label={t('mobileNav.label')} className="flex h-[62px] gap-2.5">
           <div
             data-mobile-tabbar-tabs="true"
-            className={cn('grid h-full flex-1 grid-cols-4 rounded-full p-1', MOBILE_GLASS_CLASS)}
+            className={cn('grid h-full flex-1 grid-cols-3 rounded-full p-1', MOBILE_GLASS_CLASS)}
           >
-            {GLASS_TABS.map(({ tab, to, labelKey, icon: Icon }) => {
+            {TABS.map(({ tab, to, labelKey, icon: Icon }) => {
               const active = activeTab === tab
               return (
                 <Link
@@ -277,42 +263,5 @@ function GlassTabBar({ onSearch }: MobileTabBarProps) {
         </nav>
       )}
     </div>
-  )
-}
-
-function KeycapTabBar() {
-  const { t } = useTranslation()
-  const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const activeTab = resolveMobileTab(pathname)
-  const dockRef = useRef<HTMLElement>(null)
-
-  useDockHeight(dockRef)
-
-  return (
-    <nav
-      ref={dockRef}
-      data-mobile-tabbar="true"
-      aria-label={t('mobileNav.label')}
-      className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+14px)] z-40 flex h-[62px] gap-2.5"
-    >
-      <div data-mobile-tabbar-tabs="true" className="grid h-full flex-1 grid-cols-5 gap-0 p-1">
-        {KEYCAP_TABS.map(({ tab, to, labelKey, icon: Icon }) => {
-          const active = activeTab === tab
-          return (
-            <Link
-              key={tab}
-              to={to}
-              data-mobile-tab="true"
-              data-active={active ? 'true' : 'false'}
-              aria-current={active ? 'page' : undefined}
-              className="flex min-w-0 flex-col items-center justify-center gap-0.5 text-[10px] font-semibold"
-            >
-              <Icon className="h-[22px] w-[22px]" strokeWidth={1.7} aria-hidden="true" />
-              <span className="truncate">{t(labelKey)}</span>
-            </Link>
-          )
-        })}
-      </div>
-    </nav>
   )
 }

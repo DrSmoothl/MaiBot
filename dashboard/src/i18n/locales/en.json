@@ -1608,18 +1608,22 @@
     "home": "Home",
     "chat": "Chat",
     "manage": "Manage",
-    "observe": "Monitor",
     "me": "Me",
     "search": "Search",
     "live": "MaiBot live",
     "botInitial": "M",
-    "observeLive": "Live",
-    "observeLogs": "Logs",
-    "observeReasoning": "Reasoning",
     "backHome": "Back to home",
     "backManage": "Back to manage"
   },
   "manage": {
-    "searchPlaceholder": "Search pages or settings"
+    "searchPlaceholder": "Search pages or settings",
+    "groups": {
+      "runtime": "Runtime records"
+    }
+  },
+  "dynamicForm": {
+    "mobileTextEmpty": "Empty",
+    "mobileTextCancel": "Cancel",
+    "mobileTextDone": "Done"
   }
 }

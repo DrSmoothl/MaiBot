@@ -26,11 +26,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ExpressionReviewer } from '@/components/expression-reviewer'
+import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
+import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
+import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
 import { formatChatDisplayName } from '@/lib/chat-display'
+import { cn } from '@/lib/utils'
 
 import {
   batchDeleteExpressions,
@@ -112,7 +117,11 @@ export function ExpressionManagementPage() {
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false)
   const [isMoreActionsOpen, setIsMoreActionsOpen] = useState(false)
-  const [activeView, setActiveView] = useState<'list' | 'logs' | 'quick' | 'clusters'>('list')
+  // 手机上默认进入卡片审核，与设计稿一致；桌面端默认列表
+  const isMobileViewport = useMediaQuery('(max-width: 1023.98px)')
+  const [activeView, setActiveView] = useState<'list' | 'logs' | 'quick' | 'clusters'>(() =>
+    window.matchMedia('(max-width: 1023.98px)').matches ? 'quick' : 'list'
+  )
 
   // 兄弟读：聊天流 / 共享组 / 统计 / 审核统计统一以 'expression' 前缀分层，
   // list.invalidate() 失效 ['expression'] 前缀时一并刷新（读失败局部呈现，不弹全局 toast）
@@ -211,6 +220,9 @@ export function ExpressionManagementPage() {
       onClearSelection: list.clearSelection,
       onCloseClearConfirm: () => setIsClearConfirmOpen(false),
     })
+
+  // 手机上卡片审核是全屏的滑卡界面，底部按钮占据标签栏的位置
+  useHideMobileTabBar(isMobileViewport && activeView === 'quick')
 
   // 顶部视图切换（表达 / 快速审核 / AI审核记录）
   const handleActiveViewChange = (view: 'list' | 'logs' | 'quick' | 'clusters') => {
@@ -388,10 +400,11 @@ export function ExpressionManagementPage() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden p-4 pb-6 sm:p-6">
       {activeView !== 'list' && (
         <div className="mb-4 flex shrink-0 justify-end gap-2 sm:mb-3">
+          {/* 手机上由页头的「列表模式」返回，这里不再重复 */}
           <Button
             variant="outline"
             onClick={() => handleActiveViewChange('list')}
-            className="h-10 justify-center gap-2 sm:h-9"
+            className="h-10 justify-center gap-2 max-lg:hidden sm:h-9"
           >
             <ArrowLeft className="h-4 w-4" />
             返回表达
@@ -717,6 +730,18 @@ export function ExpressionManagementPage() {
           />
         </div>
       )}
+
+      {/* 手机页头右上角：在卡片审核与列表之间切换 */}
+      <MobileHeaderActions>
+        <button
+          type="button"
+          onClick={() => handleActiveViewChange(activeView === 'quick' ? 'list' : 'quick')}
+          data-mobile-header-text-button="true"
+          className={cn('h-11 rounded-full px-4 text-[15px]', MOBILE_GLASS_CLASS)}
+        >
+          {activeView === 'quick' ? '列表模式' : '卡片审核'}
+        </button>
+      </MobileHeaderActions>
 
       {activeView === 'clusters' && (
         <ExpressionClusterBrowser onOpenExpression={handleOpenExpressionById} />
