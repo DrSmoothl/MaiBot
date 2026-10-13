@@ -111,12 +111,14 @@ async def _handle_logs_subscribe(connection_id: str, request_id: Optional[str], 
         ok=True,
         data={"domain": "logs", "topic": "main"},
     )
+    # 读日志文件是同步磁盘 IO，放到线程里，避免卡住 WebUI 事件循环
+    entries = await asyncio.to_thread(load_recent_logs, limit=replay_limit)
     await websocket_manager.send_event(
         connection_id,
         domain="logs",
         event="snapshot",
         topic="main",
-        data={"entries": load_recent_logs(limit=replay_limit)},
+        data={"entries": entries},
     )
 
 

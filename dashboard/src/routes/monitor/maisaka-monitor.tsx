@@ -44,6 +44,7 @@ import type { LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import type { Key, ReactNode } from 'react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import {
   EnsureImageGallery,
@@ -2505,6 +2506,11 @@ interface MaisakaMonitorProps {
   embedded?: boolean
   /** 打开推理详情后返回的地址；未提供时返回当前页面。 */
   reasoningReturnTo?: string
+  /**
+   * 手机端悬浮顶栏里的工具栏位置：提供时工具栏渲染到该元素中，
+   * 时间线铺满到顶部并在内容顶部留出 `--observe-header-h` 的空间，内容从顶栏下方滚过。
+   */
+  floatingToolbarContainer?: HTMLElement | null
 }
 
 /** 虚拟列表会卸载屏外工具，重新挂载时也需要重新观察其可见性。 */
@@ -2560,6 +2566,7 @@ const HISTORY_LOAD_THRESHOLD_PX = 200
 const MonitorTimeline = memo(function MonitorTimeline({
   embedded = false,
   reasoningReturnTo,
+  floatingToolbarContainer,
 }: MaisakaMonitorProps) {
   const navigate = useNavigate()
   const { toast } = useToast()
@@ -2991,28 +2998,36 @@ const MonitorTimeline = memo(function MonitorTimeline({
   }, [timeline])
   const virtualItems = timelineVirtualizer.getVirtualItems()
 
+  const stageStatusPanel = (
+    <StageStatusPanel
+      autoScroll={autoScroll}
+      sessionId={selectedSession}
+      onClearTimeline={clearTimeline}
+      onFindPreviousBotMessage={handleFindPreviousBotMessage}
+      onScrollToTop={scrollToTop}
+      onScrollToBottom={() => scrollToBottom('smooth')}
+      stats={stats}
+      status={selectedStageStatus}
+      hideStatus={executingTool}
+    />
+  )
+
   // 主时间线区域
   return (
     <ImageGalleryProvider images={galleryImages}>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* 时间线 */}
-      <StageStatusPanel
-        autoScroll={autoScroll}
-        sessionId={selectedSession}
-        onClearTimeline={clearTimeline}
-        onFindPreviousBotMessage={handleFindPreviousBotMessage}
-        onScrollToTop={scrollToTop}
-        onScrollToBottom={() => scrollToBottom('smooth')}
-        stats={stats}
-        status={selectedStageStatus}
-        hideStatus={executingTool}
-      />
+      {/* 时间线；手机端工具栏放进悬浮顶栏 */}
+      {floatingToolbarContainer
+        ? createPortal(stageStatusPanel, floatingToolbarContainer)
+        : stageStatusPanel}
 
       <Card
         data-maisaka-timeline="true"
+        data-maisaka-floating-header={floatingToolbarContainer ? 'true' : undefined}
         className={cn(
           'relative min-w-0 flex-1 overflow-hidden',
-          embedded ? 'min-h-0' : 'min-h-[420px] lg:min-h-0'
+          embedded ? 'min-h-0' : 'min-h-[420px] lg:min-h-0',
+          floatingToolbarContainer && 'rounded-none border-0 shadow-none'
         )}
       >
         <ScrollArea
@@ -3030,7 +3045,12 @@ const MonitorTimeline = memo(function MonitorTimeline({
             setAutoScroll(false)
           }}
         >
-          <div className="min-w-0 p-4">
+          <div
+            className={cn(
+              'min-w-0 p-4',
+              floatingToolbarContainer && 'pt-[calc(var(--observe-header-h,0px)+0.5rem)]'
+            )}
+          >
             {visibleTimelineEntries.length > 0 && (
               // 固定高度：文案切换不改变下方条目的位置，避免加载前后视口跳动。
               <p className="text-muted-foreground h-7 text-center text-xs">
@@ -3208,16 +3228,22 @@ function MonitorSidebar() {
 export const MaisakaMonitor = memo(function MaisakaMonitor({
   embedded = false,
   reasoningReturnTo,
+  floatingToolbarContainer,
 }: MaisakaMonitorProps = {}) {
   return (
     <div
       className={cn(
         'relative flex min-w-0 flex-col',
-        embedded ? 'h-full min-h-0 p-2 sm:p-3' : 'gap-4 lg:h-[calc(100vh-116px)] lg:flex-row'
+        embedded ? 'h-full min-h-0 p-2 sm:p-3' : 'gap-4 lg:h-[calc(100vh-116px)] lg:flex-row',
+        floatingToolbarContainer && 'p-0 sm:p-0'
       )}
     >
       {!embedded && <MonitorSidebar />}
-      <MonitorTimeline embedded={embedded} reasoningReturnTo={reasoningReturnTo} />
+      <MonitorTimeline
+        embedded={embedded}
+        reasoningReturnTo={reasoningReturnTo}
+        floatingToolbarContainer={floatingToolbarContainer}
+      />
       <SubagentPanel embedded={embedded} />
     </div>
   )
