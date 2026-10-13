@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRouterState } from '@tanstack/react-router'
+import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -11,6 +11,7 @@ import {
 import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useToast } from '@/hooks/use-toast'
+import { Button } from '@/components/ui/button'
 import { uploadWebuiUserAvatar } from '@/lib/avatar-url'
 import { chatWsClient } from '@/lib/chat-ws-client'
 import { getAllChatStreams } from '@/lib/chat-management-api'
@@ -252,6 +253,13 @@ function buildRuntimeStatusFromStage(data: StageStatusEvent): ChatRuntimeStatus 
 }
 
 export function ChatPage() {
+  const navigate = useNavigate()
+  const setupTrial = useRouterState({
+    select: (state) => new URLSearchParams(state.location.searchStr).get('setupTrial') === 'true',
+  })
+  const [trialReplied, setTrialReplied] = useState(false)
+  const trialMessagePending = useRef(false)
+  const canOpenMessagePlatform = typeof window.maibotDesktopHost?.openMessagePlatform === 'function'
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()
   const {
@@ -366,7 +374,7 @@ export function ChatPage() {
   // 手机端（md 以下）先显示会话列表，点进会话后进入全屏对话页并隐藏底部标签栏
   const isMobileChat = useMediaQuery('(max-width: 767.98px)')
   const [mobileRoomOpen, setMobileRoomOpen] = useState(
-    () => getRequestedObservedSessionId() !== null
+    () => setupTrial || getRequestedObservedSessionId() !== null
   )
   useHideMobileTabBar(isMobileChat && mobileRoomOpen)
 
@@ -536,6 +544,11 @@ export function ChatPage() {
         }
 
         case 'bot_message': {
+          // Only a live reply after this trial's own message completes the trial, not loaded history.
+          if (tabId === 'webui-default' && trialMessagePending.current && (data.content?.trim() || data.segments?.length)) {
+            trialMessagePending.current = false
+            setTrialReplied(true)
+          }
           updateTab(tabId, { isTyping: false, runtimeStatus: null })
           const processedSet = processedMessagesMapRef.current.get(tabId) || new Set()
           const contentHash = `bot-${data.content}-${Math.floor((data.timestamp || 0) * 1000)}`
@@ -926,6 +939,7 @@ export function ChatPage() {
     setSelectedImages([])
 
     try {
+      if (setupTrial && activeTabId === 'webui-default') trialMessagePending.current = true
       await chatWsClient.sendMessage(activeTabId, messageContent, displayName, {
         images: imagesToSend.map((image) => ({
           name: image.name,
@@ -934,6 +948,7 @@ export function ChatPage() {
         })),
       })
     } catch (error) {
+      if (activeTabId === 'webui-default') trialMessagePending.current = false
       console.error('发送聊天消息失败:', error)
       setTabs((prev) =>
         prev.map((tab) => {
@@ -951,7 +966,7 @@ export function ChatPage() {
         variant: 'destructive',
       })
     }
-  }, [activeTab, activeTabId, addMessageToTab, inputValue, selectedImages, t, toast, userName])
+  }, [activeTab, activeTabId, addMessageToTab, inputValue, selectedImages, setupTrial, t, toast, userName])
 
   const sendUserEmoji = useCallback(
     async (item: UserEmojiItem) => {
@@ -1221,6 +1236,27 @@ export function ChatPage() {
         transition={{ type: 'spring', stiffness: 360, damping: 30, mass: 0.75 }}
       >
         {/* 移动端对话页顶栏：返回列表、会话名片与单个操作 */}
+        {setupTrial && (
+          <section className="bg-card mx-4 mt-4 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg border p-4" aria-live="polite">
+            <div>
+              <p className="text-sm font-semibold">{t(trialReplied ? 'chat.setupTrial.repliedTitle' : 'chat.setupTrial.title')}</p>
+              <p className="text-muted-foreground mt-1 text-xs">{t(trialReplied ? 'chat.setupTrial.repliedDescription' : 'chat.setupTrial.description')}</p>
+            </div>
+            {trialReplied && (
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => navigate({ to: '/chat', search: {}, replace: true })}>
+                  {t('chat.setupTrial.keepChatting')}
+                </Button>
+                {canOpenMessagePlatform && (
+                  <Button size="sm" onClick={() => {
+                    window.maibotDesktopHost!.openMessagePlatform()
+                    void navigate({ to: '/chat', search: {}, replace: true })
+                  }}>{t('chat.setupTrial.continue')}</Button>
+                )}
+              </div>
+            )}
+          </section>
+        )}
         <div className="md:hidden">
           {activeObservedSessionId ? (
             <MobileChatRoomBar

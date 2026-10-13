@@ -201,6 +201,14 @@
     "logs": "로그"
   },
   "chat": {
+    "setupTrial": {
+      "title": "봇과 대화해 보세요",
+      "description": "인사를 보내 봇이 정상적으로 응답하는지 확인하세요.",
+      "repliedTitle": "봇이 응답했습니다",
+      "repliedDescription": "응답과 말투가 괜찮다면 메시지 플랫폼 설정을 계속하세요.",
+      "keepChatting": "계속 대화하기",
+      "continue": "메시지 플랫폼 설정"
+    },
     "botNameFallback": "麦麦",
     "userFallback": "사용자",
     "userNameFallback": "인간",
@@ -761,7 +769,7 @@
       "saveFailedTitle": "저장에 실패했습니다",
       "validationFailedTitle": "입력값을 확인해 주세요",
       "completeSuccessTitle": "설정이 완료되었습니다",
-      "completeSuccessDescription": "{{appName}} 설정이 저장되고 적용되었습니다.",
+      "completeSuccessDescription": "{{appName}} 설정이 저장되었습니다. 채팅에서 인사를 보내 봇의 응답과 말투를 확인해 보세요.",
       "completeFailedTitle": "설정 완료에 실패했습니다",
       "skipFailedTitle": "설정 마법사 건너뛰기에 실패했습니다",
       "customTokenSuccessTitle": "Token이 업데이트되었습니다",

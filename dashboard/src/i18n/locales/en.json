@@ -213,6 +213,14 @@
     "logs": "Logs"
   },
   "chat": {
+    "setupTrial": {
+      "title": "Try chatting with the bot",
+      "description": "Say hello and check that the bot can reply.",
+      "repliedTitle": "The bot has replied",
+      "repliedDescription": "If the reply and personality look right, continue to message platform setup.",
+      "keepChatting": "Keep chatting",
+      "continue": "Continue to message platforms"
+    },
     "botNameFallback": "Mai",
     "userFallback": "User",
     "userNameFallback": "Human",
@@ -781,7 +789,7 @@
       "saveFailedTitle": "Save failed",
       "validationFailedTitle": "Validation failed",
       "completeSuccessTitle": "Setup complete",
-      "completeSuccessDescription": "{{appName}} configuration has been saved and applied.",
+      "completeSuccessDescription": "{{appName}} configuration has been saved. Say hello in Chat to try the bot's replies and personality.",
       "completeFailedTitle": "Setup failed",
       "skipFailedTitle": "Failed to skip the setup wizard",
       "customTokenSuccessTitle": "Token updated",

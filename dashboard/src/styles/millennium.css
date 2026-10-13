@@ -469,6 +469,17 @@
   border-radius: 0 !important;
 }
 
+/* 普通信息面板沿用粗描边；低优先级让各页面的选中、告警及无边框样式继续生效。 */
+:root[data-dashboard-style='millennium']
+  :where(div, section, aside, label, pre, code):where(.border) {
+  border-width: 2px;
+}
+
+:root[data-dashboard-style='millennium']
+  :where(div, section, aside, label, pre, code):where(.border-border) {
+  border-color: var(--mil-line);
+}
+
 /* ---------- 凸起的塑料模块：卡片 ---------- */
 
 :root[data-dashboard-style='millennium'] [data-dashboard-card='true'] {
@@ -619,11 +630,17 @@
 
 /* ---------- 下沉屏幕：输入框、多行文本、下拉触发器 ---------- */
 
+:root[data-dashboard-style='millennium'] select:not(.opacity-0) {
+  border-radius: 0;
+  font-family: inherit;
+}
+
 :root[data-dashboard-style='millennium']
   :is(
     [data-dashboard-input='true'],
     [data-dashboard-select-trigger='true'],
     textarea,
+    select:not(.opacity-0),
     [data-dashboard-code-editor='true']
   ) {
   background-color: var(--mil-screen);
@@ -648,7 +665,8 @@
   :is(
     [data-dashboard-input='true'],
     [data-dashboard-select-trigger='true'],
-    textarea
+    textarea,
+    select:not(.opacity-0)
   ):focus-visible {
   outline: 2px solid var(--mil-on-side);
   outline-offset: 1px;
@@ -765,12 +783,47 @@
   box-shadow: none;
 }
 
-:root[data-dashboard-style='millennium'] [data-dashboard-checkbox='true'] {
+:root[data-dashboard-style='millennium'] [data-dashboard-checkbox='true'],
+:root[data-dashboard-style='millennium'] input[type='checkbox'] {
   background-color: var(--mil-screen);
   border: 2px solid var(--mil-line);
   box-shadow: inset 2px 2px 0 var(--mil-screen-shade);
   height: 1.25rem;
   width: 1.25rem;
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox'] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  border-radius: 0;
+  vertical-align: middle;
+  color: var(--mil-on-ink);
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox']:checked {
+  background: var(--mil-on);
+  box-shadow: none;
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox']:checked::before {
+  content: '';
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--mil-on-side);
+  outline-offset: 2px;
 }
 
 :root[data-dashboard-style='millennium']
@@ -903,6 +956,7 @@
 @supports selector(::-webkit-scrollbar) {
   :root[data-dashboard-style='millennium'] * {
     scrollbar-color: auto;
+    scrollbar-width: auto;
   }
 
   :root[data-dashboard-style='millennium'] *::-webkit-scrollbar {
@@ -3688,4 +3742,62 @@
   height: 46px;
   padding-bottom: 5px;
   width: 46px;
+}
+
+/* 首次配置向导：方形状态灯与下沉导轨，沿用机壳的硬边材质。 */
+:root[data-dashboard-style='millennium'] [data-setup-steps='true'] {
+  --setup-indicator-size: 2rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-setup-step='true'] {
+  gap: 0.5rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-setup-connector='true'] {
+  top: calc(var(--setup-indicator-size) / 2 - 4px);
+  height: 8px;
+  border: 2px solid var(--mil-line);
+  background-color: var(--mil-lo);
+  box-shadow: inset 0 2px 0 var(--mil-screen-shade), 0 2px 0 var(--mil-hi);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-setup-state='complete'] > [data-setup-connector='true'] {
+  background-color: var(--mil-on);
+}
+
+:root[data-dashboard-style='millennium'] [data-setup-indicator='true'] {
+  width: var(--setup-indicator-size);
+  height: var(--setup-indicator-size);
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  background-color: var(--mil-panel);
+  box-shadow: var(--mil-bevel), 0 3px 0 var(--mil-drop);
+  color: var(--mil-print);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-setup-state='complete'] > [data-setup-indicator='true'] {
+  background-color: var(--mil-on);
+  box-shadow: inset 2px 2px 0 rgb(255 255 255 / 0.3), inset -2px -2px 0 var(--mil-on-side),
+    0 3px 0 var(--mil-drop);
+  color: var(--mil-on-ink);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-setup-state='current'] > [data-setup-indicator='true'] {
+  background-color: var(--mil-hot);
+  box-shadow: inset 2px 2px 0 rgb(255 255 255 / 0.3), inset -2px -2px 0 var(--mil-hot-side),
+    0 3px 0 var(--mil-drop);
+  color: var(--mil-hot-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-setup-label='true'] {
+  color: var(--mil-print);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-setup-state='current'] > [data-setup-label='true'] {
+  color: var(--mil-ink);
+  font-weight: 700;
 }

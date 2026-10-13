@@ -209,6 +209,10 @@ const manageRoute = createRoute({
 const chatRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/chat',
+  validateSearch: (search: Record<string, unknown>): { setupTrial?: boolean; observe?: string } => ({
+    setupTrial: search.setupTrial === true || search.setupTrial === 'true' ? true : undefined,
+    observe: typeof search.observe === 'string' && search.observe ? search.observe : undefined,
+  }),
   component: lazyRouteComponent(() => import('./routes/chat/index'), 'ChatPage'),
 })
 

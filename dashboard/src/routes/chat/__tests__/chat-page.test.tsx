@@ -8,7 +8,7 @@
  * 注意：vitest.config.ts 开启了 mockReset，所有 vi.fn 的实现必须在 beforeEach 里重建。
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -375,6 +375,7 @@ async function renderConnectedPage() {
 }
 
 beforeEach(() => {
+  delete window.maibotDesktopHost
   window.history.replaceState({}, '', '/')
   localStorage.clear()
   localStorage.setItem('maibot_webui_user_id', USER_ID)
@@ -1838,5 +1839,34 @@ describe('聊天页 ChatPage', () => {
       expect.objectContaining({ title: 'chat.toast.imageReadFailed', variant: 'destructive' })
     )
     expect(screen.getByTestId('composer')).toHaveAttribute('data-images', '')
+  })
+})
+
+
+describe('首次配置试聊与桌面平台导航', () => {
+  it('只有本次发出消息并收到新回复后才提供消息平台入口', async () => {
+    window.history.replaceState({}, '', '/chat?setupTrial=true')
+    const openMessagePlatform = vi.fn()
+    window.maibotDesktopHost = { openMessagePlatform }
+    await renderConnectedPage()
+    expect(screen.getByText('chat.setupTrial.title')).toBeInTheDocument()
+    emitSession('webui-default', { type: 'bot_message', content: '旧的广播', timestamp: 1 })
+    expect(screen.queryByRole('button', { name: 'chat.setupTrial.continue' })).not.toBeInTheDocument()
+    act(() => composerProps().onChange('你好'))
+    await act(async () => { composerProps().onSend() })
+    emitSession('webui-default', { type: 'bot_message', content: '你好呀', timestamp: 2 })
+    fireEvent.click(screen.getByRole('button', { name: 'chat.setupTrial.continue' }))
+    expect(openMessagePlatform).toHaveBeenCalledTimes(1)
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: '/chat', search: {}, replace: true })
+  })
+
+  it('普通浏览器不显示一键包的协议端管理入口', async () => {
+    window.history.replaceState({}, '', '/chat?setupTrial=true')
+    await renderConnectedPage()
+    act(() => composerProps().onChange('你好'))
+    await act(async () => { composerProps().onSend() })
+    emitSession('webui-default', { type: 'bot_message', content: '你好呀', timestamp: 2 })
+    expect(screen.getByRole('button', { name: 'chat.setupTrial.keepChatting' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'chat.setupTrial.continue' })).not.toBeInTheDocument()
   })
 })

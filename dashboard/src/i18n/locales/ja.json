@@ -146,6 +146,14 @@
     "logs": "ログ"
   },
   "chat": {
+    "setupTrial": {
+      "title": "麦麦と話してみましょう",
+      "description": "挨拶を送って、正常に返信できるか確認しましょう。",
+      "repliedTitle": "麦麦から返信が届きました",
+      "repliedDescription": "返信や話し方に問題がなければ、メッセージプラットフォームの設定に進めます。",
+      "keepChatting": "チャットを続ける",
+      "continue": "プラットフォームを設定"
+    },
     "botNameFallback": "麦麦",
     "userFallback": "ユーザー",
     "userNameFallback": "人間",
@@ -714,7 +722,7 @@
       "saveFailedTitle": "保存に失敗しました",
       "validationFailedTitle": "入力内容を確認してください",
       "completeSuccessTitle": "設定が完了しました",
-      "completeSuccessDescription": "{{appName}} の設定を保存して適用しました。",
+      "completeSuccessDescription": "{{appName}} の設定を保存しました。チャットで挨拶を送って、麦麦の返事や話し方を試してみましょう。",
       "completeFailedTitle": "設定の完了に失敗しました",
       "skipFailedTitle": "セットアップのスキップに失敗しました",
       "customTokenSuccessTitle": "Token を更新しました",
