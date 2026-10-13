@@ -60,7 +60,8 @@ SUPPLIED_PLACEHOLDERS = GROUP_PLACEHOLDERS | PRIVATE_PLACEHOLDERS
 
 
 @pytest.fixture(autouse=True)
-def reset_prompt_cache() -> Any:
+def reset_prompt_cache(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setattr(global_config.experimental.attention_drift, "enabled", False)
     set_locale("zh-CN")
     clear_prompt_cache()
     yield
@@ -307,6 +308,25 @@ def isolate_retro_blocks(generator: BaseMaisakaReplyGenerator, monkeypatch: pyte
 
     monkeypatch.setattr(generator, "_build_group_chat_attention_block", lambda session_id: "")
     monkeypatch.setattr(generator, "_build_keyword_reaction_prompt", lambda **kwargs: "")
+
+
+@pytest.mark.parametrize(
+    ("locale", "heading"),
+    [("zh-CN", "注意力漂移风格："), ("en-US", "Attention drift style:"), ("ja-JP", "注意ドリフトスタイル：")],
+)
+def test_retro_replyer_attention_drift_follows_live_config(
+    monkeypatch: pytest.MonkeyPatch, locale: str, heading: str
+) -> None:
+    set_locale(locale)
+    generator = build_retro_generator(is_group_session=True)
+    isolate_retro_blocks(generator, monkeypatch)
+
+    for enabled in (False, True, False):
+        monkeypatch.setattr(global_config.experimental.attention_drift, "enabled", enabled)
+        items = generator._build_retro_request_messages(
+            chat_history=[], reply_message=None, reply_reason="测试回复原因"
+        )
+        assert read_item_text(items[0]).count(heading) == int(enabled)
 
 
 def test_retro_request_messages_fill_single_template(monkeypatch: pytest.MonkeyPatch) -> None:

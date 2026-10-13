@@ -474,7 +474,7 @@ def _save_mid_term_memory_prompt_preview(
 ) -> None:
     """保存聊天回想生成 Prompt 到 Maisaka Prompt 预览目录。"""
 
-    if not bool(getattr(global_config.debug, "show_maisaka_thinking", False)):
+    if not global_config.debug.show_maisaka_thinking:
         return
     if not request_prompt_messages:
         return
@@ -609,8 +609,6 @@ def _resolve_participant_name(message: LLMContextMessage) -> str:
 
     if message.role == "assistant":
         return "麦麦"
-    if isinstance(message, ComplexSessionMessage) and message.source_kind == "optimized_tool_history":
-        return "历史工具调用"
     return str(message.source or "").strip()
 
 

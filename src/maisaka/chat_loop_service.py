@@ -71,6 +71,8 @@ from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
+from .attention_drift import build_attention_drift_prompt_block
+
 PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "emotion": "emoji.selector",
@@ -93,6 +95,10 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
 CONTEXT_SELECTION_CACHE_STABILITY_RATIO = 2.0
 PLANNER_FINAL_USER_REMINDER_TEMPLATE = (
     "你需要输出对{bot_name}发言的分析，视情况输出文本内容的分析，思考是否进行工具调用"
+)
+# 优化版 Planner 提示词（experimental.planner_optimized_prompt）配套的末尾提醒
+PLANNER_OPTIMIZED_FINAL_USER_REMINDER = (
+    "请你进行分析，是不调用工具，进行思考和等待\n还是使用工具搜集处理信息或使用reply回复"
 )
 
 
@@ -752,34 +758,74 @@ class MaisakaChatLoopService:
         async with self._prompt_load_lock:
             self._build_chat_system_prompt(tools_section)
 
-    def _build_chat_system_prompt(self, tools_section: str = "") -> str:
-        """基于当前配置实时构造主聊天系统提示词。"""
+    def _build_chat_system_prompt(self, tools_section: str = "", bot_nickname_notice: str = "") -> str:
+        """基于当前配置实时构造主聊天系统提示词。
 
-        return load_prompt(self._get_chat_prompt_name(), **self.build_prompt_template_context(tools_section))
+        Args:
+            tools_section: 额外注入到提示词中的工具说明片段。
+            bot_nickname_notice: 优化版模板中紧跟在名字之后的平台昵称说明；其他模板不使用。
+        """
 
-    @staticmethod
-    def _build_planner_final_user_reminder() -> str:
+        system_prompt = load_prompt(
+            self._get_chat_prompt_name(),
+            **self.build_prompt_template_context(tools_section, bot_nickname_notice),
+        )
+        # 每轮读取实验开关，普通与专注模式共用同一份本地化风格指令。
+        if attention_drift := build_attention_drift_prompt_block():
+            system_prompt += f"\n\n{attention_drift}"
+        return system_prompt
+
+    def _build_planner_final_user_reminder(self) -> str:
         """构造每轮 Planner 请求末尾的一次性 user 提醒。"""
 
+        if self._uses_optimized_planner_prompt():
+            return PLANNER_OPTIMIZED_FINAL_USER_REMINDER
         return PLANNER_FINAL_USER_REMINDER_TEMPLATE.format(bot_name=global_config.bot.nickname.strip())
+
+    def _uses_optimized_planner_prompt(self) -> bool:
+        """当前聊天是否使用优化版 Planner 提示词；Focus 模式有自己的模板，不受该实验开关影响。"""
+
+        if not global_config.experimental.planner_optimized_prompt:
+            return False
+        return not focus_mode_manager.is_enabled_for_session(self._session_id, is_group_chat=self._is_group_chat)
 
     def _get_chat_prompt_name(self) -> str:
         """选择当前聊天使用的 Planner 模板。"""
 
         if focus_mode_manager.is_enabled_for_session(self._session_id, is_group_chat=self._is_group_chat):
             return "maisaka_chat_focus"
+        if global_config.experimental.planner_optimized_prompt:
+            return "maisaka_chat_optimized"
         return "maisaka_chat"
 
-    def build_prompt_template_context(self, tools_section: str = "") -> dict[str, str]:
+    def _build_bot_alias_notice(self) -> str:
+        """构造优化版模板中紧跟在名字之后的别名说明；没有配置别名时为空。"""
+
+        alias_names = [alias_name.strip() for alias_name in global_config.bot.alias_names if alias_name.strip()]
+        if not alias_names:
+            return ""
+        return self._localized_text(
+            {
+                "en-US": f"; some people also call you {', '.join(alias_names)}",
+                "ja-JP": f"（{'、'.join(alias_names)}と呼ぶ人もいます）",
+                "zh-CN": f"，还有人叫你{'、'.join(alias_names)}",
+            }
+        )
+
+    def build_prompt_template_context(self, tools_section: str = "", bot_nickname_notice: str = "") -> dict[str, str]:
         """构造 Maisaka prompt 模板的公共渲染参数。"""
 
         return {
             "bot_name": global_config.bot.nickname,
+            "bot_alias_notice": self._build_bot_alias_notice(),
+            # 昵称说明另起一行跟在名字和行为风格之后；没有需要说明的昵称时不占行
+            "bot_nickname_notice": f"\n{bot_nickname_notice}" if bot_nickname_notice else "",
             "behavior_style": self.behavior_style_prompt,
             "file_tools_section": tools_section,
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
             "query_memory_rule": self._build_query_memory_rule(),
+            "subagent_rule": self._build_subagent_rule(),
         }
 
     @staticmethod
@@ -859,6 +905,28 @@ class MaisakaChatLoopService:
             }
         )
 
+    def _build_subagent_rule(self) -> str:
+        """开启子代理时说明何时该把任务交给 subagent；未开启时为空，不占提示词。"""
+
+        if not global_config.experimental.planner_subagent:
+            return ""
+        rule = self._localized_text(
+            {
+                "en-US": "- subagent(): When something needs looking up before you can answer or judge it (reading docs, searching the web, checking version or plugin information, finding images, verifying a claim, and so on), prefer handing it to a sub-agent: state clearly what to find out and grant it the tools it may need. It only hands you its conclusion. Call a tool directly only for things that take a single step.",
+                "ja-JP": "- subagent()：答えたり判断したりする前に調べものが必要なこと（ドキュメントの確認、ウェブ検索、バージョンやプラグイン情報の確認、画像探し、ある主張の検証など）は、サブエージェントに任せることを優先してください。何を調べるかを明確に書き、使えそうなツールを許可します。サブエージェントは結論だけをあなたに渡します。一手で済むことだけ、該当するツールを直接呼び出してください。",
+                "zh-CN": "- subagent()：遇到需要查资料才能回答或判断的事（查文档、搜网页、查版本或插件信息、找图、核实某个说法等），优先交给子代理：写清楚要查什么，把用得上的工具授权给它；它查完只把结论交给你。只有一步就能完成的事才直接调用对应工具。",
+            }
+        )
+        if global_config.experimental.advanced_sub_agent:
+            rule += self._localized_text(
+                {
+                    "en-US": " The sub-agent runs in the background: after dispatching it you do not need to wait and can keep chatting; its conclusion will be sent back to you later.",
+                    "ja-JP": "サブエージェントはバックグラウンドで動作します。依頼したあとは待つ必要はなく、会話を続けてかまいません。結論は後であなたに返されます。",
+                    "zh-CN": "子代理在后台运行，派发后不用等它，可以继续聊天，结论稍后会送回给你。",
+                }
+            )
+        return f"\n{rule}"
+
     def _build_current_chat_attention_tail_message(self) -> str:
         """构建追加到请求末尾的当前聊天专属注意事项。"""
 
@@ -896,8 +964,18 @@ class MaisakaChatLoopService:
         """设置当前 planner 请求使用的中断标记。"""
         self._interrupt_flag = interrupt_flag
 
-    def _build_bot_nickname_notice(self, history: Sequence[LLMContextMessage]) -> str:
-        """从本会话的真实 @ 信息更新昵称，在上下文前说明 bot 的平台身份。"""
+    def _build_bot_nickname_notice(
+        self,
+        history: Sequence[LLMContextMessage],
+        *,
+        skip_same_as_bot_name: bool = False,
+    ) -> str:
+        """从本会话的真实 @ 信息更新昵称，在上下文前说明 bot 的平台身份。
+
+        Args:
+            history: 已选中的上下文消息列表。
+            skip_same_as_bot_name: 是否省略与配置名字相同的昵称；提示词里已经写明名字时不需要重复。
+        """
 
         # 按历史顺序更新，保留最近一次明确提供的昵称；不要把配置昵称当成平台信息。
         for entry in history:
@@ -917,14 +995,19 @@ class MaisakaChatLoopService:
                 if self._is_group_chat and component.target_user_cardname:
                     self._bot_group_cardname = component.target_user_cardname
 
+        bot_name = global_config.bot.nickname.strip()
         lines: List[str] = []
-        if self._bot_platform_nickname:
+        if self._bot_platform_nickname and not (skip_same_as_bot_name and self._bot_platform_nickname == bot_name):
             lines.append(self._localized_text({
                 "zh-CN": f"你在 {self._bot_platform} 平台的昵称是“{self._bot_platform_nickname}”。",
                 "en-US": f'Your nickname on {self._bot_platform} is "{self._bot_platform_nickname}".',
                 "ja-JP": f"{self._bot_platform} でのあなたのニックネームは「{self._bot_platform_nickname}」です。",
             }))
-        if self._is_group_chat and self._bot_group_cardname:
+        if (
+            self._is_group_chat
+            and self._bot_group_cardname
+            and not (skip_same_as_bot_name and self._bot_group_cardname == bot_name)
+        ):
             lines.append(self._localized_text({
                 "zh-CN": f"你在本群的昵称是“{self._bot_group_cardname}”。",
                 "en-US": f'Your nickname in this group is "{self._bot_group_cardname}".',
@@ -954,15 +1037,21 @@ class MaisakaChatLoopService:
 
         items: List[ContextItem] = []
         system_item = ContextItemBuilder().set_role(RoleType.System)
-        if system_prompt is not None:
-            resolved_system_prompt = system_prompt
-        elif self._custom_chat_system_prompt is not None:
-            resolved_system_prompt = self._custom_chat_system_prompt
+        uses_builtin_system_prompt = system_prompt is None and self._custom_chat_system_prompt is None
+        if uses_builtin_system_prompt and self._uses_optimized_planner_prompt():
+            # 优化版模板自己写明了名字：昵称说明跟在名字之后，且只说明与名字不同的昵称
+            bot_nickname_notice = self._build_bot_nickname_notice(selected_history, skip_same_as_bot_name=True)
+            resolved_system_prompt = self._build_chat_system_prompt(bot_nickname_notice=bot_nickname_notice)
         else:
-            resolved_system_prompt = self._build_chat_system_prompt()
-        bot_nickname_notice = self._build_bot_nickname_notice(selected_history)
-        if bot_nickname_notice:
-            resolved_system_prompt = f"{bot_nickname_notice}\n\n{resolved_system_prompt}"
+            if system_prompt is not None:
+                resolved_system_prompt = system_prompt
+            elif self._custom_chat_system_prompt is not None:
+                resolved_system_prompt = self._custom_chat_system_prompt
+            else:
+                resolved_system_prompt = self._build_chat_system_prompt()
+            bot_nickname_notice = self._build_bot_nickname_notice(selected_history)
+            if bot_nickname_notice:
+                resolved_system_prompt = f"{bot_nickname_notice}\n\n{resolved_system_prompt}"
         system_item.add_text_content(resolved_system_prompt)
         items.append(system_item.build())
 

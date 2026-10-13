@@ -367,15 +367,14 @@ export function PluginDetailPage({
     (release) => release.version === (versionSelection?.version || releaseCatalog.recommended_version)
   )
   // 缺少插件 ID 时沿用原文案；其余加载失败由 query 的 error 呈现
-  const loading = pluginQuery.isPending && !!pluginId
-  const error = !pluginId
+  const pluginError = !pluginId
     ? '缺少插件 ID'
     : pluginQuery.isError
       ? (pluginQuery.error instanceof Error ? pluginQuery.error.message : '加载失败')
       : null
 
   // 运行时信息（Git 状态、麦麦版本、已安装列表）并行加载；
-  // 这些信息原本失败时静默降级（不打断页面），故用 data ?? 默认值，不强制报错
+  // 安装状态必须加载成功才展示操作入口，避免查询失败被误判为未安装。
   const [gitStatusQuery, maimaiVersionQuery, installedPluginsQuery] = useQueries({
     queries: [
       {
@@ -396,6 +395,8 @@ export function PluginDetailPage({
   const gitStatus: GitStatus | null = gitStatusQuery.data ?? null
   const maimaiVersion: MaimaiVersion | null = maimaiVersionQuery.data ?? null
   const installedPlugins = installedPluginsQuery.data ?? []
+  const loading = !!pluginId && !pluginError && (pluginQuery.isPending || installedPluginsQuery.isPending)
+  const error = pluginError || (installedPluginsQuery.isError ? installedPluginsQuery.error.message : null)
 
   // 由已安装列表派生安装状态与已安装版本（纯函数，不再用本地 state）
   const isInstalled = plugin ? checkPluginInstalled(plugin.id, installedPlugins) : false
@@ -406,7 +407,7 @@ export function PluginDetailPage({
 
   const readmeQuery = useQuery({
     queryKey: ['plugin-readme', plugin?.id, isInstalled, selectedRelease?.commit],
-    enabled: !!plugin && !installedPluginsQuery.isPending,
+    enabled: !!plugin && installedPluginsQuery.isSuccess,
     staleTime: 5 * 60 * 1000,
     queryFn: ({ signal }) => loadPluginReadme(
       plugin!, isInstalled && (!selectedRelease || selectedRelease.version === installedVersion), signal, selectedRelease?.commit
@@ -417,7 +418,7 @@ export function PluginDetailPage({
 
   const changelogQuery = useQuery({
     queryKey: ['plugin-changelog', plugin?.id, isInstalled, plugin?.manifest.changelog, plugin?.changelog],
-    enabled: !!plugin && !installedPluginsQuery.isPending,
+    enabled: !!plugin && installedPluginsQuery.isSuccess,
     staleTime: 5 * 60 * 1000,
     queryFn: ({ signal }) => loadPluginChangelog(plugin!, isInstalled, signal),
   })
@@ -878,6 +879,12 @@ export function PluginDetailPage({
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-3">
+                    <div className="flex items-start gap-2 text-sm">
+                      <Tag className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+                      <span className="shrink-0 text-muted-foreground">插件 ID:</span>
+                      <span className="min-w-0 break-all font-mono font-medium select-all">{plugin.id}</span>
+                    </div>
+
                     <div className="flex items-center gap-2 text-sm">
                       <User className="h-4 w-4 text-muted-foreground" />
                       <span className="text-muted-foreground">作者:</span>

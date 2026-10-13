@@ -19,7 +19,7 @@ from src.learners.expression_style_utils import (
     is_prompt_example_expression_style,
     normalize_expression_style_for_learning,
 )
-from src.learners.learner_utils_old import weighted_sample
+from src.learners.weighted_sampling import weighted_sample
 from src.maisaka.context.messages import LLMContextMessage, ModelOutputContextMessage, SessionBackedMessage
 
 logger = get_logger("maisaka_expression_selector")

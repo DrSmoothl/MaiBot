@@ -19,8 +19,9 @@ import tomlkit
 
 from src.common.logger import get_logger
 from src.common.prompt_i18n import clear_prompt_cache, extract_prompt_placeholders, list_prompt_templates
-from src.config.config import CONFIG_DIR, Config, ModelConfig, PROJECT_ROOT, config_manager
+from src.config.config import CONFIG_DIR, MODEL_CONFIG_VERSION, Config, ModelConfig, PROJECT_ROOT, config_manager
 from src.config.config_base import AttributeData, ConfigBase
+from src.config.config_upgrade_hooks import apply_config_upgrade_hooks
 from src.config.model_configs import (
     APIProvider,
     ModelInfo,
@@ -500,6 +501,10 @@ def _validate_model_config_file(config_path: Path) -> None:
         with config_path.open("r", encoding="utf-8") as handle:
             config_data = tomlkit.load(handle)
         plain_config_data = _coerce_config_numeric_values(_toml_to_plain_dict(config_data), ModelConfig)
+        # 旧副本先按同一升级钩子校验；切换后的实际写回由配置加载链路完成。
+        plain_config_data = apply_config_upgrade_hooks(
+            plain_config_data, "model_config.toml", plain_config_data["inner"]["version"], MODEL_CONFIG_VERSION
+        ).data
         ModelConfig.from_dict(AttributeData(), copy.deepcopy(plain_config_data))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"模型配置副本无效: {str(exc)}") from exc

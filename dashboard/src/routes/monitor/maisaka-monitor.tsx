@@ -44,17 +44,24 @@ import type { LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import type { Key, ReactNode } from 'react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
+import {
+  EnsureImageGallery,
+  ImageGalleryProvider,
+  useImageGallery,
+  type GalleryImage,
+} from '@/components/image-gallery'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useResolvedAvatarUrl, type AvatarTargetType } from '@/lib/avatar-url'
+import { useVirtualizerUnmountGuard } from '@/lib/use-virtualizer-unmount-guard'
 import { useToast } from '@/hooks/use-toast'
 import { backendApi } from '@/lib/http'
 import { cn } from '@/lib/utils'
@@ -78,6 +85,8 @@ import type {
 } from '@/lib/maisaka-monitor-client'
 import type { SessionInfo, StageStatusInfo, TimelineEntry } from './use-maisaka-monitor'
 import { StageStatusLabel } from './StageStatusLabel'
+import { SubagentPanel, SubagentToggleButton } from './subagent-panel'
+import { openSubagentPanel } from './subagent-panel-state'
 import { useMaisakaMonitorOverview, useMaisakaMonitorSession } from './use-maisaka-monitor'
 
 // ─── 工具函数 ──────────────────────────────────────────────────
@@ -693,6 +702,7 @@ function MonitorStatusActions({
         </Tooltip>
       </TooltipProvider>
       <ActiveContextPopover sessionId={sessionId} />
+      <SubagentToggleButton />
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <Button
           variant="ghost"
@@ -921,7 +931,33 @@ function buildMessageMediaKey(media: MaisakaMessageMedia, index: number) {
   return `${media.kind}:${media.hash}:${media.index ?? index}`
 }
 
+/** 可放大查看的媒体对应的图库条目；内联数据直接显示，远端原文件需带登录态读取。 */
+function toGalleryImage(item: MaisakaMessageMedia): GalleryImage | null {
+  const inlineSource = item.data_url?.trim() ?? ''
+  const remoteSource = item.url.trim()
+  if (!inlineSource && !remoteSource) return null
+  const label = item.kind === 'emoji' ? '表情包' : '图片'
+  return { src: inlineSource || remoteSource, alt: `${label}大图`, authenticated: !inlineSource }
+}
+
 function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
+  const galleryImage = useMemo(() => toGalleryImage(item), [item])
+  if (!galleryImage) return <MessageMediaItemBody item={item} />
+  return (
+    <EnsureImageGallery image={galleryImage}>
+      <MessageMediaItemBody item={item} galleryImage={galleryImage} />
+    </EnsureImageGallery>
+  )
+}
+
+function MessageMediaItemBody({
+  item,
+  galleryImage,
+}: {
+  item: MaisakaMessageMedia
+  galleryImage?: GalleryImage
+}) {
+  const gallery = useImageGallery()
   const inlineSource = item.data_url?.trim() ?? ''
   const remoteSource = item.url.trim()
   const canShowOriginal = Boolean(inlineSource || remoteSource)
@@ -933,7 +969,6 @@ function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
     showOriginal && !inlineSource ? 'loading' : 'idle'
   )
   const [loadRequestId, setLoadRequestId] = useState(showOriginal && !inlineSource ? 1 : 0)
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const label = item.kind === 'emoji' ? '表情包' : '图片'
 
   useEffect(() => {
@@ -982,7 +1017,7 @@ function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
             title={`放大查看${label}`}
             aria-label={`放大查看${label}`}
             disabled={!resolvedSource}
-            onClick={() => setIsPreviewOpen(true)}
+            onClick={() => galleryImage && gallery?.open(galleryImage)}
           >
             {resolvedSource ? (
               <img
@@ -1039,19 +1074,6 @@ function MessageMediaItem({ item }: { item: MaisakaMessageMedia }) {
           </button>
         )}
       </div>
-      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="border-0 bg-black/95 p-2 text-white shadow-2xl [--dialog-width:72rem]">
-          <DialogTitle className="sr-only">{label}预览</DialogTitle>
-          <DialogDescription className="sr-only">正在查看放大的{label}。</DialogDescription>
-          <div className="flex max-h-[calc(100vh-3rem)] min-h-0 w-full items-center justify-center">
-            <img
-              src={resolvedSource}
-              alt={`${label}大图`}
-              className="max-h-[calc(100vh-4rem)] max-w-full rounded-md object-contain"
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   )
 }
@@ -1333,7 +1355,11 @@ function PlannerFinalizedCard({
   const canOpenReasoning = Boolean(promptHtmlUri && parsePromptHtmlReasoningTarget(promptHtmlUri))
 
   return (
-    <Card data-maisaka-trace-card="true" className="border-l-4 border-l-emerald-500/60">
+    <Card
+      data-maisaka-trace-card="true"
+      data-maisaka-planner-card="true"
+      className="border-l-4 border-l-emerald-500/60"
+    >
       <CardHeader className="space-y-2 px-4 py-2">
         <div data-maisaka-trace-meta="true" className="flex flex-wrap items-center gap-2">
           <Brain className="h-4 w-4 text-emerald-500" />
@@ -1368,10 +1394,9 @@ function PlannerFinalizedCard({
           )}
         </div>
 
-        {planner?.content ? (
+        {/* 没有文本内容时只保留标题行，后面直接跟工具 */}
+        {planner?.content && (
           <CollapsibleText text={planner.content} maxLines={6} className="text-foreground/90" />
-        ) : (
-          <p className="text-muted-foreground text-sm">planner 本轮没有文本内容</p>
         )}
       </CardHeader>
     </Card>
@@ -1840,6 +1865,17 @@ function PlannerToolResultCard({
       )}
 
       <div className="space-y-1.5">
+        {tool.tool_name === 'subagent' && (
+          <button
+            type="button"
+            className="text-primary flex items-center gap-1 text-[11px] hover:underline"
+            onClick={() => openSubagentPanel(tool.tool_call_id)}
+            title="在右侧栏查看这个子代理的运行过程"
+          >
+            <Bot className="h-3 w-3" />
+            查看子代理运行过程
+          </button>
+        )}
         {tool.tool_name === 'reply' && (
           <ReplyToolArguments tool={tool} messages={messages} onJumpToMessage={onJumpToMessage} />
         )}
@@ -2470,6 +2506,11 @@ interface MaisakaMonitorProps {
   embedded?: boolean
   /** 打开推理详情后返回的地址；未提供时返回当前页面。 */
   reasoningReturnTo?: string
+  /**
+   * 手机端悬浮顶栏里的工具栏位置：提供时工具栏渲染到该元素中，
+   * 时间线铺满到顶部并在内容顶部留出 `--observe-header-h` 的空间，内容从顶栏下方滚过。
+   */
+  floatingToolbarContainer?: HTMLElement | null
 }
 
 /** 虚拟列表会卸载屏外工具，重新挂载时也需要重新观察其可见性。 */
@@ -2519,13 +2560,25 @@ function useActiveToolVisible(viewport: HTMLDivElement | null, toolCallId?: stri
   return visibility.id === toolCallId && visibility.visible
 }
 
+/** 距时间线顶部多近时开始拉取更早的一页 */
+const HISTORY_LOAD_THRESHOLD_PX = 200
+
 const MonitorTimeline = memo(function MonitorTimeline({
   embedded = false,
   reasoningReturnTo,
+  floatingToolbarContainer,
 }: MaisakaMonitorProps) {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const { timeline, selectedSession, selectedStageStatus, clearTimeline } = useMaisakaMonitorSession()
+  const {
+    timeline,
+    selectedSession,
+    selectedStageStatus,
+    clearTimeline,
+    historyLoading,
+    hasMoreHistory,
+    loadOlderHistory,
+  } = useMaisakaMonitorSession()
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null)
@@ -2630,6 +2683,19 @@ const MonitorTimeline = memo(function MonitorTimeline({
     return visibleEntries
   }, [timeline])
 
+  // 当前时间线里可放大的图片，按出现顺序排列，供大图预览切换上一张/下一张。
+  const galleryImages = useMemo(() => {
+    const images = new Map<string, GalleryImage>()
+    for (const entry of visibleTimelineEntries) {
+      if (!isMessageTimelineEntry(entry)) continue
+      for (const media of (entry.data as MonitorMessage).media ?? []) {
+        const image = toGalleryImage(media)
+        if (image && !images.has(image.src)) images.set(image.src, image)
+      }
+    }
+    return Array.from(images.values())
+  }, [visibleTimelineEntries])
+
   const latestPlannerEntry = useMemo(() => {
     for (let index = timeline.length - 1; index >= 0; index -= 1) {
       const entry = timeline[index]
@@ -2659,6 +2725,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
     getItemKey: (index) => visibleTimelineEntries[index]?.id ?? index,
     overscan: 8,
   })
+  useVirtualizerUnmountGuard(timelineVirtualizer)
 
   useLayoutEffect(() => {
     // 高度变化统一由下方的锚点补偿处理，避免虚拟列表与阅读位置恢复重复滚动。
@@ -2827,9 +2894,22 @@ const MonitorTimeline = memo(function MonitorTimeline({
         : null
 
       setAutoScroll(distanceToBottom < 80)
+
+      // 滚到顶部附近时拉取更早的一页；插入后由下方的锚点补偿保持阅读位置。
+      if (scrollTop < HISTORY_LOAD_THRESHOLD_PX && hasMoreHistory && !historyLoading) {
+        loadOlderHistory()
+      }
     },
-    [scrollViewport, timelineVirtualizer]
+    [hasMoreHistory, historyLoading, loadOlderHistory, scrollViewport, timelineVirtualizer]
   )
+
+  // 一页里可见条目太少、撑不满视口时无法滚动触顶，直接继续向前加载。
+  useEffect(() => {
+    if (!scrollViewport || !hasMoreHistory || historyLoading) return
+    if (scrollViewport.scrollHeight <= scrollViewport.clientHeight + HISTORY_LOAD_THRESHOLD_PX) {
+      loadOlderHistory()
+    }
+  }, [scrollViewport, hasMoreHistory, historyLoading, loadOlderHistory, timelineTotalSize])
 
   // 未跟随底部时，时间线头部被裁剪或上方插入新条目都会改变锚点条目的位置；
   // 每次绘制前（包括虚拟列表重新测量后）只补偿锚点的实际位移，
@@ -2918,27 +2998,36 @@ const MonitorTimeline = memo(function MonitorTimeline({
   }, [timeline])
   const virtualItems = timelineVirtualizer.getVirtualItems()
 
+  const stageStatusPanel = (
+    <StageStatusPanel
+      autoScroll={autoScroll}
+      sessionId={selectedSession}
+      onClearTimeline={clearTimeline}
+      onFindPreviousBotMessage={handleFindPreviousBotMessage}
+      onScrollToTop={scrollToTop}
+      onScrollToBottom={() => scrollToBottom('smooth')}
+      stats={stats}
+      status={selectedStageStatus}
+      hideStatus={executingTool}
+    />
+  )
+
   // 主时间线区域
   return (
+    <ImageGalleryProvider images={galleryImages}>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* 时间线 */}
-      <StageStatusPanel
-        autoScroll={autoScroll}
-        sessionId={selectedSession}
-        onClearTimeline={clearTimeline}
-        onFindPreviousBotMessage={handleFindPreviousBotMessage}
-        onScrollToTop={scrollToTop}
-        onScrollToBottom={() => scrollToBottom('smooth')}
-        stats={stats}
-        status={selectedStageStatus}
-        hideStatus={executingTool}
-      />
+      {/* 时间线；手机端工具栏放进悬浮顶栏 */}
+      {floatingToolbarContainer
+        ? createPortal(stageStatusPanel, floatingToolbarContainer)
+        : stageStatusPanel}
 
       <Card
         data-maisaka-timeline="true"
+        data-maisaka-floating-header={floatingToolbarContainer ? 'true' : undefined}
         className={cn(
           'relative min-w-0 flex-1 overflow-hidden',
-          embedded ? 'min-h-0' : 'min-h-[420px] lg:min-h-0'
+          embedded ? 'min-h-0' : 'min-h-[420px] lg:min-h-0',
+          floatingToolbarContainer && 'rounded-none border-0 shadow-none'
         )}
       >
         <ScrollArea
@@ -2956,7 +3045,22 @@ const MonitorTimeline = memo(function MonitorTimeline({
             setAutoScroll(false)
           }}
         >
-          <div className="min-w-0 p-4">
+          <div
+            className={cn(
+              'min-w-0 p-4',
+              floatingToolbarContainer && 'pt-[calc(var(--observe-header-h,0px)+0.5rem)]'
+            )}
+          >
+            {visibleTimelineEntries.length > 0 && (
+              // 固定高度：文案切换不改变下方条目的位置，避免加载前后视口跳动。
+              <p className="text-muted-foreground h-7 text-center text-xs">
+                {historyLoading
+                  ? '正在加载更早的记录…'
+                  : hasMoreHistory
+                    ? '上滑加载更早的记录'
+                    : '没有更早的记录了'}
+              </p>
+            )}
             {visibleTimelineEntries.length === 0 ? (
               <div className="text-muted-foreground flex flex-col items-center justify-center gap-3 py-20">
                 <Clock className="h-10 w-10 opacity-30" />
@@ -3050,6 +3154,7 @@ const MonitorTimeline = memo(function MonitorTimeline({
         </AnimatePresence>
       </Card>
     </div>
+    </ImageGalleryProvider>
   )
 })
 
@@ -3123,16 +3228,23 @@ function MonitorSidebar() {
 export const MaisakaMonitor = memo(function MaisakaMonitor({
   embedded = false,
   reasoningReturnTo,
+  floatingToolbarContainer,
 }: MaisakaMonitorProps = {}) {
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col',
-        embedded ? 'h-full min-h-0 p-2 sm:p-3' : 'gap-4 lg:h-[calc(100vh-116px)] lg:flex-row'
+        'relative flex min-w-0 flex-col',
+        embedded ? 'h-full min-h-0 p-2 sm:p-3' : 'gap-4 lg:h-[calc(100vh-116px)] lg:flex-row',
+        floatingToolbarContainer && 'p-0 sm:p-0'
       )}
     >
       {!embedded && <MonitorSidebar />}
-      <MonitorTimeline embedded={embedded} reasoningReturnTo={reasoningReturnTo} />
+      <MonitorTimeline
+        embedded={embedded}
+        reasoningReturnTo={reasoningReturnTo}
+        floatingToolbarContainer={floatingToolbarContainer}
+      />
+      <SubagentPanel embedded={embedded} />
     </div>
   )
 })

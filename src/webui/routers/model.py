@@ -4,7 +4,7 @@
 提供从各个 AI 厂商 API 获取可用模型列表的代理接口
 """
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import io
 import math
@@ -162,17 +162,14 @@ async def test_model_capability(request: ModelTestRequest):
     if model_config is None:
         raise HTTPException(status_code=404, detail=f"未找到模型: {model_name}")
 
-    # 嵌入模型不支持 chat/completions 接口，需改用嵌入接口测试：
-    # 除命中嵌入任务配置外，模型名称或标识带 embed 时也按嵌入模型处理，
-    # 避免未挂到任务的视觉向量模型误走聊天测试。
-    model_identifier = str(model_config.get("model_identifier", ""))
-    if (
-        model_name in _get_task_model_names("embedding")
-        or model_name in _get_task_model_names("image_embedding")
-        or _looks_like_embedding_model(model_name)
-        or _looks_like_embedding_model(model_identifier)
-    ):
-        return await _test_embedding_model(model_name, model_identifier)
+    # 按升级后持久化的显式类型选择测试接口，缺失或非法类型直接报错。
+    model_type = model_config["model_type"]
+    if model_type == "image_embedding":
+        return await _test_image_embedding_model(model_name)
+    if model_type == "embedding":
+        return await _test_text_embedding_model(model_name)
+    if model_type != "llm":
+        raise ValueError(f"模型 {model_name} 的 model_type 无效: {model_type}")
 
     visual_enabled = bool(model_config.get("visual", False))
     start_time = time.time()
@@ -409,57 +406,6 @@ def _get_model_config(model_name: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"读取模型配置失败: {e}")
         return None
-
-
-def _looks_like_embedding_model(model_name: str) -> bool:
-    """按模型名称或标识判断是否为嵌入模型（包含 embed 即命中）。"""
-    return "embed" in model_name.lower()
-
-
-def _looks_like_image_embedding_model(model_name: str) -> bool:
-    """识别名称或模型标识中的视觉嵌入特征。"""
-    lowered = model_name.lower()
-    return "vision" in lowered or "vl-embedding" in lowered
-
-
-def _get_task_model_names(task_key: str) -> Set[str]:
-    """从 model_config.toml 获取指定任务配置的模型名称集合。
-
-    Args:
-        task_key: 任务配置键名，如 `embedding`、`image_embedding`。
-
-    Returns:
-        任务 model_list 中的模型名称集合，读取失败时返回空集合。
-    """
-    config_path = os.path.join(CONFIG_DIR, "model_config.toml")
-    if not os.path.exists(config_path):
-        return set()
-
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config_data = tomlkit.load(f)
-
-        task_config = config_data.get("model_task_config", {}).get(task_key, {})
-        return {str(name) for name in task_config.get("model_list", [])}
-    except Exception as e:
-        logger.error(f"读取任务 '{task_key}' 配置失败: {e}")
-        return set()
-
-
-async def _test_embedding_model(model_name: str, model_identifier: str = "") -> ModelTestResponse:
-    """对嵌入模型执行向量嵌入测试。
-
-    嵌入模型不支持 chat/completions 接口，直接发对话测试会被服务商拒绝，
-    因此改为调用嵌入接口验证可用性。图片嵌入模型（在 image_embedding 任务
-    中，或名称/标识带 vision、vl-embedding）改发测试图片，验证图片嵌入链路。
-    """
-    if (
-        model_name in _get_task_model_names("image_embedding")
-        or _looks_like_image_embedding_model(model_name)
-        or _looks_like_image_embedding_model(model_identifier)
-    ):
-        return await _test_image_embedding_model(model_name)
-    return await _test_text_embedding_model(model_name)
 
 
 _EMBEDDING_TEST_TEXTS = ("今天天气真好", "今日天气十分晴朗", "猫在键盘上散步")

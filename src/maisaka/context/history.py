@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
 
 TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
-OPTIMIZED_TOOL_HISTORY_SOURCE_KIND = "optimized_tool_history"
 
 
 def build_prefixed_message_sequence(
@@ -108,8 +107,6 @@ def drop_orphan_tool_results(
         return chat_history, 0
 
     available_tool_call_ids = _collect_available_tool_call_ids(chat_history)
-    folded_tool_call_ids = _collect_folded_tool_history_call_ids(chat_history)
-    available_media_owner_ids = available_tool_call_ids | folded_tool_call_ids
 
     orphan_results = [
         message
@@ -126,7 +123,7 @@ def drop_orphan_tool_results(
         if isinstance(message, ToolResultMessage) and message.tool_call_id not in available_tool_call_ids:
             removed_count += 1
             continue
-        if _is_orphan_tool_result_media_message(message, available_media_owner_ids):
+        if _is_orphan_tool_result_media_message(message, available_tool_call_ids):
             removed_count += 1
             continue
         filtered_history.append(message)
@@ -281,36 +278,6 @@ def _collect_available_tool_call_ids(chat_history: list[LLMContextMessage]) -> s
         for tool_call in message.tool_calls
         if tool_call.call_id
     }
-
-
-def _collect_folded_tool_history_call_ids(chat_history: list[LLMContextMessage]) -> set[str]:
-    """收集已折叠工具历史中仍可作为媒体归属锚点的工具调用 ID。"""
-
-    call_ids: set[str] = set()
-    for message in chat_history:
-        if not isinstance(message, SessionBackedMessage):
-            continue
-        if message.source_kind != OPTIMIZED_TOOL_HISTORY_SOURCE_KIND:
-            continue
-
-        call_ids.update(_parse_folded_tool_history_call_ids(message.processed_plain_text))
-    return call_ids
-
-
-def _parse_folded_tool_history_call_ids(content: str) -> set[str]:
-    """从折叠后的工具历史文本中提取 tool_call_id。"""
-
-    call_ids: set[str] = set()
-    for raw_line in content.splitlines():
-        normalized_line = raw_line.strip()
-        if not normalized_line.startswith("- tool_call_id:"):
-            continue
-
-        _, _, call_id = normalized_line.partition(":")
-        normalized_call_id = call_id.strip()
-        if normalized_call_id:
-            call_ids.add(normalized_call_id)
-    return call_ids
 
 
 def _is_orphan_tool_result_media_message(

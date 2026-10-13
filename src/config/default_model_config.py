@@ -66,6 +66,7 @@ DEFAULT_MODEL_TEMPLATES: list[dict[str, Any]] = [
     {
         "model_identifier": "deepseek-v4-pro",
         "name": "deepseek-v4-pro-think",
+        "model_type": "llm",
         "api_provider": "DeepSeek",
         "price_in": 12.0,
         "price_out": 24.0,
@@ -77,6 +78,7 @@ DEFAULT_MODEL_TEMPLATES: list[dict[str, Any]] = [
     {
         "model_identifier": "deepseek-v4-pro",
         "name": "deepseek-v4-pro-nonthink",
+        "model_type": "llm",
         "api_provider": "DeepSeek",
         "price_in": 12.0,
         "price_out": 24.0,
@@ -88,6 +90,7 @@ DEFAULT_MODEL_TEMPLATES: list[dict[str, Any]] = [
     {
         "model_identifier": "deepseek-v4-flash",
         "name": "deepseek-v4-flash",
+        "model_type": "llm",
         "api_provider": "DeepSeek",
         "price_in": 1.0,
         "price_out": 2.0,

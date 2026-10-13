@@ -2,9 +2,6 @@ import type { ReactNode } from 'react'
 
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-import { CardWithBackground } from '../card-with-background'
-import { DialogContentWithBackground } from '../dialog-with-background'
 import { Markdown } from '../markdown'
 import { SkipNav } from '../skip-nav'
 import { Toaster } from '../toaster'
@@ -16,32 +13,6 @@ const { toastState, mobileState } = vi.hoisted(() => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
-}))
-
-vi.mock('@/hooks/use-background', () => ({
-  useBackground: (layer: string) => ({ config: { layer } }),
-}))
-
-vi.mock('@/components/background-layer', () => ({
-  BackgroundLayer: ({ layerId }: { layerId: string }) => (
-    <div data-testid={`background-${layerId}`} />
-  ),
-}))
-
-vi.mock('@/components/ui/dialog', () => ({
-  DialogContent: ({
-    children,
-    className,
-    ...props
-  }: {
-    children: ReactNode
-    className?: string
-    [key: string]: unknown
-  }) => (
-    <section data-testid="dialog-content" className={className} {...props}>
-      {children}
-    </section>
-  ),
 }))
 
 vi.mock('@/components/markdown-renderer', () => ({
@@ -105,30 +76,6 @@ describe('小型 UI 模块', () => {
       'href',
       '#main-content'
     )
-  })
-
-  it('CardWithBackground 合并样式、透传属性并渲染卡片背景', () => {
-    render(
-      <CardWithBackground className="custom-card" data-testid="card">
-        卡片内容
-      </CardWithBackground>
-    )
-
-    expect(screen.getByTestId('card')).toHaveClass('relative', 'isolate', 'custom-card')
-    expect(screen.getByTestId('background-card')).toBeInTheDocument()
-    expect(screen.getByText('卡片内容')).toBeInTheDocument()
-  })
-
-  it('DialogContentWithBackground 透传内容和属性', () => {
-    render(
-      <DialogContentWithBackground className="custom-dialog" aria-label="测试对话框">
-        对话框内容
-      </DialogContentWithBackground>
-    )
-
-    expect(screen.getByTestId('dialog-content')).toHaveClass('relative', 'isolate', 'custom-dialog')
-    expect(screen.getByTestId('background-dialog')).toBeInTheDocument()
-    expect(screen.getByLabelText('测试对话框')).toHaveTextContent('对话框内容')
   })
 
   it('Markdown 把文本和样式完整交给 MarkdownRenderer', () => {

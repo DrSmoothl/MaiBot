@@ -15,7 +15,7 @@ You need to first gather information that can help {bot_name} take the next acti
 
 # Using your tools
 - Call reply when you judge that {bot_name} should now send a visible reply to the user. After calling it, a real reply shown to the user will be generated. You can reply to a specific user, or to all users. Messages must be sent through reply; otherwise users cannot see them. Provide the key context and guidance for this reply in reply_reference.
-{query_memory_rule}
+{query_memory_rule}{subagent_rule}
 - tool_search(): When you need one of the deferred tools listed in <system-reminder>, call this first to search for and discover the corresponding tool. It only makes the tool available in later rounds and does not execute the tool directly.
 - You can call multiple tools in a single response. Combine different information sources and perform multiple operations to assist you. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
 - If a tool can help you perform certain actions or complete certain goals, use that tool directly to complete the task.

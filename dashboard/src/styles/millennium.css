@@ -469,6 +469,17 @@
   border-radius: 0 !important;
 }
 
+/* 普通信息面板沿用粗描边；低优先级让各页面的选中、告警及无边框样式继续生效。 */
+:root[data-dashboard-style='millennium']
+  :where(div, section, aside, label, pre, code):where(.border) {
+  border-width: 2px;
+}
+
+:root[data-dashboard-style='millennium']
+  :where(div, section, aside, label, pre, code):where(.border-border) {
+  border-color: var(--mil-line);
+}
+
 /* ---------- 凸起的塑料模块：卡片 ---------- */
 
 :root[data-dashboard-style='millennium'] [data-dashboard-card='true'] {
@@ -619,11 +630,17 @@
 
 /* ---------- 下沉屏幕：输入框、多行文本、下拉触发器 ---------- */
 
+:root[data-dashboard-style='millennium'] select:not(.opacity-0) {
+  border-radius: 0;
+  font-family: inherit;
+}
+
 :root[data-dashboard-style='millennium']
   :is(
     [data-dashboard-input='true'],
     [data-dashboard-select-trigger='true'],
     textarea,
+    select:not(.opacity-0),
     [data-dashboard-code-editor='true']
   ) {
   background-color: var(--mil-screen);
@@ -648,7 +665,8 @@
   :is(
     [data-dashboard-input='true'],
     [data-dashboard-select-trigger='true'],
-    textarea
+    textarea,
+    select:not(.opacity-0)
   ):focus-visible {
   outline: 2px solid var(--mil-on-side);
   outline-offset: 1px;
@@ -765,12 +783,47 @@
   box-shadow: none;
 }
 
-:root[data-dashboard-style='millennium'] [data-dashboard-checkbox='true'] {
+:root[data-dashboard-style='millennium'] [data-dashboard-checkbox='true'],
+:root[data-dashboard-style='millennium'] input[type='checkbox'] {
   background-color: var(--mil-screen);
   border: 2px solid var(--mil-line);
   box-shadow: inset 2px 2px 0 var(--mil-screen-shade);
   height: 1.25rem;
   width: 1.25rem;
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox'] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  border-radius: 0;
+  vertical-align: middle;
+  color: var(--mil-on-ink);
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox']:checked {
+  background: var(--mil-on);
+  box-shadow: none;
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox']:checked::before {
+  content: '';
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+:root[data-dashboard-style='millennium'] input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--mil-on-side);
+  outline-offset: 2px;
 }
 
 :root[data-dashboard-style='millennium']
@@ -903,6 +956,7 @@
 @supports selector(::-webkit-scrollbar) {
   :root[data-dashboard-style='millennium'] * {
     scrollbar-color: auto;
+    scrollbar-width: auto;
   }
 
   :root[data-dashboard-style='millennium'] *::-webkit-scrollbar {
@@ -1527,7 +1581,7 @@
 
 :root[data-dashboard-style='millennium'] [data-chat-workspace-sidebar='true'] > div:first-child {
   border-bottom: 0;
-  padding: 0.75rem 0.75rem 0.25rem;
+  padding: 0.75rem 0.5rem 0.25rem;
 }
 
 :root[data-dashboard-style='millennium'] [data-chat-sidebar-list='true'] {
@@ -2002,8 +2056,8 @@
 
 :root[data-dashboard-style='millennium'] [data-chat-sidebar-list='true'] section {
   border-color: transparent;
-  margin-left: 0.75rem;
-  margin-right: 0.75rem;
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
 }
 
 /* 分组标题是印在壳上的丝印小字 */
@@ -2236,6 +2290,14 @@
   [data-maisaka-timeline='true']
   [data-dashboard-scrollbar='true'][data-orientation='vertical'] {
   width: 8px;
+}
+
+/* Planner 卡片和它下面的工具调用属于同一轮，中间不画标题区的底边线 */
+:root[data-dashboard-style='millennium']
+  [data-maisaka-planner-card='true']
+  > [data-dashboard-card-header='true'] {
+  border-bottom: 0;
+  box-shadow: none;
 }
 
 /* ---------- 表格行内的操作键 ---------- */
@@ -3223,4 +3285,530 @@
 :root[data-dashboard-style='millennium'] [data-reasoning-output='true'] > section {
   border: 0;
   box-shadow: none;
+}
+
+/* ---------- 移动端底部标签栏：机壳下沿上一排键帽，选中的是按下去的绿键 ---------- */
+
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar='true'] {
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  border-top: 2px solid var(--mil-line);
+  bottom: 0;
+  box-shadow: inset 0 2px 0 var(--mil-hi);
+  height: auto;
+  left: 0;
+  padding: 10px 10px calc(env(safe-area-inset-bottom) + 12px);
+  right: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar-tabs='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: none;
+  box-shadow: none;
+  gap: 6px;
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-tab='true'] {
+  background-color: var(--mil-key);
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  height: 58px;
+  padding-bottom: 7px;
+  /* 切换标签时键帽按下 / 弹起有过渡 */
+  transition:
+    background-color 0.12s steps(2),
+    box-shadow 0.12s steps(2),
+    padding 0.12s steps(2),
+    transform 0.12s steps(2);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-tab='true'][data-active='true'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}
+
+/* 管理页的入口键帽：沿用侧栏键位的材质，文字靠左排 */
+:root[data-dashboard-style='millennium'] [data-manage-page='true'] [data-dashboard-nav-item='true'] {
+  color: var(--mil-ink);
+  text-decoration: none;
+}
+
+/* 手机上的底部弹层：拖动条画成一段散热栅格 */
+:root[data-dashboard-style='millennium'] [data-dialog-grabber='true'] {
+  background: repeating-linear-gradient(90deg, var(--mil-vent) 0 2px, transparent 2px 6px);
+  height: 8px;
+  width: 56px;
+}
+
+/* ---------- 手机端页面大标题：像素字丝印 ---------- */
+
+:root[data-dashboard-style='millennium'] [data-mobile-large-title='true'] {
+  color: var(--mil-ink);
+  font-family: var(--mil-font-pixel);
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* ---------- 手机端聊天：会话各在一块下沉屏幕里，对话页顶栏是一排键帽 ---------- */
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-list='true'] {
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-search='true'],
+:root[data-dashboard-style='millennium'] [data-mobile-chat-screen='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-sunk);
+  color: var(--mil-screen-ink);
+  margin: 4px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-search='true'] {
+  margin: 0 4px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-swipe-row='true'] > div:last-child {
+  background-color: var(--mil-screen);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-mobile-chat-swipe-row='true']
+  + [data-mobile-chat-swipe-row='true'] {
+  border-top: 2px dashed var(--mil-rule);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-row='true'] {
+  height: 62px;
+  padding: 0 10px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-row='true'] > span:last-child {
+  box-shadow: none;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-mobile-chat-row='true']
+  [data-mobile-chat-avatar='true'] {
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  height: 40px;
+  width: 40px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-mobile-chat-row='true']
+  [data-mobile-chat-avatar='true']
+  * {
+  border-radius: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-badge='true'] {
+  background: var(--mil-key);
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  color: var(--mil-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-row-action] {
+  background-color: var(--mil-key);
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-row-action='destructive'] {
+  background-color: var(--mil-danger);
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -7px 0 var(--mil-danger-side);
+  color: #fff;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-bar='true'] {
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  border-bottom: 2px solid var(--mil-line);
+  box-shadow:
+    inset 0 2px 0 var(--mil-hi),
+    inset 0 -2px 0 var(--mil-lo),
+    0 5px 0 var(--mil-drop);
+  padding-bottom: 10px;
+  position: relative;
+  z-index: 2;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-button='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 46px;
+  padding-bottom: 5px;
+  width: 46px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-button='true'] * {
+  border-radius: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-title='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: none;
+  box-shadow: none;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-title='true'] b {
+  font-family: var(--mil-font-pixel);
+  font-size: 22px;
+  font-weight: 400;
+}
+
+/* 千禧对话页顶栏只留像素字会话名与指示灯，不放头像 */
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-title='true'] > span:first-child {
+  display: none;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-chat-room-led='true'] {
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  height: 8px;
+  width: 8px;
+}
+
+/* 手机页头的返回键与分段切换：键帽，选中的是按下去的绿键 */
+:root[data-dashboard-style='millennium'] [data-mobile-page-back='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 46px;
+  padding-bottom: 5px;
+  width: 46px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-segmented='true'] {
+  background: none;
+  border-radius: 0;
+  gap: 8px;
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-segmented='true'] > * {
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 46px;
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-segmented='true'] > [data-active='true'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}
+
+/* 手机端设置分区胶囊：一排键帽 */
+:root[data-dashboard-style='millennium'] [data-mobile-pill-nav='true'] button {
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 46px;
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-pill-nav='true'] button[data-active='true'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}
+
+/* 长文本字段的列表行与编辑弹层 */
+:root[data-dashboard-style='millennium'] [data-mobile-text-sheet-card='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: var(--mil-sunk);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-sheet-button] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 46px;
+  padding-bottom: 5px;
+  width: 46px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-sheet-button='confirm'] {
+  background-color: var(--mil-hot);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-hot-side);
+  color: var(--mil-hot-ink);
+}
+
+/* 手机页头右上角的「+」：珊瑚橙主操作键，展开时不旋转 */
+:root[data-dashboard-style='millennium'] [data-mobile-header-button='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-hot);
+  border-radius: 0;
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-hot-side), inset 4px 4px 0 rgb(255 255 255 / 0.28);
+  color: var(--mil-hot-ink);
+  height: 46px;
+  padding-bottom: 5px;
+  transform: none;
+  width: 46px;
+}
+
+/* 手机页头右上角的文字键与图标键 */
+:root[data-dashboard-style='millennium'] [data-mobile-header-text-button],
+:root[data-dashboard-style='millennium'] [data-mobile-header-icon-button='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 46px;
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-header-icon-button='true'] {
+  width: 46px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-header-text-button='primary'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}
+
+/* 手机表情包网格：卡片之间留缝，每张是一块下沉屏幕 */
+:root[data-dashboard-style='millennium'] [data-mobile-emoji-grid='true'] {
+  gap: 10px;
+  margin: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-emoji-tile='true'] {
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-sunk);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-emoji-tile='true'] > span:last-child {
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-emoji-tile='true'][data-selected='true'] > span:last-child {
+  background-color: var(--mil-on);
+  color: var(--mil-on-ink);
+}
+
+/* 手机多选批量操作栏：浮起的面板上一排键帽，删除是红键 */
+:root[data-dashboard-style='millennium'] [data-mobile-batch-toolbar='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-panel);
+  background-image: var(--mil-speck);
+  background-size: 5px 5px;
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: var(--mil-float);
+  gap: 8px;
+  height: auto;
+  padding: 10px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-batch-action] {
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 46px;
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-batch-action='register'] {
+  background-color: var(--mil-hot);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-hot-side);
+  color: var(--mil-hot-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-batch-action='delete'] {
+  background-color: var(--mil-danger);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-danger-side);
+  color: #fff;
+}
+
+/* 手机表达方式卡片审核：通过是绿键，拒绝是红键 */
+:root[data-dashboard-style='millennium'] [data-quick-review-action] {
+  border: 0;
+  border-radius: 0;
+  height: 52px;
+  padding-bottom: 5px;
+  width: 96px;
+}
+
+:root[data-dashboard-style='millennium'] [data-quick-review-action='reject'] {
+  background-color: var(--mil-danger);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-danger-side);
+  color: #fff;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-shell='true'] [data-quick-review-action='approve'] {
+  background-color: var(--mil-on) !important;
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -7px 0 var(--mil-on-side) !important;
+  color: var(--mil-on-ink) !important;
+}
+
+/* ---------- 手机标签栏的其余部件：与原版结构相同，只换成机壳材质 ---------- */
+
+/* 麦麦实时条：一块下沉的小屏幕 */
+:root[data-dashboard-style='millennium'] [data-mobile-live-strip='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  box-shadow: var(--mil-sunk);
+  color: var(--mil-screen-ink);
+  height: 50px;
+}
+
+:root[data-dashboard-style='millennium'] [data-mobile-live-strip='true'] > span:first-child {
+  background-color: var(--mil-led);
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  color: var(--mil-line);
+  font-family: var(--mil-font-pixel);
+  height: 32px;
+  width: 32px;
+}
+
+/* 搜索键 */
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar-search='true'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 58px;
+  padding-bottom: 7px;
+}
+
+/* 首页右上角的头像入口：一枚键帽 */
+:root[data-dashboard-style='millennium'] [data-home-avatar-entry='true'] {
+  background-color: var(--mil-key);
+  border-radius: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  font-family: var(--mil-font-pixel);
+  height: 46px;
+  padding-bottom: 5px;
+  width: 46px;
+}
+
+/* 首次配置向导：方形状态灯与下沉导轨，沿用机壳的硬边材质。 */
+:root[data-dashboard-style='millennium'] [data-setup-steps='true'] {
+  --setup-indicator-size: 2rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-setup-step='true'] {
+  gap: 0.5rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-setup-connector='true'] {
+  top: calc(var(--setup-indicator-size) / 2 - 4px);
+  height: 8px;
+  border: 2px solid var(--mil-line);
+  background-color: var(--mil-lo);
+  box-shadow: inset 0 2px 0 var(--mil-screen-shade), 0 2px 0 var(--mil-hi);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-setup-state='complete'] > [data-setup-connector='true'] {
+  background-color: var(--mil-on);
+}
+
+:root[data-dashboard-style='millennium'] [data-setup-indicator='true'] {
+  width: var(--setup-indicator-size);
+  height: var(--setup-indicator-size);
+  border: 2px solid var(--mil-line);
+  border-radius: 0;
+  background-color: var(--mil-panel);
+  box-shadow: var(--mil-bevel), 0 3px 0 var(--mil-drop);
+  color: var(--mil-print);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-setup-state='complete'] > [data-setup-indicator='true'] {
+  background-color: var(--mil-on);
+  box-shadow: inset 2px 2px 0 rgb(255 255 255 / 0.3), inset -2px -2px 0 var(--mil-on-side),
+    0 3px 0 var(--mil-drop);
+  color: var(--mil-on-ink);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-setup-state='current'] > [data-setup-indicator='true'] {
+  background-color: var(--mil-hot);
+  box-shadow: inset 2px 2px 0 rgb(255 255 255 / 0.3), inset -2px -2px 0 var(--mil-hot-side),
+    0 3px 0 var(--mil-drop);
+  color: var(--mil-hot-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-setup-label='true'] {
+  color: var(--mil-print);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-setup-state='current'] > [data-setup-label='true'] {
+  color: var(--mil-ink);
+  font-weight: 700;
+}
+
+/* 千禧标签栏的选中态是按下去的键帽，不用滑动底板 */
+:root[data-dashboard-style='millennium'] [data-mobile-tab-indicator='true'] {
+  display: none;
 }

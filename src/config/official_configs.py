@@ -1,4 +1,4 @@
-from typing import Dict, Final, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import re
 
@@ -23,31 +23,6 @@ REPLY_TRIGGER_MODE_OPTION_LABELS = {
     "frequency": "频率触发",
     "dynamic": "动态触发",
 }
-
-EMOTION_TRAIT_OPTION_LABELS = {
-    "rational_calm": "理性冷静",
-    "neutral": "中性",
-    "sentimental": "多愁善感",
-}
-
-EMOTION_TRAIT_OPTION_DESCRIPTIONS = {
-    "rational_calm": "情绪表达更克制，优先保持客观、清晰和稳定。",
-    "neutral": "不追加额外情绪特点描述，完全使用原人格设定。",
-    "sentimental": "情绪表达更细腻敏感，更容易被聊天氛围触动。",
-}
-
-PERSONALITY_EMOTION_SUFFIXES: Final[dict[str, str]] = {
-    "rational_calm": "你整体理性冷静，回应时更偏向客观、克制和清晰判断，少用强烈情绪表达。",
-    "neutral": "",
-    "sentimental": "你更敏感细腻，容易被聊天氛围触动，会自然表现出一点惆怅、共情或情绪波动，但不要过度煽情。",
-}
-
-
-def build_personality_emotion_suffix(emotion_trait: str) -> str:
-    """根据实验性情绪特点档位生成追加到人格后的提示词。"""
-
-    return PERSONALITY_EMOTION_SUFFIXES[emotion_trait]
-
 
 ATTENTION_DRIFT_LEVEL_OPTION_LABELS = {
     "subtle": "轻微漂移",
@@ -822,20 +797,6 @@ class ChatConfig(ConfigBase):
     )
     """私聊回复时参考的最近消息数量。"""
 
-    enable_context_optimization: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "优化上下文",
-                "en_US": "Optimize context",
-                "ja_JP": "コンテキスト最適化",
-            },
-            "x-widget": "switch",
-            "x-row": "chat-context-controls",
-        },
-    )
-    """压缩部分上下文，减少模型消耗；一般建议开启。"""
-
     mid_term_memory: bool = Field(
         default=True,
         json_schema_extra={
@@ -981,22 +942,85 @@ class ExperimentalConfig(ConfigBase):
     )
     """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
 
-    emotion_trait: Literal["rational_calm", "neutral", "sentimental"] = Field(
-        default="neutral",
+    planner_optimized_prompt: bool = Field(
+        default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "情绪特点",
-                "en_US": "Emotion trait",
-                "ja_JP": "感情特徴",
+                "zh_CN": "优化 Planner 提示词",
+                "en_US": "Optimized planner prompt",
+                "ja_JP": "Planner プロンプトの最適化",
             },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-option-labels": EMOTION_TRAIT_OPTION_LABELS,
-            "x-option-descriptions": EMOTION_TRAIT_OPTION_DESCRIPTIONS,
+            "x-widget": "switch",
         },
     )
-    """实验性人格情绪特点；理性冷静和多愁善感会追加人格后缀，中性不追加内容。"""
+    """Planner 改用优化版提示词：以“你的名字是……”的第二人称描述麦麦自己，去掉“替麦麦做决策”的旁观者设定并精简任务说明。Focus 模式仍使用原提示词。"""
+
+    planner_unsent_reply_retry: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "回复丢失提醒重试",
+                "en_US": "Unsent reply retry",
+                "ja_JP": "未送信返信のリトライ",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """Planner 在分析里写了要回复、却没有调用任何工具就结束时，提醒一次并让它重新决策；每个回合最多重试一次。"""
+
+    tool_result_condense: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "超长工具结果整理",
+                "en_US": "Condense long tool results",
+                "ja_JP": "長いツール結果の要約",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """工具返回的结果超过阈值字数时，先交给子代理按 Planner 当前意图整理成结论再写入上下文，减少后续每轮的上下文占用；会多一次模型请求。"""
+
+    tool_result_condense_threshold: int = Field(
+        default=3000,
+        ge=500,
+        json_schema_extra={
+            "advanced": True,
+            "x-widget": "input",
+            "label": {
+                "zh_CN": "工具结果整理阈值",
+                "en_US": "Tool result condense threshold",
+                "ja_JP": "ツール結果要約のしきい値",
+            },
+        },
+    )
+    """工具结果达到多少字时才触发整理，仅在开启“超长工具结果整理”时生效；调低会更频繁地整理，调高则更多原文留在上下文里。"""
+
+    planner_subagent: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "子代理任务派发",
+                "en_US": "Delegate tasks to sub-agents",
+                "ja_JP": "サブエージェントへのタスク委任",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """给 Planner 提供 subagent 工具：把自包含的查询或整理任务交给子代理，子代理在独立上下文里多轮调用被授权的工具，只把结论交还给 Planner。"""
+
+    advanced_sub_agent: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "高级子代理",
+                "en_US": "Advanced sub-agents",
+                "ja_JP": "高度なサブエージェント",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """子代理改为在后台运行：派发后立刻返回任务 id，麦麦可以继续聊天，子代理结束时结论作为一条新消息送回并唤醒 Planner；同时提供查看和终止后台任务的工具。需要先开启“子代理任务派发”。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""

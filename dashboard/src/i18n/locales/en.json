@@ -213,6 +213,14 @@
     "logs": "Logs"
   },
   "chat": {
+    "setupTrial": {
+      "title": "Try chatting with the bot",
+      "description": "Say hello and check that the bot can reply.",
+      "repliedTitle": "The bot has replied",
+      "repliedDescription": "If the reply and personality look right, continue to message platform setup.",
+      "keepChatting": "Keep chatting",
+      "continue": "Continue to message platforms"
+    },
     "botNameFallback": "Mai",
     "userFallback": "User",
     "userNameFallback": "Human",
@@ -354,6 +362,11 @@
       "sessionUnavailable": "Cannot open the chat session. Please try again later.",
       "virtualTabCreated": "Virtual identity tab",
       "virtualTabCreatedDesc": "Created a chat for {{label}}"
+    },
+    "mobile": {
+      "back": "Back to conversations",
+      "close": "Close",
+      "settings": "Settings"
     }
   },
   "layout": {
@@ -776,7 +789,7 @@
       "saveFailedTitle": "Save failed",
       "validationFailedTitle": "Validation failed",
       "completeSuccessTitle": "Setup complete",
-      "completeSuccessDescription": "{{appName}} configuration has been saved and applied.",
+      "completeSuccessDescription": "{{appName}} configuration has been saved. Say hello in Chat to try the bot's replies and personality.",
       "completeFailedTitle": "Setup failed",
       "skipFailedTitle": "Failed to skip the setup wizard",
       "customTokenSuccessTitle": "Token updated",
@@ -1592,6 +1605,33 @@
       "requestTrend": "Hourly request trend chart showing request count changes over recent hours",
       "costTrend": "API cost trend chart showing API call cost changes over recent hours",
       "tokenUsage": "Token usage trend chart showing token consumption over recent hours"
+    },
+    "mobile": {
+      "title": "MaiBot",
+      "openSettings": "WebUI settings"
     }
+  },
+  "mobileNav": {
+    "label": "Main navigation",
+    "home": "Home",
+    "chat": "Chat",
+    "manage": "Manage",
+    "me": "Me",
+    "search": "Search",
+    "live": "MaiBot live",
+    "botInitial": "M",
+    "backHome": "Back to home",
+    "backManage": "Back to manage"
+  },
+  "manage": {
+    "searchPlaceholder": "Search pages or settings",
+    "groups": {
+      "runtime": "Runtime records"
+    }
+  },
+  "dynamicForm": {
+    "mobileTextEmpty": "Empty",
+    "mobileTextCancel": "Cancel",
+    "mobileTextDone": "Done"
   }
 }

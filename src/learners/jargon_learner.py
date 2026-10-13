@@ -32,7 +32,6 @@ jargon_learn_model = LLMServiceClient(task_name="learner", request_type="jargon.
 ALLOWED_LEARNING_SOURCE_KINDS = {
     "assistant",
     "guided_reply",
-    "optimized_tool_history",
     "outbound_send",
     "planner_assistant",
     "planner_assistant_visible",
@@ -180,7 +179,6 @@ class JargonLearner:
             "user",
             "guided_reply",
             "outbound_send",
-            "optimized_tool_history",
             "tool_result_media",
         }
         source_items: List[JargonLearningSourceItem] = []
@@ -333,10 +331,7 @@ class JargonLearner:
 
         original_message = context_message.original_message
         source_kind = context_message.source_kind
-        if source_kind == "optimized_tool_history":
-            speaker_kind = "TOOL_CALL"
-            speaker_name = "tool_call"
-        elif source_kind == "tool_result_media":
+        if source_kind == "tool_result_media":
             speaker_kind = "TOOL_RESULT"
             speaker_name = "tool_result_media"
         elif original_message is not None and is_bot_self(

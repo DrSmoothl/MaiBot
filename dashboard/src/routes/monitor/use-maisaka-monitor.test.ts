@@ -17,6 +17,7 @@ type MonitorHookModule = typeof import('./use-maisaka-monitor')
 
 // 监控客户端单例 mock：捕获 subscribe 传入的事件处理器以便测试中手动派发事件
 const clientMocks = vi.hoisted(() => ({
+  loadHistory: vi.fn(),
   onConnectionChange: vi.fn(),
   subscribe: vi.fn(),
 }))
@@ -117,6 +118,9 @@ beforeEach(() => {
     capturedHandler = listener
     return unsubscribeMock
   })
+
+  // 默认后端账本里没有更多历史；需要翻页的用例自行覆盖
+  clientMocks.loadHistory.mockResolvedValue({ count: 0, oldestEventId: 0, hasMore: false })
 
   connectionListener = null
   connectionUnsubscribeMock = vi.fn()
@@ -1182,6 +1186,105 @@ describe('内存裁剪', () => {
   })
 })
 
+describe('子代理任务', () => {
+  it('子代理事件累积成任务状态，不进入主时间线', async () => {
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule)
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 1 }))
+    emitMonitorEvent('subagent.started', {
+      event_id: 2,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      call_id: 'call-1',
+      description: '查部署要求',
+      granted_tools: ['docs_search'],
+      background: true,
+      max_rounds: 5,
+      timestamp: 110,
+    })
+    emitMonitorEvent('subagent.round', {
+      event_id: 3,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      round_index: 1,
+      content: '先查文档',
+      tool_calls: [{ id: 'tool-1', name: 'docs_search', arguments: { query: '部署' } }],
+      timestamp: 111,
+    })
+    emitMonitorEvent('subagent.tool_result', {
+      event_id: 4,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      round_index: 1,
+      call_id: 'tool-1',
+      tool_name: 'docs_search',
+      success: true,
+      summary: '文档内容',
+      duration_ms: 320,
+      timestamp: 112,
+    })
+
+    expect(view.result.current.allTimeline).toHaveLength(1)
+    const runningTask = view.result.current.subagentTasks[0]
+    expect(runningTask).toMatchObject({
+      taskId: 'subagent-1',
+      callId: 'call-1',
+      status: 'running',
+      background: true,
+      toolUsage: { docs_search: 1 },
+    })
+    expect(runningTask.rounds[0].toolCalls[0].result).toEqual({
+      success: true,
+      summary: '文档内容',
+      durationMs: 320,
+    })
+
+    emitMonitorEvent('subagent.finished', {
+      event_id: 5,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      status: 'completed',
+      conclusion: '部署需要 Python 3.12。',
+      error_message: '',
+      tool_usage: { docs_search: 1 },
+      duration_ms: 2400,
+      timestamp: 113,
+    })
+
+    expect(view.result.current.subagentTasks[0]).toMatchObject({
+      status: 'completed',
+      conclusion: '部署需要 Python 3.12。',
+      durationMs: 2400,
+    })
+    expect(view.result.current.allTimeline).toHaveLength(1)
+  })
+
+  it('重启后任务 id 重新编号时各自成为独立任务，遗留的运行中任务标记为已终止', async () => {
+    const hookModule = await importHookModule()
+    const view = await mountMonitor(hookModule)
+    const started = {
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      call_id: 'call-1',
+      description: '任务',
+      granted_tools: ['docs_search'],
+      background: true,
+      max_rounds: 5,
+    }
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 1 }))
+    emitMonitorEvent('subagent.started', { ...started, event_id: 2, timestamp: 110 })
+    emitMonitorEvent('session.start', { event_id: 3, session_id: 'session-a', timestamp: 200 })
+    emitMonitorEvent('subagent.started', { ...started, event_id: 4, call_id: 'call-2', timestamp: 210 })
+
+    const tasks = view.result.current.subagentTasks
+    expect(tasks.map((task) => [task.callId, task.status])).toEqual([
+      ['call-1', 'stopped'],
+      ['call-2', 'running'],
+    ])
+    expect(new Set(tasks.map((task) => task.key)).size).toBe(2)
+  })
+})
+
 describe('订阅进行中的共享与 SSR 短路', () => {
   it('订阅 Promise 未完成时第二个消费者不重复发起订阅', async () => {
     const deferred = createDeferred<() => Promise<void>>()
@@ -1200,5 +1303,185 @@ describe('订阅进行中的共享与 SSR 短路', () => {
     emitMonitorEvent('stage.snapshot', { entries: [], timestamp: 100 })
     expect(first.result.current.connected).toBe(true)
     expect(second.result.current.connected).toBe(true)
+  })
+})
+
+describe('历史分页', () => {
+  /** 等待 loadHistory 的 Promise 落定并刷新分页状态 */
+  const flushHistory = () => act(async () => {})
+
+  it('订阅概要建立侧栏并选中最近活跃的聊天流，同步结束后只拉取它的最新一页', async () => {
+    const view = await mountMonitor(await importHookModule(), false)
+    emitMonitorEvent('replay.started', {})
+    emitMonitorEvent('sessions.snapshot', {
+      timestamp: 500,
+      sessions: [
+        {
+          session_id: 'session-a',
+          event_count: 40,
+          last_event_id: 140,
+          last_activity: 300,
+          session_start: {
+            session_id: 'session-a',
+            session_name: '测试群',
+            is_group_chat: true,
+            group_id: 'group-1',
+            timestamp: 10,
+          },
+          latest_message: {
+            event: 'message.ingested',
+            data: makeMessageData({ event_id: 139, timestamp: 290 }),
+          },
+        },
+        {
+          session_id: 'session-b',
+          event_count: 7,
+          last_event_id: 90,
+          last_activity: 200,
+          session_start: null,
+          latest_message: null,
+        },
+      ],
+    })
+    emitMonitorEvent('stage.snapshot', { entries: [], timestamp: 500 })
+
+    expect(view.result.current.allTimeline).toHaveLength(0)
+    expect(view.result.current.sessions.get('session-a')).toMatchObject({
+      sessionName: '测试群(group-1)',
+      eventCount: 40,
+      lastActivity: 300,
+    })
+    expect(view.result.current.sessions.get('session-b')?.eventCount).toBe(7)
+    expect(view.result.current.latestMessages.get('session-a')?.eventId).toBe(139)
+    expect(view.result.current.selectedSession).toBe('session-a')
+    expect(clientMocks.loadHistory).toHaveBeenCalledTimes(1)
+    expect(clientMocks.loadHistory).toHaveBeenCalledWith('session-a', undefined)
+
+    // 历史页里的旧事件不重复计入事件数，概要里的最新消息随页入账
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 139, timestamp: 290 }))
+    expect(view.result.current.timeline.map((entry) => entry.eventId)).toEqual([139])
+    expect(view.result.current.sessions.get('session-a')?.eventCount).toBe(40)
+    emitMonitorEvent(
+      'message.ingested',
+      makeMessageData({ event_id: 141, message_id: 'live', timestamp: 310 })
+    )
+    expect(view.result.current.sessions.get('session-a')?.eventCount).toBe(41)
+  })
+
+  it('触顶加载以当前最早条目为游标，旧事件插到前面，没有更多时停止请求', async () => {
+    clientMocks.loadHistory.mockResolvedValueOnce({ count: 1, oldestEventId: 50, hasMore: true })
+    const view = await mountMonitor(await importHookModule())
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 50 }))
+    expect(view.result.current.hasMoreHistory).toBe(false)
+    await flushHistory()
+    expect(view.result.current.hasMoreHistory).toBe(true)
+
+    clientMocks.loadHistory.mockResolvedValueOnce({ count: 2, oldestEventId: 30, hasMore: false })
+    act(() => view.result.current.loadOlderHistory())
+    expect(clientMocks.loadHistory).toHaveBeenLastCalledWith('session-a', 50)
+    expect(view.result.current.historyLoading).toBe(true)
+    // 加载中重复触顶不会重复请求
+    act(() => view.result.current.loadOlderHistory())
+    expect(clientMocks.loadHistory).toHaveBeenCalledTimes(2)
+
+    emitMonitorEvent(
+      'message.updated',
+      makeMessageData({ event_id: 45, message_id: 'old-1', content: '识图完成' })
+    )
+    emitMonitorEvent(
+      'message.ingested',
+      makeMessageData({ event_id: 30, message_id: 'old-1', content: '识图中' })
+    )
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 40, message_id: 'old-2' }))
+    await flushHistory()
+
+    expect(view.result.current.timeline.map((entry) => entry.eventId)).toEqual([30, 40, 50])
+    // 更新事件在上一页、原消息在这一页时仍能应用
+    expect(view.result.current.timeline[0].data).toMatchObject({ content: '识图完成' })
+    expect(view.result.current.historyLoading).toBe(false)
+    expect(view.result.current.hasMoreHistory).toBe(false)
+    act(() => view.result.current.loadOlderHistory())
+    expect(clientMocks.loadHistory).toHaveBeenCalledTimes(2)
+  })
+
+  it('翻页带来同一轮更早的 Planner 事件时，卡片移到起始位置且内容不回滚', async () => {
+    const view = await mountMonitor(await importHookModule())
+    const planner = { session_id: 'session-a', run_id: 'r', cycle_id: 1, timestamp: 100, tools: [] }
+    emitMonitorEvent('message.sent', makeMessageData({ event_id: 303 }))
+    emitMonitorEvent('planner.finalized', { ...planner, event_id: 305 })
+    emitMonitorEvent('planner.progress', { ...planner, event_id: 301 })
+    expect(view.result.current.timeline.map((entry) => entry.id)).toEqual(['evt_301', 'evt_303'])
+    expect(view.result.current.timeline[0]).toMatchObject({
+      type: 'planner.finalized',
+      data: { event_id: 305 },
+    })
+  })
+
+  it('重连后最新一页接不上断线前的条目时丢弃旧条目，接得上则合并', async () => {
+    const view = await mountMonitor(await importHookModule())
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 10, message_id: 'm10' }))
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 11, message_id: 'm11' }))
+    await flushHistory()
+
+    // 第一次重连：最新一页从 11 开始，与已有条目衔接
+    clientMocks.loadHistory.mockResolvedValueOnce({ count: 2, oldestEventId: 11, hasMore: true })
+    emitMonitorEvent('replay.started', {})
+    emitMonitorEvent('stage.snapshot', { entries: [], timestamp: 100 })
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 11, message_id: 'm11' }))
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 12, message_id: 'm12' }))
+    await flushHistory()
+    expect(view.result.current.timeline.map((entry) => entry.eventId)).toEqual([10, 11, 12])
+
+    // 第二次重连：离线期间漏掉的事件超过一页，旧条目与最新一页之间有缺口
+    clientMocks.loadHistory.mockResolvedValueOnce({ count: 2, oldestEventId: 500, hasMore: true })
+    emitMonitorEvent('replay.started', {})
+    emitMonitorEvent('stage.snapshot', { entries: [], timestamp: 100 })
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 500, message_id: 'm500' }))
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 501, message_id: 'm501' }))
+    await flushHistory()
+    expect(view.result.current.timeline.map((entry) => entry.eventId)).toEqual([500, 501])
+    expect(view.result.current.hasMoreHistory).toBe(true)
+  })
+
+  it('首页之前的子代理事件补发后重建任务，不进入时间线', async () => {
+    const view = await mountMonitor(await importHookModule())
+    emitMonitorEvent('message.ingested', makeMessageData({ event_id: 100 }))
+    emitMonitorEvent('subagent.round', {
+      event_id: 101,
+      session_id: 'session-a',
+      task_id: 'subagent-1',
+      round_index: 1,
+      content: '继续查',
+      tool_calls: [],
+      timestamp: 120,
+    })
+    // 开始事件尚未加载时，轮次无处归属
+    expect(view.result.current.subagentTasks).toHaveLength(0)
+
+    emitMonitorEvent('subagent.history', {
+      session_id: 'session-a',
+      events: [
+        {
+          event: 'subagent.started',
+          data: {
+            event_id: 60,
+            session_id: 'session-a',
+            task_id: 'subagent-1',
+            call_id: 'call-1',
+            description: '查资料',
+            granted_tools: [],
+            background: true,
+            max_rounds: 5,
+            timestamp: 60,
+          },
+        },
+      ],
+    })
+    expect(view.result.current.subagentTasks).toHaveLength(1)
+    expect(view.result.current.subagentTasks[0]).toMatchObject({ callId: 'call-1', status: 'running' })
+    expect(view.result.current.subagentTasks[0].rounds.map((round) => round.content)).toEqual([
+      '继续查',
+    ])
+    expect(view.result.current.timeline).toHaveLength(1)
   })
 })

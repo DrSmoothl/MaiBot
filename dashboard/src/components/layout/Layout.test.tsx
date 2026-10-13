@@ -129,8 +129,6 @@ vi.mock('@/lib/runtime', () => ({
 vi.mock('./Header', () => ({
   Header: ({
     actualTheme,
-    mobileMenuOpen,
-    onMobileMenuToggle,
     onSearchOpenChange,
     onSidebarToggle,
     onTopbarToggle,
@@ -141,8 +139,6 @@ vi.mock('./Header', () => ({
     workspaceMode,
   }: {
     actualTheme: 'light' | 'dark'
-    mobileMenuOpen: boolean
-    onMobileMenuToggle: () => void
     onSearchOpenChange: (open: boolean) => void
     onSidebarToggle: () => void
     onTopbarToggle: () => void
@@ -155,7 +151,6 @@ vi.mock('./Header', () => ({
     <div
       data-testid="header"
       data-actual-theme={actualTheme}
-      data-mobile-menu-open={String(mobileMenuOpen)}
       data-search-open={String(searchOpen)}
       data-sidebar-open={String(sidebarOpen)}
       data-topbar-collapsed={String(topbarCollapsed)}
@@ -163,9 +158,6 @@ vi.mock('./Header', () => ({
     >
       <button type="button" onClick={onSidebarToggle}>
         切换侧栏模式
-      </button>
-      <button type="button" onClick={onMobileMenuToggle}>
-        切换移动菜单
       </button>
       <button type="button" onClick={() => onSearchOpenChange(!searchOpen)}>
         切换搜索
@@ -183,6 +175,19 @@ vi.mock('./Header', () => ({
         切换到设置
       </button>
     </div>
+  ),
+}))
+vi.mock('./MobileRouteHeader', () => ({
+  MobileRouteHeader: () => null,
+}))
+
+vi.mock('./MobileTabBar', () => ({
+  MobileTabBar: ({ onSearch }: { onSearch: () => void }) => (
+    <nav data-testid="mobile-tabbar">
+      <button type="button" onClick={onSearch}>
+        底部搜索
+      </button>
+    </nav>
   ),
 }))
 vi.mock('./Sidebar', () => ({
@@ -220,10 +225,6 @@ function getWorkspaceContent(container: HTMLElement) {
 
 function getMain() {
   return document.querySelector('[data-dashboard-main="true"]')
-}
-
-function getMobileOverlay() {
-  return document.querySelector('.bg-black\\/50')
 }
 
 function flushMicrotasks() {
@@ -554,7 +555,7 @@ describe('Layout 壳层、快捷键与公告入口', () => {
   })
 
   // 日志工作区在移动端同样保留麦麦导航，遮罩随菜单一起打开
-  it.each(['/', '/logs'])('移动端遮罩在 %s 随菜单打开，点击后关闭菜单', (pathname) => {
+  it.each(['/', '/logs'])('移动端在 %s 渲染底部标签栏，标签栏的搜索按钮打开全局搜索', (pathname) => {
     routerMocks.pathname = pathname
     render(
       <Layout>
@@ -562,14 +563,10 @@ describe('Layout 壳层、快捷键与公告入口', () => {
       </Layout>
     )
 
-    expect(getMobileOverlay()).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '切换移动菜单' }))
-    expect(getHeader()).toHaveAttribute('data-mobile-menu-open', 'true')
-    expect(getMobileOverlay()).toBeInTheDocument()
-
-    fireEvent.click(getMobileOverlay() as Element)
-    expect(getHeader()).toHaveAttribute('data-mobile-menu-open', 'false')
-    expect(getMobileOverlay()).not.toBeInTheDocument()
+    expect(screen.getByTestId('mobile-tabbar')).toBeInTheDocument()
+    expect(getHeader()).toHaveAttribute('data-search-open', 'false')
+    fireEvent.click(screen.getByRole('button', { name: '底部搜索' }))
+    expect(getHeader()).toHaveAttribute('data-search-open', 'true')
   })
 
   it('沉浸模式收起壳层，再次进入时保留首次快照并在退出后恢复', () => {
@@ -579,7 +576,6 @@ describe('Layout 壳层、快捷键与公告入口', () => {
       </Layout>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '切换移动菜单' }))
     act(() => {
       window.dispatchEvent(
         new CustomEvent('maibot-layout-immersive-change', { detail: { immersive: true } })
@@ -587,8 +583,6 @@ describe('Layout 壳层、快捷键与公告入口', () => {
     })
     expect(getHeader()).toHaveAttribute('data-sidebar-open', 'false')
     expect(getHeader()).toHaveAttribute('data-topbar-collapsed', 'true')
-    expect(getHeader()).toHaveAttribute('data-mobile-menu-open', 'false')
-    expect(getMobileOverlay()).not.toBeInTheDocument()
     expect(localStorage.getItem('maibot-layout-sidebar-open')).toBe('false')
     expect(localStorage.getItem('maibot-layout-topbar-collapsed')).toBe('true')
 
@@ -650,14 +644,12 @@ describe('Layout 壳层、快捷键与公告入口', () => {
     if (workspace === 'settings') {
       expect(screen.getAllByTestId('sidebar').length).toBeGreaterThan(0)
     } else {
-      // 日志工作区不挂桌面侧栏，只保留移动端侧栏供顶栏菜单按钮打开
+      // 日志工作区不挂侧栏；手机上的导航由底部标签栏负责
       expect(
         document.querySelector('[data-dashboard-sidebar-layout="true"]')
       ).not.toBeInTheDocument()
-      const mobileSidebar = screen.getByTestId('sidebar')
-      expect(mobileSidebar.parentElement).toHaveClass('lg:hidden')
-      // 移动端侧栏沿用设置工作区的内置麦麦导航
-      expect(mobileSidebar).toHaveAttribute('data-section-titles', 'sidebar.groups.botConfig')
+      expect(screen.queryByTestId('sidebar')).not.toBeInTheDocument()
+      expect(screen.getByTestId('mobile-tabbar')).toBeInTheDocument()
     }
   })
 

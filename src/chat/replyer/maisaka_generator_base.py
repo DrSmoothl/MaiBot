@@ -30,7 +30,6 @@ from src.common.utils.utils_config import ChatConfigUtils
 from src.config.config import global_config
 from src.maisaka.context.message_id_alias import to_display_message_id
 from src.config.model_configs import ModelInfo
-from src.config.official_configs import build_personality_emotion_suffix
 from src.core.types import ActionInfo
 from src.llm_models.payload_content.context_item import (
     AssistantMessageItem,
@@ -44,6 +43,7 @@ from src.llm_models.payload_content.context_item import (
 )
 from src.llm_models.payload_content.context_protocol import ContextProtocolMode
 from src.llm_models.request_snapshot import serialize_context_items_snapshot
+from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.messages import (
     LLMContextMessage,
@@ -110,11 +110,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             if not prompt_personality:
                 prompt_personality = "是人类。"
 
-            prompt_lines = [f"你的名字是{bot_name}{bot_aliases}。", prompt_personality]
-            emotion_suffix = build_personality_emotion_suffix(global_config.experimental.emotion_trait)
-            if emotion_suffix:
-                prompt_lines.append(emotion_suffix)
-            return "\n".join(prompt_lines)
+            return f"你的名字是{bot_name}{bot_aliases}。\n{prompt_personality}"
         except Exception as exc:
             logger.warning(f"构建 Maisaka 人设提示词失败: {exc}")
             return "你的名字是麦麦。\n是人类。"
@@ -557,6 +553,8 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         except Exception:
             system_prompt = "你是一个友好的 AI 助手，请根据聊天记录自然回复。"
 
+        if attention_drift := build_attention_drift_prompt_block():
+            system_prompt += f"\n\n{attention_drift}"
         return system_prompt
 
     def _build_reply_instruction(self) -> str:

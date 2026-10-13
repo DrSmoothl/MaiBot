@@ -67,8 +67,8 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.14.67"
-MODEL_CONFIG_VERSION: str = "1.17.15"
+CONFIG_VERSION: str = "8.15.4"
+MODEL_CONFIG_VERSION: str = "1.17.17"
 
 logger = get_logger("config")
 
@@ -639,8 +639,12 @@ class ConfigManager:
     async def start_file_watcher(self) -> None:
         if self._file_watcher is not None and self._file_watcher.running:
             return
+        from src.platform_io.adapter_policy import get_adapter_policy_manager
+
+        policy_path = get_adapter_policy_manager().policy_path
         self._file_watcher = FileWatcher(
-            paths=[self.bot_config_path, self.model_config_path],
+            # 监听父目录，覆盖策略文件首次创建以及编辑器的原子替换保存。
+            paths=list({self.bot_config_path.parent, self.model_config_path.parent, policy_path.parent}),
             debounce_ms=600,
             callback_timeout_s=15.0,
             callback_failure_threshold=3,
@@ -648,7 +652,7 @@ class ConfigManager:
         )
         self._file_watcher_subscription_id = self._file_watcher.subscribe(
             self._handle_file_changes,
-            paths=[self.bot_config_path, self.model_config_path],
+            paths=[self.bot_config_path, self.model_config_path, policy_path],
         )
         await self._file_watcher.start()
         logger.info(t("config.file_watcher_started"))
@@ -676,7 +680,7 @@ class ConfigManager:
         self._file_watcher = None
 
     async def _handle_file_changes(self, changes: Sequence[FileChange]) -> None:
-        """处理主配置与模型配置文件变更。
+        """处理主配置、模型配置及适配器名单文件变更。
 
         Args:
             changes: 当前批次收集到的文件变更列表。
@@ -684,6 +688,12 @@ class ConfigManager:
 
         if not changes:
             return
+        from src.platform_io.adapter_policy import get_adapter_policy_manager
+
+        if any(change.path == get_adapter_policy_manager().policy_path.resolve() for change in changes):
+            from src.chat.heart_flow.heartflow_manager import heartflow_manager
+
+            await heartflow_manager.close_policy_blocked_chats()
         changed_scopes = self._resolve_changed_scopes(changes)
         if not changed_scopes:
             return

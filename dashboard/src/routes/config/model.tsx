@@ -77,10 +77,13 @@ import {
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { HelpTooltip } from '@/components/ui/help-tooltip'
+import { MobileAddMenu } from '@/components/layout/MobileAddMenu'
+import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { ExtraParamsDialog } from '@/components/ui/extra-params-dialog'
 import { TaskConfigCard, ModelTable, ModelCardList } from './model/components'
+import type { ModelCreationType } from './model/components/AddModelMenu'
 import { EmbeddingBuildProgress } from './model/components/EmbeddingBuildProgress'
 import { TaskRuntimeSummary } from './model/components/TaskRuntimeSummary'
 import { TASK_CONFIGS } from './model/constants'
@@ -363,6 +366,12 @@ function ModelConfigPageContent() {
   const selectedTaskSingleModel = Boolean(
     selectedTaskMetadata && 'singleModel' in selectedTaskMetadata && selectedTaskMetadata.singleModel
   )
+  const selectedTaskModelNames =
+    selectedTaskField?.name === 'embedding' || selectedTaskField?.name === 'image_embedding'
+      ? models
+          .filter((model) => model.model_type === 'embedding' || model.model_type === 'image_embedding')
+          .map((model) => model.name)
+      : modelNames
 
   if (selectedTaskField && selectedTaskField.name !== selectedTaskName) {
     setSelectedTaskName(selectedTaskField.name)
@@ -494,18 +503,20 @@ function ModelConfigPageContent() {
     ? getProviderConfig(editingModel.api_provider)
     : undefined
   const selectedClientType = selectedProviderConfig?.client_type
+  const modelExtraParams = editingModel?.extra_params || {}
+  const editingModelType = editingModel?.model_type
+  const editingModelIsEmbedding = editingModelType === 'embedding' || editingModelType === 'image_embedding'
   const deepSeekClientType: DeepSeekClientType | null =
-    matchedTemplate?.id === 'deepseek' &&
+    !editingModelIsEmbedding && matchedTemplate?.id === 'deepseek' &&
     (selectedClientType === 'openai' || selectedClientType === 'openai_responses')
       ? selectedClientType
       : null
   // 思考开关格式由命中的服务商模板元数据决定，未命中则不显示思考开关
   // DeepSeek 有专用段（含 Responses 客户端的 reasoning.effort 与联网搜索），不走通用开关
   const thinkingFormatActive: ThinkingFormatConfig | null =
-    matchedTemplate?.id !== 'deepseek'
+    !editingModelIsEmbedding && matchedTemplate?.id !== 'deepseek'
       ? resolveThinkingFormatForModel(matchedTemplate, editingModel?.model_identifier ?? '')
       : null
-  const modelExtraParams = editingModel?.extra_params || {}
   const thinkingEnabled = thinkingFormatActive
     ? isThinkingEnabled(modelExtraParams, thinkingFormatActive)
     : false
@@ -564,10 +575,15 @@ function ModelConfigPageContent() {
   const openEditDialog = (
     model: ModelInfo | null,
     index: number | null,
-    preferredProvider?: string
+    preferredProvider?: string,
+    modelType: ModelInfo['model_type'] = 'llm'
   ) => {
     setModelNameTouched(false)
-    mc.openEditDialog(model, index, () => setAdvancedModelSettingsVisible(false), preferredProvider)
+    mc.openEditDialog(model, index, () => setAdvancedModelSettingsVisible(false), preferredProvider, modelType)
+  }
+
+  const openAddModelDialog = (type: ModelCreationType) => {
+    openEditDialog(null, null, modelProviderFilter || undefined, type)
   }
 
   const openProviderDialog = (provider: APIProvider | null, index: number | null) => {
@@ -826,17 +842,7 @@ function ModelConfigPageContent() {
                   className="pl-9"
                 />
               </div>
-              {/* 桌面端时添加模型按钮位于表格表头，此处仅在移动端卡片视图显示。
-                  data-tour 引导目标只在桌面端表头按钮上，避免 Joyride 定位到隐藏元素 */}
-              <Button
-                onClick={() => openEditDialog(null, null, modelProviderFilter || undefined)}
-                size="sm"
-                variant="outline"
-                className="w-full shrink-0 sm:w-auto md:hidden"
-              >
-                <Plus className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
-                <span className="text-sm">添加</span>
-              </Button>
+              {/* 桌面端添加模型按钮位于表格表头；手机上由页头右上角的「+」添加 */}
               {searchQuery && (
                 <p className="text-sm text-muted-foreground whitespace-nowrap">
                   找到 {filteredModels.length} 个结果
@@ -967,7 +973,7 @@ function ModelConfigPageContent() {
               testingModels={testingModels}
               modelTestResults={modelTestResults}
               searchQuery={searchQuery}
-              onAdd={() => openEditDialog(null, null, modelProviderFilter || undefined)}
+              onAdd={openAddModelDialog}
             />
           </div>
 
@@ -1079,7 +1085,7 @@ function ModelConfigPageContent() {
                       title={resolveFieldLabel(selectedTaskField, i18n.language)}
                       description={selectedTaskField.description}
                       taskConfig={taskConfig[selectedTaskField.name] ?? { model_list: [] }}
-                      modelNames={modelNames}
+                      modelNames={selectedTaskModelNames}
                       onChange={(field, value) => updateTaskConfig(selectedTaskField.name, field, value)}
                       hideTemperature={selectedTaskHideTemperature}
                       hideMaxTokens={selectedTaskHideMaxTokens}
@@ -1439,9 +1445,10 @@ function ModelConfigPageContent() {
         >
           <DialogHeader>
             <DialogTitle>
-              {editingIndex !== null ? '编辑模型' : '添加模型'}
+              {editingIndex !== null ? '编辑模型' : editingModelIsEmbedding ? '添加嵌入模型' : '添加 LLM 模型'}
             </DialogTitle>
             {/* 「高级」开关浮在右上角，与 DialogContent 内置的关闭按钮同行 */}
+            {!editingModelIsEmbedding && (
             <Button
               type="button"
               variant={advancedModelSettingsVisible ? 'default' : 'outline'}
@@ -1451,10 +1458,29 @@ function ModelConfigPageContent() {
             >
               高级
             </Button>
+            )}
           </DialogHeader>
 
           <DialogBody viewportClassName="min-h-0 flex-1 pr-3 sm:pr-4 [&>div]:!block">
           <div className="grid gap-3 py-2 sm:gap-4 sm:py-4">
+            {editingModelIsEmbedding && (
+            <div className="grid gap-2">
+              <Label htmlFor="model_type">模型类型</Label>
+              <Select
+                value={editingModelType}
+                onValueChange={(value) => setEditingModel((model) => model
+                  ? { ...model, model_type: value as ModelInfo['model_type'] }
+                  : null
+                )}
+              >
+                <SelectTrigger id="model_type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="embedding">文本嵌入模型</SelectItem>
+                  <SelectItem value="image_embedding">图片嵌入模型</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            )}
             <div className="grid gap-3 md:grid-cols-2 md:gap-4">
               <div className="grid gap-2" data-tour="model-name-input">
                 <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
@@ -1691,6 +1717,7 @@ function ModelConfigPageContent() {
               )}
             </div>
 
+            {!editingModelIsEmbedding && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:gap-6">
               <div className="flex items-center space-x-2">
                 <Switch
@@ -1707,8 +1734,9 @@ function ModelConfigPageContent() {
                 </Label>
               </div>
             </div>
+            )}
 
-            <fieldset className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 md:grid-cols-3">
+            <fieldset className={`grid min-w-0 grid-cols-1 gap-3 sm:gap-4 ${editingModelIsEmbedding ? '' : 'md:grid-cols-3'}`}>
               <legend className="mb-2 text-sm font-medium">默认价格</legend>
               <div className="grid gap-2">
                 <Label htmlFor="price_in">输入价格 (¥/M token)</Label>
@@ -1735,6 +1763,8 @@ function ModelConfigPageContent() {
                 />
               </div>
 
+              {!editingModelIsEmbedding && (
+              <>
               <div className="grid gap-2">
                 <Label htmlFor="price_out">输出价格 (¥/M token)</Label>
                 <Input
@@ -1774,6 +1804,8 @@ function ModelConfigPageContent() {
                   placeholder="留空=与输入价一致"
                 />
               </div>
+              </>
+              )}
             </fieldset>
 
             <section aria-labelledby="price-periods-heading" className="min-w-0 space-y-2">
@@ -1841,12 +1873,12 @@ function ModelConfigPageContent() {
                           </div>
                         ))}
                       </div>
-                      <div className="grid min-w-0 grid-cols-3 gap-2">
+                      <div className={`grid min-w-0 gap-2 ${editingModelIsEmbedding ? 'grid-cols-1' : 'grid-cols-3'}`}>
                         {([
                           ['price_in', '输入价格'],
                           ['price_out', '输出价格'],
                           ['cache_price_in', '缓存价格'],
-                        ] as const).map(([field, label]) => (
+                        ] as const).filter(([field]) => !editingModelIsEmbedding || field === 'price_in').map(([field, label]) => (
                           <div key={field} className="grid min-w-0 gap-1">
                             <Label htmlFor={`price-period-${index}-${field}`} className="text-xs">{label}</Label>
                             <Input
@@ -2055,7 +2087,7 @@ function ModelConfigPageContent() {
               </div>
             )}
 
-            {advancedModelSettingsVisible && (
+            {!editingModelIsEmbedding && advancedModelSettingsVisible && (
               <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10 sm:space-y-4 sm:p-4">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-1">
@@ -2096,6 +2128,7 @@ function ModelConfigPageContent() {
               </div>
             )}
 
+            {!editingModelIsEmbedding && (
             <div className="grid items-start gap-3 md:grid-cols-2 md:gap-4">
               {/* 模型级别温度 */}
               <div className="space-y-2 rounded-lg border p-3 sm:space-y-3 sm:p-4">
@@ -2268,6 +2301,8 @@ function ModelConfigPageContent() {
               </div>
             </div>
 
+            )}
+
             {/* 额外参数 */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">额外参数</Label>
@@ -2437,6 +2472,17 @@ function ModelConfigPageContent() {
       </AlertDialog>
 
       {/* 重启遮罩层 */}
+      {/* 手机页头右上角的「+」：添加模型与厂商 */}
+      <MobileHeaderActions>
+        <MobileAddMenu
+          label="添加"
+          items={[
+            { label: '添加 LLM 模型', onSelect: () => openAddModelDialog('llm') },
+            { label: '添加嵌入模型', onSelect: () => openAddModelDialog('embedding') },
+            { label: '添加厂商', onSelect: () => openProviderDialog(null, null) },
+          ]}
+        />
+      </MobileHeaderActions>
       <RestartOverlay />
       </div>
     </div>

@@ -65,7 +65,10 @@ import {
   X,
 } from 'lucide-react'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
+import { cn } from '@/lib/utils'
 import { RestartOverlay } from '@/components/restart-overlay'
+import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
+import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { getLocalPluginChangelog, getLocalPluginReadme, getPluginRuntimeComponents } from '@/lib/plugin-api'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
 import { PluginStats } from '@/components/plugin-stats'
@@ -1628,6 +1631,18 @@ function PluginConfigPageContent() {
 
   return (
     <>
+      {/* 手机页头右上角：去插件市场 */}
+      {!adapterManagement && (
+        <MobileHeaderActions>
+          <a
+            href={getPluginMarketplaceRoutePath()}
+            data-mobile-header-text-button="true"
+            className={cn('flex h-11 items-center rounded-full px-4 text-[15px]', MOBILE_GLASS_CLASS)}
+          >
+            插件市场
+          </a>
+        </MobileHeaderActions>
+      )}
       <ScrollArea className="h-full">
       <div className="space-y-4 p-4 sm:space-y-6 sm:p-6">
         {!adapterManagement && (

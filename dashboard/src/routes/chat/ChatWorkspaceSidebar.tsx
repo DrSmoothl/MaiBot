@@ -276,7 +276,7 @@ export function ChatWorkspaceSidebar({
       data-chat-workspace-sidebar="true"
       className={cn(
         'bg-card/90 supports-backdrop-filter:bg-card/70 flex h-full shrink-0 flex-col border-r backdrop-blur',
-        'w-60 xl:w-64',
+        'w-52 xl:w-56',
         className
       )}
     >

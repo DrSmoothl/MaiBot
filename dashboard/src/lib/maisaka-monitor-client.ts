@@ -334,8 +334,91 @@ export interface ReplierResponseEvent {
 
 // ─── 统一事件联合类型 ─────────────────────────────────────────
 
+/** 子代理任务开始；call_id 是 Planner 发起这次派发的工具调用 id */
+export interface SubagentStartedEvent {
+  session_id: string
+  task_id: string
+  call_id: string
+  description: string
+  granted_tools: string[]
+  /** 是否在后台运行（开启高级子代理） */
+  background: boolean
+  max_rounds: number
+  timestamp: number
+}
+
+/** 子代理一轮模型输出 */
+export interface SubagentRoundEvent {
+  session_id: string
+  task_id: string
+  round_index: number
+  content: string
+  tool_calls: MaisakaToolCall[]
+  timestamp: number
+}
+
+/** 子代理内部一次工具调用的结果摘要 */
+export interface SubagentToolResultEvent {
+  session_id: string
+  task_id: string
+  round_index: number
+  call_id: string
+  tool_name: string
+  success: boolean
+  summary: string
+  duration_ms: number
+  timestamp: number
+}
+
+export type SubagentTaskStatus = 'running' | 'completed' | 'failed' | 'stopped'
+
+/** 子代理任务结束：完成、失败或被终止 */
+export interface SubagentFinishedEvent {
+  session_id: string
+  task_id: string
+  status: SubagentTaskStatus
+  conclusion: string
+  error_message: string
+  tool_usage: Record<string, number>
+  duration_ms: number
+  timestamp: number
+}
+
+/** 订阅后下发的单个聊天流概要；时间线本身按页另行加载 */
+export interface SessionSummary {
+  session_id: string
+  event_count: number
+  last_event_id: number
+  last_activity: number
+  session_start: SessionStartEvent | null
+  latest_message: {
+    event: 'message.ingested' | 'message.sent'
+    data: MessageIngestedEvent | MessageSentEvent
+  } | null
+}
+
+export interface SessionsSnapshotEvent {
+  sessions: SessionSummary[]
+  timestamp: number
+}
+
+/** 随首页历史补发的子代理事件，只用于重建子代理面板，不进入时间线 */
+export interface SubagentHistoryEvent {
+  session_id: string
+  events: { event: string; data: Record<string, unknown> }[]
+}
+
+/** 一页历史加载结果；事件本身经事件通道先于该结果到达 */
+export interface MonitorHistoryPage {
+  count: number
+  oldestEventId: number
+  hasMore: boolean
+}
+
 export type MaisakaMonitorEvent =
   | { type: 'replay.started'; data: Record<string, never> }
+  | { type: 'sessions.snapshot'; data: SessionsSnapshotEvent }
+  | { type: 'subagent.history'; data: SubagentHistoryEvent }
   | { type: 'session.start'; data: SessionStartEvent }
   | { type: 'stage.status'; data: StageStatusEvent }
   | { type: 'stage.removed'; data: StageRemovedEvent }
@@ -354,10 +437,19 @@ export type MaisakaMonitorEvent =
   | { type: 'tool.execution'; data: ToolExecutionEvent }
   | { type: 'replier.request'; data: ReplierRequestEvent }
   | { type: 'replier.response'; data: ReplierResponseEvent }
+  | { type: 'subagent.started'; data: SubagentStartedEvent }
+  | { type: 'subagent.round'; data: SubagentRoundEvent }
+  | { type: 'subagent.tool_result'; data: SubagentToolResultEvent }
+  | { type: 'subagent.finished'; data: SubagentFinishedEvent }
 
 export type MaisakaEventListener = (event: MaisakaMonitorEvent) => void
 
 // ─── 客户端 ───────────────────────────────────────────────────
+
+/** 每页拉取的历史事件数 */
+const HISTORY_PAGE_SIZE = 100
+/** 历史页经事件通道逐条下发，慢链路上比普通请求耗时更长 */
+const HISTORY_REQUEST_TIMEOUT_MS = 30000
 
 class MaisakaMonitorClient {
   private readonly plannerDecoder = new PlannerDeltaDecoder()
@@ -409,9 +501,8 @@ class MaisakaMonitorClient {
 
   private getReplaySubscribeData(): Record<string, unknown> {
     return {
-      // 每次恢复都从后端账本读取，浏览器不持久化游标；中断回放也不会跳过消息。
-      since_event_id: 0,
-      replay_limit: 10000,
+      // 订阅只同步各聊天流概要与当前阶段，时间线由 loadHistory 按聊天流分页拉取。
+      mode: 'paged',
     }
   }
 
@@ -473,6 +564,25 @@ class MaisakaMonitorClient {
           }
         }, 200)
       }
+    }
+  }
+
+  /** 拉取某个聊天流早于 beforeEventId 的一页历史；不传时拉取最新一页 */
+  async loadHistory(
+    sessionId: string,
+    beforeEventId?: number,
+    limit = HISTORY_PAGE_SIZE
+  ): Promise<MonitorHistoryPage> {
+    const result = await unifiedWsClient.call({
+      domain: 'maisaka_monitor',
+      method: 'history.load',
+      data: { session_id: sessionId, before_event_id: beforeEventId ?? 0, limit },
+      timeoutMs: HISTORY_REQUEST_TIMEOUT_MS,
+    })
+    return {
+      count: Number(result.count) || 0,
+      oldestEventId: Number(result.oldest_event_id) || 0,
+      hasMore: result.has_more === true,
     }
   }
 

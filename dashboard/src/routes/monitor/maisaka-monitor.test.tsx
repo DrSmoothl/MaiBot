@@ -157,7 +157,11 @@ function setupMonitorState(overrides: MonitorStateOverrides = {}) {
     selectedSession: overrides.selectedSession ?? null,
     setSelectedSession: hookActions.setSelectedSession,
     connected: overrides.connected ?? true,
+    subagentTasks: [],
     clearTimeline: hookActions.clearTimeline,
+    historyLoading: false,
+    hasMoreHistory: false,
+    loadOlderHistory: vi.fn(),
   }
   monitorHookMocks.useMaisakaMonitor.mockReturnValue(state)
   act(() => monitorHookMocks.listeners.forEach((listener) => listener()))
@@ -1399,7 +1403,7 @@ describe('时间线事件卡片', () => {
     expect(screen.getByText('结果已记录')).toBeInTheDocument()
   })
 
-  it('planner.finalized 无执行结果时回退展示 tool_calls，空文本给出占位', () => {
+  it('planner.finalized 无执行结果时回退展示 tool_calls，空文本不显示占位', () => {
     setupMonitorState({
       timeline: [
         makeEntry(
@@ -1416,7 +1420,7 @@ describe('时间线事件卡片', () => {
     })
     render(<MaisakaMonitor />)
 
-    expect(screen.getByText('planner 本轮没有文本内容')).toBeInTheDocument()
+    expect(screen.queryByText('planner 本轮没有文本内容')).not.toBeInTheDocument()
     expect(screen.getByText('search_web')).toBeInTheDocument()
     // 回退条目默认视为执行成功且无耗时，成功状态不额外显示
     expect(screen.queryByText('执行成功')).not.toBeInTheDocument()

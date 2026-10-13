@@ -8,7 +8,6 @@ import {
   FileText,
   Globe,
   LogOut,
-  Menu,
   Moon,
   MoreHorizontal,
   Search,
@@ -52,15 +51,9 @@ import { cn } from '@/lib/utils'
 import { extensionIcons, extensionPath, extensionWorkspace } from '@/lib/plugin-webui'
 import type { WebUIExtension } from '@/lib/plugin-webui'
 
+import { LANGUAGE_CODES, LANGUAGE_NAMES } from './language-options'
 import type { WorkspaceMode } from './types'
 
-const LANGUAGE_CODES = ['zh', 'en', 'ja', 'ko'] as const
-const LANGUAGE_NAMES: Record<(typeof LANGUAGE_CODES)[number], string> = {
-  zh: '中文',
-  en: 'English',
-  ja: '日本語',
-  ko: '한국어',
-}
 const LOG_WORKSPACE_COMPACT_GAP = 12
 const LOG_WORKSPACE_EXPAND_GAP = 96
 const WORKSPACE_HOVER_LEAVE_DELAY_MS = 600
@@ -89,11 +82,9 @@ interface HeaderProps {
   /** 侧栏滑入/滑出期间让顶栏延伸到侧栏下方，顶栏自身保持不动 */
   sidebarUnderlay?: boolean
   sidebarOpen: boolean
-  mobileMenuOpen: boolean
   searchOpen: boolean
   actualTheme: 'light' | 'dark'
   onSidebarToggle: () => void
-  onMobileMenuToggle: () => void
   onSearchOpenChange: (open: boolean) => void
   onThemeChange: (theme: 'light' | 'dark' | 'system') => void
   onTopbarToggle: () => void
@@ -109,11 +100,9 @@ export function Header({
   logSwitcherHidden = false,
   sidebarUnderlay = false,
   sidebarOpen,
-  mobileMenuOpen,
   searchOpen,
   actualTheme,
   onSidebarToggle,
-  onMobileMenuToggle,
   onSearchOpenChange,
   onThemeChange,
   onTopbarToggle,
@@ -338,6 +327,8 @@ export function Header({
       className={cn(
         'sticky top-0 isolate z-30 min-w-0 overflow-visible',
         topbarCollapsed ? 'h-4' : 'flex h-[42px] flex-col border-b px-3 backdrop-blur-md sm:px-4',
+        // 手机上不显示顶栏：页面自带大标题，搜索与设置分别由标签栏和首页头像承担
+        'max-lg:hidden',
         topbarCollapsed || inheritsPageBackground ? 'bg-transparent' : 'bg-background'
       )}
     >
@@ -426,15 +417,6 @@ export function Header({
           />
 
           <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-4">
-            {/* 移动端菜单按钮 */}
-            <button
-              onClick={onMobileMenuToggle}
-              aria-label={t('a11y.closeMenu')}
-              aria-expanded={mobileMenuOpen}
-              className="hover:bg-accent rounded-lg p-2 lg:hidden"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
 
             {/* 固定模式显示左折线；悬浮模式展开后由侧栏内的右折线切回固定模式。 */}
             {sidebarOpen && (
@@ -627,6 +609,8 @@ export function Header({
                 }}
                 className={cn(
                   'relative ml-2 flex min-w-0 flex-1 items-center sm:ml-3 sm:max-w-72',
+                  // 原版风格在手机上由底部标签栏的搜索按钮负责搜索，顶栏不再重复放搜索框
+                  themeConfig.dashboardStyle !== 'millennium' && 'max-lg:hidden',
                   workspaceMode === 'logs' && themeConfig.dashboardStyle !== 'millennium'
                     ? 'mr-auto sm:mr-0 sm:w-48 sm:flex-none'
                     : 'mr-auto'
@@ -901,7 +885,8 @@ export function Header({
           </div>
         </div>
 
-        <div className="absolute right-5 bottom-[-7px] z-10 flex h-0 shrink-0 items-center justify-end sm:right-15.5">
+        {/* 顶栏收起拉片只服务桌面布局，手机上不显示 */}
+        <div className="absolute right-5 bottom-[-7px] z-10 flex h-0 shrink-0 items-center justify-end max-lg:hidden sm:right-15.5">
           <button
             type="button"
             data-dashboard-topbar-toggle="true"

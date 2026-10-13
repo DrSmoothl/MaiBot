@@ -52,6 +52,7 @@ from src.maisaka.monitor.events import (
     emit_message_sent,
     emit_message_updated,
     emit_session_start,
+    emit_subagent_finished,
 )
 from src.maisaka.monitor.message_payload import (
     build_monitor_message_content,
@@ -69,6 +70,7 @@ from src.services.message_word_frequency_service import update_high_frequency_te
 
 from .chat_loop_service import ChatResponse, MaisakaChatLoopService
 from .reasoning_engine import MaisakaReasoningEngine
+from .subagent_tasks import SubAgentTask, SubAgentTaskManager, format_tool_usage
 
 logger = get_logger("maisaka_runtime")
 
@@ -164,6 +166,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._internal_turn_queue: asyncio.Queue[Literal["message", "timeout", "proactive"]] = asyncio.Queue()
         self._proactive_trigger_message: Optional[SessionMessage] = None
         self._proactive_logical_turn_id: Optional[str] = None
+        self._subagent_tasks = SubAgentTaskManager()
         self._focus_cooldown_wakeup_scheduled = False
         self._focus_cooldown_timer_task: Optional[asyncio.Task[None]] = None
 
@@ -536,6 +539,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._cancel_focus_cooldown_timer_task()
         self._cancel_wait_timeout_task()
         await self._cancel_trimmed_history_learning_task()
+        await self._stop_background_subagents()
         while not self._internal_turn_queue.empty():
             _ = self._internal_turn_queue.get_nowait()
 
@@ -712,7 +716,65 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             "queued": True,
         }
 
-    def _build_proactive_trigger_message(self, task_id: str) -> SessionMessage:
+    async def _stop_background_subagents(self) -> None:
+        """运行时停止时终止全部后台子代理，并让观察页知道它们已被终止。"""
+
+        running_tasks = [task for task in self._subagent_tasks.list_tasks() if task.status == "running"]
+        await self._subagent_tasks.cancel_all()
+        for task in running_tasks:
+            await emit_subagent_finished(
+                session_id=self.session_id,
+                task_id=task.task_id,
+                status="stopped",
+                conclusion="",
+                error_message="",
+                tool_usage=task.tool_usage,
+                duration_ms=task.elapsed_seconds * 1000,
+            )
+
+    def deliver_subagent_result(self, task: SubAgentTask) -> None:
+        """后台子代理结束时，把结论作为一条新的 user 消息追加到上下文末尾并唤醒 Planner。
+
+        结论只追加在历史末尾，不回填到当初调用 subagent 的位置，已经发送过的上下文前缀保持不变。
+        """
+
+        if not self._running:
+            return
+
+        # 任务说明是 Planner 自己写的，这里只带一段摘要帮它对上是哪个任务
+        task_preview = task.description.replace("\n", " ")
+        if len(task_preview) > 200:
+            task_preview = f"{task_preview[:200]}…"
+        detail_lines = [
+            f'<subagent_result id="{task.task_id}" status="{task.status}">',
+            f"你派发的子代理任务已结束。任务：{task_preview}",
+            f"工具使用：{format_tool_usage(task.tool_usage)}",
+        ]
+        if task.status == "completed":
+            detail_lines.append(f"结论：\n{task.conclusion}")
+        else:
+            detail_lines.append(f"子代理没有完成任务：{task.error_message}")
+        detail_lines.extend(
+            [
+                "请结合当前聊天自行决定是否使用这个结论，以及是否需要回复。",
+                "</subagent_result>",
+            ]
+        )
+        visible_text = "\n".join(detail_lines)
+        self._chat_history.append(
+            SessionBackedMessage(
+                raw_message=MessageSequence([TextComponent(visible_text)]),
+                visible_text=visible_text,
+                timestamp=datetime.now(),
+                message_id=task.task_id,
+                source_kind="subagent_result",
+            )
+        )
+        self._arm_forced_turn_state(message_id=task.task_id, reason="子代理任务结束")
+        self._queue_proactive_turn(self._build_proactive_trigger_message(task.task_id, "子代理任务结束"))
+        logger.info(f"{self.log_prefix} 后台子代理任务结束并已送回结论: task_id={task.task_id} status={task.status}")
+
+    def _build_proactive_trigger_message(self, task_id: str, description: str = "插件主动聊天任务") -> SessionMessage:
         """构造主动任务触发消息，不写入消息数据库。"""
 
         message = SessionMessage(
@@ -728,8 +790,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         )
         message.account_id = self.chat_stream.account_id
         message.scope = self.chat_stream.scope
-        message.raw_message = MessageSequence([TextComponent("插件主动聊天任务")])
-        message.processed_plain_text = "插件主动聊天任务"
+        message.raw_message = MessageSequence([TextComponent(description)])
+        message.processed_plain_text = description
         return message
 
     def _queue_proactive_turn(
@@ -1594,9 +1656,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         }
         discovered_tool_names: set[str] = set()
         for message in selected_history:
-            if isinstance(message, SessionBackedMessage) and message.source_kind == "optimized_tool_history":
-                discovered_tool_names.update(self._parse_folded_tool_search_result_tool_names(message.visible_text))
-                continue
             if not isinstance(message, ToolResultMessage):
                 continue
             if message.tool_name != "tool_search" or message.tool_call_id not in tool_search_call_ids:
@@ -1631,21 +1690,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             if normalized_name in self.deferred_tool_specs_by_name:
                 discovered_tool_names.add(normalized_name)
 
-        return discovered_tool_names
-
-    def _parse_folded_tool_search_result_tool_names(self, content: str) -> set[str]:
-        """从优化上下文折叠后的 tool_search 文本中恢复已发现工具名。"""
-
-        discovered_tool_names: set[str] = set()
-        for raw_line in content.splitlines():
-            normalized_line = raw_line.strip()
-            if not normalized_line.startswith("- tool_search:"):
-                continue
-            raw_names = normalized_line.removeprefix("- tool_search:").split("(", 1)[0]
-            for raw_tool_name in raw_names.split(","):
-                normalized_name = raw_tool_name.strip()
-                if normalized_name in self.deferred_tool_specs_by_name:
-                    discovered_tool_names.add(normalized_name)
         return discovered_tool_names
 
     def get_discovered_deferred_tool_specs(self) -> list[ToolSpec]:

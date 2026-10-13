@@ -23,6 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { StreamlineIcon } from '@/components/ui/streamline-icon'
 import { createStreamlineIcon } from '@/components/ui/streamline-menu-icon'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
+import { MOBILE_ONLY_GLASS_CLASS } from '@/components/layout/mobile-glass'
 import { useMenuSections } from '@/components/layout/use-menu-sections'
 import type { MenuIcon } from '@/components/layout/types'
 import { registeredRoutePaths } from '@/router'
@@ -647,9 +648,20 @@ export function SearchDialog({
       initialWidth={672}
       initialHeight={680}
       initialTop={88}
+      mobileFullscreen
     >
-      <div className="px-4 pt-3">
-        <div className="flex items-center gap-2">
+      {/* 手机上输入框沉到屏幕底部的玻璃条里，拇指可达 */}
+      <div
+        data-search-input-bar="true"
+        className="px-4 pt-3 max-lg:order-last max-lg:px-4 max-lg:pt-2 max-lg:pb-[calc(env(safe-area-inset-bottom)+14px)]"
+      >
+        <div
+          className={cn(
+            'flex items-center gap-2',
+            'max-lg:rounded-full max-lg:py-1 max-lg:pr-1 max-lg:pl-1',
+            MOBILE_ONLY_GLASS_CLASS
+          )}
+        >
           <div className="relative min-w-0 flex-1">
             <StreamlineIcon
               name="search-bar-solid"
@@ -800,7 +812,10 @@ export function SearchDialog({
                 </Collapsible>
               )}
               {aiAnswer && (
-                <section data-search-answer="true" className="border-border/70 bg-muted/30 rounded-lg border p-3">
+                <section
+                  data-search-answer="true"
+                  className="border-border/70 bg-muted/30 rounded-lg border p-3"
+                >
                   <div className="mb-2 flex items-center gap-2 text-sm font-medium">
                     <Sparkles className="text-primary h-4 w-4" />
                     {t('search.aiAnswer')}

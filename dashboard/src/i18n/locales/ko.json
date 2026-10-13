@@ -201,6 +201,14 @@
     "logs": "로그"
   },
   "chat": {
+    "setupTrial": {
+      "title": "봇과 대화해 보세요",
+      "description": "인사를 보내 봇이 정상적으로 응답하는지 확인하세요.",
+      "repliedTitle": "봇이 응답했습니다",
+      "repliedDescription": "응답과 말투가 괜찮다면 메시지 플랫폼 설정을 계속하세요.",
+      "keepChatting": "계속 대화하기",
+      "continue": "메시지 플랫폼 설정"
+    },
     "botNameFallback": "麦麦",
     "userFallback": "사용자",
     "userNameFallback": "인간",
@@ -334,6 +342,11 @@
       "sessionUnavailable": "채팅 세션을 열 수 없습니다. 잠시 후 다시 시도하세요.",
       "virtualTabCreated": "가상 신분 탭",
       "virtualTabCreatedDesc": "{{label}} 대화를 만들었습니다"
+    },
+    "mobile": {
+      "back": "대화 목록으로",
+      "close": "닫기",
+      "settings": "설정"
     }
   },
   "layout": {
@@ -756,7 +769,7 @@
       "saveFailedTitle": "저장에 실패했습니다",
       "validationFailedTitle": "입력값을 확인해 주세요",
       "completeSuccessTitle": "설정이 완료되었습니다",
-      "completeSuccessDescription": "{{appName}} 설정이 저장되고 적용되었습니다.",
+      "completeSuccessDescription": "{{appName}} 설정이 저장되었습니다. 채팅에서 인사를 보내 봇의 응답과 말투를 확인해 보세요.",
       "completeFailedTitle": "설정 완료에 실패했습니다",
       "skipFailedTitle": "설정 마법사 건너뛰기에 실패했습니다",
       "customTokenSuccessTitle": "Token이 업데이트되었습니다",
@@ -1572,6 +1585,33 @@
       "requestTrend": "시간별 요청 트렌드 차트, 최근 시간대별 요청 수 변화 표시",
       "costTrend": "API 비용 트렌드 차트, 최근 시간대별 API 호출 비용 변화 표시",
       "tokenUsage": "토큰 소비 트렌드 차트, 최근 시간대별 토큰 사용량 변화 표시"
+    },
+    "mobile": {
+      "title": "MaiBot",
+      "openSettings": "WebUI 설정"
     }
+  },
+  "mobileNav": {
+    "label": "주 탐색",
+    "home": "홈",
+    "chat": "채팅",
+    "manage": "관리",
+    "me": "내 정보",
+    "search": "검색",
+    "live": "MaiBot 실시간",
+    "botInitial": "M",
+    "backHome": "홈으로",
+    "backManage": "관리로"
+  },
+  "manage": {
+    "searchPlaceholder": "페이지 또는 설정 검색",
+    "groups": {
+      "runtime": "실행 기록"
+    }
+  },
+  "dynamicForm": {
+    "mobileTextEmpty": "비어 있음",
+    "mobileTextCancel": "취소",
+    "mobileTextDone": "완료"
   }
 }

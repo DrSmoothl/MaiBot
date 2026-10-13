@@ -45,6 +45,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
+import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
+import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
@@ -1316,6 +1318,20 @@ export function ReasoningProcessPage({
         embedded ? 'p-0' : 'p-1'
       )}
     >
+      {/* 手机页头右上角：导出当前推理过程（嵌在日志页时只在推理页签可见时挂上） */}
+      {(!embedded || toolbarVisible) && (
+        <MobileHeaderActions>
+          <button
+            type="button"
+            aria-label="导出推理过程"
+            onClick={handleDownloadReasoningJson}
+            data-mobile-header-icon-button="true"
+            className={cn('flex h-11 w-11 items-center justify-center rounded-full', MOBILE_GLASS_CLASS)}
+          >
+            <Download className="h-5 w-5" strokeWidth={1.7} />
+          </button>
+        </MobileHeaderActions>
+      )}
       {toolbarPortal}
       {topbarActionsPortal}
 

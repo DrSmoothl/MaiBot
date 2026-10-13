@@ -262,9 +262,7 @@ beforeEach(() => {
     installedPlugins.some((item) => item.id === pluginId)
   )
   vi.mocked(pluginApi.getInstalledPluginVersion).mockImplementation((pluginId, installedPlugins) => {
-    const found = installedPlugins.find((item) => item.id === pluginId)
-    if (!found) return undefined
-    return 'manifest' in found ? found.manifest.version : found.version
+    return installedPlugins.find((item) => item.id === pluginId)?.manifest.version
   })
   vi.mocked(pluginApi.connectPluginProgressWebSocket).mockImplementation(async (onProgress, onError) => {
     progressHandler = onProgress

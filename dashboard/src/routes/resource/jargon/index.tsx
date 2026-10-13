@@ -3,6 +3,9 @@ import { Check, ChevronDown, Download, Plus, Search, Trash2, Upload, X } from 'l
 import { useState } from 'react'
 
 import { ChatScopeFilterPanel } from '@/components/chat-scope-filter-panel'
+import { MobileAddMenu } from '@/components/layout/MobileAddMenu'
+import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
+import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { AccentPanel } from '@/components/ui/accent-panel'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,6 +19,7 @@ import { Label } from '@/components/ui/label'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
 import { formatChatDisplayName } from '@/lib/chat-display'
+import { cn } from '@/lib/utils'
 
 import {
   batchDeleteJargons,
@@ -356,6 +360,25 @@ export function JargonManagementPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden p-4 pb-6 sm:p-6">
+      {/* 手机页头右上角：导出与添加 */}
+      <MobileHeaderActions>
+        <button
+          type="button"
+          aria-label="导出黑话"
+          onClick={openExportDialog}
+          data-mobile-header-icon-button="true"
+          className={cn('flex h-11 w-11 items-center justify-center rounded-full', MOBILE_GLASS_CLASS)}
+        >
+          <Upload className="h-5 w-5" strokeWidth={1.7} />
+        </button>
+        <MobileAddMenu
+          label="添加黑话"
+          items={[
+            { label: '新增黑话', onSelect: () => setIsCreateDialogOpen(true) },
+            { label: '导入黑话', onSelect: () => setIsImportDialogOpen(true) },
+          ]}
+        />
+      </MobileHeaderActions>
       <div className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
         <div className="flex min-h-full flex-col gap-3 pr-3 sm:pr-4 lg:h-full lg:min-h-0">
           {/* 搜索和筛选 */}
@@ -382,7 +405,7 @@ export function JargonManagementPage() {
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="outline"
-                      className="h-8 min-w-44 justify-between gap-3 px-3 text-xs"
+                      className="h-8 min-w-44 justify-between gap-3 px-3 text-xs max-lg:hidden"
                       aria-label={`黑话分类：${activeSummary.label} ${activeSummary.count}`}
                     >
                       <span>{activeSummary.label}</span>
@@ -414,7 +437,7 @@ export function JargonManagementPage() {
                     </DropdownMenuRadioGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <div className="flex gap-2">
+                <div className="flex gap-2 max-lg:hidden">
                   <Button
                     onClick={() => setIsCreateDialogOpen(true)}
                     className="h-8 w-10 px-0"
@@ -474,6 +497,52 @@ export function JargonManagementPage() {
             </div>
           </AccentPanel>
 
+          {/* 手机：分类改为可点按的统计卡，聊天范围改为横滑胶囊 */}
+          <div data-mobile-jargon-summary="true" className="grid grid-cols-4 rounded-3xl bg-card py-3 lg:hidden">
+            {summaryOptions.slice(0, 4).map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={summaryFilter === option.value}
+                onClick={() => handleSummaryChange(option.value)}
+                className={cn(
+                  'flex min-w-0 flex-col items-center gap-0.5 px-1',
+                  summaryFilter !== option.value && 'opacity-60'
+                )}
+              >
+                <b className="text-xl font-semibold tabular-nums">{option.count}</b>
+                <span className="text-muted-foreground truncate text-xs">{option.label}</span>
+              </button>
+            ))}
+          </div>
+          <nav
+            aria-label="聊天范围"
+            data-mobile-pill-nav="true"
+            className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden"
+          >
+            {[{ id: 'all', label: '全部聊天' }, ...chatList.map((chat) => ({
+              id: chat.session_id,
+              label: formatChatDisplayName(chat.chat_name, chat.account_id),
+            }))].map((item) => {
+              const active = filterChatId === item.id
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={active}
+                  data-active={active ? 'true' : 'false'}
+                  onClick={() => handleChatChange(String(item.id))}
+                  className={cn(
+                    'h-9 shrink-0 rounded-full px-4 text-[15px]',
+                    active ? 'bg-foreground text-background font-semibold' : 'bg-card'
+                  )}
+                >
+                  {item.label}
+                </button>
+              )
+            })}
+          </nav>
+
           {/* 黑话列表 */}
           <div
             className={`grid min-h-0 grid-cols-1 gap-3 transition-[grid-template-columns] duration-200 lg:flex-1 lg:items-stretch ${
@@ -501,7 +570,7 @@ export function JargonManagementPage() {
               onCollapsedChange={setScopePanelCollapsed}
               collapseLabel="折叠范围列表"
               expandLabel="展开范围列表"
-              className="[&_[data-chat-scope-panel-header=true]]:px-2 [&_[data-chat-scope-panel-header=true]]:py-1 [&_[data-chat-scope-panel-item=true]]:py-1.5"
+              className="max-lg:hidden [&_[data-chat-scope-panel-header=true]]:px-2 [&_[data-chat-scope-panel-header=true]]:py-1 [&_[data-chat-scope-panel-item=true]]:py-1.5"
               listClassName="space-y-0.5 p-1"
             />
 

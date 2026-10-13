@@ -23,10 +23,7 @@ from src.maisaka.context.history import (
     normalize_tool_result_order,
 )
 from src.maisaka.context.messages import ModelOutputContextMessage, SessionBackedMessage, ToolResultMessage
-from src.maisaka.context.post_processor import (
-    _build_trimmed_assistant_tool_user_message,
-    _trim_history_to_context_target,
-)
+from src.maisaka.context.post_processor import _trim_history_to_context_target
 from src.maisaka.chat_loop_service import MaisakaChatLoopService
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.plugin_runtime.hook_payloads import serialize_prompt_items
@@ -112,23 +109,6 @@ def test_drop_unanswered_parallel_call_removes_entire_tool_turn() -> None:
 
     assert removed_count == 1
     assert filtered == []
-
-
-def test_parallel_tool_turn_folding_preserves_call_order_and_stable_id() -> None:
-    first_call = _call("call-item-1", "call-1")
-    second_call = _call("call-item-2", "call-2")
-    folded = _build_trimmed_assistant_tool_user_message(
-        [first_call, second_call],
-        tool_result_by_call_id={
-            "call-2": _result("call-2"),
-            "call-1": _result("call-1"),
-        },
-    )
-
-    assert folded is not None
-    assert folded.message_id == "optimized_tool_history:turn-1"
-    assert folded.visible_text.index("tool_call_id: call-1") < folded.visible_text.index("tool_call_id: call-2")
-    assert folded.visible_text.index("result:call-1") < folded.visible_text.index("result:call-2")
 
 
 def test_context_selection_keeps_complete_tool_turn_beyond_window() -> None:

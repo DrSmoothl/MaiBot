@@ -12,6 +12,7 @@ import type {
 } from './types'
 
 interface ModelInfo {
+  model_type: 'llm' | 'embedding' | 'image_embedding'
   model_identifier: string
   name: string
   api_provider: string
@@ -211,6 +212,7 @@ function createBasicModel(
     extra_params: buildThinkingExtraParams(existing?.extra_params, thinking),
     visual,
     model_identifier: modelIdentifier,
+    model_type: 'llm',
     name: modelName,
     api_provider: providerName,
   }

@@ -36,6 +36,7 @@ from src.llm_models.payload_content.context_item import (
     RoleType,
     UserMessageItem,
 )
+from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.history import build_session_message_visible_text
 from src.maisaka.context.message_adapter import (
     build_visible_text_from_sequence,
@@ -124,6 +125,7 @@ class RetroReplyPromptMixin:
             for block in (
                 self._build_personality_prompt(),
                 self._build_group_chat_attention_block(self._resolve_session_id(stream_id)),
+                build_attention_drift_prompt_block(),
             )
             if block.strip()
         )

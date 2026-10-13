@@ -1,11 +1,7 @@
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-import ast
 import asyncio
-import json
-import os
 import random
 import re
 import time
@@ -65,7 +61,7 @@ def parse_platform_accounts(platforms: list[str]) -> dict[str, str]:
 
 
 def _get_configured_qq_account() -> str:
-    qq_account = str(getattr(global_config.bot, "qq_account", "")).strip()
+    qq_account = global_config.bot.qq_account.strip()
     if qq_account in {"", "0"}:
         return ""
     return qq_account
@@ -94,7 +90,7 @@ def get_configured_bot_accounts() -> dict[str, str]:
         primary_platform = str(global_config.bot.platform or "qq").strip().lower()
         bot_accounts[primary_platform] = qq_account
 
-    platforms_list = getattr(global_config.bot, "platforms", []) or []
+    platforms_list = global_config.bot.platforms
     platform_accounts = parse_platform_accounts(platforms_list)
 
     for platform_name, account in platform_accounts.items():
@@ -153,8 +149,8 @@ def is_mentioned_bot_in_message(message: SessionMessage) -> tuple[bool, bool, fl
 
     current_accounts = get_bot_accounts(platform)
 
-    nickname = str(global_config.bot.nickname or "")
-    alias_names = list(getattr(global_config.bot, "alias_names", []) or [])
+    nickname = global_config.bot.nickname
+    alias_names = global_config.bot.alias_names
     keywords = [nickname] + alias_names
 
     reply_probability = 0.0
@@ -520,33 +516,6 @@ def _merge_processed_segments_to_max_count(
     return merged_segments
 
 
-def random_remove_punctuation(text: str) -> str:
-    """随机处理标点符号，模拟人类打字习惯
-
-    Args:
-        text: 要处理的文本
-
-    Returns:
-        str: 处理后的文本
-    """
-    result = ""
-    text_len = len(text)
-
-    for i, char in enumerate(text):
-        if char == "。" and i == text_len - 1:  # 结尾的句号
-            if random.random() > 0.1:  # 90%概率删除结尾句号
-                continue
-        elif char == "，":
-            rand = random.random()
-            if rand < 0.05:  # 5%概率删除逗号
-                continue
-            elif rand < 0.25:  # 20%概率把逗号变成空格
-                result += " "
-                continue
-        result += char
-    return result
-
-
 def _get_random_default_reply() -> str:
     """获取随机默认回复"""
     default_replies = [
@@ -688,8 +657,8 @@ async def process_llm_response_segments_async(
     try:
         split_sentences = await split_text_with_llm(text)
     except Exception:
-        logger.exception("LLM 断句失败")
-        raise
+        logger.exception("LLM 断句失败，本次回复不断句")
+        split_sentences = [(text, "")]
 
     # 数据首次加载和错别字计算交给线程执行，避免占住聊天事件循环。
     segments = await asyncio.to_thread(_apply_response_post_processing, split_sentences, enable_chinese_typo)
@@ -951,145 +920,3 @@ def get_chat_type_and_target_info(chat_id: str) -> Tuple[bool, Optional["ChatTar
         logger.error(f"获取聊天类型和目标信息时出错 for {chat_id}: {e}", exc_info=True)
 
     return is_group_chat, chat_target_info
-
-
-def record_replyer_action_temp(chat_id: str, reason: str, think_level: int) -> None:
-    """
-    临时记录replyer动作被选择的信息（仅群聊）
-
-    Args:
-        chat_id: 聊天ID
-        reason: 选择理由
-        think_level: 思考深度等级
-    """
-    try:
-        # 确保data/temp目录存在
-        temp_dir = "data/temp"
-        os.makedirs(temp_dir, exist_ok=True)
-
-        # 创建记录数据
-        record_data = {
-            "chat_id": chat_id,
-            "reason": reason,
-            "think_level": think_level,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        # 生成文件名（使用时间戳避免冲突）
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"replyer_action_{timestamp_str}.json"
-        filepath = os.path.join(temp_dir, filename)
-
-        # 写入文件
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(record_data, f, ensure_ascii=False, indent=2)
-
-        logger.debug(f"已记录replyer动作选择: chat_id={chat_id}, think_level={think_level}")
-    except Exception as e:
-        logger.warning(f"记录replyer动作选择失败: {e}")
-
-
-def assign_message_ids(messages: List[SessionMessage]) -> List[Tuple[str, SessionMessage]]:
-    """
-    为消息列表中的每个消息分配唯一的简短随机ID
-
-    Args:
-        messages: 消息列表
-
-    Returns:
-        List[SessionMessage]: 分配了唯一ID的消息列表
-    """
-    result: List[Tuple[str, SessionMessage]] = []  # 复制原始消息列表
-    used_ids = set()
-    len_i = len(messages)
-    if len_i > 100:
-        a = 10
-        b = 99
-    else:
-        a = 1
-        b = 9
-
-    for i, message in enumerate(messages):
-        # 生成唯一的简短ID
-        while True:
-            # 使用索引+随机数生成简短ID
-            random_suffix = random.randint(a, b)
-            message_id = f"m{i + 1}{random_suffix}"
-
-            if message_id not in used_ids:
-                used_ids.add(message_id)
-                break
-        result.append((message_id, message))
-
-    return result
-
-
-#                 break
-#         result.append((message_id, message))
-
-#     return result
-
-
-def parse_keywords_string(keywords_input) -> list[str]:
-    # sourcery skip: use-contextlib-suppress
-    """
-    统一的关键词解析函数，支持多种格式的关键词字符串解析
-
-    支持的格式：
-    1. 字符串列表格式：'["utils.py", "修改", "代码", "动作"]'
-    2. 斜杠分隔格式：'utils.py/修改/代码/动作'
-    3. 逗号分隔格式：'utils.py,修改,代码,动作'
-    4. 空格分隔格式：'utils.py 修改 代码 动作'
-    5. 已经是列表的情况：["utils.py", "修改", "代码", "动作"]
-    6. JSON格式字符串：'{"keywords": ["utils.py", "修改", "代码", "动作"]}'
-
-    Args:
-        keywords_input: 关键词输入，可以是字符串或列表
-
-    Returns:
-        list[str]: 解析后的关键词列表，去除空白项
-    """
-    if not keywords_input:
-        return []
-
-    # 如果已经是列表，直接处理
-    if isinstance(keywords_input, list):
-        return [str(k).strip() for k in keywords_input if str(k).strip()]
-
-    # 转换为字符串处理
-    keywords_str = str(keywords_input).strip()
-    if not keywords_str:
-        return []
-
-    try:
-        # 尝试作为JSON对象解析（支持 {"keywords": [...]} 格式）
-        json_data = json.loads(keywords_str)
-        if isinstance(json_data, dict) and "keywords" in json_data:
-            keywords_list = json_data["keywords"]
-            if isinstance(keywords_list, list):
-                return [str(k).strip() for k in keywords_list if str(k).strip()]
-        elif isinstance(json_data, list):
-            # 直接是JSON数组格式
-            return [str(k).strip() for k in json_data if str(k).strip()]
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    try:
-        # 尝试使用 ast.literal_eval 解析（支持Python字面量格式）
-        parsed = ast.literal_eval(keywords_str)
-        if isinstance(parsed, list):
-            return [str(k).strip() for k in parsed if str(k).strip()]
-    except (ValueError, SyntaxError):
-        pass
-
-    # 尝试不同的分隔符
-    separators = ["/", ",", " ", "|", ";"]
-
-    for separator in separators:
-        if separator in keywords_str:
-            keywords_list = [k.strip() for k in keywords_str.split(separator) if k.strip()]
-            if len(keywords_list) > 1:  # 确保分割有效
-                return keywords_list
-
-    # 如果没有分隔符，返回单个关键词
-    return [keywords_str] if keywords_str else []

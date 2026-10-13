@@ -27,7 +27,7 @@
 - {bot_name}が今、正式にユーザーへ可視の返信を送るべきだと判断したときは reply を呼び出してください。呼び出し後、ユーザーに実際に表示される返信が生成されます。特定のユーザーに返信しても、全ユーザーに向けて返信してもかまいません。
 - fetch_history()：現在チャットのストリームにあり、まだ文脈に入っていないメッセージを確認する必要がある場合に使います。現在チャットのメッセージだけを新しいものから古いものへ最大 num 件返し、返されたメッセージは通常の user message として追加されるため、後続で引用・判断できます。
 - switch_chat()：別の未フォーカスのチャットへフォーカスを移すと決めた場合に使います。すでにフォーカス中のチャットへ切り替えてはいけません。切り替え後、現在チャットは対象チャットになります。
-{query_memory_rule}
+{query_memory_rule}{subagent_rule}
 - tool_search()：deferred tools の一覧にあるツールが必要な場合、まずこれを呼び出して該当ツールを検索・発見してください。これは後続のラウンドでツールを利用可能にするだけで、業務処理を直接実行するものではありません。
 - You can call multiple tools in a single response. 複数の情報源を組み合わせ、複数の操作であなたを補助してください。If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
 - ツール実行に問題が発生した場合は、解決を試みるか代替案を使ってください。

@@ -52,6 +52,8 @@ from src.maisaka.builtin_tool import (
     is_builtin_tool_in_action_stage,
 )
 from .chat_loop_service import ChatResponse
+from .planner_reply_guard import has_unsent_reply_intent
+from .tool_result_condenser import condense_tool_result, should_condense_tool_result
 from src.maisaka.visual.chat_history_refresher import (
     has_pending_image_recognition,
     log_pending_image_recognition_before_text_planner,
@@ -104,6 +106,11 @@ logger = get_logger("maisaka_reasoning_engine")
 HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
 STOP_AFTER_EXECUTION_PAUSE_REASON = "stop_after_execution"
+# Planner 正文写了要回复却没调用任何工具时，追加给下一轮的提醒
+PLANNER_UNSENT_REPLY_HINT = (
+    "你上一轮的输出没有调用任何工具，聊天里没有出现任何新消息：你的文字输出只有你自己能看到。\n"
+    "如果你打算发言，必须调用 reply 工具；如果你决定不发言，直接结束即可，不需要解释。"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,8 +405,33 @@ class MaisakaReasoningEngine:
         self,
         planner_no_tool_count: int,
         planner_extra_lines: list[str],
+        planner_content: str,
     ) -> tuple[int, CycleEnd, bool]:
         """处理 Planner 未调用工具时的终止策略。"""
+
+        # 正文写了要回复却没调用工具时回复会丢失：提醒一次再跑一轮；同一回合只重试一次，仍不调用工具就正常结束
+        if (
+            global_config.experimental.planner_unsent_reply_retry
+            and planner_no_tool_count == 0
+            and has_unsent_reply_intent(planner_content)
+        ):
+            self._runtime._chat_history.append(
+                ReferenceMessage(
+                    content=PLANNER_UNSENT_REPLY_HINT,
+                    timestamp=datetime.now(),
+                    reference_type=ReferenceMessageType.PLANNER_TOOL_HINT,
+                    # 本轮收尾的历史后处理会先消耗一次，留到下一轮请求发出后再过期
+                    remaining_uses_value=2,
+                    display_prefix="[未调用工具提醒]",
+                )
+            )
+            planner_extra_lines.append("状态：正文表达了回复意图但未调用工具，已提醒并重试一轮")
+            logger.info(f"{self._runtime.log_prefix} Planner 表达了回复意图但未调用工具，已追加提醒并重试")
+            return (
+                planner_no_tool_count + 1,
+                CycleEnd("planner_no_tool_retry", "Planner 想回复但未调用工具，已提醒并继续下一轮。"),
+                False,
+            )
 
         planner_no_tool_count += 1
         cycle_end = CycleEnd("planner_no_tool_end", "Planner本轮思考结束。")
@@ -478,6 +510,7 @@ class MaisakaReasoningEngine:
         planner_no_tool_count, cycle_end, should_end_after_no_tool = self._handle_planner_no_tool_retry(
             planner_no_tool_count,
             planner_extra_lines,
+            planner_content,
         )
         state.cycle_end = cycle_end
         state.tool_result_summaries = []
@@ -864,7 +897,11 @@ class MaisakaReasoningEngine:
 
         completed_cycle = await self._end_cycle(cycle_detail)
         cycle_end = state.cycle_end
-        if round_index + 1 >= self._runtime._max_internal_rounds and cycle_end.reason in {"continue", "tool_continue"}:
+        if round_index + 1 >= self._runtime._max_internal_rounds and cycle_end.reason in {
+            "continue",
+            "planner_no_tool_retry",
+            "tool_continue",
+        }:
             cycle_end = self._cycle_end_for_max_rounds(self._runtime._max_internal_rounds)
 
         response = state.response
@@ -1298,7 +1335,6 @@ class MaisakaReasoningEngine:
         process_result = process_chat_history_after_cycle(
             self._runtime._chat_history,
             max_context_size=self._runtime._max_context_size,
-            enable_context_optimization=global_config.chat.enable_context_optimization,
             pending_call_ids=self._runtime._get_pending_wait_tool_call_ids(),
         )
         if process_result.changed_count <= 0:
@@ -1568,12 +1604,14 @@ class MaisakaReasoningEngine:
         result: ToolExecutionResult,
         *,
         append_post_history: bool = True,
+        condensed_content: str | None = None,
     ) -> None:
         """将统一工具执行结果写回 Maisaka 历史。
 
         Args:
             tool_call: 原始工具调用对象。
             result: 统一工具执行结果。
+            condensed_content: 子代理整理后的结果文本；提供时代替原始结果文本写入历史。
         """
 
         if (
@@ -1583,7 +1621,11 @@ class MaisakaReasoningEngine:
         ):
             return
 
-        history_content = self._build_tool_result_history_content(tool_call, result)
+        history_content = self._build_tool_result_history_content(
+            tool_call,
+            result,
+            condensed_content=condensed_content,
+        )
         if not history_content:
             history_content = "工具执行成功。" if result.success else f"工具 {tool_call.func_name} 执行失败。"
 
@@ -1719,10 +1761,16 @@ class MaisakaReasoningEngine:
             label_parts.append(f"source_url={source_url}")
         return " / ".join(label_parts)
 
-    def _build_tool_result_history_content(self, tool_call: ToolCall, result: ToolExecutionResult) -> str:
+    def _build_tool_result_history_content(
+        self,
+        tool_call: ToolCall,
+        result: ToolExecutionResult,
+        *,
+        condensed_content: str | None = None,
+    ) -> str:
         """构造纯文本 tool result，并在其中引用拆分出去的媒体索引。"""
 
-        history_content = result.get_history_content()
+        history_content = result.get_history_content() if condensed_content is None else condensed_content
         media_items = self._iter_tool_result_media_items(result)
         if not media_items:
             return history_content
@@ -2065,7 +2113,30 @@ class MaisakaReasoningEngine:
                 result,
                 tool_spec_map.get(invocation.tool_name),
             )
-            self._append_tool_execution_result(tool_call, result, append_post_history=False)
+            # 超长结果先交给子代理按当前意图整理，Planner 历史里只留整理后的结论
+            condensed_content: str | None = None
+            raw_history_content = result.get_history_content()
+            if global_config.experimental.tool_result_condense and should_condense_tool_result(
+                invocation.tool_name,
+                raw_history_content,
+                success=result.success,
+            ):
+                self._runtime._update_stage_status(
+                    f"工具结果整理 · {invocation.tool_name}",
+                    f"原始结果 {len(raw_history_content)} 字",
+                )
+                condensed_content = await condense_tool_result(
+                    self._runtime,
+                    tool_call,
+                    raw_history_content,
+                    latest_thought,
+                )
+            self._append_tool_execution_result(
+                tool_call,
+                result,
+                append_post_history=False,
+                condensed_content=condensed_content,
+            )
             deferred_post_history_messages.extend(
                 message for message in result.post_history_messages if isinstance(message, LLMContextMessage)
             )

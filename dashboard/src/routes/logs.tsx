@@ -40,11 +40,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { logWebSocket, type LogEntry } from '@/lib/log-websocket'
+import { useVirtualizerUnmountGuard } from '@/lib/use-virtualizer-unmount-guard'
 import { getSetting, setSetting } from '@/lib/settings-manager'
 import { cn } from '@/lib/utils'
 
@@ -237,6 +247,9 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
     clampNumber(getSetting('logColumnWidthExtra'), COLUMN_WIDTH_EXTRA_MIN, COLUMN_WIDTH_EXTRA_MAX)
   )
   const [filtersOpen, setFiltersOpen] = useState(() => getSetting('logFiltersOpen'))
+  // 手机上的筛选弹层与桌面端的展开状态分开，避免把弹层的开关记进设置
+  const isMobileViewport = useMediaQuery('(max-width: 1023.98px)')
+  const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
   const [toolbarRoot, setToolbarRoot] = useState<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement>(null)
 
@@ -460,6 +473,7 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
     estimateSize: () => estimatedRowHeight,
     overscan: 50, // 增加预渲染数量以减少快速滚动时的空白
   })
+  useVirtualizerUnmountGuard(rowVirtualizer)
 
   // 用于追踪是否是程序触发的滚动
   const isAutoScrollingRef = useRef(false)
@@ -512,6 +526,163 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
       })
     }
   }, [filteredLogs.length, autoScroll, rowVirtualizer])
+
+  // 级别、时间与显示设置：桌面端在工具栏下就地展开，手机上放进底部弹层
+  const filterFields = (
+    <>
+            {/* 级别筛选 */}
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
+              <Select
+                value={levelFilter}
+                onValueChange={(value) => handleLevelFilterChange(value as LogLevelFilter)}
+              >
+                <SelectTrigger className="h-8 w-full text-xs sm:flex-1">
+                  <Filter className="mr-1.5 h-3.5 w-3.5" />
+                  <SelectValue placeholder="最低级别" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部级别</SelectItem>
+                  <SelectItem value="DEBUG">DEBUG 及以上</SelectItem>
+                  <SelectItem value="INFO">INFO 及以上</SelectItem>
+                  <SelectItem value="WARNING">WARNING 及以上</SelectItem>
+                  <SelectItem value="ERROR">ERROR 及以上</SelectItem>
+                  <SelectItem value="CRITICAL">CRITICAL</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={resetFilters}
+                className="h-8 w-full sm:w-auto"
+                title="重置筛选"
+              >
+                <X className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="text-xs">重置</span>
+              </Button>
+            </div>
+
+            {/* 时间筛选 */}
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      'h-8 w-full min-w-0 justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
+                      !dateFrom && 'text-muted-foreground'
+                    )}
+                  >
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate text-xs">
+                      {dateFrom ? format(dateFrom, 'PP', { locale: zhCN }) : '开始日期'}
+                    </span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={dateFrom}
+                    onSelect={setDateFrom}
+                    initialFocus
+                    locale={zhCN}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      'h-8 w-full min-w-0 justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
+                      !dateTo && 'text-muted-foreground'
+                    )}
+                  >
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate text-xs">
+                      {dateTo ? format(dateTo, 'PP', { locale: zhCN }) : '结束日期'}
+                    </span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={dateTo}
+                    onSelect={setDateTo}
+                    initialFocus
+                    locale={zhCN}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              {(dateFrom || dateTo) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={clearDateFilter}
+                  className="col-span-2 h-8 w-full sm:w-auto"
+                >
+                  <X className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="text-xs">清除</span>
+                </Button>
+              )}
+            </div>
+
+            {/* 显示设置 */}
+            <div className="border-border/50 flex flex-col gap-2 border-t pt-2 sm:flex-row sm:items-center sm:gap-3">
+              {/* 字号调整 */}
+              <div className="flex items-center gap-2">
+                <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                  <Type className="h-3.5 w-3.5" />
+                  <span>字号</span>
+                </div>
+                <div className="flex gap-1">
+                  {(Object.keys(fontSizeConfig) as FontSize[]).map((size) => (
+                    <Button
+                      key={size}
+                      variant={fontSize === size ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => handleFontSizeChange(size)}
+                      className="h-6 px-2 text-xs"
+                    >
+                      {fontSizeConfig[size].label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 行间距调整 */}
+              <div className="flex max-w-[200px] flex-1 items-center gap-2">
+                <span className="text-muted-foreground text-xs whitespace-nowrap">行距</span>
+                <Slider
+                  value={[lineSpacing]}
+                  onValueChange={handleLineSpacingChange}
+                  min={LINE_SPACING_MIN}
+                  max={LINE_SPACING_MAX}
+                  step={2}
+                  className="flex-1"
+                />
+                <span className="text-muted-foreground w-7 text-xs">{lineSpacing}px</span>
+              </div>
+
+              <div className="flex max-w-[220px] flex-1 items-center gap-2">
+                <span className="text-muted-foreground text-xs whitespace-nowrap">列宽</span>
+                <Slider
+                  value={[columnWidthExtra]}
+                  onValueChange={handleColumnWidthExtraChange}
+                  min={COLUMN_WIDTH_EXTRA_MIN}
+                  max={COLUMN_WIDTH_EXTRA_MAX}
+                  step={8}
+                  className="flex-1"
+                />
+                <span className="text-muted-foreground w-9 text-xs">+{columnWidthExtra}</span>
+              </div>
+            </div>
+    </>
+  )
 
   const toolbarContent = (
     <Collapsible open={filtersOpen} onOpenChange={handleFiltersOpenChange}>
@@ -609,11 +780,23 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
               <span className="ml-1 text-xs">导出</span>
             </Button>
 
-            <CollapsibleTrigger asChild>
+            {isMobileViewport && (
               <Button
                 variant="outline"
                 size="sm"
                 className="h-8 px-2"
+                onClick={() => setMobileFilterOpen(true)}
+                data-log-mobile-filter-button="true"
+              >
+                <Filter className="h-3.5 w-3.5" />
+                <span className="ml-1 text-xs">筛选</span>
+              </Button>
+            )}
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn('h-8 px-2', isMobileViewport && 'hidden')}
                 title={filtersOpen ? '收起筛选' : '展开筛选'}
               >
                 <Filter className="h-3.5 w-3.5" />
@@ -645,161 +828,24 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
             </div>
           </div>
 
-          <CollapsibleContent className="w-full space-y-2">
-            {/* 级别筛选 */}
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
-              <Select
-                value={levelFilter}
-                onValueChange={(value) => handleLevelFilterChange(value as LogLevelFilter)}
-              >
-                <SelectTrigger className="h-8 w-full text-xs sm:flex-1">
-                  <Filter className="mr-1.5 h-3.5 w-3.5" />
-                  <SelectValue placeholder="最低级别" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部级别</SelectItem>
-                  <SelectItem value="DEBUG">DEBUG 及以上</SelectItem>
-                  <SelectItem value="INFO">INFO 及以上</SelectItem>
-                  <SelectItem value="WARNING">WARNING 及以上</SelectItem>
-                  <SelectItem value="ERROR">ERROR 及以上</SelectItem>
-                  <SelectItem value="CRITICAL">CRITICAL</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={resetFilters}
-                className="h-8 w-full sm:w-auto"
-                title="重置筛选"
-              >
-                <X className="h-3.5 w-3.5 sm:mr-1" />
-                <span className="text-xs">重置</span>
-              </Button>
-            </div>
-
-            {/* 时间筛选 */}
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      'h-8 min-w-0 w-full justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
-                      !dateFrom && 'text-muted-foreground'
-                    )}
-                  >
-                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate text-xs">
-                      {dateFrom ? format(dateFrom, 'PP', { locale: zhCN }) : '开始日期'}
-                    </span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={dateFrom}
-                    onSelect={setDateFrom}
-                    initialFocus
-                    locale={zhCN}
-                  />
-                </PopoverContent>
-              </Popover>
-
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      'h-8 min-w-0 w-full justify-start px-2 text-left font-normal sm:flex-1 sm:px-3',
-                      !dateTo && 'text-muted-foreground'
-                    )}
-                  >
-                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate text-xs">
-                      {dateTo ? format(dateTo, 'PP', { locale: zhCN }) : '结束日期'}
-                    </span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={dateTo}
-                    onSelect={setDateTo}
-                    initialFocus
-                    locale={zhCN}
-                  />
-                </PopoverContent>
-              </Popover>
-
-              {(dateFrom || dateTo) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={clearDateFilter}
-                  className="col-span-2 h-8 w-full sm:w-auto"
-                >
-                  <X className="h-3.5 w-3.5 sm:mr-1" />
-                  <span className="text-xs">清除</span>
-                </Button>
-              )}
-            </div>
-
-            {/* 显示设置 */}
-            <div className="border-border/50 flex flex-col gap-2 border-t pt-2 sm:flex-row sm:items-center sm:gap-3">
-              {/* 字号调整 */}
-              <div className="flex items-center gap-2">
-                <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
-                  <Type className="h-3.5 w-3.5" />
-                  <span>字号</span>
-                </div>
-                <div className="flex gap-1">
-                  {(Object.keys(fontSizeConfig) as FontSize[]).map((size) => (
-                    <Button
-                      key={size}
-                      variant={fontSize === size ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => handleFontSizeChange(size)}
-                      className="h-6 px-2 text-xs"
-                    >
-                      {fontSizeConfig[size].label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 行间距调整 */}
-              <div className="flex max-w-[200px] flex-1 items-center gap-2">
-                <span className="text-muted-foreground text-xs whitespace-nowrap">行距</span>
-                <Slider
-                  value={[lineSpacing]}
-                  onValueChange={handleLineSpacingChange}
-                  min={LINE_SPACING_MIN}
-                  max={LINE_SPACING_MAX}
-                  step={2}
-                  className="flex-1"
-                />
-                <span className="text-muted-foreground w-7 text-xs">{lineSpacing}px</span>
-              </div>
-
-              <div className="flex max-w-[220px] flex-1 items-center gap-2">
-                <span className="text-muted-foreground text-xs whitespace-nowrap">列宽</span>
-                <Slider
-                  value={[columnWidthExtra]}
-                  onValueChange={handleColumnWidthExtraChange}
-                  min={COLUMN_WIDTH_EXTRA_MIN}
-                  max={COLUMN_WIDTH_EXTRA_MAX}
-                  step={8}
-                  className="flex-1"
-                />
-                <span className="text-muted-foreground w-9 text-xs">+{columnWidthExtra}</span>
-              </div>
-            </div>
-          </CollapsibleContent>
+          {/* 手机上筛选改为底部弹层，这里只在桌面端就地展开 */}
+          {!isMobileViewport && (
+            <CollapsibleContent className="w-full space-y-2">{filterFields}</CollapsibleContent>
+          )}
         </div>
       </div>
+      <Dialog open={mobileFilterOpen} onOpenChange={setMobileFilterOpen}>
+        <DialogContent data-log-filter-sheet="true">
+          <DialogHeader>
+            <DialogTitle>筛选</DialogTitle>
+            <DialogDescription className="sr-only">日志级别、时间范围与显示设置</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">{filterFields}</div>
+          <DialogFooter>
+            <Button onClick={() => setMobileFilterOpen(false)}>完成</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Collapsible>
   )
 
@@ -1155,7 +1201,8 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
         <div id={toolbarContainerId} className="flex min-w-0 flex-1 justify-end" />
       </div>
       {showSwitchHint && (
-        <div className="shrink-0 border-b px-3 py-2 lg:px-4">
+        // 提示说的是桌面顶栏左上角的切换，手机上切换就在页面顶部，不需要这条提示
+        <div className="shrink-0 border-b px-3 py-2 max-lg:hidden lg:px-4">
           <div className="border-primary/30 bg-primary/5 flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-foreground font-medium">小提示</span>
