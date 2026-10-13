@@ -255,8 +255,6 @@ interface MobileChatListProps {
   onClose: (tabId: string) => void
 }
 
-type ChatListSegment = 'local' | 'observed'
-
 /** 手机端会话列表：点按进入全屏对话页，左滑露出设置/关闭 */
 export function MobileChatList({
   tabs,
@@ -270,7 +268,6 @@ export function MobileChatList({
   onClose,
 }: MobileChatListProps) {
   const { t, i18n } = useTranslation()
-  const [segment, setSegment] = useState<ChatListSegment>('local')
   const [query, setQuery] = useState('')
   const language = i18n.resolvedLanguage ?? i18n.language
   const normalizedQuery = query.trim().toLowerCase()
@@ -286,92 +283,87 @@ export function MobileChatList({
       (session) => !normalizedQuery || session.sessionName.toLowerCase().includes(normalizedQuery)
     )
 
-  // 分段控件二选一；千禧风格的分段画成键帽，会话列表画成下沉屏幕
-  const showLocal = segment === 'local'
-  const showObserved = segment === 'observed'
-
   const localSection = (
+    // 与麦麦的会话固定在最上面
     <section data-mobile-chat-section="local" aria-label={t('chat.sidebar.myChats')}>
-      <div data-mobile-chat-screen="true">
-        {visibleTabs.map((tab) => {
-          const displayName = getChatTabDisplayName(tab, t('chat.botNameFallback'))
-          const lastMessage = tab.messages[tab.messages.length - 1]
-          return (
-            <SwipeRow
-              key={tab.id}
-              actions={
-                tab.id === 'webui-default'
-                  ? []
-                  : [
-                      {
-                        label: t('chat.mobile.close'),
-                        destructive: true,
-                        onClick: () => onClose(tab.id),
-                      },
-                    ]
-              }
-            >
-              <ChatRow
-                avatar={<TabAvatar tab={tab} />}
-                title={displayName}
-                badge={tab.type === 'virtual' ? t('chat.sidebar.virtualBadge') : undefined}
-                preview={lastMessage?.content || t('chat.sidebar.emptyPreview')}
-                time={formatRowTime(lastMessage?.timestamp, language)}
-                onOpen={() => onOpenTab(tab.id)}
-              />
-            </SwipeRow>
-          )
-        })}
-      </div>
+      {visibleTabs.map((tab) => {
+        const displayName = getChatTabDisplayName(tab, t('chat.botNameFallback'))
+        const lastMessage = tab.messages[tab.messages.length - 1]
+        return (
+          <SwipeRow
+            key={tab.id}
+            actions={
+              tab.id === 'webui-default'
+                ? []
+                : [
+                    {
+                      label: t('chat.mobile.close'),
+                      destructive: true,
+                      onClick: () => onClose(tab.id),
+                    },
+                  ]
+            }
+          >
+            <ChatRow
+              avatar={<TabAvatar tab={tab} />}
+              title={displayName}
+              badge={tab.type === 'virtual' ? t('chat.sidebar.virtualBadge') : undefined}
+              preview={lastMessage?.content || t('chat.sidebar.emptyPreview')}
+              time={formatRowTime(lastMessage?.timestamp, language)}
+              onOpen={() => onOpenTab(tab.id)}
+            />
+          </SwipeRow>
+        )
+      })}
     </section>
   )
 
   const observedSection = (
+    // 麦麦的聊天流接在后面，按最近活跃排序，行内标「观察」区分
     <section data-mobile-chat-section="observed" aria-label={t('chat.sidebar.observedChats')}>
-      <div data-mobile-chat-screen="true">
-        {observedSessionsError ? (
-          <p className="text-destructive px-5 py-4 text-sm">
-            {t('chat.sidebar.loadObservedChatsFailed')}
-          </p>
-        ) : visibleObserved.length === 0 ? (
-          <p className="text-muted-foreground px-5 py-4 text-sm">
-            {t('chat.sidebar.waitingObservedChats')}
-          </p>
-        ) : (
-          visibleObserved.map((session) => {
-            const status = observedStageStatuses.get(session.sessionId)
-            const latest = observedLatestMessages.get(session.sessionId)
-            const content = latest?.content || latest?.mediaText || t('chat.sidebar.emptyPreview')
-            const preview =
-              status && status.stage && status.stage !== '等待消息' ? (
-                <StageStatusLabel status={status} />
-              ) : session.isGroupChat && latest?.speakerName ? (
-                `${latest.speakerName}: ${content}`
-              ) : (
-                content
-              )
-            return (
-              <SwipeRow
-                key={session.sessionId}
-                actions={[
-                  {
-                    label: t('chat.mobile.settings'),
-                    onClick: () => onOpenObservedSettings(session.sessionId),
-                  },
-                ]}
-              >
-                <ChatRow
-                  avatar={<ObservedAvatar session={session} />}
-                  title={session.sessionName}
-                  preview={preview}
-                  time={formatRowTime(session.lastActivity, language)}
-                  onOpen={() => onOpenObserved(session.sessionId)}
-                />
-              </SwipeRow>
+      {observedSessionsError ? (
+        <p className="text-destructive px-5 py-4 text-sm">
+          {t('chat.sidebar.loadObservedChatsFailed')}
+        </p>
+      ) : visibleObserved.length === 0 ? (
+        <p className="text-muted-foreground px-5 py-4 text-sm">
+          {t('chat.sidebar.waitingObservedChats')}
+        </p>
+      ) : (
+        visibleObserved.map((session) => {
+          const status = observedStageStatuses.get(session.sessionId)
+          const latest = observedLatestMessages.get(session.sessionId)
+          const content = latest?.content || latest?.mediaText || t('chat.sidebar.emptyPreview')
+          const preview =
+            status && status.stage && status.stage !== '等待消息' ? (
+              <StageStatusLabel status={status} />
+            ) : session.isGroupChat && latest?.speakerName ? (
+              `${latest.speakerName}: ${content}`
+            ) : (
+              content
             )
-          })
-        )}
-      </div>
+          return (
+            <SwipeRow
+              key={session.sessionId}
+              actions={[
+                {
+                  label: t('chat.mobile.settings'),
+                  onClick: () => onOpenObservedSettings(session.sessionId),
+                },
+              ]}
+            >
+              <ChatRow
+                avatar={<ObservedAvatar session={session} />}
+                title={session.sessionName}
+                badge={t('chat.sidebar.observedBadge')}
+                preview={preview}
+                time={formatRowTime(session.lastActivity, language)}
+                onOpen={() => onOpenObserved(session.sessionId)}
+              />
+            </SwipeRow>
+          )
+        })
+      )}
     </section>
   )
 
@@ -386,7 +378,10 @@ export function MobileChatList({
         </h1>
       </div>
       <div className="px-4">
-        <label data-mobile-chat-search="true" className="bg-muted flex h-10 items-center gap-2 rounded-xl px-3">
+        <label
+          data-mobile-chat-search="true"
+          className="bg-muted flex h-10 items-center gap-2 rounded-xl px-3"
+        >
           <Search className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />
           <input
             type="search"
@@ -398,33 +393,11 @@ export function MobileChatList({
           />
         </label>
       </div>
-      <div className="px-4">
-        <div
-          role="tablist"
-          aria-label={t('chat.sidebar.conversations')}
-          data-mobile-segmented="true"
-          className="bg-muted grid grid-cols-2 rounded-[10px] p-0.5"
-        >
-          {(['local', 'observed'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={segment === value}
-              data-active={segment === value ? 'true' : 'false'}
-              onClick={() => setSegment(value)}
-              className={cn(
-                'h-[30px] rounded-lg text-sm',
-                segment === value && 'bg-background font-semibold shadow-[0_1px_3px_rgb(0_0_0/0.12)]'
-              )}
-            >
-              {value === 'local' ? t('chat.sidebar.myChats') : t('chat.sidebar.observedChats')}
-            </button>
-          ))}
-        </div>
+      {/* 与麦麦的会话和麦麦的聊天流放在同一个列表里 */}
+      <div data-mobile-chat-screen="true">
+        {localSection}
+        {observedSection}
       </div>
-      {showLocal && localSection}
-      {showObserved && observedSection}
     </div>
   )
 }

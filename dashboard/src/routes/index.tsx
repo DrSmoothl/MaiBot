@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Link } from '@tanstack/react-router'
-import { AlertCircle, ArrowRight, ExternalLink, Pencil, RefreshCw } from 'lucide-react'
+import { AlertCircle, ArrowRight, ExternalLink, Pencil, RefreshCw, Settings } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -980,9 +980,9 @@ function IndexPageContent() {
               to="/settings"
               data-home-avatar-entry="true"
               aria-label={t('home.mobile.openSettings')}
-              className="bg-muted text-foreground flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold"
+              className="bg-muted text-foreground flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
             >
-              {t('mobileNav.botInitial')}
+              <Settings className="h-[22px] w-[22px]" strokeWidth={1.7} aria-hidden="true" />
             </Link>
           }
         />

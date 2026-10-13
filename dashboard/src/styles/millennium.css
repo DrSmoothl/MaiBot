@@ -3666,9 +3666,8 @@
   width: 32px;
 }
 
-/* 搜索键与收起后的当前标签键 */
-:root[data-dashboard-style='millennium'] [data-mobile-tabbar-search='true'],
-:root[data-dashboard-style='millennium'] [data-mobile-tabbar-expand='true'] {
+/* 搜索键 */
+:root[data-dashboard-style='millennium'] [data-mobile-tabbar-search='true'] {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   background-color: var(--mil-key);
@@ -3677,12 +3676,6 @@
   color: var(--mil-ink);
   height: 58px;
   padding-bottom: 7px;
-}
-
-:root[data-dashboard-style='millennium'] [data-mobile-tabbar-expand='true'] {
-  background-color: var(--mil-on);
-  box-shadow: var(--mil-pressed);
-  color: var(--mil-on-ink);
 }
 
 /* 首页右上角的头像入口：一枚键帽 */

@@ -1533,7 +1533,7 @@
     },
     "mobile": {
       "title": "MaiBot",
-      "openSettings": "マイページと WebUI 設定"
+      "openSettings": "WebUI 設定"
     }
   },
   "mobileNav": {

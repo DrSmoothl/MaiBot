@@ -40,10 +40,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { logWebSocket, type LogEntry } from '@/lib/log-websocket'
 import { getSetting, setSetting } from '@/lib/settings-manager'
 import { cn } from '@/lib/utils'
@@ -237,6 +246,9 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
     clampNumber(getSetting('logColumnWidthExtra'), COLUMN_WIDTH_EXTRA_MIN, COLUMN_WIDTH_EXTRA_MAX)
   )
   const [filtersOpen, setFiltersOpen] = useState(() => getSetting('logFiltersOpen'))
+  // 手机上的筛选弹层与桌面端的展开状态分开，避免把弹层的开关记进设置
+  const isMobileViewport = useMediaQuery('(max-width: 1023.98px)')
+  const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
   const [toolbarRoot, setToolbarRoot] = useState<HTMLElement | null>(null)
   const parentRef = useRef<HTMLDivElement>(null)
 
@@ -513,139 +525,9 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
     }
   }, [filteredLogs.length, autoScroll, rowVirtualizer])
 
-  const toolbarContent = (
-    <Collapsible open={filtersOpen} onOpenChange={handleFiltersOpenChange}>
-      <div className="grid w-full gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(620px,760px)]">
-        <div
-          className={cn(
-            'flex min-h-9 min-w-0 flex-wrap content-start items-start gap-1.5',
-            'border-border/80 bg-background/35 overflow-y-auto border p-1.5',
-            '[scrollbar-gutter:stable]',
-            filtersOpen ? 'max-h-[104px] lg:h-0 lg:max-h-none lg:min-h-full' : 'h-10 max-h-10'
-          )}
-          aria-label="模块显示筛选"
-        >
-          {uniqueModules.map(({ id, displayName }) => {
-            const visible = !hiddenModules.has(id)
-            return (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={visible}
-                aria-label={`${visible ? '隐藏' : '显示'} ${displayName}`}
-                title={`${visible ? '隐藏' : '显示'} ${displayName}（${id}）`}
-                onClick={() => toggleModuleVisibility(id)}
-                className={cn(
-                  'h-7 max-w-full border px-2 text-xs font-medium transition-colors',
-                  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none',
-                  'active:translate-y-px',
-                  visible
-                    ? 'border-primary/60 bg-primary/10 text-foreground hover:bg-primary/20'
-                    : 'border-border/60 bg-muted/30 text-muted-foreground/45 hover:text-muted-foreground'
-                )}
-              >
-                <span className="block max-w-40 truncate">{displayName}</span>
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-2">
-          <div className="flex w-full flex-wrap items-center gap-1.5 lg:justify-end">
-            <div className="relative min-w-[180px] flex-1 lg:max-w-64">
-              <Search className="text-muted-foreground absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2" />
-              <Input
-                placeholder="搜索日志..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                className="h-8 pr-8 pl-8 text-xs sm:text-sm"
-              />
-              {searchQuery && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute top-1/2 right-0.5 h-7 w-7 -translate-y-1/2"
-                  title="清空搜索"
-                  aria-label="清空搜索"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-
-            <Button
-              variant={autoScroll ? 'default' : 'outline'}
-              size="sm"
-              onClick={toggleAutoScroll}
-              className="h-8 px-2"
-              title={autoScroll ? '自动滚动' : '已暂停'}
-            >
-              {autoScroll ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-              <span className="ml-1 text-xs">{autoScroll ? '滚动' : '暂停'}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleClear}
-              disabled={logs.length === 0}
-              className="h-8 px-2"
-              title="清空日志"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span className="ml-1 text-xs">清空</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExport}
-              disabled={filteredLogs.length === 0}
-              className="h-8 px-2"
-              title="导出日志"
-            >
-              <Download className="h-3.5 w-3.5" />
-              <span className="ml-1 text-xs">导出</span>
-            </Button>
-
-            <CollapsibleTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 px-2"
-                title={filtersOpen ? '收起筛选' : '展开筛选'}
-              >
-                <Filter className="h-3.5 w-3.5" />
-                <span className="ml-1 text-xs">筛选</span>
-                {filtersOpen ? (
-                  <ChevronUp className="ml-1 h-3.5 w-3.5" />
-                ) : (
-                  <ChevronDown className="ml-1 h-3.5 w-3.5" />
-                )}
-              </Button>
-            </CollapsibleTrigger>
-
-            <div className="text-muted-foreground ml-auto flex items-center gap-2 text-xs whitespace-nowrap lg:ml-1">
-              <span className="flex items-center gap-1.5">
-                <span
-                  className={cn(
-                    'h-2 w-2 rounded-full',
-                    connected ? 'animate-pulse bg-green-500' : 'bg-red-500'
-                  )}
-                />
-                {connected ? '已连接' : '未连接'}
-              </span>
-              <span>
-                <span className="font-mono">
-                  {filteredLogs.length} / {logs.length}
-                </span>
-                <span className="ml-1">条日志</span>
-              </span>
-            </div>
-          </div>
-
-          <CollapsibleContent className="w-full space-y-2">
+  // 级别、时间与显示设置：桌面端在工具栏下就地展开，手机上放进底部弹层
+  const filterFields = (
+    <>
             {/* 级别筛选 */}
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-2">
               <Select
@@ -797,9 +679,171 @@ function LogTerminalPane({ toolbarContainerId, toolbarVisible }: LogTerminalPane
                 <span className="text-muted-foreground w-9 text-xs">+{columnWidthExtra}</span>
               </div>
             </div>
-          </CollapsibleContent>
+    </>
+  )
+
+  const toolbarContent = (
+    <Collapsible open={filtersOpen} onOpenChange={handleFiltersOpenChange}>
+      <div className="grid w-full gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(620px,760px)]">
+        <div
+          className={cn(
+            'flex min-h-9 min-w-0 flex-wrap content-start items-start gap-1.5',
+            'border-border/80 bg-background/35 overflow-y-auto border p-1.5',
+            '[scrollbar-gutter:stable]',
+            filtersOpen ? 'max-h-[104px] lg:h-0 lg:max-h-none lg:min-h-full' : 'h-10 max-h-10'
+          )}
+          aria-label="模块显示筛选"
+        >
+          {uniqueModules.map(({ id, displayName }) => {
+            const visible = !hiddenModules.has(id)
+            return (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={visible}
+                aria-label={`${visible ? '隐藏' : '显示'} ${displayName}`}
+                title={`${visible ? '隐藏' : '显示'} ${displayName}（${id}）`}
+                onClick={() => toggleModuleVisibility(id)}
+                className={cn(
+                  'h-7 max-w-full border px-2 text-xs font-medium transition-colors',
+                  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none',
+                  'active:translate-y-px',
+                  visible
+                    ? 'border-primary/60 bg-primary/10 text-foreground hover:bg-primary/20'
+                    : 'border-border/60 bg-muted/30 text-muted-foreground/45 hover:text-muted-foreground'
+                )}
+              >
+                <span className="block max-w-40 truncate">{displayName}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-2">
+          <div className="flex w-full flex-wrap items-center gap-1.5 lg:justify-end">
+            <div className="relative min-w-[180px] flex-1 lg:max-w-64">
+              <Search className="text-muted-foreground absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2" />
+              <Input
+                placeholder="搜索日志..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                className="h-8 pr-8 pl-8 text-xs sm:text-sm"
+              />
+              {searchQuery && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute top-1/2 right-0.5 h-7 w-7 -translate-y-1/2"
+                  title="清空搜索"
+                  aria-label="清空搜索"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+
+            <Button
+              variant={autoScroll ? 'default' : 'outline'}
+              size="sm"
+              onClick={toggleAutoScroll}
+              className="h-8 px-2"
+              title={autoScroll ? '自动滚动' : '已暂停'}
+            >
+              {autoScroll ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              <span className="ml-1 text-xs">{autoScroll ? '滚动' : '暂停'}</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClear}
+              disabled={logs.length === 0}
+              className="h-8 px-2"
+              title="清空日志"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="ml-1 text-xs">清空</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={filteredLogs.length === 0}
+              className="h-8 px-2"
+              title="导出日志"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="ml-1 text-xs">导出</span>
+            </Button>
+
+            {isMobileViewport && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2"
+                onClick={() => setMobileFilterOpen(true)}
+                data-log-mobile-filter-button="true"
+              >
+                <Filter className="h-3.5 w-3.5" />
+                <span className="ml-1 text-xs">筛选</span>
+              </Button>
+            )}
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn('h-8 px-2', isMobileViewport && 'hidden')}
+                title={filtersOpen ? '收起筛选' : '展开筛选'}
+              >
+                <Filter className="h-3.5 w-3.5" />
+                <span className="ml-1 text-xs">筛选</span>
+                {filtersOpen ? (
+                  <ChevronUp className="ml-1 h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                )}
+              </Button>
+            </CollapsibleTrigger>
+
+            <div className="text-muted-foreground ml-auto flex items-center gap-2 text-xs whitespace-nowrap lg:ml-1">
+              <span className="flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    'h-2 w-2 rounded-full',
+                    connected ? 'animate-pulse bg-green-500' : 'bg-red-500'
+                  )}
+                />
+                {connected ? '已连接' : '未连接'}
+              </span>
+              <span>
+                <span className="font-mono">
+                  {filteredLogs.length} / {logs.length}
+                </span>
+                <span className="ml-1">条日志</span>
+              </span>
+            </div>
+          </div>
+
+          {/* 手机上筛选改为底部弹层，这里只在桌面端就地展开 */}
+          {!isMobileViewport && (
+            <CollapsibleContent className="w-full space-y-2">{filterFields}</CollapsibleContent>
+          )}
         </div>
       </div>
+      <Dialog open={mobileFilterOpen} onOpenChange={setMobileFilterOpen}>
+        <DialogContent data-log-filter-sheet="true">
+          <DialogHeader>
+            <DialogTitle>筛选</DialogTitle>
+            <DialogDescription className="sr-only">日志级别、时间范围与显示设置</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">{filterFields}</div>
+          <DialogFooter>
+            <Button onClick={() => setMobileFilterOpen(false)}>完成</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Collapsible>
   )
 

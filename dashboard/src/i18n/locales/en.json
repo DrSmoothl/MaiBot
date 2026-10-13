@@ -1600,7 +1600,7 @@
     },
     "mobile": {
       "title": "MaiBot",
-      "openSettings": "Me & WebUI settings"
+      "openSettings": "WebUI settings"
     }
   },
   "mobileNav": {

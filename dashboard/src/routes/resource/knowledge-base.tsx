@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
+import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { MemoryDeleteDialog } from '@/components/memory/MemoryDeleteDialog'
 import { MemoryEpisodeManager } from '@/components/memory/MemoryEpisodeManager'
 import {
@@ -992,6 +994,17 @@ export function KnowledgeBasePage() {
 
   return (
     <div className="bg-background flex h-full flex-col">
+      {/* 手机页头右上角：记忆状态（含运行自检） */}
+      <MobileHeaderActions>
+        <button
+          type="button"
+          onClick={() => setRuntimeStatusDialogOpen(true)}
+          data-mobile-header-text-button="true"
+          className={cn('h-11 rounded-full px-4 text-[15px]', MOBILE_GLASS_CLASS)}
+        >
+          记忆状态
+        </button>
+      </MobileHeaderActions>
       <div className="flex-1 overflow-auto">
         <div className="memory-console-density mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 py-4 xl:px-5">
           <div className="hidden">

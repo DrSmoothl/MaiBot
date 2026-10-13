@@ -1580,7 +1580,7 @@
     },
     "mobile": {
       "title": "MaiBot",
-      "openSettings": "내 정보 및 WebUI 설정"
+      "openSettings": "WebUI 설정"
     }
   },
   "mobileNav": {

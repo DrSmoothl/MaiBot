@@ -1,11 +1,6 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
-import {
-  ChevronRight,
-  House,
-  LayoutGrid,
-  MessageCircle,
-  Search,
-} from 'lucide-react'
+import { ChevronRight, House, LayoutGrid, MessageCircle, Search } from 'lucide-react'
+import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LucideIcon } from 'lucide-react'
@@ -36,9 +31,12 @@ const TABS: MobileTabDef[] = [
 
 // 与 Tailwind 的 lg 断点对齐：桌面端完全不挂载标签栏，也就不会订阅麦麦实时状态。
 const MOBILE_MEDIA_QUERY = '(max-width: 1023.98px)'
+
 // 页面向下滚动超过该距离后标签栏收成胶囊
 const COLLAPSE_SCROLL_TOP = 48
 const SCROLL_DELTA_THRESHOLD = 6
+// 收起 / 展开用同一条弹簧：尺寸、位置连续过渡，不跳变
+const DOCK_SPRING = { type: 'spring', stiffness: 420, damping: 36, mass: 0.8 } as const
 
 /** 底部浮层占用的高度写到根元素上，页面据此给内容留出底部空间 */
 const DOCK_HEIGHT_CSS_VAR = '--mobile-dock-height'
@@ -142,8 +140,6 @@ function TabBarDock({ onSearch }: Pick<MobileTabBarProps, 'onSearch'>) {
       latestStatus.sessionName ??
       latestStatus.sessionId.slice(0, 8))
     : ''
-  const activeDef = TABS.find((def) => def.tab === activeTab) ?? TABS[0]
-  const ActiveIcon = activeDef.icon
 
   useDockHeight(dockRef)
 
@@ -154,8 +150,11 @@ function TabBarDock({ onSearch }: Pick<MobileTabBarProps, 'onSearch'>) {
     void navigate({ to: '/chat', search: { observe: latestStatus.sessionId } })
   }
 
+  // 麦麦实时条：展开时在标签栏上方，收起时移进同一行；两处共用 layoutId，位置与尺寸连续过渡
   const liveStrip = latestStatus && (
-    <button
+    <motion.button
+      layoutId="mobile-live-strip"
+      transition={DOCK_SPRING}
       type="button"
       data-mobile-live-strip="true"
       onClick={openLive}
@@ -166,102 +165,109 @@ function TabBarDock({ onSearch }: Pick<MobileTabBarProps, 'onSearch'>) {
         MOBILE_GLASS_CLASS
       )}
     >
-      <span className="bg-foreground text-background flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold">
+      <motion.span
+        layout="position"
+        className="bg-foreground text-background flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
+      >
         {t('mobileNav.botInitial')}
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
+      </motion.span>
+      <motion.span layout="position" className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-sm font-semibold">
           {liveSessionName} · <StageStatusLabel status={latestStatus} />
         </span>
         {!collapsed && latestStatus.detail && (
           <span className="text-muted-foreground truncate text-xs">{latestStatus.detail}</span>
         )}
-      </span>
+      </motion.span>
       {!collapsed && (
         <span className="flex h-10 w-10 shrink-0 items-center justify-center">
           <ChevronRight className="h-[18px] w-[18px]" strokeWidth={1.7} aria-hidden="true" />
         </span>
       )}
-    </button>
+    </motion.button>
   )
 
   return (
-    <div
-      ref={dockRef}
-      data-mobile-tabbar="true"
-      data-collapsed={collapsed ? 'true' : 'false'}
-      className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+14px)] z-40 flex flex-col gap-2.5"
-    >
-      {showLive && !collapsed && liveStrip}
-      {collapsed ? (
-        // 收起态：只保留当前标签（点按展开）与麦麦实时，iOS 26 的标签栏最小化形态
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            data-mobile-tabbar-expand="true"
-            aria-label={t(activeDef.labelKey)}
-            onClick={() => setCollapsed(false)}
-            className={cn(
-              'text-primary flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full',
-              MOBILE_GLASS_CLASS
-            )}
-          >
-            <ActiveIcon className="h-[22px] w-[22px]" strokeWidth={1.7} aria-hidden="true" />
-          </button>
-          {showLive ? liveStrip : <span className="flex-1" />}
-          <button
-            type="button"
-            data-mobile-tabbar-search="true"
-            onClick={onSearch}
-            aria-label={t('mobileNav.search')}
-            className={cn(
-              'text-foreground flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full',
-              MOBILE_GLASS_CLASS
-            )}
-          >
-            <Search className="h-[22px] w-[22px]" strokeWidth={1.7} aria-hidden="true" />
-          </button>
+    <MotionConfig reducedMotion="user">
+      <LayoutGroup>
+        <div
+          ref={dockRef}
+          data-mobile-tabbar="true"
+          data-collapsed={collapsed ? 'true' : 'false'}
+          className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+14px)] z-40 flex flex-col gap-2.5"
+        >
+          {showLive && !collapsed && liveStrip}
+          <nav aria-label={t('mobileNav.label')} className="flex items-center gap-2.5">
+            {/* 收起时只留下当前标签，其余标签淡出，容器宽度随之收缩成圆键 */}
+            <motion.div
+              layout
+              transition={DOCK_SPRING}
+              data-mobile-tabbar-tabs="true"
+              onClick={collapsed ? () => setCollapsed(false) : undefined}
+              className={cn(
+                'flex rounded-full p-1',
+                collapsed ? 'h-[52px] w-[52px] flex-none' : 'h-[62px] flex-1',
+                MOBILE_GLASS_CLASS
+              )}
+            >
+              <AnimatePresence initial={false} mode="popLayout">
+                {TABS.filter(({ tab }) => !collapsed || tab === activeTab).map(
+                  ({ tab, to, labelKey, icon: Icon }) => {
+                    const active = activeTab === tab
+                    return (
+                      <motion.div
+                        key={tab}
+                        layout
+                        transition={DOCK_SPRING}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        className="flex min-w-0 flex-1"
+                      >
+                        <Link
+                          to={to}
+                          data-mobile-tab="true"
+                          data-active={active ? 'true' : 'false'}
+                          aria-current={active ? 'page' : undefined}
+                          aria-label={collapsed ? t(labelKey) : undefined}
+                          onClick={collapsed ? (event) => event.preventDefault() : undefined}
+                          className={cn(
+                            'flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[10px] font-semibold transition-colors',
+                            active ? 'bg-foreground/[0.06] text-primary' : 'text-foreground'
+                          )}
+                        >
+                          <Icon
+                            className="h-[22px] w-[22px]"
+                            strokeWidth={1.7}
+                            aria-hidden="true"
+                          />
+                          {!collapsed && <span className="truncate">{t(labelKey)}</span>}
+                        </Link>
+                      </motion.div>
+                    )
+                  }
+                )}
+              </AnimatePresence>
+            </motion.div>
+            {collapsed && (showLive ? liveStrip : <span className="flex-1" />)}
+            <motion.button
+              layout
+              transition={DOCK_SPRING}
+              type="button"
+              data-mobile-tabbar-search="true"
+              onClick={onSearch}
+              aria-label={t('mobileNav.search')}
+              className={cn(
+                'text-foreground flex shrink-0 items-center justify-center rounded-full',
+                collapsed ? 'h-[52px] w-[52px]' : 'h-[62px] w-[62px]',
+                MOBILE_GLASS_CLASS
+              )}
+            >
+              <Search className="h-[22px] w-[22px]" strokeWidth={1.7} aria-hidden="true" />
+            </motion.button>
+          </nav>
         </div>
-      ) : (
-        <nav aria-label={t('mobileNav.label')} className="flex h-[62px] gap-2.5">
-          <div
-            data-mobile-tabbar-tabs="true"
-            className={cn('grid h-full flex-1 grid-cols-3 rounded-full p-1', MOBILE_GLASS_CLASS)}
-          >
-            {TABS.map(({ tab, to, labelKey, icon: Icon }) => {
-              const active = activeTab === tab
-              return (
-                <Link
-                  key={tab}
-                  to={to}
-                  data-mobile-tab="true"
-                  data-active={active ? 'true' : 'false'}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-full text-[10px] font-semibold transition-colors',
-                    active ? 'bg-foreground/[0.06] text-primary' : 'text-foreground'
-                  )}
-                >
-                  <Icon className="h-[22px] w-[22px]" strokeWidth={1.7} aria-hidden="true" />
-                  <span className="truncate">{t(labelKey)}</span>
-                </Link>
-              )
-            })}
-          </div>
-          <button
-            type="button"
-            data-mobile-tabbar-search="true"
-            onClick={onSearch}
-            aria-label={t('mobileNav.search')}
-            className={cn(
-              'text-foreground flex h-[62px] w-[62px] shrink-0 items-center justify-center rounded-full',
-              MOBILE_GLASS_CLASS
-            )}
-          >
-            <Search className="h-[22px] w-[22px]" strokeWidth={1.7} aria-hidden="true" />
-          </button>
-        </nav>
-      )}
-    </div>
+      </LayoutGroup>
+    </MotionConfig>
   )
 }
