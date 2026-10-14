@@ -947,8 +947,13 @@ function IndexPageContent() {
   )
   const versionsMismatch =
     versionCompatibility?.status !== undefined && versionCompatibility.status !== 'compatible'
+  // 移动端由 Layout 的 main 滚动，内层按内容撑高并允许滚动传递，避免拦截触摸滑动。
   return (
-    <ScrollArea className="h-full" scrollbars="vertical">
+    <ScrollArea
+      className="h-full max-lg:h-auto"
+      viewportClassName="max-lg:h-auto max-lg:overscroll-auto"
+      scrollbars="vertical"
+    >
       <div data-home-page="true" className="space-y-2 p-4 sm:space-y-4 sm:p-6">
         {dashboardError && (
           <Card className="border-destructive/50 bg-destructive/5">

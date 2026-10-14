@@ -2,8 +2,8 @@
  * ProfileSearchPanel —— 记忆查询 → 「人物画像」子视图。
  *
  * 只负责检索与查看：查询卡与人物列表占据整行，精确/模糊两种查询方式合成一个切换按钮，
- * 切换时输入区做纵向滚动过渡；点击候选项弹出画像详情弹窗（快照文本、覆写与自动画像切换、
- * 原始响应），与文字记录「点列表项开详情」的交互一致，详情不再常驻占位。
+ * 切换时输入区做纵向滚动过渡；点击候选项从右侧滑入画像详情覆盖面板（快照文本、
+ * 覆写与自动画像切换、原始响应），详情不再常驻占位。
  * 支撑证据的纠错、别名维护、画像覆写属于检修动作，在记忆检修的 ProfileMaintenancePanel。
  */
 import { ArrowLeftRight, ChevronDown, Loader2, RefreshCw, Search } from 'lucide-react'
@@ -11,7 +11,6 @@ import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   Dialog,
@@ -79,179 +78,189 @@ export function ProfileSearchPanel({ profile }: ProfileSearchPanelProps) {
     selectedProfile?.person_name || selectedPersonId || String(queryResult?.person_id ?? '')
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-4 w-4" />
-            人物画像查询
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* 精确/模糊合成一个无文字切换按钮，放在输入框同一行末尾；
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+      {/* 查询栏放在列表卡之外（与文字记录一致），列表卡只含滚动列表，滚动时顶线与边框不会被带走 */}
+      <div className="shrink-0 space-y-3">
+        {/* 精确/模糊合成一个无文字切换按钮，放在输入框同一行末尾；
               点一次换成另一种，再点一次换回来。
               切换效果是纵向滚动：输入区在 overflow-hidden 的窗口里滚动，不做淡入淡出。
               popLayout 让退场内容立刻脱离文档流，容器高度由新内容决定，不会先塌再长。 */}
-          {/* 精确/模糊合成一个无文字切换按钮：按钮固定在行尾不参与滚动，
+        {/* 精确/模糊合成一个无文字切换按钮：按钮固定在行尾不参与滚动，
               只有左侧输入区在 overflow-hidden 的窗口里纵向滚动。
               popLayout 让退场内容脱离文档流，容器高度始终由新内容决定，不会先塌再长。 */}
-          <div className="flex items-end gap-3">
-            <div className="relative min-w-0 flex-1 overflow-hidden">
-              <AnimatePresence initial={false} mode="popLayout">
-                <motion.div
-                  key={queryMode}
-                  className="flex w-full items-end gap-3"
-                  initial={reduceMotion ? false : { y: '100%' }}
-                  animate={{ y: 0 }}
-                  exit={reduceMotion ? undefined : { y: '-100%' }}
-                  transition={{ duration: reduceMotion ? 0 : 0.24, ease: 'easeInOut' }}
-                >
-                  {queryMode === 'exact' ? (
-                    <>
-                      {/* 平台 + 账号两个定位条件；匹配到的人物直接看下方结果列表 */}
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Label htmlFor="profile-platform">平台</Label>
-                        <Input
-                          id="profile-platform"
-                          value={queryPlatform}
-                          onChange={(event) => setQueryPlatform(event.target.value)}
-                          placeholder="例如 qq、telegram、webui"
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Label htmlFor="profile-user-id">用户账号</Label>
-                        <Input
-                          id="profile-user-id"
-                          value={queryUserId}
-                          onChange={(event) => setQueryUserId(event.target.value)}
-                          placeholder="输入平台侧 user_id"
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="min-w-0 flex-1 space-y-2">
-                      {/* 关键词由后端解析：姓名、平台昵称、群名片与 person_id 都走这一个入口 */}
-                      <Label htmlFor="profile-keyword">人物关键词</Label>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="relative min-w-0 basis-[calc(100%_-_4rem)] flex-1 overflow-hidden sm:basis-0">
+            <AnimatePresence initial={false} mode="popLayout">
+              <motion.div
+                key={queryMode}
+                className="flex w-full items-end gap-3"
+                initial={reduceMotion ? false : { y: '100%' }}
+                animate={{ y: 0 }}
+                exit={reduceMotion ? undefined : { y: '-100%' }}
+                transition={{ duration: reduceMotion ? 0 : 0.24, ease: 'easeInOut' }}
+              >
+                {queryMode === 'exact' ? (
+                  <>
+                    {/* 平台 + 账号两个定位条件；匹配到的人物直接看下方结果列表 */}
+                    <div className="min-w-0 flex-1">
+                      <Label htmlFor="profile-platform" className="sr-only">平台</Label>
                       <Input
-                        id="profile-keyword"
-                        value={queryKeyword}
-                        onChange={(event) => setQueryKeyword(event.target.value)}
-                        placeholder="人物名称、群名片或 person_id"
+                        id="profile-platform"
+                        value={queryPlatform}
+                        onChange={(event) => setQueryPlatform(event.target.value)}
+                        placeholder="例如 qq、telegram、webui"
                       />
                     </div>
-                  )}
-                </motion.div>
-              </AnimatePresence>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="shrink-0"
-              aria-label={queryMode === 'exact' ? '切换为模糊查询' : '切换为精确查询'}
-              title={
-                queryMode === 'exact'
-                  ? '当前精确查询（按平台与用户账号定位），点击切换为模糊查询'
-                  : '当前模糊查询（按关键词检索），点击切换为精确查询'
-              }
-              onClick={() => setQueryMode(queryMode === 'exact' ? 'fuzzy' : 'exact')}
-            >
-              <ArrowLeftRight className="h-4 w-4" />
-            </Button>
+                    <div className="min-w-0 flex-1">
+                      <Label htmlFor="profile-user-id" className="sr-only">用户账号</Label>
+                      <Input
+                        id="profile-user-id"
+                        value={queryUserId}
+                        onChange={(event) => setQueryUserId(event.target.value)}
+                        placeholder="输入平台侧 user_id"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="min-w-0 flex-1">
+                    {/* 关键词由后端解析：姓名、平台昵称、群名片与 person_id 都走这一个入口 */}
+                    <Label htmlFor="profile-keyword" className="sr-only">人物关键词</Label>
+                    <Input
+                      id="profile-keyword"
+                      value={queryKeyword}
+                      onChange={(event) => setQueryKeyword(event.target.value)}
+                      placeholder="人物名称、群名片或 person_id"
+                    />
+                  </div>
+                )}
+              </motion.div>
+            </AnimatePresence>
           </div>
-
-          <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="shrink-0"
+            aria-label={queryMode === 'exact' ? '切换为模糊查询' : '切换为精确查询'}
+            title={
+              queryMode === 'exact'
+                ? '当前精确查询（按平台与用户账号定位），点击切换为模糊查询'
+                : '当前模糊查询（按关键词检索），点击切换为精确查询'
+            }
+            onClick={() => setQueryMode(queryMode === 'exact' ? 'fuzzy' : 'exact')}
+          >
+            <ArrowLeftRight className="h-4 w-4" />
+          </Button>
+          <div className="flex shrink-0 flex-wrap items-end gap-2">
             <Button onClick={() => void submitQuery()} disabled={querying}>
               <Search className="mr-2 h-4 w-4" />
-              查询人物画像
+              查询
             </Button>
             <Button variant="outline" onClick={() => void loadProfiles()} disabled={loading}>
               <RefreshCw className={cn('mr-2 h-4 w-4', loading && 'animate-spin')} />
               查看画像库
             </Button>
           </div>
+        </div>
 
-          {querying ? (
-            <div className="text-muted-foreground flex items-center gap-2 text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              正在查询人物画像
-            </div>
-          ) : null}
+        {querying ? (
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            正在查询人物画像
+          </div>
+        ) : null}
+      </div>
 
-          <ScrollArea
-            aria-label="人物画像列表"
-            className="max-h-[clamp(32.5rem,70vh,52rem)]"
-            viewportClassName="max-h-[clamp(32.5rem,70vh,52rem)]"
-          >
-            <Table>
-              <TableHeader className="bg-background sticky top-0">
-                <TableRow>
-                  <TableHead>人物</TableHead>
-                  <TableHead>版本</TableHead>
-                  <TableHead>更新时间</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {profiles.length > 0 ? (
-                  profiles.map((item) => (
-                    <TableRow
-                      key={item.person_id}
-                      className={cn(
-                        'cursor-pointer',
-                        selectedPersonId === item.person_id && 'bg-muted/60'
-                      )}
-                      onClick={() => selectProfile(item.person_id)}
-                    >
-                      <TableCell>
-                        <div className="font-medium break-all">
-                          {item.person_name || item.person_id}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <ScrollArea
+          aria-label="人物画像列表"
+          data-memory-delete-screen="true"
+          className="h-[60dvh] min-h-0 flex-none rounded-lg border bg-background lg:h-auto lg:flex-1 [&_[data-dashboard-table-wrapper]]:overflow-visible">
+          <Table>
+            <TableHeader className="bg-background sticky top-0 z-10 [&_th]:shadow-[inset_0_1px_0_var(--mil-line,var(--border)),inset_0_-1px_0_var(--mil-line,var(--border))] [&_tr]:border-b-0">
+              <TableRow>
+                <TableHead>人物</TableHead>
+                <TableHead>版本</TableHead>
+                <TableHead>更新时间</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {profiles.length > 0 ? (
+                profiles.map((item) => (
+                  <TableRow
+                    key={item.person_id}
+                    data-profile-person-row="true"
+                    className={cn(
+                      'cursor-pointer',
+                      selectedPersonId === item.person_id && 'bg-muted/60'
+                    )}
+                    onClick={() => selectProfile(item.person_id)}
+                  >
+                    <TableCell>
+                      <div className="font-medium break-all">
+                        {item.person_name || item.person_id}
+                      </div>
+                      {item.person_name ? (
+                        <div className="text-muted-foreground mt-0.5 font-mono text-xs break-all">
+                          {item.person_id}
                         </div>
-                        {item.person_name ? (
-                          <div className="text-muted-foreground mt-0.5 font-mono text-xs break-all">
-                            {item.person_id}
-                          </div>
-                        ) : null}
-                        {describeProfileIdentity(item).length > 0 ? (
-                          <div className="text-muted-foreground mt-1 text-xs break-all">
-                            {describeProfileIdentity(item).join(' · ')}
-                          </div>
-                        ) : null}
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {item.has_manual_override ? (
-                            <Badge variant="secondary">画像覆写</Badge>
-                          ) : null}
-                          {item.source_note && !item.source_note.startsWith('sdk_memory_kernel.') ? (
-                            <Badge variant="outline">{item.source_note}</Badge>
-                          ) : null}
+                      ) : null}
+                      {describeProfileIdentity(item).length > 0 ? (
+                        <div className="text-muted-foreground mt-1 text-xs break-all">
+                          {describeProfileIdentity(item).join(' · ')}
                         </div>
-                      </TableCell>
-                      <TableCell>{Number(item.profile_version ?? 0)}</TableCell>
-                      <TableCell>{formatMemoryTime(item.updated_at)}</TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-muted-foreground text-center">
-                      {loading ? (
-                        <ThinkingIllustration size="sm" className="mx-auto" />
-                      ) : profileListMode === 'search' ? (
-                        '没有匹配的人物画像'
-                      ) : (
-                        '还没有人物画像快照'
-                      )}
+                      ) : null}
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {item.has_manual_override ? (
+                          <Badge variant="secondary">画像覆写</Badge>
+                        ) : null}
+                        {item.source_note && !item.source_note.startsWith('sdk_memory_kernel.') ? (
+                          <Badge variant="outline">{item.source_note}</Badge>
+                        ) : null}
+                      </div>
                     </TableCell>
+                    <TableCell>{Number(item.profile_version ?? 0)}</TableCell>
+                    <TableCell>{formatMemoryTime(item.updated_at)}</TableCell>
                   </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        </CardContent>
-      </Card>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-muted-foreground text-center">
+                    {loading ? (
+                      <ThinkingIllustration size="sm" className="mx-auto" />
+                    ) : profileListMode === 'search' ? (
+                      '没有匹配的人物画像'
+                    ) : (
+                      '还没有人物画像快照'
+                    )}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ScrollArea>
+      </div>
 
-      {/* 画像详情改为弹窗：与文字记录点列表项开详情一致，不再常驻占右侧栏 */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-h-[85vh] [--dialog-width:48rem]">
-          <DialogHeader className="space-y-1 text-left">
+      {/* 画像详情从右侧滑入覆盖页面，关闭后保留列表的选择与滚动位置。 */}
+      <Dialog modal={false} open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent
+          side="right"
+          hideOverlay
+          className="[--dialog-width:36rem]"
+          onInteractOutside={(event) => {
+            // 焦点移出不关闭非模态浮层，否则先点卡片再切换人物会先关闭、再重新播放入场动画。
+            // 点击另一人物时直接切换详情；其他外部点击保持默认的关闭行为。
+            const originalEvent = event.detail.originalEvent
+            const target = originalEvent.target
+            if (
+              originalEvent.type === 'focusin' ||
+              (target instanceof Element && target.closest('[data-profile-person-row="true"]'))
+            ) {
+              event.preventDefault()
+            }
+          }}
+        >
+          <DialogHeader className="space-y-1 pr-6 text-left">
             <DialogTitle className="text-sm">画像详情</DialogTitle>
             <DialogDescription>
               {detailPersonLabel
@@ -307,8 +316,12 @@ export function ProfileSearchPanel({ profile }: ProfileSearchPanelProps) {
                   className="min-h-[180px]"
                   placeholder="当前没有画像文本"
                 />
-                <div className="text-sm text-muted-foreground">
-                  待确认事实 {currentProfileEvidence?.uncertain_fact_count ?? queryResult?.uncertain_fact_count ?? 0} 条；画像正文只展示摘要。
+                <div className="text-muted-foreground text-sm">
+                  待确认事实{' '}
+                  {currentProfileEvidence?.uncertain_fact_count ??
+                    queryResult?.uncertain_fact_count ??
+                    0}{' '}
+                  条；画像正文只展示摘要。
                 </div>
 
                 {/* 证据纠错与刷新属于检修动作，已移到记忆检修 → 画像维护 */}

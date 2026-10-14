@@ -21,7 +21,6 @@ import {
   MemoryMaintenanceManager,
   type MemoryMaintenanceAction,
 } from '@/components/memory/MemoryMaintenanceManager'
-import { MemoryMiniTabs } from '@/components/memory/MemoryMiniTabs'
 import { MemoryTimelineManager } from '@/components/memory/MemoryTimelineManager'
 import { RoutePendingFallback } from '@/components/route-pending-fallback'
 import { AccentPanel } from '@/components/ui/accent-panel'
@@ -79,6 +78,7 @@ import { KnowledgeGraphPage } from './knowledge-graph'
 
 type MemoryConsoleTab =
   | 'records'
+  | 'profiles'
   | 'images'
   | 'graph'
   | 'timeline'
@@ -93,6 +93,7 @@ type LoadableMemoryTab = Extract<
 
 const MEMORY_CONSOLE_TABS: MemoryConsoleTab[] = [
   'records',
+  'profiles',
   'images',
   'graph',
   'timeline',
@@ -101,24 +102,11 @@ const MEMORY_CONSOLE_TABS: MemoryConsoleTab[] = [
   'delete',
 ]
 
-// 记忆查询下的内容切面：文字记录与人物画像共用「记忆查询」这一入口
-type MemoryViewMode = 'records' | 'profiles'
-
-const MEMORY_VIEW_OPTIONS = [
-  { value: 'records', label: '文字记录', description: '查询数据库权威记录与关联内容' },
-  { value: 'profiles', label: '人物画像', description: '按身份检索人物画像快照' },
-] as const satisfies ReadonlyArray<{
-  value: MemoryViewMode
-  label: string
-  description: string
-}>
-
 // 情景记忆管理并入记忆检修后的子模式，人物画像维护与纠错历史同样并入检修
 type InspectionMode = 'maintenance' | 'correction' | 'tuning' | 'episodes' | 'profiles' | 'feedback'
 
 interface KnowledgeBaseDeepLinkState {
   tab: MemoryConsoleTab
-  memoryView?: MemoryViewMode
   inspectionMode?: InspectionMode
   chatId?: string
   timeStart?: number
@@ -153,16 +141,15 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
   // 纠错历史同样并入检修，旧链接 tab=feedback 迁移为 inspection 的 feedback 子模式
   const legacyEpisodesTab = rawTab === 'episodes'
   const legacyFeedbackTab = rawTab === 'feedback'
-  // 人物画像曾是独立标签，旧链接 tab=profiles 迁移为「记忆查询 → 人物画像」切面（保留 person_id），
-  // 后端审计时间线的 jump_target 仍指向 tab=profiles，由这里统一翻译
-  const legacyProfilesTab = rawTab === 'profiles'
+  // 兼容此前「记忆查询 → 人物画像」的 view 参数，保留 person_id 定位。
+  const legacyProfileView = (!rawTab || rawTab === 'records') && params.get('view') === 'profiles'
   const tabParam =
     legacyInspectionMode || legacyEpisodesTab || legacyFeedbackTab
       ? 'inspection'
-      : legacyProfilesTab
-        ? 'records'
+      : legacyProfileView
+        ? 'profiles'
         : (rawTab as MemoryConsoleTab | null)
-  // 图谱已从标签栏移到右上角入口，旧链接 tab=graph 与无效 tab 都回落到记忆查询
+  // 图谱保留 tab=graph 深链入口，无效 tab 回落到文字记录。
   const tab = tabParam && MEMORY_CONSOLE_TABS.includes(tabParam) ? tabParam : 'records'
   const taskId = parseOptionalTimestampQuery(params.get('task_id'))
   const rawMode = params.get('mode')
@@ -174,13 +161,8 @@ function readKnowledgeBaseDeepLink(): KnowledgeBaseDeepLinkState {
     rawMode === 'feedback'
       ? (rawMode as InspectionMode)
       : undefined
-  const rawView = params.get('view')
-  const memoryViewParam =
-    rawView === 'profiles' || rawView === 'records' ? (rawView as MemoryViewMode) : undefined
   return {
     tab,
-    // 旧 tab=profiles 链接与显式 view=profiles 都落到记忆查询的人物画像切面
-    memoryView: memoryViewParam ?? (legacyProfilesTab ? 'profiles' : undefined),
     inspectionMode:
       legacyInspectionMode ??
       modeParam ??
@@ -528,9 +510,6 @@ export function KnowledgeBasePage() {
   const [graphInitialParagraphHash, setGraphInitialParagraphHash] = useState(
     deepLinkRef.current.paragraphHash ?? ''
   )
-  const [memoryView, setMemoryView] = useState<MemoryViewMode>(
-    deepLinkRef.current.memoryView ?? 'records'
-  )
   const [profileInitialPersonId, setProfileInitialPersonId] = useState(
     deepLinkRef.current.personId ?? ''
   )
@@ -598,11 +577,11 @@ export function KnowledgeBasePage() {
     onRuntimeChanged: () => memoryRuntime.refreshRuntimeConfig(),
   })
 
-  // 人物画像领域：查询侧在「记忆查询 → 人物画像」，维护侧在「记忆检修 → 画像维护」，
+  // 人物画像领域：查询侧在顶层「人物画像」，维护侧在「记忆检修 → 画像维护」，
   // 两侧共享同一份状态，因此在这里实例化一次后分别传入两个面板
   const memoryProfile = useMemoryProfileConsole({
     active:
-      (activeTab === 'records' && memoryView === 'profiles') ||
+      activeTab === 'profiles' ||
       (activeTab === 'inspection' && inspectionMode === 'profiles'),
     initialPersonId: profileInitialPersonId,
     locateToken: profileLocateToken,
@@ -669,16 +648,6 @@ export function KnowledgeBasePage() {
     setProfileLocateToken((current) => current + 1)
   }, [])
 
-  // 记忆查询内部的内容切面切换：文字记录 / 人物画像，深链参数用 view 与检修的 mode 区分
-  const switchMemoryView = useCallback(
-    (view: MemoryViewMode, query: Record<string, string | number | undefined> = {}) => {
-      setMemoryView(view)
-      setActiveTab('records')
-      updateKnowledgeBaseDeepLink('records', { view, ...query })
-    },
-    []
-  )
-
   const refreshMemoryRecords = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['memory-records'] }),
@@ -708,6 +677,7 @@ export function KnowledgeBasePage() {
         if (record.type === 'fact' && personId) {
           memoryCorrection.setScope('person_profile')
           memoryCorrection.setPersonId(personId)
+          memoryCorrection.setPersonLookupMode('id')
         } else {
           memoryCorrection.setScope('memory')
         }
@@ -730,7 +700,7 @@ export function KnowledgeBasePage() {
           return
         }
         locateProfile(personId)
-        switchMemoryView('profiles', { person_id: personId })
+        switchMemoryTab('profiles', { person_id: personId })
         return
       }
 
@@ -770,7 +740,7 @@ export function KnowledgeBasePage() {
         )
       }
     },
-    [locateProfile, memoryCorrection, memoryDelete, switchMemoryTab, switchMemoryView, toast]
+    [locateProfile, memoryCorrection, memoryDelete, switchMemoryTab, toast]
   )
 
   const handleTimelineJump = useCallback(
@@ -824,11 +794,11 @@ export function KnowledgeBasePage() {
         return
       }
 
-      // 人物画像已并入记忆查询；后端跳转目标仍是 profiles，这里转译为「记忆查询 → 人物画像」切面
+      // 定位人物后直接打开顶层画像页，重复定位同一人物也刷新详情。
       if (rawTab === 'profiles') {
         const personId = readJumpParam(target, 'person_id')
         locateProfile(personId)
-        switchMemoryView('profiles', { person_id: personId })
+        switchMemoryTab('profiles', { person_id: personId })
         return
       }
 
@@ -883,12 +853,6 @@ export function KnowledgeBasePage() {
         return
       }
 
-      // 跳到记忆查询时回到文字记录切面，避免沿用上一次遗留的人物画像切面
-      if (tab === 'records') {
-        switchMemoryView('records')
-        return
-      }
-
       switchMemoryTab(tab)
     },
     [
@@ -897,7 +861,6 @@ export function KnowledgeBasePage() {
       memoryDelete,
       memoryFeedback,
       switchMemoryTab,
-      switchMemoryView,
     ]
   )
 
@@ -978,6 +941,8 @@ export function KnowledgeBasePage() {
 
   const shouldRenderMemoryTab = (tab: MemoryConsoleTab) =>
     activeTab === tab || visitedMemoryTabs.has(tab)
+  const isFixedMemoryPage =
+    activeTab === 'timeline' || activeTab === 'images' || activeTab === 'records' || activeTab === 'profiles'
   const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
   const renderPanelFallback = (tab: LoadableMemoryTab) => (
     <TabsContent value={tab} className="space-y-4">
@@ -994,7 +959,7 @@ export function KnowledgeBasePage() {
   }
 
   return (
-    <div className="bg-background flex h-full flex-col">
+    <div data-memory-console-page="true" data-memory-fixed-page={isFixedMemoryPage ? 'true' : undefined} className="bg-background flex h-full min-h-0 min-w-0 flex-col">
       {/* 手机页头右上角：记忆状态（含运行自检） */}
       <MobileHeaderActions>
         <button
@@ -1006,8 +971,11 @@ export function KnowledgeBasePage() {
           记忆状态
         </button>
       </MobileHeaderActions>
-      <div className="flex-1 overflow-auto">
-        <div className="memory-console-density mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 py-4 xl:px-5">
+      <div className={cn('min-h-0 min-w-0 flex-1 overflow-y-auto', isFixedMemoryPage && 'lg:flex lg:flex-col lg:overflow-hidden')}>
+        <div className={cn(
+          'memory-console-density mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 py-2 xl:px-5',
+          isFixedMemoryPage && 'lg:min-h-0 lg:flex-1 lg:overflow-hidden pb-2'
+        )}>
           <div className="hidden">
             <Button variant="outline" size="sm" onClick={() => void loadPage()}>
               <RefreshCw className="mr-2 h-4 w-4" />
@@ -1210,22 +1178,23 @@ export function KnowledgeBasePage() {
           <Tabs
             value={activeTab}
             onValueChange={(value) => switchMemoryTab(value as MemoryConsoleTab)}
-            className="space-y-3"
+            className={isFixedMemoryPage ? 'flex min-w-0 flex-col gap-2 lg:min-h-0 lg:flex-1 lg:overflow-hidden' : 'min-w-0 space-y-3'}
           >
             <div
               data-memory-console-tab-row="true"
-              className="border-border/40 -mx-4 flex flex-wrap items-center gap-2 border-b px-4 pt-0 pb-1.5 xl:-mx-5 xl:px-5"
+              className="border-border/40 -mx-4 flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-0 xl:-mx-5 xl:px-5"
             >
               <DashboardTabBar
                 variant="grid"
-                className="w-full max-w-full self-stretch grid-cols-3 sm:w-fit sm:auto-cols-max sm:grid-flow-col sm:grid-cols-none"
+                className="w-full max-w-full self-stretch grid-cols-2 py-0 sm:w-fit sm:auto-cols-max sm:grid-flow-col sm:grid-cols-none"
               >
                 {[
                   {
                     value: 'records',
-                    label: '记忆查询',
-                    description: '查询权威记录与人物画像',
+                    label: '文字记录',
+                    description: '查询权威记录与关联内容',
                   },
+                  { value: 'profiles', label: '人物画像', description: '按身份检索人物画像快照' },
                   { value: 'images', label: '图片记忆', description: '图片向量、认知与关联记忆' },
                   { value: 'timeline', label: '记忆流', description: '核对聊天流记忆变动' },
                 ].map((item) => (
@@ -1233,7 +1202,7 @@ export function KnowledgeBasePage() {
                     key={item.value}
                     value={item.value}
                     title={item.description}
-                    className="h-full px-3 text-xs"
+                    className="h-8 px-3 py-1 text-xs sm:py-1"
                   >
                     {item.label}
                   </DashboardTabTrigger>
@@ -1241,7 +1210,7 @@ export function KnowledgeBasePage() {
               </DashboardTabBar>
               <DashboardTabBar
                 variant="grid"
-                className="w-full max-w-full self-stretch grid-cols-3 sm:w-fit sm:auto-cols-max sm:grid-flow-col sm:grid-cols-none"
+                className="w-full max-w-full self-stretch grid-cols-3 py-0 sm:w-fit sm:auto-cols-max sm:grid-flow-col sm:grid-cols-none"
               >
                 {[
                   {
@@ -1256,7 +1225,7 @@ export function KnowledgeBasePage() {
                     key={item.value}
                     value={item.value}
                     title={item.description}
-                    className="h-full px-3 text-xs"
+                    className="h-8 px-3 py-1 text-xs sm:py-1"
                   >
                     {item.label}
                   </DashboardTabTrigger>
@@ -1321,35 +1290,26 @@ export function KnowledgeBasePage() {
               </DropdownMenu>
             </div>
 
-            {/* 记忆查询内部再分内容切面：文字记录 / 人物画像。
-                这里必须有外层 TabsContent 包裹：MemoryRecordsTab 自带的 TabsContent
-                会绑定到最近的嵌套 Tabs，否则外层标签栏找不到 value=records 的面板 */}
+            {/* 文字记录自带 TabsContent，直接绑定顶层标签；人物画像使用独立面板。 */}
             {shouldRenderMemoryTab('records') && (
-              <TabsContent value="records" className="space-y-4">
-                <Tabs
-                  value={memoryView}
-                  onValueChange={(value) => switchMemoryView(value as MemoryViewMode)}
-                  className="space-y-3"
-                >
-                  <MemoryMiniTabs items={MEMORY_VIEW_OPTIONS} />
-                  <MemoryRecordsTab
-                    onAction={handleMemoryRecordAction}
-                    onCorrectionPlan={(planId, requestText) => {
-                      memoryCorrection.setRequestText(requestText)
-                      memoryCorrection.setScope('memory')
-                      memoryCorrection.setPersonId('')
-                      memoryCorrection.setPersonKeyword('')
-                      memoryCorrection.setChatId('')
-                      memoryCorrection.setSelectedPlanId(planId)
-                      memoryCorrection.setPlanSearch(planId)
-                      setInspectionMode('correction')
-                      switchMemoryTab('inspection', { mode: 'correction', plan_id: planId })
-                    }}
-                  />
-                  <TabsContent value="profiles" className="space-y-4">
-                    <ProfileSearchPanel profile={memoryProfile} />
-                  </TabsContent>
-                </Tabs>
+              <MemoryRecordsTab
+                onAction={handleMemoryRecordAction}
+                onCorrectionPlan={(planId, requestText) => {
+                  memoryCorrection.setRequestText(requestText)
+                  memoryCorrection.setScope('memory')
+                  memoryCorrection.setPersonId('')
+                  memoryCorrection.setPersonKeyword('')
+                  memoryCorrection.setChatId('')
+                  memoryCorrection.setSelectedPlanId(planId)
+                  memoryCorrection.setPlanSearch(planId)
+                  setInspectionMode('correction')
+                  switchMemoryTab('inspection', { mode: 'correction', plan_id: planId })
+                }}
+              />
+            )}
+            {shouldRenderMemoryTab('profiles') && (
+              <TabsContent value="profiles" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+                <ProfileSearchPanel profile={memoryProfile} />
               </TabsContent>
             )}
 
@@ -1374,7 +1334,7 @@ export function KnowledgeBasePage() {
               (shouldShowPanelFallback('timeline') ? (
                 renderPanelFallback('timeline')
               ) : (
-                <TabsContent value="timeline" className="space-y-4">
+                <TabsContent value="timeline" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden">
                   <MemoryTimelineManager
                     chatTargets={importChatTargets}
                     initialChatId={timelineInitialChatId}
@@ -1400,7 +1360,7 @@ export function KnowledgeBasePage() {
                   }}
                   className="space-y-4"
                 >
-                  <TabsList className="grid w-full grid-cols-6">
+                  <TabsList className="grid h-auto w-full grid-cols-3 gap-2 lg:grid-cols-6">
                     <TabsTrigger value="correction">内容修正</TabsTrigger>
                     <TabsTrigger value="maintenance">状态维护</TabsTrigger>
                     <TabsTrigger value="tuning">检索调优</TabsTrigger>

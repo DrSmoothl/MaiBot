@@ -65,7 +65,7 @@ export function MemoryTimelineEventDialog({
     >
       <DialogContent className="max-h-[85vh] [--dialog-width:56rem]">
         <DialogHeader>
-          <DialogTitle>{event?.title}详情</DialogTitle>
+          <DialogTitle>{event?.title.replace(/\bEpisode\b/g, '记忆片')}详情</DialogTitle>
           <DialogDescription className="sr-only">
             查看事件时间、触发原因与关联证据。
           </DialogDescription>

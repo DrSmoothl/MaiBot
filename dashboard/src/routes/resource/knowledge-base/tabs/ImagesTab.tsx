@@ -16,7 +16,14 @@ import { createPortal } from 'react-dom'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogBody, DialogContent } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -60,7 +67,13 @@ function formatTime(value?: number | null): string {
   return new Date(value * 1000).toLocaleString('zh-CN')
 }
 
-function Stats({ stats }: { stats?: MemoryImageStatsPayload }) {
+function Stats({
+  stats,
+  onOpenMaintenance,
+}: {
+  stats?: MemoryImageStatsPayload
+  onOpenMaintenance: () => void
+}) {
   const primaryItems = [
     ['已记住的图片', stats?.asset_count ?? 0],
     ['图片说明', stats?.observation_count ?? 0],
@@ -90,6 +103,8 @@ function Stats({ stats }: { stats?: MemoryImageStatsPayload }) {
               size="icon"
               className="text-muted-foreground h-7 w-7 shrink-0"
               aria-label="后台处理情况"
+              aria-haspopup="dialog"
+              onClick={onOpenMaintenance}
             >
               <Info className="h-4 w-4" />
             </Button>
@@ -104,6 +119,7 @@ function Stats({ stats }: { stats?: MemoryImageStatsPayload }) {
                 </div>
               ))}
             </div>
+            <div className="text-muted-foreground pt-2 text-xs">点击打开高级维护</div>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -133,7 +149,6 @@ export function ImagesTab({ toolbarTarget }: ImagesTabProps) {
   const [savingSemantic, setSavingSemantic] = useState(false)
   const [error, setError] = useState('')
   const [maintenanceOpen, setMaintenanceOpen] = useState(false)
-  const maintenanceRef = useRef<HTMLDetailsElement>(null)
   const detailRequestIdRef = useRef(0)
 
   const loadPage = useCallback(async () => {
@@ -280,18 +295,18 @@ export function ImagesTab({ toolbarTarget }: ImagesTabProps) {
   )
 
   return (
-    <TabsContent value="images" className="space-y-4">
+    <TabsContent value="images" className="mt-0 flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
       {toolbarTarget ? createPortal(refreshButton, toolbarTarget) : refreshButton}
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="shrink-0">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      <Card className="flex h-[440px] min-w-0 flex-col overflow-hidden md:h-[760px]">
+      <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <CardHeader className="shrink-0 space-y-0 gap-2 border-b pb-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="sr-only">已记住的图片</CardTitle>
-          <Stats stats={status?.stats} />
+          <Stats stats={status?.stats} onOpenMaintenance={() => setMaintenanceOpen(true)} />
           <Select value={chatId || 'all'} onValueChange={handleChatFilterChange}>
             <SelectTrigger aria-label="按聊天筛选" className="w-full sm:w-52 sm:shrink-0">
               <SelectValue />
@@ -318,7 +333,7 @@ export function ImagesTab({ toolbarTarget }: ImagesTabProps) {
               </AlertDescription>
             </Alert>
           )}
-          <div className="@container min-h-0 flex-1 overflow-auto pr-1">
+          <div key={`${chatId}:${offset}`} className="@container h-[60dvh] min-h-0 flex-none overflow-auto overscroll-contain pr-1 lg:h-auto lg:flex-1">
             {loading ? (
               <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -340,7 +355,6 @@ export function ImagesTab({ toolbarTarget }: ImagesTabProps) {
                     variant="outline"
                     onClick={() => {
                       setMaintenanceOpen(true)
-                      maintenanceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                     }}
                   >
                     查看历史图片回填
@@ -377,7 +391,7 @@ export function ImagesTab({ toolbarTarget }: ImagesTabProps) {
               </div>
             )}
           </div>
-          <div className="mt-4 flex items-center justify-between">
+          <div className="mt-2 flex shrink-0 items-center justify-between">
             <Button
               variant="outline"
               size="sm"
@@ -642,20 +656,17 @@ export function ImagesTab({ toolbarTarget }: ImagesTabProps) {
         </DialogContent>
       </Dialog>
 
-      <details
-        data-dashboard-card="true"
-        ref={maintenanceRef}
-        open={maintenanceOpen}
-        onToggle={(event) => setMaintenanceOpen(event.currentTarget.open)}
-        className="bg-card text-card-foreground rounded-lg border p-4 shadow"
-      >
-        <summary className="cursor-pointer text-sm font-medium">
-          高级维护 · 历史图片回填与故障处理
-        </summary>
-        <div className="mt-4">
-          <ImageMaintenancePanel status={status} onRefresh={loadPage} />
-        </div>
-      </details>
+      <Dialog open={maintenanceOpen} onOpenChange={setMaintenanceOpen}>
+        <DialogContent className="max-h-[85vh] [--dialog-width:64rem]">
+          <DialogHeader>
+            <DialogTitle>图片记忆高级维护</DialogTitle>
+            <DialogDescription className="sr-only">历史图片回填、失败任务与索引诊断。</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <ImageMaintenancePanel status={status} onRefresh={loadPage} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
     </TabsContent>
   )
 }

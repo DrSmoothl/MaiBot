@@ -362,7 +362,7 @@ export function ImportTab({ queue, form }: ImportTabProps) {
       >
         <TabsList
           aria-label="长期记忆写入方式"
-          className="border-border/60 bg-muted/30 h-auto w-fit gap-1 rounded-xl border"
+          className="border-border/60 bg-muted/30 h-auto max-w-full flex-wrap justify-start gap-1 rounded-xl border lg:w-fit"
         >
           <TabsTrigger value="import">
             <Upload className="mr-2 h-4 w-4" />

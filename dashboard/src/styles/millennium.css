@@ -286,15 +286,20 @@
   :root[data-dashboard-style='millennium'] [data-dashboard-sidebar-section-title='true'] {
     font-size: 0.625rem;
     letter-spacing: 0.02em;
-    line-height: 1.4;
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
   }
 
-  /* 中文分组统一为两行，每行两个字，与下方图标中心对齐。 */
+  /* 中文标题使用整列宽度，短标题保持一行，长标题自然换行并与图标中心对齐。 */
   :root[data-dashboard-style='millennium'] [data-dashboard-sidebar-title-stacked='true'] {
     letter-spacing: 0;
     margin-inline: auto;
-    width: 2em;
-    word-break: break-all;
+    width: auto;
+    max-width: 100%;
+    word-break: normal;
   }
 }
 
@@ -1517,9 +1522,48 @@
 
 /* ---------- 长期记忆：记录列表是一整块屏幕 ---------- */
 
-/* 记忆流事件共用下沉白底，横线分隔条目，不重复堆叠卡片外框。 */
+/* 记忆页顶部键帽与筛选控件收紧，不沿用全局加高尺寸。 */
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true']
+  [data-memory-console-tab-row='true']
+  :is([data-dashboard-tabs-list='true'], [data-dashboard-tabs-trigger='true']) {
+  height: 2.25rem;
+  min-height: 2.25rem;
+  padding-block: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true']
+  [data-memory-console-tab-row='true'] [data-dashboard-tabs-trigger='true'] {
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true'] [data-memory-timeline-panel='true']
+  :is([data-dashboard-button='true'], [data-dashboard-select-trigger='true'], [data-dashboard-date-time-trigger='true']):is(.h-8, .h-9, .h-10) {
+  height: 2.25rem;
+  min-height: 2.25rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true'] [data-memory-timeline-panel='true']
+  [data-dashboard-button='true'].w-8 {
+  width: 2.25rem;
+}
+
+/* 合并后的分页底栏使用更矮的键帽与下拉框。 */
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true'] [data-memory-timeline-panel='true']
+  [data-memory-timeline-pagination='true']
+  :is([data-dashboard-button='true'], [data-dashboard-select-trigger='true']) {
+  height: 1.875rem;
+  min-height: 1.875rem;
+  padding-inline: 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* 记忆流与抹除列表共用下沉白底，横线分隔条目，不重复堆叠卡片外框。 */
 :root[data-dashboard-style='millennium']
-  :is([data-memory-timeline-list='true'], [data-memory-timeline-evidence='true']) {
+  :is(
+    [data-memory-timeline-list='true'],
+    [data-memory-timeline-evidence='true'],
+    [data-memory-delete-screen='true']
+  ) {
   background-color: var(--mil-screen);
   background-image: var(--mil-screen-tex);
   background-size: 3px 3px;
@@ -1528,7 +1572,8 @@
   color: var(--mil-screen-ink);
 }
 
-:root[data-dashboard-style='millennium'] [data-memory-timeline-event='true'] {
+:root[data-dashboard-style='millennium']
+  :is([data-memory-timeline-event='true'], [data-memory-delete-operation='true']) {
   background-color: transparent;
   background-image: none;
   border: 0;
@@ -1537,16 +1582,19 @@
   margin: 0;
 }
 
-:root[data-dashboard-style='millennium'] [data-memory-timeline-event='true']:last-child {
+:root[data-dashboard-style='millennium']
+  :is([data-memory-timeline-event='true'], [data-memory-delete-operation='true']):last-child {
   border-bottom: 0;
 }
 
-:root[data-dashboard-style='millennium'] [data-memory-timeline-event='true']:hover {
+:root[data-dashboard-style='millennium']
+  :is([data-memory-timeline-event='true'], [data-memory-delete-operation='true']):hover {
   background-color: color-mix(in srgb, var(--mil-on) 10%, transparent);
   box-shadow: inset 3px 0 0 var(--mil-on-side);
 }
 
-:root[data-dashboard-style='millennium'] [data-memory-timeline-event='true']:focus-visible {
+:root[data-dashboard-style='millennium']
+  :is([data-memory-timeline-event='true'], [data-memory-delete-operation='true']):focus-visible {
   outline: 2px solid var(--mil-on-side);
   outline-offset: -3px;
 }
@@ -1679,6 +1727,17 @@
   box-shadow: inset 3px 3px 0 var(--mil-screen-shade);
   color: var(--mil-screen-ink);
   padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-record-checkbox='true'] {
+  height: 1rem;
+  width: 1rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-memory-record-checkbox='true'] [data-dashboard-checkbox-indicator='true'] svg {
+  height: 0.625rem;
+  width: 0.625rem;
 }
 
 :root[data-dashboard-style='millennium']
@@ -3220,6 +3279,16 @@
 }
 
 /* ---------- 千禧图标 ---------- */
+
+/* 手机记忆页的多行标签保留键帽样式，但文字与留白必须能放进窄列。 */
+@media (max-width: 1023px) {
+  :root[data-dashboard-style='millennium']
+    [data-memory-console-page='true'] [data-dashboard-tabs-trigger='true'] {
+    min-width: 0;
+    padding-inline: 0.375rem;
+    font-size: 0.75rem;
+  }
+}
 
 /* 手绘图标的路径和替换规则统一登记在 src/components/ui/millennium-icon-set.ts，
    替换图标库图标用的样式由它在启动时生成，这里不再手写。 */

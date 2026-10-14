@@ -194,6 +194,7 @@ export function Sidebar({
             className={cn(
               // 移动端始终使用正常间距,桌面端根据 sidebarOpen 切换
               'flex flex-col gap-[var(--layout-sidebar-section-gap)]',
+              isMillennium && 'lg:gap-4',
               !visuallyOpen && 'lg:w-full'
             )}
           >
@@ -203,7 +204,7 @@ export function Sidebar({
                 <div
                   className={cn(
                     'h-[var(--layout-sidebar-section-title-height)] px-[var(--layout-sidebar-nav-item-padding-x)]',
-                    isMillennium && 'lg:h-auto lg:px-0 lg:text-center',
+                    isMillennium && 'lg:h-auto lg:px-0 lg:mb-0.5 lg:text-center',
                     section.title === 'sidebar.groups.overview' && 'hidden',
                     // 移动端始终显示，桌面端根据状态切换
                     'mb-[var(--layout-sidebar-section-title-margin-bottom)]',
@@ -237,6 +238,7 @@ export function Sidebar({
                     data-dashboard-sidebar-section-divider="true"
                     className={cn(
                       'border-border mb-2 hidden border-t transition-opacity duration-[220ms] motion-reduce:transition-none lg:block',
+                      isMillennium && 'lg:hidden',
                       sidebarRevealed && 'lg:opacity-0'
                     )}
                   />

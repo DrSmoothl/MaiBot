@@ -219,7 +219,7 @@ describe('ProfileConsole 画像库加载', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: '画像详情' })).not.toBeInTheDocument()
     })
-    expect(screen.getByText('人物画像查询')).toBeInTheDocument()
+    expect(screen.queryByText('人物画像查询')).not.toBeInTheDocument()
   })
 
   it('画像列表内容较少时自然收缩，较多时按视口限制最大高度', async () => {

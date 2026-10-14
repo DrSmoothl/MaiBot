@@ -2818,6 +2818,71 @@
   padding-block: 0;
 }
 
+/* 桌面列表共用剩余视口高度；手机让搜索与表单随整页滚动，列表保留独立浏览高度。 */
+@media (min-width: 1024px) {
+  [data-dashboard-main='true']:has([data-memory-fixed-page='true']) {
+    overflow: hidden;
+  }
+}
+
+@media (max-width: 1023px) {
+  /* 网格/弹性子项默认的 min-width:auto 会被长 ID、按钮和输入框撑开。 */
+  [data-memory-console-page='true'] :is(.grid, .flex) > :is(div, form, section),
+  [data-memory-console-page='true'] [role='tabpanel'],
+  [data-memory-console-page='true'] [data-dashboard-card='true'] {
+    min-width: 0;
+  }
+
+  [data-memory-console-page='true'] :is(input, textarea, [data-dashboard-select-trigger='true']) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  [data-memory-console-page='true'] [data-dashboard-card='true'] {
+    overflow-wrap: anywhere;
+  }
+
+  [data-memory-console-page='true'] [data-memory-console-tab-row='true'] {
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  [data-memory-console-page='true'] [data-memory-records-result-header='true'] > .ml-auto {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 1023px) {
+  [data-dashboard-workspace-content='true']:has([data-memory-fixed-page='true']) {
+    height: 100%;
+    min-height: 0;
+  }
+
+  [data-dashboard-workspace-content='true'] > div:has([data-memory-fixed-page='true']) {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+.memory-console-density [data-memory-timeline-panel='true'] > [data-dashboard-card-content='true'] {
+  padding: 0.5rem 0.75rem;
+}
+
+.memory-console-density [data-memory-timeline-pagination='true'] [data-dashboard-button='true'] {
+  height: 1.75rem;
+  min-width: 1.75rem;
+  padding-inline: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.memory-console-density [data-memory-timeline-filters='true']
+  :is([data-dashboard-select-trigger='true'], [data-dashboard-date-time-trigger='true']) {
+  height: 2rem;
+  min-height: 2rem;
+  padding-block: 0;
+}
+
 .memory-console-density th {
   height: 2.25rem;
   padding-left: 0.75rem;

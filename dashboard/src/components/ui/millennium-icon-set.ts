@@ -165,6 +165,10 @@ export const MILLENNIUM_ICON_SET: MillenniumIconDef[] = [
     path: 'M4 4h16v12H10l-4 4v-4H4z',
   },
   {
+    lucide: ['box'],
+    path: 'M12 3 3 8v9l9 5 9-5V8zM3 8l9 5 9-5M12 13v9',
+  },
+  {
     lucide: ['user', 'circle-user', 'user-circle', 'circle-user-round', 'user-circle-2', 'user-round'],
     path: 'M9 4h6v6H9zM5 20v-6h14v6',
   },
