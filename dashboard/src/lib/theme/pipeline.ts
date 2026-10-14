@@ -1,6 +1,11 @@
 import type { ThemeTokens, UserThemeConfig } from './tokens'
 
-import { generatePalette, getReadableForeground, isDefaultAccentColor } from './palette'
+import {
+  generatePalette,
+  getModernChartCompanions,
+  getReadableForeground,
+  isDefaultAccentColor,
+} from './palette'
 import { getPresetById } from './presets'
 import { sanitizeCSS } from './sanitizer'
 import {
@@ -206,6 +211,19 @@ export function applyThemePipeline(config: UserThemeConfig, isDark: boolean): vo
   const backgroundConfig = config.styleBackgroundConfig?.[dashboardStyle]
 
   injectTokensAsCSS(tokens, root)
+
+  // 原版风格的桌面端样式表（styles/modern.css）用这组变量替换图表的系列 2–5；手机端和其它风格不读取它们。
+  const modernChartKeys = ['chart-2', 'chart-3', 'chart-4', 'chart-5'] as const
+  if (dashboardStyle === 'modern') {
+    const companions = isDefaultAccentColor(config.accentColor)
+      ? getModernChartCompanions(isDark)
+      : modernChartKeys.map((key) => tokens.color[key])
+    modernChartKeys.forEach((key, index) => {
+      root.style.setProperty(`--modern-${key}`, companions[index])
+    })
+  } else {
+    modernChartKeys.forEach((key) => root.style.removeProperty(`--modern-${key}`))
+  }
   if (customCSS) {
     const sanitized = sanitizeCSS(customCSS)
     if (sanitized.css.trim().length > 0) {

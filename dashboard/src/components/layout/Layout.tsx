@@ -387,6 +387,7 @@ export function Layout({ children }: LayoutProps) {
       {isElectron() && <TitleBar />}
       <div
         data-dashboard-shell="true"
+        data-dashboard-page-background={pageBg.type}
         className={cn(
           'relative isolate flex h-[100dvh] overflow-hidden overscroll-none',
           isElectron() && 'pt-8'
@@ -431,6 +432,7 @@ export function Layout({ children }: LayoutProps) {
                   topbarCollapsed={topbarCollapsed}
                   onMobileMenuClose={() => {}}
                   onSidebarFix={handleSidebarFix}
+                  onSidebarToggle={handleSidebarModeToggle}
                 />
               </motion.div>
             </motion.div>

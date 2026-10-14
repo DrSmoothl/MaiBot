@@ -93,7 +93,14 @@ interface HeaderProps {
   workspaceMode: WorkspaceMode
 }
 
-type HeaderActionId = 'settings' | 'docs' | 'language' | 'theme' | 'logout' | 'extensions'
+type HeaderActionId =
+  | 'settings'
+  | 'docs'
+  | 'language'
+  | 'theme'
+  | 'collapse'
+  | 'logout'
+  | 'extensions'
 
 export function Header({
   extensions = [],
@@ -140,6 +147,8 @@ export function Header({
   const { themeConfig } = useContext(ThemeProviderContext)
   // 千禧风格的顶栏要放得下键帽，比其它风格高一截；高度由动画驱动，所以在这里按风格取值。
   const expandedTopbarHeight = themeConfig.dashboardStyle === 'millennium' ? 70 : 42
+  // 原版风格和千禧一样用顶栏里的按钮收起顶栏，不再显示顶栏下沿的滑条。
+  const isModernStyle = themeConfig.dashboardStyle === 'modern'
   const currentLang = i18nInstance.language || 'zh'
   const { config: headerBg, inheritedFrom } = useBackground('header')
   const inheritsPageBackground = inheritedFrom === 'page'
@@ -306,6 +315,7 @@ export function Header({
     highlightedHeaderAction === action ? (
       <motion.span
         layoutId="topbar-selection-pill"
+        data-dashboard-topbar-pill="true"
         className="bg-primary pointer-events-none absolute inset-x-1 inset-y-0 -z-10 rounded-sm shadow-sm"
         transition={{ type: 'spring', stiffness: 480, damping: 38, mass: 0.6 }}
       />
@@ -351,7 +361,7 @@ export function Header({
           )}
         >
           {!inheritsPageBackground && <BackgroundLayer config={headerBg} layerId="header" />}
-          {sidebarOpen && (
+          {sidebarOpen && !isModernStyle && (
             <button
               type="button"
               data-dashboard-sidebar-mode-switch="true"
@@ -418,8 +428,9 @@ export function Header({
 
           <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-4">
 
-            {/* 固定模式显示左折线；悬浮模式展开后由侧栏内的右折线切回固定模式。 */}
-            {sidebarOpen && (
+            {/* 固定模式显示左折线；悬浮模式展开后由侧栏内的右折线切回固定模式。
+                原版风格的这枚开关放在侧栏 Logo 行右侧，这里不再渲染。 */}
+            {sidebarOpen && !isModernStyle && (
               <button
                 type="button"
                 data-dashboard-sidebar-mode-switch="true"
@@ -544,6 +555,7 @@ export function Header({
                           (hoveredWorkspace ?? workspaceMode) === value && (
                           <motion.span
                             layoutId="topbar-selection-pill"
+                            data-dashboard-topbar-pill="true"
                             className="bg-primary absolute inset-x-1 inset-y-0.5 -z-10 rounded-sm shadow-sm"
                             transition={{ type: 'spring', stiffness: 480, damping: 38, mass: 0.6 }}
                           />
@@ -778,8 +790,8 @@ export function Header({
               )}
             </Button>
 
-            {/* 千禧风格用一颗键帽收起顶栏，取代顶栏下沿的滑条 */}
-            {themeConfig.dashboardStyle === 'millennium' && (
+            {/* 千禧风格用一颗键帽收起顶栏，取代顶栏下沿的滑条；原版风格同样改为顶栏按钮 */}
+            {(themeConfig.dashboardStyle === 'millennium' || isModernStyle) && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -789,9 +801,16 @@ export function Header({
                 aria-expanded={!topbarCollapsed}
                 data-dashboard-header-action="true"
                 data-dashboard-topbar-collapse-key="true"
-                data-header-action-highlighted="false"
+                data-header-action-highlighted={
+                  isModernStyle && highlightedHeaderAction === 'collapse' ? 'true' : 'false'
+                }
+                onPointerEnter={
+                  isModernStyle ? () => handleHeaderActionEnter('collapse') : undefined
+                }
+                onPointerLeave={isModernStyle ? handleHeaderActionLeave : undefined}
                 className="relative isolate hidden border-0 bg-transparent shadow-none sm:inline-flex"
               >
+                {isModernStyle && renderHeaderActionPill('collapse')}
                 <ChevronsUp className="h-5 w-5" />
               </Button>
             )}
@@ -885,22 +904,24 @@ export function Header({
           </div>
         </div>
 
-        {/* 顶栏收起拉片只服务桌面布局，手机上不显示 */}
-        <div className="absolute right-5 bottom-[-7px] z-10 flex h-0 shrink-0 items-center justify-end max-lg:hidden sm:right-15.5">
-          <button
-            type="button"
-            data-dashboard-topbar-toggle="true"
-            onClick={onTopbarToggle}
-            aria-label={topbarCollapsed ? t('header.expandTopbar') : t('header.collapseTopbar')}
-            aria-expanded={!topbarCollapsed}
-            title={topbarCollapsed ? t('header.expandTopbar') : t('header.collapseTopbar')}
-            className="bg-foreground/70 flex h-3 w-24 shrink-0 items-center justify-center transition-shadow"
-          >
-            <span className="sr-only">
-              {topbarCollapsed ? t('header.expandTopbar') : t('header.collapseTopbar')}
-            </span>
-          </button>
-        </div>
+        {/* 顶栏收起拉片只服务桌面布局，手机上不显示；原版风格改用顶栏里的收起按钮 */}
+        {!isModernStyle && (
+          <div className="absolute right-5 bottom-[-7px] z-10 flex h-0 shrink-0 items-center justify-end max-lg:hidden sm:right-15.5">
+            <button
+              type="button"
+              data-dashboard-topbar-toggle="true"
+              onClick={onTopbarToggle}
+              aria-label={topbarCollapsed ? t('header.expandTopbar') : t('header.collapseTopbar')}
+              aria-expanded={!topbarCollapsed}
+              title={topbarCollapsed ? t('header.expandTopbar') : t('header.collapseTopbar')}
+              className="bg-foreground/70 flex h-3 w-24 shrink-0 items-center justify-center transition-shadow"
+            >
+              <span className="sr-only">
+                {topbarCollapsed ? t('header.expandTopbar') : t('header.collapseTopbar')}
+              </span>
+            </button>
+          </div>
+        )}
       </div>
     </motion.header>
   )
