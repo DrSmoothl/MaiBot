@@ -3,11 +3,11 @@
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
-import os
 import traceback
 
 from maim_message import MessageBase
 
+from src.common.paths import get_instance_root
 from src.chat.heart_flow.heartflow_message_processor import HeartFCMessageReceiver
 from src.chat.heart_flow.heartflow_manager import heartflow_manager
 from src.common.logger import get_logger
@@ -35,7 +35,7 @@ from .message import SessionMessage
 # 定义日志配置
 
 # 获取项目根目录（假设本文件在src/chat/message_receive/下，根目录为上上上级目录）
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+PROJECT_ROOT = str(get_instance_root())
 
 # 配置主程序日志格式
 logger = get_logger("chat")

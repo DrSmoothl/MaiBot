@@ -32,6 +32,7 @@ import stat
 
 import tomlkit
 
+from src.common.paths import PACKAGE_ROOT, get_instance_root
 from src.common.logger import get_logger
 from src.common.shutdown import is_shutdown_requested
 from src.config.config import config_manager
@@ -293,13 +294,13 @@ class PluginRuntimeManager(
     @staticmethod
     def _get_builtin_plugin_dirs() -> List[Path]:
         """内置插件目录：src/plugins/built_in/"""
-        candidate = Path("src", "plugins", "built_in").resolve()
+        candidate = (PACKAGE_ROOT / "plugins" / "built_in").resolve()
         return [candidate] if candidate.is_dir() else []
 
     @staticmethod
     def _get_third_party_plugin_dirs() -> List[Path]:
         """第三方插件目录：plugins/"""
-        candidate = Path("plugins").resolve()
+        candidate = (get_instance_root() / "plugins").resolve()
         return [candidate] if candidate.is_dir() else []
 
     @classmethod

@@ -12,6 +12,7 @@ import time
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 
+from src.common.paths import get_instance_root
 from src.common.runtime_loop import run_on_main_loop
 from src.platform_io.avatar import avatar_service, validate_avatar_target
 from src.webui.dependencies import require_auth
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/avatar", tags=["avatar"], dependencies=[Depends(requ
 # 浏览器直接复用已下载头像的最长时间；超过后带 ETag 校验，头像未变只返回 304。
 AVATAR_BROWSER_MAX_AGE = 3 * 60 * 60
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = get_instance_root()
 AVATAR_CACHE_ROOT = (PROJECT_ROOT / "data" / "avatar").resolve()
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 SUPPORTED_AVATAR_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}

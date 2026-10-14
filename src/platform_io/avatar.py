@@ -14,9 +14,11 @@ import time
 from httpx import AsyncClient
 from PIL import Image
 
+from src.common.paths import get_instance_root
+
 AvatarTargetType = Literal["user", "group"]
 AvatarStatus = Literal["available", "unsupported", "missing"]
-AVATAR_CACHE_ROOT = Path(__file__).resolve().parents[2] / "data" / "avatar"
+AVATAR_CACHE_ROOT = get_instance_root() / "data" / "avatar"
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 AVATAR_CACHE_TTL = 86400
 AVATAR_NEGATIVE_TTL = 300

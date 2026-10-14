@@ -16,6 +16,7 @@ import sqlite3
 import time
 import warnings
 
+from src.common.paths import get_instance_root
 from src.plugin_runtime.runner.plugin_paths import build_plugin_paths
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -24,7 +25,7 @@ MAX_PENDING_PER_PLUGIN = 8
 MAX_PENDING_TOTAL = 32
 MAX_UPLOADS_PER_PLUGIN = 2
 MAX_UPLOADS_TOTAL = 4
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = get_instance_root()
 
 
 class UploadCapacityError(ValueError):

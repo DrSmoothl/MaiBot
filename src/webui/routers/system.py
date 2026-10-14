@@ -21,6 +21,7 @@ import os
 import sqlite3
 import time
 
+from src.common.paths import get_instance_root
 from src.common.database.database import engine, get_db_session
 from src.common.database.database_model import Images, ImageType
 from src.common.logger import get_logger
@@ -43,7 +44,7 @@ router = APIRouter(prefix="/system", tags=["system"], dependencies=[Depends(requ
 logger = get_logger("webui_system")
 
 _start_time = time.time()
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = get_instance_root()
 _DATA_DIR = _PROJECT_ROOT / "data"
 _IMAGE_DIR = _DATA_DIR / "images"
 _EMOJI_DIR = _DATA_DIR / "emoji"

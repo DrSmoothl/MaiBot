@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
+from src.common.paths import SOURCE_ROOT, get_instance_root
 from src.common.i18n import t
 from src.common.logger import get_logger
 from src.webui.dependencies import require_auth
@@ -119,7 +120,7 @@ async def _build_static_file_response(request: Request, static_path: Path, file_
 
 
 def _get_project_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return SOURCE_ROOT
 
 
 def _resolve_statistics_report_path() -> Path:
@@ -128,7 +129,7 @@ def _resolve_statistics_report_path() -> Path:
     if report_path.is_absolute():
         return report_path.resolve()
 
-    return (_get_project_root() / report_path).resolve()
+    return (get_instance_root() / report_path).resolve()
 
 
 def _is_local_dashboard_enabled() -> bool:

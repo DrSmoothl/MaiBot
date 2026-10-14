@@ -2,12 +2,14 @@ import asyncio
 import copy
 import hashlib
 import inspect
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TypeVar, cast
 
 import tomlkit
 
+from src.common.paths import get_instance_root
 from src.common.i18n import t
 from src.common.logger import get_logger
 from src.common.version import read_project_version
@@ -60,7 +62,7 @@ from .official_configs import (
     修订号：配置文件内容小更新
 """
 
-PROJECT_ROOT: Path = Path(__file__).parent.parent.parent.absolute().resolve()
+PROJECT_ROOT: Path = get_instance_root()
 CONFIG_DIR: Path = PROJECT_ROOT / "config"
 BOT_CONFIG_PATH: Path = (CONFIG_DIR / "bot_config.toml").resolve().absolute()
 MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute()
@@ -918,6 +920,8 @@ class _ConfigProxy:
 
 # generate_new_config_file(Config, BOT_CONFIG_PATH, CONFIG_VERSION)
 config_manager = ConfigManager()
-config_manager.initialize()
+# CLI 初始化只生成缺失文件；正常启动仍沿用原有加载和升级流程。
+if os.environ.get("MAIBOT_INITIALIZE_ONLY") != "1":
+    config_manager.initialize()
 global_config: Config = cast(Config, _ConfigProxy(config_manager.get_global_config))
 model_config: ModelConfig = cast(ModelConfig, _ConfigProxy(config_manager.get_model_config))

@@ -21,7 +21,10 @@ import sys
 import time
 import tomllib
 
-from .version import PROJECT_ROOT
+from .paths import PACKAGED_INSTALL, SOURCE_ROOT, get_instance_root
+from .version import read_project_version
+
+PROJECT_ROOT = get_instance_root() if PACKAGED_INSTALL else SOURCE_ROOT
 
 # 更新只会拉取这个仓库：直连官方地址，或经由插件市场镜像源配置里启用的镜像。
 # 不读取本地 remote 配置，也不接受任何外部传入的地址。
@@ -47,6 +50,7 @@ _GIT_STALL_OPTIONS = ("-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=
 _COMMIT_FIELD_SEPARATOR = "\x1f"
 
 BLOCKER_MESSAGES: Dict[str, str] = {
+    "package_install": "安装版请停止 MaiBot 后执行 uv tool upgrade maibot",
     "git_missing": "未找到 Git，无法自更新",
     "not_git_repo": "当前部署不是 Git 仓库（如 Docker 镜像或压缩包），请按对应部署方式更新",
     "detached_head": "当前不在任何分支上（分离头指针），无法自更新",
@@ -153,7 +157,8 @@ class UpdateResult:
 
 
 def _state_dir(root: Path) -> Path:
-    return root.joinpath(*_STATE_DIR_PARTS)
+    instance_root = get_instance_root() if root == PROJECT_ROOT else root
+    return instance_root.joinpath(*_STATE_DIR_PARTS)
 
 
 def _pending_path(root: Path) -> Path:
@@ -270,6 +275,8 @@ def _sync_dependencies(root: Path, tool: str) -> None:
 def inspect_local(root: Path = PROJECT_ROOT) -> LocalState:
     """读取本地仓库状态；只执行只读的 Git 命令。"""
 
+    if PACKAGED_INSTALL:
+        return LocalState(version=read_project_version(), blocker="package_install")
     version, _ = _parse_pyproject((root / "pyproject.toml").read_text(encoding="utf-8"))
     state = LocalState(version=version, dependency_tool=detect_dependency_tool(root))
     if shutil.which("git") is None:
@@ -339,7 +346,8 @@ def load_update_sources(root: Path = PROJECT_ROOT) -> List[UpdateSource]:
     """
 
     official = UpdateSource(id=OFFICIAL_SOURCE_ID, name="GitHub 官方源", url=OFFICIAL_REPOSITORY_URL)
-    config_path = root.joinpath(*_MIRROR_CONFIG_PARTS)
+    instance_root = get_instance_root() if root == PROJECT_ROOT else root
+    config_path = instance_root.joinpath(*_MIRROR_CONFIG_PARTS)
     if not config_path.is_file():
         return [official]
     mirrors: List[Dict[str, Any]] = json.loads(config_path.read_text(encoding="utf-8")).get("git_mirrors", [])

@@ -85,7 +85,7 @@ def load_bot_functions(events, *, memory_failure=False, memory_delay=0, install_
         "_shutdown_task": None,
         "_shutdown_deadline": None,
     }
-    tree = ast.parse((ROOT / "bot.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "src/runtime.py").read_text(encoding="utf-8"))
     functions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
     # 预算常量也取自实际 bot，避免 fixture 的旧数值掩盖生命周期回归。
     budgets = [
@@ -96,7 +96,7 @@ def load_bot_functions(events, *, memory_failure=False, memory_delay=0, install_
         and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id.endswith("_TIMEOUT")
     ]
-    exec(compile(ast.Module(body=budgets + functions, type_ignores=[]), str(ROOT / "bot.py"), "exec"), namespace)
+    exec(compile(ast.Module(body=budgets + functions, type_ignores=[]), str(ROOT / "src/runtime.py"), "exec"), namespace)
     system = SimpleNamespace(
         webui_server=SimpleNamespace(shutdown=record("webui_stop")), app=SimpleNamespace(stop=record("app_stop"))
     )

@@ -12,6 +12,7 @@ import re
 import time
 import uuid
 
+from src.common.paths import get_instance_root
 from src.common.logger import get_logger
 from src.common.operation_timing import log_operation, timed_operation
 from src.config.model_configs import APIProvider, ModelInfo
@@ -49,7 +50,7 @@ from src.llm_models.payload_content.context_item import (
 from src.llm_models.payload_content.resp_format import RespFormat, RespFormatType
 from src.llm_models.payload_content.tool_option import ToolCall, ToolOption, normalize_tool_options
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = get_instance_root()
 LLM_REQUEST_LOG_DIR = PROJECT_ROOT / "logs" / "maisaka_prompt" / "llm_error"
 LLM_REQUEST_AUDIO_DIR = PROJECT_ROOT / "data" / "prompt_audio"
 REPLAY_SCRIPT_RELATIVE_PATH = Path("scripts") / "replay_llm_request.py"
