@@ -856,6 +856,9 @@ class MaisakaReasoningEngine:
             if trigger_message is None:
                 logger.warning(f"{self._runtime.log_prefix} 主动触发缺少对应的触发消息，跳过本轮")
                 return TurnStartContext([], None, timeout_triggered, proactive_triggered, silent_reply_frequency)
+            # 主动任务排队后，上一轮仍可能进入 wait；消费时必须再次恢复运行状态，
+            # 避免补齐 wait 结果并取消超时任务后，残留等待状态阻止后续消息调度。
+            self._runtime._enter_running_state()
             await self._runtime.restore_proactive_user_context()
             await self._emit_flow_step("turn.proactive", "主动思考触发", "按已安排的主动触发继续判断当前对话。")
             if self._runtime._has_pending_wait_tool_call():
