@@ -29,6 +29,7 @@ from src.webui.routers.plugin import router as plugin_router
 from src.webui.routers.reasoning_process import router as reasoning_process_router
 from src.webui.routers.reply_effects import router as reply_effects_router
 from src.webui.routers.search import router as search_router
+from src.webui.routers.self_update import router as self_update_router
 from src.webui.routers.statistics import router as statistics_router
 from src.webui.routers.system import router as system_router
 from src.webui.routers.user_emoji import router as user_emoji_router
@@ -64,6 +65,7 @@ router.include_router(user_emoji_router)
 router.include_router(plugin_router)
 # 注册系统控制路由
 router.include_router(system_router)
+router.include_router(self_update_router)
 router.include_router(data_transfer_router)
 router.include_router(reasoning_process_router)
 router.include_router(reply_effects_router)

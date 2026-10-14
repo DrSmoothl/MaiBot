@@ -95,7 +95,8 @@ if __name__ == "__main__" and os.environ.get("MAIBOT_WORKER_PROCESS") == "1":
 from src.common.i18n import set_locale, t, tn  # noqa: E402
 from src.common.logger import get_logger, initialize_logging, shutdown_logging  # noqa: E402
 from src.common.runtime_loop import set_main_loop  # noqa: E402
-from src.common.process_runner import RESTART_EXIT_CODE, supervise_worker  # noqa: E402
+from src.common.process_runner import RESTART_EXIT_CODE, run_runner  # noqa: E402
+from src.common.self_update import apply_pending_update, clear_pending_update  # noqa: E402
 from src.common.shutdown import application_signal_handlers, request_shutdown  # noqa: E402
 from src.common.update_notice import emit_terminal_update_notice_if_needed  # noqa: E402
 from src.config.legacy_upgrade_confirmation import require_legacy_upgrade_confirmation  # noqa: E402
@@ -120,13 +121,17 @@ def run_runner_process():
     script_file = sys.argv[0]
     python_executable = sys.executable
 
-    # 设置环境变量，标记子进程为 Worker 进程
-    env = os.environ.copy()
-    env["MAIBOT_WORKER_PROCESS"] = "1"
-
     logger.info(t("startup.launching_script", script_file=script_file))
     cmd = [python_executable, script_file] + sys.argv[1:]
-    sys.exit(supervise_worker(cmd, env, logger))
+    # 上次运行遗留的更新请求不再执行；自更新只在 WebUI 触发的重启（退出码 42）时进行。
+    clear_pending_update()
+
+    def apply_update() -> bool:
+        result = apply_pending_update(logger)
+        return result is not None and result.success
+
+    # run_runner 会给子进程加上 Worker 标记；自更新成功后改由新代码的 Runner 接手。
+    sys.exit(run_runner(cmd, os.environ.copy(), logger, apply_update))
 
 
 # 检查是否是 Worker 进程

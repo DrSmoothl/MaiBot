@@ -14,6 +14,7 @@ import { useAuthGuard } from '@/hooks/use-auth'
 import { useBackground } from '@/hooks/use-background'
 
 import { TitleBar } from '@/components/electron/TitleBar'
+import { SelfUpdateResultNotifier } from '@/components/self-update-result-notifier'
 import { matchesShortcut } from '@/lib/keyboard'
 import { isElectron } from '@/lib/runtime'
 import { cn } from '@/lib/utils'
@@ -545,6 +546,7 @@ export function Layout({ children }: LayoutProps) {
       <Suspense fallback={null}>
         <UpdateNoticeDialog />
       </Suspense>
+      <SelfUpdateResultNotifier />
     </TooltipProvider>
   )
 }
