@@ -2,6 +2,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+import asyncio
 import random
 import re
 import time
@@ -1162,7 +1163,9 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                 api_provider = getattr(_client, "api_provider", None)
                 active_client_type = str(getattr(api_provider, "client_type", "") or "")
                 prompt_started_at = time.perf_counter()
-                built_request_messages = self._build_request_messages(
+                # 视觉请求构建会解码、缩放和编码图片，在工作线程中执行，避免阻塞聊天事件循环。
+                built_request_messages = await asyncio.to_thread(
+                    self._build_request_messages,
                     chat_history=filtered_history,
                     reply_message=reply_message,
                     reply_reason=reply_reason or "",

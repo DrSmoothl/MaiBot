@@ -15,8 +15,12 @@ from __future__ import annotations
 from copy import copy
 from dataclasses import replace
 from datetime import datetime
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
+import base64
+
+from PIL import Image, ImageOps
 
 from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import get_chat_type_and_target_info, is_bot_self
@@ -67,6 +71,33 @@ SHORT_REPLY_STYLE = "简短表达"
 
 RETRO_REPLY_TARGET_CONTENT_LIMIT = 300
 """复古模板里目标消息内容的截断长度，与旧版保持一致。"""
+
+RETRO_RECENT_IMAGE_COUNT = 3
+RETRO_RECENT_IMAGE_MAX_SIDE = 640
+RETRO_OLDER_IMAGE_MAX_SIDE = 128
+
+
+def _resize_retro_image(part: ContextImagePart, max_side: int) -> ContextImagePart:
+    """等比例缩小本次请求的图片，小图保持原样；缩放时取首帧并保留透明度。"""
+    with Image.open(BytesIO(base64.b64decode(part.image_base64, validate=True))) as image:
+        if max(image.size) <= max_side:
+            return part
+        # 编码后不携带 EXIF，先摆正照片，再约束长边，极窄图片至少保留一个像素。
+        frame = ImageOps.exif_transpose(image)
+        frame = frame.convert("RGBA" if frame.has_transparency_data else "RGB")
+        scale = max_side / max(frame.size)
+        frame = frame.resize(
+            (max(1, int(frame.width * scale)), max(1, int(frame.height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+        output = BytesIO()
+        if frame.has_transparency_data:
+            frame.convert("RGBA").save(output, format="PNG")
+            image_format = "png"
+        else:
+            frame.convert("RGB").save(output, format="JPEG", quality=95)
+            image_format = "jpeg"
+    return ContextImagePart(image_format, base64.b64encode(output.getvalue()).decode("ascii"))
 
 
 class RetroReplyPromptMixin:
@@ -177,7 +208,7 @@ class RetroReplyPromptMixin:
     def _prepare_retro_visual_history(
         chat_history: List[LLMContextMessage],
     ) -> Tuple[List[LLMContextMessage], Dict[int, List[ContextImagePart]]]:
-        """先确定实际发送的图片，仅在本次模板副本中去掉对应的图片和表情包描述。"""
+        """确定实际发送的图片并按新旧缩小，仅在本次模板副本中去掉对应的图片和表情包描述。"""
 
         candidates: List[Tuple[int, int, ContextImagePart]] = []
         for message_index, message in enumerate(chat_history):
@@ -201,8 +232,11 @@ class RetroReplyPromptMixin:
         retained = candidates[-image_limit:] if image_limit else []
         visual_parts: Dict[int, List[ContextImagePart]] = {}
         visual_indices: Dict[int, Set[int]] = {}
-        for message_index, media_index, part in retained:
-            visual_parts.setdefault(message_index, []).append(part)
+        recent_start = max(0, len(retained) - RETRO_RECENT_IMAGE_COUNT)
+        for image_index, (message_index, media_index, part) in enumerate(retained):
+            # 按实际发送的图片计数，同一发言中的多张图片和表情包也各占一个位置。
+            max_side = RETRO_RECENT_IMAGE_MAX_SIDE if image_index >= recent_start else RETRO_OLDER_IMAGE_MAX_SIDE
+            visual_parts.setdefault(message_index, []).append(_resize_retro_image(part, max_side))
             visual_indices.setdefault(message_index, set()).add(media_index)
 
         def without_visual_descriptions(sequence: MessageSequence, sent_indices: Set[int]) -> MessageSequence:
