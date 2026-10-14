@@ -458,7 +458,6 @@ export function CorrectionTab({ correction }: CorrectionTabProps) {
               <WandSparkles className="h-4 w-4" />
               记忆修正
             </CardTitle>
-            <CardDescription>输入自然语言修正请求，生成预览后再确认写入</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col space-y-4">
             <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -538,11 +537,7 @@ export function CorrectionTab({ correction }: CorrectionTabProps) {
                         <Badge variant="secondary">{getChatTargetValueLabel(selectedChatTarget)}</Badge>
                         <span className="font-mono break-all">{selectedChatTarget.chat_id}</span>
                       </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground">
-                        可直接填写，名称会在后端尝试转换为真实 session_id
-                      </div>
-                    )}
+                    ) : null}
                     <div className="overflow-hidden rounded-md border bg-background">
                       {chatTargetsLoading ? (
                         <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">

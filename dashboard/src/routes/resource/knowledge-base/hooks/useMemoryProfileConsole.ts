@@ -136,7 +136,7 @@ export function useMemoryProfileConsole({
   const [queryPlatform, setQueryPlatform] = useState('')
   const [queryUserId, setQueryUserId] = useState('')
   const [evidenceLimit, setEvidenceLimit] = useState('12')
-  const [queryMode, setQueryMode] = useState<ProfileQueryMode>('exact')
+  const [queryMode, setQueryMode] = useState<ProfileQueryMode>('fuzzy')
   const [showRawProfilePayload, setShowRawProfilePayload] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [overrideText, setOverrideText] = useState('')

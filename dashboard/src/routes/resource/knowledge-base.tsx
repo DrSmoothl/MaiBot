@@ -509,6 +509,7 @@ export function KnowledgeBasePage() {
   const queryClient = useQueryClient()
   const deepLinkRef = useRef<KnowledgeBaseDeepLinkState>(readKnowledgeBaseDeepLink())
   const [activeTab, setActiveTab] = useState<MemoryConsoleTab>(deepLinkRef.current.tab)
+  const [imagesToolbarTarget, setImagesToolbarTarget] = useState<HTMLDivElement | null>(null)
   const [runtimeStatusDialogOpen, setRuntimeStatusDialogOpen] = useState(false)
   const [visitedMemoryTabs, setVisitedMemoryTabs] = useState<Set<MemoryConsoleTab>>(
     () => new Set<MemoryConsoleTab>([deepLinkRef.current.tab])
@@ -746,9 +747,9 @@ export function KnowledgeBasePage() {
         return
       }
 
-      if (action === 'reinforce' || action === 'freeze' || action === 'protect') {
+      if (action === 'status' || action === 'reinforce' || action === 'freeze' || action === 'protect') {
         setMaintenanceInitialTarget(record.id)
-        setMaintenanceInitialAction(action)
+        setMaintenanceInitialAction(action === 'status' ? 'reinforce' : action)
         setInspectionMode('maintenance')
         switchMemoryTab('inspection', { mode: 'maintenance', target: record.id })
         return
@@ -1262,13 +1263,16 @@ export function KnowledgeBasePage() {
                 ))}
               </DashboardTabBar>
 
-              {/* 「更多操作」省略号与标签同一行：self-stretch 让标签撑满该行，
-                  h-8 定住行高，标签高度随之与按钮对齐 */}
+              {/* 图片刷新与「更多操作」放在标签行右侧；self-stretch 让标签撑满该行，
+                  h-8 定住行高，标签高度随之与按钮对齐。 */}
+              {activeTab === 'images' && (
+                <div ref={setImagesToolbarTarget} className="ml-auto flex items-center" />
+              )}
               {runtimeConfig?.vector_rebuild_required ? (
                 <Button
                   variant="destructive"
                   size="sm"
-                  className="ml-auto"
+                  className={cn(activeTab !== 'images' && 'ml-auto')}
                   title={runtimeConfig.vector_rebuild_message}
                   onClick={() => void memoryRuntime.openVectorRebuildDialog()}
                   disabled={memoryRuntime.vectorRebuilding}
@@ -1288,7 +1292,10 @@ export function KnowledgeBasePage() {
                     type="button"
                     variant="outline"
                     size="icon"
-                    className={cn('h-8 w-8', !runtimeConfig?.vector_rebuild_required && 'ml-auto')}
+                    className={cn(
+                      'h-8 w-8',
+                      activeTab !== 'images' && !runtimeConfig?.vector_rebuild_required && 'ml-auto'
+                    )}
                     aria-label="更多操作"
                     title="更多操作"
                   >
@@ -1346,7 +1353,7 @@ export function KnowledgeBasePage() {
               </TabsContent>
             )}
 
-            {shouldRenderMemoryTab('images') && <ImagesTab />}
+            {shouldRenderMemoryTab('images') && <ImagesTab toolbarTarget={imagesToolbarTarget} />}
 
             {/* 图谱已从标签栏移到右上角「打开图谱」入口；这里保留面板，
                 以便旧链接 tab=graph 与审计时间线等携带 paragraph_hash 的跳转仍能直接定位图谱 */}

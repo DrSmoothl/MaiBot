@@ -220,8 +220,7 @@ export function ProfileSearchPanel({ profile }: ProfileSearchPanelProps) {
                           {item.has_manual_override ? (
                             <Badge variant="secondary">画像覆写</Badge>
                           ) : null}
-                          {item.source_note &&
-                          item.source_note !== 'sdk_memory_kernel.memory_profile_admin.query' ? (
+                          {item.source_note && !item.source_note.startsWith('sdk_memory_kernel.') ? (
                             <Badge variant="outline">{item.source_note}</Badge>
                           ) : null}
                         </div>

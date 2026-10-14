@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Activity,
   AlertTriangle,
   BookOpen,
   CheckCircle2,
@@ -13,9 +14,6 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Shield,
-  Snowflake,
-  Sparkles,
   Trash2,
   UserRound,
 } from 'lucide-react'
@@ -78,9 +76,7 @@ const RECORD_LABELS: Record<MemoryRecordType, string> = {
 const ACTION_LABELS: Record<string, string> = {
   graph: '图谱',
   correct: '修正',
-  reinforce: '强化',
-  freeze: '冻结',
-  protect: '保护',
+  status: '状态',
   delete: '删除',
   profile: '画像',
   edit_fact: '编辑',
@@ -91,9 +87,7 @@ const ACTION_LABELS: Record<string, string> = {
 const ACTION_ICONS: Record<string, typeof Database> = {
   graph: Network,
   correct: Pencil,
-  reinforce: Sparkles,
-  freeze: Snowflake,
-  protect: Shield,
+  status: Activity,
   delete: Trash2,
   profile: UserRound,
   edit_fact: Pencil,
@@ -405,6 +399,14 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
   })
 
   const detail = detailQuery.data
+  // 三种维护动作共用一个入口，保留原先的位置与其它操作的顺序。
+  const detailActions = Array.from(
+    new Set(
+      (detail?.available_actions ?? []).map((action) =>
+        ['reinforce', 'freeze', 'protect'].includes(action) ? 'status' : action
+      )
+    )
+  )
   const error = searchQuery.error ?? detailQuery.error
   const errorText = error instanceof Error ? error.message : error ? '查询记忆失败' : ''
   // 「关联内容」「事实账本」两组胶囊标签；只保留有内容的页签，计数直接进入标签文案
@@ -540,7 +542,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
     // 跳转或改写类动作会离开当前详情，统一关闭弹窗；画像动作可能仅提示不跳转，
     // 未知动作保持弹窗，均不关闭
     if (
-      ['graph', 'correct', 'reinforce', 'freeze', 'protect', 'delete', 'episode'].includes(action)
+      ['graph', 'correct', 'status', 'reinforce', 'freeze', 'protect', 'delete', 'episode'].includes(action)
     ) {
       setSelectedRecord(null)
     }
@@ -778,7 +780,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
             </DialogTitle>
             {detail ? (
               <div className="flex flex-wrap gap-1.5">
-                {detail.available_actions.map((action) => {
+                {detailActions.map((action) => {
                   const Icon = ACTION_ICONS[action] ?? Database
                   return (
                     <Button
@@ -820,22 +822,31 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
                     {detail.record.type !== 'paragraph' ? (
                       <Badge>{RECORD_LABELS[detail.record.type]}</Badge>
                     ) : null}
-                    <Badge variant="outline">
-                      <LocalizedEnumLabel
-                        value={detail.record.status}
-                        labels={RECORD_STATUS_LABELS}
-                      />
-                    </Badge>
+                    {detail.record.status !== 'active' ? (
+                      <Badge variant="outline">
+                        <LocalizedEnumLabel
+                          value={detail.record.status}
+                          labels={RECORD_STATUS_LABELS}
+                        />
+                      </Badge>
+                    ) : null}
+                    {typeof detail.record.metadata.confidence === 'number' ? (
+                      <span className="text-muted-foreground text-xs tabular-nums">
+                        置信度 {detail.record.metadata.confidence.toFixed(2)}
+                      </span>
+                    ) : null}
                     {detail.record.updated_at || detail.record.created_at ? (
                       <span className="text-muted-foreground text-xs">
                         {formatTimestamp(detail.record.updated_at || detail.record.created_at)}
                       </span>
                     ) : null}
                   </div>
-                  <p className="text-sm leading-6 break-words whitespace-pre-wrap">
-                    {detail.record.summary || detail.record.title}
-                  </p>
-                  {detail.record.source_label || detail.record.source ? (
+                  {detail.record.type !== 'relation' ? (
+                    <p className="text-sm leading-6 break-words whitespace-pre-wrap">
+                      {detail.record.summary || detail.record.title}
+                    </p>
+                  ) : null}
+                  {detail.record.type !== 'relation' && (detail.record.source_label || detail.record.source) ? (
                     <div className="text-muted-foreground text-xs break-all">
                       来源：{detail.record.source_label || detail.record.source}
                       {detail.record.source_label &&
@@ -911,7 +922,6 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
 
                 {relatedTabItems.length > 0 ? (
                   <section className="space-y-2">
-                    <div className="text-muted-foreground px-1 text-xs font-medium">关联内容</div>
                     <Tabs value={activeRelatedTab} onValueChange={setRelatedTab}>
                       <MemoryMiniTabs items={relatedTabItems} />
                       <TabsContent value="paragraphs" className="mt-2">
