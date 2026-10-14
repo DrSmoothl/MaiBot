@@ -89,8 +89,14 @@ def read_manifest(directory: Path) -> Dict[str, Any]:
 
 
 def distribution_files(directory: Path) -> List[Path]:
-    # uv build 会生成 dist/.gitignore，它不属于 Python 发布文件。
-    return sorted(path for path in (directory / "dist").iterdir() if path.name != ".gitignore")
+    files = list((directory / "dist").iterdir())
+    # uv 生成 .gitignore；PyPA 上传时生成对应发行文件的签名证明，它们不属于包清单。
+    attestations = {
+        f"{path.name}.publish.attestation"
+        for path in files
+        if path.name.endswith((".whl", ".tar.gz"))
+    }
+    return sorted(path for path in files if path.name != ".gitignore" and path.name not in attestations)
 
 
 def audit(directory: Path) -> None:

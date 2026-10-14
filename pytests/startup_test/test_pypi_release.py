@@ -48,6 +48,15 @@ def test_retry_verifies_original_distribution_bytes(tmp_path: Path) -> None:
                 "files": {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}}
     (tmp_path / "release.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert release.verify(tmp_path) == manifest
+    for name in files:
+        (dist / f"{name}.publish.attestation").write_text('{"signature":"generated-by-pypa"}', encoding="utf-8")
+    # 上传生成的签名证明不改变 wheel/sdist 的校验结果。
+    assert release.verify(tmp_path) == manifest
+    unexpected = dist / "unknown.whl.publish.attestation"
+    unexpected.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="校验和"):
+        release.verify(tmp_path)
+    unexpected.unlink()
     (dist / "a.whl").write_bytes(b"rebuilt")
     with pytest.raises(ValueError, match="校验和"):
         release.verify(tmp_path)

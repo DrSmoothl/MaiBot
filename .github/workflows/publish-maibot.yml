@@ -16,6 +16,11 @@ on:
         description: '上传 PyPI 并创建 GitHub Release（关闭时只构建验证）'
         default: false
         type: boolean
+      resume_run_id:
+        description: '复用此前运行的原产物；上传后失败时填写原 Actions run ID，不重新构建'
+        required: false
+        default: ''
+        type: string
 
 # 防止两次正式发布同时创建同一个 tag 或向同一个项目上传。
 concurrency:
@@ -46,11 +51,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          ID=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
-            --jq ".artifacts[] | select(.name == \"maibot-$RELEASE_VERSION\" and .expired == false) | .id")
+          find_artifact() {
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/artifacts" \
+              --jq ".artifacts[] | select(.name == \"maibot-$RELEASE_VERSION\" and .expired == false) | .id"
+          }
+          RUN_ID="$GITHUB_RUN_ID"
+          ID=$(find_artifact "$RUN_ID")
+          if [ -z "$ID" ] && [ -n "$RESUME_RUN_ID" ]; then
+            [[ "$RESUME_RUN_ID" =~ ^[0-9]+$ ]]
+            RUN_ID="$RESUME_RUN_ID"
+            ID=$(find_artifact "$RUN_ID")
+            if [ -z "$ID" ]; then
+              echo "原 run 中没有可用的对应版本产物，禁止重新构建已上传的版本" >&2
+              exit 1
+            fi
+          fi
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           if [ -n "$ID" ]; then
             echo 'reuse=true' >> "$GITHUB_OUTPUT"
           else
@@ -62,7 +82,7 @@ jobs:
         with:
           name: maibot-${{ inputs.version }}
           path: release-dist
-          run-id: ${{ github.run_id }}
+          run-id: ${{ steps.recovery.outputs.run_id }}
           github-token: ${{ github.token }}
       - name: Check out source to release
         if: steps.recovery.outputs.reuse != 'true'
@@ -104,7 +124,7 @@ jobs:
             test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$SOURCE_COMMIT"
           fi
       - name: Save validated files and release notes for retry
-        if: steps.recovery.outputs.reuse != 'true'
+        if: steps.recovery.outputs.reuse != 'true' || steps.recovery.outputs.run_id != github.run_id
         uses: actions/upload-artifact@v4
         with:
           name: maibot-${{ inputs.version }}

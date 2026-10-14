@@ -26,9 +26,12 @@
 - 上传 PyPI 失败：在原 Actions run 中选择 **Re-run failed jobs**。使用原已验证的 wheel 和源码包，补传缺失文件。
 - PyPI 成功、创建 Release 失败：同样重跑原 run 的失败 job，补建 Release。
 - **Re-run all jobs** 也会优先复用同一 run 已保存的产物，不根据可能已经移动的分支重新打包。
+- 若需要先修复发布脚本，再继续一个已经上传过包的版本：推送修复后启动新的 run，填写原 `version` 和 `resume_run_id`。流程复用原 run 的提交 SHA、发布说明及包文件，`ref` 不再用于构建。原产物缺失时明确失败，禁止重新构建。
 - 产物保存 90 天。上传开始后应在原 run 中重试；不要对同一已发布版本重新构建。文件内容不同会被校验拒绝，即使文件名相同也不会跳过冲突。
 - 若同名 tag 指向不同提交，或同名 Release 是草稿/预发布状态，流程会失败，不移动 tag 或修改已有 Release。
 
 每个 run 的产物包含 wheel、源码包、版本、固定提交 SHA、文件 SHA256 和 Release 正文。构建与发布 job 分开；PyPI job 不执行待发布源码中的构建步骤，也不重新打包。
+
+PyPA 上传 Action 会在包目录生成 `.publish.attestation` 签名证明。上传后仅对原 wheel 和源码包做 SHA256 检查，允许它们对应的签名证明；未知文件、额外发行包及原包内容变化仍会导致失败。
 
 最后创建 Release 使用仓库的 `GITHUB_TOKEN`；由该 Token 创建的 tag/Release 不会触发普通下游工作流。如果后续需要把 Docker 或 OneKey 发布接到本流程，应显式编排，不能依赖这些 tag 的 push 事件。
