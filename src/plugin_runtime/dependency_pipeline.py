@@ -20,6 +20,7 @@ import tomllib
 
 from packaging.utils import canonicalize_name
 
+from src.common.paths import get_instance_root, project_metadata_path
 from src.common.logger import get_logger
 from src.plugin_runtime.compat_policy import is_force_plugin_compatibility_enabled
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator, PluginManifest
@@ -86,7 +87,7 @@ class PluginDependencyPipeline:
             project_root: 项目根目录；留空时自动推断。
         """
 
-        self._project_root: Path = project_root or Path(__file__).resolve().parents[2]
+        self._project_root: Path = project_root or get_instance_root()
         self._manifest_validator: ManifestValidator = ManifestValidator(
             project_root=self._project_root,
             validate_python_package_dependencies=False,
@@ -443,7 +444,7 @@ class PluginDependencyPipeline:
             PackageIndexSettings: 按优先级排列的索引地址与约束依赖。
         """
 
-        with (self._project_root / "pyproject.toml").open("rb") as pyproject_file:
+        with project_metadata_path(self._project_root).open("rb") as pyproject_file:
             uv_config: Dict[str, Any] = tomllib.load(pyproject_file).get("tool", {}).get("uv", {})
 
         raw_indexes: List[Dict[str, Any]] = uv_config.get("index", [])

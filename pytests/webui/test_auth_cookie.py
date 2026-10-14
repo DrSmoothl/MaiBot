@@ -13,7 +13,12 @@ from src.webui.core.auth import COOKIE_NAME, clear_auth_cookie, set_auth_cookie
     ("mode", "secure_cookie", "scheme", "forwarded_proto", "expected_secure"),
     [
         ("development", True, "http", None, True),
-        ("production", False, "http", None, True),
+        ("production", False, "http", None, False),
+        ("production", False, "https", None, False),
+        ("production", False, "http", "https", False),
+        ("production", True, "http", None, True),
+        ("production", True, "https", None, True),
+        ("production", True, "http", "https", True),
         ("development", True, "http", "https", True),
         ("development", True, "https", None, True),
         ("development", False, "http", None, False),
@@ -30,7 +35,9 @@ def test_cookie_security_follows_configuration(
     monkeypatch.setattr(global_config.webui, "mode", mode)
     monkeypatch.setattr(global_config.webui, "secure_cookie", secure_cookie)
     headers = [] if forwarded_proto is None else [(b"x-forwarded-proto", forwarded_proto.encode())]
-    request = Request({"type": "http", "scheme": scheme, "path": "/", "headers": headers})
+    request = Request(
+        {"type": "http", "scheme": scheme, "server": ("example.com", 7999), "path": "/", "headers": headers}
+    )
     response = Response()
 
     set_auth_cookie(response, "test-session-token", request)

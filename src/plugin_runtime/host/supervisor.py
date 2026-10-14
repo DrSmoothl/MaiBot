@@ -9,6 +9,7 @@ import os
 import sys
 import time
 
+from src.common.paths import get_instance_root
 from src.common.logger import get_logger
 from src.common.shutdown import is_shutdown_requested
 from src.config.config import global_config
@@ -91,7 +92,7 @@ from .rpc_server import RPCServer
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = get_instance_root()
 _RUNNER_DEBUG_FILE_PATH = _PROJECT_ROOT / "logs" / "plugin_runtime_debug" / "runner_rpc_debug.jsonl"
 _ADAPTER_PLUGIN_TYPE = "adapter"
 _RUNTIME_GROUP_LOGGER_NAMES: Dict[str, str] = {

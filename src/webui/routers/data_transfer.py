@@ -21,6 +21,7 @@ import time
 import uuid
 import zipfile
 
+from src.common.paths import get_instance_root
 from src.common.logger import get_logger
 from src.config.config import MMC_VERSION
 from src.webui.dependencies import require_auth
@@ -29,7 +30,7 @@ logger = get_logger("webui_data_transfer")
 
 router = APIRouter(prefix="/data-transfer", tags=["data-transfer"], dependencies=[Depends(require_auth)])
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = get_instance_root()
 _EXPORT_DIRS: dict[str, Path] = {
     "config": _PROJECT_ROOT / "config",
     "data": _PROJECT_ROOT / "data",

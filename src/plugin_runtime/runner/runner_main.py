@@ -29,6 +29,7 @@ import tomllib
 from pydantic import TypeAdapter, ValidationError
 import tomlkit
 
+from src.common.paths import get_instance_root
 from src.plugin_runtime.local_sdk import activate_local_sdk_import_path
 
 activate_local_sdk_import_path()
@@ -89,7 +90,7 @@ _PLUGIN_ALLOWED_RAW_HOST_METHODS = frozenset(
     }
 )
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = get_instance_root()
 _RUNNER_DEBUG_FILE_PATH = _PROJECT_ROOT / "logs" / "plugin_runtime_debug" / "runner_rpc_debug.jsonl"
 
 # 宿主保留键 [plugin].enabled 的校验器，规则与配置模型声明 ``enabled: bool`` 时一致

@@ -286,15 +286,20 @@
   :root[data-dashboard-style='millennium'] [data-dashboard-sidebar-section-title='true'] {
     font-size: 0.625rem;
     letter-spacing: 0.02em;
-    line-height: 1.4;
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
   }
 
-  /* 中文分组统一为两行，每行两个字，与下方图标中心对齐。 */
+  /* 中文标题使用整列宽度，短标题保持一行，长标题自然换行并与图标中心对齐。 */
   :root[data-dashboard-style='millennium'] [data-dashboard-sidebar-title-stacked='true'] {
     letter-spacing: 0;
     margin-inline: auto;
-    width: 2em;
-    word-break: break-all;
+    width: auto;
+    max-width: 100%;
+    word-break: normal;
   }
 }
 
@@ -503,7 +508,7 @@
 /* 没用 Card 组件、直接写 bg-card + border 的面板：同样是塑料面，但不加底部厚度 */
 :root[data-dashboard-style='millennium']
   [data-dashboard-shell]
-  .bg-card.border:not([data-dashboard-card='true']) {
+  .bg-card.border:not([data-dashboard-card='true'], [data-memory-timeline-event='true']) {
   border: 2px solid var(--mil-line);
   box-shadow: var(--mil-bevel);
 }
@@ -639,6 +644,7 @@
   :is(
     [data-dashboard-input='true'],
     [data-dashboard-select-trigger='true'],
+    [data-dashboard-date-time-trigger='true'],
     textarea,
     select:not(.opacity-0),
     [data-dashboard-code-editor='true']
@@ -652,7 +658,11 @@
 }
 
 :root[data-dashboard-style='millennium']
-  :is([data-dashboard-input='true'], [data-dashboard-select-trigger='true']).h-9 {
+  :is(
+    [data-dashboard-input='true'],
+    [data-dashboard-select-trigger='true'],
+    [data-dashboard-date-time-trigger='true']
+  ).h-9 {
   height: 2.875rem;
 }
 
@@ -665,6 +675,7 @@
   :is(
     [data-dashboard-input='true'],
     [data-dashboard-select-trigger='true'],
+    [data-dashboard-date-time-trigger='true'],
     textarea,
     select:not(.opacity-0)
   ):focus-visible {
@@ -673,6 +684,62 @@
 }
 
 /* ---------- 浮层：下拉、菜单、弹窗、提示 ---------- */
+
+/* 日期选择器用下沉日历屏幕和方形键帽，不调用浏览器原生弹窗。 */
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true'] [data-slot='calendar'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 3px 3px 0 var(--mil-screen-shade);
+  color: var(--mil-screen-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true']
+  :is(.rdp-week, .rdp-weekdays) {
+  gap: 3px;
+}
+
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true'] .rdp-week {
+  margin-top: 3px;
+}
+
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true']
+  :is(.rdp-day button, .rdp-nav button) {
+  background-color: var(--mil-key);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -3px 0 var(--mil-key-side);
+  color: var(--mil-ink);
+  font-weight: 700;
+  height: 2rem;
+  min-width: 2rem;
+  padding: 0 0 3px;
+}
+
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true'] .rdp-day button:hover {
+  background-color: var(--mil-key-hover);
+}
+
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true'] .rdp-today {
+  background-color: transparent;
+}
+
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true'] .rdp-today button {
+  outline: 2px solid var(--mil-on-side);
+  outline-offset: -4px;
+}
+
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true'] .rdp-outside button {
+  color: var(--mil-screen-dim);
+  opacity: 0.5;
+}
+
+:root[data-dashboard-style='millennium'] [data-date-time-picker='true']
+  .rdp-day button[data-selected-single='true'] {
+  background-color: var(--mil-on);
+  box-shadow: var(--mil-pressed);
+  color: var(--mil-on-ink);
+  opacity: 1;
+}
 
 :root[data-dashboard-style='millennium']
   :is(
@@ -714,6 +781,11 @@
 :root[data-dashboard-style='millennium'] [data-dashboard-tabs-list='true'] {
   background-color: transparent;
   gap: 0.5rem;
+}
+
+/* 迷你标签页直接铺在机壳上，只保留各键帽的描边。 */
+:root[data-dashboard-style='millennium'] [data-memory-mini-tabs='true'] {
+  border: 0;
 }
 
 :root[data-dashboard-style='millennium']
@@ -1450,6 +1522,202 @@
 
 /* ---------- 长期记忆：记录列表是一整块屏幕 ---------- */
 
+/* 记忆页顶部键帽与筛选控件收紧，不沿用全局加高尺寸。 */
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true']
+  [data-memory-console-tab-row='true']
+  :is([data-dashboard-tabs-list='true'], [data-dashboard-tabs-trigger='true']) {
+  height: 2.25rem;
+  min-height: 2.25rem;
+  padding-block: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true']
+  [data-memory-console-tab-row='true'] [data-dashboard-tabs-trigger='true'] {
+  padding-bottom: 5px;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true'] [data-memory-timeline-panel='true']
+  :is([data-dashboard-button='true'], [data-dashboard-select-trigger='true'], [data-dashboard-date-time-trigger='true']):is(.h-8, .h-9, .h-10) {
+  height: 2.25rem;
+  min-height: 2.25rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true'] [data-memory-timeline-panel='true']
+  [data-dashboard-button='true'].w-8 {
+  width: 2.25rem;
+}
+
+/* 合并后的分页底栏使用更矮的键帽与下拉框。 */
+:root[data-dashboard-style='millennium'] [data-dashboard-main='true'] [data-memory-timeline-panel='true']
+  [data-memory-timeline-pagination='true']
+  :is([data-dashboard-button='true'], [data-dashboard-select-trigger='true']) {
+  height: 1.875rem;
+  min-height: 1.875rem;
+  padding-inline: 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* 记忆流与抹除列表共用下沉白底，横线分隔条目，不重复堆叠卡片外框。 */
+:root[data-dashboard-style='millennium']
+  :is(
+    [data-memory-timeline-list='true'],
+    [data-memory-timeline-evidence='true'],
+    [data-memory-delete-screen='true']
+  ) {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-sunk);
+  color: var(--mil-screen-ink);
+}
+
+:root[data-dashboard-style='millennium']
+  :is([data-memory-timeline-event='true'], [data-memory-delete-operation='true']) {
+  background-color: transparent;
+  background-image: none;
+  border: 0;
+  border-bottom: 2px solid var(--mil-rule);
+  box-shadow: none;
+  margin: 0;
+}
+
+:root[data-dashboard-style='millennium']
+  :is([data-memory-timeline-event='true'], [data-memory-delete-operation='true']):last-child {
+  border-bottom: 0;
+}
+
+:root[data-dashboard-style='millennium']
+  :is([data-memory-timeline-event='true'], [data-memory-delete-operation='true']):hover {
+  background-color: color-mix(in srgb, var(--mil-on) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--mil-on-side);
+}
+
+:root[data-dashboard-style='millennium']
+  :is([data-memory-timeline-event='true'], [data-memory-delete-operation='true']):focus-visible {
+  outline: 2px solid var(--mil-on-side);
+  outline-offset: -3px;
+}
+
+/* 导入队列共用一块下沉屏幕，分组用实线、任务之间用虚线分隔。
+   内侧暗边单独覆盖在内容上方，避免标题、选中态或滚动内容盖住屏幕的凹槽。 */
+:root[data-dashboard-style='millennium'] [data-memory-import-queue-screen='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: -2px -2px 0 2px var(--mil-lo), 2px 2px 0 2px var(--mil-hi);
+  color: var(--mil-screen-ink);
+  isolation: isolate;
+  margin: 5px 9px 9px;
+  padding: 0;
+  position: relative;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-queue-screen='true']::after {
+  box-shadow: inset 3px 3px 0 var(--mil-screen-shade);
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-group='true'] {
+  border-bottom: 2px solid var(--mil-rule);
+  margin: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-group='true']:last-child {
+  border-bottom: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-group='true'] > * {
+  margin-block: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-group-header='true'] {
+  background-color: transparent;
+  border-bottom: 2px solid var(--mil-rule);
+  padding: 0.625rem 0.875rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task-list='true'] {
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true'] {
+  --mil-import-led: var(--mil-vent);
+  background-color: transparent;
+  background-image: none;
+  border: 0;
+  border-bottom: 2px dashed var(--mil-rule);
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--mil-screen-ink);
+  cursor: pointer;
+  margin: 0;
+  padding-left: 2.5rem;
+  position: relative;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true']:last-child {
+  border-bottom: 0;
+}
+
+/* 左侧实心状态灯不加外框和圆角；颜色表示任务状态，进度仍由百分比显示。 */
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true']::before {
+  background-color: var(--mil-import-led);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  content: '';
+  height: 0.625rem;
+  left: 1rem;
+  position: absolute;
+  top: 1.25rem;
+  width: 0.625rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-memory-import-task='true']:is([data-status='preparing'], [data-status='running']) {
+  --mil-import-led: var(--mil-led);
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true'][data-status='completed'] {
+  --mil-import-led: var(--mil-on-side);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-memory-import-task='true']:is([data-status='completed_with_errors'], [data-status='cancel_requested']) {
+  --mil-import-led: var(--mil-hot);
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true'][data-status='failed'] {
+  --mil-import-led: var(--mil-danger);
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true'][data-status='cancelled'] {
+  --mil-import-led: var(--mil-screen-dim);
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true']:focus-visible {
+  outline: 2px solid var(--mil-on-side);
+  outline-offset: -4px;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true'] [data-dashboard-badge='true'] {
+  background-color: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--mil-screen-dim);
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-import-task='true'] [data-dashboard-progress='true'] {
+  display: none;
+}
+
 :root[data-dashboard-style='millennium']
   [data-dashboard-card-content='true']:has(> [data-memory-record-row]) {
   background-color: var(--mil-screen);
@@ -1459,6 +1727,17 @@
   box-shadow: inset 3px 3px 0 var(--mil-screen-shade);
   color: var(--mil-screen-ink);
   padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-memory-record-checkbox='true'] {
+  height: 1rem;
+  width: 1rem;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-memory-record-checkbox='true'] [data-dashboard-checkbox-indicator='true'] svg {
+  height: 0.625rem;
+  width: 0.625rem;
 }
 
 :root[data-dashboard-style='millennium']
@@ -3000,6 +3279,16 @@
 }
 
 /* ---------- 千禧图标 ---------- */
+
+/* 手机记忆页的多行标签保留键帽样式，但文字与留白必须能放进窄列。 */
+@media (max-width: 1023px) {
+  :root[data-dashboard-style='millennium']
+    [data-memory-console-page='true'] [data-dashboard-tabs-trigger='true'] {
+    min-width: 0;
+    padding-inline: 0.375rem;
+    font-size: 0.75rem;
+  }
+}
 
 /* 手绘图标的路径和替换规则统一登记在 src/components/ui/millennium-icon-set.ts，
    替换图标库图标用的样式由它在启动时生成，这里不再手写。 */

@@ -12,6 +12,7 @@ from rapidfuzz.distance import Levenshtein
 from rich.traceback import install
 from sqlmodel import select
 
+from src.common.paths import get_instance_root
 from src.common.data_models.image_data_model import MaiEmoji
 from src.common.database.database import get_db_session, get_db_session_manual
 from src.common.database.database_model import Images, ImageType
@@ -28,7 +29,7 @@ logger = get_logger("emoji")
 
 install(extra_lines=3)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = get_instance_root()
 DATA_DIR = PROJECT_ROOT / "data"
 EmojiRegisterStatus = Literal["registered", "skipped", "failed"]
 EMOJI_DIR = DATA_DIR / "emoji"  # 表情包存储目录

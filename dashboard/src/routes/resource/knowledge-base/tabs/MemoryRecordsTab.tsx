@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Activity,
   AlertTriangle,
   BookOpen,
+  Box,
   CheckCircle2,
   Database,
   FileText,
@@ -13,9 +15,6 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Shield,
-  Snowflake,
-  Sparkles,
   Trash2,
   UserRound,
 } from 'lucide-react'
@@ -78,9 +77,7 @@ const RECORD_LABELS: Record<MemoryRecordType, string> = {
 const ACTION_LABELS: Record<string, string> = {
   graph: '图谱',
   correct: '修正',
-  reinforce: '强化',
-  freeze: '冻结',
-  protect: '保护',
+  status: '状态',
   delete: '删除',
   profile: '画像',
   edit_fact: '编辑',
@@ -91,9 +88,7 @@ const ACTION_LABELS: Record<string, string> = {
 const ACTION_ICONS: Record<string, typeof Database> = {
   graph: Network,
   correct: Pencil,
-  reinforce: Sparkles,
-  freeze: Snowflake,
-  protect: Shield,
+  status: Activity,
   delete: Trash2,
   profile: UserRound,
   edit_fact: Pencil,
@@ -226,7 +221,7 @@ function RecordTypeIcon({ type, className }: { type: MemoryRecordType; className
     type === 'paragraph'
       ? FileText
       : type === 'entity'
-        ? UserRound
+        ? Box
         : type === 'relation'
           ? Network
           : type === 'episode'
@@ -258,8 +253,13 @@ function RecordButton({
         compact && 'py-2'
       )}
     >
-      <span className="bg-muted mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-md">
-        <RecordTypeIcon type={record.type} className="h-3.5 w-3.5" />
+      <span className="mt-0.5 flex w-12 flex-none flex-col items-center gap-1">
+        <span className="bg-muted flex h-7 w-7 items-center justify-center rounded-md">
+          <RecordTypeIcon type={record.type} className="h-3.5 w-3.5" />
+        </span>
+        <span className="text-muted-foreground text-xs font-medium whitespace-nowrap">
+          {RECORD_LABELS[record.type]}
+        </span>
       </span>
       <span className="min-w-0 flex-1">
         <span className={cn('block font-medium break-words', compact ? 'text-xs' : 'text-sm')}>
@@ -270,24 +270,27 @@ function RecordButton({
             {record.summary}
           </span>
         ) : null}
-        <span className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-          <span className="font-medium">{RECORD_LABELS[record.type]}</span>
-          {knowledgeTypeLabel ? <Badge variant="secondary">{knowledgeTypeLabel}</Badge> : null}
-          {record.status !== 'active' ? (
-            <Badge variant="outline">
-              <LocalizedEnumLabel value={record.status} labels={RECORD_STATUS_LABELS} />
-            </Badge>
-          ) : null}
-          {/* 只展示可读来源（聊天流名称 / 人物姓名 / 导入来源），不暴露内部来源标记 */}
-          {record.source_label ? (
-            <>
-              <span aria-hidden="true">·</span>
-              <span className="max-w-full truncate" title={record.source_label}>
-                来自 {record.source_label}
-              </span>
-            </>
-          ) : null}
-        </span>
+        {knowledgeTypeLabel || record.status !== 'active' || record.source_label ? (
+          <span className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            {knowledgeTypeLabel ? <Badge variant="secondary">{knowledgeTypeLabel}</Badge> : null}
+            {record.status !== 'active' ? (
+              <Badge variant="outline">
+                <LocalizedEnumLabel value={record.status} labels={RECORD_STATUS_LABELS} />
+              </Badge>
+            ) : null}
+            {/* 只展示可读来源（聊天流名称 / 人物姓名 / 导入来源），不暴露内部来源标记 */}
+            {record.source_label ? (
+              <>
+                {knowledgeTypeLabel || record.status !== 'active' ? (
+                  <span aria-hidden="true">·</span>
+                ) : null}
+                <span className="max-w-full truncate" title={record.source_label}>
+                  来自 {record.source_label}
+                </span>
+              </>
+            ) : null}
+          </span>
+        ) : null}
       </span>
     </button>
   )
@@ -405,6 +408,14 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
   })
 
   const detail = detailQuery.data
+  // 三种维护动作共用一个入口，保留原先的位置与其它操作的顺序。
+  const detailActions = Array.from(
+    new Set(
+      (detail?.available_actions ?? []).map((action) =>
+        ['reinforce', 'freeze', 'protect'].includes(action) ? 'status' : action
+      )
+    )
+  )
   const error = searchQuery.error ?? detailQuery.error
   const errorText = error instanceof Error ? error.message : error ? '查询记忆失败' : ''
   // 「关联内容」「事实账本」两组胶囊标签；只保留有内容的页签，计数直接进入标签文案
@@ -540,7 +551,16 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
     // 跳转或改写类动作会离开当前详情，统一关闭弹窗；画像动作可能仅提示不跳转，
     // 未知动作保持弹窗，均不关闭
     if (
-      ['graph', 'correct', 'reinforce', 'freeze', 'protect', 'delete', 'episode'].includes(action)
+      [
+        'graph',
+        'correct',
+        'status',
+        'reinforce',
+        'freeze',
+        'protect',
+        'delete',
+        'episode',
+      ].includes(action)
     ) {
       setSelectedRecord(null)
     }
@@ -548,16 +568,19 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
   }
 
   return (
-    <TabsContent value="records" className="space-y-4">
+    <TabsContent
+      value="records"
+      className="mt-0 flex min-h-0 flex-1 flex-col gap-2 overflow-hidden"
+    >
       {/* 搜索栏不套卡片外框，直接贴在结果卡片上方 */}
       <form
-        className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_160px_auto_auto] md:items-center"
+        className="grid min-w-0 grid-cols-2 shrink-0 gap-3 lg:grid-cols-[minmax(0,1fr)_160px_auto_auto] lg:items-center"
         onSubmit={(event) => {
           event.preventDefault()
           submitSearch()
         }}
       >
-        <div className="relative">
+        <div className="relative col-span-2 min-w-0 lg:col-span-1">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
           <Input
             id="memory-record-query"
@@ -576,7 +599,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
             setRecordType(value as 'all' | MemoryRecordType)
           }}
         >
-          <SelectTrigger id="memory-record-type" aria-label="记录类型" className="h-9">
+          <SelectTrigger id="memory-record-type" aria-label="记录类型" className="col-span-2 h-9 min-w-0 lg:col-span-1">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -588,7 +611,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
             <SelectItem value="episode">情景记忆</SelectItem>
           </SelectContent>
         </Select>
-        <div className="flex h-9 items-center gap-2">
+        <div className="flex min-h-9 min-w-0 items-center gap-2">
           <Switch
             id="memory-record-inactive"
             checked={includeInactive}
@@ -603,7 +626,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
           </Label>
         </div>
         {/* 查询与刷新为两个独立按钮，同色同高保持风格统一 */}
-        <div className="flex h-9 gap-2">
+        <div className="flex min-h-9 items-center justify-end gap-2 lg:justify-start">
           <Button type="submit" className="h-9" disabled={searchQuery.isFetching}>
             {searchQuery.isFetching ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -627,7 +650,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
       </form>
 
       {errorText ? (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="shrink-0">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>{errorText}</AlertDescription>
         </Alert>
@@ -635,11 +658,11 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
 
       {/* 结果卡用弹性列布局：头部按内容取高，滚动区吃掉剩余高度，
           避免头部与滚动区各写死高度后互相留空隙或溢出 */}
-      <Card className="flex h-[660px] flex-col overflow-hidden">
+      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* 结果头部单行：左侧多选操作，右侧各类型计数小字 */}
         <CardHeader
           data-memory-records-result-header="true"
-          className="flex-row flex-wrap items-center space-y-0 gap-x-3 gap-y-1 border-b"
+          className="mb-0! shrink-0 flex-row flex-wrap items-center space-y-0 gap-x-3 gap-y-1 border-b-0! shadow-none!"
           aria-label="记忆多选操作"
         >
           <label
@@ -648,6 +671,8 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
           >
             <Checkbox
               id="memory-record-select-all"
+              data-memory-record-checkbox="true"
+              className="h-3.5 w-3.5 [&_svg]:size-2.5"
               aria-label="全选当前结果"
               checked={allChecked ? true : checkedRecords.length > 0 ? 'indeterminate' : false}
               disabled={!records.length || searchQuery.isFetching}
@@ -704,63 +729,71 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
             </span>
           ) : null}
         </CardHeader>
-        <ScrollArea className="min-h-0 flex-1">
-          <CardContent className="space-y-2 pt-3">
-            {searchQuery.isLoading ? (
-              <div className="text-muted-foreground flex h-40 items-center justify-center gap-2 text-sm">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                正在查询
-              </div>
-            ) : searchQuery.data?.items.length ? (
-              searchQuery.data.items.map((record) => {
-                const key = `${record.type}:${record.id}`
-                const checked = checkedKeys.has(key)
-                // 勾选框与内容同处一个边框内；左侧整列都是勾选热区，右侧点击打开详情
-                return (
-                  <div
-                    key={key}
-                    data-memory-record-row="true"
-                    data-checked={checked ? 'true' : 'false'}
-                    className={cn(
-                      'flex items-stretch rounded-md border transition-colors',
-                      checked && 'border-primary bg-primary/5'
-                    )}
-                  >
-                    <label
-                      htmlFor={`memory-record-select-${key}`}
-                      className="flex shrink-0 cursor-pointer items-start py-3 pr-1 pl-3"
+        {/* 列表放进与记忆流一致的下沉屏幕：边框属于固定外框，不随内容滚动 */}
+        <div className="flex min-h-0 flex-1 flex-col px-3 pb-3 sm:px-4 sm:pb-4">
+          <ScrollArea
+            data-memory-delete-screen="true"
+            className="bg-background h-[60dvh] min-h-0 flex-none rounded-lg border lg:h-auto lg:flex-1"
+          >
+            <CardContent className="space-y-2 border-0! pt-3 shadow-none!">
+              {searchQuery.isLoading ? (
+                <div className="text-muted-foreground flex h-40 items-center justify-center gap-2 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  正在查询
+                </div>
+              ) : searchQuery.data?.items.length ? (
+                searchQuery.data.items.map((record) => {
+                  const key = `${record.type}:${record.id}`
+                  const checked = checkedKeys.has(key)
+                  // 勾选框与内容同处一个边框内；左侧整列都是勾选热区，右侧点击打开详情
+                  return (
+                    <div
+                      key={key}
+                      data-memory-record-row="true"
+                      data-checked={checked ? 'true' : 'false'}
+                      className={cn(
+                        'flex items-stretch rounded-md border transition-colors',
+                        checked && 'border-primary bg-primary/5'
+                      )}
                     >
-                      <Checkbox
-                        id={`memory-record-select-${key}`}
-                        aria-label={`选择${RECORD_LABELS[record.type]}：${record.title || record.id}`}
-                        checked={checked}
-                        onCheckedChange={(next) =>
-                          setCheckedKeys((previous) => {
-                            const updated = new Set(previous)
-                            if (next === true) updated.add(key)
-                            else updated.delete(key)
-                            return updated
-                          })
+                      <label
+                        htmlFor={`memory-record-select-${key}`}
+                        className="flex shrink-0 cursor-pointer items-start py-3 pr-1 pl-3"
+                      >
+                        <Checkbox
+                          id={`memory-record-select-${key}`}
+                          data-memory-record-checkbox="true"
+                          className="h-3.5 w-3.5 [&_svg]:size-2.5"
+                          aria-label={`选择${RECORD_LABELS[record.type]}：${record.title || record.id}`}
+                          checked={checked}
+                          onCheckedChange={(next) =>
+                            setCheckedKeys((previous) => {
+                              const updated = new Set(previous)
+                              if (next === true) updated.add(key)
+                              else updated.delete(key)
+                              return updated
+                            })
+                          }
+                        />
+                      </label>
+                      <RecordButton
+                        record={record}
+                        selected={
+                          record.type === selectedRecord?.type && record.id === selectedRecord?.id
                         }
+                        onSelect={setSelectedRecord}
                       />
-                    </label>
-                    <RecordButton
-                      record={record}
-                      selected={
-                        record.type === selectedRecord?.type && record.id === selectedRecord?.id
-                      }
-                      onSelect={setSelectedRecord}
-                    />
-                  </div>
-                )
-              })
-            ) : (
-              <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">
-                没有匹配记录
-              </div>
-            )}
-          </CardContent>
-        </ScrollArea>
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="text-muted-foreground flex h-40 items-center justify-center text-sm">
+                  没有匹配记录
+                </div>
+              )}
+            </CardContent>
+          </ScrollArea>
+        </div>
       </Card>
 
       <Dialog
@@ -778,7 +811,7 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
             </DialogTitle>
             {detail ? (
               <div className="flex flex-wrap gap-1.5">
-                {detail.available_actions.map((action) => {
+                {detailActions.map((action) => {
                   const Icon = ACTION_ICONS[action] ?? Database
                   return (
                     <Button
@@ -820,22 +853,32 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
                     {detail.record.type !== 'paragraph' ? (
                       <Badge>{RECORD_LABELS[detail.record.type]}</Badge>
                     ) : null}
-                    <Badge variant="outline">
-                      <LocalizedEnumLabel
-                        value={detail.record.status}
-                        labels={RECORD_STATUS_LABELS}
-                      />
-                    </Badge>
+                    {detail.record.status !== 'active' ? (
+                      <Badge variant="outline">
+                        <LocalizedEnumLabel
+                          value={detail.record.status}
+                          labels={RECORD_STATUS_LABELS}
+                        />
+                      </Badge>
+                    ) : null}
+                    {typeof detail.record.metadata.confidence === 'number' ? (
+                      <span className="text-muted-foreground text-xs tabular-nums">
+                        置信度 {detail.record.metadata.confidence.toFixed(2)}
+                      </span>
+                    ) : null}
                     {detail.record.updated_at || detail.record.created_at ? (
                       <span className="text-muted-foreground text-xs">
                         {formatTimestamp(detail.record.updated_at || detail.record.created_at)}
                       </span>
                     ) : null}
                   </div>
-                  <p className="text-sm leading-6 break-words whitespace-pre-wrap">
-                    {detail.record.summary || detail.record.title}
-                  </p>
-                  {detail.record.source_label || detail.record.source ? (
+                  {detail.record.type !== 'relation' ? (
+                    <p className="text-sm leading-6 break-words whitespace-pre-wrap">
+                      {detail.record.summary || detail.record.title}
+                    </p>
+                  ) : null}
+                  {detail.record.type !== 'relation' &&
+                  (detail.record.source_label || detail.record.source) ? (
                     <div className="text-muted-foreground text-xs break-all">
                       来源：{detail.record.source_label || detail.record.source}
                       {detail.record.source_label &&
@@ -911,7 +954,6 @@ export function MemoryRecordsTab({ onAction, onCorrectionPlan }: MemoryRecordsTa
 
                 {relatedTabItems.length > 0 ? (
                   <section className="space-y-2">
-                    <div className="text-muted-foreground px-1 text-xs font-medium">关联内容</div>
                     <Tabs value={activeRelatedTab} onValueChange={setRelatedTab}>
                       <MemoryMiniTabs items={relatedTabItems} />
                       <TabsContent value="paragraphs" className="mt-2">

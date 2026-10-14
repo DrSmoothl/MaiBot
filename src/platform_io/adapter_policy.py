@@ -7,11 +7,12 @@ from typing import Any, Dict, List, Mapping, Optional
 import tomlkit
 from tomlkit.items import AoT, Table
 
+from src.common.paths import get_instance_root
 from src.common.logger import get_logger
 
 logger = get_logger("platform_io.adapter_policy")
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_PROJECT_ROOT = get_instance_root()
 _DEFAULT_POLICY_PATH = _PROJECT_ROOT / "config" / "adapter_policy.toml"
 _SUPPORTED_CHAT_TYPES = {"group", "private"}
 _SUPPORTED_LIST_TYPES = {"whitelist", "blacklist"}

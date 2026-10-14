@@ -19,6 +19,7 @@ import tomlkit
 
 from src.common.logger import get_logger
 from src.common.prompt_i18n import clear_prompt_cache, extract_prompt_placeholders, list_prompt_templates
+from src.common.paths import resource_path
 from src.config.config import CONFIG_DIR, MODEL_CONFIG_VERSION, Config, ModelConfig, PROJECT_ROOT, config_manager
 from src.config.config_base import AttributeData, ConfigBase
 from src.config.config_upgrade_hooks import apply_config_upgrade_hooks
@@ -67,7 +68,7 @@ PathBody = Annotated[Dict[str, str], Body()]
 router = APIRouter(prefix="/config", tags=["config"], dependencies=[Depends(require_auth)])
 compat_router = APIRouter(prefix="/api/config", tags=["config-compat"], dependencies=[Depends(require_auth)])
 
-PROMPTS_DIR = PROJECT_ROOT / "prompts"
+PROMPTS_DIR = resource_path("prompts")
 CUSTOM_PROMPTS_DIR = PROJECT_ROOT / "data" / "custom_prompts"
 MAISAKA_PROMPT_PREVIEW_DIR = (PROJECT_ROOT / "logs" / "maisaka_prompt").resolve()
 _SCHEMA_CACHE: Dict[str, Dict[str, Any]] = {}

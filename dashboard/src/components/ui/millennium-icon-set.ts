@@ -149,6 +149,10 @@ export const MILLENNIUM_ICON_SET: MillenniumIconDef[] = [
     path: 'M4 4h16v16H4zM12 8v5h4',
   },
   {
+    lucide: ['calendar', 'calendar-days', 'calendar-clock'],
+    path: 'M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h2M14 14h2M8 18h2M14 18h2',
+  },
+  {
     lucide: ['eye'],
     path: 'M2 12l5-5h10l5 5-5 5H7zM10 10h4v4h-4z',
   },
@@ -159,6 +163,10 @@ export const MILLENNIUM_ICON_SET: MillenniumIconDef[] = [
   {
     lucide: ['message-circle', 'message-square'],
     path: 'M4 4h16v12H10l-4 4v-4H4z',
+  },
+  {
+    lucide: ['box'],
+    path: 'M12 3 3 8v9l9 5 9-5V8zM3 8l9 5 9-5M12 13v9',
   },
   {
     lucide: ['user', 'circle-user', 'user-circle', 'circle-user-round', 'user-circle-2', 'user-round'],

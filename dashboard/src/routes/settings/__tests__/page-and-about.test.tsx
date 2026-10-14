@@ -23,6 +23,7 @@ vi.mock('../AppearanceTab', () => ({ AppearanceTab: () => <div>外观页内容</
 vi.mock('../SecurityTab', () => ({ SecurityTab: () => <div>安全页内容</div> }))
 vi.mock('../OtherTab', () => ({ OtherTab: () => <div>其他页内容</div> }))
 vi.mock('../MobileAccountCard', () => ({ MobileAccountCard: () => null }))
+vi.mock('../SelfUpdateCard', () => ({ SelfUpdateCard: () => null }))
 
 beforeEach(() => {
   routerState.searchStr = ''

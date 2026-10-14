@@ -16,11 +16,12 @@ import uuid
 
 import numpy as np
 
+from src.common.paths import get_instance_root
 from src.common.logger import get_logger
 from src.config.config import config_manager
 
 logger = get_logger("expression_vector_index")
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = get_instance_root()
 
 VECTOR_CANDIDATE_HARD_LIMIT = 50
 VECTOR_INDEX_VERSION = 2

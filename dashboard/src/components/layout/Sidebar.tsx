@@ -1,4 +1,4 @@
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -20,6 +20,7 @@ interface SidebarProps {
   topbarCollapsed?: boolean
   onMobileMenuClose: () => void
   onSidebarFix: () => void
+  onSidebarToggle?: () => void
 }
 
 const SIDEBAR_HOVER_EXPAND_DELAY_MS = 180
@@ -32,10 +33,13 @@ export function Sidebar({
   topbarCollapsed = false,
   onMobileMenuClose,
   onSidebarFix,
+  onSidebarToggle,
 }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const { themeConfig } = useTheme()
   const isMillennium = themeConfig.dashboardStyle === 'millennium'
+  // 原版风格的侧栏模式开关都放在 Logo 行右侧，顶栏左端不再放折线按钮。
+  const isModernStyle = themeConfig.dashboardStyle === 'modern'
   const { config: sidebarBg, inheritedFrom } = useBackground('sidebar')
   const inheritsPageBackground = inheritedFrom === 'page'
   const builtInMenuSections = useMenuSections()
@@ -148,7 +152,24 @@ export function Sidebar({
             }}
             className="text-muted-foreground/55 hover:text-primary focus-visible:ring-ring absolute right-4 bottom-3 z-20 hidden h-7 w-7 items-center justify-center border-0 bg-transparent p-0 shadow-none transition-colors focus-visible:ring-2 focus-visible:outline-none lg:flex"
           >
-            <ChevronRight aria-hidden="true" className="h-5 w-5" strokeWidth={2.25} />
+            {isModernStyle ? (
+              <PanelLeftOpen aria-hidden="true" className="h-[1.125rem] w-[1.125rem]" />
+            ) : (
+              <ChevronRight aria-hidden="true" className="h-5 w-5" strokeWidth={2.25} />
+            )}
+          </button>
+        )}
+        {isModernStyle && sidebarOpen && onSidebarToggle && (
+          <button
+            type="button"
+            data-dashboard-sidebar-mode-switch="true"
+            aria-label={t('header.switchSidebarToHover')}
+            aria-expanded="true"
+            title={t('header.switchSidebarToHover')}
+            onClick={onSidebarToggle}
+            className="text-muted-foreground/55 hover:text-primary focus-visible:ring-ring absolute right-4 bottom-3 z-20 hidden h-7 w-7 items-center justify-center border-0 bg-transparent p-0 shadow-none transition-colors focus-visible:ring-2 focus-visible:outline-none lg:flex"
+          >
+            <PanelLeftClose aria-hidden="true" className="h-[1.125rem] w-[1.125rem]" />
           </button>
         )}
       </div>
@@ -173,6 +194,7 @@ export function Sidebar({
             className={cn(
               // 移动端始终使用正常间距,桌面端根据 sidebarOpen 切换
               'flex flex-col gap-[var(--layout-sidebar-section-gap)]',
+              isMillennium && 'lg:gap-4',
               !visuallyOpen && 'lg:w-full'
             )}
           >
@@ -182,7 +204,7 @@ export function Sidebar({
                 <div
                   className={cn(
                     'h-[var(--layout-sidebar-section-title-height)] px-[var(--layout-sidebar-nav-item-padding-x)]',
-                    isMillennium && 'lg:h-auto lg:px-0 lg:text-center',
+                    isMillennium && 'lg:h-auto lg:px-0 lg:mb-0.5 lg:text-center',
                     section.title === 'sidebar.groups.overview' && 'hidden',
                     // 移动端始终显示，桌面端根据状态切换
                     'mb-[var(--layout-sidebar-section-title-margin-bottom)]',
@@ -216,6 +238,7 @@ export function Sidebar({
                     data-dashboard-sidebar-section-divider="true"
                     className={cn(
                       'border-border mb-2 hidden border-t transition-opacity duration-[220ms] motion-reduce:transition-none lg:block',
+                      isMillennium && 'lg:hidden',
                       sidebarRevealed && 'lg:opacity-0'
                     )}
                   />

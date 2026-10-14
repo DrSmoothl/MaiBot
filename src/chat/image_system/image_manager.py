@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, Optional, Set
 
 import asyncio
@@ -9,6 +8,7 @@ import hashlib
 from rich.traceback import install
 from sqlmodel import select
 
+from src.common.paths import get_instance_root
 from src.common.data_models.image_data_model import MaiImage
 from src.common.database.database import get_db_session
 from src.common.database.database_model import Images, ImageType
@@ -20,7 +20,7 @@ from src.services.llm_service import LLMServiceClient
 
 install(extra_lines=3)
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.absolute().resolve()
+PROJECT_ROOT = get_instance_root()
 DATA_DIR = PROJECT_ROOT / "data"
 IMAGE_DIR = DATA_DIR / "images"
 

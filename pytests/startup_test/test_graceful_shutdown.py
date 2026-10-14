@@ -577,7 +577,7 @@ def test_real_worker_consumes_stop_received_during_startup():
 
 def test_early_worker_guard_runs_before_business_imports(bot, monkeypatch):
     ns, system, events = bot()
-    tree = ast.parse((ROOT / "bot.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "src/runtime.py").read_text(encoding="utf-8"))
     business_import = next(
         i for i, node in enumerate(tree.body) if isinstance(node, ast.ImportFrom) and node.module.startswith("src.")
     )

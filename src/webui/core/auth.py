@@ -18,7 +18,7 @@ COOKIE_MAX_AGE = 7 * 24 * 60 * 60  # 7天
 
 def _is_secure_environment() -> bool:
     """
-    检测是否应该启用安全 Cookie（HTTPS）
+    根据 secure_cookie 配置决定是否启用安全 Cookie（HTTPS）。
 
     Returns:
         bool: 如果应该使用 secure cookie 则返回 True
@@ -28,13 +28,8 @@ def _is_secure_environment() -> bool:
         logger.info("配置中启用了 secure_cookie")
         return True
 
-    # 检查是否是生产环境
-    if global_config.webui.mode == "production":
-        logger.info("WebUI运行在生产模式，启用 secure cookie")
-        return True
-
-    # 默认：开发环境不启用（因为通常是 HTTP）
-    logger.debug("WebUI运行在开发模式，禁用 secure cookie")
+    # 运行模式不代表访问协议，关闭配置时允许通过 HTTP 使用登录 Cookie。
+    logger.debug("配置中未启用 secure_cookie")
     return False
 
 
