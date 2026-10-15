@@ -598,36 +598,15 @@ function BotConfigPageContent() {
   }
 
   return (
-    <ScrollArea className="h-full min-w-0" scrollbars="vertical">
+    // 手机端由工作区 main 统一滚动，内部视口展开，避免嵌套滚动截住上下滑动。
+    <ScrollArea
+      className="h-full min-w-0 max-lg:h-auto max-lg:overflow-visible max-lg:[&>[data-dashboard-scrollbar]]:hidden"
+      viewportClassName="max-lg:h-auto max-lg:!overflow-visible max-lg:overscroll-auto"
+      scrollbars="vertical"
+    >
       <div className="max-w-full space-y-4 p-4 sm:space-y-6 sm:p-6">
         {/* 顶部操作栏整体吸顶：手机端分两行，PC 端导航与操作按钮同一行。 */}
         <div data-config-section-navigation="true" className="bg-background sticky top-0 z-20 flex min-w-0 flex-col gap-3 py-2 lg:flex-row lg:items-center">
-          {/* 手机：设置分区排成一行可横滑的胶囊，替代下拉菜单与钉固栏 */}
-          {editMode === 'detail' && tabGroups.length > 0 && (
-            <nav
-              aria-label="选择设置页面"
-              data-mobile-pill-nav="true"
-              className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:hidden"
-            >
-              {tabGroups.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  aria-pressed={activeConfigTab === tab.id}
-                  data-active={activeConfigTab === tab.id ? 'true' : 'false'}
-                  onClick={() => setActiveConfigTab(tab.id)}
-                  className={cn(
-                    'h-9 shrink-0 rounded-full px-4 text-[15px]',
-                    activeConfigTab === tab.id
-                      ? 'bg-foreground text-background font-semibold'
-                      : 'bg-card text-foreground'
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </nav>
-          )}
           <div className="flex w-full min-w-0 items-center gap-3 max-lg:hidden lg:flex-1">
             {editMode === 'detail' && tabGroups.length > 0 && (
               <DropdownMenu>
@@ -788,6 +767,32 @@ function BotConfigPageContent() {
             </DropdownMenu>
           </div>
 
+          {/* 手机：设置分区排成一行可横滑的胶囊，替代下拉菜单与钉固栏 */}
+          {editMode === 'detail' && tabGroups.length > 0 && (
+            <nav
+              aria-label="选择设置页面"
+              data-mobile-pill-nav="true"
+              className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:hidden"
+            >
+              {tabGroups.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  aria-pressed={activeConfigTab === tab.id}
+                  data-active={activeConfigTab === tab.id ? 'true' : 'false'}
+                  onClick={() => setActiveConfigTab(tab.id)}
+                  className={cn(
+                    'h-9 shrink-0 rounded-full px-4 text-[15px]',
+                    activeConfigTab === tab.id
+                      ? 'bg-foreground text-background font-semibold'
+                      : 'bg-card text-foreground'
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
 
         {/* 源代码模式 */}

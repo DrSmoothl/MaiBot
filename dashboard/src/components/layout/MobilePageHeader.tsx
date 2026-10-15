@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils'
 import { MOBILE_GLASS_CLASS } from './mobile-glass'
 
 interface MobilePageHeaderProps {
-  title: ReactNode
+  /** 不传标题时只显示返回与操作栏，供自带标题的页面使用。 */
+  title?: ReactNode
   /** 标题上方的一行小字，例如首页的日期 */
   eyebrow?: ReactNode
   /** 标题右侧的操作，例如首页头像或观察页的聊天流切换 */
@@ -54,20 +55,24 @@ export function MobilePageHeader({
           {backTrailing}
         </div>
       )}
-      <div className="flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          {eyebrow && (
-            <div className="text-muted-foreground text-[13px] font-medium">{eyebrow}</div>
-          )}
-          <h1
-            data-mobile-large-title="true"
-            className="truncate text-[34px] leading-tight font-bold"
-          >
-            {title}
-          </h1>
+      {(title || eyebrow || trailing) && (
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            {eyebrow && (
+              <div className="text-muted-foreground text-[13px] font-medium">{eyebrow}</div>
+            )}
+            {title && (
+              <h1
+                data-mobile-large-title="true"
+                className="truncate text-[34px] leading-tight font-bold"
+              >
+                {title}
+              </h1>
+            )}
+          </div>
+          {trailing}
         </div>
-        {trailing}
-      </div>
+      )}
       {children}
     </header>
   )

@@ -95,9 +95,9 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
         advanced && 'bg-amber-50/30 px-2 dark:bg-amber-500/10',
       )}
     >
-      <div className="flex min-w-0 items-baseline justify-between gap-3">
+      <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
         <h4 className="flex-none whitespace-nowrap text-base font-semibold sm:text-lg">{title}</h4>
-        <p className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground sm:text-sm">{description}</p>
+        <p className="min-w-0 text-xs leading-relaxed text-muted-foreground sm:flex-1 sm:truncate sm:text-right sm:text-sm">{description}</p>
       </div>
 
       <div className="grid gap-3">
@@ -146,9 +146,9 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
         </div>
 
         {/* 推理参数 */}
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-1 lg:grid-cols-3">
           {!hideTemperature && (
-            <div className="flex min-w-0 items-center gap-3">
+            <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
               <Label htmlFor={temperatureInputId} className="whitespace-nowrap">温度</Label>
               <Input
                 id={temperatureInputId}
@@ -163,7 +163,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 min={0}
                 max={2}
                 step={0.1}
-                className="h-8 w-24 flex-none text-right text-sm tabular-nums sm:hidden"
+                className="h-10 w-full min-w-0 text-sm tabular-nums sm:hidden"
               />
               <Slider
                 value={[taskConfig.temperature ?? 0.7]}
@@ -179,28 +179,28 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
           )}
 
           {!hideMaxTokens && (
-            <div className="flex min-w-0 items-center gap-3">
-              <Label>最大 Token</Label>
+            <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <Label className="whitespace-nowrap">最大 Token</Label>
               <Input
                 type="number"
                 step="1"
                 min="1"
                 value={taskConfig.max_tokens ?? 4096}
                 onChange={(e) => onChange('max_tokens', parseInt(e.target.value))}
-                className="min-w-0 flex-1"
+                className="h-10 min-w-0 sm:h-9 sm:flex-1"
               />
             </div>
           )}
 
           {/* 模型选择策略 */}
           {!hideSelectionStrategy && (
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="col-span-2 flex min-w-0 flex-col items-stretch gap-2 sm:col-span-1 sm:flex-row sm:items-center sm:gap-3">
             <Label className="whitespace-nowrap">选择策略</Label>
             <Select
               value={taskConfig.selection_strategy ?? 'balance'}
               onValueChange={(value) => onChange('selection_strategy', value)}
             >
-              <SelectTrigger className="min-w-0 flex-1">
+              <SelectTrigger className="h-10 min-w-0 sm:h-9 sm:flex-1">
                 <SelectValue placeholder="选择模型选择策略" />
               </SelectTrigger>
               <SelectContent>

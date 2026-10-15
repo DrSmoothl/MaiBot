@@ -1153,7 +1153,7 @@ class EmojiManager:
             _ensure_directories()
             if global_config.emoji.steal_emoji and (
                 self._emoji_num < global_config.emoji.max_reg_num
-                or (self._emoji_num > global_config.emoji.max_reg_num and global_config.emoji.do_replace)
+                or (self._emoji_num >= global_config.emoji.max_reg_num and global_config.emoji.do_replace)
             ):
                 known_paths: set[Path] = set()
                 with get_db_session() as session:

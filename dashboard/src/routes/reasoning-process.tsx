@@ -1034,7 +1034,7 @@ export function ReasoningProcessPage({
   const selectedTokenText = selected
     ? formatTokenUsage(selected.prompt_tokens, selected.completion_tokens, selected.total_tokens)
     : ''
-  const renderRefreshButton = (variant: 'default' | 'topbar' | 'toolbar' = 'default') => (
+  const renderRefreshButton = (variant: 'default' | 'toolbar' = 'default') => (
     <Button
       variant="outline"
       size="sm"
@@ -1044,7 +1044,6 @@ export function ReasoningProcessPage({
       disabled={loading}
       className={cn(
         'shrink-0 p-0',
-        variant === 'topbar' && 'h-9 w-9',
         variant === 'toolbar' && 'h-8 w-8',
         variant === 'default' && 'h-9 w-9 sm:h-10 sm:w-10'
       )}
@@ -1190,11 +1189,10 @@ export function ReasoningProcessPage({
       ? createPortal(toolbarContent, toolbarRoot)
       : null
   const topbarActionsPortal =
-    embedded && toolbarVisible && topbarActionsRoot && (returnTo || !browsingStage)
+    embedded && toolbarVisible && topbarActionsRoot && returnTo
       ? createPortal(
           <div className="flex items-center gap-2">
             {renderReturnButton(true)}
-            {!browsingStage && renderRefreshButton('topbar')}
           </div>,
           topbarActionsRoot
         )
@@ -1334,6 +1332,11 @@ export function ReasoningProcessPage({
       )}
       {toolbarPortal}
       {topbarActionsPortal}
+      {embedded && !browsingStage && (
+        <div className="flex shrink-0 justify-end px-2 pt-2 sm:px-3">
+          {renderRefreshButton('toolbar')}
+        </div>
+      )}
 
       <AlertDialog
         open={Boolean(pendingClearStage)}
@@ -1423,7 +1426,7 @@ export function ReasoningProcessPage({
         >
           <div
             data-reasoning-panel="true"
-            className="bg-background flex h-[50vh] min-h-[320px] flex-col overflow-hidden rounded-md border transition-[height,min-height,opacity,transform,border-width] duration-300 ease-out lg:h-auto lg:min-h-0 lg:transition-[opacity,transform,border-width]"
+            className="bg-background flex min-h-0 flex-col overflow-hidden rounded-md border transition-[opacity,transform,border-width] duration-300 ease-out max-lg:self-start"
           >
             {embedded && browsingStage && (
               <div
@@ -1441,7 +1444,9 @@ export function ReasoningProcessPage({
             <ScrollArea
               data-reasoning-screen="true"
               data-reasoning-list="true"
-              className="min-h-0 flex-1"
+              className="min-h-0 flex-1 max-lg:flex-none max-lg:overflow-visible max-lg:[&>[data-dashboard-scrollbar]]:hidden"
+              viewportClassName="max-lg:h-auto max-lg:!overflow-visible max-lg:overscroll-auto"
+              scrollbars="vertical"
             >
               <div data-reasoning-list-items="true" className="space-y-1 p-1.5 sm:p-2">
                 {items.map((item) => {
@@ -1580,7 +1585,7 @@ export function ReasoningProcessPage({
 
           <div
             data-reasoning-panel="true"
-            className="bg-background flex h-[calc(100dvh-7rem)] min-h-[360px] flex-col overflow-hidden rounded-md border lg:h-auto lg:min-h-0"
+            className="bg-background flex min-h-0 flex-col overflow-hidden rounded-md border max-lg:self-start"
           >
             {replayPanelOpen ? (
               <ReplayItemEditorColumn
@@ -1600,9 +1605,9 @@ export function ReasoningProcessPage({
                 <div className="relative min-h-0 flex-1 overflow-hidden">
                   <ScrollArea
                     data-reasoning-screen="true"
-                    className="h-full transition-transform duration-300 ease-out"
+                    className="h-full transition-transform duration-300 ease-out max-lg:h-auto max-lg:flex-none max-lg:overflow-visible max-lg:[&>[data-dashboard-scrollbar]]:hidden"
                     scrollbars="vertical"
-                    viewportClassName="overscroll-auto lg:overscroll-contain"
+                    viewportClassName="overscroll-auto max-lg:h-auto max-lg:!overflow-visible lg:overscroll-contain"
                   >
                     <div className="min-h-full min-w-0">
                       <div

@@ -353,15 +353,29 @@ export function Layout({ children }: LayoutProps) {
   // 日志视图切换挂在顶栏里，不随页面容器移动；让它与页面同步退场/入场，避免突兀地出现或消失。
   const logSwitcherHidden =
     workspaceTransitionStage !== 'idle' && workspaceTransitionStage !== 'page-enter'
+  // 手机没有桌面工作区顶栏，管理入口必须包含插件的全部页面。
+  const mobileMenuSections = useMemo<MenuSection[]>(() => [
+    ...builtInMenuSections,
+    ...extensions.filter((extension) => extension.pages.length > 0).map((extension) => ({
+      title: extension.workspace_title ?? extension.plugin_id,
+      literalTitle: true,
+      items: extension.pages.map((page) => ({
+        icon: extensionIcons[page.icon],
+        label: page.title,
+        literalLabel: true,
+        path: extensionPath(extension.plugin_id, page.id),
+      })),
+    })),
+  ], [builtInMenuSections, extensions])
   const mobileNavValue = useMemo(
     () => ({
-      menuSections,
+      menuSections: mobileMenuSections,
       openSearch: () => setSearchOpen(true),
       setTabBarHidden: setMobileTabBarHidden,
       headerActionsElement: mobileHeaderActionsElement,
       setTitleOverride: setMobileTitleOverride,
     }),
-    [menuSections, mobileHeaderActionsElement]
+    [mobileMenuSections, mobileHeaderActionsElement]
   )
   const handleSidebarFix = () => {
     // 悬浮展开已处于完整宽度；固定时跳过占位宽度过渡，避免已经展开的侧栏出现二次动画。
@@ -510,7 +524,7 @@ export function Layout({ children }: LayoutProps) {
                 <MobileNavContext.Provider value={mobileNavValue}>
                   <div className="shrink-0 lg:hidden">
                     <MobileRouteHeader
-                      menuSections={menuSections}
+                      menuSections={mobileMenuSections}
                       actionsRef={setMobileHeaderActionsElement}
                       titleOverride={mobileTitleOverride}
                     />

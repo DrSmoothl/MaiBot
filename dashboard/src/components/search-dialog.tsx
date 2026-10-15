@@ -687,11 +687,6 @@ export function SearchDialog({
             disabled={!normalizedQuery || aiSearchLoading || configIndexLoading}
             onClick={() => void runAISearch()}
           >
-            {aiSearchLoading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
             {aiSearchLoading ? t('search.aiSearching') : t('search.aiSearch')}
           </Button>
         </div>
