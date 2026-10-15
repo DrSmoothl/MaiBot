@@ -495,6 +495,7 @@
       "retroPanelDepthDesc": "Controls the visibility of recessed surfaces and shadows."
     },
     "security": {
+      "tokenManagement": "Access Token Management",
       "currentToken": "Current Access Token",
       "yourToken": "Your Access Token",
       "regenerate": "Regenerate",

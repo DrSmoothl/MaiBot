@@ -428,6 +428,7 @@
       "retroPanelDepthDesc": "くぼみと影の見え方を調整します。"
     },
     "security": {
+      "tokenManagement": "アクセストークン管理",
       "currentToken": "現在のアクセストークン",
       "yourToken": "あなたのアクセストークン",
       "regenerate": "再生成",

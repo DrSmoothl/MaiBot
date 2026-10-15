@@ -7,7 +7,6 @@ import {
   Database,
   FileText,
   Globe,
-  LogOut,
   Moon,
   MoreHorizontal,
   Search,
@@ -44,7 +43,6 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toggleThemeWithTransition } from '@/components/use-theme'
 import { useBackground } from '@/hooks/use-background'
-import { logout } from '@/lib/auth'
 import { isElectron } from '@/lib/runtime'
 import { ThemeProviderContext } from '@/lib/theme-context'
 import { cn } from '@/lib/utils'
@@ -99,7 +97,6 @@ type HeaderActionId =
   | 'language'
   | 'theme'
   | 'collapse'
-  | 'logout'
   | 'extensions'
 
 export function Header({
@@ -283,10 +280,6 @@ export function Header({
       resizeObserver.disconnect()
     }
   }, [workspaceMode, workspaceTabsKey, themeConfig.dashboardStyle])
-
-  const handleLogout = async () => {
-    await logout()
-  }
 
   const activeHeaderAction: HeaderActionId | null = languageMenuOpen ? 'language' : null
   const highlightedHeaderAction =
@@ -815,30 +808,6 @@ export function Header({
               </Button>
             )}
 
-            {/* 分隔线 */}
-            <div className="bg-border hidden h-6 w-px sm:block" />
-
-            {/* 登出按钮 */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => {
-                setHoveredHeaderAction('logout')
-                void handleLogout()
-              }}
-              title={t('header.logout')}
-              aria-label={t('header.logout')}
-              data-dashboard-header-action="true"
-              data-header-action-highlighted={
-                highlightedHeaderAction === 'logout' ? 'true' : 'false'
-              }
-              onPointerEnter={() => handleHeaderActionEnter('logout')}
-              onPointerLeave={handleHeaderActionLeave}
-              className="relative isolate hidden border-0 bg-transparent shadow-none sm:inline-flex"
-            >
-              {renderHeaderActionPill('logout')}
-              <LogOut className="h-4 w-4" />
-            </Button>
             </LayoutGroup>
 
             <DropdownMenu>
@@ -895,10 +864,6 @@ export function Header({
                     ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-                <DropdownMenuItem onClick={handleLogout} className="cursor-pointer gap-2">
-                  <LogOut className="h-4 w-4" />
-                  {t('header.logoutLabel')}
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

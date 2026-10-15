@@ -475,6 +475,7 @@
       "retroPanelDepthDesc": "오목한 표면과 그림자의 가시성을 조절합니다."
     },
     "security": {
+      "tokenManagement": "액세스 토큰 관리",
       "currentToken": "현재 액세스 토큰",
       "yourToken": "액세스 토큰",
       "regenerate": "재생성",
