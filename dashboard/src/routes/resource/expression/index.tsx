@@ -13,7 +13,7 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 
 import { useQuery } from '@tanstack/react-query'
 
@@ -103,7 +103,7 @@ const DEFAULT_STATS: StatsData = {
 /**
  * 表达方式管理主页面
  */
-export function ExpressionManagementPage() {
+export function ExpressionManagementPage({ browserHeader }: { browserHeader?: ReactNode }) {
   const { toast } = useToast()
   const importInputRef = useRef<HTMLInputElement>(null)
 
@@ -432,25 +432,14 @@ export function ExpressionManagementPage() {
           <div
             className={`grid grid-cols-1 items-stretch gap-5 transition-[grid-template-columns] duration-200 sm:gap-4 lg:h-full lg:min-h-[30rem] ${
               browserPanelCollapsed
-                ? 'lg:grid-cols-[3.25rem_minmax(0,1fr)]'
+                ? browserHeader
+                  ? 'lg:grid-cols-[8rem_minmax(0,1fr)]'
+                  : 'lg:grid-cols-[3.25rem_minmax(0,1fr)]'
                 : 'lg:grid-cols-[13.5rem_minmax(0,1fr)]'
             }`}
           >
             <div className="flex min-h-0 flex-col gap-3">
-              <div
-                className={`${browserPanelCollapsed ? 'lg:hidden' : ''} grid h-11 w-full grid-cols-2 overflow-hidden border-2 bg-transparent`}
-              >
-                <div className="flex min-w-0 items-center justify-between gap-2 px-2.5 py-1">
-                  <div className="text-muted-foreground text-[11px]">总数量</div>
-                  <div className="text-sm leading-none font-semibold">{stats.total}</div>
-                </div>
-                <div className="flex min-w-0 items-center justify-between gap-2 border-l px-2.5 py-1">
-                  <div className="text-muted-foreground text-[11px]">近7天新增</div>
-                  <div className="text-sm leading-none font-semibold text-green-600">
-                    {stats.recent_7days}
-                  </div>
-                </div>
-              </div>
+              {browserHeader}
 
               <ChatScopeFilterPanel
                 modes={[
@@ -568,6 +557,18 @@ export function ExpressionManagementPage() {
 
               <div className="border-2 bg-transparent">
                 <div className="flex flex-wrap items-center gap-2 px-3 py-1.5">
+                  <div className="grid h-8 shrink-0 grid-cols-2 overflow-hidden border-2 bg-transparent">
+                    <div className="flex min-w-0 items-center justify-between gap-2 px-2.5 py-1">
+                      <div className="text-muted-foreground text-[11px]">总数量</div>
+                      <div className="text-sm leading-none font-semibold">{stats.total}</div>
+                    </div>
+                    <div className="flex min-w-0 items-center justify-between gap-2 border-l px-2.5 py-1">
+                      <div className="text-muted-foreground text-[11px]">近7天新增</div>
+                      <div className="text-sm leading-none font-semibold text-green-600">
+                        {stats.recent_7days}
+                      </div>
+                    </div>
+                  </div>
                   {scopeStatus && (
                     <>
                       {renderStatusIndicator('开启学习', scopeStatus.enableLearning, false)}

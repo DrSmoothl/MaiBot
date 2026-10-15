@@ -146,7 +146,7 @@ export function Header({
   const workspaceTabsKey = workspaceTabs.map((tab) => `${tab.value}:${tab.labelKey}`).join('|')
   const { themeConfig } = useContext(ThemeProviderContext)
   // 千禧风格的顶栏要放得下键帽，比其它风格高一截；高度由动画驱动，所以在这里按风格取值。
-  const expandedTopbarHeight = themeConfig.dashboardStyle === 'millennium' ? 70 : 42
+  const expandedTopbarHeight = themeConfig.dashboardStyle === 'millennium' ? 52 : 42
   // 原版风格和千禧一样用顶栏里的按钮收起顶栏，不再显示顶栏下沿的滑条。
   const isModernStyle = themeConfig.dashboardStyle === 'modern'
   const currentLang = i18nInstance.language || 'zh'
