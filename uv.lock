@@ -912,7 +912,7 @@ requires-dist = [
     { name = "jieba", specifier = ">=0.42.1" },
     { name = "json-repair", specifier = ">=0.60.1,<0.61" },
     { name = "jsonschema", specifier = ">=4.26.0,<5" },
-    { name = "maibot-dashboard", specifier = "==1.9.3.dev20261015530" },
+    { name = "maibot-dashboard", specifier = "==1.9.3.dev20261015532" },
     { name = "maibot-plugin-sdk", specifier = ">=2.12.0" },
     { name = "maim-message", specifier = "==0.6.8" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
@@ -955,11 +955,11 @@ dev = [
 
 [[package]]
 name = "maibot-dashboard"
-version = "1.9.3.dev20261015530"
+version = "1.9.3.dev20261015532"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d2/75/dcf9eeeaf573cacda9ff4b697c213196c0e3f4c606068154882b62442b73/maibot_dashboard-1.9.3.dev20261015530.tar.gz", hash = "sha256:431341d49398999457757d7bd3d96dab97562fee1991aba39e4c42299f7d234f", size = 3077535, upload-time = "2026-10-15T12:55:51.934Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/e0/5882c04d834430f7efad023522ce765cf156bc4269d3f88910d94b8a7257/maibot_dashboard-1.9.3.dev20261015532.tar.gz", hash = "sha256:df97446e1071824b5562f66ee8f0ed76365de8585cb58872c0e4d6df44f3d9c5", size = 3079569, upload-time = "2026-10-15T15:32:19.375Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/db/2fb659134ab381f5166005b310b8fee714dbb89047f820b43c933d2a292b/maibot_dashboard-1.9.3.dev20261015530-py3-none-any.whl", hash = "sha256:0253dad6912efea773b220319b77d84f9863eb75814645d87ffa3bf289fb895a", size = 3164448, upload-time = "2026-10-15T12:55:50.152Z" },
+    { url = "https://files.pythonhosted.org/packages/64/6c/28c04d18f864aebfe2fd7941263725214c5f3303f020b66798addbb00beb/maibot_dashboard-1.9.3.dev20261015532-py3-none-any.whl", hash = "sha256:0dbfda8e1de4083105a8af126199caf61277887c9eb2f0d0d78b27422edc602c", size = 3164508, upload-time = "2026-10-15T15:32:17.706Z" },
 ]
 
 [[package]]
