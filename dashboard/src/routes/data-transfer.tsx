@@ -223,7 +223,12 @@ export function DataTransferPage() {
   }, [importConfig, importData, importFile, importLogs, importPlugins, toast])
 
   return (
-    <ScrollArea className="h-full">
+    // 手机端让导入导出与本地缓存内容自然展开，交给工作区统一滚动。
+    <ScrollArea
+      className="h-full max-lg:h-auto max-lg:overflow-visible max-lg:[&>[data-dashboard-scrollbar]]:hidden"
+      viewportClassName="max-lg:h-auto max-lg:!overflow-visible max-lg:overscroll-auto"
+      scrollbars="vertical"
+    >
       <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
         <Card>
           <CardHeader>

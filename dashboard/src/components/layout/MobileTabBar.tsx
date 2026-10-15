@@ -35,6 +35,7 @@ const MOBILE_MEDIA_QUERY = '(max-width: 1023.98px)'
 // 页面向下滚动超过该距离后标签栏收成胶囊
 const COLLAPSE_SCROLL_TOP = 48
 const SCROLL_DELTA_THRESHOLD = 6
+const LOG_VIEWER_PATHS = new Set(['/logs', '/reasoning-process', '/statistics'])
 // 收起 / 展开用同一条弹簧：尺寸、位置连续过渡，不跳变
 const DOCK_SPRING = { type: 'spring', stiffness: 420, damping: 36, mass: 0.8 } as const
 
@@ -80,8 +81,14 @@ function useDockHeight(ref: React.RefObject<HTMLElement | null>) {
 
 /** 向下滚动时收起、向上滚动时展开；监听所有滚动容器，兼容页面内部自带滚动区域的情况 */
 function useCollapseOnScroll(pathname: string) {
-  // 记录在哪个页面上收起；换页后自然回到展开态
-  const [collapsedPath, setCollapsedPath] = useState<string | null>(null)
+  // 日志类页面默认收起，仅由用户点击展开，避免滚动时反复改变内容区高度。
+  const [dockState, setDockState] = useState(() => ({
+    pathname,
+    collapsed: LOG_VIEWER_PATHS.has(pathname),
+  }))
+  if (dockState.pathname !== pathname) {
+    setDockState({ pathname, collapsed: LOG_VIEWER_PATHS.has(pathname) })
+  }
   const pathnameRef = useRef(pathname)
   const lastScrollTops = useRef(new WeakMap<EventTarget, number>())
 
@@ -91,6 +98,7 @@ function useCollapseOnScroll(pathname: string) {
 
   useEffect(() => {
     const handleScroll = (event: Event) => {
+      if (LOG_VIEWER_PATHS.has(pathnameRef.current)) return
       const target = event.target
       if (!(target instanceof HTMLElement)) return
       // 横向滚动条、输入框等不参与判断
@@ -100,19 +108,25 @@ function useCollapseOnScroll(pathname: string) {
       lastScrollTops.current.set(target, scrollTop)
       const delta = scrollTop - previous
       if (scrollTop <= COLLAPSE_SCROLL_TOP) {
-        setCollapsedPath(null)
+        setDockState((current) => current.pathname === pathnameRef.current && current.collapsed === false
+          ? current
+          : { pathname: pathnameRef.current, collapsed: false })
       } else if (delta > SCROLL_DELTA_THRESHOLD) {
-        setCollapsedPath(pathnameRef.current)
+        setDockState((current) => current.pathname === pathnameRef.current && current.collapsed === true
+          ? current
+          : { pathname: pathnameRef.current, collapsed: true })
       } else if (delta < -SCROLL_DELTA_THRESHOLD) {
-        setCollapsedPath(null)
+        setDockState((current) => current.pathname === pathnameRef.current && current.collapsed === false
+          ? current
+          : { pathname: pathnameRef.current, collapsed: false })
       }
     }
     document.addEventListener('scroll', handleScroll, { capture: true, passive: true })
     return () => document.removeEventListener('scroll', handleScroll, { capture: true })
   }, [])
 
-  const collapsed = collapsedPath === pathname
-  const setCollapsed = (value: boolean) => setCollapsedPath(value ? pathname : null)
+  const collapsed = dockState.collapsed
+  const setCollapsed = (value: boolean) => setDockState({ pathname, collapsed: value })
   return [collapsed, setCollapsed] as const
 }
 
@@ -270,9 +284,7 @@ function TabBarDock({ onSearch }: Pick<MobileTabBarProps, 'onSearch'>) {
               </AnimatePresence>
             </motion.div>
             {collapsed && (showLive ? liveStrip : <span className="flex-1" />)}
-            <motion.button
-              layout
-              transition={DOCK_SPRING}
+            <button
               type="button"
               data-mobile-tabbar-search="true"
               onClick={onSearch}
@@ -284,7 +296,7 @@ function TabBarDock({ onSearch }: Pick<MobileTabBarProps, 'onSearch'>) {
               )}
             >
               <Search className="h-[22px] w-[22px]" strokeWidth={1.7} aria-hidden="true" />
-            </motion.button>
+            </button>
           </nav>
         </div>
       </LayoutGroup>

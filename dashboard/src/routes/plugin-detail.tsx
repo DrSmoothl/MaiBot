@@ -322,12 +322,12 @@ export function PluginDetailPage({
   const isDialog = mode === 'dialog'
   const isPanel = mode === 'panel'
   const containerClassName = isPanel
-    ? 'flex h-full min-h-0 flex-col gap-4 p-3 sm:p-4'
+    ? 'flex h-full min-h-0 flex-col gap-4 p-3 sm:p-4 max-lg:h-auto'
     : isDialog
       ? 'space-y-4 sm:space-y-5 p-4 sm:p-5'
       : 'space-y-4 sm:space-y-6 p-4 sm:p-6'
   const detailScrollClassName = isPanel
-    ? 'min-h-0 flex-1'
+    ? 'min-h-0 flex-1 max-lg:flex-none max-lg:overflow-visible max-lg:[&>[data-dashboard-scrollbar]]:hidden'
     : isDialog
       ? 'h-[min(68vh,720px)]'
       : 'h-[calc(100vh-200px)] sm:h-[calc(100vh-220px)]'
@@ -730,7 +730,11 @@ export function PluginDetailPage({
         </div>
       </div>
 
-      <ScrollArea className={detailScrollClassName}>
+      <ScrollArea
+        className={detailScrollClassName}
+        viewportClassName={isPanel ? 'max-lg:h-auto max-lg:!overflow-visible max-lg:overscroll-auto' : undefined}
+        scrollbars="vertical"
+      >
         <div className="space-y-6 pr-4">
           {/* 插件头部信息卡片 */}
           <Card>

@@ -1531,7 +1531,11 @@ function ModelConfigPageContent() {
                         setFormErrors((prev) => ({ ...prev, name: undefined }))
                       }
                     }}
-                    placeholder="例如: qwen3-30b"
+                    placeholder={editingModelType === 'embedding'
+                      ? '例如: text-embedding-v4'
+                      : editingModelType === 'image_embedding'
+                        ? '例如: multimodal-embedding-v1'
+                        : '例如: qwen3-30b'}
                     className={`sm:flex-1 ${formErrors.name ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                   />
                 </div>

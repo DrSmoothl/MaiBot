@@ -115,6 +115,14 @@ export function Header({
   workspaceMode,
 }: HeaderProps) {
   const { t, i18n: i18nInstance } = useTranslation()
+  const [preloadMobileSearch, setPreloadMobileSearch] = useState(false)
+
+  useEffect(() => {
+    if (!window.matchMedia('(max-width: 1023.98px)').matches) return
+    // 首屏显示后提前挂载关闭状态的搜索面板，首次点击不再等待下载组件。
+    const timer = window.setTimeout(() => setPreloadMobileSearch(true), 300)
+    return () => window.clearTimeout(timer)
+  }, [])
   const pluginTabs = extensions.flatMap((extension) => {
     const page = extension.pages.find((page) => page.placement === 'workspace')
     return page
@@ -657,7 +665,7 @@ export function Header({
               </>
             )}
             {/* 搜索对话框 */}
-            {(searchOpen || searchDialogLoaded) && (
+            {(searchOpen || searchDialogLoaded || preloadMobileSearch) && (
               <Suspense fallback={null}>
                 <SearchDialog
                   open={searchOpen}

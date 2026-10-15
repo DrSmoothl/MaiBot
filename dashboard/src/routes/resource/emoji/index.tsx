@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -82,6 +82,18 @@ export function EmojiManagementPage() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   // 手机端：长按进入多选，筛选收进底部弹层
   const isMobile = useMediaQuery('(max-width: 1023.98px)')
+  const isWideGrid = useMediaQuery('(min-width: 1280px)')
+  const gridColumns = isMobile ? 3 : {
+    small: isWideGrid ? 10 : 8,
+    medium: isWideGrid ? 8 : 6,
+    large: isWideGrid ? 5 : 4,
+  }[cardSize]
+  const [preferredPageSize, setPreferredPageSize] = useState(20)
+  const alignedPageSize = Math.ceil(preferredPageSize / gridColumns) * gridColumns
+  const pageSizeOptions = [20, 40, 60, 100].map((value) => ({
+    value,
+    count: Math.ceil(value / gridColumns) * gridColumns,
+  }))
   const [mobileSelecting, setMobileSelecting] = useState(false)
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
   const selecting = isMobile && mobileSelecting
@@ -92,6 +104,7 @@ export function EmojiManagementPage() {
   // 翻页保留选中项，改参重置页码但保留选择，搜索内建 300ms 防抖。
   const list = useDataList<Emoji, EmojiFilters, number>({
     domain: 'emoji',
+    initialPageSize: alignedPageSize,
     preserveSelectionOnParamsChange: true,
     getId: (emoji) => emoji.id,
     initialFilters: { status: 'adopted', format: 'all', sortBy: 'register_time', sortOrder: 'desc' },
@@ -115,6 +128,11 @@ export function EmojiManagementPage() {
   const loading = list.isPending
   const page = list.page
   const pageSize = list.pageSize
+  // 分页数量必须与实际网格列数一致，避免每个非末页都留出缺角。
+  const { setPageSize } = list
+  useEffect(() => {
+    if (pageSize !== alignedPageSize) setPageSize(alignedPageSize)
+  }, [alignedPageSize, pageSize, setPageSize])
   // 命中提示用的已去空搜索词（与防抖后驱动查询的值一致）
   const searchKeyword = list.searchInput.trim()
 
@@ -279,7 +297,12 @@ export function EmojiManagementPage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col p-4 max-lg:h-auto max-lg:px-0 max-lg:pt-1 sm:p-6">
-      <ScrollArea className="flex-1">
+      {/* 手机端由工作区 main 滚动，内部视口展开，避免截住触摸滚动。 */}
+      <ScrollArea
+        className="min-w-0 flex-1 max-lg:flex-none max-lg:overflow-visible max-lg:[&>[data-dashboard-scrollbar]]:hidden"
+        viewportClassName="max-lg:h-auto max-lg:!overflow-visible max-lg:overscroll-auto"
+        scrollbars="vertical"
+      >
         {/* 手机上滚动区满宽、内容自己留边距，满宽网格就不会撑出横向滚动 */}
         <div className="space-y-4 pr-4 max-lg:px-4 sm:space-y-6">
           {/* 手机：搜索 + 状态胶囊；排序、格式等收进筛选弹层 */}
@@ -299,7 +322,8 @@ export function EmojiManagementPage() {
                 <nav
                   aria-label="表情包状态"
                   data-mobile-pill-nav="true"
-                  className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none]"
+                  className="-mx-4 flex gap-2 overflow-x-auto overflow-y-hidden px-4 py-1 [scrollbar-width:none]"
+                  style={{ touchAction: 'pan-x pan-y' }}
                 >
                   {statusOptions.map((option) => {
                     const active = list.filters.status === option.value
@@ -455,17 +479,16 @@ export function EmojiManagementPage() {
                     每页显示
                   </Label>
                   <Select
-                    value={pageSize.toString()}
-                    onValueChange={(value) => list.setPageSize(parseInt(value))}
+                    value={preferredPageSize.toString()}
+                    onValueChange={(value) => setPreferredPageSize(parseInt(value))}
                   >
                     <SelectTrigger id="emoji-page-size" className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="20">20</SelectItem>
-                      <SelectItem value="40">40</SelectItem>
-                      <SelectItem value="60">60</SelectItem>
-                      <SelectItem value="100">100</SelectItem>
+                      {pageSizeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value.toString()}>{option.count}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -777,15 +800,14 @@ export function EmojiManagementPage() {
             </div>
             <div className="space-y-2">
               <Label>每页显示</Label>
-              <Select value={pageSize.toString()} onValueChange={(value) => list.setPageSize(parseInt(value))}>
+              <Select value={preferredPageSize.toString()} onValueChange={(value) => setPreferredPageSize(parseInt(value))}>
                 <SelectTrigger aria-label="每页显示">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="40">40</SelectItem>
-                  <SelectItem value="60">60</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
+                  {pageSizeOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value.toString()}>{option.count}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

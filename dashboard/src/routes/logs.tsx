@@ -1006,9 +1006,12 @@ interface LogViewerPageProps {
 }
 
 export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
-  const [activeTab, setActiveTab] = useState<LogViewerTab>(
+  const isMobileViewport = useMediaQuery('(max-width: 1023.98px)')
+  const [desktopActiveTab, setActiveTab] = useState<LogViewerTab>(
     () => defaultTab ?? loadStoredLogViewerTab()
   )
+  // 手机上三个入口各自展示对应页面，避免上次的桌面页签覆盖入口选择。
+  const activeTab = isMobileViewport ? (defaultTab ?? 'terminal') : desktopActiveTab
   const [topbarTabsRoot, setTopbarTabsRoot] = useState<HTMLElement | null>(null)
   // 千禧顶栏始终用图标模式，初始即取紧凑态，避免先渲染完整文字再收窄造成顶栏跳动。
   const [topbarTabsCompact, setTopbarTabsCompact] = useState(
@@ -1038,8 +1041,9 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
   }, [topbarTabsCompact])
 
   useEffect(() => {
+    if (isMobileViewport) return
     localStorage.setItem(LOG_VIEWER_ACTIVE_TAB_KEY, activeTab)
-  }, [activeTab])
+  }, [activeTab, isMobileViewport])
 
   useEffect(() => {
     if (!topbarTabsRoot) return
@@ -1184,13 +1188,6 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
       className="flex h-full min-h-0 flex-col overflow-hidden"
     >
       {topbarTabsPortal}
-      {/* 移动端：页签单独置顶并只显示图标，避免挤压下方工具栏按钮 */}
-      <div
-        data-log-viewer-mobile-switcher="true"
-        className="flex shrink-0 items-center border-b px-3 py-1 sm:hidden"
-      >
-        {renderTabSwitcher(false, true)}
-      </div>
       <div
         className={cn(
           // 工具栏容器里没有内容时整行收起，避免只剩一条分隔线；

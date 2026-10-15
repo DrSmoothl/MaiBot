@@ -1,5 +1,7 @@
-import { useRouterState } from '@tanstack/react-router'
+import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 import { MOBILE_EXTRA_MANAGE_SECTIONS } from './mobile-manage-sections'
 import { MobilePageHeader } from './MobilePageHeader'
@@ -49,8 +51,9 @@ export function MobileRouteHeader({
   titleOverride = null,
 }: MobileRouteHeaderProps) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  if (SELF_HEADED_PATHS.has(pathname) || pathname.startsWith('/extensions/')) return null
+  if (SELF_HEADED_PATHS.has(pathname)) return null
 
   const tab = resolveMobileTab(pathname)
 
@@ -67,20 +70,42 @@ export function MobileRouteHeader({
 
   // 单独的麦麦观察页归到「聊天」，返回聊天；其余子页面返回「管理」
   const fromChat = tab === 'chat'
+  const fromExtension = pathname.startsWith('/extensions/')
+  const extensionPages = fromExtension
+    ? menuSections.find((section) => section.items.some((item) => item.path === pathname))?.items ?? []
+    : []
   const title =
     titleOverride ??
     findMenuLabel([...menuSections, ...MOBILE_EXTRA_MANAGE_SECTIONS], pathname, t) ??
-    (fromChat ? t('sidebar.menu.maisakaMonitor') : null)
+    (fromChat ? t('sidebar.menu.maisakaMonitor') : fromExtension ? t('sidebar.menu.pluginConfig') : null)
   if (!title) return null
   return (
     <MobilePageHeader
-      title={title}
+      title={fromExtension ? undefined : title}
       back={
         fromChat
           ? { to: '/chat', label: t('chat.mobile.back') }
           : { to: '/manage', label: t('mobileNav.backManage') }
       }
-      backTrailing={<div ref={actionsRef} data-mobile-header-actions="true" className="flex gap-2.5" />}
+      backTrailing={
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2.5">
+          {extensionPages.length > 1 && (
+            <Select value={pathname} onValueChange={(path) => void navigate({ to: path })}>
+              <SelectTrigger className="min-w-0 max-w-64 flex-1" aria-label="切换插件页面">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {extensionPages.map((item) => (
+                  <SelectItem key={item.path} value={item.path}>
+                    {item.literalLabel ? item.label : t(item.label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <div ref={actionsRef} data-mobile-header-actions="true" className="flex shrink-0 gap-2.5" />
+        </div>
+      }
       className="px-4 pt-3 pb-2"
     />
   )

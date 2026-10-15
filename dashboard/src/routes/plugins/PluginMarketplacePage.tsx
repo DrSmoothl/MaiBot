@@ -989,7 +989,12 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   }
 
   const marketplaceContent = (
-    <ScrollArea className="h-full" viewportRef={scrollViewportRef}>
+    <ScrollArea
+      className="h-full max-lg:h-auto max-lg:overflow-visible max-lg:[&>[data-dashboard-scrollbar]]:hidden"
+      viewportClassName="max-lg:h-auto max-lg:!overflow-visible max-lg:overscroll-auto"
+      scrollbars="vertical"
+      viewportRef={scrollViewportRef}
+    >
       <div className="space-y-4 p-3 sm:p-4">
         {/* 安装提示 */}
         {restartNoticeVisible && (
@@ -1037,7 +1042,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
         {/* 搜索和筛选栏 */}
         <Card className="p-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             {/* 搜索框 */}
             <div className="relative w-full sm:max-w-md sm:flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1056,10 +1061,10 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
                 <SelectTrigger
                   aria-label="类型筛选"
                   title="类型筛选"
-                  className="min-w-0 flex-1 justify-center gap-1 px-2 sm:w-12 sm:flex-none"
+                  className="min-w-0 flex-1 gap-2 px-3 sm:w-12 sm:flex-none sm:justify-center sm:gap-1 sm:px-2"
                 >
-                  <Filter className="h-4 w-4" />
-                  <span className="sr-only">
+                  <Filter className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate text-left sm:sr-only">
                     <SelectValue placeholder="选择类型" />
                   </span>
                 </SelectTrigger>
@@ -1079,10 +1084,10 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
                 <SelectTrigger
                   aria-label="排序"
                   title="排序"
-                  className="min-w-0 flex-1 justify-center gap-1 px-2 sm:w-12 sm:flex-none"
+                  className="min-w-0 flex-1 gap-2 px-3 sm:w-12 sm:flex-none sm:justify-center sm:gap-1 sm:px-2"
                 >
-                  <ArrowUpDown className="h-4 w-4" />
-                  <span className="sr-only">
+                  <ArrowUpDown className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate text-left sm:sr-only">
                     <SelectValue placeholder="排序" />
                   </span>
                 </SelectTrigger>
@@ -1101,7 +1106,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
               <Badge
                 variant="outline"
                 data-plugin-market-count-badge="true"
-                className="h-9 border-input bg-transparent px-3 text-sm font-normal"
+                className="h-9 border-input bg-transparent px-3 text-sm font-normal max-sm:!h-auto max-sm:!border-0 max-sm:!bg-transparent max-sm:!p-0 max-sm:!shadow-none"
               >
                 全部插件 {getFilteredPluginCount()}
               </Badge>
@@ -1110,16 +1115,16 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
                 type="button"
                 variant="ghost"
                 data-plugin-market-settings-button="true"
-                className="bg-transparent shadow-none hover:bg-transparent sm:ml-auto"
+                className="gap-1.5 bg-transparent px-2 shadow-none hover:bg-transparent sm:ml-auto"
                 onClick={() => navigate({ to: settingsRoute })}
               >
-                <Settings2 className="h-4 w-4 mr-2" />
+                <Settings2 className="h-4 w-4" />
                 设置
               </Button>
             </div>
 
             {/* 兼容性筛选 */}
-            <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:min-w-fit sm:flex-col sm:items-center sm:justify-center sm:gap-1">
+            <div className="flex w-full items-center justify-between gap-3 max-sm:border-t max-sm:border-dashed max-sm:pt-3 sm:w-auto sm:min-w-fit sm:flex-col sm:items-center sm:justify-center sm:gap-1">
               <label
                 htmlFor="compatible-only-plugins"
                 className="cursor-pointer text-xs font-medium leading-none text-muted-foreground whitespace-nowrap"
@@ -1215,9 +1220,9 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   )
 
   return (
-    <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
+    <div className="relative h-full min-h-0 min-w-0 overflow-hidden max-lg:h-auto max-lg:overflow-x-clip max-lg:overflow-y-visible">
       <div
-        className="flex h-full min-h-0 w-full will-change-transform transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+        className="flex h-full min-h-0 w-full will-change-transform transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none max-lg:h-auto max-lg:items-start"
         style={{ transform: detailPluginId ? 'translate3d(-100%, 0, 0)' : 'translate3d(0, 0, 0)' }}
         onTransitionEnd={(event) => {
           if (event.target !== event.currentTarget || event.propertyName !== 'transform') return
@@ -1237,7 +1242,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         <div
           ref={marketplacePaneRef}
           data-plugin-market-pane="true"
-          className="h-full w-full min-w-0 shrink-0 outline-none [contain:layout_paint]"
+          className={`h-full w-full min-w-0 shrink-0 outline-none [contain:layout_paint] max-lg:[contain:none] ${detailPluginId ? 'max-lg:h-0 max-lg:overflow-hidden' : 'max-lg:h-auto'}`}
           tabIndex={-1}
           inert={detailPluginId !== null}
           aria-hidden={detailPluginId !== null}
@@ -1247,7 +1252,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         <div
           ref={detailPaneRef}
           data-plugin-detail-pane="true"
-          className="h-full w-full min-w-0 shrink-0 outline-none [contain:layout_paint]"
+          className={`h-full w-full min-w-0 shrink-0 outline-none [contain:layout_paint] max-lg:[contain:none] ${detailPluginId ? 'max-lg:h-auto' : 'max-lg:h-0 max-lg:overflow-hidden'}`}
           tabIndex={-1}
           inert={detailPluginId === null}
           aria-hidden={detailPluginId === null}

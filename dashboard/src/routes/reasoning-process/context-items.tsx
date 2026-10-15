@@ -899,7 +899,7 @@ export function ContextItemCard({
         )}
         {toolCalls.length > 0 && <ToolCallsCollapsible toolCalls={toolCalls} />}
         {item.item_type === 'ProviderActivityItem' && item.details && item.details.length > 0 && (
-          <pre className="bg-muted/20 max-h-64 overflow-auto rounded-md border p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap">
+          <pre className="bg-muted/20 max-h-64 overflow-auto rounded-md border p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap max-lg:max-h-none max-lg:overflow-visible max-lg:break-words">
             {item.details.join('\n')}
           </pre>
         )}
@@ -933,7 +933,7 @@ export function ContextItemCard({
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent className="min-w-0 border-t">
-          <pre className="max-h-96 overflow-auto p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap lg:max-h-[32rem]">
+          <pre className="max-h-96 overflow-auto p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap max-lg:max-h-none max-lg:overflow-visible max-lg:break-words lg:max-h-[32rem]">
             {JSON.stringify(item, null, 2)}
           </pre>
         </CollapsibleContent>

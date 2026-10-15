@@ -1825,6 +1825,15 @@
   padding: 0.75rem 0.875rem;
 }
 
+/* 翻转卡面是绝对定位，无法撑开手机端的自动行高；为标题、状态屏和指示灯留足高度。 */
+@media (max-width: 1023.98px) {
+  :root[data-dashboard-style='millennium']
+    [data-home-page='true']
+    :is([data-maibot-status-flip-card='true'], [data-maibot-status-rotor='true']) {
+    min-height: 192px;
+  }
+}
+
 :root[data-dashboard-style='millennium'] [data-home-page='true'] [data-maibot-activity-orbit='true'] {
   display: none;
 }
@@ -3650,6 +3659,7 @@
   background: none;
   box-shadow: none;
   gap: 6px;
+  height: 58px;
   padding: 0;
 }
 
@@ -3674,7 +3684,7 @@
   box-shadow: var(--mil-pressed);
   color: var(--mil-on-ink);
   padding-bottom: 2px;
-  transform: translateY(2px);
+  transform: none;
 }
 
 /* 管理页的入口键帽：沿用侧栏键位的材质，文字靠左排 */
@@ -3731,7 +3741,10 @@
 
 :root[data-dashboard-style='millennium']
   [data-mobile-chat-swipe-row='true']
-  + [data-mobile-chat-swipe-row='true'] {
+  + [data-mobile-chat-swipe-row='true'],
+:root[data-dashboard-style='millennium']
+  [data-mobile-chat-section='local']:has(> [data-mobile-chat-swipe-row='true'])
+  + [data-mobile-chat-section='observed']:has(> [data-mobile-chat-swipe-row='true']) {
   border-top: 2px dashed var(--mil-rule);
 }
 
@@ -4078,6 +4091,20 @@
   color: var(--mil-ink);
   height: 58px;
   padding-bottom: 7px;
+}
+
+/* 收起后统一三块控件的外框，实时屏的凹陷层次留在框内，不向外撑出。 */
+:root[data-dashboard-style='millennium']
+  [data-mobile-tabbar='true'][data-collapsed='true']
+  :is([data-mobile-tabbar-tabs='true'], [data-mobile-tabbar-search='true']) {
+  width: 58px;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-mobile-tabbar='true'][data-collapsed='true']
+  [data-mobile-live-strip='true'] {
+  box-shadow: inset 3px 3px 0 var(--mil-screen-shade), inset -2px -2px 0 var(--mil-hi);
+  height: 58px;
 }
 
 /* 首页右上角的头像入口：一枚键帽 */
