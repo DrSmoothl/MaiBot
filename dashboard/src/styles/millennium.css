@@ -2063,7 +2063,7 @@
   color: var(--mil-on-ink);
 }
 
-/* 日志视图切换占据实际布局宽度，不再通过固定偏移挤占工作区键和搜索框。 */
+/* 日志视图切换在搜索框右侧占据实际布局宽度。 */
 :root[data-dashboard-style='millennium'] [data-dashboard-header='true'] #log-viewer-topbar-tabs {
   position: static;
   /* Tailwind 4 的位移使用独立 translate 属性，需与 transform 一并清除。 */

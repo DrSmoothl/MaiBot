@@ -401,31 +401,6 @@ export function Header({
       )}
       <div className={cn(topbarCollapsed ? 'hidden' : 'contents')}>
         <div className="relative z-10 flex h-full min-h-0 items-center justify-between gap-2">
-          {/* 千禧风格下此槽位占据实际布局宽度：宽度从 0 展开，把工作区键平滑推开而不是瞬间挤开。
-              隐藏态左侧留出侧栏宽度，工作区键停在设置工作区时的位置，入场/退场只做一次单向移动。 */}
-          <motion.div
-            id="log-viewer-topbar-tabs"
-            className={cn(
-              'absolute top-1/2 left-0 hidden min-w-0 shrink-0 -translate-y-1/2 items-center [&>*]:shrink-0',
-              workspaceMode === 'logs' && 'sm:flex',
-              // 展开/收起过程中裁掉尚未露出的部分；静止后放开，避免裁掉键帽阴影。
-              !(logSwitcherShown && logSwitcherSettled) && 'pointer-events-none overflow-x-clip'
-            )}
-            initial={false}
-            animate={
-              logSwitcherShown
-                ? { opacity: 1, width: 'auto', marginLeft: 0 }
-                : { opacity: 0, width: 0, marginLeft: logSwitcherInset }
-            }
-            transition={
-              logSwitcherShown
-                ? // 宽度动画跑在主线程：等日志页挂载、上滑完成后再展开，避开最重的那几帧
-                  { duration: 0.36, delay: 0.28, ease: [0.22, 1, 0.36, 1] }
-                : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }
-            }
-            onAnimationComplete={() => setLogSwitcherSettled(logSwitcherShown)}
-          />
-
           <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-4">
 
             {/* 固定模式显示左折线；悬浮模式展开后由侧栏内的右折线切回固定模式。
@@ -644,6 +619,31 @@ export function Header({
                   <Search className="h-4 w-4" />
                 </button>
               </form>
+              {/* 千禧风格下日志切换槽位放在搜索框右侧，并参与正常布局；其他风格保留左侧定位。
+                  宽度从 0 展开，入场/退场只做一次单向移动。 */}
+              <motion.div
+                id="log-viewer-topbar-tabs"
+                className={cn(
+                  'absolute top-1/2 left-0 hidden min-w-0 shrink-0 -translate-y-1/2 items-center [&>*]:shrink-0',
+                  workspaceMode === 'logs' && 'sm:flex',
+                  // 展开/收起过程中裁掉尚未露出的部分；静止后放开，避免裁掉键帽阴影。
+                  !(logSwitcherShown && logSwitcherSettled) && 'pointer-events-none overflow-x-clip'
+                )}
+                initial={false}
+                animate={
+                  logSwitcherShown
+                    ? { opacity: 1, width: 'auto', marginLeft: 0 }
+                    : { opacity: 0, width: 0, marginLeft: themeConfig.dashboardStyle === 'millennium' ? 0 : logSwitcherInset }
+                }
+                transition={
+                  logSwitcherShown
+                    ? // 宽度动画跑在主线程：等日志页挂载、上滑完成后再展开，避开最重的那几帧
+                      { duration: 0.36, delay: 0.28, ease: [0.22, 1, 0.36, 1] }
+                    : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }
+                }
+                onAnimationComplete={() => setLogSwitcherSettled(logSwitcherShown)}
+              />
+
               {/* 后端切换按钮（仅 Electron） */}
             {isElectron() && (
               <>
