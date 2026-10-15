@@ -397,7 +397,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden p-4 pb-6 sm:p-6">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden p-2 pb-4 sm:p-6">
       {activeView !== 'list' && (
         <div className="mb-4 flex shrink-0 justify-end gap-2 sm:mb-3">
           {/* 手机上由页头的「列表模式」返回，这里不再重复 */}
@@ -427,7 +427,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
           activeView === 'list' ? 'min-h-0 flex-1 overflow-y-auto lg:overflow-hidden' : 'hidden'
         }
       >
-        <div className="pr-3 pb-2 sm:pr-4 lg:h-full">
+        <div className="min-w-0 pb-2 sm:pr-4 lg:h-full">
           {/* 表达方式列表 */}
           <div
             className={`grid grid-cols-1 items-stretch gap-5 transition-[grid-template-columns] duration-200 sm:gap-4 lg:h-full lg:min-h-[30rem] ${
@@ -510,7 +510,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
               />
             </div>
 
-            <div className="flex min-h-0 flex-col space-y-4 sm:space-y-3">
+            <div className="flex min-h-0 min-w-0 flex-col space-y-3">
               {/* 批量操作工具栏 */}
               <div
                 className={`${list.selectedCount > 0 ? 'flex' : 'hidden'} mt-4 flex-col items-start justify-between gap-3 border-t pt-4 sm:mt-3 sm:flex-row sm:items-center sm:pt-3`}
@@ -596,7 +596,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                         新增
                       </Button>
                       {currentChat && (
-                        <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+                        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
                           <Button
                             variant="outline"
                             size="sm"
@@ -615,7 +615,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                               <Button
                                 variant="outline"
                                 size="icon"
-                                className="data-[state=open]:bg-accent h-7 w-full transition-colors duration-200 sm:w-7"
+                                className="data-[state=open]:bg-accent h-7 w-7 shrink-0 transition-colors duration-200"
                                 title="更多"
                                 aria-label={isMoreActionsOpen ? '关闭更多操作' : '更多操作'}
                               >
