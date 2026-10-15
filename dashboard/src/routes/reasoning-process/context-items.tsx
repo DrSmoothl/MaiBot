@@ -806,9 +806,6 @@ export function ToolCallsCollapsible({ toolCalls }: { toolCalls: unknown[] }) {
                     {toolCall.sourceLabel}
                   </Badge>
                 )}
-                {toolCall.id && (
-                  <span className="text-muted-foreground font-mono text-[11px]">{toolCall.id}</span>
-                )}
               </div>
               <pre className="bg-muted/20 mt-2 rounded-md border p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
                 {stringifyStructuredValue(toolCall.arguments)}
@@ -858,10 +855,6 @@ export function ContextItemCard({
   const images = getContextItemImages(item)
   const contentBlocks = getContextItemContentBlocks(item)
   const toolCalls = getContextItemToolCalls(item)
-  const callId =
-    item.item_type === 'FunctionCallItem' && isRecord(item.tool_call)
-      ? String(item.tool_call.call_id || '')
-      : String(item.call_id || '')
 
   return (
     <article
@@ -878,23 +871,11 @@ export function ContextItemCard({
             {roleStyle.label}
           </Badge>
           <span className="text-muted-foreground font-mono text-[11px]">{item.item_type}</span>
-          {item.meta.logical_turn_id && (
-            <Badge
-              variant="outline"
-              className="max-w-48 truncate font-mono text-[10px]"
-              title={item.meta.logical_turn_id}
-            >
-              turn {item.meta.logical_turn_id}
-            </Badge>
-          )}
           {item.phase && <Badge variant="outline">phase: {item.phase}</Badge>}
           {item.representation && <Badge variant="outline">{item.representation}</Badge>}
           {item.status && <Badge variant="outline">{item.status}</Badge>}
         </div>
 
-        {callId && (
-          <div className="text-muted-foreground font-mono text-[11px]">call_id: {callId}</div>
-        )}
         {contentBlocks.map((block, blockIndex) =>
           block.type === 'text' ? (
             <NaturalLanguageText
