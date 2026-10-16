@@ -2234,6 +2234,17 @@
   color: var(--mil-on-ink);
 }
 
+/* 桌面浏览框使用独立标记，避免响应式边框类变化导致窗口外壳样式失效。 */
+@media (min-width: 768px) {
+  :root[data-dashboard-style='millennium'] [data-expression-browser-panel='true'] {
+    background-color: var(--mil-panel);
+    background-image: var(--mil-speck);
+    background-size: 5px 5px;
+    border: 2px solid var(--mil-line);
+    box-shadow: var(--mil-raise);
+  }
+}
+
 /* 表达方式表格：整个浏览区是屏幕，表格本身不再单独描边 */
 :root[data-dashboard-style='millennium'] [data-expression-table-viewport='true'] {
   background-color: var(--mil-screen);

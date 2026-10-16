@@ -139,7 +139,7 @@ export function ExpressionList({
   }
 
   return (
-    <div className={cn('flex min-h-0 min-w-0 flex-col bg-transparent md:border-2', className)}>
+    <div data-expression-browser-panel="true" className={cn('flex min-h-0 min-w-0 flex-col bg-transparent md:border-2', className)}>
       {/* 桌面端表格视图 */}
       <div
         data-expression-table-viewport="true"
