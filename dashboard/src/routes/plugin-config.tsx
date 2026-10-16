@@ -69,7 +69,7 @@ import { cn } from '@/lib/utils'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
 import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
-import { getLocalPluginChangelog, getLocalPluginReadme, getPluginRuntimeComponents } from '@/lib/plugin-api'
+import { fetchPluginList, getLocalPluginChangelog, getLocalPluginReadme, getPluginRuntimeComponents } from '@/lib/plugin-api'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
 import { PluginStats } from '@/components/plugin-stats'
 import { PluginWebUIManagerPanel } from '@/components/plugin-webui-manager'
@@ -695,6 +695,30 @@ function PluginDetailsPanel({
   }, [plugin.id])
 
   const statsPluginId = plugin.manifest.id || plugin.id
+  const [marketMatch, setMarketMatch] = useState<{ pluginId: string; exists: boolean } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    // 使用完整市场列表，避免将暂不兼容的已上架插件误判成本地插件。
+    fetchPluginList()
+      .then((plugins) => {
+        if (!cancelled) {
+          setMarketMatch({
+            pluginId: statsPluginId,
+            exists: plugins.some((item) => item.id === statsPluginId || item.manifest.id === statsPluginId),
+          })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setMarketMatch(null)
+          console.warn('检查插件市场收录状态失败:', error)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [statsPluginId])
 
   return (
     <div className="space-y-4">
@@ -777,15 +801,17 @@ function PluginDetailsPanel({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="p-3 sm:p-3">
-              <CardTitle>市场反馈</CardTitle>
-              <CardDescription>点赞、评分和评论会提交到插件市场统计服务。</CardDescription>
-            </CardHeader>
-            <CardContent className="p-3 pt-0 sm:p-3 sm:pt-0">
-              <PluginStats pluginId={statsPluginId} />
-            </CardContent>
-          </Card>
+          {marketMatch?.pluginId === statsPluginId && marketMatch.exists && (
+            <Card>
+              <CardHeader className="p-3 sm:p-3">
+                <CardTitle>市场反馈</CardTitle>
+                <CardDescription>点赞、评分和评论会提交到插件市场统计服务。</CardDescription>
+              </CardHeader>
+              <CardContent className="p-3 pt-0 sm:p-3 sm:pt-0">
+                <PluginStats pluginId={statsPluginId} />
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader className="p-3 sm:p-3">
