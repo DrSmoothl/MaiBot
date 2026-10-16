@@ -47,10 +47,9 @@ def client(monkeypatch):
     monkeypatch.setattr(self_update_router, "_last_check", None)
     monkeypatch.setattr(self_update_router, "inspect_local", make_local)
     monkeypatch.setattr(self_update_router, "read_last_result", lambda: None)
-    monkeypatch.setattr(self_update_router, "check_for_update", lambda: make_check(make_local()))
+    monkeypatch.setattr(self_update_router, "check_for_update", lambda **kwargs: make_check(make_local()))
     monkeypatch.setattr(self_update_router, "evaluate_update", lambda local, target, checked_at: make_check(local))
     monkeypatch.setattr(self_update_router, "schedule_restart", lambda: restarts.append("restart"))
-    monkeypatch.setattr(self_update_router, "get_git_mirror_service", lambda: None)
 
     app = FastAPI()
     app.include_router(self_update_router.router, prefix="/api/webui")
@@ -64,7 +63,7 @@ def test_status_uses_last_check_without_network(client, monkeypatch):
     status = test_client.get("/api/webui/system/self-update/status").json()
     assert (status["supported"], status["checked_at"], status["update_available"]) == (True, None, False)
 
-    checked = test_client.post("/api/webui/system/self-update/check").json()
+    checked = test_client.post("/api/webui/system/self-update/check", json={"source_id": "github"}).json()
     assert (checked["latest_version"], checked["behind"], checked["can_apply"]) == ("1.3.8", 1, True)
     assert checked["commits"][0]["summary"] == "修复断句"
     assert (checked["source_id"], checked["source_name"]) == ("ghproxy-vip", "ghproxy.vip 镜像")
@@ -95,10 +94,8 @@ def test_package_status_reuses_cached_version_and_pypi_source(client, monkeypatc
     local = LocalState(version="1.3.8", dependency_tool="uv", deployment_type="package")
     monkeypatch.setattr(self_update_router, "inspect_local", lambda: local)
     monkeypatch.setattr(self_update_router, "evaluate_update", evaluate_update)
-    monkeypatch.setattr(self_update_router, "check_for_update", lambda: evaluate_update(local, "1.3.9", 123.0))
-    mirror = Mock(side_effect=AssertionError("包安装不应初始化 Git 镜像"))
-    monkeypatch.setattr(self_update_router, "get_git_mirror_service", mirror)
-    checked = test_client.post("/api/webui/system/self-update/check").json()
+    monkeypatch.setattr(self_update_router, "check_for_update", lambda **kwargs: evaluate_update(local, "1.3.9", 123.0))
+    checked = test_client.post("/api/webui/system/self-update/check", json={"source_id": "github"}).json()
     assert checked["can_apply"] and checked["deployment_type"] == "package"
     assert (checked["source_id"], checked["latest_version"]) == ("pypi", "1.3.9")
     status = test_client.get("/api/webui/system/self-update/status").json()
@@ -110,12 +107,13 @@ def test_apply_registers_request_then_restarts(client, monkeypatch):
     test_client, restarts = client
     requested: List[str] = []
 
-    def request_update(expected_commit: str) -> PendingUpdate:
+    def request_update(expected_commit: str, source_id: str, custom_prefix: str) -> PendingUpdate:
+        assert source_id == "github" and custom_prefix == ""
         requested.append(expected_commit)
         return PendingUpdate(target_commit=expected_commit, base_commit=BASE, branch="main", requested_at=0.0)
 
     monkeypatch.setattr(self_update_router, "request_update", request_update)
-    response = test_client.post("/api/webui/system/self-update/apply", json={"expected_commit": TARGET})
+    response = test_client.post("/api/webui/system/self-update/apply", json={"expected_commit": TARGET, "source_id": "github"})
     assert response.status_code == 200 and response.json()["success"] is True
     assert (requested, restarts) == ([TARGET], ["restart"])
 
@@ -123,11 +121,11 @@ def test_apply_registers_request_then_restarts(client, monkeypatch):
 def test_apply_refused_does_not_restart(client, monkeypatch):
     test_client, restarts = client
 
-    def request_update(expected_commit: str) -> PendingUpdate:
+    def request_update(expected_commit: str, source_id: str, custom_prefix: str) -> PendingUpdate:
         raise SelfUpdateError("dirty_worktree", "存在未提交的本地改动，请先提交或还原后再更新")
 
     monkeypatch.setattr(self_update_router, "request_update", request_update)
-    response = test_client.post("/api/webui/system/self-update/apply", json={"expected_commit": TARGET})
+    response = test_client.post("/api/webui/system/self-update/apply", json={"expected_commit": TARGET, "source_id": "github"})
     assert response.status_code == 409
     assert "未提交的本地改动" in response.json()["detail"]
     assert restarts == []
@@ -138,5 +136,21 @@ def test_routes_require_auth():
     app.include_router(self_update_router.router, prefix="/api/webui")
     with TestClient(app) as test_client:
         assert test_client.get("/api/webui/system/self-update/status").status_code == 401
-        response = test_client.post("/api/webui/system/self-update/apply", json={"expected_commit": TARGET})
+        response = test_client.post("/api/webui/system/self-update/apply", json={"expected_commit": TARGET, "source_id": "github"})
         assert response.status_code == 401
+
+
+def test_update_requires_manual_source_selection(client):
+    test_client, restarts = client
+    assert test_client.post("/api/webui/system/self-update/check").status_code == 422
+    assert test_client.post("/api/webui/system/self-update/apply", json={"expected_commit": TARGET}).status_code == 422
+    assert restarts == []
+
+
+def test_source_is_forwarded_to_check_and_apply(client, monkeypatch):
+    test_client, _ = client
+    check = Mock(return_value=make_check(make_local()))
+    monkeypatch.setattr(self_update_router, "check_for_update", check)
+    response = test_client.post("/api/webui/system/self-update/check", json={"source_id": "cnb"})
+    assert response.status_code == 200
+    check.assert_called_once_with(source_id="cnb", custom_prefix="")

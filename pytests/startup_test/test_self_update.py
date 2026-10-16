@@ -163,56 +163,37 @@ def test_commit_outside_official_history_is_refused(repos):
     assert git(local, "rev-parse", "HEAD") == base
 
 
-def test_update_follows_plugin_mirror_config(repos, tmp_path, monkeypatch):
+def test_update_uses_only_manually_selected_source(repos, tmp_path, monkeypatch):
     official, local = repos
-    # 用 Git 的 insteadOf 把假域名指到本地仓库：live 可用，dead 指向不存在的路径，官方地址不可达。
     repo_path = "gh/Mai-with-u/MaiBot.git"
     git(local, "config", f"url.{official.as_posix()}.insteadOf", f"https://live.test/{repo_path}")
     git(local, "config", f"url.{(tmp_path / 'nowhere').as_posix()}.insteadOf", f"https://dead.test/{repo_path}")
-    monkeypatch.setattr(self_update, "OFFICIAL_REPOSITORY_URL", str(tmp_path / "unreachable-official"))
-    use_mirrors(
-        local,
-        mirror("live", "可用镜像", priority=3),
-        mirror("off", "已停用镜像", priority=1, enabled=False),
-        mirror("dead", "失效镜像", priority=2),
-    )
-    assert [source.id for source in self_update.load_update_sources(local)] == ["dead", "live"]
-
+    # 旧插件镜像配置即使包含其他可用源，也不能参与本体选源或失败后的重试。
+    use_mirrors(local, mirror("live", "旧插件镜像", priority=1))
     target = release(official)
-    check = self_update.check_for_update(local)
-    assert check.source is not None and (check.source.id, check.latest_commit) == ("live", target)
-
-    self_update.request_update(target, local)
+    with pytest.raises(SelfUpdateError) as error:
+        self_update.check_for_update(local, "custom", "https://dead.test/gh")
+    assert error.value.code == "fetch_failed"
+    check = self_update.check_for_update(local, "custom", "https://live.test/gh")
+    assert check.source.id == "custom" and check.latest_commit == target
+    pending = self_update.request_update(target, local, "custom", "https://live.test/gh")
+    assert pending.source_id == "custom" and pending.custom_prefix == "https://live.test/gh"
     result = self_update.apply_pending_update(Mock(), local)
-    assert result is not None and (result.success, result.source_name) == (True, "可用镜像")
+    assert result.success and result.source_name == "自定义源"
     assert git(local, "rev-parse", "HEAD") == target
 
 
-def test_mirror_config_failures_are_reported(repos, tmp_path):
+def test_source_selection_is_restricted_and_ignores_plugin_configuration(repos):
     official, local = repos
+    use_mirrors(local, mirror("off", "旧插件镜像", priority=1, enabled=False))
     release(official)
-    git(local, "config", f"url.{(tmp_path / 'nowhere').as_posix()}.insteadOf", "https://dead.test/")
-
-    use_mirrors(local, mirror("dead", "失效镜像", priority=1))
-    with pytest.raises(SelfUpdateError) as error:
-        self_update.check_for_update(local)
-    assert error.value.code == "fetch_failed" and "失效镜像" in error.value.message
-
-    use_mirrors(local, mirror("plain", "明文镜像", priority=1, scheme="http"))
-    with pytest.raises(SelfUpdateError) as error:
-        self_update.check_for_update(local)
-    assert error.value.code == "invalid_source"
-
-    use_mirrors(local, mirror("off", "已停用镜像", priority=1, enabled=False))
-    with pytest.raises(SelfUpdateError) as error:
-        self_update.check_for_update(local)
-    assert error.value.code == "no_update_source"
-
-    # 镜像源配置里的 github 条目就是官方地址本身。
-    use_mirrors(local, {**mirror("github", "GitHub 官方源", priority=1), "clone_prefix": "https://github.com"})
-    assert self_update.check_for_update(local).source == self_update.UpdateSource(
-        id="github", name="GitHub 官方源", url=str(official)
-    )
+    assert self_update.check_for_update(local, "github").source.url == str(official)
+    assert self_update.select_update_source("cnb").url == "https://cnb.cool/Mai-with-u/maibot.git"
+    for source, prefix in (("ghproxy-vip", ""), ("pypi", ""), ("custom", "http://plain.test"),
+                           ("custom", "https://user:password@host.test")):
+        with pytest.raises(SelfUpdateError) as error:
+            self_update.check_for_update(local, source, prefix)
+        assert error.value.code == "invalid_source"
 
 
 @pytest.mark.parametrize(

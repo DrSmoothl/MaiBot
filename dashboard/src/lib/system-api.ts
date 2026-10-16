@@ -175,21 +175,28 @@ export async function getSelfUpdateStatus(): Promise<SelfUpdateStatus> {
   })
 }
 
-/** 联网检查官方仓库是否有新版本 */
-export async function checkSelfUpdate(): Promise<SelfUpdateStatus> {
+export interface SelfUpdateSourceSelection {
+  source_id: 'cnb' | 'github' | 'custom' | 'pypi' | 'tuna' | 'aliyun'
+  custom_prefix?: string
+}
+
+/** 使用本次选中的来源检查本体更新 */
+export async function checkSelfUpdate(source: SelfUpdateSourceSelection): Promise<SelfUpdateStatus> {
   return backendApi.post<SelfUpdateStatus>('/api/webui/system/self-update/check', {
+    body: source,
     errorMessage: '检查更新失败',
   })
 }
 
 /** 更新到界面上确认过的提交并重启 */
 export async function applySelfUpdate(
-  expectedCommit: string
+  expectedCommit: string,
+  source: SelfUpdateSourceSelection
 ): Promise<{ success: boolean; message: string }> {
   return backendApi.post<{ success: boolean; message: string }>(
     '/api/webui/system/self-update/apply',
     {
-      body: { expected_commit: expectedCommit },
+      body: { expected_commit: expectedCommit, ...source },
       errorMessage: '发起更新失败',
     }
   )

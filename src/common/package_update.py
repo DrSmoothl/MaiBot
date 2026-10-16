@@ -20,6 +20,11 @@ import tomllib
 
 PYPI_URL = "https://pypi.org/pypi/maibot/json"
 PYPI_INDEX = "https://pypi.org/simple"
+PACKAGE_INDEXES: Dict[str, Tuple[str, str]] = {
+    "pypi": ("PyPI 官方", PYPI_INDEX),
+    "tuna": ("清华镜像", "https://pypi.tuna.tsinghua.edu.cn/simple"),
+    "aliyun": ("阿里镜像", "https://mirrors.aliyun.com/pypi/simple"),
+}
 PACKAGE_RUNNER_ENV = "MAIBOT_PACKAGE_RUNNER"
 UPDATE_TIMEOUT = 1800
 _VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
@@ -32,6 +37,12 @@ class SelfUpdateError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+def package_index(source_id: str) -> str:
+    if source_id not in PACKAGE_INDEXES:
+        raise SelfUpdateError("invalid_source", "包安装更新只支持 PyPI 官方、清华或阿里")
+    return PACKAGE_INDEXES[source_id][1]
 
 
 def version_tuple(version: str) -> Tuple[int, ...]:
@@ -198,7 +209,9 @@ def execute_update(request: Dict[str, Any], result: Dict[str, Any]) -> None:
     environment = ToolEnvironment(prefix, Path(request["python"]), Path(sys.executable), request["uv"])
     target = request["target"]
     version_tuple(target)
-    result.update(stage="precheck", from_version=request["current"], to_version=target, source_name="PyPI")
+    source_id = request.get("source_id", "pypi")
+    index = package_index(source_id)
+    result.update(stage="precheck", from_version=request["current"], to_version=target, source_name=PACKAGE_INDEXES[source_id][0])
     env = os.environ.copy()
     # 防止继承 UV_PYTHON 等变量导致重建正在运行的 Python，或把其他实例环境当作目标。
     for name in list(env):
@@ -232,7 +245,7 @@ def execute_update(request: Dict[str, Any], result: Dict[str, Any]) -> None:
     def install_command(version: str) -> List[str]:
         return [environment.uv, "--no-config", "pip", "install", f"maibot=={version}",
                 "--reinstall-package", "maibot", "--python", str(environment.python),
-                "--default-index", PYPI_INDEX, "--no-python-downloads"]
+                "--default-index", index, "--no-python-downloads"]
 
     # 指定当前工具解释器；不重建环境、不重写全局命令入口，也不删除插件额外安装的依赖。
     with FileLock(environment.locks / "update.guard"):
@@ -265,7 +278,7 @@ def execute_update(request: Dict[str, Any], result: Dict[str, Any]) -> None:
             try:
                 # 精确恢复快照并清除本次新增的依赖，不能只降级主包、留下新版本依赖。
                 _run([environment.uv, "--no-config", "pip", "sync", "--python", str(environment.python),
-                      "--default-index", PYPI_INDEX, "--reinstall", str(requirements)], root, env)
+                      "--default-index", index, "--reinstall", str(requirements)], root, env)
                 if _run(verify, root, env) != request["current"]:
                     raise SelfUpdateError("rollback_failed", "回滚后的主程序版本不一致")
                 if _run([entrypoint, "--version"], root, env) != request["current"]:
@@ -279,15 +292,16 @@ def execute_update(request: Dict[str, Any], result: Dict[str, Any]) -> None:
     result.update(success=True, stage="done", dependencies_synced=True)
 
 
-def run_update(root: Path, current: str, target: str, result: Dict[str, Any]) -> Dict[str, Any]:
+def run_update(root: Path, current: str, target: str, result: Dict[str, Any], source_id: str = "pypi") -> Dict[str, Any]:
     """复制执行器到实例目录，避免升级时替换正在读取的执行器源码。"""
+    package_index(source_id)
     environment = tool_environment()
     state = root / "data/self_update"
     state.mkdir(parents=True, exist_ok=True)
     script = state / "package_updater.py"
     shutil.copyfile(Path(__file__), script)
     request = {"root": str(root.resolve()), "prefix": str(environment.prefix), "python": str(environment.python),
-               "uv": environment.uv, "current": current, "target": target, "result": result}
+               "uv": environment.uv, "current": current, "target": target, "result": result, "source_id": source_id}
     request_path = state / "package_request.json"
     request_path.write_text(json.dumps(request), encoding="utf-8")
     output_path = state / "package_result.json"

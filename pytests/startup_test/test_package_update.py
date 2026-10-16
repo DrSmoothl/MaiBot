@@ -119,8 +119,9 @@ def test_package_apply_consumes_request_and_records_result(package_host, monkeyp
     root, _ = package_host
     self_update.request_update("1.3.9", root)
 
-    def update(instance, current, target, result):
+    def update(instance, current, target, result, source_id):
         assert (instance, current, target) == (root, "1.3.8", "1.3.9")
+        assert source_id == "pypi"
         return {**result, "success": True, "from_version": current, "to_version": target, "stage": "done"}
 
     monkeypatch.setattr(self_update, "run_update", update)
@@ -229,7 +230,7 @@ def test_real_uv_upgrade_and_rollback_with_live_interpreter(tmp_path, pinned):
             # 执行器文件保持原样；仅在测试进程中把固定 PyPI 地址替换成隔离的本地索引。
             driver = (
                 "import runpy,sys; ns=runpy.run_path(sys.argv[1]); "
-                "ns['execute_update'].__globals__['PYPI_INDEX']=sys.argv[3]; "
+                "ns['execute_update'].__globals__['PACKAGE_INDEXES']['pypi']=('Test index',sys.argv[3]); "
                 "sys.argv=[sys.argv[1],sys.argv[2]]; ns['main']()"
             )
             subprocess.run([str(base_python), "-I", "-c", driver, str(helper), str(request_path), index.as_uri()],
@@ -250,3 +251,30 @@ def test_real_uv_upgrade_and_rollback_with_live_interpreter(tmp_path, pinned):
         else:
             live.terminate()
         live.wait(timeout=10)
+
+
+@pytest.mark.parametrize("source", ["pypi", "tuna", "aliyun"])
+def test_package_update_selection_survives_restart(package_host, monkeypatch, source):
+    root, _ = package_host
+    check = self_update.check_for_update(root, source)
+    assert check.source.id == source
+    assert check.source.url == package_update.PACKAGE_INDEXES[source][1]
+    pending = self_update.request_update("1.3.9", root, source)
+    assert pending.source_id == source
+    calls = []
+
+    def update(instance, current, target, result, source_id):
+        calls.append(source_id)
+        return {**result, "success": True}
+
+    monkeypatch.setattr(self_update, "run_update", update)
+    assert self_update.apply_pending_update(Mock(), root).success
+    assert calls == [source]
+
+
+@pytest.mark.parametrize("source", ["custom", "github", "cnb", "unknown"])
+def test_package_update_rejects_other_sources(package_host, source):
+    root, _ = package_host
+    with pytest.raises(SelfUpdateError, match="只支持"):
+        self_update.request_update("1.3.9", root, source)
+    assert not self_update._pending_path(root).exists()
