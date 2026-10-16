@@ -1,4 +1,5 @@
 import { CheckCircle2, Eye, EyeOff, KeyRound, ShieldCheck, XCircle } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -6,11 +7,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { HelpTooltip } from '@/components/ui/help-tooltip'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { validateToken } from '@/lib/token-validator'
 import { cn } from '@/lib/utils'
-import { PROVIDER_TEMPLATES } from '../config/providerTemplates'
+import type { ModelListItem } from '@/lib/config-api'
+import { findTemplateByBaseUrl, PROVIDER_TEMPLATES, resolveThinkingFormatForModel } from '../config/providerTemplates'
 
 import type {
   ApiProviderSetupConfig,
@@ -126,9 +129,6 @@ export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
           value={config.nickname}
           onChange={(e) => onChange({ ...config, nickname: e.target.value })}
         />
-        <p className="text-muted-foreground text-xs">
-          {t('setupPage.forms.botBasic.nickname.description')}
-        </p>
       </div>
     </div>
   )
@@ -144,11 +144,13 @@ export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
   const { t } = useTranslation()
 
   return (
-    <div className="space-y-6">
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
       <div className="space-y-3">
         <Label htmlFor="personality">{t('setupPage.forms.personality.personality.label')}</Label>
         <Textarea
           id="personality"
+          autoResize={false}
+          className="h-32 resize-none overflow-y-auto"
           placeholder={t('setupPage.forms.personality.personality.placeholder')}
           value={config.personality}
           onChange={(e) => onChange({ ...config, personality: e.target.value })}
@@ -163,6 +165,8 @@ export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
         <Label htmlFor="reply_style">{t('setupPage.forms.personality.replyStyle.label')}</Label>
         <Textarea
           id="reply_style"
+          autoResize={false}
+          className="h-32 resize-none overflow-y-auto"
           placeholder={t('setupPage.forms.personality.replyStyle.placeholder')}
           value={config.reply_style}
           onChange={(e) => onChange({ ...config, reply_style: e.target.value })}
@@ -184,6 +188,7 @@ interface ApiProviderSetupFormProps {
 
 export function ApiProviderSetupForm({ config, onChange }: ApiProviderSetupFormProps) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
   const [showApiKey, setShowApiKey] = useState(false)
   const [customMode, setCustomMode] = useState(false)
   const [selectedPreset, setSelectedPreset] = useState('deepseek')
@@ -231,60 +236,68 @@ export function ApiProviderSetupForm({ config, onChange }: ApiProviderSetupFormP
     <div className="space-y-6">
       <div className="space-y-3">
         <Label>{t('setupPage.forms.apiProvider.providerName.label')}</Label>
-        {/* 只挂载当前模式，避免滑出容器的表单边框露出，也不裁切主题轮廓。 */}
-        <div className="flex gap-2">
-          {!customMode ? (
-            <>
-              <Input className="h-11 min-w-0 flex-1" readOnly value={config.provider_name} />
-              <select
-                aria-label="选择预置提供商"
-                className="border-input bg-background h-11 w-52 rounded-md border px-3 text-sm"
-                onChange={(event) => selectPreset(event.target.value)}
-                value={selectedPreset}
+        {/* 表单纵向切换，按钮留在原位，仅线性调整宽度。 */}
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <AnimatePresence initial={false} mode="wait">
+              <motion.div
+                key={customMode ? 'custom' : 'preset'}
+                initial={{ opacity: 0, y: reduceMotion ? 0 : customMode ? 16 : -16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: reduceMotion ? 0 : customMode ? 16 : -16 }}
+                transition={{ duration: reduceMotion ? 0 : 0.16, ease: 'linear' }}
+                className="flex gap-2"
               >
-                {providerPresets.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.display_name}
-                  </option>
-                ))}
-              </select>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-11"
-                onClick={switchToCustom}
-              >
-                自定义
-              </Button>
-            </>
-          ) : (
-            <>
-              <Input
-                id="provider_name"
-                className="h-11 min-w-0 flex-1"
-                placeholder={t('setupPage.forms.apiProvider.providerName.placeholder')}
-                value={config.provider_name}
-                onChange={(e) => onChange({ ...config, provider_name: e.target.value })}
-              />
-              <Input
-                aria-label={t('setupPage.forms.apiProvider.baseUrl.label')}
-                className="h-11 min-w-0 flex-1 font-mono"
-                placeholder="https://api.example.com/v1"
-                value={config.base_url}
-                onChange={(e) => onChange({ ...config, base_url: e.target.value })}
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-11"
-                onClick={switchToPreset}
-              >
-                预置
-              </Button>
-            </>
-          )}
+                {!customMode ? (
+                  <Select value={selectedPreset} onValueChange={selectPreset}>
+                    <SelectTrigger aria-label="选择预置提供商" className="h-11 min-w-0 flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent position="popper" collisionPadding={12}>
+                      {providerPresets.map((preset) => (
+                        <SelectItem key={preset.id} value={preset.id}>
+                          {preset.display_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <>
+                    <Input
+                      id="provider_name"
+                      className="h-11 min-w-0 flex-1"
+                      placeholder={t('setupPage.forms.apiProvider.providerName.placeholder')}
+                      value={config.provider_name}
+                      onChange={(e) => onChange({ ...config, provider_name: e.target.value })}
+                    />
+                    <Input
+                      aria-label={t('setupPage.forms.apiProvider.baseUrl.label')}
+                      className="h-11 min-w-0 flex-1 font-mono"
+                      placeholder="https://api.example.com/v1"
+                      value={config.base_url}
+                      onChange={(e) => onChange({ ...config, base_url: e.target.value })}
+                    />
+                  </>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+          <motion.div
+            initial={false}
+            animate={{ width: customMode ? 64 : 80 }}
+            transition={{ duration: reduceMotion ? 0 : 0.2, ease: 'linear' }}
+            className="shrink-0"
+          >
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-11 w-full"
+              onClick={customMode ? switchToPreset : switchToCustom}
+            >
+              {customMode ? '预置' : '自定义'}
+            </Button>
+          </motion.div>
         </div>
       </div>
 
@@ -324,20 +337,83 @@ export function ApiProviderSetupForm({ config, onChange }: ApiProviderSetupFormP
 interface ModelSetupFormProps {
   config: ModelSetupConfig
   onChange: (config: ModelSetupConfig) => void
+  models?: ModelListItem[]
+  fetchStatus?: 'idle' | 'loading' | 'success' | 'error'
+  fetchError?: string
+  providerBaseUrl?: string
 }
 
-export function ModelSetupForm({ config, onChange }: ModelSetupFormProps) {
+export function ModelSetupForm({
+  config,
+  onChange,
+  models = [],
+  fetchStatus = 'idle',
+  fetchError = '',
+  providerBaseUrl = '',
+}: ModelSetupFormProps) {
   const { t } = useTranslation()
+
+  const providerTemplate = findTemplateByBaseUrl(providerBaseUrl)
+  const supportsThinkingSwitch = (identifier: string): boolean => {
+    if (!identifier.trim() || (fetchStatus !== 'success' && fetchStatus !== 'error')) return false
+    if (providerTemplate?.id === 'deepseek') return true
+    const format = resolveThinkingFormatForModel(providerTemplate, identifier)
+    return format?.kind === 'enable_thinking' ||
+      (format?.kind === 'thinking_type' && format.canDisable === true)
+  }
 
   const inferThinkingEnabled = (modelIdentifier: string) => {
     const normalizedIdentifier = modelIdentifier.trim().toLowerCase()
     return normalizedIdentifier.includes('deepseek-v4-pro')
   }
 
+  const renderModelInput = (role: 'planner' | 'replyer') => {
+    const identifier = config[`${role}_model_identifier`]
+    const changeModel = (value: string) =>
+      onChange({
+        ...config,
+        [`${role}_model_identifier`]: value,
+        [`${role}_model_name`]: value,
+        [`${role}_thinking`]: inferThinkingEnabled(value),
+      })
+    if (fetchStatus === 'success') {
+      return (
+        <Select value={identifier} onValueChange={changeModel}>
+          <SelectTrigger id={`${role}_model_identifier`} className="min-w-0 font-mono">
+            <SelectValue placeholder="请选择模型" />
+          </SelectTrigger>
+          <SelectContent position="popper" collisionPadding={12}>
+            {models.map((model) => (
+              <SelectItem key={model.id} value={model.id}>{model.id}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )
+    }
+    return (
+      <Input
+        id={`${role}_model_identifier`}
+        placeholder={fetchStatus === 'error' ? '手动输入模型标识符' : '填写 API Key 后自动获取'}
+        value={fetchStatus === 'error' ? identifier : ''}
+        disabled={fetchStatus !== 'error'}
+        onChange={(event) => changeModel(event.target.value)}
+        className="font-mono"
+      />
+    )
+  }
+
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-4 rounded-lg border p-4">
+      {fetchStatus === 'loading' && (
+        <p role="status" className="text-muted-foreground text-sm">正在获取模型列表…</p>
+      )}
+      {fetchStatus === 'error' && (
+        <p role="alert" className="text-destructive text-sm">
+          {fetchError}，请手动填写模型标识符。
+        </p>
+      )}
+      <div className="grid min-w-0 md:grid-cols-2">
+        <div className="min-w-0 space-y-4 pb-6 md:pr-6 md:pb-0">
           <div className="space-y-3">
             <Label htmlFor="planner_model_identifier" className="flex items-center gap-1">
               {t('setupPage.forms.modelSetup.planner.identifier.label')}
@@ -346,37 +422,26 @@ export function ModelSetupForm({ config, onChange }: ModelSetupFormProps) {
                 side="right"
               />
             </Label>
-            <Input
-              id="planner_model_identifier"
-              placeholder="gpt-4.1-mini"
-              value={config.planner_model_identifier}
-              onChange={(e) =>
-                onChange({
-                  ...config,
-                  planner_model_identifier: e.target.value,
-                  planner_model_name: e.target.value,
-                  planner_thinking: inferThinkingEnabled(e.target.value),
-                })
-              }
-              className="font-mono"
-            />
+            {renderModelInput('planner')}
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-md bg-muted/40 p-3">
-            <Label htmlFor="planner_thinking" className="text-sm font-medium">
-              启用思考
-            </Label>
-            <Switch
-              id="planner_thinking"
-              checked={config.planner_thinking}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, planner_thinking: checked })
-              }
-            />
-          </div>
+          {supportsThinkingSwitch(config.planner_model_identifier) && (
+            <div className="flex items-center justify-between gap-4 rounded-md bg-muted/40 p-3">
+              <Label htmlFor="planner_thinking" className="text-sm font-medium">
+                启用思考
+              </Label>
+              <Switch
+                id="planner_thinking"
+                checked={config.planner_thinking}
+                onCheckedChange={(checked) =>
+                  onChange({ ...config, planner_thinking: checked })
+                }
+              />
+            </div>
+          )}
         </div>
 
-        <div className="space-y-4 rounded-lg border p-4">
+        <div className="border-border min-w-0 space-y-4 border-t-2 pt-6 md:border-t-0 md:border-l-2 md:pt-0 md:pl-6">
           <div className="space-y-3">
             <Label htmlFor="replyer_model_identifier" className="flex items-center gap-1">
               {t('setupPage.forms.modelSetup.replyer.identifier.label')}
@@ -385,34 +450,23 @@ export function ModelSetupForm({ config, onChange }: ModelSetupFormProps) {
                 side="right"
               />
             </Label>
-            <Input
-              id="replyer_model_identifier"
-              placeholder="gpt-4.1"
-              value={config.replyer_model_identifier}
-              onChange={(e) =>
-                onChange({
-                  ...config,
-                  replyer_model_identifier: e.target.value,
-                  replyer_model_name: e.target.value,
-                  replyer_thinking: inferThinkingEnabled(e.target.value),
-                })
-              }
-              className="font-mono"
-            />
+            {renderModelInput('replyer')}
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-md bg-muted/40 p-3">
-            <Label htmlFor="replyer_thinking" className="text-sm font-medium">
-              启用思考
-            </Label>
-            <Switch
-              id="replyer_thinking"
-              checked={config.replyer_thinking}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, replyer_thinking: checked })
-              }
-            />
-          </div>
+          {supportsThinkingSwitch(config.replyer_model_identifier) && (
+            <div className="flex items-center justify-between gap-4 rounded-md bg-muted/40 p-3">
+              <Label htmlFor="replyer_thinking" className="text-sm font-medium">
+                启用思考
+              </Label>
+              <Switch
+                id="replyer_thinking"
+                checked={config.replyer_thinking}
+                onCheckedChange={(checked) =>
+                  onChange({ ...config, replyer_thinking: checked })
+                }
+              />
+            </div>
+          )}
         </div>
       </div>
 

@@ -1007,7 +1007,7 @@
       "modelSetup": {
         "planner": {
           "identifier": {
-            "label": "用于规划的 模型 名称",
+            "label": "用于 规划思考 的模型",
             "description": "填写 API 服务商对应的模型标识，例如 deepseek-chat。"
           },
           "visual": {
@@ -1016,7 +1016,7 @@
         },
         "replyer": {
           "identifier": {
-            "label": "用于回复的 模型 名称",
+            "label": "用于 回复发言 的模型",
             "description": "填写 API 服务商对应的模型标识，例如 deepseek-chat。"
           },
           "visual": {

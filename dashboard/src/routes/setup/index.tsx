@@ -12,7 +12,6 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +33,7 @@ import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/version'
 import { useToast } from '@/hooks/use-toast'
 import { validateToken } from '@/lib/token-validator'
+import type { ModelListItem } from '@/lib/config-api'
 import type {
   ApiProviderSetupConfig,
   SetupStep,
@@ -59,6 +59,7 @@ import {
   saveApiProviderSetupConfig,
   saveModelSetupConfig,
   completeSetup,
+  fetchSetupModels,
   updateAccessToken,
 } from './api'
 
@@ -158,6 +159,56 @@ function SetupPageContent() {
     : setupSteps
 
   const currentStepId = steps[currentStep]?.id
+  const [availableModels, setAvailableModels] = useState<ModelListItem[]>([])
+  const [modelFetchStatus, setModelFetchStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [modelFetchError, setModelFetchError] = useState('')
+
+  useEffect(() => {
+    if (currentStepId !== 'model-setup') return
+    setAvailableModels([])
+    setModelFetchError('')
+    if (!apiProviderSetup.base_url.trim() || !apiProviderSetup.api_key.trim()) {
+      setModelFetchStatus('idle')
+      return
+    }
+
+    setModelFetchStatus('loading')
+    let cancelled = false
+    // 等待用户停止输入；切换地址或 Key 后忽略旧请求，避免串用提供商的列表。
+    const timer = window.setTimeout(async () => {
+      try {
+        const models = await fetchSetupModels({
+          provider_name: '',
+          base_url: apiProviderSetup.base_url,
+          api_key: apiProviderSetup.api_key,
+        })
+        if (cancelled) return
+        setAvailableModels(models)
+        setModelSetup((previous) => {
+          const planner = models.some((model) => model.id === previous.planner_model_identifier)
+            ? previous.planner_model_identifier : ''
+          const replyer = models.some((model) => model.id === previous.replyer_model_identifier)
+            ? previous.replyer_model_identifier : ''
+          return {
+            ...previous,
+            planner_model_identifier: planner,
+            planner_model_name: planner,
+            replyer_model_identifier: replyer,
+            replyer_model_name: replyer,
+          }
+        })
+        setModelFetchStatus('success')
+      } catch (error) {
+        if (cancelled) return
+        setModelFetchError(error instanceof Error ? error.message : '获取模型列表失败')
+        setModelFetchStatus('error')
+      }
+    }, 600)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [currentStepId, apiProviderSetup.base_url, apiProviderSetup.api_key])
 
   // 加载现有配置
   useEffect(() => {
@@ -292,6 +343,12 @@ function SetupPageContent() {
   }
 
   function validateModelSetup(config: ModelSetupConfig): string | null {
+    if (modelFetchStatus === 'loading') return '正在获取模型列表，请稍候'
+    if (modelFetchStatus === 'idle') return '请先填写 API Key 获取模型列表'
+    if (modelFetchStatus === 'success' && (
+      !availableModels.some((model) => model.id === config.planner_model_identifier) ||
+      !availableModels.some((model) => model.id === config.replyer_model_identifier)
+    )) return '请选择用于规划和回复的模型'
     if (!config.planner_model_identifier.trim()) {
       return t('setupPage.validation.enterPlannerModelIdentifier')
     }
@@ -415,7 +472,7 @@ function SetupPageContent() {
         return (
           <div className="space-y-8">
             <BotBasicForm config={botBasic} onChange={setBotBasic} />
-            <div className="border-t pt-6">
+            <div className="border-border border-t-2 pt-6">
               <PersonalityForm config={personality} onChange={setPersonality} />
             </div>
           </div>
@@ -424,8 +481,15 @@ function SetupPageContent() {
         return (
           <div className="space-y-8">
             <ApiProviderSetupForm config={apiProviderSetup} onChange={setApiProviderSetup} />
-            <div className="border-t pt-6">
-              <ModelSetupForm config={modelSetup} onChange={setModelSetup} />
+            <div className="border-border border-t-2 pt-6">
+              <ModelSetupForm
+                config={modelSetup}
+                onChange={setModelSetup}
+                models={availableModels}
+                fetchStatus={modelFetchStatus}
+                fetchError={modelFetchError}
+                providerBaseUrl={apiProviderSetup.base_url}
+              />
             </div>
           </div>
         )
@@ -484,7 +548,7 @@ function SetupPageContent() {
       ) : (
         <>
           {/* 主要内容 */}
-          <div className="relative z-10 w-full max-w-4xl">
+          <div className="relative z-10 w-full max-w-5xl">
             {/* 头部 */}
             <div className="mb-4 text-center md:mb-5">
               <h1 className="mb-1 text-2xl font-bold md:text-3xl">{t('setupPage.header.title')}</h1>
@@ -580,12 +644,7 @@ function SetupPageContent() {
                   </div>
 
                   {/* 表单内容 */}
-                  <ScrollArea
-                    className="h-[clamp(220px,42vh,500px)] min-h-0"
-                    viewportClassName="overscroll-auto"
-                  >
-                    <div className="pr-2">{renderStepForm()}</div>
-                  </ScrollArea>
+                  {renderStepForm()}
                 </div>
               </CardContent>
             </Card>
@@ -605,7 +664,7 @@ function SetupPageContent() {
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       className="flex-1 gap-2 sm:flex-none"
                       disabled={isSaving || isCompleting || currentStepId === 'custom-token'}
                     >

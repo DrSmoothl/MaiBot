@@ -495,6 +495,17 @@
   border-color: var(--mil-line);
 }
 
+/* 通用分隔组件与卡片、输入框统一使用 2px 线宽。 */
+:root[data-dashboard-style='millennium'] [data-dashboard-separator='true'][data-orientation='horizontal'] {
+  height: 2px;
+  background-color: var(--mil-line);
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-separator='true'][data-orientation='vertical'] {
+  width: 2px;
+  background-color: var(--mil-line);
+}
+
 /* ---------- 凸起的塑料模块：卡片 ---------- */
 
 :root[data-dashboard-style='millennium'] [data-dashboard-card='true'] {
@@ -699,6 +710,7 @@
 :root[data-dashboard-style='millennium']
   :is([data-dashboard-input='true'], textarea)::placeholder {
   color: var(--mil-screen-dim);
+  opacity: 0.5;
 }
 
 :root[data-dashboard-style='millennium']
@@ -786,6 +798,11 @@
   color: var(--mil-ink);
 }
 
+:root[data-dashboard-style='millennium'] [data-dashboard-select-item='true'] {
+  background-color: transparent;
+  color: inherit;
+}
+
 :root[data-dashboard-style='millennium']
   :is([role='menuitem'], [role='option'], [role='menuitemcheckbox'], [role='menuitemradio'])[data-highlighted] {
   background-color: var(--mil-on);
@@ -870,6 +887,7 @@
 /* ---------- 开关、复选框、单选 ---------- */
 
 :root[data-dashboard-style='millennium'] [data-dashboard-switch='true'] {
+  border-radius: 0 !important;
   background-color: var(--mil-screen);
   border: 2px solid var(--mil-line);
   box-shadow: inset 2px 2px 0 var(--mil-screen-shade);
@@ -880,6 +898,7 @@
 }
 
 :root[data-dashboard-style='millennium'] [data-dashboard-switch-thumb='true'] {
+  border-radius: 0 !important;
   background-color: var(--mil-key);
   border: 2px solid var(--mil-line);
   box-shadow: none;
