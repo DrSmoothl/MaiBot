@@ -6,6 +6,7 @@ from fastapi import APIRouter, Cookie, HTTPException
 from src.common.logger import get_logger
 from src.config.config import MMC_VERSION
 from src.webui.services.git_mirror_service import get_git_mirror_service
+from src.webui.services.plugin_market_service import fetch_information_file
 
 from .progress import update_progress
 from .schemas import (
@@ -151,14 +152,14 @@ async def fetch_raw_file(
 
     try:
         service = get_git_mirror_service()
-        result = await service.fetch_raw_file(
-            owner=request.owner,
-            repo=request.repo,
-            branch=request.branch,
-            file_path=request.file_path,
-            mirror_id=request.mirror_id,
-            custom_url=request.custom_url,
-        )
+        if (request.owner.casefold() == "mai-with-u" and request.repo == "plugin-repo"
+                and request.file_path in {"plugin_details.json", "plugin_versions.json"}):
+            result = await fetch_information_file(request.file_path)
+        else:
+            result = await service.fetch_raw_file(
+                owner=request.owner, repo=request.repo, branch=request.branch,
+                file_path=request.file_path, mirror_id=request.mirror_id, custom_url=request.custom_url,
+            )
 
         if result.get("success"):
             await update_progress(

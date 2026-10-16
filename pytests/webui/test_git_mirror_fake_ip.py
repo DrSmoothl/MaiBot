@@ -6,7 +6,7 @@ import ipaddress
 import httpx
 import pytest
 
-from src.webui.services import git_mirror_service
+from src.webui.services import git_mirror_service, plugin_market_service
 from src.webui.utils import network_security
 
 
@@ -60,7 +60,9 @@ def test_builtin_raw_mirror_reaches_http_with_fake_ip(mirror_service, monkeypatc
     )
     assert result["success"] is True
     assert result["data"] == '{"plugins": []}'
-    assert str(requests[0].url) == mirror["raw_prefix"] + "/Mai-with-u/plugin-repo/main/plugin_details.json"
+    expected = (mirror["raw_prefix"] + "/plugin-repo/-/git/raw/main/plugin_details.json"
+                if mirror["id"] == "cnb" else mirror["raw_prefix"] + "/Mai-with-u/plugin-repo/main/plugin_details.json")
+    assert str(requests[0].url) == expected
 
 
 @pytest.mark.parametrize("address", ["127.0.0.1", "10.0.0.1", "169.254.169.254", "::1", "224.0.0.1"])
@@ -178,11 +180,11 @@ def test_clone_reaches_git_with_fake_ip(mirror_service, monkeypatch, tmp_path, c
     resolve_to(monkeypatch, "198.18.0.209")
     commands = []
 
-    def run(command, **kwargs):
+    async def run(command, **kwargs):
         commands.append(command)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(git_mirror_service.subprocess, "run", run)
+    monkeypatch.setattr(git_mirror_service, "_run_git_process", run)
     result = asyncio.run(
         mirror_service.clone_repository(
             "owner",
@@ -203,11 +205,11 @@ def test_update_reaches_git_with_fake_ip(mirror_service, monkeypatch, tmp_path, 
     (tmp_path / ".git").mkdir()
     commands = []
 
-    def run(command, **kwargs):
+    async def run(command, **kwargs):
         commands.append(command)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(git_mirror_service.subprocess, "run", run)
+    monkeypatch.setattr(git_mirror_service, "_run_git_process", run)
     result = asyncio.run(mirror_service.pull_repository(tmp_path, remote_url=remote_url))
     assert result["success"] is True
     network_commands = [c for c in commands if "fetch" in c or "pull" in c]
@@ -242,15 +244,20 @@ def test_noncanonical_fake_ip_literals_are_blocked(monkeypatch, host):
 
 
 @pytest.mark.parametrize("operation", ["raw", "clone"])
-def test_all_mirrors_failed_preserves_validation_reason(mirror_service, monkeypatch, tmp_path, operation):
+def test_mirror_validation_failure_preserves_reason(mirror_service, monkeypatch, tmp_path, operation):
     resolve_to(monkeypatch, "10.0.0.1")
     if operation == "raw":
         result = asyncio.run(mirror_service.fetch_raw_file("a", "b", "main", "file", report_progress=False))
     else:
+        mirror = next(item for item in git_mirror_service.GitMirrorConfig.DEFAULT_MIRRORS if item["id"] == "github")
+        monkeypatch.setattr(plugin_market_service, "download_mirror", lambda: mirror)
         result = asyncio.run(mirror_service.clone_repository("a", "b", tmp_path / "plugin"))
     assert result["success"] is False
     assert "禁止访问非公网地址: 10.0.0.1" in result["error"]
-    assert "github" in result["error"]
+    if operation == "raw":
+        assert "github" in result["error"]
+    else:
+        assert result["mirror_used"] == "github"
 
 
 def test_git_clone_preserves_normal_initial_redirect(mirror_service, monkeypatch, tmp_path):

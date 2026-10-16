@@ -3,16 +3,19 @@
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Cookie, HTTPException
-from pydantic import BaseModel
 import asyncio
+import json
 
 import httpx
 
 from src.config.config import MMC_VERSION
 from src.webui.services.plugin_market_service import (
+    PluginSourceSettings,
+    fetch_information_file,
+    load_source_settings,
     request_market,
     request_market_detail,
-    save_market_source,
+    save_source_settings,
     use_github_market_data,
 )
 
@@ -22,23 +25,22 @@ from .support import require_plugin_token
 router = APIRouter()
 
 
-class MarketSourceSettings(BaseModel):
-    use_github: bool
-
-
-@router.get("/marketplace/source", response_model=MarketSourceSettings)
-def get_market_source(maibot_session: Optional[str] = Cookie(None)) -> MarketSourceSettings:
+@router.get("/marketplace/source", response_model=PluginSourceSettings)
+def get_market_source(maibot_session: Optional[str] = Cookie(None)) -> PluginSourceSettings:
     require_plugin_token(maibot_session)
-    return MarketSourceSettings(use_github=use_github_market_data())
+    return load_source_settings()
 
 
-@router.put("/marketplace/source", response_model=MarketSourceSettings)
+@router.put("/marketplace/source", response_model=PluginSourceSettings)
 def update_market_source(
-    request: MarketSourceSettings, maibot_session: Optional[str] = Cookie(None)
-) -> MarketSourceSettings:
+    request: PluginSourceSettings, maibot_session: Optional[str] = Cookie(None)
+) -> PluginSourceSettings:
     require_plugin_token(maibot_session)
-    save_market_source(request.use_github)
-    return request
+    try:
+        save_source_settings(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return load_source_settings()
 
 
 def market_entry(data: Dict[str, Any]) -> PluginReleaseEntry:
@@ -104,6 +106,22 @@ async def get_marketplace(
 async def get_marketplace_detail(plugin_id: str, maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
     require_plugin_token(maibot_session)
     try:
+        if await asyncio.to_thread(use_github_market_data):
+            from .releases import load_plugin_release_entry
+
+            entry = await load_plugin_release_entry(plugin_id)
+            if entry is None:
+                raise HTTPException(status_code=404, detail="插件信息源未找到该插件")
+            description = await asyncio.to_thread(describe_entry, entry)
+            release = next((item for item in entry.versions if item.version == description["recommended_version"]), None)
+            if release is not None:
+                return {"manifest": release.manifest, "releases": description}
+            result = await fetch_information_file("plugin_details.json")
+            details = json.loads(result["data"])
+            item = next((item for item in details if item["id"] == entry.id), None)
+            if item is None:
+                raise HTTPException(status_code=404, detail="插件信息源没有可用的插件详情")
+            return {"manifest": item["manifest"], "releases": description}
         data = await request_market_detail(plugin_id, MMC_VERSION)
         entry = await asyncio.to_thread(parse_market_release_entry, data, plugin_id)
         catalog = await asyncio.to_thread(describe_entry, entry)

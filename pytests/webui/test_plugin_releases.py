@@ -248,6 +248,32 @@ def test_moved_tag_or_manifest_tampering_does_not_install(local_install):
     assert support.resolve_installed_plugin_path("example.demo") is None
 
 
+@pytest.mark.parametrize("tampered", [False, True])
+def test_cnb_install_keeps_original_commit_and_manifest_validation(local_install, monkeypatch, tampered):
+    from types import SimpleNamespace
+
+    from src.webui.services import git_mirror_service
+
+    client, _, repository, chosen, _ = local_install
+    cnb = next(m for m in git_mirror_service.GitMirrorConfig.DEFAULT_MIRRORS if m["id"] == "cnb")
+    config = SimpleNamespace(get_enabled_mirrors=lambda: [cnb], get_mirror_by_id=lambda _: cnb)
+    service = git_mirror_service.GitMirrorService(max_retries=1, config=config)
+    # 保留真实 CNB 镜像选择与 Git 克隆，仅把网络终点替换为隔离的本地仓库。
+    monkeypatch.setattr(git_mirror_service, "mirror_clone_url", lambda *_: str(repository))
+    monkeypatch.setattr(release_install, "get_git_mirror_service", lambda: service)
+    if tampered:
+        chosen.commit = "b" * 40
+    response = client.post("/plugins/install", json={"plugin_id": "example.demo", "version": "latest", "mirror_id": "cnb"})
+    assert response.status_code == (409 if tampered else 200), response.text
+    target = support.resolve_installed_plugin_path("example.demo")
+    if tampered:
+        assert target is None
+    else:
+        receipt = release_install.read_release_receipt(target)
+        assert receipt["commit"] == chosen.commit
+        assert receipt["repository_url"] == "https://github.com/example/demo"
+
+
 def test_manifest_mismatch_does_not_install(local_install):
     client, _, _, chosen, _ = local_install
     chosen.manifest["description"] = "篡改索引"

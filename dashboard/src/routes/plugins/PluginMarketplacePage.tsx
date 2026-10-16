@@ -40,6 +40,7 @@ import { PLUGIN_MARKET_VIEW_STATE_KEY } from '@/lib/plugin-market-navigation'
 
 import { PluginInstallDialog, type PluginInstallDialogHandle } from './PluginInstallDialog'
 import { MarketplaceTab } from './MarketplaceTab'
+import { PluginSettingsDialog } from './PluginSettingsDialog'
 import type {
   GitStatus,
   MaimaiVersion,
@@ -153,9 +154,8 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   const scrollViewportRef = useRef<HTMLDivElement | null>(null)
   const scrollRestoredRef = useRef(false)
   const initialViewStateRef = useRef(readPluginMarketplaceViewState())
-  const settingsRoute: '/plugin-mirrors' | '/plugin-mirrors/embed' = embedded
-    ? '/plugin-mirrors/embed'
-    : '/plugin-mirrors'
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sourceRevision, setSourceRevision] = useState(0)
   const [restartNoticeVisible, setRestartNoticeVisible] = useState(
     () => localStorage.getItem('plugins-restart-notice-dismissed') !== 'true'
   )
@@ -561,7 +561,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         void unsubscribeProgress()
       }
     }
-  }, [toast, showCompatibleOnly])
+  }, [toast, showCompatibleOnly, sourceRevision])
 
   // 检查插件兼容性
   // 规则：
@@ -1116,7 +1116,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
                 variant="ghost"
                 data-plugin-market-settings-button="true"
                 className="gap-1.5 bg-transparent px-2 shadow-none hover:bg-transparent sm:ml-auto"
-                onClick={() => navigate({ to: settingsRoute })}
+                onClick={() => setSettingsOpen(true)}
               >
                 <Settings2 className="h-4 w-4" />
                 设置
@@ -1274,6 +1274,15 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
           ) : null}
         </div>
       </div>
+      {settingsOpen && (
+        <PluginSettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onSaved={() => {
+            setSettingsOpen(false)
+            setSourceRevision((revision) => revision + 1)
+          }}
+        />
+      )}
       {/* 安装对话框 */}
       <PluginInstallDialog
         ref={installDialogRef}

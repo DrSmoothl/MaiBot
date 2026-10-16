@@ -12,8 +12,13 @@ import httpx
 
 from src.config.config import MMC_VERSION
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator
-from src.webui.services.git_mirror_service import get_git_mirror_service
-from src.webui.services.plugin_market_service import request_market_detail, use_github_market_data
+from src.webui.services.plugin_market_service import (
+    fetch_information_file,
+    load_source_settings,
+    request_market,
+    request_market_detail,
+    use_github_market_data,
+)
 
 from .support import require_plugin_token
 
@@ -49,15 +54,18 @@ class PluginReleaseIndex(BaseModel):
 
 _cache: Optional[PluginReleaseIndex] = None
 _cache_time = 0.0
+_cache_source: Optional[str] = None
 
 
 async def load_release_index() -> PluginReleaseIndex:
-    global _cache, _cache_time
-    if _cache is not None and monotonic() - _cache_time < 5 * 60:
+    global _cache, _cache_time, _cache_source
+    source = (await asyncio.to_thread(load_source_settings)).information_source
+    if _cache_source == source and _cache is not None and monotonic() - _cache_time < 5 * 60:
         return _cache
-    response = await get_git_mirror_service().fetch_raw_file(
-        owner="Mai-with-u", repo="plugin-repo", branch="main", file_path="plugin_versions.json"
-    )
+    try:
+        response = await fetch_information_file("plugin_versions.json", source)
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{exc}") from exc
     if not response.get("success"):
         raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{response.get('error', '未知错误')}")
     try:
@@ -84,7 +92,7 @@ async def load_release_index() -> PluginReleaseIndex:
                 raise ValueError(f"版本索引安装模式不匹配：{entry.id}")
     except (ValidationError, ValueError, KeyError) as exc:
         raise HTTPException(status_code=502, detail=f"插件版本索引无效：{exc}") from exc
-    _cache, _cache_time = index, monotonic()
+    _cache, _cache_time, _cache_source = index, monotonic(), source
     return index
 
 
@@ -177,5 +185,13 @@ async def resolve_release(plugin_id: str, version: str) -> Tuple[PluginReleaseEn
 @router.get("/releases")
 async def get_plugin_releases(maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
     require_plugin_token(maibot_session)
+    if not await asyncio.to_thread(use_github_market_data):
+        try:
+            data = await request_market("plugins/summary", {"maibot_version": MMC_VERSION, "compatible_only": "false"})
+            from .marketplace import describe_market_list
+
+            return (await asyncio.to_thread(describe_market_list, data))["catalog"]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{exc}") from exc
     index = await load_release_index()
     return {"plugins": [describe_entry(entry) for entry in index.plugins]}

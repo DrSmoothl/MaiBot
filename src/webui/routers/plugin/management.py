@@ -684,10 +684,16 @@ async def _perform_update_plugin(request: UpdatePluginRequest, maibot_session: O
             stage="loading", progress=30, message="正在通过 Git 拉取新版本...", operation="update", plugin_id=plugin_id
         )
         service = get_git_mirror_service()
+        source_url = request.repository_url
+        if not source_url:
+            urls = manifest.get("urls")
+            source_url = urls.get("repository") if isinstance(urls, dict) else None
+            source_url = source_url or manifest.get("repository_url")
         result = await service.pull_repository(
             repository_path=plugin_path,
             branch=request.branch,
-            remote_url=request.repository_url,
+            remote_url=source_url,
+            mirror_id=request.mirror_id,
         )
 
         if not result.get("success"):

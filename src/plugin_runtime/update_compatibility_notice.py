@@ -18,13 +18,11 @@ logger = get_logger("plugin_update_compatibility")
 UpdateCheckStatus = Literal["checking", "available", "unavailable", "not_found", "check_failed"]
 MarketplaceLoader = Callable[[], Awaitable[List[Dict[str, Any]]]]
 
-_PLUGIN_REPO_OWNER = "Mai-with-u"
-_PLUGIN_REPO_NAME = "plugin-repo"
-_PLUGIN_REPO_BRANCH = "main"
 _PLUGIN_DETAILS_FILE = "plugin_details.json"
 _MARKETPLACE_CACHE_TTL_SECONDS = 5 * 60
 _MARKETPLACE_FETCH_TIMEOUT_SECONDS = 10
 _marketplace_cache: Optional[Tuple[float, List[Dict[str, Any]]]] = None
+_marketplace_cache_source: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -212,27 +210,29 @@ def mark_compatible_marketplace_updates(
 
 
 async def _fetch_marketplace_plugins() -> List[Dict[str, Any]]:
-    global _marketplace_cache
+    global _marketplace_cache, _marketplace_cache_source
 
+    from src.webui.services.plugin_market_service import load_source_settings
+
+    source = (await asyncio.to_thread(load_source_settings)).information_source
     now = time.monotonic()
-    if _marketplace_cache is not None and now - _marketplace_cache[0] < _MARKETPLACE_CACHE_TTL_SECONDS:
+    if _marketplace_cache_source == source and _marketplace_cache is not None and now - _marketplace_cache[0] < _MARKETPLACE_CACHE_TTL_SECONDS:
         return _marketplace_cache[1]
 
-    # 复用插件管理页的镜像源配置，避免启动检查与手动更新使用不同的数据源。
-    from src.webui.services.git_mirror_service import get_git_mirror_service
+    # 启动检查与商店使用同一信息源，不跟随代码下载镜像或自动切换来源。
+    from src.webui.services.plugin_market_service import fetch_information_file, request_market, use_github_market_data
 
-    service = get_git_mirror_service()
+    async def fetch() -> Dict[str, Any]:
+        if await asyncio.to_thread(use_github_market_data):
+            return await fetch_information_file(_PLUGIN_DETAILS_FILE)
+        from src.config.config import MMC_VERSION
+
+        response = await request_market("plugins/summary", {"maibot_version": MMC_VERSION, "compatible_only": "false"})
+        plugins = [{"id": item["marketplace_id"], "manifest": item["manifest"]} for item in response["plugins"]]
+        return {"success": True, "data": json.dumps(plugins)}
+
     try:
-        result = await asyncio.wait_for(
-            service.fetch_raw_file(
-                owner=_PLUGIN_REPO_OWNER,
-                repo=_PLUGIN_REPO_NAME,
-                branch=_PLUGIN_REPO_BRANCH,
-                file_path=_PLUGIN_DETAILS_FILE,
-                report_progress=False,
-            ),
-            timeout=_MARKETPLACE_FETCH_TIMEOUT_SECONDS,
-        )
+        result = await asyncio.wait_for(fetch(), timeout=_MARKETPLACE_FETCH_TIMEOUT_SECONDS)
     except TimeoutError as exc:
         raise RuntimeError("获取插件市场清单超时") from exc
 
@@ -248,6 +248,7 @@ async def _fetch_marketplace_plugins() -> List[Dict[str, Any]]:
 
     normalized_plugins = [item for item in marketplace_plugins if isinstance(item, dict)]
     _marketplace_cache = (time.monotonic(), normalized_plugins)
+    _marketplace_cache_source = source
     return normalized_plugins
 
 
