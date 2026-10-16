@@ -59,7 +59,7 @@ interface MarketplaceTabProps {
 }
 
 function getMarketplaceColumnCount(): number {
-  if (window.matchMedia('(min-width: 1280px)').matches) return 4
+  if (window.matchMedia('(min-width: 1408px)').matches) return 4
   if (window.matchMedia('(min-width: 768px)').matches) return 3
   if (window.matchMedia('(min-width: 640px)').matches) return 2
   return 1
@@ -278,8 +278,9 @@ export const MarketplaceTab = memo(function MarketplaceTab({
 }: MarketplaceTabProps) {
   const [columnCount, setColumnCount] = useState(getMarketplaceColumnCount)
   useEffect(() => {
-    const queries = [640, 768, 1280].map((width) => window.matchMedia(`(min-width: ${width}px)`))
+    const queries = [640, 768, 1408].map((width) => window.matchMedia(`(min-width: ${width}px)`))
     const updateColumns = () => setColumnCount(getMarketplaceColumnCount())
+    updateColumns()
     queries.forEach((query) => query.addEventListener('change', updateColumns))
     return () => queries.forEach((query) => query.removeEventListener('change', updateColumns))
   }, [])
@@ -447,12 +448,19 @@ export const MarketplaceTab = memo(function MarketplaceTab({
 
   return (
     // 各行内部共享网格轨道；屏幕外行交给浏览器跳过布局和绘制，保留 DOM 与滚动状态。
-    <div className="flex flex-col gap-3">
+    // 上下预留绘制空间，避免跨越卡片边框的榜单标签被 content-visibility 裁切。
+    // 卡片行距由外层控制，内部三条共享轨道不加行距，避免空进度行撑大底部留白。
+    <div className="flex flex-col gap-8">
       {pluginRows.map((row) => (
         <div
           key={getPluginIdentity(row[0])}
-          className="-m-2 grid grid-cols-1 gap-3 p-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4"
-          style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 200px' }}
+          className="-mx-2 -my-4 grid gap-x-6 gap-y-0 px-2 py-4"
+          // 布局与数据分行共用列数，避免响应式样式覆盖后出现一组四张却只显示三列。
+          style={{
+            gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+            contentVisibility: 'auto',
+            containIntrinsicSize: 'auto 200px',
+          }}
         >
           {row.map(renderPluginCard)}
         </div>

@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import {
   ArrowLeft,
@@ -22,7 +23,6 @@ import {
   Tag,
   GitBranch,
   Info,
-  FileText,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { backendApi } from '@/lib/http'
@@ -580,9 +580,10 @@ export function PluginDetailPage({
       <div className={containerClassName}>
         <div className="flex min-w-0 items-center gap-2">
           <Button 
-            variant="ghost" 
+            variant="outline"
             size="icon"
             onClick={handleBack}
+            data-plugin-detail-back="true"
             className="h-10 w-10 shrink-0 [&_svg]:size-5"
             aria-label="返回插件市场"
           >
@@ -606,9 +607,10 @@ export function PluginDetailPage({
       <div className={containerClassName}>
         <div className="flex min-w-0 items-center gap-2">
           <Button 
-            variant="ghost" 
+            variant="outline"
             size="icon"
             onClick={handleBack}
+            data-plugin-detail-back="true"
             className="h-10 w-10 shrink-0 [&_svg]:size-5"
             aria-label="返回插件市场"
           >
@@ -633,9 +635,10 @@ export function PluginDetailPage({
   }
 
   const isCompatible = checkCompatibility()
-  const detailActionButtonClassName = 'h-10! shrink-0 px-4 text-sm'
+  const displayManifest = selectedRelease?.manifest || plugin.manifest
+  const detailActionButtonClassName = 'h-10! flex-1 px-3 text-sm'
   const detailActionButtons = (
-    <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       {isInstalled ? (
         <>
           {needsUpdate() ? (
@@ -704,6 +707,14 @@ export function PluginDetailPage({
           )}
         </Button>
       )}
+      {plugin.manifest.repository_url && (
+        <Button asChild variant="outline" className="h-10! shrink-0 px-3 text-sm">
+          <a href={plugin.manifest.repository_url} target="_blank" rel="noopener noreferrer">
+            <GitBranch className="h-4 w-4" />
+            仓库
+          </a>
+        </Button>
+      )}
     </div>
   )
 
@@ -713,9 +724,10 @@ export function PluginDetailPage({
       <div className="flex shrink-0 flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-2">
           <Button 
-            variant="ghost" 
+            variant="outline"
             size="icon"
             onClick={handleBack}
+            data-plugin-detail-back="true"
             className="h-10 w-10 shrink-0 [&_svg]:size-5"
             aria-label="返回插件市场"
             title="返回插件市场"
@@ -737,28 +749,33 @@ export function PluginDetailPage({
       >
         <div className="space-y-6 pr-4">
           {/* 插件头部信息卡片 */}
-          <Card>
-            <CardHeader>
+          <Card data-plugin-detail-hero="true" className="grid min-w-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_26rem]">
+            <CardHeader className="min-w-0 p-5 sm:p-6">
               <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-stretch">
-                <div className="flex-1 space-y-2">
+                <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex items-start gap-4">
-                    <PluginIcon
-                      pluginId={plugin.id}
-                      manifest={plugin.manifest}
-                      installed={isInstalled}
-                      marketplaceIconUrl={plugin.assets?.icon_64}
-                      className="h-14 w-14"
-                      iconClassName="h-7 w-7"
-                    />
+                    <div data-plugin-detail-icon="true" className="shrink-0">
+                      <PluginIcon
+                        pluginId={plugin.id}
+                        manifest={plugin.manifest}
+                        installed={isInstalled}
+                        marketplaceIconUrl={plugin.assets?.icon_64}
+                        className="h-20 w-20"
+                        iconClassName="h-7 w-7"
+                      />
+                    </div>
                     <div className="min-w-0 space-y-2">
+                      <CardTitle className="break-words text-2xl">{plugin.manifest.name}</CardTitle>
                       <div className="flex items-center gap-3 flex-wrap">
-                        <CardTitle className="text-2xl">{plugin.manifest.name}</CardTitle>
-                        <Badge variant="secondary" className="text-sm">
+                        <Badge variant="secondary" data-plugin-detail-version="true" className="text-sm">
                           v{selectedRelease?.version || plugin.manifest.version}
                         </Badge>
-                        <Badge variant="outline" className="text-sm">
+                        <Badge variant="outline" data-plugin-detail-type="true" className="text-sm">
                           {getPluginTypeLabel(plugin)}
                         </Badge>
+                        {plugin.manifest.license && (
+                          <Badge variant="outline" className="text-xs">{plugin.manifest.license}</Badge>
+                        )}
                         {isInstalled && (
                           <Badge variant="default" className="text-sm">
                             <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -779,17 +796,22 @@ export function PluginDetailPage({
                         )}
                       </div>
                       <CardDescription className="text-base">{plugin.manifest.description}</CardDescription>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span>作者 {plugin.manifest.author?.name || 'Unknown'}</span>
+                        <span>最新更新 {formatPluginUpdateDate(latestPluginUpdate)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3 pt-4">
-              <div className="flex min-w-0 items-center justify-end gap-3">
-                {releaseCatalog?.mode === 'releases' && !releaseCatalog.sync_error && (
+            <CardContent data-plugin-detail-release="true" className="min-w-0 space-y-3 border-t p-5 sm:p-6 lg:border-l lg:border-t-0">
+              {releaseCatalog?.mode === 'releases' && !releaseCatalog.sync_error && (
+                <label className="block min-w-0 space-y-2">
+                  <span className="block text-xs text-muted-foreground">选择版本</span>
                   <select
                     aria-label="选择发布版本"
-                    className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-foreground"
+                    className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground"
                     value={selectedRelease?.version || ''}
                     disabled={operating || detailPending}
                     onChange={(event) => setSelection({ pluginId, version: event.target.value })}
@@ -803,10 +825,33 @@ export function PluginDetailPage({
                         {` · 更新于 ${formatPluginUpdateDate(release.published_at)}`}
                       </option>
                     ))}
+                    {releaseCatalog.rejected_releases?.map((release) => (
+                      <option
+                        key={`rejected:${release.tag}`}
+                        value={`rejected:${release.tag}`}
+                        disabled
+                        className="text-muted-foreground"
+                        title={describeRejectedReleaseError(release.error)}
+                      >
+                        {release.tag} · 校验失败 · {describeRejectedReleaseError(release.error)}
+                      </option>
+                    ))}
                   </select>
+                </label>
+              )}
+              {detailActionButtons}
+              <dl data-plugin-detail-compatibility="true" className="space-y-2 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <dt>适配麦麦</dt>
+                  <dd className="font-mono">{displayManifest.host_application.min_version} — {displayManifest.host_application.max_version || '不限'}</dd>
+                </div>
+                {displayManifest.sdk && (
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <dt>Plugin SDK</dt>
+                    <dd className="font-mono">{displayManifest.sdk.min_version} — {displayManifest.sdk.max_version || '不限'}</dd>
+                  </div>
                 )}
-                {detailActionButtons}
-              </div>
+              </dl>
               {releaseCatalog && (
                 releaseCatalog.sync_error ? (
                   <p role="alert" className="text-sm text-destructive">版本同步失败：{releaseCatalog.sync_error}</p>
@@ -814,29 +859,11 @@ export function PluginDetailPage({
                   <p className="text-sm text-muted-foreground">该插件尚无可识别的发布版本，使用分支安装。</p>
                 ) : (
                   <>
-                    {selectedRelease && (
-                      <p className="text-sm text-muted-foreground">
-                        适配麦麦 {selectedRelease.manifest.host_application.min_version} — {selectedRelease.manifest.host_application.max_version || '不限'}
-                        ；SDK {selectedRelease.manifest.sdk?.min_version} — {selectedRelease.manifest.sdk?.max_version || '不限'}
-                      </p>
-                    )}
                     {versionSelection && installedVersion && selectedRelease?.version !== installedVersion && (
                       <p className="text-sm text-muted-foreground">切换版本会备份当前插件目录；降级不会回滚插件数据。</p>
                     )}
                     {!releaseCatalog.recommended_version && (
                       <p role="status" className="text-sm text-muted-foreground">没有兼容的稳定版本；可在列表中查看各版本不兼容的原因，或手动选择兼容的预发布版本。</p>
-                    )}
-                    {!!releaseCatalog.rejected_releases?.length && (
-                      <details className="text-sm text-muted-foreground">
-                        <summary>有 {releaseCatalog.rejected_releases.length} 个发布版本未通过校验</summary>
-                        <ul className="mt-2 space-y-1">
-                          {releaseCatalog.rejected_releases.map((item) => (
-                            <li key={item.tag}>
-                              {item.tag}：{describeRejectedReleaseError(item.error)}
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
                     )}
                   </>
                 )
@@ -845,54 +872,55 @@ export function PluginDetailPage({
           </Card>
 
           <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
-            {/* 左侧 - README 和更新日志，由外层详情容器统一滚动 */}
+            {/* 左侧 - README 与更新日志共用卡片，通过标签切换，由外层详情容器统一滚动。 */}
             <div className="min-w-0 space-y-6 lg:col-span-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">插件说明</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {readmeLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <ThinkingIllustration />
-                    </div>
-                  ) : readme ? (
-                    <MarkdownRenderer content={readme} />
-                  ) : (
-                    <div className="text-center text-muted-foreground py-12">
-                      暂无说明文档
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    更新日志
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {changelogLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <ThinkingIllustration />
-                    </div>
-                  ) : changelog ? (
-                    <MarkdownRenderer content={changelog} />
-                  ) : (
-                    <div className="text-center text-muted-foreground py-12">
-                      暂无更新日志
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              <Tabs key={pluginId} defaultValue="readme" asChild>
+                <Card data-plugin-detail-doc-tabs="true">
+                  <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0">
+                    <CardTitle className="text-lg">插件说明</CardTitle>
+                    <TabsList aria-label="插件文档" className="ml-auto h-auto gap-2 bg-transparent p-0">
+                      <TabsTrigger value="readme" className="h-9">README</TabsTrigger>
+                      <TabsTrigger value="changelog" className="h-9">更新日志</TabsTrigger>
+                    </TabsList>
+                  </CardHeader>
+                  <TabsContent value="readme" asChild>
+                    <CardContent data-plugin-detail-doc="true">
+                      {readmeLoading ? (
+                        <div className="flex items-center justify-center py-12">
+                          <ThinkingIllustration />
+                        </div>
+                      ) : readme ? (
+                        <MarkdownRenderer content={readme} />
+                      ) : (
+                        <div className="text-center text-muted-foreground py-12">
+                          暂无说明文档
+                        </div>
+                      )}
+                    </CardContent>
+                  </TabsContent>
+                  <TabsContent value="changelog" asChild>
+                    <CardContent data-plugin-detail-doc="true">
+                      {changelogLoading ? (
+                        <div className="flex items-center justify-center py-12">
+                          <ThinkingIllustration />
+                        </div>
+                      ) : changelog ? (
+                        <MarkdownRenderer content={changelog} />
+                      ) : (
+                        <div className="text-center text-muted-foreground py-12">
+                          暂无更新日志
+                        </div>
+                      )}
+                    </CardContent>
+                  </TabsContent>
+                </Card>
+              </Tabs>
             </div>
 
             {/* 右侧 - 详细信息 */}
             <div className="min-w-0 space-y-6 lg:col-span-1">
               {/* 统计信息 */}
-              <Card>
+              <Card data-plugin-detail-stats="true">
                 <CardHeader>
                   <CardTitle className="text-lg">统计信息</CardTitle>
                 </CardHeader>
@@ -909,7 +937,7 @@ export function PluginDetailPage({
                 <CardHeader>
                   <CardTitle className="text-lg">基本信息</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent data-plugin-detail-info="true" className="space-y-4">
                   <div className="space-y-3">
                     <div className="flex items-start gap-2 text-sm">
                       <Tag className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
@@ -1008,7 +1036,7 @@ export function PluginDetailPage({
                   <CardContent className="space-y-4">
                     <div>
                       <p className="text-sm text-muted-foreground mb-2">关键词</p>
-                      <div className="flex flex-wrap gap-2">
+                      <div data-plugin-detail-keywords="true" className="flex flex-wrap gap-2">
                         {plugin.manifest.keywords.map((keyword) => (
                           <Badge key={keyword} variant="outline" className="text-xs">
                             <Tag className="h-3 w-3 mr-1" />

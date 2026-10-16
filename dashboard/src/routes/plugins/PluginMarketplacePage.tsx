@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
-import { AlertCircle, AlertTriangle, ArrowUpDown, Filter, Info, Loader2, Search, Settings2 } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowUpDown, Filter, Info, Loader2, Search, Wrench } from 'lucide-react'
 
 import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
@@ -287,7 +287,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     setRestartNoticeVisible(false)
   }
 
-  // 「仅显示当前版本」开关：在市场页内直接切换的兼容性筛选偏好，变化后写回 localStorage
+  // 「仅显示兼容」开关：在市场页内直接切换的兼容性筛选偏好，变化后写回 localStorage
   useEffect(() => {
     localStorage.setItem(PLUGIN_MARKET_COMPATIBLE_ONLY_KEY, String(showCompatibleOnly))
   }, [showCompatibleOnly])
@@ -1041,7 +1041,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         )}
 
         {/* 搜索和筛选栏 */}
-        <Card className="p-4">
+        <Card data-plugin-market-toolbar="true" className="p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             {/* 搜索框 */}
             <div className="relative w-full sm:max-w-md sm:flex-1">
@@ -1101,46 +1101,48 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
               </Select>
             </div>
 
-            {/* 移动端插件数量与设置同一行 */}
-            <div className="flex items-center justify-between gap-2 sm:contents">
-              <Badge
-                variant="outline"
-                data-plugin-market-count-badge="true"
-                className="h-9 border-input bg-transparent px-3 text-sm font-normal max-sm:!h-auto max-sm:!border-0 max-sm:!bg-transparent max-sm:!p-0 max-sm:!shadow-none"
-              >
-                全部插件 {getFilteredPluginCount()}
-              </Badge>
+            {/* 插件数量与右侧控制区在窄屏时分别占一行。 */}
+            <Badge
+              variant="outline"
+              data-plugin-market-count-badge="true"
+              className="h-9 border-input bg-transparent px-3 text-sm font-normal max-sm:!h-auto max-sm:!border-0 max-sm:!bg-transparent max-sm:!p-0 max-sm:!shadow-none"
+            >
+              全部插件 {getFilteredPluginCount()}
+            </Badge>
 
+            {/* 兼容筛选和设置组成横向控制区，开关与文字垂直居中。 */}
+            <div data-plugin-market-controls="true" className="flex shrink-0 items-center justify-end gap-4 max-sm:border-t max-sm:pt-3 sm:ml-auto sm:border-l sm:pl-5">
+              <div data-plugin-market-compat="true" className="flex items-center gap-3">
+                <label
+                  htmlFor="compatible-only-plugins"
+                  className="cursor-pointer text-xs font-medium leading-none text-muted-foreground whitespace-nowrap"
+                >
+                  仅显示兼容
+                </label>
+                <Switch
+                  id="compatible-only-plugins"
+                  checked={showCompatibleOnly}
+                  onCheckedChange={setShowCompatibleOnly}
+                />
+              </div>
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
+                size="icon"
                 data-plugin-market-settings-button="true"
-                className="gap-1.5 bg-transparent px-2 shadow-none hover:bg-transparent sm:ml-auto"
+                className="shrink-0 [&_svg]:size-5"
+                aria-label="插件市场设置"
+                title="插件市场设置"
                 onClick={() => setSettingsOpen(true)}
               >
-                <Settings2 className="h-4 w-4" />
-                设置
+                <Wrench />
               </Button>
-            </div>
-
-            {/* 兼容性筛选 */}
-            <div className="flex w-full items-center justify-between gap-3 max-sm:border-t max-sm:border-dashed max-sm:pt-3 sm:w-auto sm:min-w-fit sm:flex-col sm:items-center sm:justify-center sm:gap-1">
-              <label
-                htmlFor="compatible-only-plugins"
-                className="cursor-pointer text-xs font-medium leading-none text-muted-foreground whitespace-nowrap"
-              >
-                仅显示当前版本
-              </label>
-              <Switch
-                id="compatible-only-plugins"
-                checked={showCompatibleOnly}
-                onCheckedChange={setShowCompatibleOnly}
-              />
             </div>
 
           </div>
           {isFetchingMarketplace && (
             <div
+              data-plugin-market-loading="true"
               className="mt-3 flex min-w-0 items-center gap-2 rounded-md border bg-background/85 px-3 py-2 text-xs shadow-sm backdrop-blur"
               aria-live="polite"
             >

@@ -554,20 +554,20 @@
   [data-plugin-market-card='true']
   [data-dashboard-card-title='true'] {
   color: var(--mil-ink);
-  font-size: 0.9375rem;
+  font-family: var(--mil-font-pixel);
+  font-size: 1.25rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
 }
 
-:root[data-dashboard-style='millennium']
-  [data-plugin-market-card='true'][data-plugin-installed='true'] {
-  border-color: var(--mil-hot);
-}
-
-/* 市场卡片减少标题区与统计区之间的留白。 */
+/* 上半区使用 64px 图标、标题和作者信息、两行说明，底部以刻线分隔。 */
 :root[data-dashboard-style='millennium']
   [data-plugin-market-card='true']
   > [data-dashboard-card-header='true'] {
-  margin-bottom: 0.375rem;
-  padding: 0.625rem 0.75rem 0.5rem;
+  margin-bottom: 0;
+  min-height: 10.375rem;
+  padding: var(--plugin-market-content-padding);
 }
 
 /* ---------- 键帽：按钮 ---------- */
@@ -1385,11 +1385,25 @@
       [data-home-card-id='builtin:bot-status'][data-home-card-style]:not(
         [data-home-card-style='borderless']
       )
-      [data-maibot-status-face],
-    [data-plugin-market-card='true']
+      [data-maibot-status-face]
   ) {
   border-radius: 0 !important;
   box-shadow: 0 var(--plugin-market-depth, 5px) 0 var(--mil-drop) !important;
+}
+
+/* 插件市场卡片没有外层包裹元素：斜面、轮廓光影和厚度都画在卡片自己身上 */
+:root[data-dashboard-style='millennium'] [data-plugin-market-card='true'] {
+  --plugin-market-content-padding: 1.375rem;
+  --plugin-market-outline: color-mix(in srgb, var(--mil-line) 85%, var(--mil-panel));
+  border-color: var(--plugin-market-outline);
+  border-radius: 0 !important;
+  min-height: 15rem;
+  box-shadow:
+    inset 3px 3px 0 color-mix(in srgb, var(--mil-hi) 40%, var(--mil-panel)),
+    inset -3px -3px 0 color-mix(in srgb, var(--mil-lo) 90%, black),
+    0 var(--plugin-market-depth, 5px) 0 var(--mil-drop),
+    0 0 0 1px var(--mil-lo),
+    0 var(--plugin-market-shadow-y, 7px) var(--plugin-market-shadow-blur, 12px) rgb(0 0 0 / 0.16) !important;
 }
 
 :root[data-dashboard-style='millennium']
@@ -4245,4 +4259,500 @@
 /* 千禧标签栏的选中态是按下去的键帽，不用滑动底板 */
 :root[data-dashboard-style='millennium'] [data-mobile-tab-indicator='true'] {
   display: none;
+}
+
+/* ---------- 插件市场：工具条是一块控制面板，每个插件是一块带铭牌的塑料模块 ---------- */
+
+/* 设置是独立的方形米白键帽，和左边的筛选键同高。 */
+:root[data-dashboard-style='millennium'] [data-plugin-market-settings-button='true'] {
+  background-color: var(--mil-key) !important;
+  border: 0;
+  box-shadow: var(--mil-keycap) !important;
+  color: var(--mil-ink);
+  height: 2.875rem;
+  padding: 0 0 5px;
+  width: 2.875rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-market-settings-button='true']:hover {
+  background-color: var(--mil-key-hover) !important;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-market-settings-button='true']:active {
+  box-shadow:
+    inset 0 0 0 2px var(--mil-line),
+    inset 0 -4px 0 rgb(0 0 0 / 0.22) !important;
+  transform: translateY(2px);
+}
+
+/* 兼容说明与横向滑块并排，控制区左侧用刻线分隔。 */
+:root[data-dashboard-style='millennium'] [data-plugin-market-compat='true'] label {
+  color: var(--mil-print);
+  font-weight: 400;
+  font-size: 0.875rem;
+  letter-spacing: normal;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-market-controls='true'] {
+  border-color: var(--mil-lo);
+  border-top-width: 3px;
+  box-shadow: inset 0 3px 0 var(--mil-hi);
+}
+
+/* 两侧各 3px 的暗面和亮面组成宽凹槽；窄屏对应上方横向刻线。 */
+@media (min-width: 640px) {
+  :root[data-dashboard-style='millennium'] [data-plugin-market-controls='true'] {
+    border-top-width: 0;
+    border-left-width: 3px;
+    box-shadow: inset 3px 0 0 var(--mil-hi);
+  }
+}
+
+/* 加载提示：一条下沉的小屏幕 */
+:root[data-dashboard-style='millennium'] [data-plugin-market-loading='true'] {
+  backdrop-filter: none;
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 2px 2px 0 var(--mil-screen-shade);
+  color: var(--mil-screen-ink);
+}
+
+/* 卡片按下去的行程和厚度一致：5px 厚度收到 1px，卡片下移 4px */
+@media (hover: hover) and (pointer: fine) {
+  :root[data-dashboard-style='millennium'] [data-plugin-market-card='true']:hover {
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-dashboard-style='millennium'] [data-plugin-market-card='true']:hover {
+    transform: none;
+  }
+}
+
+/* 图标嵌在一圈描边的小窗里，底色是屏幕色，市场图标带轻微厚度和柔和投影。 */
+:root[data-dashboard-style='millennium'] [data-plugin-card-icon='true'] > div:first-child,
+:root[data-dashboard-style='millennium'] [data-plugin-detail-icon='true'] > div {
+  background-color: var(--mil-screen);
+  border: 2px solid var(--mil-line);
+  color: var(--mil-accent-text);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-card-icon='true'] > div:first-child {
+  box-shadow: 2px 2px 0 var(--mil-drop), 0 4px 8px rgb(0 0 0 / 0.2);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-icon='true'] > div {
+  box-shadow: 3px 3px 0 var(--mil-drop);
+  height: 5rem;
+  width: 5rem;
+}
+
+/* 「可更新」是贴在图标窗底边的一条珊瑚橙标签 */
+:root[data-dashboard-style='millennium'] [data-plugin-update-ribbon='true'] {
+  background-color: var(--mil-hot);
+  border: 2px solid var(--mil-line);
+  color: var(--mil-hot-ink);
+  font-family: var(--mil-font-pixel);
+  font-synthesis: none;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 0 1px;
+}
+
+/* 安装状态和飙升榜统一使用珊瑚橙硬边铭牌。 */
+:root[data-dashboard-style='millennium'] :is([data-plugin-growth-badge], [data-plugin-installed-badge='true']) {
+  border: 2px solid var(--mil-line);
+  box-shadow: 2px 2px 0 var(--mil-drop);
+  font-family: var(--mil-font-pixel);
+  font-synthesis: none;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+}
+
+:root[data-dashboard-style='millennium'] :is([data-plugin-growth-badge], [data-plugin-installed-badge='true']) {
+  background-color: var(--mil-hot);
+  color: var(--mil-hot-ink);
+}
+
+/* 最近发布 / 更新：丝印小字配一颗指示灯，发布是绿灯，更新是橙灯 */
+:root[data-dashboard-style='millennium'] [data-plugin-activity] {
+  color: var(--mil-print);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-activity] > [aria-hidden='true'] {
+  background-color: var(--mil-led);
+  border: 1px solid var(--mil-line);
+  box-shadow: 0 0 6px var(--mil-led);
+  height: 8px;
+  width: 8px;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-activity='update'] > [aria-hidden='true'] {
+  background-color: var(--mil-hot);
+  box-shadow: 0 0 6px var(--mil-hot);
+}
+
+/* 底栏贴近刻线，上留 16px、下留 20px；左右仍与图标、简介对齐。 */
+:root[data-dashboard-style='millennium'] [data-plugin-card-body='true'] {
+  justify-content: flex-start;
+  padding: 1rem var(--plugin-market-content-padding) 1.25rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-card-toolbar='true'],
+:root[data-dashboard-style='millennium'] [data-plugin-card-actions='true'] {
+  gap: var(--plugin-market-toolbar-gap, 0.625rem);
+}
+
+/* 读数屏延展至操作按钮旁，三项数据紧凑居中，避免栏外大段空白。 */
+:root[data-dashboard-style='millennium'] [data-plugin-card-stats='true'] {
+  align-self: center;
+  flex: 1 1 auto;
+  justify-content: center;
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 2px 2px 0 var(--mil-screen-shade);
+  color: var(--mil-screen-dim);
+  column-gap: var(--plugin-market-stat-gap, 1rem);
+  font-size: 0.8125rem;
+  min-height: 2.25rem;
+  padding: 0.25rem var(--plugin-market-stat-padding, 0.625rem);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-stat-value] {
+  color: var(--mil-screen-dim);
+  font-family: var(--mil-font-pixel);
+  font-synthesis: none;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-stat-value].text-primary {
+  color: var(--mil-screen-ink);
+}
+
+/* 卡片里的小键帽：比页面级的键矮一档，底边厚度也收薄；实线边框不再叠加内描边。 */
+:root[data-dashboard-style='millennium']
+  [data-plugin-card-actions='true']
+  [data-dashboard-button='true']:is(.border-input, .bg-secondary, .bg-primary, .bg-destructive) {
+  height: 2.25rem;
+  padding-bottom: 0;
+  padding-top: 0;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-plugin-card-actions='true']
+  [data-dashboard-button='true']:is(.border-input, .bg-secondary, .bg-primary, .bg-destructive).w-7 {
+  width: 2.25rem;
+}
+
+/* 点赞内容按扣除底部厚度后的顶面居中，图标和数字同步上移。 */
+:root[data-dashboard-style='millennium'] [data-plugin-card-actions='true'] [data-dashboard-button='true'][data-plugin-like-button='true'] {
+  min-width: 4rem;
+  gap: 0.25rem;
+  padding-bottom: 5px;
+}
+
+/* 三位数字的预留由按钮宽度承担，避免数字槽把图标与短数字隔开。 */
+:root[data-dashboard-style='millennium'] [data-plugin-like-button='true'] > span {
+  min-width: 0;
+  font-family: var(--mil-font-pixel);
+  text-align: left;
+}
+
+:root[data-dashboard-style='millennium']
+  [data-plugin-card-actions='true']
+  [data-dashboard-button='true']:is(.border-input, .bg-secondary) {
+  box-shadow:
+    inset 0 -5px 0 var(--mil-key-side),
+    inset 3px 3px 0 var(--mil-key-hi);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-plugin-card-actions='true']
+  [data-dashboard-button='true'].bg-primary {
+  box-shadow:
+    inset 0 -5px 0 var(--mil-hot-side),
+    inset 3px 3px 0 rgb(255 255 255 / 0.28);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-plugin-card-actions='true']
+  [data-dashboard-button='true'].bg-destructive {
+  box-shadow:
+    inset 0 -5px 0 var(--mil-danger-side),
+    inset 3px 3px 0 rgb(255 255 255 / 0.2);
+}
+
+/* 已点赞保留平整绿底：顶面下压 3px、底座收至 1px，按钮底边保持对齐。 */
+:root[data-dashboard-style='millennium']
+  [data-plugin-card-actions='true']
+  [data-dashboard-button='true'][data-plugin-like-button='true'][data-liked='true'] {
+  background-color: var(--mil-on);
+  box-shadow: inset 0 -1px 0 var(--mil-on-side);
+  color: var(--mil-on-ink);
+  height: calc(2.25rem - 3px);
+  padding-top: 0;
+  padding-bottom: 1px;
+  transform: translateY(1.5px);
+}
+
+:root[data-dashboard-style='millennium']
+  [data-plugin-card-actions='true']
+  [data-dashboard-button='true']:not(:disabled):not([data-liked='true']):active {
+  box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.22);
+}
+
+/* 英文和数字沿用像素字，中文正文使用黑体，保留与标题的层级。 */
+:root[data-dashboard-style='millennium'] :is(
+  [data-plugin-card-description='true'],
+  [data-plugin-card-author='true'],
+  [data-plugin-market-card='true'] [data-plugin-activity]
+) {
+  font-family: var(--mil-font-en), 'Noto Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  letter-spacing: normal;
+}
+
+/* 简介是印在壳上的说明文字 */
+:root[data-dashboard-style='millennium'] [data-plugin-card-description='true'] {
+  color: var(--mil-print);
+}
+
+/* 关键词标签：一排小键帽 */
+:root[data-dashboard-style='millennium'] :is([data-plugin-keyword='true'], [data-plugin-detail-keywords='true'] [data-dashboard-badge='true']) {
+  background-color: var(--mil-key);
+  border: 2px solid var(--mil-line);
+  box-shadow:
+    inset 0 -3px 0 var(--mil-key-side),
+    inset 2px 2px 0 var(--mil-key-hi);
+  color: var(--mil-ink);
+  padding-bottom: 3px;
+}
+
+/* 安装 / 更新进度：卡片下方一块下沉屏幕，进度条沿用分段格 */
+:root[data-dashboard-style='millennium'] [data-plugin-card-progress] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 2px 2px 0 var(--mil-screen-shade);
+  color: var(--mil-screen-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-card-progress='error'] {
+  border-color: var(--mil-danger);
+}
+
+/* 卡片内部描边与外框使用同一浅色，保留原有阴影和键帽厚度。 */
+:root[data-dashboard-style='millennium'] [data-plugin-market-card='true'] :is(
+  [data-plugin-card-stats='true'],
+  [data-plugin-card-actions='true'] [data-dashboard-button='true'],
+  [data-plugin-card-icon='true'] > div:first-child,
+  [data-plugin-growth-badge],
+  [data-plugin-installed-badge='true'],
+  [data-plugin-update-ribbon='true'],
+  [data-plugin-keyword='true']
+) {
+  border-color: var(--plugin-market-outline);
+}
+
+/* ---------- 插件详情：铭牌、版本读数、说明屏幕 ---------- */
+
+/* 返回键沿用侧栏的完整键帽，底座和顶面高光让箭头明确呈现为可点击按钮。 */
+:root[data-dashboard-style='millennium'] [data-dashboard-button='true'][data-plugin-detail-back='true'] {
+  background-color: var(--mil-key);
+  border: 0;
+  box-shadow: var(--mil-keycap);
+  color: var(--mil-ink);
+  height: 2.875rem;
+  padding: 0 0 5px;
+  width: 2.875rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-button='true'][data-plugin-detail-back='true']:hover {
+  background-color: var(--mil-key-hover);
+}
+
+:root[data-dashboard-style='millennium'] [data-dashboard-button='true'][data-plugin-detail-back='true']:not(:disabled):active {
+  background-color: var(--mil-key-hover);
+  box-shadow: inset 0 0 0 2px var(--mil-line), inset 0 -4px 0 var(--mil-key-side);
+  padding-bottom: 2px;
+  transform: translateY(2px);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-pane='true'] h1 {
+  font-family: var(--mil-font-pixel);
+  font-synthesis: none;
+  letter-spacing: 0.06em;
+}
+
+/* 详情头部左右分区：左侧铭牌信息，右侧版本选择、操作和适配范围。 */
+:root[data-dashboard-style='millennium'] [data-plugin-detail-hero='true'] > [data-dashboard-card-header='true'] {
+  border-bottom: 0;
+  box-shadow: none;
+  margin-bottom: 0;
+  padding: 1.5rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-release='true'] {
+  border-color: var(--mil-lo);
+  padding: 1.5rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-compatibility='true'] {
+  color: var(--mil-print);
+}
+
+/* 头部铭牌：插件名用像素大字，不套模块标题的丝印小字 */
+:root[data-dashboard-style='millennium'] [data-plugin-detail-hero='true'] [data-dashboard-card-title='true'] {
+  color: var(--mil-ink);
+  font-family: var(--mil-font-pixel);
+  font-size: 1.75rem;
+  font-synthesis: none;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-hero='true'] [data-dashboard-card-header='true'] .text-muted-foreground {
+  color: var(--mil-print);
+}
+
+/* 版本号是一块小读数屏，类型是一枚键帽 */
+:root[data-dashboard-style='millennium'] [data-plugin-detail-version='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 2px 2px 0 var(--mil-screen-shade);
+  color: var(--mil-screen-ink);
+  font-family: var(--mil-font-pixel);
+  font-synthesis: none;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-type='true'] {
+  background-color: var(--mil-key);
+  border: 2px solid var(--mil-line);
+  box-shadow:
+    inset 0 -3px 0 var(--mil-key-side),
+    inset 2px 2px 0 var(--mil-key-hi);
+  color: var(--mil-ink);
+  padding-bottom: 4px;
+}
+
+/* 版本选择下方的适配范围等说明：丝印小字 */
+:root[data-dashboard-style='millennium'] [data-plugin-detail-release='true'] > :is(p, details) {
+  color: var(--mil-print);
+  letter-spacing: 0.04em;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-release='true'] > p[role='alert'] {
+  color: var(--mil-danger);
+}
+
+/* 文档切换键置于标题右侧，选中项使用顶栏同款绿色键面。 */
+:root[data-dashboard-style='millennium'] [data-plugin-detail-doc-tabs='true'] [data-dashboard-tabs-list='true'] {
+  min-height: 0;
+  padding: 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-doc-tabs='true'] [data-dashboard-tabs-trigger='true'] {
+  min-height: 2.25rem;
+  height: 2.25rem;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 0 -3px 0 var(--mil-key-side), inset 1px 1px 0 var(--mil-key-hi);
+  padding: 0 0.75rem 3px;
+  font-size: 0.75rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-doc-tabs='true'] [data-dashboard-tabs-trigger='true'][data-state='active'] {
+  background-color: var(--mil-on);
+  box-shadow: inset 0 -1px 0 var(--mil-on-side);
+  color: var(--mil-on-ink);
+  padding-bottom: 1px;
+  transform: none;
+}
+
+/* 说明和更新日志：正文整块放进下沉屏幕 */
+:root[data-dashboard-style='millennium'] [data-plugin-detail-doc='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-sunk);
+  color: var(--mil-screen-ink);
+  margin: 0 1rem 1.25rem;
+  padding: 1.25rem 1.5rem;
+}
+
+/* 统计：四个读数各是一块小屏，数字用像素字；选择器带上 .bg-card.border，压过通用面板的凸起斜面 */
+:root[data-dashboard-style='millennium'] [data-dashboard-shell] [data-plugin-stat-tile='true'].bg-card.border {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 3px 3px 0 var(--mil-screen-shade);
+  color: var(--mil-screen-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-stat-tile='true'] .text-2xl {
+  font-family: var(--mil-font-pixel);
+  font-synthesis: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-stat-tile='true'] .text-muted-foreground {
+  color: var(--mil-screen-dim);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-stats-heading='true'] {
+  color: var(--mil-print);
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-rating-item='true'] {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: inset 2px 2px 0 var(--mil-screen-shade);
+  color: var(--mil-screen-ink);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-rating-item='true'] .text-muted-foreground {
+  color: var(--mil-screen-dim);
+}
+
+/* 基本信息：一块屏幕里的清单，行间虚线 */
+:root[data-dashboard-style='millennium'] [data-plugin-detail-info='true'] > div {
+  background-color: var(--mil-screen);
+  background-image: var(--mil-screen-tex);
+  background-size: 3px 3px;
+  border: 2px solid var(--mil-line);
+  box-shadow: var(--mil-sunk);
+  color: var(--mil-screen-ink);
+  margin: 0 4px 4px;
+  padding: 0.25rem 0.875rem;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-info='true'] > div > div {
+  margin: 0 !important;
+  padding: 0.625rem 0;
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-info='true'] > div > div + div {
+  border-top: 1px dashed var(--mil-rule);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-info='true'] .text-muted-foreground {
+  color: var(--mil-screen-dim);
+}
+
+:root[data-dashboard-style='millennium'] [data-plugin-detail-info='true'] .text-primary {
+  color: var(--mil-accent-text);
 }
