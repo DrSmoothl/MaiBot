@@ -2583,6 +2583,8 @@ const MonitorTimeline = memo(function MonitorTimeline({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
+  const userScrollingRef = useRef(false)
+  const [scrollIdleRevision, setScrollIdleRevision] = useState(0)
   const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null)
   const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** 程序化跳转滚动期间忽略滚动监听，防止自动跟随把视图拉回底部 */
@@ -2624,6 +2626,57 @@ const MonitorTimeline = memo(function MonitorTimeline({
     ) as HTMLDivElement | null
     setScrollViewport(viewport)
   }, [])
+
+  useEffect(() => {
+    if (!scrollViewport) return
+    let touching = false
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    const finishScroll = () => {
+      if (touching || !userScrollingRef.current) return
+      userScrollingRef.current = false
+      // 松手不等于滚动结束；惯性完全停止后才恢复位置补偿和底部跟随。
+      const distance = scrollViewport.scrollHeight - scrollViewport.scrollTop - scrollViewport.clientHeight
+      setAutoScroll(distance <= 2)
+      setScrollIdleRevision((revision) => revision + 1)
+    }
+    const scheduleIdle = () => {
+      if (idleTimer !== null) clearTimeout(idleTimer)
+      idleTimer = setTimeout(finishScroll, 180)
+    }
+    const beginScroll = () => {
+      userScrollingRef.current = true
+      revealScrollLockRef.current = false
+      setAutoScroll(false)
+      scheduleIdle()
+    }
+    const handleTouchStart = () => {
+      touching = true
+      beginScroll()
+    }
+    const handleTouchEnd = () => {
+      touching = false
+      scheduleIdle()
+    }
+    const handleNativeScroll = () => {
+      if (userScrollingRef.current) scheduleIdle()
+    }
+    scrollViewport.addEventListener('touchstart', handleTouchStart, { passive: true })
+    scrollViewport.addEventListener('touchend', handleTouchEnd, { passive: true })
+    scrollViewport.addEventListener('touchcancel', handleTouchEnd, { passive: true })
+    scrollViewport.addEventListener('wheel', beginScroll, { passive: true })
+    scrollViewport.addEventListener('scroll', handleNativeScroll, { passive: true })
+    scrollViewport.addEventListener('scrollend', finishScroll)
+    return () => {
+      if (idleTimer !== null) clearTimeout(idleTimer)
+      userScrollingRef.current = false
+      scrollViewport.removeEventListener('touchstart', handleTouchStart)
+      scrollViewport.removeEventListener('touchend', handleTouchEnd)
+      scrollViewport.removeEventListener('touchcancel', handleTouchEnd)
+      scrollViewport.removeEventListener('wheel', beginScroll)
+      scrollViewport.removeEventListener('scroll', handleNativeScroll)
+      scrollViewport.removeEventListener('scrollend', finishScroll)
+    }
+  }, [scrollViewport, selectedSession])
 
   const visibleTimelineEntries = useMemo(() => {
     const noReplyTimingGateCycles = new Set<string>()
@@ -2867,16 +2920,16 @@ const MonitorTimeline = memo(function MonitorTimeline({
       previousSelectedSessionRef.current = selectedSession
       scrollAnchorRef.current = null
       scrollToBottom('auto')
-    } else if (autoScroll) {
+    } else if (autoScroll && !userScrollingRef.current) {
       scrollToBottom('auto')
     }
-  }, [selectedSession, autoScroll, scrollToBottom, timelineTotalSize])
+  }, [selectedSession, autoScroll, scrollToBottom, timelineTotalSize, scrollIdleRevision])
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const target =
         scrollViewport ?? e.currentTarget.querySelector('[data-radix-scroll-area-viewport]')
-      if (!target) return
+      if (!target || e.target !== target) return
       const { scrollTop, scrollHeight, clientHeight } = target as HTMLElement
       const distanceToBottom = scrollHeight - scrollTop - clientHeight
 
@@ -2893,29 +2946,34 @@ const MonitorTimeline = memo(function MonitorTimeline({
         ? { key: anchorItem.key, start: anchorItem.start }
         : null
 
-      setAutoScroll(distanceToBottom < 80)
+      // 拖动及惯性阶段不因进入底部附近就抢回滚动控制权。
+      if (!userScrollingRef.current) setAutoScroll(distanceToBottom < 80)
 
       // 滚到顶部附近时拉取更早的一页；插入后由下方的锚点补偿保持阅读位置。
-      if (scrollTop < HISTORY_LOAD_THRESHOLD_PX && hasMoreHistory && !historyLoading) {
+      if (!userScrollingRef.current && scrollTop < HISTORY_LOAD_THRESHOLD_PX && hasMoreHistory && !historyLoading) {
         loadOlderHistory()
       }
     },
     [hasMoreHistory, historyLoading, loadOlderHistory, scrollViewport, timelineVirtualizer]
   )
 
-  // 一页里可见条目太少、撑不满视口时无法滚动触顶，直接继续向前加载。
+  // 撑不满视口时继续加载；用户滑到顶部则等惯性结束再插入历史，避免中途改变滚动范围。
   useEffect(() => {
-    if (!scrollViewport || !hasMoreHistory || historyLoading) return
-    if (scrollViewport.scrollHeight <= scrollViewport.clientHeight + HISTORY_LOAD_THRESHOLD_PX) {
+    if (!scrollViewport || !hasMoreHistory || historyLoading || userScrollingRef.current) return
+    if (
+      scrollViewport.scrollHeight <= scrollViewport.clientHeight + HISTORY_LOAD_THRESHOLD_PX ||
+      (scrollIdleRevision > 0 && scrollViewport.scrollTop < HISTORY_LOAD_THRESHOLD_PX)
+    ) {
       loadOlderHistory()
     }
-  }, [scrollViewport, hasMoreHistory, historyLoading, loadOlderHistory, timelineTotalSize])
+  }, [scrollViewport, hasMoreHistory, historyLoading, loadOlderHistory, timelineTotalSize, scrollIdleRevision])
 
   // 未跟随底部时，时间线头部被裁剪或上方插入新条目都会改变锚点条目的位置；
   // 每次绘制前（包括虚拟列表重新测量后）只补偿锚点的实际位移，
   // 保留用户尚未触发 scroll 事件的滚动量；正在查看的条目展开时也不移动视口。
+  // 触摸和惯性期间不写 scrollTop（移动浏览器会因此中止惯性），停稳后再恢复补偿。
   useLayoutEffect(() => {
-    if (autoScroll || !scrollViewport || revealScrollLockRef.current) return
+    if (autoScroll || !scrollViewport || revealScrollLockRef.current || userScrollingRef.current) return
     const anchor = scrollAnchorRef.current
     if (!anchor) return
     const anchorItem = timelineVirtualizer.measurementsCache.find((item) => item.key === anchor.key)
@@ -3032,7 +3090,8 @@ const MonitorTimeline = memo(function MonitorTimeline({
       >
         <ScrollArea
           className="h-full"
-          viewportClassName="[overflow-anchor:none]"
+          scrollbars="vertical"
+          viewportClassName="!overflow-x-hidden [overflow-anchor:none]"
           ref={scrollRef}
           onScrollCapture={handleScroll}
           onClickCapture={(event) => {
