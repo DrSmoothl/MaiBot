@@ -1909,13 +1909,18 @@ class MaisakaReasoningEngine:
                     f"media_index={media_index} image_hash={image.binary_hash} error={exc}"
                 )
 
-    def _build_tool_result_summary(self, tool_call: ToolCall, result: ToolExecutionResult) -> str:
-        """构建用于终端展示的工具结果摘要。"""
+    def _build_tool_result_summary(
+        self,
+        tool_call: ToolCall,
+        result: ToolExecutionResult,
+        condensed_content: Optional[str] = None,
+    ) -> str:
+        """构建终端和监控共用的摘要，优先展示写入 Planner 历史的整理结果。"""
 
         normalized_tool_call = format_tool_call_for_display(tool_call)
         source_label = str(normalized_tool_call.get("source_label") or "").strip()
         source_text = f" [{source_label}]" if source_label else ""
-        history_content = result.get_history_content().strip()
+        history_content = (result.get_history_content() if condensed_content is None else condensed_content).strip()
         if not history_content:
             history_content = result.error_message.strip()
         if not history_content:
@@ -1950,6 +1955,7 @@ class MaisakaReasoningEngine:
         result: ToolExecutionResult,
         duration_ms: float,
         tool_spec: Optional[ToolSpec] = None,
+        condensed_content: Optional[str] = None,
     ) -> dict[str, Any]:
         """构建 planner.finalized 中单个工具的监控结果。"""
 
@@ -1983,7 +1989,7 @@ class MaisakaReasoningEngine:
             "success": result.success,
             "stop_after_execution": result.stop_after_execution,
             "duration_ms": round(duration_ms, 2),
-            "summary": self._build_tool_result_summary(tool_call, result),
+            "summary": self._build_tool_result_summary(tool_call, result, condensed_content),
             "detail": normalized_detail,
             "card": normalized_card,
             "sub_cards": normalized_sub_cards,
@@ -2027,16 +2033,18 @@ class MaisakaReasoningEngine:
         result: ToolExecutionResult,
         duration_ms: float,
         tool_spec: Optional[ToolSpec],
+        condensed_content: Optional[str] = None,
     ) -> None:
         """追加终端摘要和监控详情。"""
 
-        tool_result_summaries.append(self._build_tool_result_summary(tool_call, result))
+        tool_result_summaries.append(self._build_tool_result_summary(tool_call, result, condensed_content))
         monitor_result = self._build_tool_monitor_result(
             tool_call,
             invocation,
             result,
             duration_ms,
             tool_spec=tool_spec,
+            condensed_content=condensed_content,
         )
         if result.content_items or result.post_history_messages:
             # 图片解码与缩放不能占用 bot 事件循环；每个工具结果只处理一次。
@@ -2159,6 +2167,7 @@ class MaisakaReasoningEngine:
                 result=result,
                 duration_ms=tool_duration_ms,
                 tool_spec=tool_spec_map.get(invocation.tool_name),
+                condensed_content=condensed_content,
             )
             tool_monitor_results[-1].update(started_at=tool_started_at, ended_at=tool_ended_at)
             next_call_id = tool_calls[tool_index].call_id if tool_index < total_tool_count else ""
