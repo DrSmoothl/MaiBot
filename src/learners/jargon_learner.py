@@ -1,5 +1,5 @@
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from html import escape
 from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
@@ -9,10 +9,10 @@ import re
 
 from src.chat.utils.utils import is_bot_self
 from src.common.data_models.llm_service_data_models import LLMResponseResult
-from src.common.data_models.message_component_data_model import EmojiComponent, ReplyComponent
+from src.common.data_models.message_component_data_model import EmojiComponent, MessageSequence, ReplyComponent
 from src.common.logger import get_logger
 from src.config.config import global_config
-from src.llm_models.payload_content.context_item import AssistantMessageItem, ContextItem, ContextItemBuilder, RoleType
+from src.llm_models.payload_content.context_item import ContextItem, ContextItemBuilder, RoleType
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.jargon_context_matcher import is_jargon_reference_text
 from src.prompt.prompt_manager import prompt_manager
@@ -29,39 +29,18 @@ if TYPE_CHECKING:
 logger = get_logger("jargon_learner")
 
 jargon_learn_model = LLMServiceClient(task_name="learner", request_type="jargon.learner")
-ALLOWED_LEARNING_SOURCE_KINDS = {
-    "assistant",
-    "guided_reply",
-    "outbound_send",
-    "planner_assistant",
-    "planner_assistant_visible",
-    "planner_tool_result",
-    "planner_user",
-    "session",
-    "tool",
-    "tool_result_media",
-    "user",
-}
-FILTERED_TOOL_NAMES = {"query_person_profile", "wait"}
+ALLOWED_LEARNING_SOURCE_KINDS = {"planner_user", "session", "user"}
 MESSAGE_OPEN_TAG_PATTERN = re.compile(r"^<message\b(?P<attrs>[^>]*)>", re.IGNORECASE | re.DOTALL)
-MESSAGE_ID_ATTR_PATTERN = re.compile(r'\s+msg_id\s*=\s*"[^"]*"', re.IGNORECASE)
-
-
-def _is_filtered_tool_name(tool_name: Optional[str]) -> bool:
-    return (tool_name or "").strip() in FILTERED_TOOL_NAMES
-
-
-def _is_standalone_emoji_message(message: "SessionMessage") -> bool:
-    if message.is_emoji:
-        return True
-
-    components = list(message.raw_message.components)
-    content_components = [component for component in components if not isinstance(component, ReplyComponent)]
-    return bool(content_components) and all(isinstance(component, EmojiComponent) for component in content_components)
+MESSAGE_ID_ATTR_PATTERN = re.compile(r'\s+(?:msg_id|source_id|group_card)\s*=\s*"[^"]*"', re.IGNORECASE)
+GROUP_CARD_ATTR_PATTERN = re.compile(r'\s+group_card\s*=\s*"[^"]*"', re.IGNORECASE)
+EMOJI_TEXT_PATTERN = re.compile(r"\[(?:消息类型\]表情包|表情包[^\]]*\])")
 
 
 def _is_learnable_session_message(message: "SessionMessage") -> bool:
-    return not message.is_notify and not _is_standalone_emoji_message(message)
+    return (
+        not is_bot_self(message.platform, message.message_info.user_info.user_id)
+        and not message.is_notify
+    )
 
 
 @dataclass(frozen=True)
@@ -165,66 +144,18 @@ class JargonLearner:
     def _extract_learning_sources_from_context(
         context_messages: Sequence["LLMContextMessage"],
     ) -> List[JargonLearningSourceItem]:
-        """从上下文消息中提取可学习素材，过滤表情包消息。"""
+        """提取学习素材，直接过滤模型输出、机器人发言和表情包消息。"""
 
-        from src.maisaka.context.messages import (
-            ModelOutputContextMessage,
-            ReferenceMessage,
-            ReferenceMessageType,
-            SessionBackedMessage,
-            ToolResultMessage,
-        )
+        from src.maisaka.context.messages import SessionBackedMessage
 
-        allowed_session_source_kinds = {
-            "user",
-            "guided_reply",
-            "outbound_send",
-            "tool_result_media",
-        }
         source_items: List[JargonLearningSourceItem] = []
         seen_message_ids: set[str] = set()
         seen_object_ids: set[int] = set()
         seen_context_keys: set[tuple[str, str, str]] = set()
 
         for context_message in context_messages:
-            if (
-                isinstance(context_message, ReferenceMessage)
-                and context_message.reference_type == ReferenceMessageType.JARGON
-            ):
-                continue
-
-            if isinstance(context_message, ModelOutputContextMessage):
-                assistant_content = JargonLearner._render_assistant_context_text(context_message)
-                if assistant_content:
-                    source_items.append(
-                        JargonLearningSourceItem(
-                            source_kind=context_message.source_kind,
-                            speaker_kind="ASSISTANT",
-                            speaker_name=global_config.bot.nickname or "assistant",
-                            content=assistant_content,
-                            timestamp=context_message.timestamp,
-                        )
-                    )
-                continue
-
-            if isinstance(context_message, ToolResultMessage):
-                if _is_filtered_tool_name(context_message.tool_name):
-                    continue
-                tool_result_content = JargonLearner._render_tool_result_context_text(context_message)
-                if tool_result_content:
-                    source_items.append(
-                        JargonLearningSourceItem(
-                            source_kind=context_message.source,
-                            speaker_kind="TOOL_RESULT",
-                            speaker_name=context_message.tool_name or "tool_result",
-                            content=tool_result_content,
-                            timestamp=context_message.timestamp,
-                        )
-                    )
-                continue
-
             if isinstance(context_message, SessionBackedMessage):
-                if context_message.source_kind not in allowed_session_source_kinds:
+                if context_message.source_kind != "user":
                     continue
 
                 original_message = context_message.original_message
@@ -252,73 +183,56 @@ class JargonLearner:
                         continue
                     seen_context_keys.add(context_key)
 
-                content = (context_message.processed_plain_text or "").strip()
+                content = JargonLearner._clean_learning_content(context_message.processed_plain_text)
                 if not content:
                     continue
                 if is_jargon_reference_text(content):
                     continue
 
-                source_items.append(JargonLearner._build_source_item_from_context_message(context_message))
+                source_item = JargonLearner._build_source_item_from_context_message(context_message)
+                if source_item.content:
+                    source_items.append(source_item)
 
         return source_items
 
     @staticmethod
-    def _render_assistant_context_text(message: "LLMContextMessage") -> str:
-        """渲染 assistant 正文，供黑话学习引用。"""
+    def _clean_learning_content(content: str) -> str:
+        """清理已渲染的用户消息；去掉表情包后正文为空则丢弃。"""
 
-        from src.maisaka.context.messages import ModelOutputContextMessage
-
-        if not isinstance(message, ModelOutputContextMessage) or not isinstance(
-            message.output_item,
-            AssistantMessageItem,
-        ):
+        content = content.strip()
+        header = MESSAGE_OPEN_TAG_PATTERN.match(content)
+        if header and re.search(r'\bis_self_message="true"', header.group("attrs"), re.IGNORECASE):
             return ""
-
-        content = message.content.strip()
-        if not content:
+        body = content[header.end():] if header else content
+        body = EMOJI_TEXT_PATTERN.sub("", body).strip()
+        if not body:
             return ""
-
-        return content
+        if header:
+            attrs = GROUP_CARD_ATTR_PATTERN.sub("", header.group("attrs"))
+            return f"<message{attrs}>\n{body}"
+        return body
 
     @staticmethod
-    def _render_tool_result_context_text(message: "LLMContextMessage") -> str:
-        """渲染工具结果，供黑话学习引用。"""
+    def _build_session_message_learning_content(message: "SessionMessage") -> str:
+        """只渲染用户消息，过滤表情包组件并省略群名片。"""
 
-        from src.maisaka.context.messages import ToolResultMessage
-
-        if not isinstance(message, ToolResultMessage):
-            return ""
-
-        status = "success" if message.success else "failed"
-        return "\n".join(
-            [
-                f"[tool_result:{status}]",
-                f"tool_call_id: {message.tool_call_id}",
-                f"tool_name: {message.tool_name or 'tool'}",
-                "[content]",
-                message.content.strip() or "[空工具结果]",
-            ]
-        ).strip()
-
-    @staticmethod
-    def _build_session_message_learning_content(
-        message: "SessionMessage",
-        *,
-        is_self_message: bool,
-    ) -> str:
-        """复用规划器消息格式构造黑话学习素材正文。"""
-
-        from src.maisaka.context.history import build_prefixed_message_sequence
         from src.maisaka.context.message_adapter import build_visible_text_from_sequence
-        from src.maisaka.context.planner_messages import build_planner_user_prefix_from_session_message
+        from src.maisaka.context.planner_messages import build_planner_prefix
 
-        planner_prefix = build_planner_user_prefix_from_session_message(
-            message,
+        sequence = MessageSequence([
+            component for component in message.raw_message.components
+            if not isinstance(component, (EmojiComponent, ReplyComponent))
+        ])
+        body = build_visible_text_from_sequence(sequence).strip()
+        if not body:
+            return ""
+        user_info = message.message_info.user_info
+        prefix = build_planner_prefix(
+            timestamp=message.timestamp,
+            user_name=user_info.user_nickname or user_info.user_id,
             include_message_id=False,
-            is_self_message=is_self_message,
         )
-        visible_sequence = build_prefixed_message_sequence(message.raw_message, planner_prefix)
-        return build_visible_text_from_sequence(visible_sequence).strip()
+        return JargonLearner._clean_learning_content(prefix + body)
 
     @staticmethod
     def _build_source_item_from_context_message(context_message: "LLMContextMessage") -> JargonLearningSourceItem:
@@ -331,37 +245,20 @@ class JargonLearner:
 
         original_message = context_message.original_message
         source_kind = context_message.source_kind
-        if source_kind == "tool_result_media":
-            speaker_kind = "TOOL_RESULT"
-            speaker_name = "tool_result_media"
-        elif original_message is not None and is_bot_self(
-            original_message.platform,
-            original_message.message_info.user_info.user_id,
-        ):
-            speaker_kind = "ASSISTANT"
-            speaker_name = global_config.bot.nickname or "assistant"
-        elif source_kind in {"guided_reply", "outbound_send"}:
-            speaker_kind = "ASSISTANT"
-            speaker_name = global_config.bot.nickname or "assistant"
-        else:
-            speaker_kind = "USER"
-            if original_message is None:
-                speaker_name = "未知用户"
-            else:
-                user_info = original_message.message_info.user_info
-                speaker_name = user_info.user_cardname or user_info.user_nickname or "未知用户"
+        speaker_name = (
+            original_message.message_info.user_info.user_nickname if original_message is not None else "未知用户"
+        )
 
         if original_message is not None:
             content = JargonLearner._build_session_message_learning_content(
                 original_message,
-                is_self_message=speaker_kind == "ASSISTANT",
             )
         else:
-            content = (context_message.processed_plain_text or "").strip()
+            content = JargonLearner._clean_learning_content(context_message.processed_plain_text)
 
         return JargonLearningSourceItem(
             source_kind=source_kind,
-            speaker_kind=speaker_kind,
+            speaker_kind="USER",
             speaker_name=speaker_name,
             content=content,
             timestamp=context_message.timestamp,
@@ -446,7 +343,7 @@ class JargonLearner:
         prompt = await prompt_manager.render_prompt(prompt_template)
 
         try:
-            learning_messages = await self._build_multi_learning_messages(pending_messages, prompt)
+            learning_messages = await self._build_multi_learning_messages(source_items, prompt)
             generation_result = await jargon_learn_model.generate_response_with_context(
                 lambda _client: learning_messages,
                 session_id=learning_session_id,
@@ -548,18 +445,24 @@ class JargonLearner:
         source_items: List[JargonLearningSourceItem] = []
         for message in messages:
             if isinstance(message, JargonLearningSourceItem):
-                if message.source_kind not in ALLOWED_LEARNING_SOURCE_KINDS:
+                if message.speaker_kind != "USER" or message.source_kind not in ALLOWED_LEARNING_SOURCE_KINDS:
+                    continue
+                if message.original_message is not None and not _is_learnable_session_message(message.original_message):
                     continue
                 if is_jargon_reference_text(message.content):
                     continue
-                source_items.append(message)
+                content = self._clean_learning_content(message.content)
+                if content:
+                    source_items.append(replace(message, content=content))
                 continue
 
             if not _is_learnable_session_message(message):
                 continue
 
             await message.process()
-            source_items.append(self._build_source_item_from_session_message(message))
+            source_item = self._build_source_item_from_session_message(message)
+            if source_item.content:
+                source_items.append(source_item)
 
         return source_items
 
@@ -570,8 +473,6 @@ class JargonLearner:
     @staticmethod
     def _build_message_open_tag_for_learning(source_id: int, attrs: str) -> str:
         learning_attrs = MESSAGE_ID_ATTR_PATTERN.sub("", attrs or "")
-        if re.search(r"\bsource_id\s*=", learning_attrs, re.IGNORECASE):
-            return f"<message{learning_attrs}>"
         return f'<message source_id="{source_id}"{learning_attrs}>'
 
     @classmethod
@@ -599,20 +500,11 @@ class JargonLearner:
         """把真实会话消息转换为黑话学习素材。"""
 
         user_info = message.message_info.user_info
-        if is_bot_self(message.platform, user_info.user_id):
-            speaker_kind = "ASSISTANT"
-            speaker_name = global_config.bot.nickname or "assistant"
-        else:
-            speaker_kind = "USER"
-            speaker_name = user_info.user_cardname or user_info.user_nickname or "未知用户"
-
-        content = JargonLearner._build_session_message_learning_content(
-            message,
-            is_self_message=speaker_kind == "ASSISTANT",
-        )
+        speaker_name = user_info.user_nickname or "未知用户"
+        content = JargonLearner._build_session_message_learning_content(message)
         return JargonLearningSourceItem(
             source_kind="session",
-            speaker_kind=speaker_kind,
+            speaker_kind="USER",
             speaker_name=speaker_name,
             content=content,
             timestamp=message.timestamp,

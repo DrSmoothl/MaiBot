@@ -21,22 +21,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.learners.jargon_learner import (
-    FILTERED_TOOL_NAMES,
     JargonLearner,
     JargonLearningSourceItem,
     jargon_learn_model,
 )
 from src.learners.jargon_miner import JargonMiner
 from src.llm_models.payload_content.context_item import (
-    AssistantMessageItem,
-    ContextItemMeta,
-    ContextTextPart,
-    FunctionCallOutputItem,
     UserMessageItem,
     get_item_text,
 )
 from src.llm_models.request_snapshot import deserialize_persisted_context_items_snapshot
-from src.maisaka.context.messages import ModelOutputContextMessage, ToolResultMessage
 from src.maisaka.jargon_context_matcher import is_jargon_reference_text
 from src.prompt.prompt_manager import prompt_manager
 
@@ -95,20 +89,13 @@ def _message_body(text: str) -> str:
     return MESSAGE_HEADER_PATTERN.sub("", text.strip(), count=1).strip()
 
 
-def _is_sticker_message(text: str) -> bool:
-    body = _message_body(text)
-    if not body:
-        return False
-    return body.startswith("[表情包") or body.startswith("[消息类型]表情包")
-
-
 def _is_message_summary(text: str) -> bool:
     body = _message_body(text)
     return body.startswith("[消息类型]复杂消息") or body.startswith("聊天记录摘要")
 
 
 def _is_allowed_planner_user_message(text: str) -> bool:
-    content = text.strip()
+    content = JargonLearner._clean_learning_content(text)
     if not content.startswith("<message"):
         return False
 
@@ -126,122 +113,28 @@ def _extract_message_ids(text: str) -> set[str]:
     return {match.group(1).strip() for match in MESSAGE_ID_PATTERN.finditer(text) if match.group(1).strip()}
 
 
-def _build_assistant_content(raw_message: Dict[str, Any], timestamp: datetime, source_kind: str) -> str:
-    content = _message_text(raw_message).strip()
-    if not content:
-        return ""
-
-    assistant_message = ModelOutputContextMessage(
-        output_item=AssistantMessageItem(
-            meta=ContextItemMeta.create(timestamp=timestamp),
-            parts=(ContextTextPart(content),),
-        ),
-        source_kind=source_kind,
-    )
-    return JargonLearner._render_assistant_context_text(assistant_message)
-
-
-def _build_tool_result_content(raw_message: Dict[str, Any], timestamp: datetime) -> str:
-    tool_call_id = raw_message.get("tool_call_id")
-    if not isinstance(tool_call_id, str) or not tool_call_id.strip():
-        tool_call_id = "planner_tool_result"
-    tool_name = raw_message.get("tool_name")
-    if isinstance(tool_name, str) and tool_name.strip() in FILTERED_TOOL_NAMES:
-        return ""
-
-    raw_content = _message_text(raw_message).strip()
-    if _is_person_profile_content(raw_content):
-        return ""
-
-    tool_result_message = ToolResultMessage(
-        content=raw_content,
-        timestamp=timestamp,
-        tool_call_id=tool_call_id.strip(),
-        logical_turn_id=f"legacy_tool:{tool_call_id.strip()}",
-        tool_name=tool_name.strip() if isinstance(tool_name, str) else "",
-        success=True,
-    )
-    return JargonLearner._render_tool_result_context_text(tool_result_message)
-
-
 def _build_user_source_item(text: str, timestamp: datetime) -> Optional[JargonLearningSourceItem]:
     if not _is_allowed_planner_user_message(text):
-        return None
-    if _is_sticker_message(text):
         return None
     if is_jargon_reference_text(text):
         return None
     if _is_person_profile_content(text):
         return None
 
-    content = text.strip()
+    content = JargonLearner._clean_learning_content(text)
     if not content:
         return None
 
     attrs = _parse_message_attrs(content)
     speaker_name = attrs.get("user", "未知用户").strip() or "未知用户"
-    speaker_kind = "ASSISTANT" if speaker_name == global_config.bot.nickname else "USER"
-    source_kind = "planner_assistant_visible" if speaker_kind == "ASSISTANT" else "planner_user"
+    if speaker_name == global_config.bot.nickname:
+        return None
     return JargonLearningSourceItem(
-        source_kind=source_kind,
-        speaker_kind=speaker_kind,
+        source_kind="planner_user",
+        speaker_kind="USER",
         speaker_name=speaker_name,
         content=content,
         timestamp=timestamp,
-    )
-
-
-def _build_assistant_source_item(
-    item: AssistantMessageItem,
-    *,
-    source_kind: str = "planner_assistant",
-) -> Optional[JargonLearningSourceItem]:
-    """把 v5 assistant 正文 Item 转换为黑话学习素材。"""
-
-    text = get_item_text(item).strip()
-    if not text or _is_person_profile_content(text):
-        return None
-
-    content = JargonLearner._render_assistant_context_text(
-        ModelOutputContextMessage(output_item=item, source_kind=source_kind)
-    )
-    if not content:
-        return None
-
-    return JargonLearningSourceItem(
-        source_kind=source_kind,
-        speaker_kind="ASSISTANT",
-        speaker_name=global_config.bot.nickname,
-        content=content,
-        timestamp=item.meta.timestamp,
-    )
-
-
-def _build_tool_output_source_item(item: FunctionCallOutputItem) -> Optional[JargonLearningSourceItem]:
-    """把 v5 工具结果 Item 转换为黑话学习素材。"""
-
-    if item.tool_name.strip() in FILTERED_TOOL_NAMES or _is_person_profile_content(item.output):
-        return None
-
-    content = JargonLearner._render_tool_result_context_text(
-        ToolResultMessage(
-            content=item.output,
-            timestamp=item.meta.timestamp,
-            tool_call_id=item.call_id,
-            logical_turn_id=item.meta.logical_turn_id,
-            tool_name=item.tool_name,
-            success=item.success,
-        )
-    )
-    if not content:
-        return None
-
-    return JargonLearningSourceItem(
-        source_kind="planner_tool_result",
-        speaker_kind="TOOL_RESULT",
-        speaker_name=item.tool_name or "tool_result",
-        content=content,
-        timestamp=item.meta.timestamp,
     )
 
 
@@ -259,17 +152,6 @@ def _extract_v5_planner_sources(raw_items: Any) -> tuple[set[str], List[JargonLe
                 message_ids.update(_extract_message_ids(source_item.content))
                 source_items.append(source_item)
             continue
-
-        if isinstance(item, AssistantMessageItem):
-            source_item = _build_assistant_source_item(item)
-            if source_item is not None:
-                source_items.append(source_item)
-            continue
-
-        if isinstance(item, FunctionCallOutputItem):
-            source_item = _build_tool_output_source_item(item)
-            if source_item is not None:
-                source_items.append(source_item)
 
     return message_ids, source_items
 
@@ -316,39 +198,6 @@ def build_planner_candidate(chat_id: str, planner_path: Path, index_in_chat: int
                 message_ids.update(_extract_message_ids(source_item.content))
                 source_items.append(source_item)
             continue
-
-        if role == "assistant":
-            text = _message_text(raw_message)
-            if _is_person_profile_content(text):
-                continue
-            content = _build_assistant_content(raw_message, timestamp, "planner_assistant")
-            if content:
-                source_items.append(
-                    JargonLearningSourceItem(
-                        source_kind="planner_assistant",
-                        speaker_kind="ASSISTANT",
-                        speaker_name=global_config.bot.nickname,
-                        content=content,
-                        timestamp=timestamp,
-                    )
-                )
-            continue
-
-        if role == "tool":
-            text = _message_text(raw_message)
-            if _is_person_profile_content(text):
-                continue
-            content = _build_tool_result_content(raw_message, timestamp)
-            if content:
-                source_items.append(
-                    JargonLearningSourceItem(
-                        source_kind="planner_tool_result",
-                        speaker_kind="TOOL_RESULT",
-                        speaker_name="tool_result",
-                        content=content,
-                        timestamp=timestamp,
-                    )
-                )
 
     if not message_ids or not source_items:
         return None

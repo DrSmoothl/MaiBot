@@ -6,7 +6,7 @@ from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass
 from json import dumps, loads
 from pathlib import Path
-from typing import List
+from typing import List, Sequence
 
 import asyncio
 import sys
@@ -24,9 +24,8 @@ from src.common.database.database import get_db_session
 from src.common.database.database_model import Messages
 from src.common.logger import get_logger
 from src.config.config import global_config
-from src.learners.jargon_learner import JargonLearner, jargon_learn_model
+from src.learners.jargon_learner import JargonLearner, JargonLearningSourceItem, jargon_learn_model
 from src.learners.jargon_miner import JargonMiner
-from src.llm_models.payload_content.context_item import ContextItem, ContextItemBuilder, RoleType
 from src.prompt.prompt_manager import prompt_manager
 
 logger = get_logger("jargon_segment_script")
@@ -53,55 +52,30 @@ class MessageSegment:
 class PlainTextJargonLearner(JargonLearner):
     """离线黑话学习器：直接使用数据库中的 processed_plain_text，避免重跑媒体解析。"""
 
-    async def _build_multi_learning_messages(
+    async def _prepare_learning_source_items(
         self,
-        messages: List[SessionMessage],
-        system_prompt: str,
-    ) -> List[ContextItem]:
-        learning_messages = [
-            ContextItemBuilder()
-            .set_role(RoleType.System)
-            .add_text_content(
-                f"{system_prompt}\n\n"
-                "注意：聊天记录会在后续多条 user message 中给出。每条消息内的 source_id "
-                "是本轮学习的来源编号；speaker=SELF 的消息只作为上下文，不要从 SELF 的发言中学习。"
-            )
-            .build()
-        ]
-
-        for index, message in enumerate(messages, start=1):
-            user_info = message.message_info.user_info
-            speaker_name = user_info.user_cardname or user_info.user_nickname or "未知用户"
-            speaker_kind = "SELF" if self._is_self_message(message) else "USER"
-            content = (message.processed_plain_text or "").strip() or "[空消息]"
-            learning_messages.append(
-                ContextItemBuilder()
-                .set_role(RoleType.User)
-                .add_text_content(
-                    "\n".join(
-                        [
-                            f"[source_id:{index}]",
-                            f"[speaker:{speaker_kind}]",
-                            f"[name:{speaker_name}]",
-                            f"[time:{message.timestamp.strftime('%H:%M:%S')}]",
-                            "[content]",
-                            content,
-                        ]
-                    )
-                )
-                .build()
-            )
-
-        learning_messages.append(
-            ContextItemBuilder().set_role(RoleType.User).add_text_content("请根据以上聊天消息输出 JSON。").build()
-        )
-        return learning_messages
-
-    @staticmethod
-    def _is_self_message(message: SessionMessage) -> bool:
+        messages: Sequence[SessionMessage] | Sequence[JargonLearningSourceItem],
+    ) -> List[JargonLearningSourceItem]:
         from src.chat.utils.utils import is_bot_self
 
-        return is_bot_self(message.platform, message.message_info.user_info.user_id)
+        sources: List[JargonLearningSourceItem] = []
+        for message in messages:
+            if isinstance(message, JargonLearningSourceItem):
+                sources.append(message)
+                continue
+            user_info = message.message_info.user_info
+            if is_bot_self(message.platform, user_info.user_id) or message.is_notify:
+                continue
+            # 复用已解析的正文，最终通过线上同一入口清理并过滤空消息。
+            sources.append(JargonLearningSourceItem(
+                source_kind="session",
+                speaker_kind="USER",
+                speaker_name=user_info.user_nickname or "未知用户",
+                content=message.processed_plain_text,
+                timestamp=message.timestamp,
+                original_message=message,
+            ))
+        return await super()._prepare_learning_source_items(sources)
 
 
 def _message_filters() -> list[object]:
