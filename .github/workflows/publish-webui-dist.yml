@@ -107,6 +107,9 @@ jobs:
     needs: build-and-publish
     if: github.ref_name == 'dev'
     runs-on: ubuntu-24.04
+    env:
+      # 优先从官方 PyPI 解析刚发布的包，避免镜像同步延迟。
+      UV_INDEX: https://pypi.org/simple
     permissions:
       contents: write
     steps:

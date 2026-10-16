@@ -41,6 +41,8 @@ interface TaskConfigCardProps {
   dataTour?: string
   /** 单选模型任务（如嵌入模型）用下拉单选替代多选标签列表 */
   singleModel?: boolean
+  headerContent?: React.ReactNode
+  modelContent?: React.ReactNode
 }
 
 const selectionStrategyOptions = [
@@ -76,6 +78,8 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
   hideSelectionStrategy = false,
   dataTour,
   singleModel = false,
+  headerContent,
+  modelContent,
 }: TaskConfigCardProps) {
   const temperatureInputId = React.useId()
   const timeoutInputId = React.useId()
@@ -87,15 +91,54 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
   }
 
   return (
-    <div className="space-y-3 pb-5 pt-3 sm:pb-6 sm:pt-4">
+    <div className="space-y-5">
       <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
         <h4 className="flex-none whitespace-nowrap text-base font-semibold sm:text-lg">{title}</h4>
         <p className="min-w-0 text-xs leading-relaxed text-muted-foreground sm:flex-1 sm:truncate sm:text-right sm:text-sm">{description}</p>
       </div>
 
-      <div className="grid gap-3">
+      {headerContent}
+
+      <section className="rounded-lg border bg-card" aria-label="模型">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+          <h5 className="text-sm font-semibold tracking-widest">MODELS · 模型</h5>
+          {/* 模型选择策略 */}
+          {!hideSelectionStrategy && (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Label className="whitespace-nowrap">选择策略</Label>
+              <Select
+                value={taskConfig.selection_strategy ?? 'balance'}
+                onValueChange={(value) => onChange('selection_strategy', value)}
+              >
+                <SelectTrigger className="h-9 w-full min-w-0 sm:w-48">
+                  <SelectValue placeholder="选择模型选择策略" />
+                </SelectTrigger>
+                <SelectContent>
+                  <TooltipProvider delayDuration={150}>
+                    {selectionStrategyOptions.map((option) => (
+                      <Tooltip key={option.value}>
+                        <TooltipTrigger asChild>
+                          <SelectItem value={option.value} title={option.description}>
+                            {option.label}
+                          </SelectItem>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="right"
+                          align="center"
+                          className="max-w-72 bg-background text-foreground border shadow-lg"
+                        >
+                          {option.description}
+                        </TooltipContent>
+                      </Tooltip>
+                    ))}
+                  </TooltipProvider>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
         {/* 模型列表 */}
-        <div data-tour={dataTour}>
+        <div className="space-y-4 p-4" data-tour={dataTour}>
           {singleModel ? (
             <div className="flex min-w-0 items-center gap-2">
               <Select
@@ -136,12 +179,18 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
               compact
             />
           )}
+          {modelContent}
         </div>
+      </section>
 
-        {/* 推理参数 */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-1 lg:grid-cols-4">
+      {/* 推理参数 */}
+      <section className="rounded-lg border bg-card" aria-label="参数">
+        <div className="border-b bg-muted/40 px-4 py-3">
+          <h5 className="text-sm font-semibold tracking-widest">PARAMS · 参数</h5>
+        </div>
+        <div className="grid grid-cols-1 gap-5 p-4 xl:grid-cols-3">
           {!hideTemperature && (
-            <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="flex min-w-0 flex-col items-stretch gap-3">
               <Label htmlFor={temperatureInputId} className="whitespace-nowrap">温度</Label>
               <Input
                 id={temperatureInputId}
@@ -164,7 +213,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 min={0}
                 max={2}
                 step={0.1}
-                className="hidden min-w-0 flex-1 sm:flex"
+                className="hidden min-h-9 min-w-0 sm:flex"
                 data-dashboard-slider="config"
                 data-dashboard-slider-value-format="fixed-1"
               />
@@ -172,7 +221,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
           )}
 
           {!hideMaxTokens && (
-            <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="flex min-w-0 flex-col items-stretch gap-3">
               <Label className="whitespace-nowrap">最大 Token</Label>
               <Input
                 type="number"
@@ -180,46 +229,12 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 min="1"
                 value={taskConfig.max_tokens ?? 4096}
                 onChange={(e) => onChange('max_tokens', parseInt(e.target.value))}
-                className="h-10 min-w-0 sm:h-9 sm:flex-1"
+                className="h-10 min-w-0 sm:h-9"
               />
             </div>
           )}
 
-          {/* 模型选择策略 */}
-          {!hideSelectionStrategy && (
-          <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
-            <Label className="whitespace-nowrap">选择策略</Label>
-            <Select
-              value={taskConfig.selection_strategy ?? 'balance'}
-              onValueChange={(value) => onChange('selection_strategy', value)}
-            >
-              <SelectTrigger className="h-10 min-w-0 sm:h-9 sm:flex-1">
-                <SelectValue placeholder="选择模型选择策略" />
-              </SelectTrigger>
-              <SelectContent>
-                <TooltipProvider delayDuration={150}>
-                  {selectionStrategyOptions.map((option) => (
-                    <Tooltip key={option.value}>
-                      <TooltipTrigger asChild>
-                        <SelectItem value={option.value} title={option.description}>
-                          {option.label}
-                        </SelectItem>
-                      </TooltipTrigger>
-                      <TooltipContent
-                        side="right"
-                        align="center"
-                        className="max-w-72 bg-background text-foreground border shadow-lg"
-                      >
-                        {option.description}
-                      </TooltipContent>
-                    </Tooltip>
-                  ))}
-                </TooltipProvider>
-              </SelectContent>
-            </Select>
-          </div>
-          )}
-          <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <div className="flex min-w-0 flex-col items-stretch gap-3">
             <div className="flex shrink-0 items-center gap-1.5">
               <Label htmlFor={timeoutInputId} className="whitespace-nowrap">时间上限 (秒)</Label>
               <TooltipProvider delayDuration={150}>
@@ -250,12 +265,12 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 }
               }}
               placeholder="240"
-              className="h-10 min-w-0 sm:h-9 sm:flex-1"
+              className="h-10 min-w-0 sm:h-9"
             />
           </div>
         </div>
 
-      </div>
+      </section>
     </div>
   )
 })

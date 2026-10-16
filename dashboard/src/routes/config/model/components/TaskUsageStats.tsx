@@ -47,43 +47,49 @@ export function TaskUsageStats({ taskName }: { taskName: string }) {
 
   const current = data?.task_name === taskName ? data : null
   return (
-    <section className="mt-6 min-w-0 space-y-3 border-t-2 border-border py-4" aria-label="最近使用情况">
-      {error ? (
-        <p role="alert" className="text-destructive text-sm">{error}</p>
-      ) : !current ? (
-        <p role="status" className="text-muted-foreground text-sm">正在获取使用情况…</p>
-      ) : (
-        <>
-          <p className="text-sm">最近 24 小时请求数 <span className="ml-2 text-xl font-semibold tabular-nums">{current.request_count.toLocaleString()}</span></p>
-          {current.models.length === 0 ? (
-            <p className="text-muted-foreground text-sm">最近 24 小时暂无调用记录。</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="sr-only">
-                  <tr>
-                    <th className="py-2 pr-4 font-medium">模型 / 提供商</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">平均耗时</th>
-                    <th className="whitespace-nowrap py-2 pl-3 text-right font-medium">失败率</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {current.models.map((model) => (
-                    <tr key={`${model.provider_name}/${model.model_name}/${model.model_identifier}`} className="border-b-2 border-border last:border-b-0">
-                      <td className="py-3 pr-4">
-                        <div className="break-all font-medium">{model.model_name}</div>
-                        <div className="text-muted-foreground break-all text-xs">{model.provider_name}{model.model_identifier !== model.model_name ? ` · ${model.model_identifier}` : ''}</div>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{model.avg_duration === null ? '—' : `${model.avg_duration.toFixed(2)} 秒`}</td>
-                      <td className="whitespace-nowrap py-3 pl-3 text-right tabular-nums">{(model.failure_rate * 100).toFixed(1)}%</td>
+    <section className="min-w-0 rounded-lg border bg-card" aria-label="最近使用情况">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+        <h5 className="text-sm font-semibold tracking-widest">USAGE · 用量</h5>
+        <span className="text-xs text-muted-foreground">最近 24 小时</span>
+      </div>
+      <div className="space-y-3 p-4">
+        {error ? (
+          <p role="alert" className="text-destructive text-sm">{error}</p>
+        ) : !current ? (
+          <p role="status" className="text-muted-foreground text-sm">正在获取使用情况…</p>
+        ) : (
+          <>
+            <p className="text-sm">最近 24 小时请求数 <span className="ml-2 text-xl font-semibold tabular-nums">{current.request_count.toLocaleString()}</span></p>
+            {current.models.length === 0 ? (
+              <p className="text-muted-foreground text-sm">最近 24 小时暂无调用记录。</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="sr-only">
+                    <tr>
+                      <th className="py-2 pr-4 font-medium">模型 / 提供商</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right font-medium">平均耗时</th>
+                      <th className="whitespace-nowrap py-2 pl-3 text-right font-medium">失败率</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
+                  </thead>
+                  <tbody>
+                    {current.models.map((model) => (
+                      <tr key={`${model.provider_name}/${model.model_name}/${model.model_identifier}`} className="border-b-2 border-border last:border-b-0">
+                        <td className="py-3 pr-4">
+                          <div className="break-all font-medium">{model.model_name}</div>
+                          <div className="text-muted-foreground break-all text-xs">{model.provider_name}{model.model_identifier !== model.model_name ? ` · ${model.model_identifier}` : ''}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{model.avg_duration === null ? '—' : `${model.avg_duration.toFixed(2)} 秒`}</td>
+                        <td className="whitespace-nowrap py-3 pl-3 text-right tabular-nums">{(model.failure_rate * 100).toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </section>
   )
 }

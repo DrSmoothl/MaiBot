@@ -1101,10 +1101,11 @@ function ModelConfigPageContent() {
                 </div>
               </aside>
 
-              <section className="min-h-0 min-w-0 rounded-lg border px-4 lg:col-span-3 lg:h-full lg:overflow-y-auto lg:overscroll-contain">
+              <section className="min-h-0 min-w-0 lg:col-span-3 lg:h-full lg:overflow-y-auto lg:overscroll-contain">
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.div
                     key={selectedTaskField.name}
+                    className="space-y-5 p-1"
                     data-config-field-path={`model_task_config.${selectedTaskField.name}`}
                     initial={reduceTaskMotion ? false : { opacity: 0, x: 12 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -1124,20 +1125,21 @@ function ModelConfigPageContent() {
                       showAdvancedSettings={advancedTaskSettingsVisible}
                       singleModel={selectedTaskSingleModel}
                       dataTour="task-model-select"
+                      headerContent={
+                        (selectedTaskField.name === 'planner' || selectedTaskField.name === 'replyer') && (
+                          <TaskRuntimeSummary
+                            taskName={selectedTaskField.name}
+                            modelList={taskConfig[selectedTaskField.name]?.model_list ?? []}
+                            models={models}
+                          />
+                        )
+                      }
+                      modelContent={selectedTaskField.name === 'embedding' && (
+                        <EmbeddingBuildProgress
+                          selectedEmbeddingModel={taskConfig.embedding?.model_list[0] ?? ''}
+                        />
+                      )}
                     />
-                    {selectedTaskField.name === 'embedding' && (
-                      <EmbeddingBuildProgress
-                        selectedEmbeddingModel={taskConfig.embedding?.model_list[0] ?? ''}
-                      />
-                    )}
-                    {(selectedTaskField.name === 'planner' ||
-                      selectedTaskField.name === 'replyer') && (
-                      <TaskRuntimeSummary
-                        taskName={selectedTaskField.name}
-                        modelList={taskConfig[selectedTaskField.name]?.model_list ?? []}
-                        models={models}
-                      />
-                    )}
                     <TaskUsageStats key={selectedTaskField.name} taskName={selectedTaskField.name} />
                   </motion.div>
                 </AnimatePresence>
