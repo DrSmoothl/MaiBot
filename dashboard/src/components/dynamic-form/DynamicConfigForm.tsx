@@ -501,7 +501,7 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
     <>
       {groupFieldsByRow(fields).map((row, index) => (
         <React.Fragment key={row.map((field) => field.name).join('|')}>
-          {index > 0 && <Separator className="my-1.5 bg-border/50" />}
+          {index > 0 && basePath !== 'personality' && <Separator className="my-1.5 bg-border/50" />}
           {renderRows([row])}
           {row.map((field) => {
             const fieldPath = buildFieldPath(basePath, field.name)
