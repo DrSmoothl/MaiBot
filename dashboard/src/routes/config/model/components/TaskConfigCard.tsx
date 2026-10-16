@@ -23,7 +23,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { cn } from '@/lib/utils'
 
 import type { TaskConfig } from '../types'
 
@@ -75,12 +74,11 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
   hideTemperature = false,
   hideMaxTokens = false,
   hideSelectionStrategy = false,
-  advanced = false,
-  showAdvancedSettings = false,
   dataTour,
   singleModel = false,
 }: TaskConfigCardProps) {
   const temperatureInputId = React.useId()
+  const timeoutInputId = React.useId()
   const selectedModels = taskConfig.model_list || []
   const selectedModel = selectedModels[0] ?? ''
 
@@ -89,12 +87,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
   }
 
   return (
-    <div
-      className={cn(
-        'space-y-3 pb-5 pt-3 sm:pb-6 sm:pt-4',
-        advanced && 'bg-amber-50/30 px-2 dark:bg-amber-500/10',
-      )}
-    >
+    <div className="space-y-3 pb-5 pt-3 sm:pb-6 sm:pt-4">
       <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
         <h4 className="flex-none whitespace-nowrap text-base font-semibold sm:text-lg">{title}</h4>
         <p className="min-w-0 text-xs leading-relaxed text-muted-foreground sm:flex-1 sm:truncate sm:text-right sm:text-sm">{description}</p>
@@ -146,7 +139,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
         </div>
 
         {/* 推理参数 */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-1 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-1 lg:grid-cols-4">
           {!hideTemperature && (
             <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
               <Label htmlFor={temperatureInputId} className="whitespace-nowrap">温度</Label>
@@ -194,7 +187,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
 
           {/* 模型选择策略 */}
           {!hideSelectionStrategy && (
-          <div className="col-span-2 flex min-w-0 flex-col items-stretch gap-2 sm:col-span-1 sm:flex-row sm:items-center sm:gap-3">
+          <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
             <Label className="whitespace-nowrap">选择策略</Label>
             <Select
               value={taskConfig.selection_strategy ?? 'balance'}
@@ -226,45 +219,41 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
             </Select>
           </div>
           )}
-        </div>
-
-        {showAdvancedSettings && (
-          <div className="grid gap-3 rounded-md border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10 sm:grid-cols-2">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex shrink-0 items-center gap-1.5">
-                <Label>任务硬超时 (秒)</Label>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <StreamlineIcon
-                        name="information-circle-solid"
-                        fallback={Info}
-                        className="h-3.5 w-3.5 cursor-help text-muted-foreground"
-                      />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" align="start" className="max-w-64">
-                      到达此时间会取消本次模型调用，并尝试使用任务中的下一个模型。默认值：240 秒。
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Input
-                type="number"
-                step="1"
-                min="1"
-                value={taskConfig.hard_timeout ?? ''}
-                onChange={(e) => {
-                  const value = parseInt(e.target.value)
-                  if (!isNaN(value) && value >= 1) {
-                    onChange('hard_timeout', value)
-                  }
-                }}
-                placeholder="240"
-                className="min-w-0 flex-1"
-              />
+          <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Label htmlFor={timeoutInputId} className="whitespace-nowrap">时间上限 (秒)</Label>
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <StreamlineIcon
+                      name="information-circle-solid"
+                      fallback={Info}
+                      className="h-3.5 w-3.5 cursor-help text-muted-foreground"
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="start" className="max-w-64">
+                    到达此时间会取消本次模型调用，并尝试使用任务中的下一个模型。默认值：240 秒。
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
+            <Input
+              id={timeoutInputId}
+              type="number"
+              step="1"
+              min="1"
+              value={taskConfig.hard_timeout ?? ''}
+              onChange={(e) => {
+                const value = parseInt(e.target.value)
+                if (!isNaN(value) && value >= 1) {
+                  onChange('hard_timeout', value)
+                }
+              }}
+              placeholder="240"
+              className="h-10 min-w-0 sm:h-9 sm:flex-1"
+            />
           </div>
-        )}
+        </div>
 
       </div>
     </div>
