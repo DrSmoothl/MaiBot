@@ -497,11 +497,23 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
     </>
   )
 
+  const isFullWidthControlRow = (row: FieldSchema[]) => {
+    if (row.length !== 1) return false
+    const field = row[0]
+    return field['x-layout'] !== 'inline-right' &&
+      ['input', 'number', 'password', 'select', 'textarea', undefined].includes(field['x-widget']) &&
+      ['string', 'number', 'integer', 'select', 'textarea'].includes(field.type)
+  }
+
   const renderFieldList = (fields: FieldSchema[]) => (
     <>
-      {groupFieldsByRow(fields).map((row, index) => (
+      {groupFieldsByRow(fields).map((row, index, rows) => (
         <React.Fragment key={row.map((field) => field.name).join('|')}>
-          {index > 0 && basePath !== 'personality' && <Separator className="my-1.5 bg-border/50" />}
+          {index > 0 && basePath !== 'personality' && (
+            isFullWidthControlRow(rows[index - 1]) && isFullWidthControlRow(row)
+              ? <div className="h-3" aria-hidden="true" />
+              : <Separator className="my-1.5 bg-border/50" />
+          )}
           {renderRows([row])}
           {row.map((field) => {
             const fieldPath = buildFieldPath(basePath, field.name)
