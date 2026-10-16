@@ -62,6 +62,21 @@ class Messages(SQLModel, table=True):
     # 消息发生时当前会话的生效回复频率；无法解析时为空
 
 
+class ModelTaskUsage(SQLModel, table=True):
+    """模型任务的分钟级调用汇总，包含失败尝试，不保存请求内容。"""
+
+    __tablename__ = "model_task_usage"  # type: ignore
+
+    bucket_time: datetime = Field(primary_key=True, index=True)
+    task_name: str = Field(primary_key=True, max_length=100)
+    model_name: str = Field(primary_key=True, max_length=255)
+    model_identifier: str = Field(primary_key=True, max_length=255)
+    provider_name: str = Field(primary_key=True, max_length=255)
+    request_count: int = Field(default=0)
+    failure_count: int = Field(default=0)
+    success_duration: float = Field(default=0.0)
+
+
 class ModelUsage(SQLModel, table=True):
     __tablename__ = "llm_usage"  # type: ignore
 

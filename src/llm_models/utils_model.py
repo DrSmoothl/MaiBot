@@ -65,6 +65,7 @@ from src.llm_models.payload_content.tool_option import (
     normalize_tool_options,
 )
 from src.llm_models.utils import compress_messages, llm_usage_recorder
+from src.services.model_task_usage_service import track_model_task_usage
 
 install(extra_lines=3)
 
@@ -1057,14 +1058,17 @@ class LLMOrchestrator:
                 active_request.trace_context.model_attempt += 1
                 active_request.trace_context.current_attempt_started_at = time.time()
             try:
-                if isinstance(active_request, ResponseRequest):
-                    response = await client.get_response(active_request)
-                elif isinstance(active_request, EmbeddingRequest):
-                    response = await client.get_embedding(active_request)
-                elif isinstance(active_request, ImageEmbeddingRequest):
-                    response = await client.get_image_embedding(active_request)
-                else:
-                    response = await client.get_audio_transcriptions(active_request)
+                async with track_model_task_usage(
+                    self.task_name, model_info.name, model_info.model_identifier, api_provider.name,
+                ):
+                    if isinstance(active_request, ResponseRequest):
+                        response = await client.get_response(active_request)
+                    elif isinstance(active_request, EmbeddingRequest):
+                        response = await client.get_embedding(active_request)
+                    elif isinstance(active_request, ImageEmbeddingRequest):
+                        response = await client.get_image_embedding(active_request)
+                    else:
+                        response = await client.get_audio_transcriptions(active_request)
                 self._record_success_generation_attempt(
                     api_provider=api_provider,
                     request=active_request,

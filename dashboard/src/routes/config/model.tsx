@@ -86,6 +86,7 @@ import { TaskConfigCard, ModelTable, ModelCardList } from './model/components'
 import type { ModelCreationType } from './model/components/AddModelMenu'
 import { EmbeddingBuildProgress } from './model/components/EmbeddingBuildProgress'
 import { TaskRuntimeSummary } from './model/components/TaskRuntimeSummary'
+import { TaskUsageStats } from './model/components/TaskUsageStats'
 import { TASK_CONFIGS } from './model/constants'
 import { useModelTour, useModelFetcher, useModelConfig } from './model/hooks'
 import {
@@ -1137,6 +1138,7 @@ function ModelConfigPageContent() {
                         models={models}
                       />
                     )}
+                    <TaskUsageStats key={selectedTaskField.name} taskName={selectedTaskField.name} />
                   </motion.div>
                 </AnimatePresence>
               </section>
