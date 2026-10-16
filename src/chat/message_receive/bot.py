@@ -733,7 +733,11 @@ class ChatBot:
             # print(message_data)
             # logger.debug(str(message_data))
             maim_raw_message = MessageBase.from_dict(message_data)
-            message = SessionMessage.from_maim_message(maim_raw_message)
+            # MessageBase 不保留顶层归属字段，必须从原始字典解析并传入内部消息。
+            route_key = RouteKeyFactory.from_message_dict(
+                {**message_data, "platform": maim_raw_message.message_info.platform}
+            )
+            message = SessionMessage.from_maim_message(maim_raw_message, route_key=route_key)
             await self.receive_message(message)
 
         except Exception as e:

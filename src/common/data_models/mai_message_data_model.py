@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from maim_message import (
     BaseMessageInfo as MaimBaseMessageInfo,
@@ -19,6 +19,9 @@ from src.common.data_models.message_component_data_model import MessageSequence
 from src.common.utils.utils_message import MessageUtils
 
 from . import BaseDatabaseDataModel
+
+if TYPE_CHECKING:
+    from src.platform_io.types import RouteKey
 
 
 @dataclass
@@ -126,8 +129,8 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
         )
 
     @classmethod
-    def from_maim_message(cls, message: MessageBase):
-        """从 maim_message.MessageBase 创建 MaiMessage。"""
+    def from_maim_message(cls, message: MessageBase, *, route_key: Optional["RouteKey"] = None):
+        """从 maim_message.MessageBase 创建 MaiMessage，可显式传入原消息的路由归属。"""
         msg_info = message.message_info
         assert msg_info, "MessageBase 的 message_info 不能为空"
 
@@ -163,10 +166,11 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
 
         add_cfg = msg_info.additional_config or {}
         obj.message_info = MessageInfo(user_info=user_info, group_info=group_info, additional_config=add_cfg)
-        # 暂时兼容 maim_message 的旧归属格式；下个版本移除旧字段读取。
-        from src.platform_io.route_key_factory import RouteKeyFactory
+        if route_key is None:
+            # 暂时兼容 maim_message 的旧归属格式；下个版本移除旧字段读取。
+            from src.platform_io.route_key_factory import RouteKeyFactory
 
-        route_key = RouteKeyFactory.from_session_message(obj)
+            route_key = RouteKeyFactory.from_session_message(obj)
         obj.account_id = route_key.account_id
         obj.scope = route_key.scope
         return obj
