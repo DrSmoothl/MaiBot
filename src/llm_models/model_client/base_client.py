@@ -8,6 +8,7 @@ import time
 import uuid
 
 from src.common.logger import get_logger
+from src.common.startup_diagnostics import diagnostic_stage
 from src.config.config import config_manager
 from src.config.model_configs import APIProvider, ModelInfo
 from src.llm_models.payload_content.context_item import (
@@ -657,14 +658,16 @@ class ClientRegistry:
         # 如果强制创建新实例，直接创建不使用缓存
         if force_new:
             if registration := self.client_registry.get(api_provider.client_type):
-                return registration.factory(api_provider)
+                with diagnostic_stage(f"llm.client_create:{api_provider.client_type}"):
+                    return registration.factory(api_provider)
             raise KeyError(f"'{api_provider.client_type}' 类型的 Client 未注册")
 
         # 异步 HTTP 客户端绑定创建它的事件循环，同一循环内按 Provider 复用。
         cache_key = self._get_client_cache_key(api_provider)
         if cache_key not in self.client_instance_cache:
             if registration := self.client_registry.get(api_provider.client_type):
-                self.client_instance_cache[cache_key] = registration.factory(api_provider)
+                with diagnostic_stage(f"llm.client_create:{api_provider.client_type}"):
+                    self.client_instance_cache[cache_key] = registration.factory(api_provider)
             else:
                 raise KeyError(f"'{api_provider.client_type}' 类型的 Client 未注册")
         return self.client_instance_cache[cache_key]

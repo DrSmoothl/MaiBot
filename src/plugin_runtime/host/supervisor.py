@@ -1888,6 +1888,8 @@ class PluginRunnerSupervisor:
             env["PYTHONPATH"] = local_sdk_pythonpath
             self._logger.info(f"Runner 将优先使用本地插件 SDK: {env.get(ENV_LOCAL_PLUGIN_SDK_PATH)}")
 
+        spawn_started_at = time.monotonic()
+        self._logger.info("开始拉起 Runner 子进程")
         self._runner_process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
@@ -1903,7 +1905,10 @@ class PluginRunnerSupervisor:
                 name="PluginRunnerSupervisor.stderr",
             )
 
-        self._logger.debug(f"Runner 已拉起，pid={self._runner_process.pid}")
+        self._logger.info(
+            f"Runner 已拉起，pid={self._runner_process.pid} "
+            f"耗时={time.monotonic() - spawn_started_at:.3f}s returncode={self._runner_process.returncode}"
+        )
 
     async def _drain_runner_stderr(self, stream: asyncio.StreamReader) -> None:
         """持续排空 Runner 的 stderr。
@@ -1988,12 +1993,20 @@ class PluginRunnerSupervisor:
                     with contextlib.suppress(Exception):
                         await asyncio.wait_for(process.wait(), timeout=kill_timeout_sec)
 
+        self._logger.info(f"Runner 退出: pid={process.pid} returncode={process.returncode} reason={reason}")
         self._runner_process = None
 
         if self._stderr_drain_task is not None:
-            self._stderr_drain_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._stderr_drain_task
+            if process.returncode is not None:
+                # 已退出进程的 stderr 可能仍有缓冲；立即 cancel 会丢失最关键的异常堆栈。
+                try:
+                    await asyncio.wait_for(self._stderr_drain_task, timeout=1.0)
+                except asyncio.TimeoutError:
+                    self._logger.warning("Runner 已退出，但等待 stderr 排空超时")
+            else:
+                self._stderr_drain_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._stderr_drain_task
             self._stderr_drain_task = None
 
         for plugin_id in list(self._message_gateway_states.keys()):

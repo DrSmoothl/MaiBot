@@ -286,7 +286,7 @@ class RPCServer:
                 self._logger.debug("Runner staged 握手成功")
                 self._connection = conn
         except Exception as e:
-            self._logger.error(f"握手失败: {e}")
+            self._logger.error(f"握手失败: {type(e).__name__}: {e}", exc_info=True)
             await conn.close()
             return
 

@@ -2663,7 +2663,16 @@ def main() -> None:
     """进程入口（python -m src.plugin_runtime.runner.runner_main）"""
     initialize_logging(verbose=False)
     _disable_runner_console_logging()
-    asyncio.run(_async_main())
+    logger.info(
+        f"Runner 进程启动: pid={os.getpid()} group={os.environ.get(ENV_RUNNER_GROUP, 'unknown')} "
+        f"python={sys.version.split()[0]} platform={sys.platform}"
+    )
+    try:
+        asyncio.run(_async_main())
+    except Exception:
+        # 握手前 IPC 日志尚未接通，必须先把完整异常写入 Runner 自己的日志文件。
+        logger.exception("Runner 进程异常退出")
+        raise
 
 
 if __name__ == "__main__":
