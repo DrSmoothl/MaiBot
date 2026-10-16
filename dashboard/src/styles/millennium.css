@@ -1990,6 +1990,41 @@
 
 /* ---------- 模型管理 ---------- */
 
+/* 控件使用单层 2px 实体边框，键帽阴影只绘制底座和高光，不再叠一圈深色线。 */
+:root[data-dashboard-style='millennium'] [data-model-config-page='true'] {
+  --mil-keycap: inset 0 -5px 0 var(--mil-key-side), inset 2px 2px 0 var(--mil-key-hi);
+  --mil-pressed: inset 0 -2px 0 var(--mil-on-side);
+}
+
+:root[data-dashboard-style='millennium'] [data-model-config-page='true'] :is(
+  [data-dashboard-button='true']:is(.border-input, .bg-secondary, .bg-primary, .bg-destructive),
+  [data-dashboard-tabs-trigger='true'],
+  [data-dashboard-input='true'],
+  [data-dashboard-select-trigger='true']
+) {
+  border: 2px solid var(--mil-line);
+}
+
+:root[data-dashboard-style='millennium'] [data-model-config-page='true']
+  [data-dashboard-button='true']:is(.border-input, .bg-secondary, .bg-primary, .bg-destructive) {
+  box-shadow: var(--mil-keycap);
+}
+
+:root[data-dashboard-style='millennium'] [data-model-config-page='true']
+  [data-dashboard-button='true'].bg-primary {
+  box-shadow: inset 0 -5px 0 var(--mil-hot-side), inset 2px 2px 0 rgb(255 255 255 / 0.28);
+}
+
+:root[data-dashboard-style='millennium'] [data-model-config-page='true']
+  [data-dashboard-button='true'].bg-destructive {
+  box-shadow: inset 0 -5px 0 var(--mil-danger-side), inset 2px 2px 0 rgb(255 255 255 / 0.2);
+}
+
+:root[data-dashboard-style='millennium'] [data-model-config-page='true']
+  [data-dashboard-button='true']:is(.border-input, .bg-secondary, .bg-primary, .bg-destructive):not(:disabled):active {
+  box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.22);
+}
+
 /* 这一页的通用规则会把标签、输入框和表格都压成透明底；千禧下恢复成键帽和屏幕 */
 :root[data-dashboard-style='millennium']
   [data-dashboard-shell='true']

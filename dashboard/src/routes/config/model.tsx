@@ -1001,15 +1001,16 @@ function ModelConfigPageContent() {
                 <div className="flex items-center justify-between gap-2 border-b px-3 py-2.5">
                   <h2 className="text-sm font-semibold">模型类别</h2>
                   {taskConfigSchema.fields.some((field) => field.advanced) && (
-                    <Button
-                      type="button"
-                      variant={advancedTaskSettingsVisible ? 'default' : 'outline'}
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => setAdvancedTaskSettingsVisible((current) => !current)}
-                    >
-                      高级设置
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Label htmlFor="advanced-task-settings" className="cursor-pointer whitespace-nowrap text-xs">
+                        高级设置
+                      </Label>
+                      <Switch
+                        id="advanced-task-settings"
+                        checked={advancedTaskSettingsVisible}
+                        onCheckedChange={setAdvancedTaskSettingsVisible}
+                      />
+                    </div>
                   )}
                 </div>
                 {/* 移动端用紧凑选择器，避免类别列表占满屏幕并接管页面纵向滚动。 */}
@@ -1101,11 +1102,11 @@ function ModelConfigPageContent() {
                 </div>
               </aside>
 
-              <section className="min-h-0 min-w-0 lg:col-span-3 lg:h-full lg:overflow-y-auto lg:overscroll-contain">
+              <section className="min-h-0 min-w-0 overflow-x-clip lg:col-span-3 lg:h-full lg:overflow-hidden">
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.div
                     key={selectedTaskField.name}
-                    className="space-y-5 p-1"
+                    className="flex min-h-0 flex-col gap-3 p-1 lg:h-full lg:overflow-hidden"
                     data-config-field-path={`model_task_config.${selectedTaskField.name}`}
                     initial={reduceTaskMotion ? false : { opacity: 0, x: 12 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -1125,22 +1126,27 @@ function ModelConfigPageContent() {
                       showAdvancedSettings={advancedTaskSettingsVisible}
                       singleModel={selectedTaskSingleModel}
                       dataTour="task-model-select"
-                      headerContent={
-                        (selectedTaskField.name === 'planner' || selectedTaskField.name === 'replyer') && (
-                          <TaskRuntimeSummary
-                            taskName={selectedTaskField.name}
-                            modelList={taskConfig[selectedTaskField.name]?.model_list ?? []}
-                            models={models}
-                          />
-                        )
-                      }
                       modelContent={selectedTaskField.name === 'embedding' && (
                         <EmbeddingBuildProgress
                           selectedEmbeddingModel={taskConfig.embedding?.model_list[0] ?? ''}
                         />
                       )}
                     />
-                    <TaskUsageStats key={selectedTaskField.name} taskName={selectedTaskField.name} />
+                    {(taskConfig[selectedTaskField.name]?.model_list.length ?? 0) > 0 && (
+                      <TaskUsageStats
+                        key={selectedTaskField.name}
+                        taskName={selectedTaskField.name}
+                        summary={
+                          (selectedTaskField.name === 'planner' || selectedTaskField.name === 'replyer') && (
+                            <TaskRuntimeSummary
+                              taskName={selectedTaskField.name}
+                              modelList={taskConfig[selectedTaskField.name]?.model_list ?? []}
+                              models={models}
+                            />
+                          )
+                        }
+                      />
+                    )}
                   </motion.div>
                 </AnimatePresence>
               </section>
