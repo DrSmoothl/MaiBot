@@ -955,6 +955,19 @@ class ExperimentalConfig(ConfigBase):
     )
     """Planner 改用优化版提示词：以“你的名字是……”的第二人称描述麦麦自己，去掉“替麦麦做决策”的旁观者设定并精简任务说明。Focus 模式仍使用原提示词。"""
 
+    planner_stop_tool: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "使用 stop() 工具",
+                "en_US": "Use stop() tool",
+                "ja_JP": "stop() ツールを使用",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """给 Planner 提供无参数的 stop() 工具，调用后结束本轮思考并等待新消息，与不输出任何工具时一致。"""
+
     planner_unsent_reply_retry: bool = Field(
         default=False,
         json_schema_extra={

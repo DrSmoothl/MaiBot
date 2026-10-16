@@ -27,6 +27,8 @@ from .send_emoji import get_tool_spec as get_send_emoji_tool_spec
 from .send_emoji import handle_tool as handle_send_emoji_tool
 from .show_emoji_list import get_tool_spec as get_show_emoji_list_tool_spec
 from .show_emoji_list import handle_tool as handle_show_emoji_list_tool
+from .stop import get_tool_spec as get_stop_tool_spec
+from .stop import handle_tool as handle_stop_tool
 from .subagent import get_status_tool_spec as get_subagent_status_tool_spec
 from .subagent import get_stop_tool_spec as get_subagent_stop_tool_spec
 from .subagent import get_tool_spec as get_subagent_tool_spec
@@ -92,6 +94,7 @@ def _get_query_image_memory_tool_spec() -> ToolSpec:
 
 BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
     BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="both"),
+    BuiltinToolEntry("stop", get_stop_tool_spec, handle_stop_tool, stage="action"),
     BuiltinToolEntry("reply", get_reply_tool_spec, handle_reply_tool, stage="action"),
     BuiltinToolEntry(
         "view_forward_message",
@@ -165,6 +168,8 @@ def _is_builtin_tool_enabled_by_config(entry: BuiltinToolEntry) -> bool:
         return bool(global_config.experimental.focus_mode)
     if entry.name == "subagent":
         return global_config.experimental.planner_subagent
+    if entry.name == "stop":
+        return global_config.experimental.planner_stop_tool
     if entry.name in {"subagent_status", "subagent_stop"}:
         # 只有后台子代理才有需要查看和终止的任务
         return global_config.experimental.planner_subagent and global_config.experimental.advanced_sub_agent

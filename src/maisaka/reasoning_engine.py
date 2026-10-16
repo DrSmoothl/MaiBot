@@ -726,6 +726,8 @@ class MaisakaReasoningEngine:
                 "tool_stop_after_execution",
                 "插件工具请求在当前批次执行完成后结束 Planner，并等待新消息。",
             )
+        if pause_tool_name == "stop":
+            return CycleEnd("planner_no_tool_end", "Planner 调用 stop，已结束本轮思考并等待新消息。")
         if pause_tool_name == "wait":
             return CycleEnd("tool_pause:wait", "Planner 调用 wait，本轮暂停并在等待结束后继续判断。")
         if pause_tool_name == "wait_rest":

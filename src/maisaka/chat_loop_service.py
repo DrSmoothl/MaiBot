@@ -826,6 +826,7 @@ class MaisakaChatLoopService:
             "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
             "query_memory_rule": self._build_query_memory_rule(),
             "subagent_rule": self._build_subagent_rule(),
+            "stop_rule": self._build_stop_rule(),
         }
 
     @staticmethod
@@ -902,6 +903,19 @@ class MaisakaChatLoopService:
                 "en-US": '- query_memory(): Consider retrieval more actively when the other person mentions signals like "before", "last time", "recently", "do you remember", "I like", or "I said", or when the reply depends on long-term preferences, prior promises, shared experiences, or long-term information about a person.',
                 "ja-JP": "- query_memory()：相手が「前に」「この前」「最近」「覚えてる？」「好き」「言った」などの合図を出した場合、または返信が長期的な好み、以前の約束、共有した経験、人物の長期的な情報に依存する場合は、より積極的に検索を検討できます。",
                 "zh-CN": "- query_memory()：当对方提到“之前”“上次”“最近”“还记得吗”“我喜欢”“我说过”等信号，或回复依赖长期偏好、先前承诺、共同经历、人物长期信息时，可以更积极检索。",
+            }
+        )
+
+    def _build_stop_rule(self) -> str:
+        """开启 stop 工具时，说明它可显式替代无工具输出的结束方式。"""
+
+        if not global_config.experimental.planner_stop_tool:
+            return ""
+        return "\n" + self._localized_text(
+            {
+                "en-US": "- stop(): As an exception to the no-tool rule above, you can call stop() with no arguments to explicitly end this thinking round and wait for new messages. It has the same effect as calling no tools; it sends no reply and schedules no timed wait. Call it alone, after completing any other actions.",
+                "ja-JP": "- stop()：上記のツールを使わない終了方法の例外として、引数なしの stop() でこの思考を明示的に終了し、新しいメッセージを待つこともできます。ツールを呼ばずに終了する場合と同じで、返信の送信や時間指定の待機は行いません。他の操作を完了してから単独で呼んでください。",
+                "zh-CN": "- stop()：作为上述不使用工具结束方式的例外，也可以调用无参数的 stop() 显式结束本轮思考并等待新消息，效果与不输出任何工具一致，不发送回复，也不设置定时等待。请在其他操作完成后单独调用。",
             }
         )
 
