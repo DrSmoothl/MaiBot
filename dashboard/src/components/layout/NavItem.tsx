@@ -1,6 +1,6 @@
 import { Link, useMatchRoute } from '@tanstack/react-router'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -15,6 +15,9 @@ interface NavItemProps {
   item: MenuItem
   sidebarOpen: boolean
   expandOnHover?: boolean
+  groupFlyoutWidth?: number
+  groupFlyoutId?: string
+  onGroupFlyoutClose?: () => void
   onMobileMenuClose: () => void
 }
 
@@ -22,6 +25,9 @@ export function NavItem({
   item,
   sidebarOpen,
   expandOnHover = false,
+  groupFlyoutWidth,
+  groupFlyoutId,
+  onGroupFlyoutClose,
   onMobileMenuClose,
 }: NavItemProps) {
   const { t } = useTranslation()
@@ -43,6 +49,18 @@ export function NavItem({
   const pressStartedRef = useRef(false)
   const clickDeliveredRef = useRef(false)
 
+  const closeFlyout = useCallback(() => {
+    setFlyoutRect(null)
+    onGroupFlyoutClose?.()
+  }, [onGroupFlyoutClose])
+
+  // 分组统一控制展开；每个按钮仍以自己的原位坐标绘制，保留原有点击与动画逻辑。
+  useLayoutEffect(() => {
+    if (!onGroupFlyoutClose) return
+    const link = itemRef.current?.firstElementChild
+    setFlyoutRect(groupFlyoutWidth !== undefined && link ? link.getBoundingClientRect() : null)
+  }, [groupFlyoutWidth, onGroupFlyoutClose])
+
   const handleFlyoutScroll = useCallback(() => {
     const node = flyoutRef.current
     const link = itemRef.current?.firstElementChild
@@ -52,8 +70,8 @@ export function NavItem({
       node.style.left = `${rect.left - 6}px`
       node.style.top = `${rect.top - 6}px`
     }
-    setFlyoutRect(null)
-  }, [])
+    closeFlyout()
+  }, [closeFlyout])
 
   const handleFlyoutWheel = useCallback((event: WheelEvent) => {
     if (event.ctrlKey || event.deltaY === 0) return
@@ -88,7 +106,7 @@ export function NavItem({
   }, [handleFlyoutScroll, handleFlyoutWheel])
 
   const openFlyout = () => {
-    if (expandOnHover && window.matchMedia('(min-width: 1024px)').matches) {
+    if (!onGroupFlyoutClose && expandOnHover && window.matchMedia('(min-width: 1024px)').matches) {
       const link = itemRef.current?.firstElementChild
       if (link) setFlyoutRect(link.getBoundingClientRect())
     }
@@ -150,11 +168,11 @@ export function NavItem({
     className: linkClassName,
     onClick: () => {
       clickDeliveredRef.current = true
-      setFlyoutRect(null)
+      closeFlyout()
       onMobileMenuClose()
     },
     onKeyDown: (event: KeyboardEvent<HTMLAnchorElement>) => {
-      if (event.key === 'Escape') setFlyoutRect(null)
+      if (event.key === 'Escape') closeFlyout()
     },
   } as const
 
@@ -179,7 +197,7 @@ export function NavItem({
       // 动画直接改变键帽本身的宽度，四周边框和底边随之重绘，不再裁断右边缘。
       const animationProps = {
         initial: { width: flyoutRect.width },
-        animate: { width: 'auto' },
+        animate: { width: groupFlyoutWidth ?? 'auto' },
         exit: { width: flyoutRect.width },
         transition: flyoutTransition,
       }
@@ -211,7 +229,9 @@ export function NavItem({
       onPointerEnter={(event) => {
         if (event.pointerType === 'mouse') openFlyout()
       }}
-      onPointerLeave={() => setFlyoutRect(null)}
+      onPointerLeave={() => {
+        if (!onGroupFlyoutClose) setFlyoutRect(null)
+      }}
       onPointerDown={(event) => {
         const onNavLink = (event.target as Element).closest('[data-dashboard-nav-item]') !== null
         pressStartedRef.current = event.button === 0 && onNavLink
@@ -242,7 +262,7 @@ export function NavItem({
       }}
       onFocus={openFlyout}
       onBlur={(event) => {
-        if (!itemRef.current?.contains(event.relatedTarget) && !flyoutRef.current?.contains(event.relatedTarget)) {
+        if (!onGroupFlyoutClose && !itemRef.current?.contains(event.relatedTarget) && !flyoutRef.current?.contains(event.relatedTarget)) {
           setFlyoutRect(null)
         }
       }}
@@ -256,6 +276,7 @@ export function NavItem({
               <motion.div
                 key={item.path}
                 ref={setFlyoutRef}
+                data-dashboard-sidebar-group={groupFlyoutId}
                 className="fixed z-[60] p-[6px] max-lg:hidden"
                 style={{ left: flyoutRect.left - 6, top: flyoutRect.top - 6 }}
                 // 外层只定位并保留键帽阴影，收回时等待内部按钮的宽度动画结束。
