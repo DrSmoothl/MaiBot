@@ -4997,17 +4997,30 @@ class DebugConfig(ConfigBase):
     """在交互式终端中启用本地消息和指令输入。"""
 
     show_maisaka_thinking: bool = Field(
-        default=True,
+        default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "显示思考过程",
-                "en_US": "Show thinking process",
-                "ja_JP": "思考過程を表示",
+                "zh_CN": "显示终端思考大框",
+                "en_US": "Show thinking panels in terminal",
+                "ja_JP": "ターミナルに思考パネルを表示",
             },
             "x-widget": "switch",
         },
     )
-    """在日志或界面中显示麦麦的思考过程。"""
+    """在终端显示思考过程大框，不影响推理记录保存和 WebUI 查看。"""
+
+    save_maisaka_reasoning: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "保存推理记录",
+                "en_US": "Save reasoning records",
+                "ja_JP": "推論記録を保存",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """保存 Planner、工具调用及聊天回想的完整推理记录，供 WebUI 查看，与终端显示独立。"""
 
     enable_reply_effect_tracking: bool = Field(
         default=False,

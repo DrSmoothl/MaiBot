@@ -10,6 +10,7 @@ from typing import Any, Sequence
 from json_repair import repair_json
 from pydantic import BaseModel
 
+import asyncio
 import json
 import re
 
@@ -161,7 +162,8 @@ async def build_mid_term_memory_message(
         return request_prompt_messages
 
     result = await llm_client.generate_response_with_context(context_factory)
-    _save_mid_term_memory_prompt_preview(
+    await asyncio.to_thread(
+        _save_mid_term_memory_prompt_preview,
         request_prompt_messages,
         result=result,
         session_id=session_id,
@@ -474,7 +476,7 @@ def _save_mid_term_memory_prompt_preview(
 ) -> None:
     """保存聊天回想生成 Prompt 到 Maisaka Prompt 预览目录。"""
 
-    if not global_config.debug.show_maisaka_thinking:
+    if not global_config.debug.save_maisaka_reasoning:
         return
     if not request_prompt_messages:
         return

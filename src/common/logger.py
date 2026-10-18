@@ -114,7 +114,7 @@ def initialize_ws_handler(loop):
     root_logger = logging.getLogger()
     if handler not in root_logger.handlers:
         root_logger.addHandler(handler)
-        print("[日志系统] ✅ WebSocket 日志推送已启用")
+        get_logger("logger").debug("WebSocket 日志推送已启用")
 
 
 class TimestampedFileHandler(logging.Handler):

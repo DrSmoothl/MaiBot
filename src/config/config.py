@@ -69,7 +69,7 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.15.6"
+CONFIG_VERSION: str = "8.15.7"
 MODEL_CONFIG_VERSION: str = "1.17.17"
 
 logger = get_logger("config")
@@ -657,7 +657,7 @@ class ConfigManager:
             paths=[self.bot_config_path, self.model_config_path, policy_path],
         )
         await self._file_watcher.start()
-        logger.info(t("config.file_watcher_started"))
+        logger.debug(t("config.file_watcher_started"))
 
     async def stop_file_watcher(self) -> None:
         if self._file_watcher is None:

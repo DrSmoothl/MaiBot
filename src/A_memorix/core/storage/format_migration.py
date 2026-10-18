@@ -620,7 +620,7 @@ def run_startup_format_migration(data_dir: Path) -> Dict[str, Any]:
             summary["vectors"] = [dict(item) for item in work["vectors"]]
             summary["graph"] = dict(work["graph"])
             summary["finished_at"] = time.time()
-            logger.info(
+            logger.debug(
                 "A_Memorix 无需执行存储格式迁移: "
                 f"reason={summary['sqlite']['reason']}, "
                 f"duration={summary['finished_at'] - started_at:.2f}s"

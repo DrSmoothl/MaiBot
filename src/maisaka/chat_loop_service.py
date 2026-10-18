@@ -1377,20 +1377,22 @@ class MaisakaChatLoopService:
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
         }
-        prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
-            built_messages,
-            category=self._resolve_prompt_preview_category(request_kind),
-            chat_id=self._session_id,
-            request_kind=request_kind,
-            selection_reason=prompt_selection_reason,
-            tool_definitions=list(all_tools),
-            output_items=final_output_items,
-            metadata=prompt_metadata,
-            generation_attempts=generation_result.generation_attempts,
-        )
-        prompt_html_uri = prompt_section_result.preview_access.preview_web_uri
-        if global_config.debug.show_maisaka_thinking:
-            prompt_section = prompt_section_result.panel
+        if global_config.debug.save_maisaka_reasoning:
+            prompt_section_result = await asyncio.to_thread(
+                PromptCLIVisualizer.build_prompt_section_result,
+                built_messages,
+                category=self._resolve_prompt_preview_category(request_kind),
+                chat_id=self._session_id,
+                request_kind=request_kind,
+                selection_reason=prompt_selection_reason,
+                tool_definitions=list(all_tools),
+                output_items=final_output_items,
+                metadata=prompt_metadata,
+                generation_attempts=generation_result.generation_attempts,
+            )
+            prompt_html_uri = prompt_section_result.preview_access.preview_web_uri
+            if global_config.debug.show_maisaka_thinking:
+                prompt_section = prompt_section_result.panel
 
         return ChatResponse(
             output_items=tuple(final_output_items),

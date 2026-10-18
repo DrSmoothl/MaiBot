@@ -956,7 +956,7 @@ class ExpressionVectorIndex:
                     candidate_profile=candidate_profile,
                 )
                 self._profile_cache = (time.monotonic(), profile, configured_identity)
-                logger.info(
+                logger.debug(
                     f"表达向量 embedding profile 已标定: marker={profile.marker[:12]} "
                     f"model={profile.model_name} identifier={profile.model_identifier} "
                     f"provider={profile.api_provider} dimension={profile.dimension} revision={profile.revision}"
@@ -3048,7 +3048,7 @@ class ExpressionVectorIndex:
                 if self._history_backfill_wakeup.is_set():
                     continue
                 self._history_backfill_last_empty_at = time.monotonic()
-                logger.info(
+                logger.debug(
                     f"表达向量历史补建已完成当前可用项: index={resolved_index_path} "
                     f"profile={current_profile.marker[:12]} deferred={selection.deferred_count} "
                     f"isolated={selection.isolated_count}"

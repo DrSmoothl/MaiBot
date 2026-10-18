@@ -976,6 +976,8 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         self, result: ReplyGenerationResult, *, stream_id: Optional[str], reply_reason: str
     ) -> None:
         """在持久化边界统一收集图片，返回给监控的数据不携带大块图片编码。"""
+        if not global_config.debug.save_maisaka_reasoning:
+            return
         if result.request_messages or result.output_items:
             # 同一次保存收集请求和输出图片，监控结果只保留已提交保存的图片引用。
             preview = PromptCLIVisualizer.build_prompt_preview_access(

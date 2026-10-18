@@ -910,7 +910,12 @@ class MaisakaReasoningEngine:
             cycle_end = self._cycle_end_for_max_rounds(self._runtime._max_internal_rounds)
 
         response = state.response
+        # 记录先在线程中保存并回填监控数据，终端开关仅影响后续打印。
+        tool_prompt_panels = await asyncio.to_thread(
+            self._runtime._prepare_tool_prompt_records, state.tool_monitor_results
+        )
         self._runtime._render_context_usage_panel(
+            tool_prompt_panels=tool_prompt_panels,
             cycle_id=cycle_detail.cycle_id,
             time_records=dict(completed_cycle.time_records),
             planner_selected_history_count=response.selected_history_count if response is not None else None,
