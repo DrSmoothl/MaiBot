@@ -567,7 +567,7 @@
 
 /* Future Retro dashboard style */
 :root[data-dashboard-style='future-retro'] {
-  --retro-paper-warmth: 100%;
+  --retro-paper-warmth: 89%;
   --retro-panel-depth: 1;
   --retro-stroke-scale: 1;
   --retro-paper: color-mix(in srgb, #fff, #f3e3cc var(--retro-paper-warmth));
@@ -762,6 +762,49 @@
   opacity: 0.92;
 }
 
+@keyframes future-retro-activity-blink {
+  0%, 33.333% {
+    opacity: 1;
+  }
+  33.334%, 100% {
+    opacity: 0.25;
+  }
+}
+
+:root[data-dashboard-style='future-retro'] [data-maibot-activity-orbit='true'] {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 4px;
+}
+
+:root[data-dashboard-style='future-retro'] [data-maibot-activity-orbit='true'] > span {
+  position: static;
+  width: 100%;
+  height: 10px;
+  border: 0;
+  border-radius: 0;
+  background: currentColor;
+  animation: none;
+}
+
+:root[data-dashboard-style='future-retro'] [data-maibot-activity-orbit='true'][data-state='running'] > span {
+  animation: future-retro-activity-blink 1.8s steps(1, end) infinite;
+}
+
+:root[data-dashboard-style='future-retro'] [data-maibot-activity-orbit='true'][data-state='running'] > span:nth-child(2) {
+  animation-delay: -1.2s;
+}
+
+:root[data-dashboard-style='future-retro'] [data-maibot-activity-orbit='true'][data-state='running'] > span:nth-child(3) {
+  animation-delay: -0.6s;
+}
+
+:root.no-animations[data-dashboard-style='future-retro'] [data-maibot-activity-orbit='true'] > span {
+  animation: none;
+}
+
 :root[data-dashboard-style='future-retro'] [data-home-version-button='true'] {
   margin: -0.25rem -0.375rem;
   padding: 0.25rem 0.375rem;
@@ -792,7 +835,7 @@
   position: absolute;
   top: 50%;
   left: 0;
-  width: calc(100% + 64px);
+  width: calc(100% + 100vw);
   height: 180px;
   overflow: visible;
   pointer-events: none;

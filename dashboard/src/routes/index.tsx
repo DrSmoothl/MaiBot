@@ -1017,9 +1017,9 @@ const IndexPageContent = memo(function IndexPageContent({ botVersion }: { botVer
               viewBox="0 0 1100 180"
               preserveAspectRatio="none"
             >
-              <path data-spectrum-line="green" d="M0 84 H740 C850 84 880 18 1010 18 H1100" />
+              <path data-spectrum-line="green" d="M0 84 H1100" />
               <path data-spectrum-line="gold" d="M0 90 H1100" />
-              <path data-spectrum-line="orange" d="M0 96 H740 C850 96 880 162 1010 162 H1100" />
+              <path data-spectrum-line="orange" d="M0 96 H1100" />
             </svg>
           </span>
         </div>
