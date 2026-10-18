@@ -50,6 +50,7 @@ from src.maisaka.context.message_adapter import (
 from src.maisaka.context.messages import (
     LLMContextMessage,
     ModelOutputContextMessage,
+    ContentContextMessage,
     SessionBackedMessage,
     build_context_items_from_history_entry,
 )
@@ -139,11 +140,7 @@ class RetroReplyPromptMixin:
                         and message_index in visual_parts
                         and message.message_id == reply_message.message_id
                     ):
-                        if message.original_message is not None:
-                            reply_message = message.original_message
-                        else:
-                            reply_message = copy(reply_message)
-                            reply_message.raw_message = message.raw_message
+                        reply_message = message.original_message
                         break
         prompt_name = self._select_retro_prompt_name(
             reply_message=reply_message,
@@ -177,11 +174,11 @@ class RetroReplyPromptMixin:
             history_by_id = {
                 message.message_id: message
                 for message in chat_history
-                if isinstance(message, SessionBackedMessage) and message.message_id
+                if isinstance(message, ContentContextMessage) and message.message_id
             }
             history_started = False
             for message_index, message in enumerate(chat_history):
-                if not isinstance(message, SessionBackedMessage):
+                if not isinstance(message, ContentContextMessage):
                     continue
                 history_line = self._render_retro_history_line(message, history_by_id)
                 if not history_line:
@@ -212,7 +209,7 @@ class RetroReplyPromptMixin:
 
         candidates: List[Tuple[int, int, ContextImagePart]] = []
         for message_index, message in enumerate(chat_history):
-            if not isinstance(message, SessionBackedMessage):
+            if not isinstance(message, ContentContextMessage):
                 continue
             media_index = -1
             for component in message.raw_message.components:
@@ -258,23 +255,24 @@ class RetroReplyPromptMixin:
 
         rendered_history: List[LLMContextMessage] = []
         for message_index, message in enumerate(chat_history):
-            if not isinstance(message, SessionBackedMessage) or message_index not in visual_indices:
+            if not isinstance(message, ContentContextMessage) or message_index not in visual_indices:
                 rendered_history.append(message)
                 continue
             sent_indices = visual_indices[message_index]
             sequence = without_visual_descriptions(message.raw_message, sent_indices)
-            original = message.original_message
-            if original is not None:
-                original = copy(original)
+            if isinstance(message, SessionBackedMessage):
+                original = copy(message.original_message)
                 original.raw_message = without_visual_descriptions(original.raw_message, sent_indices)
-                visible_text = build_session_message_visible_text(original)
+                rendered_history.append(replace(
+                    message, raw_message=sequence, original_message=original,
+                    visible_text=build_session_message_visible_text(original),
+                ))
             else:
-                speaker, _ = parse_speaker_content(message.processed_plain_text)
+                speaker, _ = parse_speaker_content(message.visible_text)
                 _, content = parse_speaker_content(build_visible_text_from_sequence(sequence))
-                visible_text = format_speaker_content(speaker or "", content)
-            rendered_history.append(
-                replace(message, raw_message=sequence, original_message=original, visible_text=visible_text)
-            )
+                rendered_history.append(replace(
+                    message, raw_message=sequence, visible_text=format_speaker_content(speaker or "", content),
+                ))
         return rendered_history, visual_parts
 
     def _select_retro_prompt_name(
@@ -402,7 +400,7 @@ class RetroReplyPromptMixin:
         history_by_id = {
             message.message_id: message
             for message in (chat_history or [])
-            if isinstance(message, SessionBackedMessage) and message.message_id
+            if isinstance(message, ContentContextMessage) and message.message_id
         }
         references = self._build_retro_references(reply_message.raw_message, history_by_id)
         target_content = self._normalize_content(
@@ -428,7 +426,7 @@ class RetroReplyPromptMixin:
         history_by_id = {
             message.message_id: message
             for message in chat_history
-            if isinstance(message, SessionBackedMessage) and message.message_id
+            if isinstance(message, ContentContextMessage) and message.message_id
         }
 
         for message in chat_history:
@@ -442,22 +440,16 @@ class RetroReplyPromptMixin:
     def _render_retro_history_line(
         self,
         message: LLMContextMessage,
-        history_by_id: Optional[Dict[str, SessionBackedMessage]] = None,
+        history_by_id: Optional[Dict[str, ContentContextMessage]] = None,
     ) -> str:
         """渲染历史正文与引用关系，引用图片优先使用上下文中的最新描述。"""
 
-        if not isinstance(message, SessionBackedMessage):
+        if not isinstance(message, ContentContextMessage):
             return ""
 
-        speaker, content = parse_speaker_content(message.processed_plain_text)
-        original = message.original_message
-        if original is not None:
-            speaker, content = parse_speaker_content(
-                build_session_message_visible_text(original, include_reply_components=False)
-            )
+        speaker, content = parse_speaker_content(message.render_visible_text(include_reply_components=False))
         content = content.strip()
-
-        sequence = original.raw_message if original is not None else message.raw_message
+        sequence = message.media_sequence
         references = self._build_retro_references(sequence, history_by_id)
 
         if not content and not references:
@@ -479,7 +471,7 @@ class RetroReplyPromptMixin:
     @staticmethod
     def _build_retro_references(
         sequence: MessageSequence,
-        history_by_id: Optional[Dict[str, SessionBackedMessage]] = None,
+        history_by_id: Optional[Dict[str, ContentContextMessage]] = None,
     ) -> List[str]:
         """统一渲染聊天历史和当前回复目标的引用，优先使用上下文中最新的原消息。"""
 
@@ -489,11 +481,9 @@ class RetroReplyPromptMixin:
                 continue
             target = history_by_id.get(component.target_message_id) if history_by_id is not None else None
             if target is not None:
-                target_speaker, target_content = parse_speaker_content(target.processed_plain_text)
-                if target.original_message is not None:
-                    target_speaker, target_content = parse_speaker_content(
-                        build_session_message_visible_text(target.original_message, include_reply_components=False)
-                    )
+                target_speaker, target_content = parse_speaker_content(
+                    target.render_visible_text(include_reply_components=False)
+                )
             else:
                 # 引用目标不在当前上下文时，使用引用组件已保存的原消息内容，不查询数据库。
                 target_speaker = (

@@ -993,7 +993,7 @@ class MaisakaChatLoopService:
 
         # 按历史顺序更新，保留最近一次明确提供的昵称；不要把配置昵称当成平台信息。
         for entry in history:
-            if not isinstance(entry, SessionBackedMessage) or entry.original_message is None:
+            if not isinstance(entry, SessionBackedMessage):
                 continue
             message = entry.original_message
             if not self._session_id or message.session_id != self._session_id:

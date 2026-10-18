@@ -45,9 +45,13 @@ class MessageInfo:
 
 
 class MaiMessage(BaseDatabaseDataModel[Messages]):
-    def __init__(self, message_id: str, timestamp: datetime, platform: str):
+    def __init__(
+        self, message_id: str, timestamp: datetime, platform: str, received_at: Optional[datetime] = None
+    ):
         self.message_id: str = message_id
         self.timestamp: datetime = timestamp
+        # 主程序入口记录的实际接收时间；历史与出站消息保持为空，不由源时间推测。
+        self.received_at: Optional[datetime] = received_at
         self.initialized = False
         self.platform: str = platform
         self.account_id: Optional[str] = None
@@ -70,7 +74,12 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
 
     @classmethod
     def from_db_instance(cls, db_record: "Messages"):
-        obj = cls(message_id=db_record.message_id, timestamp=db_record.timestamp, platform=db_record.platform)
+        obj = cls(
+            message_id=db_record.message_id,
+            timestamp=db_record.timestamp,
+            platform=db_record.platform,
+            received_at=db_record.received_at,
+        )
 
         user_info = UserInfo(db_record.user_id, db_record.user_nickname, db_record.user_cardname)
         # 部分平台（如 QQ 官方机器人）不提供群名，群名为空不能让群消息退化成私聊。
@@ -106,6 +115,7 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
         return Messages(
             message_id=self.message_id,
             timestamp=self.timestamp,
+            received_at=self.received_at,
             platform=self.platform,
             account_id=self.account_id,
             scope=self.scope,
@@ -129,7 +139,13 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
         )
 
     @classmethod
-    def from_maim_message(cls, message: MessageBase, *, route_key: Optional["RouteKey"] = None):
+    def from_maim_message(
+        cls,
+        message: MessageBase,
+        *,
+        route_key: Optional["RouteKey"] = None,
+        received_at: Optional[datetime] = None,
+    ):
         """从 maim_message.MessageBase 创建 MaiMessage，可显式传入原消息的路由归属。"""
         msg_info = message.message_info
         assert msg_info, "MessageBase 的 message_info 不能为空"
@@ -143,7 +159,12 @@ class MaiMessage(BaseDatabaseDataModel[Messages]):
         assert msg_id
         assert timestamp
 
-        obj = cls(message_id=msg_id, timestamp=datetime.fromtimestamp(timestamp), platform=platform)
+        obj = cls(
+            message_id=msg_id,
+            timestamp=datetime.fromtimestamp(timestamp),
+            platform=platform,
+            received_at=received_at,
+        )
         obj.raw_message = MessageUtils.from_maim_message_segments_to_MaiSeq(message)
 
         usr_info = msg_info.user_info

@@ -49,6 +49,7 @@ from .v40_to_v41 import migrate_v40_to_v41
 from .v41_to_v42 import BEHAVIOR_TABLES, migrate_v41_to_v42
 from .v42_to_v43 import migrate_v42_to_v43
 from .v43_to_v44 import migrate_v43_to_v44
+from .v44_to_v45 import migrate_v44_to_v45
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -96,7 +97,8 @@ V41_SCHEMA_VERSION = 41
 V42_SCHEMA_VERSION = 42
 V43_SCHEMA_VERSION = 43
 V44_SCHEMA_VERSION = 44
-LATEST_SCHEMA_VERSION = 44
+V45_SCHEMA_VERSION = 45
+LATEST_SCHEMA_VERSION = 45
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -1970,6 +1972,13 @@ def build_default_migration_registry() -> MigrationRegistry:
                 name="v43_to_v44",
                 description="新增模型任务调用与失败率的分钟级统计。",
                 handler=migrate_v43_to_v44,
+            ),
+            MigrationStep(
+                version_from=V44_SCHEMA_VERSION,
+                version_to=V45_SCHEMA_VERSION,
+                name="v44_to_v45",
+                description="为消息保留独立的高精度实际接收时间，历史记录保持为空。",
+                handler=migrate_v44_to_v45,
             ),
         ]
     )

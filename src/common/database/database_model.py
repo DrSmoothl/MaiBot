@@ -29,7 +29,9 @@ class Messages(SQLModel, table=True):
 
     # 消息元数据
     message_id: str = Field(index=True, max_length=255)  # 消息id
-    timestamp: datetime = Field(sa_column=Column(DateTime))  # 消息时间，单位为秒
+    timestamp: datetime = Field(sa_column=Column(DateTime))  # 上游消息时间，保留原始精度
+    received_at: Optional[datetime] = Field(default=None, sa_column=Column(DateTime, nullable=True, index=True))
+    # 主程序实际接收时间，保留微秒；旧消息与出站消息不补造接收时间。
     platform: str = Field(index=True, max_length=100)  # 顶层平台字段
     account_id: Optional[str] = Field(default=None, max_length=255, nullable=True)  # 机器人账号归属
     scope: Optional[str] = Field(default=None, max_length=255, nullable=True)  # 路由作用域

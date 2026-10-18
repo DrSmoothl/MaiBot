@@ -203,24 +203,6 @@ def contains_complex_message(message_sequence: MessageSequence) -> bool:
     return any(isinstance(component, ForwardNodeComponent) for component in message_sequence.components)
 
 
-async def build_full_complex_message_content(message: SessionMessage, path: Sequence[int] = ()) -> str:
-    """按路径构造转发消息当前层级的文本内容。"""
-
-    if _prepare_unresolved_visual_components(message.raw_message.components):
-        await message.process(
-            enable_heavy_media_analysis=True,
-            enable_voice_transcription=False,
-        )
-
-    full_content = _build_complex_message_full_text(message.raw_message, path)
-    if full_content:
-        return full_content
-
-    if not message.processed_plain_text:
-        await message.process()
-    return (message.processed_plain_text or "").strip()
-
-
 def build_full_complex_message_content_from_sequence(
     message_sequence: MessageSequence,
     path: Sequence[int] = (),
@@ -533,6 +515,11 @@ class LLMContextMessage(ABC):
     timestamp: datetime
 
     @property
+    def received_at(self) -> Optional[datetime]:
+        """返回真实入站接收时间；生成的上下文和未知历史不伪造接收时刻。"""
+        return None
+
+    @property
     @abstractmethod
     def role(self) -> str:
         """返回 LLM 消息角色。"""
@@ -562,16 +549,28 @@ class LLMContextMessage(ABC):
 
 
 @dataclass(slots=True)
-class SessionBackedMessage(LLMContextMessage):
-    """真实会话上下文消息。"""
+class ContentContextMessage(LLMContextMessage):
+    """以 user 角色传给模型的图文内容；不表示内容来自 IM。"""
 
     raw_message: MessageSequence
     visible_text: str
     timestamp: datetime
     message_id: Optional[str] = None
-    original_message: Optional[SessionMessage] = None
     source_kind: str = "user"
     context_item_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+    @property
+    def media_sequence(self) -> MessageSequence:
+        """提供需要识别或刷新的原始媒体组件。"""
+        return self.raw_message
+
+    async def expand_forward_content(self, path: Sequence[int]) -> str:
+        """内部图文直接展开现有组件。"""
+        return build_full_complex_message_content_from_sequence(self.media_sequence, path)
+
+    def render_visible_text(self, *, include_reply_components: bool = True) -> str:
+        """返回用于展示的内容；内部上下文使用自己的可见文本。"""
+        return self.visible_text
 
     @property
     def role(self) -> str:
@@ -596,6 +595,56 @@ class SessionBackedMessage(LLMContextMessage):
             limit_emoji_size=limit_emoji_size,
             meta=ContextItemMeta.create(item_id=self.context_item_id, timestamp=self.timestamp),
         )
+
+
+@dataclass(slots=True)
+class InternalContextMessage(ContentContextMessage):
+    """内部生成或插件插入的上下文，不占据真实 IM 消息位置。"""
+
+    source_kind: str = "internal"
+
+
+@dataclass(slots=True)
+class ToolResultMediaMessage(InternalContextMessage):
+    """工具返回的媒体，显式关联所属调用，不从消息编号解析归属。"""
+
+    tool_call_id: str = field(kw_only=True)
+    source_kind: str = "tool_result_media"
+
+    def __post_init__(self) -> None:
+        if not self.tool_call_id.strip():
+            raise ValueError("工具媒体必须关联有效的调用 ID")
+
+
+@dataclass(slots=True)
+class SessionBackedMessage(ContentContextMessage):
+    """真实接收或发送的 IM 消息，必须保留原始消息与消息编号。"""
+
+    message_id: str = field(kw_only=True)
+    original_message: SessionMessage = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        if self.original_message is None or not self.message_id:
+            raise ValueError("真实 IM 上下文必须具有原始消息和消息编号")
+
+    @property
+    def received_at(self) -> Optional[datetime]:
+        return self.original_message.received_at
+
+    @property
+    def media_sequence(self) -> MessageSequence:
+        return self.original_message.raw_message
+
+    async def expand_forward_content(self, path: Sequence[int]) -> str:
+        """真实 IM 转发先完成未解析媒体的分析，再展开请求的层级。"""
+        if _prepare_unresolved_visual_components(self.media_sequence.components):
+            await self.original_message.process(enable_heavy_media_analysis=True, enable_voice_transcription=False)
+        return build_full_complex_message_content_from_sequence(self.media_sequence, path)
+
+    def render_visible_text(self, *, include_reply_components: bool = True) -> str:
+        from .history import build_session_message_visible_text
+
+        return build_session_message_visible_text(self.original_message, include_reply_components=include_reply_components)
 
     @classmethod
     def from_session_message(
@@ -837,7 +886,7 @@ def build_context_items_from_history_entry(
     """将 Maisaka 历史条目转换为发给 LLM 的统一 Context Items。"""
 
     # 尺寸限制由普通 planner/replyer 显式启用，复古模式等已有调用保持原来的图片策略。
-    if isinstance(context_message, SessionBackedMessage) and limit_emoji_size:
+    if isinstance(context_message, ContentContextMessage) and limit_emoji_size:
         item = context_message.to_context_item(enable_visual_message=enable_visual_message, limit_emoji_size=True)
     else:
         item = context_message.to_context_item(enable_visual_message=enable_visual_message)

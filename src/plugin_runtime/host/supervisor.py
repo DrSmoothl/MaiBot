@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -1741,6 +1742,7 @@ class PluginRunnerSupervisor:
             Envelope: 注入结果响应。
         """
 
+        received_at = datetime.now()
         try:
             payload = RouteMessagePayload.model_validate(envelope.payload)
         except Exception as exc:
@@ -1791,6 +1793,7 @@ class PluginRunnerSupervisor:
             payload.message["account_id"] = route_key.account_id
             payload.message["scope"] = route_key.scope
             session_message = self._message_gateway.build_session_message(payload.message)
+            session_message.received_at = received_at
             self._attach_inbound_route_metadata(session_message, route_key, payload.route_metadata)
         except Exception as exc:
             return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, str(exc))
@@ -1804,6 +1807,7 @@ class PluginRunnerSupervisor:
                 external_message_id=payload.external_message_id or str(payload.message.get("message_id") or "") or None,
                 dedupe_key=payload.dedupe_key or None,
                 session_message=session_message,
+                received_at=received_at,
                 payload=payload.message,
                 metadata={
                     "plugin_id": envelope.plugin_id,

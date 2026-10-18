@@ -259,7 +259,7 @@ class RuntimeCoreCapabilityMixin:
 
         try:
             from src.chat.heart_flow.heartflow_manager import heartflow_manager
-            from src.maisaka.context.messages import SessionBackedMessage
+            from src.maisaka.context.messages import InternalContextMessage
             from src.maisaka.context.message_adapter import build_visible_text_from_sequence
             from src.plugin_runtime.host.message_utils import PluginMessageUtils
 
@@ -272,7 +272,7 @@ class RuntimeCoreCapabilityMixin:
                 visible_text = "[插件上下文消息]"
 
             source_kind = str(args.get("source_kind") or f"plugin:{plugin_id}").strip() or f"plugin:{plugin_id}"
-            context_message = SessionBackedMessage(
+            context_message = InternalContextMessage(
                 raw_message=message_sequence,
                 visible_text=visible_text,
                 timestamp=datetime.now(),

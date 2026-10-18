@@ -66,13 +66,13 @@ from src.maisaka.context.messages import (
     ReferenceMessage,
     ReferenceMessageType,
     SessionBackedMessage,
+    ToolResultMediaMessage,
     ToolResultMessage,
     contains_complex_message,
 )
 from src.maisaka.focus import focus_mode_manager
 from src.maisaka.context.post_processor import process_chat_history_after_cycle
 from src.maisaka.context.history import (
-    TOOL_RESULT_MEDIA_SOURCE_KIND,
     build_prefixed_message_sequence,
     build_session_message_visible_text,
 )
@@ -1871,12 +1871,12 @@ class MaisakaReasoningEngine:
             media_index = self._build_tool_result_media_index(tool_call, item_index)
             self._schedule_tool_result_media_image_recognition(media_sequence, media_index)
             self._runtime._chat_history.append(
-                SessionBackedMessage(
+                ToolResultMediaMessage(
+                    tool_call_id=tool_call.call_id,
                     raw_message=media_sequence,
                     visible_text=visible_text,
                     timestamp=datetime.now(),
                     message_id=media_index,
-                    source_kind=TOOL_RESULT_MEDIA_SOURCE_KIND,
                 )
             )
 

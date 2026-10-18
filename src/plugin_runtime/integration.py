@@ -9,6 +9,7 @@
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -278,6 +279,7 @@ class PluginRuntimeManager(
         Args:
             envelope: Platform IO 产出的入站封装。
         """
+        received_at = envelope.received_at if envelope.received_at is not None else datetime.now()
         session_message = envelope.session_message
         if session_message is None and envelope.payload is not None:
             from src.plugin_runtime.host.message_utils import PluginMessageUtils
@@ -285,6 +287,7 @@ class PluginRuntimeManager(
             session_message = PluginMessageUtils._build_session_message_from_dict(dict(envelope.payload))
         if session_message is None:
             raise ValueError("Platform IO 入站封装缺少可用的 SessionMessage 或 payload")
+        session_message.received_at = received_at
 
         from src.chat.message_receive.bot import chat_bot
 

@@ -2442,7 +2442,7 @@ class StatisticOutputTask(AsyncTask):
         query_start_timestamp = start_time.timestamp()
         messages = fetch_messages_since(start_time)
         for message in messages:
-            message_time_ts = message.timestamp.timestamp()
+            message_time_ts = message.statistics_time.timestamp()
 
             # 找到对应的时间间隔索引
             time_diff = message_time_ts - query_start_timestamp
@@ -2821,7 +2821,7 @@ class StatisticOutputTask(AsyncTask):
         query_start_timestamp = start_time.timestamp()
         messages = fetch_messages_since(start_time)
         for message in messages:
-            message_time_ts = message.timestamp.timestamp()
+            message_time_ts = message.statistics_time.timestamp()
 
             time_diff = message_time_ts - query_start_timestamp
             interval_index = int(time_diff // interval_seconds)

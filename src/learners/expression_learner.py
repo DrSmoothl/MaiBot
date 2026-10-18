@@ -309,28 +309,16 @@ class ExpressionLearner:
 
         source_messages: List["SessionMessage"] = []
         seen_message_ids: set[str] = set()
-        seen_object_ids: set[int] = set()
 
         for context_message in context_messages:
             if not isinstance(context_message, SessionBackedMessage):
                 continue
-            if context_message.source_kind not in {"user", "guided_reply", "outbound_send"}:
-                continue
 
             original_message = context_message.original_message
-            if original_message is None:
+            message_id = context_message.message_id
+            if message_id in seen_message_ids:
                 continue
-
-            message_id = str(original_message.message_id or "").strip()
-            if message_id:
-                if message_id in seen_message_ids:
-                    continue
-                seen_message_ids.add(message_id)
-            else:
-                object_id = id(original_message)
-                if object_id in seen_object_ids:
-                    continue
-                seen_object_ids.add(object_id)
+            seen_message_ids.add(message_id)
 
             source_messages.append(original_message)
 

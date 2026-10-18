@@ -47,6 +47,8 @@ from src.llm_models.request_snapshot import serialize_context_items_snapshot
 from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.messages import (
+    ContentContextMessage,
+    ToolResultMediaMessage,
     LLMContextMessage,
     ModelOutputContextMessage,
     ReferenceMessage,
@@ -55,8 +57,8 @@ from src.maisaka.context.messages import (
     build_context_items_from_history_entry,
 )
 from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
+from src.maisaka.memory.mid_term import MemorySummaryMessage
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
-from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 from src.plugin_runtime.hook_payloads import deserialize_prompt_items, serialize_prompt_items
@@ -67,7 +69,6 @@ from .retro_prompt import RetroReplyPromptMixin
 logger = get_logger("replyer")
 
 REPLYER_MAX_HOOK_RETRIES = 3
-TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 DUPLICATE_TARGET_REPLY_REMINDER_ARG = "_duplicate_target_reply_reminder"
 
 
@@ -450,7 +451,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
     @staticmethod
     def _build_text_from_message_sequence(message: SessionBackedMessage) -> str:
         text_parts: List[str] = []
-        for component in getattr(message.raw_message, "components", ()):
+        for component in message.raw_message.components:
             if isinstance(component, TextComponent):
                 text_parts.append(component.text)
                 continue
@@ -483,10 +484,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                 continue
             if message.source_kind != "user":
                 continue
-            if message.original_message is not None:
-                match_text = self._build_target_message_content(message.original_message).strip()
-            else:
-                match_text = self._build_text_from_message_sequence(message)
+            match_text = self._build_target_message_content(message.original_message).strip()
             if not match_text:
                 match_text = (message.processed_plain_text or "").strip()
             if match_text:
@@ -641,8 +639,8 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             if self._is_replyer_filtered_history_message(message):
                 continue
 
-            if isinstance(message, SessionBackedMessage):
-                guided_reply = self._extract_guided_bot_reply(message)
+            if isinstance(message, ContentContextMessage):
+                guided_reply = self._extract_guided_bot_reply(message) if isinstance(message, SessionBackedMessage) else ""
                 if guided_reply:
                     items.append(
                         ContextItemBuilder().set_role(RoleType.Assistant).add_text_content(guided_reply).build()
@@ -961,11 +959,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
     def _is_replyer_filtered_history_message(message: LLMContextMessage) -> bool:
         """判断 replyer 侧需要过滤掉的非真实聊天上下文。"""
 
-        if isinstance(message, (ReferenceMessage, ToolResultMessage)):
-            return True
-        if isinstance(message, SessionBackedMessage) and message.source_kind == TOOL_RESULT_MEDIA_SOURCE_KIND:
-            return True
-        return is_mid_term_memory_message(message)
+        return isinstance(message, (ToolResultMediaMessage, MemorySummaryMessage, ReferenceMessage, ToolResultMessage))
 
     @classmethod
     def _should_keep_replyer_history_message(cls, message: LLMContextMessage) -> bool:
