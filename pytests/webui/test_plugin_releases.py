@@ -250,16 +250,15 @@ def test_moved_tag_or_manifest_tampering_does_not_install(local_install):
 
 @pytest.mark.parametrize("tampered", [False, True])
 def test_cnb_install_keeps_original_commit_and_manifest_validation(local_install, monkeypatch, tampered):
-    from types import SimpleNamespace
-
-    from src.webui.services import git_mirror_service
+    from src.common.git_source import GitSource
+    from src.webui.services import git_mirror_service, plugin_market_service
 
     client, _, repository, chosen, _ = local_install
-    cnb = next(m for m in git_mirror_service.GitMirrorConfig.DEFAULT_MIRRORS if m["id"] == "cnb")
-    config = SimpleNamespace(get_enabled_mirrors=lambda: [cnb], get_mirror_by_id=lambda _: cnb)
-    service = git_mirror_service.GitMirrorService(max_retries=1, config=config)
-    # 保留真实 CNB 镜像选择与 Git 克隆，仅把网络终点替换为隔离的本地仓库。
-    monkeypatch.setattr(git_mirror_service, "mirror_clone_url", lambda *_: str(repository))
+    service = git_mirror_service.GitMirrorService(max_retries=1)
+    # 保留真实 CNB 选择与克隆，只替换网络终点为隔离的本地仓库。
+    monkeypatch.setattr(plugin_market_service, "download_source", lambda: GitSource.select("cnb"))
+    monkeypatch.setattr(GitSource, "clone_url", lambda *_: str(repository))
+    monkeypatch.setattr(git_mirror_service, "_validate_custom_outbound_url", lambda value: value)
     monkeypatch.setattr(release_install, "get_git_mirror_service", lambda: service)
     if tampered:
         chosen.commit = "b" * 40

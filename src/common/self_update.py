@@ -9,8 +9,7 @@ Worker（WebUI）只负责检查更新与登记更新请求；真正改动代码
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import quote, urlsplit
-from urllib.request import Request, urlopen
+from urllib.parse import quote
 
 import base64
 import importlib.util
@@ -23,6 +22,7 @@ import sys
 import time
 import tomllib
 
+from .git_source import GitSource
 from .package_update import (
     PACKAGE_INDEXES,
     PACKAGE_RUNNER_ENV,
@@ -45,7 +45,6 @@ PROJECT_ROOT = get_instance_root() if PACKAGED_INSTALL else SOURCE_ROOT
 OFFICIAL_REPOSITORY_PATH = "Mai-with-u/MaiBot"
 OFFICIAL_REPOSITORY_URL = f"https://github.com/{OFFICIAL_REPOSITORY_PATH}.git"
 OFFICIAL_SOURCE_ID = "github"
-CNB_REPOSITORY_URL = "https://cnb.cool/Mai-with-u/maibot.git"
 SUPPORTED_BRANCHES: Tuple[str, ...] = ("main", "dev")
 DEPENDENCY_FILES = frozenset({"pyproject.toml", "uv.lock", "requirements.txt"})
 
@@ -367,18 +366,11 @@ def evaluate_update(local: LocalState, target: str, checked_at: float, root: Pat
 
 def select_update_source(source_id: str, custom_prefix: str = "") -> UpdateSource:
     """本体源码只允许单个 CNB、GitHub 或自定义 HTTPS 前缀。"""
-    if source_id == "github":
-        return UpdateSource("github", "GitHub 官方源", OFFICIAL_REPOSITORY_URL)
-    if source_id == "cnb":
-        return UpdateSource("cnb", "CNB 镜像", CNB_REPOSITORY_URL)
-    if source_id == "custom":
-        prefix = custom_prefix.strip().rstrip("/")
-        parsed = urlsplit(prefix)
-        # 禁止本地传输、Git ext 以及查询参数注入；只追加固定的官方仓库路径。
-        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise SelfUpdateError("invalid_source", "自定义更新源必须是无认证信息、查询参数和片段的 HTTPS 前缀")
-        return UpdateSource("custom", "自定义源", f"{prefix}/{OFFICIAL_REPOSITORY_PATH}.git")
-    raise SelfUpdateError("invalid_source", "源码更新只支持 CNB、GitHub 或一个自定义源")
+    try:
+        source = GitSource.select(source_id, custom_prefix)
+        return UpdateSource(source.id, source.name, source.clone_url("Mai-with-u", "MaiBot"))
+    except ValueError as exc:
+        raise SelfUpdateError("invalid_source", str(exc)) from exc
 
 
 def _fetch_branch_head(
@@ -401,16 +393,9 @@ def _fetch_branch_head(
 
 def _get_update_json(path: str) -> Dict[str, Any]:
     """只读官方 API；沿用 urllib 的环境/系统代理，不依赖 Git 配置。"""
-    request = Request(
-        f"https://api.github.com/repos/{OFFICIAL_REPOSITORY_PATH}/{path}",
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "MaiBot-Self-Update"},
-    )
     try:
-        with urlopen(request, timeout=5) as response:
-            payload = json.load(response)
-        if not isinstance(payload, dict):
-            raise ValueError("API 响应不是对象")
-        return payload
+        source = GitSource.select("github")
+        return source.read_json(source.api_url("Mai-with-u", "MaiBot", path), timeout=5)
     except (OSError, ValueError) as exc:
         raise SelfUpdateError("fetch_failed", f"GitHub API 检查更新失败：{exc}") from exc
 

@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Cookie, HTTPException
 
@@ -10,15 +10,11 @@ from src.webui.services.plugin_market_service import fetch_information_file
 
 from .progress import update_progress
 from .schemas import (
-    AddMirrorRequest,
-    AvailableMirrorsResponse,
     CloneRepositoryRequest,
     CloneRepositoryResponse,
     FetchRawFileRequest,
     FetchRawFileResponse,
     GitStatusResponse,
-    MirrorConfigResponse,
-    UpdateMirrorRequest,
     VersionResponse,
 )
 from .support import get_plugins_dir, parse_version, require_plugin_token, validate_safe_path
@@ -26,17 +22,6 @@ from .support import get_plugins_dir, parse_version, require_plugin_token, valid
 logger = get_logger("webui.plugin_routes")
 
 router = APIRouter()
-
-
-def _mirror_to_response(mirror: Dict[str, Any]) -> MirrorConfigResponse:
-    return MirrorConfigResponse(
-        id=mirror["id"],
-        name=mirror["name"],
-        raw_prefix=mirror["raw_prefix"],
-        clone_prefix=mirror["clone_prefix"],
-        enabled=mirror["enabled"],
-        priority=mirror["priority"],
-    )
 
 
 @router.get("/version", response_model=VersionResponse)
@@ -49,89 +34,6 @@ def get_maimai_version() -> VersionResponse:
 def check_git_status() -> GitStatusResponse:
     service = get_git_mirror_service()
     return GitStatusResponse(**service.check_git_installed())
-
-
-@router.get("/mirrors", response_model=AvailableMirrorsResponse)
-def get_available_mirrors(maibot_session: Optional[str] = Cookie(None)) -> AvailableMirrorsResponse:
-    require_plugin_token(maibot_session)
-
-    service = get_git_mirror_service()
-    config = service.get_mirror_config()
-    mirrors = [_mirror_to_response(mirror) for mirror in config.get_all_mirrors()]
-    return AvailableMirrorsResponse(mirrors=mirrors, default_priority=config.get_default_priority_list())
-
-
-@router.post("/mirrors", response_model=MirrorConfigResponse)
-def add_mirror(request: AddMirrorRequest, maibot_session: Optional[str] = Cookie(None)) -> MirrorConfigResponse:
-    require_plugin_token(maibot_session)
-
-    try:
-        service = get_git_mirror_service()
-        config = service.get_mirror_config()
-        mirror = config.add_mirror(
-            mirror_id=request.id,
-            name=request.name,
-            raw_prefix=request.raw_prefix,
-            clone_prefix=request.clone_prefix,
-            enabled=request.enabled,
-            priority=request.priority,
-        )
-        return _mirror_to_response(mirror)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        logger.error(f"添加镜像源失败: {e}")
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
-
-
-@router.post("/mirrors/reset", response_model=AvailableMirrorsResponse)
-def reset_mirrors(maibot_session: Optional[str] = Cookie(None)) -> AvailableMirrorsResponse:
-    require_plugin_token(maibot_session)
-    config = get_git_mirror_service().get_mirror_config()
-    mirrors = [_mirror_to_response(mirror) for mirror in config.reset_default_mirrors()]
-    return AvailableMirrorsResponse(mirrors=mirrors, default_priority=config.get_default_priority_list())
-
-
-@router.put("/mirrors/{mirror_id}", response_model=MirrorConfigResponse)
-def update_mirror(
-    mirror_id: str,
-    request: UpdateMirrorRequest,
-    maibot_session: Optional[str] = Cookie(None),
-) -> MirrorConfigResponse:
-    require_plugin_token(maibot_session)
-
-    try:
-        service = get_git_mirror_service()
-        config = service.get_mirror_config()
-        mirror = config.update_mirror(
-            mirror_id=mirror_id,
-            name=request.name,
-            raw_prefix=request.raw_prefix,
-            clone_prefix=request.clone_prefix,
-            enabled=request.enabled,
-            priority=request.priority,
-        )
-        if mirror is None:
-            raise HTTPException(status_code=404, detail=f"未找到镜像源: {mirror_id}")
-        return _mirror_to_response(mirror)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"更新镜像源失败: {e}")
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
-
-
-@router.delete("/mirrors/{mirror_id}")
-def delete_mirror(mirror_id: str, maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
-    require_plugin_token(maibot_session)
-
-    service = get_git_mirror_service()
-    config = service.get_mirror_config()
-    if not config.delete_mirror(mirror_id):
-        raise HTTPException(status_code=404, detail=f"未找到镜像源: {mirror_id}")
-    return {"success": True, "message": f"已删除镜像源: {mirror_id}"}
 
 
 @router.post("/fetch-raw", response_model=FetchRawFileResponse)

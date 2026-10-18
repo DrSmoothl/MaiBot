@@ -1,12 +1,11 @@
 """插件中心 v2 代理与市场数据源设置。"""
 
 from typing import Any, Dict, Optional
+from urllib.error import HTTPError
 
 from fastapi import APIRouter, Cookie, HTTPException
 import asyncio
 import json
-
-import httpx
 
 from src.config.config import MMC_VERSION
 from src.webui.services.plugin_market_service import (
@@ -98,7 +97,7 @@ async def get_marketplace(
             "plugins/summary", {"maibot_version": MMC_VERSION, "compatible_only": str(compatible_only).lower()}
         )
         return await asyncio.to_thread(describe_market_list, data)
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=502, detail=f"获取插件中心列表失败：{exc}") from exc
 
 
@@ -126,9 +125,9 @@ async def get_marketplace_detail(plugin_id: str, maibot_session: Optional[str] =
         entry = await asyncio.to_thread(parse_market_release_entry, data, plugin_id)
         catalog = await asyncio.to_thread(describe_entry, entry)
         return {"manifest": data["manifest"], "releases": catalog}
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
+    except HTTPError as exc:
+        if exc.code == 404:
             raise HTTPException(status_code=404, detail="插件中心未找到该插件") from exc
         raise HTTPException(status_code=502, detail=f"获取插件中心详情失败：{exc}") from exc
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=502, detail=f"获取插件中心详情失败：{exc}") from exc

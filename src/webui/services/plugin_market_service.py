@@ -4,15 +4,15 @@ from os import getenv
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Literal, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 import asyncio
 import json
 import os
 import tempfile
 
 from pydantic import BaseModel, model_validator
-import httpx
 
+from src.common.git_source import GitSource
 from src.webui.utils.http_client import get_shared_ssl_context
 
 SETTINGS_FILE = Path("data/plugin_market.json")
@@ -68,39 +68,25 @@ def save_source_settings(settings: PluginSourceSettings) -> None:
                 os.unlink(name)
 
 
-def download_mirror() -> Dict[str, Any]:
-    """下载只选择一个源，与市场信息源及主程序更新镜像配置无关。"""
-    from .git_mirror_service import GitMirrorConfig
-
+def download_source() -> GitSource:
+    """下载源与信息源分别配置，通过同一个组件解析。"""
     settings = load_source_settings()
-    if settings.download_source == "custom":
-        return {"id": "custom", "name": "自定义下载源", "clone_prefix": settings.custom_download_prefix}
-    return dict(next(item for item in GitMirrorConfig.DEFAULT_MIRRORS if item["id"] == settings.download_source))
+    return GitSource.select(settings.download_source, settings.custom_download_prefix or "")
 
 
 async def fetch_information_file(file_path: str, source: Optional[str] = None) -> Dict[str, Any]:
-    """静态市场索引固定从所选 CNB 或 GitHub 读取，失败不换源。"""
-    from .git_mirror_service import GitMirrorConfig, mirror_raw_url
+    from src.webui.utils.network_security import validate_public_url
 
     selected = source if source is not None else (await asyncio.to_thread(load_source_settings)).information_source
-    if selected not in {"cnb", "github"}:
-        raise ValueError("当前插件信息源不是 Git 仓库")
-    mirror = next(item for item in GitMirrorConfig.DEFAULT_MIRRORS if item["id"] == selected)
-    url = await asyncio.to_thread(mirror_raw_url, "Mai-with-u", "plugin-repo", "main", file_path, mirror)
-    async with httpx.AsyncClient(verify=get_shared_ssl_context(), timeout=20) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-    return {"success": True, "data": response.text, "mirror_used": selected, "attempts": 1, "url": url}
+    url = GitSource.select(selected).raw_url("Mai-with-u", "plugin-repo", "main", file_path)
+    url = await asyncio.to_thread(validate_public_url, url, allow_fake_ip=True)
+    data = await asyncio.to_thread(GitSource.read_text, url, 20, get_shared_ssl_context())
+    return {"success": True, "data": data, "mirror_used": selected, "attempts": 1, "url": url}
 
 
 async def request_market(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    async with httpx.AsyncClient(verify=get_shared_ssl_context(), timeout=20) as client:
-        response = await client.get(f"{MARKET_BASE_URL}/api/v2/market/{path}", params=params)
-        response.raise_for_status()
-        data = response.json()
-    if not isinstance(data, dict):
-        raise ValueError("插件中心返回了无效的数据结构")
-    return data
+    url = f"{MARKET_BASE_URL}/api/v2/market/{path}?{urlencode(params)}"
+    return await asyncio.to_thread(GitSource.read_json, url, 20, get_shared_ssl_context())
 
 
 async def request_market_detail(plugin_id: str, maibot_version: str) -> Dict[str, Any]:

@@ -1,8 +1,8 @@
-from types import SimpleNamespace
+from urllib.error import HTTPError
+from urllib.parse import urlsplit
 import asyncio
 import json
 
-import httpx
 import pytest
 
 from src.webui.services import git_mirror_service as git
@@ -12,7 +12,8 @@ from src.webui.services import plugin_market_service as market
 @pytest.fixture(autouse=True)
 def isolated_sources(tmp_path, monkeypatch):
     monkeypatch.setattr(market, "SETTINGS_FILE", tmp_path / "sources.json")
-    monkeypatch.setattr(git, "_validate_mirror_prefix", lambda value, _: value)
+    monkeypatch.setattr(git, "_validate_custom_outbound_url", lambda value: value)
+    monkeypatch.setattr("src.webui.utils.network_security.validate_public_url", lambda value, **kw: value)
 
 
 def configure(**values):
@@ -24,27 +25,27 @@ def configure(**values):
 def test_information_source_is_fixed_and_never_uses_download_source(monkeypatch, source, host, status):
     configure(information_source=source, download_source="custom", custom_download_prefix="https://download.example")
     calls = []
-    client = httpx.AsyncClient
+    def read(url, *args):
+        calls.append(urlsplit(url))
+        if status != 200:
+            raise HTTPError(url, status, "offline", {}, None)
+        return "[]"
 
-    def respond(request):
-        calls.append(request.url)
-        return httpx.Response(status, text="[]")
-
-    monkeypatch.setattr(market.httpx, "AsyncClient", lambda **kwargs: client(transport=httpx.MockTransport(respond)))
+    monkeypatch.setattr(market.GitSource, "read_text", read)
     if status == 200:
         result = asyncio.run(market.fetch_information_file("plugin_details.json"))
         assert result["mirror_used"] == source
     else:
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(HTTPError):
             asyncio.run(market.fetch_information_file("plugin_details.json"))
-    assert len(calls) == 1 and calls[0].host == host
+    assert len(calls) == 1 and calls[0].hostname == host
 
 
 @pytest.mark.parametrize("information", ["official", "cnb", "github"])
 @pytest.mark.parametrize("download,host", [("cnb", "cnb.cool"), ("github", "github.com"), ("custom", "download.example")])
 def test_download_uses_only_selected_source_even_on_failure(monkeypatch, tmp_path, information, download, host):
     configure(information_source=information, download_source=download, custom_download_prefix="https://download.example")
-    service = git.GitMirrorService(config=SimpleNamespace(get_enabled_mirrors=lambda: []))
+    service = git.GitMirrorService()
     calls = []
 
     async def clone(url, *args, **kwargs):
@@ -54,7 +55,7 @@ def test_download_uses_only_selected_source_even_on_failure(monkeypatch, tmp_pat
     monkeypatch.setattr(service, "_clone_with_url", clone)
     result = asyncio.run(service.clone_repository("Owner", "Plugin", tmp_path, branch="v1.2.3", mirror_id="obsolete"))
     assert not result["success"] and result["error"] == "selected source failed"
-    assert len(calls) == 1 and httpx.URL(calls[0]).host == host
+    assert len(calls) == 1 and urlsplit(calls[0]).hostname == host
 
 
 def test_release_index_cache_does_not_cross_information_sources(monkeypatch):
@@ -87,7 +88,7 @@ def test_marketplace_listing_only_calls_selected_information_source(monkeypatch,
 
     async def request(path, params):
         calls.append(path)
-        raise httpx.ConnectError("offline")
+        raise OSError("offline")
 
     monkeypatch.setattr(marketplace, "request_market", request)
     if source == "official":

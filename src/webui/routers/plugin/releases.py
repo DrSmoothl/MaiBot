@@ -2,13 +2,12 @@
 
 from time import monotonic
 from typing import Any, Dict, List, Literal, Optional, Tuple
+from urllib.error import HTTPError
 
 from fastapi import APIRouter, Cookie, HTTPException
 from packaging.version import Version
 from pydantic import BaseModel, Field, ValidationError
 import asyncio
-
-import httpx
 
 from src.config.config import MMC_VERSION
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator
@@ -64,7 +63,7 @@ async def load_release_index() -> PluginReleaseIndex:
         return _cache
     try:
         response = await fetch_information_file("plugin_versions.json", source)
-    except (httpx.HTTPError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{exc}") from exc
     if not response.get("success"):
         raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{response.get('error', '未知错误')}")
@@ -153,11 +152,11 @@ async def load_plugin_release_entry(plugin_id: str) -> Optional[PluginReleaseEnt
     try:
         data = await request_market_detail(plugin_id, MMC_VERSION)
         return await asyncio.to_thread(parse_market_release_entry, data, plugin_id)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
+    except HTTPError as exc:
+        if exc.code == 404:
             return None
         raise HTTPException(status_code=502, detail=f"获取插件中心版本失败：{exc}") from exc
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=502, detail=f"插件中心版本数据无效：{exc}") from exc
 
 
@@ -191,7 +190,7 @@ async def get_plugin_releases(maibot_session: Optional[str] = Cookie(None)) -> D
             from .marketplace import describe_market_list
 
             return (await asyncio.to_thread(describe_market_list, data))["catalog"]
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        except (OSError, ValueError, KeyError, TypeError) as exc:
             raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{exc}") from exc
     index = await load_release_index()
     return {"plugins": [describe_entry(entry) for entry in index.plugins]}

@@ -128,7 +128,7 @@ export function usePluginList() {
   const [actingPluginId, setActingPluginId] = useState<string | null>(null)
   const [marketPluginsById, setMarketPluginsById] = useState<Record<string, PluginInfo>>({})
   const [maimaiVersion, setMaimaiVersion] = useState<MaimaiVersion | null>(null)
-  const [checkingUpdates, setCheckingUpdates] = useState(!adapterOnly && !initialTarget.pluginId)
+  const [checkingUpdates, setCheckingUpdates] = useState(!initialTarget.pluginId)
   const updateCheckStartedRef = useRef(false)
   const initialTargetHandledRef = useRef(false)
   const installedRequestRef = useRef(0)
@@ -154,7 +154,7 @@ export function usePluginList() {
   }
 
   const checkPluginUpdates = async () => {
-    if (adapterOnly || updateCheckStartedRef.current) {
+    if (updateCheckStartedRef.current) {
       return
     }
     updateCheckStartedRef.current = true
