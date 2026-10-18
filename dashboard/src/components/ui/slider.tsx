@@ -88,6 +88,8 @@ const Slider = React.forwardRef<
           key={index}
           aria-label={props["aria-label"]}
           aria-labelledby={props["aria-labelledby"]}
+          aria-valuetext={props["aria-valuetext"]}
+          aria-describedby={props["aria-describedby"]}
           data-dashboard-slider-thumb="true"
           className={cn(
             "block h-4 w-4 rounded-full border border-primary/50 bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",

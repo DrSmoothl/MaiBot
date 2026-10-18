@@ -9,6 +9,7 @@ import { KeyValueEditor } from "@/components/ui/key-value-editor"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { DiscreteSlider } from "@/components/ui/discrete-slider"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -394,6 +395,19 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
       switch (resolvedWidget) {
         case 'slider':
           return renderSlider()
+        case 'discrete-slider':
+          return (
+            <DiscreteSlider
+              label={fieldLabel}
+              value={typeof value === 'string' ? value : String(schema.default ?? '')}
+              options={(schema.options ?? []).map(option => ({
+                value: option,
+                label: optionLabels[option] ?? option,
+                description: optionDescriptions[option],
+              }))}
+              onValueChange={onChange}
+            />
+          )
         case 'input':
           return renderTextInput()
         case 'number':

@@ -146,6 +146,7 @@ function BotStatusFlipCard({
   const { i18n, t } = useTranslation()
   const prefersReducedMotion = useReducedMotion()
   const [isFlipped, setIsFlipped] = useState(false)
+  const [isFlipping, setIsFlipping] = useState(false)
   const { botStatus, isBotStatusLoading } = useContext(BotRuntimeContext)
   const botRuntimeState: BotRuntimeState =
     isBotStatusLoading && !botStatus ? 'loading'
@@ -181,17 +182,22 @@ function BotStatusFlipCard({
       aria-label={t(isFlipped ? 'home.botStatus.showStatus' : 'home.botStatus.showRecentOnline')}
       aria-pressed={isFlipped}
       className="group focus-visible:ring-primary/55 focus-visible:ring-offset-background relative isolate block h-full min-h-[136px] w-full overflow-visible rounded-lg text-left [perspective:900px] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
-      onClick={() => setIsFlipped((current) => !current)}
+      onClick={() => {
+        setIsFlipping(!prefersReducedMotion)
+        setIsFlipped((current) => !current)
+      }}
     >
       <motion.div
         data-maibot-status-rotor="true"
         className="relative z-10 h-full min-h-[136px] w-full [will-change:transform] [transform-style:preserve-3d]"
         animate={{ rotateY: prefersReducedMotion ? 0 : isFlipped ? 180 : 0 }}
         transition={{ duration: prefersReducedMotion ? 0 : 0.46, ease: [0.22, 1, 0.36, 1] }}
+        onAnimationComplete={() => setIsFlipping(false)}
       >
         <motion.div
           data-maibot-status-face="front"
           aria-hidden={isFlipped}
+          inert={isFlipped || isFlipping}
           className={faceClassName}
           animate={{ opacity: prefersReducedMotion && isFlipped ? 0 : 1 }}
           transition={{ duration: prefersReducedMotion ? 0.12 : 0 }}
@@ -259,6 +265,7 @@ function BotStatusFlipCard({
         <motion.div
           data-maibot-status-face="back"
           aria-hidden={!isFlipped}
+          inert={!isFlipped || isFlipping}
           className={faceClassName}
           style={{ transform: prefersReducedMotion ? 'none' : 'rotateY(180deg)' }}
           animate={{ opacity: prefersReducedMotion && !isFlipped ? 0 : 1 }}
@@ -289,26 +296,30 @@ function BotStatusFlipCard({
                   >
                     <XAxis dataKey="timestamp" hide />
                     <YAxis domain={[0, 3600]} hide />
-                    <Tooltip
-                      cursor={{ fill: 'hsl(var(--muted) / 0.32)' }}
-                      contentStyle={{
-                        background: 'hsl(var(--popover))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: 8,
-                        color: 'hsl(var(--popover-foreground))',
-                        fontSize: 11,
-                      }}
-                      formatter={(value) => [
-                        formatOnlineTime(Number(value)),
-                        t('home.botStatus.online'),
-                      ]}
-                      labelFormatter={(value) =>
-                        new Intl.DateTimeFormat(i18n.resolvedLanguage ?? i18n.language, {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }).format(new Date(String(value)))
-                      }
-                    />
+                    {/* Tooltip 按变换后的 DOM 尺寸反复测量、定位，3D 翻转中会形成更新循环。
+                        只在背面翻转完成后挂载；active=false 仍会测量，不能阻止循环。 */}
+                    {isFlipped && !isFlipping && (
+                      <Tooltip
+                        cursor={{ fill: 'hsl(var(--muted) / 0.32)' }}
+                        contentStyle={{
+                          background: 'hsl(var(--popover))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: 8,
+                          color: 'hsl(var(--popover-foreground))',
+                          fontSize: 11,
+                        }}
+                        formatter={(value) => [
+                          formatOnlineTime(Number(value)),
+                          t('home.botStatus.online'),
+                        ]}
+                        labelFormatter={(value) =>
+                          new Intl.DateTimeFormat(i18n.resolvedLanguage ?? i18n.language, {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }).format(new Date(String(value)))
+                        }
+                      />
+                    )}
                     <Bar
                       dataKey="online_seconds"
                       fill="hsl(var(--primary) / 0.68)"

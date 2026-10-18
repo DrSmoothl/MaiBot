@@ -20,6 +20,7 @@ import { Separator } from '@/components/ui/separator'
 import { DataPanel, PageFrame } from '@/components/ui/surface'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
+import { DiscreteSlider } from '@/components/ui/discrete-slider'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
@@ -105,6 +106,8 @@ function Samples({ label, dark }: { label: string; dark: boolean }) {
   const [liked, setLiked] = useState(true)
   const [stream, setStream] = useState<string | number>('friends')
   const [scope, setScope] = useState('all')
+  const [quoteFrequency, setQuoteFrequency] = useState('occasionally')
+  const [driftLevel, setDriftLevel] = useState('active')
   return (
     <main className="control-samples">
       <h1>全部控件 <small>{label} · {dark ? '夜间' : '日间'}</small></h1>
@@ -163,6 +166,17 @@ function Samples({ label, dark }: { label: string; dark: boolean }) {
           <Slider aria-label="普通拖动条" defaultValue={[40]} />
           <Slider aria-label="温度" variant="value" valueFormat="fixed-1" defaultValue={[0.8]} min={0} max={2} step={0.1} />
           <Slider aria-label="禁用拖动条" variant="value" defaultValue={[40]} disabled />
+        </div>
+      </section>
+      <section>
+        <h2>档位滑杆 · 三档 / 四档 / 禁用</h2>
+        <div className="sample-sliders">
+          <DiscreteSlider label="群聊引用频率" value={quoteFrequency} onValueChange={setQuoteFrequency}
+            options={[{ value: 'never', label: '不引用' }, { value: 'occasionally', label: '偶尔引用' }, { value: 'often', label: '经常引用' }]} />
+          <DiscreteSlider label="漂移档位" value={driftLevel} onValueChange={setDriftLevel}
+            options={[{ value: 'subtle', label: '轻微漂移' }, { value: 'active', label: '活跃联想' }, { value: 'scattered', label: '明显发散' }, { value: 'wild', label: '强烈跳跃' }]} />
+          <DiscreteSlider label="禁用档位" value="medium" onValueChange={() => {}} disabled
+            options={[{ value: 'low', label: '低' }, { value: 'medium', label: '中' }, { value: 'high', label: '高' }]} />
         </div>
       </section>
       <p className="sample-note">可点击操作；按 Tab 检查焦点，方向键调整拖动条。所有控件均来自公共组件。</p>
@@ -308,7 +322,7 @@ function ReviewPage() {
   const [dark, setDark] = useState(isDark)
   const [view, setView] = useState<PreviewView>(params.get('page') === 'comparison' ? 'comparison' : activePreviewPage ?? 'all')
   const [themeOpen, setThemeOpen] = useState(false)
-  const [panning, setPanning] = useState(true)
+  const [panning, setPanning] = useState(false)
   const [zoom, setZoom] = useState(100)
   const [command, setCommand] = useState<{ action: 'fit' | 'in' | 'out' | 'reset'; revision: number }>({ action: 'fit', revision: 0 })
   const commandCanvas = (action: typeof command.action) => setCommand(previous => ({ action, revision: previous.revision + 1 }))

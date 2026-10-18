@@ -19,6 +19,7 @@ export type XWidgetType =
   | 'password'
   | 'select'
   | 'slider'
+  | 'discrete-slider'
   | 'switch'
   | 'tags'
   | 'talk-time'

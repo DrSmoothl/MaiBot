@@ -471,6 +471,8 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
                   ? "grid-cols-[minmax(0,1fr)_auto]"
                   : isVisualImageCompressionRow
                   ? "grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.1fr)] items-center"
+                  : rowKey === 'chat-quote-frequency'
+                  ? "md:grid-cols-2"
                   : "md:grid-cols-2 xl:grid-cols-3",
               )}
             >

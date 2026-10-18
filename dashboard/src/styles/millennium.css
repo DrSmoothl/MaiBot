@@ -1197,10 +1197,13 @@
   color: var(--mil-screen-ink) !important;
 }
 
-/* 首页卡片的投影由外层包裹元素负责：换成硬边的塑料厚度，斜面留在卡片本身 */
+/* 普通首页卡片由外层投影；活动卡片只给旋转卡面投影，避免出现固定不动的第二层阴影。 */
 :root[data-dashboard-style='millennium']
   :is(
-    [data-home-summary-cards='true'] [data-home-card-style]:not([data-home-card-style='borderless']),
+    [data-home-summary-cards='true']
+      [data-home-card-style]:not([data-home-card-style='borderless']):not(
+        [data-home-card-id='builtin:bot-status']
+      ),
     [data-home-summary-cards='true']
       [data-home-card-id='builtin:bot-status'][data-home-card-style]:not(
         [data-home-card-style='borderless']

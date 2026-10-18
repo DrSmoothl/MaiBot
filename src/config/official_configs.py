@@ -466,7 +466,7 @@ class TalkRulesItem(ConfigBase):
 class ChatReplyTimingConfig(ConfigBase):
     """聊天回复时机与频率配置类"""
 
-    __ui_label__ = "什么时候发言"
+    __ui_label__ = "回复频率"
     __ui_icon__ = "activity"
 
     talk_value: float = Field(
@@ -750,7 +750,7 @@ class ChatConfig(ConfigBase):
     __ui_label__ = "聊天"
     __ui_order__ = 20
     __ui_use_subtabs__ = True
-    __ui_root_sub_label__ = "基础设置"
+    __ui_root_sub_label__ = "聊天设置"
 
     enable_reply_at: bool = Field(
         default=True,
@@ -862,9 +862,7 @@ class AttentionDriftConfig(ConfigBase):
                 "en_US": "Drift level",
                 "ja_JP": "ドリフト段階",
             },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-widget": "discrete-slider",
             "x-option-labels": ATTENTION_DRIFT_LEVEL_OPTION_LABELS,
             "x-option-descriptions": ATTENTION_DRIFT_LEVEL_OPTION_DESCRIPTIONS,
             "x-row": "attention-drift-style",
@@ -880,9 +878,7 @@ class AttentionDriftConfig(ConfigBase):
                 "en_US": "Anchor policy",
                 "ja_JP": "アンカー方針",
             },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-widget": "discrete-slider",
             "x-option-labels": ATTENTION_DRIFT_ANCHOR_OPTION_LABELS,
             "x-option-descriptions": ATTENTION_DRIFT_ANCHOR_OPTION_DESCRIPTIONS,
             "x-row": "attention-drift-style",
@@ -898,9 +894,7 @@ class AttentionDriftConfig(ConfigBase):
                 "en_US": "Short reaction style",
                 "ja_JP": "短い反応スタイル",
             },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-widget": "discrete-slider",
             "x-option-labels": ATTENTION_DRIFT_REACTION_OPTION_LABELS,
             "x-option-descriptions": ATTENTION_DRIFT_REACTION_OPTION_DESCRIPTIONS,
             "x-row": "attention-drift-reaction",
