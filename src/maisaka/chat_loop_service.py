@@ -1076,6 +1076,7 @@ class MaisakaChatLoopService:
             context_items = build_context_items_from_history_entry(
                 msg,
                 enable_visual_message=enable_visual_message,
+                limit_emoji_size=True,
             )
             if not context_items:
                 continue
@@ -1187,7 +1188,9 @@ class MaisakaChatLoopService:
             max_context_size=max_context_size,
             is_group_chat=self._is_group_chat,
         )
-        built_messages, history_item_count = self._build_request_messages(
+        # 上下文可能触发表情包解码、缩放和缓存等待，在线程池执行，避免阻塞事件循环。
+        built_messages, history_item_count = await asyncio.to_thread(
+            self._build_request_messages,
             selected_history,
             enable_visual_message=enable_visual_message,
             include_day_boundary_time_messages=request_kind == "planner",

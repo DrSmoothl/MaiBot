@@ -652,6 +652,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                 context_items = build_context_items_from_history_entry(
                     message,
                     enable_visual_message=enable_visual_message,
+                    limit_emoji_size=True,
                 )
                 items.extend(context_items)
                 continue

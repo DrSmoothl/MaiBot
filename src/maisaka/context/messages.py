@@ -43,6 +43,7 @@ from src.llm_models.payload_content.context_item import (
     get_response_tool_calls,
 )
 from src.llm_models.payload_content.tool_option import ToolCall
+from src.maisaka.visual.emoji_image_cache import emoji_image_cache
 
 FORWARD_PREVIEW_LIMIT = 4
 FOCUS_COOLDOWN_WAKEUP_SOURCE = "focus_cooldown_wakeup"
@@ -126,8 +127,14 @@ def _append_emoji_component(
     component: EmojiComponent,
     *,
     enable_visual_message: bool,
+    limit_emoji_size: bool = False,
 ) -> bool:
     """将表情组件追加到 LLM 消息构建器。"""
+    if enable_visual_message and limit_emoji_size and component.binary_data:
+        part = emoji_image_cache.get(component.binary_hash, component.binary_data)
+        builder.add_image_content(part.image_format, part.image_base64)
+        return True
+
     image_format = _guess_image_format(component.binary_data)
     if enable_visual_message and image_format and component.binary_data:
         builder.add_text_content("[消息类型]表情包")
@@ -436,6 +443,7 @@ def _build_item_from_sequence(
     fallback_text: str,
     *,
     enable_visual_message: bool = True,
+    limit_emoji_size: bool = False,
     tool_call_id: Optional[str] = None,
     tool_name: Optional[str] = None,
     meta: ContextItemMeta | None = None,
@@ -463,6 +471,7 @@ def _build_item_from_sequence(
                     builder,
                     component,
                     enable_visual_message=enable_visual_message,
+                    limit_emoji_size=limit_emoji_size,
                 )
                 or has_content
             )
@@ -576,12 +585,15 @@ class SessionBackedMessage(LLMContextMessage):
     def source(self) -> str:
         return self.source_kind
 
-    def to_context_item(self, enable_visual_message: bool = True) -> ContextItem | None:
+    def to_context_item(
+        self, enable_visual_message: bool = True, *, limit_emoji_size: bool = False
+    ) -> ContextItem | None:
         return _build_item_from_sequence(
             RoleType.User,
             self.raw_message,
             self.processed_plain_text,
             enable_visual_message=enable_visual_message,
+            limit_emoji_size=limit_emoji_size,
             meta=ContextItemMeta.create(item_id=self.context_item_id, timestamp=self.timestamp),
         )
 
@@ -616,8 +628,10 @@ class ComplexSessionMessage(SessionBackedMessage):
     def source(self) -> str:
         return f"{self.source_kind}:{self.complex_message_type}"
 
-    def to_context_item(self, enable_visual_message: bool = True) -> ContextItem | None:
-        del enable_visual_message
+    def to_context_item(
+        self, enable_visual_message: bool = True, *, limit_emoji_size: bool = False
+    ) -> ContextItem | None:
+        del enable_visual_message, limit_emoji_size
         message_sequence = MessageSequence([TextComponent(self.prompt_text)])
         return _build_item_from_sequence(
             RoleType.User,
@@ -818,8 +832,13 @@ def build_context_items_from_history_entry(
     context_message: LLMContextMessage,
     *,
     enable_visual_message: bool = True,
+    limit_emoji_size: bool = False,
 ) -> tuple[ContextItem, ...]:
     """将 Maisaka 历史条目转换为发给 LLM 的统一 Context Items。"""
 
-    item = context_message.to_context_item(enable_visual_message=enable_visual_message)
+    # 尺寸限制由普通 planner/replyer 显式启用，复古模式等已有调用保持原来的图片策略。
+    if isinstance(context_message, SessionBackedMessage) and limit_emoji_size:
+        item = context_message.to_context_item(enable_visual_message=enable_visual_message, limit_emoji_size=True)
+    else:
+        item = context_message.to_context_item(enable_visual_message=enable_visual_message)
     return (item,) if item is not None else ()
