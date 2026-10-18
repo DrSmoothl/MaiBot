@@ -87,7 +87,8 @@ async def load_release_index() -> PluginReleaseIndex:
                 if release.manifest.get("manifest_version") == 2 and release.manifest.get("id") != entry.manifest_id:
                     raise ValueError(f"版本索引 manifest ID 不匹配：{entry.id}")
                 seen.add(release.version)
-            if bool(entry.versions or entry.rejected_releases) != (entry.mode == "releases"):
+            # Release 待审核时两个列表都可为空，但不能因此退回分支安装。
+            if entry.mode == "branch" and (entry.versions or entry.rejected_releases):
                 raise ValueError(f"版本索引安装模式不匹配：{entry.id}")
     except (ValidationError, ValueError, KeyError) as exc:
         raise HTTPException(status_code=502, detail=f"插件版本索引无效：{exc}") from exc
@@ -128,7 +129,8 @@ def parse_market_release_entry(data: Dict[str, Any], plugin_id: Optional[str] = 
     })
     if plugin_id is not None and plugin_id.casefold() not in {entry.id.casefold(), (entry.manifest_id or "").casefold()}:
         raise ValueError("插件中心返回的插件 ID 与请求不一致")
-    if bool(entry.versions or entry.rejected_releases) != (entry.mode == "releases"):
+    # Release 待审核时两个列表都可为空，但不能因此退回分支安装。
+    if entry.mode == "branch" and (entry.versions or entry.rejected_releases):
         raise ValueError(f"版本索引安装模式不匹配：{entry.id}")
     seen = set()
     for release in entry.versions:
@@ -170,6 +172,8 @@ async def resolve_release(plugin_id: str, version: str) -> Tuple[PluginReleaseEn
         if version != "latest":
             raise HTTPException(status_code=400, detail="该插件尚未发布 Release，只支持分支安装")
         return entry, None
+    if not entry.versions:
+        raise HTTPException(status_code=400, detail="暂无可安装版本")
     description = await asyncio.to_thread(describe_entry, entry)
     target = description["recommended_version"] if version == "latest" else version
     release = next((item for item in entry.versions if item.version == target), None)
