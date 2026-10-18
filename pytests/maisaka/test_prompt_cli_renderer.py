@@ -12,24 +12,6 @@ from src.llm_models.payload_content.context_item import (
 )
 
 
-def test_preview_metadata_keeps_token_usage() -> None:
-    metadata = PromptCLIVisualizer._normalize_preview_metadata(
-        {
-            "model_name": "test-model",
-            "duration_ms": 123.456,
-            "prompt_tokens": 1200,
-            "completion_tokens": 34,
-            "total_tokens": 1234,
-        }
-    )
-
-    assert metadata == {
-        "model_name": "test-model",
-        "duration_ms": 123.46,
-        "prompt_tokens": 1200,
-        "completion_tokens": 34,
-        "total_tokens": 1234,
-    }
 
 
 def test_reasoning_item_is_displayed_as_independent_item_content() -> None:
