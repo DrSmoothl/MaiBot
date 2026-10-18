@@ -49,7 +49,7 @@ def validator_versions(monkeypatch):
     monkeypatch.setattr(release_install, "ManifestValidator", validator)
 
 
-def test_recommendation_filters_host_sdk_protocol_prerelease_and_yanked():
+def test_recommendation_allows_sdk_mismatch_but_filters_host_protocol_prerelease_and_yanked():
     host = manifest("5.0.0")
     host["host_application"]["min_version"] = "2.0.0"
     sdk = manifest("4.0.0")
@@ -61,9 +61,9 @@ def test_recommendation_filters_host_sdk_protocol_prerelease_and_yanked():
         release("4.0.0", manifest=sdk), release("3.0.0", manifest=old),
         release("7.0.0", prerelease=True), release("6.0.0", yanked=True),
     ))
-    assert result["recommended_version"] == "1.10.0"
+    assert result["recommended_version"] == "4.0.0"
     assert result["versions"][0]["prerelease"] is True
-    assert all(item["reasons"] for item in result["versions"] if item["version"] in {"3.0.0", "4.0.0", "5.0.0", "6.0.0"})
+    assert all(item["reasons"] for item in result["versions"] if item["version"] in {"3.0.0", "5.0.0", "6.0.0"})
 
 
 def test_no_compatible_release_and_sync_errors_are_explicit():
@@ -465,3 +465,24 @@ def test_missing_plugin_dependency_blocks_install(local_install):
     response = install(client)
     assert response.status_code == 400 and "插件依赖不满足" in response.text
     assert support.resolve_installed_plugin_path("example.demo") is None
+
+
+@pytest.mark.parametrize("updating", [False, True])
+@pytest.mark.parametrize("sdk", [
+    {"min_version": "9.0.0", "max_version": "9.99.99"},
+    {"min_version": "1.0.0", "max_version": "1.99.99"},
+])
+def test_market_install_and_update_allow_sdk_range_mismatch(local_install, updating, sdk):
+    client, _, repository, chosen, _ = local_install
+    if updating:
+        assert install(client).status_code == 200
+    new_manifest = {**manifest("1.1.0"), "sdk": sdk}
+    (repository / "_manifest.json").write_text(json.dumps(new_manifest), encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "commit", "-qam", "SDK range mismatch"], check=True)
+    subprocess.run(["git", "-C", str(repository), "tag", "v1.1.0"], check=True)
+    chosen.version, chosen.tag, chosen.manifest = "1.1.0", "v1.1.0", new_manifest
+    chosen.commit = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+    response = client.post("/plugins/update", json={"plugin_id": "example.demo", "version": "latest"}) if updating else install(client)
+    assert response.status_code == 200, response.text
+    target = support.resolve_installed_plugin_path("example.demo")
+    assert release_install.read_release_receipt(target)["version"] == "1.1.0"
