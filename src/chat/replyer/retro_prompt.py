@@ -148,12 +148,12 @@ class RetroReplyPromptMixin:
             think_level=think_level,
             reply_tool_args=reply_tool_args,
         )
+        # 复古回复器对齐训练分布：system 消息仅保留人设（训练数据 persona-only，
+        # 无 gca 注意事项块与 attention_drift 块——线上注入属训练外成分，会把回复带向啰嗦/书面）。
         system_prompt = "\n\n".join(
             block.strip()
             for block in (
                 self._build_personality_prompt(),
-                self._build_group_chat_attention_block(self._resolve_session_id(stream_id)),
-                build_attention_drift_prompt_block(),
             )
             if block.strip()
         )
@@ -286,8 +286,8 @@ class RetroReplyPromptMixin:
         """按群聊/私聊、是否简短回复、是否补充自己发言挑选模板。"""
 
         if self._is_retro_group_chat(stream_id):
-            if self._is_retro_short_reply(think_level, reply_tool_args):
-                return RETRO_GROUP_LIGHT_PROMPT
+            # 复古回复器对齐训练分布：训练数据 100% 使用标准模板（retro_replyer），
+            # light 模板（口语化/尽量简短/不要太有条理）属训练外成分。群聊恒用标准模板。
             return RETRO_GROUP_PROMPT
 
         if reply_message is not None:
@@ -335,16 +335,17 @@ class RetroReplyPromptMixin:
             "bot_name": global_config.bot.nickname,
             "sender_name": self._build_retro_sender_name(chat_history, reply_message),
             "reply_style": reply_style,
-            "expression_habits_block": expression_habits.strip(),
+            # 复古回复器对齐训练分布：表达习惯参考块在训练数据中仅 bdpan 源少量出现，
+            # 线上动态注入会把回复带向套用句式模板、变书面。retro 路径跳过该块。
+            "expression_habits_block": "",
             "extra_info_block": self._build_retro_extra_info_block(reply_requirements),
             "dialogue_prompt": self._build_retro_dialogue_block(chat_history),
             "time_block": f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "reply_target_block": self._build_retro_reply_target_block(reply_message, chat_history),
             "planner_reasoning": combined_reference,
-            "keywords_reaction_prompt": self._build_keyword_reaction_prompt(
-                chat_history=chat_history,
-                reply_message=reply_message,
-            ),
+            # 复古回复器对齐训练分布：关键词反应提示（"人机"否定/定型文模板等）
+            # 在训练数据中不存在，线上注入属训练外成分。retro 路径跳过。
+            "keywords_reaction_prompt": "",
         }
 
     @staticmethod
@@ -416,8 +417,8 @@ class RetroReplyPromptMixin:
                 return f"你现在想补充说明你刚刚自己的发言内容：你{reference_text} 说：{target_content}"
             return f"你现在想补充说明你刚刚自己的发言内容：{target_content}"
         if references:
-            return f"现在{sender_name}{reference_text} 说：{target_content}。引起了你的注意"
-        return f"现在{sender_name}说的：{target_content}。引起了你的注意"
+            return f"现在{sender_name}{reference_text} 说：{target_content} 引起了你的注意"
+        return f"现在{sender_name}说的：{target_content} 引起了你的注意"
 
     def _build_retro_dialogue_block(self, chat_history: List[LLMContextMessage]) -> str:
         """把聊天历史渲染成旧版那样的可读文本块。"""
