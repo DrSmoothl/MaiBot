@@ -5122,6 +5122,19 @@ class MaimMessageConfig(ConfigBase):
 
     __ui_parent__ = "debug"
 
+    enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用 maim_message 服务",
+                "en_US": "Enable maim_message service",
+                "ja_JP": "maim_message サービスを有効化",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """消息服务总开关；关闭后不启动旧版 WS 和新版 API 服务，重启生效，不影响插件式适配器。"""
+
     ws_server_host: str = Field(
         default="127.0.0.1",
         json_schema_extra={

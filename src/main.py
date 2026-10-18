@@ -248,18 +248,21 @@ class MainSystem:
 
             # 在独立线程中巡检推理图片，空闲时也能清理旧版本遗留的孤立缓存。
             PromptPreviewLogger.start()
-            self._register_message_handlers()
-            if self.app is None or self.server is None:
-                raise RuntimeError("消息服务未初始化")
 
             tasks = [
                 emoji_manager.periodic_emoji_maintenance(),
                 periodic_emoji_cache_cleanup(),
                 periodic_image_cache_cleanup(),
                 periodic_transfer_temp_cleanup(),
-                self.app.run(),
-                self.server.run(),
             ]
+            # 插件式适配器通过 SDK 通信，不依赖 maim_message 的网络监听服务。
+            if global_config.maim_message.enabled:
+                self._register_message_handlers()
+                if self.app is None or self.server is None:
+                    raise RuntimeError("消息服务未初始化")
+                tasks.extend([self.app.run(), self.server.run()])
+            else:
+                logger.info("maim_message 已关闭，跳过旧版 WS 和新版 API 服务启动")
             if global_config.debug.enable_console_input:
                 if sys.stdin.isatty():
                     from src.cli.bot_console import BotConsole
