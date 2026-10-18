@@ -1,3 +1,4 @@
+import { Card } from '@/components/ui/card'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
@@ -435,10 +436,10 @@ function StatusBadge({ status }: { status: string }) {
 
 function DetailScore({ label, value }: { label: string; value: number | null | undefined }) {
   return (
-    <div className="bg-card rounded-lg border p-3">
+    <Card className="p-3">
       <div className="text-muted-foreground text-xs">{label}</div>
       <div className="mt-1 text-xl font-bold tabular-nums">{scoreText(value)}</div>
-    </div>
+    </Card>
   )
 }
 
@@ -528,14 +529,14 @@ function EvaluationDetail({ detail }: { detail: EffectDetail }) {
         </div>
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <DetailScore label="回应度" value={scores?.response_score} />
-          <div className="bg-card rounded-lg border p-3">
+          <Card className="p-3">
             <div className="text-muted-foreground text-xs">反馈倾向</div>
             <div className="mt-1 text-lg font-bold">
               {scores == null ? '—' : receptionText(scores.reception_categories)}
             </div>
-          </div>
+          </Card>
           <DetailScore label="聊天推动度" value={scores?.conversation_score} />
-          <div className="bg-card rounded-lg border p-3">
+          <Card className="p-3">
             <div className="text-muted-foreground text-xs">综合置信度</div>
             <div className="mt-1 text-xl font-bold tabular-nums">
               {scores == null
@@ -548,7 +549,7 @@ function EvaluationDetail({ detail }: { detail: EffectDetail }) {
                   ? '已完成 / 无信息'
                   : confidenceText(scores.confidence)}
             </div>
-          </div>
+          </Card>
         </div>
         {incomplete && (
           <div className="text-muted-foreground mt-3 text-xs">观察窗口不完整，未进行评分。</div>

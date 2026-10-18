@@ -7,6 +7,7 @@
  * （例如重启期间后端短暂不可达导致的预期失败）。
  */
 import { backendApi } from '@/lib/http'
+import { getApiBaseUrl } from '@/lib/api-base'
 
 /**
  * 重启麦麦主程序
@@ -172,6 +173,7 @@ export interface SelfUpdateStatus {
 export async function getSelfUpdateStatus(): Promise<SelfUpdateStatus> {
   return backendApi.get<SelfUpdateStatus>('/api/webui/system/self-update/status', {
     errorMessage: '获取更新状态失败',
+    signal: AbortSignal.timeout(8000),
   })
 }
 
@@ -180,12 +182,46 @@ export interface SelfUpdateSourceSelection {
   custom_prefix?: string
 }
 
-/** 使用本次选中的来源检查本体更新 */
+export const SELF_UPDATE_STATUS_EVENT = 'maibot-self-update-status'
+const SELF_UPDATE_CUSTOM_PREFIX_KEY = 'maibot-self-update-custom-prefix'
+const startupUpdateChecks = new Map<string, Promise<SelfUpdateStatus>>()
+
+export function getSelfUpdateCustomPrefix(): string {
+  return localStorage.getItem(SELF_UPDATE_CUSTOM_PREFIX_KEY) ?? ''
+}
+
+/** 使用本次选中的来源检查本体更新，所有入口共享后端判断和状态通知。 */
 export async function checkSelfUpdate(source: SelfUpdateSourceSelection): Promise<SelfUpdateStatus> {
-  return backendApi.post<SelfUpdateStatus>('/api/webui/system/self-update/check', {
+  const status = await backendApi.post<SelfUpdateStatus>('/api/webui/system/self-update/check', {
     body: source,
     errorMessage: '检查更新失败',
+    signal: AbortSignal.timeout(20000),
   })
+  if (source.source_id === 'custom' && source.custom_prefix?.trim()) {
+    localStorage.setItem(SELF_UPDATE_CUSTOM_PREFIX_KEY, source.custom_prefix.trim())
+  }
+  startupUpdateChecks.set(await getApiBaseUrl(), Promise.resolve(status))
+  window.dispatchEvent(new CustomEvent<SelfUpdateStatus>(SELF_UPDATE_STATUS_EVENT, { detail: status }))
+  return status
+}
+
+/** 每个后端在本次 WebUI 启动时共享一次后台检查，不阻塞页面加载。 */
+export async function checkSelfUpdateOnStartup(): Promise<SelfUpdateStatus> {
+  const baseUrl = await getApiBaseUrl()
+  const existing = startupUpdateChecks.get(baseUrl)
+  if (existing) return existing
+
+  const request = (async () => {
+    const local = await getSelfUpdateStatus()
+    if (!local.supported) return local
+    // 包安装沿用现有 PyPI 检查，Git 镜像仅适用于源码部署。
+    if (local.deployment_type === 'package') return checkSelfUpdate({ source_id: 'pypi' })
+
+    // 自动检查只读取官方 API；下载源在执行更新时选择，避免逐个探测镜像拖慢启动。
+    return checkSelfUpdate({ source_id: 'github' })
+  })()
+  startupUpdateChecks.set(baseUrl, request)
+  return request
 }
 
 /** 更新到界面上确认过的提交并重启 */

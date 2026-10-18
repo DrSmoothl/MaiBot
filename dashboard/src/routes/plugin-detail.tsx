@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
@@ -26,6 +27,8 @@ import {
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { backendApi } from '@/lib/http'
+import { pluginProgressClient } from '@/lib/plugin-progress-client'
+import { buildLocalPluginInfo } from '@/lib/plugin-info'
 import type { PluginInfo } from '@/types/plugin'
 import {
   checkGitStatus,
@@ -43,6 +46,7 @@ import {
   type InstalledPlugin,
   type GitStatus,
   type MaimaiVersion,
+  type PluginLoadProgress,
 } from '@/lib/plugin-api'
 import { describeRejectedReleaseError, shortenReleaseReasons } from '@/lib/plugin-api/release-reasons'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
@@ -67,42 +71,6 @@ function isAbortError(error: unknown): boolean {
     error.name === 'AbortError'
     || (cause instanceof Error && cause.name === 'AbortError')
   )
-}
-
-function buildLocalPluginInfo(installedPlugin: InstalledPlugin): PluginInfo {
-  const urls = installedPlugin.manifest.urls as PluginInfo['manifest']['urls'] | undefined
-
-  return {
-    id: installedPlugin.id,
-    manifest: {
-      manifest_version: installedPlugin.manifest.manifest_version || 1,
-      id: installedPlugin.manifest.id || installedPlugin.id,
-      name: installedPlugin.manifest.name,
-      version: installedPlugin.manifest.version,
-      description: installedPlugin.manifest.description || '',
-      author: installedPlugin.manifest.author,
-      license: installedPlugin.manifest.license || 'Unknown',
-      host_application: installedPlugin.manifest.host_application,
-      homepage_url: installedPlugin.manifest.homepage_url || urls?.homepage,
-      repository_url: installedPlugin.manifest.repository_url || urls?.repository,
-      urls,
-      keywords: installedPlugin.manifest.keywords || [],
-      plugin_type: installedPlugin.manifest.plugin_type || 'extension',
-      display: installedPlugin.manifest.display,
-      changelog: installedPlugin.manifest.changelog,
-      default_locale: (installedPlugin.manifest.default_locale as string) || 'zh-CN',
-      locales_path: installedPlugin.manifest.locales_path as string | undefined,
-    },
-    downloads: 0,
-    rating: 0,
-    review_count: 0,
-    installed: true,
-    installed_version: installedPlugin.manifest.version,
-    published_at: '',
-    updated_at: '',
-    changelog: installedPlugin.changelog ?? undefined,
-    source: 'local',
-  }
 }
 
 async function loadPluginReadme(
@@ -319,6 +287,53 @@ export function PluginDetailPage({
   const queryClient = useQueryClient()
   const pluginId = pluginIdProp ?? search.pluginId
   const [selection, setSelection] = useState<{ pluginId?: string; version: string } | null>(null)
+  const [operationProgress, setOperationProgress] = useState<PluginLoadProgress | null>(null)
+  const [progressConnectionError, setProgressConnectionError] = useState<string | null>(null)
+
+  // 与插件市场共用进度通道，只接收本详情页发起的同一插件、同一种操作。
+  useEffect(() => {
+    let disposed = false
+    let unsubscribe: (() => Promise<void>) | undefined
+    void pluginProgressClient.subscribe((progress) => {
+      if (disposed) return
+      setOperationProgress((current) => (
+        current?.stage === 'loading'
+        && current.plugin_id === progress.plugin_id
+        && current.operation === progress.operation
+          ? progress
+          : current
+      ))
+    }).then((cleanup) => {
+      if (disposed) void cleanup()
+      else unsubscribe = cleanup
+    }).catch((error: unknown) => {
+      if (!disposed) setProgressConnectionError(
+        error instanceof Error ? error.message : '无法连接插件进度通道'
+      )
+    })
+    return () => {
+      disposed = true
+      void unsubscribe?.()
+    }
+  }, [])
+
+  const beginOperation = (target: PluginInfo, operation: 'install' | 'update' | 'uninstall') => {
+    const label = { install: '安装', update: '更新', uninstall: '卸载' }[operation]
+    setOperationProgress({
+      operation, plugin_id: target.id, stage: 'loading', progress: 0,
+      message: `正在准备${label} ${target.manifest.name}`,
+      total_plugins: 1, loaded_plugins: 0,
+    })
+  }
+  const finishOperation = (target: PluginInfo, operation: 'install' | 'update' | 'uninstall', error?: unknown) => {
+    const label = { install: '安装', update: '更新', uninstall: '卸载' }[operation]
+    setOperationProgress((current) => {
+      if (!current || current.plugin_id !== target.id || current.operation !== operation) return current
+      return error === undefined
+        ? { ...current, stage: 'success', progress: 100, loaded_plugins: 1, message: `${label}完成`, error: undefined }
+        : { ...current, stage: 'error', message: `${label}失败`, error: error instanceof Error ? error.message : String(error) }
+    })
+  }
   const isDialog = mode === 'dialog'
   const isPanel = mode === 'panel'
   const containerClassName = isPanel
@@ -486,6 +501,7 @@ export function PluginDetailPage({
 
   // 安装插件（失败由全局 mutation 错误 toast 呈现）
   const installMutation = useMutation({
+    onMutate: ({ plugin }: { plugin: PluginInfo }) => beginOperation(plugin, 'install'),
     mutationFn: (vars: { plugin: PluginInfo }) => {
       const repositoryUrl =
         vars.plugin.manifest.repository_url || vars.plugin.manifest.urls?.repository || ''
@@ -494,7 +510,9 @@ export function PluginDetailPage({
         : installPlugin(vars.plugin.id, repositoryUrl, 'main', releaseRequest)
     },
     meta: { errorTitle: '安装失败' },
+    onError: (error, vars) => finishOperation(vars.plugin, 'install', error),
     onSuccess: (_data, vars) => {
+      finishOperation(vars.plugin, 'install')
       // 记录下载统计
       if (vars.plugin.manifest.id) {
         recordPluginDownload(vars.plugin.manifest.id).catch((err) => {
@@ -514,10 +532,13 @@ export function PluginDetailPage({
 
   // 卸载插件（失败由全局 mutation 错误 toast 呈现）
   const uninstallMutation = useMutation({
+    onMutate: ({ plugin }: { plugin: PluginInfo }) => beginOperation(plugin, 'uninstall'),
     mutationFn: (vars: { plugin: PluginInfo }) =>
       uninstallPlugin(vars.plugin.id),
     meta: { errorTitle: '卸载失败' },
+    onError: (error, vars) => finishOperation(vars.plugin, 'uninstall', error),
     onSuccess: (_data, vars) => {
+      finishOperation(vars.plugin, 'uninstall')
       toast({
         title: '卸载成功',
         description: `${vars.plugin.manifest.name} 已成功卸载`,
@@ -530,6 +551,7 @@ export function PluginDetailPage({
 
   // 更新插件（失败由全局 mutation 错误 toast 呈现）
   const updateMutation = useMutation({
+    onMutate: ({ plugin }: { plugin: PluginInfo }) => beginOperation(plugin, 'update'),
     mutationFn: (vars: { plugin: PluginInfo }) => {
       const repositoryUrl =
         vars.plugin.manifest.repository_url || vars.plugin.manifest.urls?.repository || ''
@@ -538,7 +560,9 @@ export function PluginDetailPage({
         : updatePlugin(vars.plugin.id, repositoryUrl, 'main', releaseRequest)
     },
     meta: { errorTitle: '更新失败' },
+    onError: (error, vars) => finishOperation(vars.plugin, 'update', error),
     onSuccess: (data, vars) => {
+      finishOperation(vars.plugin, 'update')
       toast({
         title: '更新成功',
         description: `${vars.plugin.manifest.name} 已从 ${data.old_version} 更新到 ${data.new_version}`,
@@ -549,7 +573,7 @@ export function PluginDetailPage({
     },
   })
 
-  // 任一写操作进行中即视为操作中（保持按钮禁用 / loading 语义）
+  // 写操作互斥；按钮的忙碌文字分别由各自 mutation 决定。
   const operating =
     installMutation.isPending || uninstallMutation.isPending || updateMutation.isPending
   // 首屏元数据用于阅读，安装等操作要等完整详情到达后再开放。
@@ -557,19 +581,19 @@ export function PluginDetailPage({
 
   // 安装插件
   const handleInstall = () => {
-    if (!plugin || !gitStatus?.installed || detailPending) return
+    if (!plugin || !gitStatus?.installed || detailPending || operating) return
     installMutation.mutate({ plugin })
   }
 
   // 卸载插件
   const handleUninstall = () => {
-    if (!plugin || detailPending) return
+    if (!plugin || detailPending || operating) return
     uninstallMutation.mutate({ plugin })
   }
 
   // 更新插件
   const handleUpdate = () => {
-    if (!plugin || !gitStatus?.installed || detailPending) return
+    if (!plugin || !gitStatus?.installed || detailPending || operating) return
     updateMutation.mutate({ plugin })
   }
 
@@ -584,7 +608,7 @@ export function PluginDetailPage({
             size="icon"
             onClick={handleBack}
             data-plugin-detail-back="true"
-            className="h-10 w-10 shrink-0 [&_svg]:size-5"
+            className="shrink-0 [&_svg]:size-5"
             aria-label="返回插件市场"
           >
             <ArrowLeft className="h-5 w-5" />
@@ -611,7 +635,7 @@ export function PluginDetailPage({
             size="icon"
             onClick={handleBack}
             data-plugin-detail-back="true"
-            className="h-10 w-10 shrink-0 [&_svg]:size-5"
+            className="shrink-0 [&_svg]:size-5"
             aria-label="返回插件市场"
           >
             <ArrowLeft className="h-5 w-5" />
@@ -648,7 +672,7 @@ export function PluginDetailPage({
               onClick={handleUpdate}
               title={!gitStatus?.installed ? 'Git 未安装' : undefined}
             >
-              {operating ? (
+              {updateMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   更新中...
@@ -668,7 +692,7 @@ export function PluginDetailPage({
             onClick={handleUninstall}
             title={!gitStatus?.installed ? 'Git 未安装' : undefined}
           >
-            {operating ? (
+            {uninstallMutation.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 卸载中...
@@ -694,7 +718,7 @@ export function PluginDetailPage({
                 : undefined
           }
         >
-          {operating ? (
+          {installMutation.isPending ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               安装中...
@@ -728,7 +752,7 @@ export function PluginDetailPage({
             size="icon"
             onClick={handleBack}
             data-plugin-detail-back="true"
-            className="h-10 w-10 shrink-0 [&_svg]:size-5"
+            className="shrink-0 [&_svg]:size-5"
             aria-label="返回插件市场"
             title="返回插件市场"
           >
@@ -840,6 +864,19 @@ export function PluginDetailPage({
                 </label>
               )}
               {detailActionButtons}
+              {operationProgress?.plugin_id === plugin.id && (
+                <div className="space-y-2 text-sm" role="status" aria-live="polite">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 break-words">{operationProgress.message}</span>
+                    <span className="shrink-0 tabular-nums">{operationProgress.progress}%</span>
+                  </div>
+                  <Progress value={operationProgress.progress} aria-label="插件操作进度" />
+                  {operationProgress.error && <p className="text-destructive break-words">{operationProgress.error}</p>}
+                  {operating && progressConnectionError && (
+                    <p className="text-destructive break-words">实时进度连接失败：{progressConnectionError}</p>
+                  )}
+                </div>
+              )}
               <dl data-plugin-detail-compatibility="true" className="space-y-2 text-xs text-muted-foreground">
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <dt>适配麦麦</dt>
@@ -879,8 +916,8 @@ export function PluginDetailPage({
                   <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0">
                     <CardTitle className="text-lg">插件说明</CardTitle>
                     <TabsList aria-label="插件文档" className="ml-auto h-auto gap-2 bg-transparent p-0">
-                      <TabsTrigger value="readme" className="h-9">README</TabsTrigger>
-                      <TabsTrigger value="changelog" className="h-9">更新日志</TabsTrigger>
+                      <TabsTrigger value="readme" size="sm">README</TabsTrigger>
+                      <TabsTrigger value="changelog" size="sm">更新日志</TabsTrigger>
                     </TabsList>
                   </CardHeader>
                   <TabsContent value="readme" asChild>

@@ -48,7 +48,9 @@ import { ThemeProviderContext } from '@/lib/theme-context'
 import { cn } from '@/lib/utils'
 import { extensionIcons, extensionPath, extensionWorkspace } from '@/lib/plugin-webui'
 import type { WebUIExtension } from '@/lib/plugin-webui'
+import { splitWorkspaceTabs } from '@/lib/workspace-tabs'
 
+import { HeaderUpdateButton } from './HeaderUpdateButton'
 import { LANGUAGE_CODES, LANGUAGE_NAMES } from './language-options'
 import type { WorkspaceMode } from './types'
 
@@ -92,6 +94,7 @@ interface HeaderProps {
 }
 
 type HeaderActionId =
+  | 'update'
   | 'settings'
   | 'docs'
   | 'language'
@@ -139,15 +142,11 @@ export function Header({
   })
   // 顶栏最多直接展示两个插件工作区，其余收进“更多”；当前工作区保持可见。
   const activePluginTab = pluginTabs.find((tab) => tab.value === workspaceMode)
-  const visiblePluginTabs = pluginTabs.slice(0, 2)
-  if (activePluginTab && !visiblePluginTabs.includes(activePluginTab)) {
-    visiblePluginTabs[1] = activePluginTab
-  }
+  const { visible: visiblePluginTabs, overflow: overflowTabs } = splitWorkspaceTabs(pluginTabs, activePluginTab)
   const workspaceTabs = [
     ...WORKSPACE_TABS.map((tab) => ({ ...tab, literal: false })),
     ...visiblePluginTabs,
   ]
-  const overflowTabs = pluginTabs.filter((tab) => !visiblePluginTabs.includes(tab))
   const workspaceTabsKey = workspaceTabs.map((tab) => `${tab.value}:${tab.labelKey}`).join('|')
   const { themeConfig } = useContext(ThemeProviderContext)
   // 千禧风格的顶栏要放得下键帽，比其它风格高一截；高度由动画驱动，所以在这里按风格取值。
@@ -472,6 +471,7 @@ export function Header({
                 >
                   {workspaceTabs.map(({ value, to, icon: Icon, labelKey, literal }) => (
                     <TabsTrigger
+                      size="sm"
                       key={value}
                       asChild
                       value={value}
@@ -676,6 +676,14 @@ export function Header({
                 />
               </Suspense>
             )}
+
+            <HeaderUpdateButton
+              highlighted={highlightedHeaderAction === 'update'}
+              onPointerEnter={() => handleHeaderActionEnter('update')}
+              onPointerLeave={handleHeaderActionLeave}
+            >
+              {renderHeaderActionPill('update')}
+            </HeaderUpdateButton>
 
             {/* WebUI 设置 */}
             <span data-dashboard-header-vent="true" aria-hidden="true" className="hidden" />

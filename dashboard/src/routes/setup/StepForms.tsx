@@ -1,19 +1,31 @@
-import { CheckCircle2, Eye, EyeOff, KeyRound, ShieldCheck, XCircle } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
+import { StatusLight } from '@/components/ui/status-light'
 import { Label } from '@/components/ui/label'
 import { HelpTooltip } from '@/components/ui/help-tooltip'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { validateToken } from '@/lib/token-validator'
 import { cn } from '@/lib/utils'
 import type { ModelListItem } from '@/lib/config-api'
-import { findTemplateByBaseUrl, PROVIDER_TEMPLATES, resolveThinkingFormatForModel } from '../config/providerTemplates'
+import {
+  findTemplateByBaseUrl,
+  PROVIDER_TEMPLATES,
+  resolveThinkingFormatForModel,
+} from '../config/providerTemplates'
 
 import type {
   ApiProviderSetupConfig,
@@ -29,84 +41,51 @@ interface CustomTokenFormProps {
 
 export function CustomTokenForm({ token, onChange }: CustomTokenFormProps) {
   const { t } = useTranslation()
-  const [showToken, setShowToken] = useState(false)
   const tokenValidation = useMemo(() => validateToken(token), [token])
-  const toggleLabel = showToken
-    ? t('setupPage.forms.customToken.hide')
-    : t('setupPage.forms.customToken.show')
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-900 dark:border-yellow-900 dark:bg-yellow-950/30 dark:text-yellow-200">
-        <div className="flex gap-3">
-          <ShieldCheck className="mt-0.5 h-5 w-5 flex-shrink-0" strokeWidth={2} fill="none" />
-          <div className="space-y-1">
-            <p className="font-semibold">{t('setupPage.forms.customToken.noticeTitle')}</p>
-            <p>{t('setupPage.forms.customToken.noticeDescription')}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <Label htmlFor="custom-token">{t('setupPage.forms.customToken.label')}</Label>
-        <div className="relative">
-          <KeyRound
-            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-            strokeWidth={2}
-            fill="none"
-          />
-          <Input
-            id="custom-token"
-            type={showToken ? 'text' : 'password'}
-            placeholder={t('setupPage.forms.customToken.placeholder')}
-            value={token}
-            onChange={(e) => onChange(e.target.value)}
-            className="pl-10 pr-10 font-mono"
-            autoComplete="new-password"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="absolute top-1/2 right-2 h-7 w-7 -translate-y-1/2 rounded-md border-0 p-0 hover:bg-transparent"
-            onClick={() => setShowToken(!showToken)}
-            aria-label={toggleLabel}
-            title={toggleLabel}
-          >
-            {showToken ? (
-              <EyeOff className="text-muted-foreground h-4 w-4" />
-            ) : (
-              <Eye className="text-muted-foreground h-4 w-4" />
+      <Label htmlFor="custom-token" className="sr-only">
+        {t('setupPage.forms.customToken.label')}
+      </Label>
+      <PasswordInput
+        id="custom-token"
+        controlSize="lg"
+        placeholder={t('setupPage.forms.customToken.placeholder')}
+        value={token}
+        onChange={(event) => onChange(event.target.value)}
+        showLabel={t('setupPage.forms.customToken.show')}
+        hideLabel={t('setupPage.forms.customToken.hide')}
+        autoComplete="new-password"
+        aria-describedby="custom-token-requirements"
+        className="text-base sm:text-lg md:text-xl"
+      />
+      <ul
+        id="custom-token-requirements"
+        aria-label={t('setupPage.forms.customToken.requirements')}
+        className="grid grid-cols-2 gap-2.5 sm:grid-cols-4"
+      >
+        {tokenValidation.rules.map((rule) => (
+          <li
+            key={rule.id}
+            className={cn(
+              'border-border flex min-h-11 items-center justify-center gap-2 rounded-[var(--surface-radius)] border-2 px-2 py-2 text-sm font-semibold',
+              rule.passed ? 'text-foreground' : 'text-muted-foreground'
             )}
-          </Button>
-        </div>
-        {t('setupPage.forms.customToken.description') ? (
-          <p className="text-muted-foreground text-xs">
-            {t('setupPage.forms.customToken.description')}
-          </p>
-        ) : null}
-      </div>
-
-      <div className="rounded-lg bg-muted/50 p-4">
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-          {tokenValidation.rules.map((rule) => (
-            <div key={rule.id} className="flex items-center gap-2 text-xs">
-              {rule.passed ? (
-                <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0 text-green-500" />
-              ) : (
-                <XCircle className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+          >
+            <StatusLight
+              status={rule.passed ? 'on' : 'off'}
+              glow={false}
+              label={t(
+                rule.passed
+                  ? 'setupPage.forms.customToken.met'
+                  : 'setupPage.forms.customToken.unmet'
               )}
-              <span
-                className={cn(
-                  rule.passed ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'
-                )}
-              >
-                {rule.label}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
+            />
+            <span>{t(`setupPage.forms.customToken.rules.${rule.id}`)}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

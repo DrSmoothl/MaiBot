@@ -599,11 +599,18 @@
       "resetAllSettingsBtn": "모든 설정을 기본값으로 재설정",
       "confirmResetAll": "모든 설정 재설정 확인",
       "confirmResetAllDesc": "테마, 색상, 애니메이션 등 모든 인터페이스 설정을 기본값으로 복원합니다. 로그인 상태에는 영향이 없습니다. 계속하시겠습니까?",
-      "configWizardDesc": "초기 설정 마법사를 다시 실행하여 시스템 기본 설정을 재구성할 수 있습니다.",
+      "configWizardDesc": "초기 설정을 다시 진행합니다. 로그인 비밀번호도 초기화하여 비밀번호 설정부터 시작할 수 있습니다.",
       "rerunSetup": "초기 설정 다시 실행",
+      "resetSetupPassword": "로그인 비밀번호도 초기화",
+      "resetSetupPasswordDesc": "기존 비밀번호는 즉시 무효화되며 다른 브라우저에서는 다시 로그인해야 합니다. 현재 브라우저는 로그인 상태로 비밀번호 설정 화면에 진입합니다. 새 비밀번호를 저장하기 전에는 임시 인증 정보를 사용하며 재시작 시 변경됩니다.",
+      "setupPasswordResetSuccess": "비밀번호가 초기화되었습니다. 비밀번호 설정으로 이동합니다.",
+      "setupResetSuccess": "초기 설정이 초기화되었습니다. 설정 마법사로 이동합니다.",
+      "setupResetFailed": "설정을 초기화할 수 없습니다. 다시 시도하세요.",
       "confirmRerunSetup": "재구성 확인",
       "confirmRerunSetupDesc": "초기 설정 마법사로 돌아갑니다. 시스템 기본 설정을 재구성할 수 있습니다. 계속하시겠습니까?",
       "devToolsDesc": "아래 기능은 개발 및 디버깅 전용입니다. 페이지 충돌이나 비정상 동작을 유발할 수 있습니다.",
+      "alwaysShowUpdateButton": "업데이트 버튼 항상 표시",
+      "alwaysShowUpdateButtonDesc": "업데이트 감지 여부와 관계없이 오른쪽 상단에 메인 프로그램 업데이트 버튼을 항상 표시합니다. 즉시 적용됩니다.",
       "alwaysShowUpdateNotice": "업데이트 로그 항상 표시",
       "alwaysShowUpdateNoticeDesc": "활성화하면 WebUI에 들어갈 때마다 업데이트 내용과 플러그인 호환성 알림이 차례로 표시됩니다. 새로고침 후 적용됩니다.",
       "triggerError": "테스트 오류 발생",
@@ -775,7 +782,8 @@
       },
       "customToken": {
         "title": "로그인 Token 설정",
-        "description": "이번 실행에서 생성된 랜덤 Token을 고정 사용자 지정 Token으로 바꿉니다"
+        "description": "설정하지 않으면 시작할 때마다 임의의 비밀번호가 생성됩니다.",
+        "label": "로그인 비밀번호"
       },
       "botBasic": {
         "title": "Bot 기본 설정",
@@ -837,7 +845,7 @@
       "next": "다음",
       "skip": "마법사 건너뛰기",
       "complete": "설정 완료",
-      "saveToken": "Token 저장",
+      "saveToken": "저장 후 계속",
       "saving": "저장 중...",
       "completing": "완료 중..."
     },
@@ -867,11 +875,19 @@
         "noticeTitle": "현재 실행 시 생성된 랜덤 Token을 사용 중입니다",
         "noticeDescription": "랜덤 Token은 다음 실행 때 변경됩니다. 고정 사용자 지정 Token을 설정하고 앞으로 WebUI 로그인에 사용하세요.",
         "label": "사용자 지정 Token *",
-        "placeholder": "안전하게 보관할 수 있는 Token을 입력하세요",
+        "placeholder": "새 비밀번호 입력",
         "description": "저장하면 현재 로그인이 만료되며 새 Token으로 다시 로그인해야 합니다.",
         "requirements": "Token 요구 사항",
-        "show": "Token 표시",
-        "hide": "Token 숨기기"
+        "show": "표시",
+        "hide": "숨기기",
+        "met": "충족",
+        "unmet": "미충족",
+        "rules": {
+          "minLength": "10자 이상",
+          "hasUppercase": "대문자",
+          "hasLowercase": "소문자",
+          "hasSpecialChar": "특수 문자"
+        }
       },
       "botBasic": {
         "platform": {

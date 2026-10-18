@@ -1,3 +1,4 @@
+import { DataPanel } from '@/components/ui/surface'
 import { Download, Star, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
@@ -321,29 +322,29 @@ function PluginStatsContent({ pluginId, compact = false }: PluginStatsProps) {
   return (
     <div className="space-y-4">
       <div data-plugin-stat-tiles="true" className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div data-plugin-stat-tile="true" className="flex flex-col items-center rounded-lg border bg-card p-3">
+        <DataPanel data-plugin-stat-tile="true" className="flex flex-col items-center p-3">
           <Download className="mb-1 h-5 w-5 text-muted-foreground" />
           <span className="text-2xl font-bold">{stats.downloads.toLocaleString()}</span>
           <span className="text-xs text-muted-foreground">下载量</span>
-        </div>
+        </DataPanel>
 
-        <div data-plugin-stat-tile="true" className="flex flex-col items-center rounded-lg border bg-card p-3">
+        <DataPanel data-plugin-stat-tile="true" className="flex flex-col items-center p-3">
           <Star className="mb-1 h-5 w-5 fill-yellow-400 text-yellow-400" />
           <span className="text-2xl font-bold">{stats.rating.toFixed(1)}</span>
           <span className="text-xs text-muted-foreground">{stats.rating_count} 条评分</span>
-        </div>
+        </DataPanel>
 
-        <div data-plugin-stat-tile="true" className="flex flex-col items-center rounded-lg border bg-card p-3">
+        <DataPanel data-plugin-stat-tile="true" className="flex flex-col items-center p-3">
           <ThumbsUp className="mb-1 h-5 w-5 text-green-500" />
           <span className="text-2xl font-bold">{stats.likes}</span>
           <span className="text-xs text-muted-foreground">点赞</span>
-        </div>
+        </DataPanel>
 
-        <div data-plugin-stat-tile="true" className="flex flex-col items-center rounded-lg border bg-card p-3">
+        <DataPanel data-plugin-stat-tile="true" className="flex flex-col items-center p-3">
           <ThumbsDown className="mb-1 h-5 w-5 text-red-500" />
           <span className="text-2xl font-bold">{stats.dislikes}</span>
           <span className="text-xs text-muted-foreground">点踩</span>
-        </div>
+        </DataPanel>
       </div>
 
       <div className="flex items-center gap-2">

@@ -6,12 +6,11 @@ import {
   CheckCircle2,
   Globe,
   ShieldCheck,
-  SkipForward,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { SetupWizardLayout } from './SetupWizardLayout'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -499,7 +498,7 @@ function SetupPageContent() {
   }
 
   return (
-    <div className="from-primary/5 via-background to-secondary/5 relative flex h-full min-h-screen flex-col items-center justify-center overflow-y-auto overflow-x-hidden bg-gradient-to-br p-3 md:p-4">
+    <div className="relative h-full min-h-screen overflow-x-hidden overflow-y-auto px-4">
       {/* 语言切换 */}
       <div className="absolute top-3 right-3 z-20">
         <DropdownMenu>
@@ -530,15 +529,9 @@ function SetupPageContent() {
         </DropdownMenu>
       </div>
 
-      {/* 背景装饰 */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="bg-primary/5 absolute top-1/4 left-1/4 h-64 w-64 rounded-full blur-3xl md:h-96 md:w-96" />
-        <div className="bg-secondary/5 absolute right-1/4 bottom-1/4 h-64 w-64 rounded-full blur-3xl md:h-96 md:w-96" />
-      </div>
-
       {/* 加载状态 */}
       {isLoading ? (
-        <div className="relative z-10 text-center">
+        <div className="relative z-10 flex min-h-screen flex-col items-center justify-center text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center">
             <div className="border-primary h-12 w-12 animate-spin rounded-full border-4 border-t-transparent" />
           </div>
@@ -546,148 +539,43 @@ function SetupPageContent() {
           <p className="text-muted-foreground mt-2 text-sm">{t('setupPage.loading.description')}</p>
         </div>
       ) : (
-        <>
-          {/* 主要内容 */}
-          <div className="relative z-10 w-full max-w-5xl">
-            {/* 头部 */}
-            <div className="mb-4 text-center md:mb-5">
-              <h1 className="mb-1 text-2xl font-bold md:text-3xl">{t('setupPage.header.title')}</h1>
-              {t('setupPage.header.description', { appName: APP_NAME }) ? (
-                <p className="text-muted-foreground text-sm md:text-base">
-                  {t('setupPage.header.description', { appName: APP_NAME })}
-                </p>
-              ) : null}
-            </div>
-
-            {/* 步骤指示器 */}
-            <div data-setup-steps="true" className="mb-4 flex justify-between md:mb-5">
-              {steps.map((step, index) => {
-                const Icon = step.icon
-                return (
-                  <div
-                    key={step.id}
-                    data-setup-step="true"
-                    data-setup-state={
-                      index === currentStep ? 'current' : index < currentStep ? 'complete' : 'pending'
-                    }
-                    aria-current={index === currentStep ? 'step' : undefined}
-                    className={cn(
-                      'flex flex-1 flex-col items-center gap-1',
-                      index < steps.length - 1 && 'relative'
-                    )}
+        <SetupWizardLayout
+          steps={steps}
+          currentStep={currentStep}
+          actions={
+            <>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="px-1"
+                    disabled={isSaving || isCompleting || currentStepId === 'custom-token'}
                   >
-                    {/* 连接线 */}
-                    {index < steps.length - 1 && (
-                      <div
-                        data-setup-connector="true"
-                        className={cn(
-                          'absolute top-2.5 left-1/2 h-0.5 w-full md:top-3.5',
-                          index < currentStep ? 'bg-primary' : 'bg-border'
-                        )}
-                      />
-                    )}
+                    {t('setupPage.actions.skip')}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t('setupPage.skipDialog.title')}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t('setupPage.skipDialog.description')}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleSkip}>
+                      {t('setupPage.skipDialog.confirm')}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
 
-                    {/* 步骤指示灯 */}
-                    <div
-                      data-setup-indicator="true"
-                      className={cn(
-                        'relative z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all md:h-7 md:w-7',
-                        index === currentStep
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : index < currentStep
-                            ? 'border-primary bg-primary text-primary-foreground'
-                            : 'border-border bg-background text-muted-foreground'
-                      )}
-                    >
-                      {index < currentStep ? (
-                        <CheckCircle2
-                          className="h-2.5 w-2.5 md:h-3.5 md:w-3.5"
-                          strokeWidth={2.5}
-                          fill="none"
-                        />
-                      ) : (
-                        <Icon className="h-2.5 w-2.5 md:h-3.5 md:w-3.5" />
-                      )}
-                    </div>
-
-                    {/* 步骤标题 */}
-                    <span
-                      data-setup-label="true"
-                      className={cn(
-                        'max-w-[60px] truncate text-center text-[10px] md:max-w-none md:text-xs md:whitespace-normal',
-                        index === currentStep
-                          ? 'text-foreground font-medium'
-                          : 'text-muted-foreground'
-                      )}
-                      title={step.title}
-                    >
-                      {step.title}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* 步骤内容卡片 */}
-            <Card className="mb-4 shadow-lg md:mb-5">
-              <CardContent className="p-4 md:p-8">
-                  <div className="min-h-0">
-                  <div className="mb-4 md:mb-6">
-                    <h2 className="mb-2 text-xl font-semibold md:text-2xl">
-                      {steps[currentStep].title}
-                    </h2>
-                    {steps[currentStep].description ? (
-                      <p className="text-muted-foreground text-sm md:text-base">
-                        {steps[currentStep].description}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  {/* 表单内容 */}
-                  {renderStepForm()}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* 操作按钮 */}
-            <div className="flex flex-col items-center justify-between gap-2 sm:flex-row sm:gap-0">
-              <Button
-                variant="outline"
-                onClick={handlePrevious}
-                disabled={currentStep === 0 || isSaving}
-                className="order-2 w-full sm:order-1 sm:w-auto"
-              >
-                {t('setupPage.actions.previous')}
-              </Button>
-
-              <div className="order-1 flex w-full gap-2 sm:order-2 sm:w-auto">
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="flex-1 gap-2 sm:flex-none"
-                      disabled={isSaving || isCompleting || currentStepId === 'custom-token'}
-                    >
-                      <SkipForward className="h-4 w-4" strokeWidth={2} fill="none" />
-                      {t('setupPage.actions.skip')}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t('setupPage.skipDialog.title')}</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {t('setupPage.skipDialog.description')}
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleSkip}>
-                        {t('setupPage.skipDialog.confirm')}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-
+              <div className="ml-auto flex items-center gap-3">
+                {currentStep > 0 && (
+                  <Button variant="outline" onClick={handlePrevious} disabled={isSaving}>
+                    {t('setupPage.actions.previous')}
+                  </Button>
+                )}
                 {currentStep === steps.length - 1 && currentStepId !== 'custom-token' ? (
                   <Button
                     onClick={handleComplete}
@@ -709,7 +597,16 @@ function SetupPageContent() {
                     )}
                   </Button>
                 ) : (
-                  <Button onClick={handleNext} disabled={isSaving} className="flex-1 sm:flex-none">
+                  <Button
+                    onClick={handleNext}
+                    variant={currentStepId === 'custom-token' && !validateToken(customToken).isValid ? 'outline' : 'default'}
+                    size="lg"
+                    disabled={
+                      isSaving ||
+                      (currentStepId === 'custom-token' && !validateToken(customToken).isValid)
+                    }
+                    className="min-w-44"
+                  >
                     {isSaving ? (
                       <>
                         <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -726,10 +623,12 @@ function SetupPageContent() {
                   </Button>
                 )}
               </div>
-            </div>
-          </div>
-
-        </>
+            </>
+          }
+        >
+          {/* 表单内容 */}
+          {renderStepForm()}
+        </SetupWizardLayout>
       )}
     </div>
   )

@@ -541,7 +541,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
             max={max}
             step={step}
             className="min-w-0 flex-1"
-            data-dashboard-slider="config"
+            variant="value"
           />
           <Input
             aria-label={`${fieldLabel} 数值`}

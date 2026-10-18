@@ -88,6 +88,11 @@ export function Sidebar({
     groupSourceRef.current = node
     const firstRect = links[0].getBoundingClientRect()
     const sectionRect = node.getBoundingClientRect()
+    const viewport = node.closest('[data-dashboard-scrollbar-viewport="true"]')!
+    const viewportRect = viewport.getBoundingClientRect()
+    // 组间透明接触面也限制在可滚动区域内，不能挡住顶栏或底部内容。
+    const top = Math.max(sectionRect.top, viewportRect.top)
+    const bottom = Math.min(sectionRect.bottom + 6, viewportRect.bottom)
     // 所有键帽按组内最长标签展开为同宽，图标保持在原位。
     const width = Math.max(...links.map((link) => {
       const label = link.querySelector<HTMLElement>('[data-dashboard-nav-label="true"]')!
@@ -96,9 +101,9 @@ export function Sidebar({
     setGroupFlyout((current) => current?.title === section.title ? current : {
       title: section.title,
       left: firstRect.left,
-      top: sectionRect.top,
+      top,
       width,
-      height: sectionRect.height,
+      height: Math.max(0, bottom - top),
     })
   }
 
@@ -334,7 +339,7 @@ export function Sidebar({
                       left: groupFlyout.left - 6,
                       top: groupFlyout.top,
                       width: groupFlyout.width + 12,
-                      height: groupFlyout.height + 6,
+                      height: groupFlyout.height,
                     }}
                   />,
                   document.body

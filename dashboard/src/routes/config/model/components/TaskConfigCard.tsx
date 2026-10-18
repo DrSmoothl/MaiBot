@@ -5,6 +5,7 @@ import React from 'react'
 import { Info, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { PageFrame } from '@/components/ui/surface'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
@@ -95,7 +96,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
         <p className="min-w-0 text-xs leading-relaxed text-muted-foreground sm:flex-1 sm:truncate sm:text-right sm:text-sm">{description}</p>
       </div>
 
-      <section className={`grid grid-cols-1 gap-x-4 gap-y-2 rounded-lg border bg-card p-3 ${!hideSelectionStrategy ? '@[28rem]:grid-cols-[minmax(0,1fr)_13rem]' : ''}`} aria-label="模型">
+      <PageFrame className={`grid grid-cols-1 gap-x-4 gap-y-2 p-3 ${!hideSelectionStrategy ? '@[28rem]:grid-cols-[minmax(0,1fr)_13rem]' : ''}`} aria-label="模型">
         <div className="contents">
           <h5 className="self-center text-sm font-semibold @[28rem]:col-start-1 @[28rem]:row-start-1">模型</h5>
           {/* 模型选择策略 */}
@@ -106,7 +107,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 value={taskConfig.selection_strategy ?? 'balance'}
                 onValueChange={(value) => onChange('selection_strategy', value)}
               >
-                <SelectTrigger className="h-9! w-full min-w-0 @[28rem]:h-full!">
+                <SelectTrigger controlSize="sm" className="w-full min-w-0 @[28rem]:h-full">
                   <SelectValue placeholder="选择模型选择策略" />
                 </SelectTrigger>
                 <SelectContent>
@@ -141,7 +142,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 value={selectedModel}
                 onValueChange={(value) => onChange('model_list', [value])}
               >
-                <SelectTrigger className="h-9! min-w-0 flex-1">
+                <SelectTrigger controlSize="sm" className="min-w-0 flex-1">
                   <SelectValue placeholder="选择模型..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -177,11 +178,11 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
           )}
           {modelContent}
         </div>
-      </section>
+      </PageFrame>
 
       {/* 推理参数 */}
       {selectedModels.length > 0 && (
-        <section className="rounded-lg border bg-card" aria-label="参数">
+        <PageFrame aria-label="参数">
           <div className="border-b bg-muted/40 px-3 py-2">
             <h5 className="text-sm font-semibold">参数</h5>
           </div>
@@ -191,6 +192,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
               <div className={`row-span-2 grid min-w-0 grid-rows-subgrid gap-2 ${!hideMaxTokens ? 'col-span-2 @[30rem]:col-span-1' : ''}`}>
                 <Label htmlFor={temperatureInputId} className="self-center whitespace-nowrap">温度</Label>
                 <Input
+                  controlSize="sm"
                   id={temperatureInputId}
                   type="number"
                   value={taskConfig.temperature ?? 0.7}
@@ -203,7 +205,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                   min={0}
                   max={2}
                   step={0.1}
-                  className="h-9! w-full min-w-0 text-sm tabular-nums sm:hidden"
+                  className="w-full min-w-0 text-sm tabular-nums sm:hidden"
                 />
                 <Slider
                   value={[taskConfig.temperature ?? 0.7]}
@@ -212,8 +214,8 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                   max={2}
                   step={0.1}
                   className="hidden min-h-9 min-w-0 sm:flex"
-                  data-dashboard-slider="config"
-                  data-dashboard-slider-value-format="fixed-1"
+                  variant="value"
+                  valueFormat="fixed-1"
                 />
               </div>
             )}
@@ -222,12 +224,13 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
               <div className="row-span-2 grid min-w-0 grid-rows-subgrid gap-2">
                 <Label className="self-center whitespace-nowrap">最大 Token</Label>
                 <Input
+                  controlSize="sm"
                   type="number"
                   step="1"
                   min="1"
                   value={taskConfig.max_tokens ?? 4096}
                   onChange={(e) => onChange('max_tokens', parseInt(e.target.value))}
-                  className="h-9! min-w-0"
+                  className="min-w-0"
                 />
               </div>
             )}
@@ -251,6 +254,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 </TooltipProvider>
               </div>
               <Input
+                controlSize="sm"
                 id={timeoutInputId}
                 type="number"
                 step="1"
@@ -263,12 +267,12 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                   }
                 }}
                 placeholder="240"
-                className="h-9! min-w-0"
+                className="min-w-0"
               />
             </div>
           </div>
 
-        </section>
+        </PageFrame>
       )}
     </div>
   )

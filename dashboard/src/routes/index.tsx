@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 import { Link } from '@tanstack/react-router'
 import { AlertCircle, ArrowRight, ExternalLink, Pencil, RefreshCw, Settings } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
-import { lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
@@ -54,7 +54,7 @@ import {
   StatisticsOverviewCard,
   TokenTrendCard,
 } from './home/StatisticsCards'
-import type { TimeSeriesData } from './home/types'
+import type { BotStatus, TimeSeriesData } from './home/types'
 
 const ExpressionReviewer = lazy(() =>
   import('@/components/expression-reviewer').then((module) => ({
@@ -62,12 +62,26 @@ const ExpressionReviewer = lazy(() =>
   }))
 )
 
+const BotRuntimeContext = createContext<{ botStatus: BotStatus | null; isBotStatusLoading: boolean }>({
+  botStatus: null,
+  isBotStatusLoading: true,
+})
+
+// 运行状态单独订阅；轮询只更新状态卡，版本变化才通知首页其余部分。
 // 主导出组件：包装 RestartProvider
 export function IndexPage() {
+  return <RestartProvider><HomeRuntime /></RestartProvider>
+}
+
+// 轮询必须在 RestartProvider 内部，避免同时重建重启上下文、唤醒首页订阅者。
+function HomeRuntime() {
+  const { botStatus, isBotStatusLoading, fetchBotStatus } = useBotStatus()
+  useEffect(() => { void fetchBotStatus(true) }, [fetchBotStatus])
+  const runtime = useMemo(() => ({ botStatus, isBotStatusLoading }), [botStatus, isBotStatusLoading])
   return (
-    <RestartProvider>
-      <IndexPageContent />
-    </RestartProvider>
+    <BotRuntimeContext.Provider value={runtime}>
+      <IndexPageContent botVersion={botStatus?.version} />
+    </BotRuntimeContext.Provider>
   )
 }
 
@@ -121,24 +135,30 @@ function FeatureStatusLight({
 }
 
 function BotStatusFlipCard({
-  botRuntimeLabel,
-  botRuntimeState,
   memoryEnabled,
   onlineData,
-  uptime,
   visualEnabled,
 }: {
-  botRuntimeLabel: string
-  botRuntimeState: BotRuntimeState
   memoryEnabled: boolean
   onlineData: TimeSeriesData[]
-  uptime: string | null
   visualEnabled: boolean
 }) {
   const { i18n, t } = useTranslation()
   const prefersReducedMotion = useReducedMotion()
   const [isFlipped, setIsFlipped] = useState(false)
-  const recentOnlineData = onlineData.slice(-24)
+  const { botStatus, isBotStatusLoading } = useContext(BotRuntimeContext)
+  const botRuntimeState: BotRuntimeState =
+    isBotStatusLoading && !botStatus ? 'loading'
+      : botStatus?.running === true ? 'running' : botStatus ? 'stopped' : 'unknown'
+  const botRuntimeLabel = t(`home.botStatus.${botRuntimeState}`)
+  const uptime = botStatus ? t('home.botStatus.uptime', {
+    time: t('home.time.hoursMinutes', {
+      hours: Math.floor(botStatus.uptime / 3600),
+      minutes: Math.floor((botStatus.uptime % 3600) / 60),
+    }),
+  }) : null
+  // 状态轮询不改变在线曲线的数据引用，避免重新启动图表动画。
+  const recentOnlineData = useMemo(() => onlineData.slice(-24), [onlineData])
   const recentOnlineSeconds = recentOnlineData.reduce(
     (total, item) => total + item.online_seconds,
     0
@@ -326,23 +346,7 @@ function formatStorageBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
 }
 
-function compareVersions(left: string, right: string): number {
-  const parseVersion = (version: string): number[] => {
-    const match = version.replace(/^v/i, '').match(/^\d+(?:\.\d+)*/)
-    return (match?.[0] ?? '0').split('.').map((part) => Number.parseInt(part, 10))
-  }
-  const leftParts = parseVersion(left)
-  const rightParts = parseVersion(right)
-  const length = Math.max(leftParts.length, rightParts.length)
-
-  for (let index = 0; index < length; index += 1) {
-    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
-    if (difference !== 0) return difference
-  }
-  return 0
-}
-
-function IndexPageContent() {
+const IndexPageContent = memo(function IndexPageContent({ botVersion }: { botVersion: string | undefined }) {
   const { i18n, t } = useTranslation()
   const { themeConfig } = useContext(ThemeProviderContext)
   const { triggerRestart, isRestarting } = useRestart()
@@ -355,7 +359,6 @@ function IndexPageContent() {
     loadingProgress,
     fetchDashboardData,
   } = useDashboardData()
-  const { botStatus, isBotStatusLoading, fetchBotStatus } = useBotStatus()
   const { featureStatus, fetchFeatureStatus } = useFeatureStatus()
   const { localCacheStats, isLocalCacheStatsLoading, fetchLocalCacheStats } = useLocalCacheMetrics()
   const { uncheckedCount, fetchReviewStats } = useReviewStats()
@@ -363,7 +366,7 @@ function IndexPageContent() {
     hitokoto,
     hitokotoLoading,
     hitokotoSettings,
-    maibotStableRelease,
+    selfUpdateStatus,
     versionCompatibility,
     fetchHitokoto,
     saveHitokotoSettings,
@@ -403,7 +406,6 @@ function IndexPageContent() {
     /* eslint-disable react-hooks/set-state-in-effect -- 挂载时拉取仪表盘各数据源 */
     fetchDashboardData()
     fetchHitokoto()
-    fetchBotStatus(true)
     fetchFeatureStatus()
     fetchLocalCacheStats()
     fetchReviewStats()
@@ -411,7 +413,6 @@ function IndexPageContent() {
   }, [
     fetchDashboardData,
     fetchHitokoto,
-    fetchBotStatus,
     fetchFeatureStatus,
     fetchLocalCacheStats,
     fetchReviewStats,
@@ -451,13 +452,6 @@ function IndexPageContent() {
     )
   }
 
-  // 格式化时间显示
-  const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-    return t('home.time.hoursMinutes', { hours, minutes })
-  }
-
   const localCacheDirectories = localCacheStats?.directories ?? []
   const imageCacheDirectory = localCacheDirectories.find((item) => item.key === 'images')
   const emojiCacheDirectory = localCacheDirectories.find((item) => item.key === 'emoji')
@@ -477,15 +471,6 @@ function IndexPageContent() {
   )
   const totalStorageTableCount = localCacheStats?.database.tables.length ?? 0
   const hasLocalCacheStats = localCacheStats !== null
-  const botRuntimeState: BotRuntimeState =
-    isBotStatusLoading && !botStatus
-      ? 'loading'
-      : botStatus?.running === true
-        ? 'running'
-        : botStatus
-          ? 'stopped'
-          : 'unknown'
-  const botRuntimeLabel = t(`home.botStatus.${botRuntimeState}`)
   const storageDetails = [
     {
       key: 'images',
@@ -528,13 +513,8 @@ function IndexPageContent() {
       source: 'builtin',
       render: () => (
         <BotStatusFlipCard
-          botRuntimeLabel={botRuntimeLabel}
-          botRuntimeState={botRuntimeState}
           memoryEnabled={featureStatus.memoryEnabled}
           onlineData={dashboardData.hourly_data}
-          uptime={
-            botStatus ? t('home.botStatus.uptime', { time: formatTime(botStatus.uptime) }) : null
-          }
           visualEnabled={featureStatus.visualEnabled}
         />
       ),
@@ -845,15 +825,7 @@ function IndexPageContent() {
                           )}
                         </>
                         {storageDisplayMode === 'size' && (
-                          <div
-                            data-home-storage-progress="true"
-                            className="bg-muted col-span-3 h-1.5 min-w-0 overflow-hidden rounded-full"
-                          >
-                            <div
-                              className="bg-primary h-full rounded-full transition-all"
-                              style={{ width: `${visiblePercent}%` }}
-                            />
-                          </div>
+                          <Progress value={visiblePercent} aria-label={`${item.label}存储占用`} className="col-span-3 min-w-0" />
                         )}
                       </div>
                     )
@@ -940,11 +912,7 @@ function IndexPageContent() {
     ...homeCards.filter((card) => card.id === hitokotoCardId),
     ...homeCards.filter((card) => !firstRowCardIds.includes(card.id) && card.id !== hitokotoCardId),
   ]
-  const maibotUpdateAvailable = Boolean(
-    botStatus?.version &&
-    maibotStableRelease &&
-    compareVersions(maibotStableRelease.version, botStatus.version) > 0
-  )
+  const maibotUpdateAvailable = Boolean(selfUpdateStatus?.update_available)
   const versionsMismatch =
     versionCompatibility?.status !== undefined && versionCompatibility.status !== 'compatible'
   // 移动端由 Layout 的 main 滚动，内层按内容撑高并允许滚动传递，避免拦截触摸滑动。
@@ -1009,7 +977,7 @@ function IndexPageContent() {
               {t('home.versionCard.maibotVersion')}
             </span>
             <span className="text-base">
-              {botStatus?.version ? `V${botStatus.version}` : t('home.versionCard.unknown')}
+              {botVersion ? `V${botVersion}` : t('home.versionCard.unknown')}
             </span>
           </button>
           <button
@@ -1023,14 +991,18 @@ function IndexPageContent() {
             </span>
             <span className="text-base">V{APP_VERSION}</span>
           </button>
-          {maibotUpdateAvailable && maibotStableRelease && (
+          {maibotUpdateAvailable && selfUpdateStatus && (
             <a
-              href={maibotStableRelease.url}
+              href={selfUpdateStatus.deployment_type === 'package'
+                ? 'https://pypi.org/project/maibot/'
+                : `https://github.com/Mai-with-u/MaiBot/compare/${selfUpdateStatus.current_commit}...${selfUpdateStatus.latest_commit}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 text-sm text-sky-600 hover:underline dark:text-sky-400"
             >
-              {t('home.versionCard.updateAvailable')} V{maibotStableRelease.version}
+              {t('home.versionCard.updateAvailable')} {selfUpdateStatus.deployment_type === 'package'
+                ? `V${selfUpdateStatus.latest_version}`
+                : `${selfUpdateStatus.branch} · ${selfUpdateStatus.latest_commit?.slice(0, 8)}`}
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           )}
@@ -1157,4 +1129,4 @@ function IndexPageContent() {
       </div>
     </ScrollArea>
   )
-}
+})

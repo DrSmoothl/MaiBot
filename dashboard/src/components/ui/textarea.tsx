@@ -28,6 +28,8 @@ function restoreScrollContainers(containers: Array<{ element: HTMLElement; scrol
 }
 
 export interface TextareaProps extends React.ComponentProps<"textarea"> {
+  /** 编辑区已由输入面板提供边框时使用 composer。 */
+  variant?: "default" | "composer"
   /**
    * 是否启用自动高度调整
    * @default true
@@ -46,7 +48,7 @@ export interface TextareaProps extends React.ComponentProps<"textarea"> {
 }
 
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, autoResize = true, minHeight = 60, maxHeight, value, onChange, ...props }, ref) => {
+  ({ className, variant = "default", autoResize = true, minHeight = 60, maxHeight, value, onChange, ...props }, ref) => {
     const innerRef = React.useRef<HTMLTextAreaElement>(null)
     const [hasFixedHeight, setHasFixedHeight] = React.useState(false)
 
@@ -69,15 +71,18 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 
       const scrollContainers = getScrollContainers(textarea)
 
-      let scrollHeight = textarea.scrollHeight
-      if (scrollHeight < textarea.offsetHeight) {
-        // 内容变短时才临时重置高度，避免长文本输入时触发浏览器滚动锚定。
-        textarea.style.height = 'auto'
-        scrollHeight = textarea.scrollHeight
-      }
+      // 先解除旧高度才能测出内容缩短后的高度；同步恢复父容器滚动，避免输入时页面跳动。
+      textarea.style.height = 'auto'
+      const computed = window.getComputedStyle(textarea)
+      const borderHeight = parseFloat(computed.borderTopWidth) + parseFloat(computed.borderBottomWidth)
+      const paddingHeight = parseFloat(computed.paddingTop) + parseFloat(computed.paddingBottom)
+      // scrollHeight 含内边距、不含边框，不能直接当作 border-box 的高度。
+      const contentHeight = computed.boxSizing === 'border-box'
+        ? textarea.scrollHeight + borderHeight
+        : textarea.scrollHeight - paddingHeight
 
       // 计算新高度
-      let newHeight = Math.max(scrollHeight, minHeight)
+      let newHeight = Math.max(contentHeight, minHeight)
       
       // 应用最大高度限制
       if (maxHeight && maxHeight > 0) {
@@ -87,7 +92,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       textarea.style.height = `${newHeight}px`
       
       // 如果内容超过最大高度，启用滚动
-      if (maxHeight && maxHeight > 0 && scrollHeight > maxHeight) {
+      if (maxHeight && maxHeight > 0 && contentHeight > maxHeight) {
         textarea.style.overflowY = 'auto'
       } else {
         textarea.style.overflowY = 'hidden'
@@ -109,7 +114,15 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       if (!textarea || !autoResize || hasFixedHeight) return
 
       const animationFrameId = window.requestAnimationFrame(adjustHeight)
-      const resizeObserver = new ResizeObserver(adjustHeight)
+      // 高度由本组件调整，只在可用宽度变化时重新测量，避免观察自身高度形成循环。
+      let previousWidth = textarea.getBoundingClientRect().width
+      const resizeObserver = new ResizeObserver(() => {
+        const width = textarea.getBoundingClientRect().width
+        if (width !== previousWidth) {
+          previousWidth = width
+          adjustHeight()
+        }
+      })
       resizeObserver.observe(textarea)
       if (textarea.parentElement) {
         resizeObserver.observe(textarea.parentElement)
@@ -138,6 +151,8 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 
     return (
       <textarea
+        data-dashboard-textarea="true"
+        data-textarea-variant={variant}
         className={cn(
           "flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
           "custom-scrollbar",

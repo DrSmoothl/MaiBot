@@ -1,3 +1,4 @@
+import { Card } from '@/components/ui/card'
 /**
  * 模型列表 - 移动端卡片视图
  */
@@ -78,9 +79,9 @@ export const ModelCardList = React.memo(function ModelCardList({
 }: ModelCardListProps) {
   if (paginatedModels.length === 0) {
     return (
-      <div className="text-muted-foreground bg-card rounded-lg border py-8 text-center md:hidden">
+      <Card className="text-muted-foreground py-8 text-center md:hidden">
         {searchQuery ? '未找到匹配的模型' : '暂无模型配置'}
-      </div>
+      </Card>
     )
   }
 
@@ -93,7 +94,7 @@ export const ModelCardList = React.memo(function ModelCardList({
         const testResult = modelTestResults.get(model.name)
         const testStatus = getModelTestStatus(testResult, isTesting)
         return (
-          <div key={displayIndex} className="bg-card space-y-2 rounded-lg border p-3">
+          <Card key={displayIndex} className="space-y-2 p-3">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center gap-2">
@@ -124,8 +125,7 @@ export const ModelCardList = React.memo(function ModelCardList({
               <div className="flex shrink-0 gap-1">
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   onClick={() => onTest(model.name)}
                   disabled={isTesting}
                   title="测试模型"
@@ -139,8 +139,7 @@ export const ModelCardList = React.memo(function ModelCardList({
                 </Button>
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="border-primary! text-primary hover:text-primary h-8 w-8"
+                  size="icon-sm"
                   onClick={() => onEdit(model, actualIndex)}
                   title="编辑"
                   aria-label={`编辑模型 ${model.name}`}
@@ -148,10 +147,9 @@ export const ModelCardList = React.memo(function ModelCardList({
                   <StreamlineIcon name="edit-pdf-solid" fallback={Pencil} className="h-3.5 w-3.5" />
                 </Button>
                 <Button
-                  variant="outline"
-                  size="icon"
+                  variant="destructive"
+                  size="icon-sm"
                   onClick={() => onDelete(actualIndex)}
-                  className="border-destructive! text-destructive hover:text-destructive h-8 w-8"
                   title="删除"
                   aria-label={`删除模型 ${model.name}`}
                 >
@@ -190,7 +188,7 @@ export const ModelCardList = React.memo(function ModelCardList({
             {!!model.price_periods?.length && (
               <p className="text-xs text-muted-foreground">{model.price_periods.length} 个价格时段</p>
             )}
-          </div>
+          </Card>
         )
       })}
     </div>

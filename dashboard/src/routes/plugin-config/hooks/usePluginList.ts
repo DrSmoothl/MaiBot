@@ -327,11 +327,6 @@ export function usePluginList() {
   const circuitActiveCount = plugins.filter(isPluginCircuitActive).length
   const loadFailedCount = plugins.filter(isPluginLoadFailed).length
   const enabledCount = installedCount - disabledCount
-  const loadTotalCount = loadSuccessCount + loadFailedCount + loadingCount + circuitActiveCount
-  const loadSuccessPercent = loadTotalCount > 0 ? (loadSuccessCount / loadTotalCount) * 100 : 0
-  const loadFailedPercent = loadTotalCount > 0 ? (loadFailedCount / loadTotalCount) * 100 : 0
-  const loadingPercent = loadTotalCount > 0 ? (loadingCount / loadTotalCount) * 100 : 0
-  const circuitPercent = loadTotalCount > 0 ? (circuitActiveCount / loadTotalCount) * 100 : 0
   const showsCircuitSummary = circuitOpenCount > 0
   const modernLoadSummaryLabel = [
     `加载成功 ${loadSuccessCount} 个`,
@@ -567,13 +562,10 @@ export function usePluginList() {
     disabledCount,
     loadingCount,
     circuitOpenCount,
+    circuitActiveCount,
     loadFailedCount,
     enabledCount,
     loadSuccessCount,
-    loadSuccessPercent,
-    loadFailedPercent,
-    loadingPercent,
-    circuitPercent,
     showsCircuitSummary,
     modernLoadSummaryLabel,
     futureRetroPluginSummaryLabel,

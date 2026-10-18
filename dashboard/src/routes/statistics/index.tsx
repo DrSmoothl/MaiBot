@@ -170,7 +170,7 @@ interface MetricItemProps {
 
 function MetricItem({ label, value, detail }: MetricItemProps) {
   return (
-    <div className="group bg-card hover:border-primary/60 relative min-h-28 min-w-0 overflow-hidden rounded-lg border px-4 py-4 shadow-sm transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-md">
+    <Card className="group hover:border-primary/60 relative min-h-28 min-w-0 overflow-hidden px-4 py-4 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5">
       <div className="bg-primary/75 absolute inset-x-0 top-0 h-0.5" />
       <div className="text-muted-foreground truncate text-xs font-medium tracking-wide">
         {label}
@@ -179,7 +179,7 @@ function MetricItem({ label, value, detail }: MetricItemProps) {
         {value}
       </div>
       {detail && <div className="text-muted-foreground mt-2 truncate text-[11px]">{detail}</div>}
-    </div>
+    </Card>
   )
 }
 

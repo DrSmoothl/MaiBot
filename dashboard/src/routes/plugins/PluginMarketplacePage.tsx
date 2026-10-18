@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { useReducedMotion } from 'motion/react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,10 +37,12 @@ import {
   type PluginStatsData,
   type PluginVoteState,
 } from '@/lib/plugin-stats'
+import { mergeInstalledPluginInfo } from '@/lib/plugin-info'
 import { PLUGIN_MARKET_VIEW_STATE_KEY } from '@/lib/plugin-market-navigation'
 
 import { PluginInstallDialog, type PluginInstallDialogHandle } from './PluginInstallDialog'
 import { MarketplaceTab } from './MarketplaceTab'
+import { filterMarketplacePlugins } from './marketplace-filter'
 import { PluginSettingsDialog } from './PluginSettingsDialog'
 import type {
   GitStatus,
@@ -49,7 +52,7 @@ import type {
   PluginLoadProgress,
   PluginProgressById,
 } from './types'
-import { clearPluginProgress, getPluginType, mergePluginProgress, PLUGIN_TYPE_OPTIONS } from './types'
+import { clearPluginProgress, mergePluginProgress, PLUGIN_TYPE_OPTIONS } from './types'
 import { PluginDetailPage } from '../plugin-detail'
 
 const PLUGIN_MARKET_COMPATIBLE_ONLY_KEY = 'plugins-market-compatible-only'
@@ -151,6 +154,7 @@ export function PluginMarketplacePage({ embedded = false }: PluginMarketplacePag
 // 内部组件：实际内容
 function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePageProps>) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const scrollViewportRef = useRef<HTMLDivElement | null>(null)
   const scrollRestoredRef = useRef(false)
   const initialViewStateRef = useRef(readPluginMarketplaceViewState())
@@ -175,8 +179,25 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   const [pluginProgressById, setPluginProgressById] = useState<PluginProgressById>({})
   const [maimaiVersion, setMaimaiVersion] = useState<MaimaiVersion | null>(null)
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>([])
+  const syncInstalledPlugins = useCallback((installed: InstalledPlugin[]) => {
+    // 详情面板关闭后仍然挂载，刷新市场列表时也要同步它订阅的安装状态缓存。
+    queryClient.setQueryData(['plugin-installed-list'], installed)
+    setInstalledPlugins(installed)
+  }, [queryClient])
+  // 安装、更新、卸载统一刷新，避免各自维护一份状态合并逻辑。
+  const refreshInstalledPlugins = useCallback(async () => {
+    const installed = await getInstalledPlugins({ forceRefresh: true })
+    syncInstalledPlugins(installed)
+    setPlugins(current => mergeInstalledPluginInfo(current, installed))
+  }, [syncInstalledPlugins])
   const [pluginStats, setPluginStats] = useState<Record<string, PluginStatsData>>({})
   const [likingPluginIds, setLikingPluginIds] = useState<Set<string>>(() => new Set())
+  // 请求去重使用即时更新的集合，避免连点抢在 React 提交之前发出重复请求。
+  const pendingLikesRef = useRef(new Set<string>())
+  const operationStateRef = useRef({ pluginProgressById, pluginStats })
+  useLayoutEffect(() => {
+    operationStateRef.current = { pluginProgressById, pluginStats }
+  }, [pluginProgressById, pluginStats])
   // 本机用户的点赞状态与本次会话内的点赞结果，单独存放而不写回 pluginStats：
   // pluginStats 同时是排序依据，点赞后保持不变才能避免卡片当场换位。
   const [voteOverlay, setVoteOverlay] = useState<Record<string, PluginVoteOverlay>>({})
@@ -320,7 +341,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   }, [])
 
   useEffect(() => {
-    if (scrollRestoredRef.current || loading) {
+    if (scrollRestoredRef.current || loading || (showCompatibleOnly && !maimaiVersion)) {
       return
     }
 
@@ -343,68 +364,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
     return () => {
       cancelAnimationFrame(frameId)
     }
-  }, [loading, plugins.length])
-
-  const mergeInstalledPluginInfo = (
-    marketPlugins: PluginInfo[],
-    installed: InstalledPlugin[]
-  ): PluginInfo[] => {
-    const mergedData: PluginInfo[] = marketPlugins.map(plugin => {
-      const installedPlugin = installed.find(item => item.id === plugin.id || item.manifest.id === plugin.id)
-
-      return {
-        ...plugin,
-        installed: Boolean(installedPlugin),
-        installed_version: installedPlugin?.manifest.version,
-        installed_release: installedPlugin?.release,
-      }
-    })
-
-    for (const installedPlugin of installed) {
-      const installedManifestId = installedPlugin.manifest?.id
-      const existsInMarket = mergedData.some(
-        p => p.id === installedPlugin.id || p.id === installedManifestId || p.manifest?.id === installedPlugin.id
-      )
-      if (!existsInMarket && installedPlugin.manifest) {
-        const urls = installedPlugin.manifest.urls as PluginInfo['manifest']['urls'] | undefined
-        // 添加本地安装但不在市场的插件
-        mergedData.push({
-          id: installedPlugin.id,
-          manifest: {
-            manifest_version: installedPlugin.manifest.manifest_version || 1,
-            id: installedPlugin.manifest.id || installedPlugin.id,
-            name: installedPlugin.manifest.name,
-            version: installedPlugin.manifest.version,
-            description: installedPlugin.manifest.description || '',
-            author: installedPlugin.manifest.author,
-            license: installedPlugin.manifest.license || 'Unknown',
-            host_application: installedPlugin.manifest.host_application,
-            homepage_url: installedPlugin.manifest.homepage_url || urls?.homepage,
-            repository_url: installedPlugin.manifest.repository_url || urls?.repository,
-            urls,
-            keywords: installedPlugin.manifest.keywords || [],
-            plugin_type: installedPlugin.manifest.plugin_type || 'extension',
-            display: installedPlugin.manifest.display,
-            changelog: installedPlugin.manifest.changelog,
-            default_locale: (installedPlugin.manifest.default_locale as string) || 'zh-CN',
-            locales_path: installedPlugin.manifest.locales_path as string | undefined,
-          },
-          downloads: 0,
-          rating: 0,
-          review_count: 0,
-          installed: true,
-          installed_version: installedPlugin.manifest.version,
-          source: 'local',
-          changelog: installedPlugin.changelog ?? undefined,
-          stats_ids: [installedPlugin.manifest.id].filter(Boolean) as string[],
-          published_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-      }
-    }
-
-    return mergedData
-  }
+  }, [loading, plugins.length, showCompatibleOnly, maimaiVersion])
 
   // 统一管理 WebSocket 和数据加载
   useEffect(() => {
@@ -498,7 +458,10 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
           // 清单失败时不等待统计请求，保证错误提示及时返回。
           const [gitStatus, maimaiVersion, marketPlugins, installed] = await Promise.all([
             checkGitStatus(),
-            getMaimaiVersion(),
+            getMaimaiVersion().then((version) => {
+              if (!isUnmounted) setMaimaiVersion(version)
+              return version
+            }),
             // 市场清单与安装状态查询失败时，统一交给外层错误处理。
             fetchPluginList({ compatibleOnly: showCompatibleOnly }),
             getInstalledPlugins(),
@@ -519,19 +482,17 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
           setMaimaiVersion(maimaiVersion)
 
           console.info('插件市场已获取')
-          setInstalledPlugins(installed)
+          syncInstalledPlugins(installed)
           const mergedData = mergeInstalledPluginInfo(marketPlugins, installed)
 
           setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary ?? {}))
           setPlugins(mergedData)
-          const bundledStats = Object.fromEntries(marketPlugins
-            .filter((plugin) => plugin.marketplace_stats)
-            .map((plugin) => [plugin.id, plugin.marketplace_stats!]))
+          setLoading(false)
+          if (marketPlugins.some((plugin) => plugin.market_data_source === 'service')) return
           // 统计是附加信息；请求失败时明确记录错误，保留已经加载的市场清单。
           try {
-            const statsSummary = marketPlugins.some((plugin) => plugin.market_data_source === 'service')
-              ? bundledStats
-              : await getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
+            const statsSummary = await getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
+            if (isUnmounted) return
             setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
             console.info('插件市场已更新')
           } catch (error) {
@@ -561,7 +522,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         void unsubscribeProgress()
       }
     }
-  }, [toast, showCompatibleOnly, sourceRevision])
+  }, [toast, showCompatibleOnly, sourceRevision, syncInstalledPlugins])
 
   // 检查插件兼容性
   // 规则：
@@ -680,10 +641,11 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
   const handleLike = useCallback(async (plugin: PluginInfo) => {
     const pluginId = plugin.manifest?.id || plugin.id
-    if (likingPluginIds.has(pluginId)) {
+    if (pendingLikesRef.current.has(pluginId)) {
       return
     }
 
+    pendingLikesRef.current.add(pluginId)
     setLikingPluginIds((currentIds) => {
       const nextIds = new Set(currentIds)
       nextIds.add(pluginId)
@@ -712,7 +674,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
       if (result.dislikes !== undefined) {
         nextOverlay.dislikes = Number(result.dislikes)
       }
-      const statsIds = [pluginId, plugin.manifest?.id, pluginStats[pluginId]?.plugin_id]
+      const statsIds = [pluginId, plugin.manifest?.id, operationStateRef.current.pluginStats[pluginId]?.plugin_id]
         .filter((id): id is string => Boolean(id))
 
       setVoteOverlay((currentOverlay) => {
@@ -723,13 +685,14 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         return mergedOverlay
       })
     } finally {
+      pendingLikesRef.current.delete(pluginId)
       setLikingPluginIds((currentIds) => {
         const nextIds = new Set(currentIds)
         nextIds.delete(pluginId)
         return nextIds
       })
     }
-  }, [likingPluginIds, pluginStats, toast])
+  }, [toast])
 
   // 安装插件处理
   const handleInstall = async (installingPlugin: PluginInfo, target: string) => {
@@ -791,26 +754,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         loaded_plugins: 1,
       })
       
-      // 重新加载已安装插件列表
-      const installed = await getInstalledPlugins({ forceRefresh: true })
-      setInstalledPlugins(installed)
-
-      // 重新合并已安装信息到插件列表
-      setPlugins(prevPlugins =>
-        prevPlugins.map(p => {
-          if (p.id === installingPlugin.id) {
-            const installedPlugin = installed.find((item) => item.id === p.id)
-
-            return {
-              ...p,
-              installed: Boolean(installedPlugin),
-              installed_version: installedPlugin?.manifest.version,
-              installed_release: installedPlugin?.release,
-            }
-          }
-          return p
-        })
-      )
+      await refreshInstalledPlugins()
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '未知错误'
       setPluginProgress({
@@ -833,7 +777,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
   // 卸载插件处理
   const handleUninstall = useCallback(async (plugin: PluginInfo) => {
-    if (pluginProgressById[plugin.id]?.stage === 'loading') {
+    if (operationStateRef.current.pluginProgressById[plugin.id]?.stage === 'loading') {
       return
     }
 
@@ -845,26 +789,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         description: `${plugin.manifest.name} 已成功卸载`,
       })
 
-      // 重新加载已安装插件列表
-      const installed = await getInstalledPlugins({ forceRefresh: true })
-      setInstalledPlugins(installed)
-
-      // 重新合并已安装信息到插件列表
-      setPlugins(prevPlugins =>
-        prevPlugins.map(p => {
-          if (p.id === plugin.id) {
-            const installedPlugin = installed.find((item) => item.id === p.id)
-
-            return {
-              ...p,
-              installed: Boolean(installedPlugin),
-              installed_version: installedPlugin?.manifest.version,
-              installed_release: installedPlugin?.release,
-            }
-          }
-          return p
-        })
-      )
+      await refreshInstalledPlugins()
     } catch (error) {
       toast({
         title: '卸载失败',
@@ -872,11 +797,11 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         variant: 'destructive',
       })
     }
-  }, [pluginProgressById, toast])
+  }, [refreshInstalledPlugins, toast])
 
   // 更新插件处理
   const handleUpdate = useCallback(async (plugin: PluginInfo) => {
-    if (pluginProgressById[plugin.id]?.stage === 'loading') {
+    if (operationStateRef.current.pluginProgressById[plugin.id]?.stage === 'loading') {
       return
     }
 
@@ -929,26 +854,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         loaded_plugins: 1,
       })
 
-      // 重新加载已安装插件列表
-      const installed = await getInstalledPlugins({ forceRefresh: true })
-      setInstalledPlugins(installed)
-
-      // 重新合并已安装信息到插件列表
-      setPlugins(prevPlugins =>
-        prevPlugins.map(p => {
-          if (p.id === plugin.id) {
-            const installedPlugin = installed.find((item) => item.id === p.id)
-
-            return {
-              ...p,
-              installed: Boolean(installedPlugin),
-              installed_version: installedPlugin?.manifest.version,
-              installed_release: installedPlugin?.release,
-            }
-          }
-          return p
-        })
-      )
+      await refreshInstalledPlugins()
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '未知错误'
       setPluginProgress({
@@ -967,26 +873,16 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         variant: 'destructive',
       })
     }
-  }, [pluginProgressById, gitStatus, maimaiVersion, checkPluginCompatibility, getIncompatibleReason, toast, setPluginProgress, setCompletedPluginProgress])
+  }, [gitStatus, maimaiVersion, checkPluginCompatibility, getIncompatibleReason, toast, setPluginProgress, setCompletedPluginProgress, refreshInstalledPlugins])
 
-  // 过滤插件用于标签页统计
-  const getFilteredPluginCount = () => {
-    return plugins.filter(p => {
-      if (!p.manifest) return false
-      if (p.source === 'local') return false
-      const matchesSearch = searchQuery === '' ||
-        p.manifest.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.manifest.author?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.manifest.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (p.manifest.keywords && p.manifest.keywords.some(k => k.toLowerCase().includes(searchQuery.toLowerCase())))
-      const matchesType = pluginTypeFilter === 'all' || getPluginType(p) === pluginTypeFilter
-      const matchesCompatibility = !showCompatibleOnly || 
-        !maimaiVersion || 
-        checkPluginCompatibility(p)
-
-      return matchesSearch && matchesType && matchesCompatibility
-    }).length
-  }
+  // 筛选只做一次，计数与列表使用同一数组；点赞和进度更新不触发重新筛选。
+  // 兼容性依赖宿主版本；缓存也必须通过同一筛选，不能先展示全部再删掉不兼容项。
+  const waitingForCompatibility = showCompatibleOnly && maimaiVersion === null
+  const visiblePlugins = useMemo(() => waitingForCompatibility ? [] : filterMarketplacePlugins(
+    plugins,
+    { searchQuery, pluginTypeFilter, showCompatibleOnly },
+    checkPluginCompatibility,
+  ), [plugins, searchQuery, pluginTypeFilter, showCompatibleOnly, waitingForCompatibility, checkPluginCompatibility])
 
   const marketplaceContent = (
     <ScrollArea
@@ -1107,7 +1003,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
               data-plugin-market-count-badge="true"
               className="h-9 border-input bg-transparent px-3 text-sm font-normal max-sm:!h-auto max-sm:!border-0 max-sm:!bg-transparent max-sm:!p-0 max-sm:!shadow-none"
             >
-              全部插件 {getFilteredPluginCount()}
+              全部插件 {visiblePlugins.length}
             </Badge>
 
             {/* 兼容筛选和设置组成横向控制区，开关与文字垂直居中。 */}
@@ -1178,7 +1074,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
         )}
 
         {/* 插件卡片网格 */}
-        {loading ? (
+        {loading || (waitingForCompatibility && !error) ? (
           <div className="flex items-center justify-center py-12">
             <ThinkingIllustration size="lg" />
           </div>
@@ -1195,10 +1091,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
           </Card>
         ) : (
           <MarketplaceTab
-            plugins={plugins}
-            searchQuery={searchQuery}
-            pluginTypeFilter={pluginTypeFilter}
-            showCompatibleOnly={showCompatibleOnly}
+            plugins={visiblePlugins}
             sortBy={marketplaceSortBy}
             gitStatus={gitStatus}
             maimaiVersion={maimaiVersion}
@@ -1266,7 +1159,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
               deferContent={deferDetailContent}
               onClose={() => setDetailPluginId(null)}
               onInstalledPluginsChange={(installed) => {
-                setInstalledPlugins(installed)
+                syncInstalledPlugins(installed)
                 setPlugins((currentPlugins) => mergeInstalledPluginInfo(currentPlugins, installed))
               }}
               initialPlugin={plugins.find((plugin) => plugin.id === displayedDetailPluginId)}

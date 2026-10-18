@@ -1,3 +1,4 @@
+import { Card } from '@/components/ui/card'
 import { AlertTriangle, CheckCircle2, Download, Loader2, RefreshCw, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -26,6 +27,8 @@ import {
   applySelfUpdate,
   checkSelfUpdate,
   getSelfUpdateStatus,
+  getSelfUpdateCustomPrefix,
+  SELF_UPDATE_STATUS_EVENT,
   type SelfUpdateResult,
   type SelfUpdateStatus,
   type SelfUpdateSourceSelection,
@@ -71,20 +74,30 @@ function SelfUpdateCardContent() {
   const [applying, setApplying] = useState(false)
   const [sourceDialogOpen, setSourceDialogOpen] = useState(false)
   const [sourceId, setSourceId] = useState<SelfUpdateSourceSelection['source_id'] | ''>('')
-  const [customPrefix, setCustomPrefix] = useState('')
+  const [customPrefix, setCustomPrefix] = useState(getSelfUpdateCustomPrefix)
   const [checkedSource, setCheckedSource] = useState<SelfUpdateSourceSelection | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    let receivedCheck = false
+    const handleStatus = (event: Event) => {
+      receivedCheck = true
+      setStatus((event as CustomEvent<SelfUpdateStatus>).detail)
+      // 自动检查只提供展示状态；应用更新仍由用户选择并确认本次来源。
+      setCheckedSource(null)
+      setLoadError(null)
+    }
+    window.addEventListener(SELF_UPDATE_STATUS_EVENT, handleStatus)
     getSelfUpdateStatus()
       .then((next) => {
-        if (!cancelled) setStatus(next)
+        if (!cancelled && !receivedCheck) setStatus(next)
       })
       .catch((error: unknown) => {
-        if (!cancelled) setLoadError(errorMessage(error))
+        if (!cancelled && !receivedCheck) setLoadError(errorMessage(error))
       })
     return () => {
       cancelled = true
+      window.removeEventListener(SELF_UPDATE_STATUS_EVENT, handleStatus)
     }
   }, [])
 
@@ -136,7 +149,7 @@ function SelfUpdateCardContent() {
   const busy = checking || applying || isRestarting
 
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6" data-testid="self-update-card">
+    <Card className="p-4 sm:p-6" data-testid="self-update-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-base sm:text-lg font-semibold">{t('settings.selfUpdate.title')}</h3>
@@ -155,7 +168,7 @@ function SelfUpdateCardContent() {
           size="sm"
           onClick={() => {
             setSourceId('')
-            setCustomPrefix('')
+            setCustomPrefix(getSelfUpdateCustomPrefix())
             setSourceDialogOpen(true)
           }}
           disabled={busy || !status?.supported}
@@ -250,7 +263,7 @@ function SelfUpdateCardContent() {
           </p>
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 

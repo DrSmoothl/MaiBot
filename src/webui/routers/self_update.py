@@ -4,7 +4,7 @@
 WebUI 只负责检查更新与登记更新请求；代码与依赖的实际更新由 Runner 在重启间隙执行。
 """
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +19,6 @@ from src.common.self_update import (
     UpdateCheck,
     check_for_update,
     clear_pending_update,
-    evaluate_update,
     inspect_local,
     read_last_result,
     request_update,
@@ -160,8 +159,12 @@ def get_self_update_status() -> SelfUpdateStatusResponse:
         ):
             return _build_status_response(UpdateCheck(local=local))
         # 本地状态可能在检查之后变化（如还原了本地改动），用最新的本地状态重新评估。
-        check = evaluate_update(local, cached.latest_commit, cached.checked_at)
-        check.source = cached.source
+        if cached.local.commit != local.commit or cached.local.version != local.version:
+            return _build_status_response(UpdateCheck(local=local))
+        blockers = [item for item in cached.blockers if item != "dirty_worktree"]
+        if local.dirty_files:
+            blockers.append("dirty_worktree")
+        check = replace(cached, local=local, blockers=blockers)
         return _build_status_response(check)
     except SelfUpdateError as e:
         logger.exception(f"获取自更新状态失败: {e.message}")

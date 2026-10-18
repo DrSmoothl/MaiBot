@@ -1,5 +1,7 @@
 """WebUI API 路由"""
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
@@ -133,6 +135,12 @@ class CompleteSetupResponse(BaseModel):
 
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="结果消息")
+
+
+class ResetSetupRequest(BaseModel):
+    """重置配置请求；默认保留现有登录密码。"""
+
+    reset_password: bool = Field(False, description="同时重置为临时密码")
 
 
 class ResetSetupResponse(BaseModel):
@@ -395,7 +403,7 @@ async def complete_setup():
 
 
 @router.post("/setup/reset", response_model=ResetSetupResponse, dependencies=[Depends(require_auth)])
-async def reset_setup():
+def reset_setup(request: Request, response: Response, options: Optional[ResetSetupRequest] = None):
     """
     重置首次配置状态，允许重新进入配置向导
 
@@ -406,7 +414,14 @@ async def reset_setup():
         token_manager = get_token_manager()
 
         # 重置配置状态
-        success = token_manager.reset_setup_status()
+        reset_password = options is not None and options.reset_password
+        success = token_manager.reset_setup_status(reset_password=reset_password)
+
+        if success and reset_password:
+            # 旧凭证立即失效；只为发起重置的浏览器续上 HttpOnly Cookie，直接进入向导。
+            # 不把临时密码返回给 JavaScript 或写入浏览器存储。
+            set_auth_cookie(response, token_manager.get_token(), request)
+            response.headers["Cache-Control"] = "no-store"
 
         return ResetSetupResponse(success=success, message="配置状态已重置" if success else "重置失败")
     except HTTPException:

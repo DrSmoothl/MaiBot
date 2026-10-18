@@ -9,8 +9,10 @@ Worker（WebUI）只负责检查更新与登记更新请求；真正改动代码
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
+from urllib.request import Request, urlopen
 
+import base64
 import importlib.util
 import json
 import os
@@ -28,7 +30,8 @@ from .package_update import (
     ensure_other_instances_stopped,
     fetch_releases,
     latest_release,
-    package_index,    release_exists,
+    package_index,
+    release_exists,
     run_update,
     tool_environment,
     version_tuple,
@@ -383,12 +386,71 @@ def _fetch_branch_head(
 ) -> Tuple[str, UpdateSource]:
     """只从本次选择的来源取回指定分支，失败不自动换源。"""
     source = select_update_source(source_id, custom_prefix)
+    # CNB 公开镜像匿名读取，避免凭据管理器里的过期 Token 把公开请求变成认证失败。
+    anonymous_options = (
+        "-c", "credential.helper=", "-c", "http.extraHeader=",
+        "-c", "http.https://cnb.cool/.extraHeader=",
+    ) if source_id == "cnb" else ()
     try:
-        _git(root, *_GIT_STALL_OPTIONS, "fetch", "--no-tags", "--quiet", source.url,
+        _git(root, *anonymous_options, *_GIT_STALL_OPTIONS, "fetch", "--no-tags", "--quiet", source.url,
              f"refs/heads/{branch}", timeout=GIT_FETCH_TIMEOUT_SECONDS)
     except SelfUpdateError as exc:
         raise SelfUpdateError("fetch_failed", f"{source.name} 获取更新失败：{exc.message}") from exc
     return _git(root, "rev-parse", "FETCH_HEAD^{commit}").strip(), source
+
+
+def _get_update_json(path: str) -> Dict[str, Any]:
+    """只读官方 API；沿用 urllib 的环境/系统代理，不依赖 Git 配置。"""
+    request = Request(
+        f"https://api.github.com/repos/{OFFICIAL_REPOSITORY_PATH}/{path}",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "MaiBot-Self-Update"},
+    )
+    try:
+        with urlopen(request, timeout=5) as response:
+            payload = json.load(response)
+        if not isinstance(payload, dict):
+            raise ValueError("API 响应不是对象")
+        return payload
+    except (OSError, ValueError) as exc:
+        raise SelfUpdateError("fetch_failed", f"GitHub API 检查更新失败：{exc}") from exc
+
+
+def _check_source_api(local: LocalState, root: Path, source: UpdateSource) -> UpdateCheck:
+    """检查只获取元数据；CNB 匿名 API 不可用，下载镜像与官方检查源分离。"""
+    if local.branch is None or local.commit is None:
+        raise ValueError("本地仓库状态缺少当前分支或提交")
+    try:
+        branch = _get_update_json(f"branches/{quote(local.branch, safe='')}")
+        target = branch["commit"]["sha"]
+        if not isinstance(target, str) or _COMMIT_PATTERN.fullmatch(target) is None:
+            raise ValueError("无效的远端提交 SHA")
+        check = UpdateCheck(local=local, checked_at=time.time(), latest_commit=target, source=source)
+        if local.dirty_files:
+            check.blockers.append("dirty_worktree")
+        if target == local.commit:
+            check.latest_version = local.version
+            return check
+        comparison = _get_update_json(f"compare/{local.commit}...{target}?per_page=100")
+        check.behind = int(comparison["ahead_by"])
+        check.ahead = int(comparison["behind_by"])
+        if check.ahead:
+            check.blockers.append("diverged")
+        changed = {item["filename"] for item in comparison["files"]}
+        check.dependencies_changed = bool(DEPENDENCY_FILES & changed)
+        if check.dependencies_changed and local.dependency_tool is None:
+            check.blockers.append("no_dependency_tool")
+        check.commits = [
+            UpdateCommit(item["sha"][:8], item["commit"]["message"].splitlines()[0], item["commit"]["committer"]["date"])
+            for item in comparison["commits"][:MAX_LISTED_COMMITS]
+        ]
+        contents = _get_update_json(f"contents/pyproject.toml?ref={target}")
+        project = base64.b64decode(contents["content"]).decode("utf-8")
+        check.latest_version, requires_python = _parse_pyproject(project)
+        if _parse_pyproject((root / "pyproject.toml").read_text(encoding="utf-8"))[1] != requires_python:
+            check.blockers.append("python_requirement_changed")
+        return check
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SelfUpdateError("fetch_failed", f"更新 API 数据不完整：{exc}") from exc
 
 
 def check_for_update(
@@ -402,15 +464,14 @@ def check_for_update(
     if local.deployment_type == "package":
         selected = source_id or "pypi"
         index = package_index(selected)
-        check = evaluate_update(local, latest_release(local.version), time.time(), root)
+        check = evaluate_update(local, latest_release(local.version, selected), time.time(), root)
         check.source = UpdateSource(selected, PACKAGE_INDEXES[selected][0], index)
         return check
     if local.branch is None:
         raise ValueError("本地仓库状态缺少当前分支，无法检查更新")
-    target, source = _fetch_branch_head(root, local.branch, source_id or "github", custom_prefix)
-    check = evaluate_update(local, target, time.time(), root)
-    check.source = source
-    return check
+    source = select_update_source(source_id or "github", custom_prefix)
+    source.name = f"{source.name}（版本检查：GitHub API）"
+    return _check_source_api(local, root, source)
 
 
 def request_update(
@@ -429,8 +490,8 @@ def request_update(
             raise SelfUpdateError(local.blocker, BLOCKER_MESSAGES[local.blocker])
         if version_tuple(expected_commit) <= version_tuple(local.version):
             raise SelfUpdateError("already_up_to_date", "目标版本必须高于当前版本")
-        if not release_exists(fetch_releases(), expected_commit):
-            raise SelfUpdateError("unknown_version", "PyPI 上没有这个可用的正式版本，请重新检查")
+        if not release_exists(fetch_releases(selected), expected_commit):
+            raise SelfUpdateError("unknown_version", "所选包源没有这个可用的正式版本，请重新检查")
         pending = PendingUpdate(expected_commit, local.version, "pypi", time.time(), selected)
         path = _pending_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -453,6 +514,8 @@ def request_update(
     if expected_commit == local.commit:
         raise SelfUpdateError("already_up_to_date", "当前已经是这个版本")
 
+    # 用户确认更新后才拉取对象；Runner 重启后仍会重新验证来源与快进条件。
+    _fetch_branch_head(root, local.branch, selected, custom_prefix)
     object_check = _run_command(["git", "cat-file", "-e", f"{expected_commit}^{{commit}}"], root, GIT_TIMEOUT_SECONDS)
     if object_check.returncode != 0:
         raise SelfUpdateError("unknown_commit", "本地没有这个目标提交，请重新检查更新")

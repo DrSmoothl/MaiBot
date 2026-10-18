@@ -11,11 +11,11 @@ export function LearningPage() {
   const { tab } = useSearch({ from: '/protected/resource/learning' })
   const navigate = useNavigate()
   const browserHeader = (
-    <TabsList aria-label={t('sidebar.menu.learning')} className="h-11 w-full shrink-0">
-      <TabsTrigger value="expression" className="min-w-0 flex-1 px-1 text-xs">
+    <TabsList aria-label={t('sidebar.menu.learning')} className="w-auto shrink-0">
+      <TabsTrigger value="expression" size="sm" className="min-w-0 px-3 text-xs">
         {t('sidebar.menu.expressionManagement')}
       </TabsTrigger>
-      <TabsTrigger value="jargon" className="min-w-0 flex-1 px-1 text-xs">
+      <TabsTrigger value="jargon" size="sm" className="min-w-0 px-3 text-xs">
         {t('sidebar.menu.slangManagement')}
       </TabsTrigger>
     </TabsList>

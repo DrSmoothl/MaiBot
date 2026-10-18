@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, Download, Loader2, MessageSquare, RefreshCw, Star, ThumbsUp, Trash2, TrendingUp } from 'lucide-react'
-import { type CSSProperties, useRef, useState } from 'react'
+import { type CSSProperties, memo, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,10 +14,10 @@ interface PluginCardProps {
   plugin: PluginInfo
   gitStatus: GitStatus | null
   maimaiVersion: MaimaiVersion | null
-  pluginStats: Record<string, PluginStatsData>
+  stats: PluginStatsData | undefined
   loadProgress: PluginLoadProgress | null
   isAnyPluginInstalling?: boolean
-  likingPluginIds: Set<string>
+  isLiking: boolean
   onInstall: (plugin: PluginInfo) => void
   onLike: (plugin: PluginInfo) => void
   onUpdate: (plugin: PluginInfo) => void
@@ -70,14 +70,14 @@ function getPluginGrowthRank(rank7d?: number | null, rank30d?: number | null): {
   return null
 }
 
-export function PluginCard({
+export const PluginCard = memo(function PluginCard({
   plugin,
   gitStatus,
   maimaiVersion,
-  pluginStats,
+  stats,
   loadProgress,
   isAnyPluginInstalling = false,
-  likingPluginIds,
+  isLiking,
   onInstall,
   onLike,
   onUpdate,
@@ -101,15 +101,11 @@ export function PluginCard({
     setTitleOverflow(Math.max(0, text.scrollWidth - viewport.clientWidth))
   }
 
-  const stats = [plugin.manifest?.id]
-    .map(id => id ? pluginStats[id] : undefined)
-    .find(Boolean)
   const likeCount = stats?.likes ?? 0
   const downloadCount = stats?.downloads ?? plugin.downloads ?? 0
   const ratingValue = stats?.rating ?? plugin.rating ?? 0
   const reviewCount = stats?.comment_count ?? plugin.review_count ?? 0
   const isLiked = stats?.liked === true
-  const isLiking = likingPluginIds.has(plugin.manifest?.id || plugin.id)
   const isInstalling = loadProgress?.operation === 'install'
     && loadProgress.stage === 'loading'
     && loadProgress?.plugin_id === plugin.id
@@ -132,7 +128,7 @@ export function PluginCard({
       data-plugin-market-card="true"
       data-plugin-installed={plugin.installed ? 'true' : undefined}
       data-plugin-recent-activity={recentActivity || downloadGrowth || likeGrowth ? 'true' : undefined}
-      className="relative isolate row-span-3 grid h-full min-w-0 cursor-pointer grid-cols-1 grid-rows-subgrid gap-y-0"
+      className="relative isolate row-span-2 grid h-full min-w-0 cursor-pointer grid-cols-1 grid-rows-subgrid gap-y-0"
       onPointerEnter={measureTitleOverflow}
       onFocusCapture={measureTitleOverflow}
       onClick={(event) => {
@@ -281,7 +277,7 @@ export function PluginCard({
                 data-liked={isLiked ? 'true' : undefined}
                 variant={isLiked ? 'secondary' : 'outline'}
                 size="sm"
-                className="h-7 gap-1 px-1.5 [&_svg]:size-3.5"
+                className="gap-1 px-1.5 [&_svg]:size-3.5"
                 title={`${isLiked ? '取消点赞' : '点赞'} · ${likeCount.toLocaleString()}`}
                 aria-label={isLiked ? '取消点赞' : '点赞'}
                 aria-pressed={isLiked}
@@ -300,8 +296,8 @@ export function PluginCard({
               {plugin.installed ? (
                 needsUpdate(plugin) ? (
                   <Button
-                    size="sm"
-                    className="h-7 w-7 px-0 [&_svg]:size-3.5"
+                    size="icon-sm"
+                    className="[&_svg]:size-3.5"
                     disabled={
                       !gitStatus?.installed
                       || isPluginOperating
@@ -328,8 +324,8 @@ export function PluginCard({
                 ) : (
                   <Button
                     variant="destructive"
-                    size="sm"
-                    className="h-7 w-7 px-0 [&_svg]:size-3.5"
+                    size="icon-sm"
+                    className="[&_svg]:size-3.5"
                     disabled={!gitStatus?.installed || isPluginOperating}
                     title={
                       !gitStatus?.installed
@@ -346,8 +342,8 @@ export function PluginCard({
                 )
               ) : (
                 <Button
-                  size="sm"
-                  className="h-7 w-7 px-0 [&_svg]:size-3.5"
+                  size="icon-sm"
+                  className="[&_svg]:size-3.5"
                   disabled={
                     !gitStatus?.installed ||
                     isAnyPluginInstalling ||
@@ -383,87 +379,98 @@ export function PluginCard({
               )}
             </div>
           )}
-        </div>
-      </CardContent>
-      {/* 安装/卸载/更新进度显示 - 在卡片下方 */}
-      {loadProgress && 
-        (loadProgress.stage === 'loading' || loadProgress.stage === 'success' || loadProgress.stage === 'error') && 
-        loadProgress.operation !== 'fetch' && 
-        loadProgress.plugin_id === plugin.id && (
-        <div className="-mt-1 px-4 pb-4">
-          <div data-plugin-card-progress={loadProgress.stage} className={`space-y-2 rounded-lg border p-2.5 ${
-            loadProgress.stage === 'success' 
-              ? 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900' 
-              : loadProgress.stage === 'error'
-                ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900'
-                : 'bg-muted/50'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {loadProgress.stage === 'loading' ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : loadProgress.stage === 'success' ? (
-                  <CheckCircle2 className="h-3 w-3 text-green-600" />
-                ) : (
-                  <AlertCircle className="h-3 w-3 text-red-600" />
-                )}
-                <span className={`text-xs font-medium ${
-                  loadProgress.stage === 'success' 
-                    ? 'text-green-700 dark:text-green-300' 
-                    : loadProgress.stage === 'error'
-                      ? 'text-red-700 dark:text-red-300'
-                      : ''
-                }`}>
+
+          {/* 安装/卸载/更新进度与操作区共用内边距，窄屏下也保持对齐。 */}
+          {loadProgress &&
+            (loadProgress.stage === 'loading' || loadProgress.stage === 'success' || loadProgress.stage === 'error') &&
+            loadProgress.operation !== 'fetch' &&
+            loadProgress.plugin_id === plugin.id && (
+            <div data-plugin-card-progress={loadProgress.stage} className={`space-y-2 rounded-lg border p-2.5 ${
+              loadProgress.stage === 'success'
+                ? 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900'
+                : loadProgress.stage === 'error'
+                  ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900'
+                  : 'bg-muted/50'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
                   {loadProgress.stage === 'loading' ? (
-                    <>
-                      {loadProgress.operation === 'install' && '正在安装'}
-                      {loadProgress.operation === 'uninstall' && '正在卸载'}
-                      {loadProgress.operation === 'update' && '正在更新'}
-                    </>
+                    <Loader2 className="h-3 w-3 animate-spin" />
                   ) : loadProgress.stage === 'success' ? (
-                    <>
-                      {loadProgress.operation === 'install' && '安装完成'}
-                      {loadProgress.operation === 'uninstall' && '卸载完成'}
-                      {loadProgress.operation === 'update' && '更新完成'}
-                    </>
+                    <CheckCircle2 className="h-3 w-3 text-green-600" />
                   ) : (
-                    <>
-                      {loadProgress.operation === 'install' && '安装失败'}
-                      {loadProgress.operation === 'uninstall' && '卸载失败'}
-                      {loadProgress.operation === 'update' && '更新失败'}
-                    </>
+                    <AlertCircle className="h-3 w-3 text-red-600" />
                   )}
-                </span>
+                  <span className={`text-xs font-medium ${
+                    loadProgress.stage === 'success'
+                      ? 'text-green-700 dark:text-green-300'
+                      : loadProgress.stage === 'error'
+                        ? 'text-red-700 dark:text-red-300'
+                        : ''
+                  }`}>
+                    {loadProgress.stage === 'loading' ? (
+                      <>
+                        {loadProgress.operation === 'install' && '正在安装'}
+                        {loadProgress.operation === 'uninstall' && '正在卸载'}
+                        {loadProgress.operation === 'update' && '正在更新'}
+                      </>
+                    ) : loadProgress.stage === 'success' ? (
+                      <>
+                        {loadProgress.operation === 'install' && '安装完成'}
+                        {loadProgress.operation === 'uninstall' && '卸载完成'}
+                        {loadProgress.operation === 'update' && '更新完成'}
+                      </>
+                    ) : (
+                      <>
+                        {loadProgress.operation === 'install' && '安装失败'}
+                        {loadProgress.operation === 'uninstall' && '卸载失败'}
+                        {loadProgress.operation === 'update' && '更新失败'}
+                      </>
+                    )}
+                  </span>
+                </div>
+                {loadProgress.stage !== 'error' && (
+                  <span className={`text-xs font-medium ${
+                    loadProgress.stage === 'success' ? 'text-green-700 dark:text-green-300' : ''
+                  }`}>{loadProgress.progress}%</span>
+                )}
               </div>
               {loadProgress.stage !== 'error' && (
-                <span className={`text-xs font-medium ${
-                  loadProgress.stage === 'success' ? 'text-green-700 dark:text-green-300' : ''
-                }`}>{loadProgress.progress}%</span>
+                <Progress
+                  value={loadProgress.progress}
+                  className={`h-1.5 ${loadProgress.stage === 'success' ? '[&>div]:bg-green-500' : ''}`}
+                />
+              )}
+              <div className={`text-xs ${
+                loadProgress.stage === 'success'
+                  ? 'text-green-600 dark:text-green-400 truncate'
+                  : loadProgress.stage === 'error'
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'text-muted-foreground truncate'
+              }`}>
+                {loadProgress.stage === 'error' ? (loadProgress.error || loadProgress.message || '操作失败') : loadProgress.message}
+              </div>
+              {progressDetail && (
+                <div className="truncate text-xs text-muted-foreground">
+                  {progressDetail}
+                </div>
               )}
             </div>
-            {loadProgress.stage !== 'error' && (
-              <Progress 
-                value={loadProgress.progress} 
-                className={`h-1.5 ${loadProgress.stage === 'success' ? '[&>div]:bg-green-500' : ''}`} 
-              />
-            )}
-            <div className={`text-xs ${
-              loadProgress.stage === 'success' 
-                ? 'text-green-600 dark:text-green-400 truncate' 
-                : loadProgress.stage === 'error'
-                  ? 'text-red-600 dark:text-red-400'
-                  : 'text-muted-foreground truncate'
-            }`}>
-              {loadProgress.stage === 'error' ? (loadProgress.error || loadProgress.message || '操作失败') : loadProgress.message}
-            </div>
-            {progressDetail && (
-              <div className="truncate text-xs text-muted-foreground">
-                {progressDetail}
-              </div>
-            )}
-          </div>
+          )}
         </div>
-      )}
+      </CardContent>
     </Card>
   )
-}
+}, (previous, next) => {
+  // 用户点赞覆盖层可能重建统计对象；比较当前卡片的统计字段，避免无关卡片重画。
+  // 其余 props（包括操作回调）全部参与比较，不能忽略有效更新。
+  const keys = Object.keys(previous) as (keyof PluginCardProps)[]
+  return keys.length === Object.keys(next).length && keys.every((key) => {
+    if (key !== 'stats') return Object.is(previous[key], next[key])
+    if (previous.stats === next.stats) return true
+    if (!previous.stats || !next.stats) return false
+    const statsKeys = Object.keys(previous.stats) as (keyof PluginStatsData)[]
+    return statsKeys.length === Object.keys(next.stats).length
+      && statsKeys.every((field) => Object.is(previous.stats![field], next.stats![field]))
+  })
+})

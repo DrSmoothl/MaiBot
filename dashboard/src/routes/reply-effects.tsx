@@ -1,3 +1,4 @@
+import { Card } from '@/components/ui/card'
 import {
   type ChangeEvent,
   type ComponentType,
@@ -511,7 +512,7 @@ function MetricCard({
   }
 
   return (
-    <div className="group bg-card hover:border-primary/50 relative min-h-32 overflow-hidden rounded-xl border px-4 py-4 shadow-sm transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-md">
+    <Card className="group hover:border-primary/50 relative min-h-32 overflow-hidden px-4 py-4 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5">
       <div className="bg-primary/70 absolute inset-x-0 top-0 h-0.5" />
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -530,7 +531,7 @@ function MetricCard({
         </div>
       </div>
       <div className="text-muted-foreground mt-3 truncate text-xs">{detail}</div>
-    </div>
+    </Card>
   )
 }
 

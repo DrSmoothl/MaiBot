@@ -767,7 +767,7 @@ function ModelConfigPageContent() {
                 }}
                 disabled={versionsLoading || saving || autoSaving || Boolean(switchingConfigVersion)}
               >
-                <SelectTrigger className="h-9 min-w-0 flex-1 sm:w-[190px] sm:flex-none" aria-label="模型配置副本">
+                <SelectTrigger className="min-w-0 flex-1 sm:w-[190px] sm:flex-none" aria-label="模型配置副本">
                   <History className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
                   <SelectValue placeholder={activeConfigVersion?.label || '默认配置'} />
                 </SelectTrigger>
@@ -916,8 +916,7 @@ function ModelConfigPageContent() {
                     <Button
                       type="button"
                       variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
+                      size="icon-sm"
                       onClick={() => handleTestProviderConnection(selectedProviderInfo.name)}
                       disabled={testingProviders.has(selectedProviderInfo.name)}
                       title="测试连接"
@@ -932,8 +931,7 @@ function ModelConfigPageContent() {
                     <Button
                       type="button"
                       variant="outline"
-                      size="icon"
-                      className="border-primary! text-primary hover:text-primary h-8 w-8"
+                      size="icon-sm"
                       onClick={() => openProviderDialog(selectedProviderInfo, selectedProviderIndex)}
                       title="编辑厂商"
                       aria-label={`编辑厂商 ${selectedProviderInfo.name}`}
@@ -942,9 +940,8 @@ function ModelConfigPageContent() {
                     </Button>
                     <Button
                       type="button"
-                      variant="outline"
-                      size="icon"
-                      className="border-destructive! text-destructive hover:text-destructive h-8 w-8"
+                      variant="destructive"
+                      size="icon-sm"
                       onClick={() => openProviderDeleteDialog(selectedProviderIndex)}
                       title="删除厂商"
                       aria-label={`删除厂商 ${selectedProviderInfo.name}`}
@@ -1948,8 +1945,8 @@ function ModelConfigPageContent() {
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                      size="icon-sm"
+                      className="shrink-0 text-destructive hover:text-destructive"
                       title={`删除时段 ${index + 1}`}
                       aria-label={`删除时段 ${index + 1}`}
                       onClick={() => updatePricePeriods((periods) => periods.filter((_, itemIndex) => itemIndex !== index))}

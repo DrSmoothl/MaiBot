@@ -1,9 +1,11 @@
 """uv 安装版更新；也可复制后交给环境外的 Python 独立执行，只依赖标准库。"""
 
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from urllib.error import URLError
+from urllib.parse import unquote, urlsplit
 from urllib.request import Request, urlopen
 
 import argparse
@@ -149,13 +151,41 @@ def register_instance(root: Path) -> FileLock:
         raise SelfUpdateError("package_busy", "这个实例正在运行，或工具环境正在更新，请等待完成") from exc
 
 
-def fetch_releases() -> Dict[str, Any]:
+class _PackageLinks(HTMLParser):
+    """从 Python Simple 包源读取正式版本，保留撤回标记。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.releases: Dict[str, List[Dict[str, Any]]] = {}
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Any]]) -> None:
+        if tag != "a":
+            return
+        attributes = dict(attrs)
+        filename = unquote(urlsplit(attributes.get("href", "")).path).rsplit("/", 1)[-1]
+        match = re.fullmatch(r"maibot-(\d+\.\d+\.\d+)(?:\.tar\.gz|-.*\.whl)", filename, re.IGNORECASE)
+        if match and _VERSION.fullmatch(match[1]):
+            self.releases.setdefault(match[1], []).append({"yanked": "data-yanked" in attributes})
+
+
+def fetch_releases(source_id: str = "pypi") -> Dict[str, Any]:
+    index = package_index(source_id)
+    url = PYPI_URL if source_id == "pypi" else f"{index}/maibot/"
     try:
-        request = Request(PYPI_URL, headers={"User-Agent": "MaiBot-Self-Update", "Accept": "application/json"})
-        with urlopen(request, timeout=20) as response:
-            return json.load(response)
+        request = Request(url, headers={
+            "User-Agent": "MaiBot-Self-Update",
+            "Accept": "application/json" if source_id == "pypi" else "text/html",
+        })
+        with urlopen(request, timeout=5) as response:
+            if source_id == "pypi":
+                return json.load(response)
+            parser = _PackageLinks()
+            parser.feed(response.read().decode("utf-8"))
+            if not parser.releases:
+                raise ValueError("包源没有可识别的正式版本")
+            return {"releases": parser.releases}
     except (OSError, URLError, ValueError) as exc:
-        raise SelfUpdateError("fetch_failed", "无法从 PyPI 检查正式版本，请稍后重试") from exc
+        raise SelfUpdateError("fetch_failed", f"无法从 {PACKAGE_INDEXES[source_id][0]} 检查正式版本：{exc}") from exc
 
 
 def release_exists(payload: Dict[str, Any], version: str) -> bool:
@@ -163,8 +193,8 @@ def release_exists(payload: Dict[str, Any], version: str) -> bool:
     return any(not item.get("yanked", False) for item in files)
 
 
-def latest_release(current: str) -> str:
-    payload = fetch_releases()
+def latest_release(current: str, source_id: str = "pypi") -> str:
+    payload = fetch_releases(source_id)
     candidates = [
         version for version in payload["releases"]
         if _VERSION.fullmatch(version)
