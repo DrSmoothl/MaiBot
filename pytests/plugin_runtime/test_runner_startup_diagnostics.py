@@ -62,3 +62,29 @@ def test_exited_runner_stderr_is_drained_before_cleanup(monkeypatch):
         warning.assert_any_call("[runner-stderr] Traceback: runner handshake timed out")
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("on_load_succeeded", [True, False])
+def test_plugin_activation_records_separate_stages(monkeypatch, on_load_succeeded):
+    runner = runner_main.PluginRunner.__new__(runner_main.PluginRunner)
+    runner._loader = SimpleNamespace(set_loaded_plugin=Mock(), purge_plugin_modules=Mock())
+    runner._bootstrap_plugin = AsyncMock(return_value=True)
+    runner._register_plugin = AsyncMock(return_value=True)
+    runner._invoke_plugin_on_load = AsyncMock(return_value=on_load_succeeded)
+    runner._unregister_plugin = AsyncMock()
+    runner._deactivate_plugin = AsyncMock()
+    meta = SimpleNamespace(plugin_id="example.slow-plugin", config_error="", plugin_dir="unused")
+    info = Mock()
+    monkeypatch.setattr(startup_diagnostics.logger, "info", info)
+
+    result = asyncio.run(runner._activate_plugin(meta))
+    assert result == (
+        runner_main.PluginActivationStatus.LOADED if on_load_succeeded else runner_main.PluginActivationStatus.FAILED
+    )
+    messages = [call.args[0] for call in info.call_args_list]
+    for stage in ("bootstrap", "register", "on_load"):
+        assert any(f"stage=runner.plugin_{stage}:example.slow-plugin" in message for message in messages)
+    if on_load_succeeded:
+        runner._loader.set_loaded_plugin.assert_called_once_with(meta)
+    else:
+        runner._unregister_plugin.assert_awaited_once_with(meta.plugin_id, reason="on_load_failed")

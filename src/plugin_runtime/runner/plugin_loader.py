@@ -19,6 +19,7 @@ import re
 import sys
 
 from src.common.logger import get_logger
+from src.common.startup_diagnostics import diagnostic_stage
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator, PluginManifest, is_reserved_plugin_directory
 
 logger = get_logger("plugin_runtime.runner.plugin_loader")
@@ -137,11 +138,13 @@ class PluginLoader:
         Returns:
             List[PluginMeta]: 成功加载的插件元数据列表，按依赖顺序排列。
         """
-        candidates, duplicate_candidates = self._discover_candidates(plugin_dirs)
+        with diagnostic_stage("runner.plugin_discovery"):
+            candidates, duplicate_candidates = self._discover_candidates(plugin_dirs)
         self._record_duplicate_candidates(duplicate_candidates)
 
         # 第二阶段：依赖解析（拓扑排序）
-        load_order, failed_deps = self._resolve_dependencies(candidates, extra_available=extra_available)
+        with diagnostic_stage("runner.plugin_dependencies"):
+            load_order, failed_deps = self._resolve_dependencies(candidates, extra_available=extra_available)
         self._record_failed_dependencies(failed_deps)
 
         # 第三阶段：按依赖顺序加载
@@ -583,12 +586,14 @@ class PluginLoader:
         try:
             with self._temporary_sys_path_entry(src_root):
                 with self._temporary_sys_path_entry(plugin_parent_dir):
-                    spec.loader.exec_module(module)
+                    with diagnostic_stage(f"runner.plugin_import:{plugin_id}"):
+                        spec.loader.exec_module(module)
 
                     # 优先使用新版 create_plugin 工厂函数
                     create_plugin = getattr(module, "create_plugin", None)
                     if create_plugin is not None:
-                        instance = create_plugin()
+                        with diagnostic_stage(f"runner.plugin_create:{plugin_id}"):
+                            instance = create_plugin()
                         self._validate_sdk_plugin_contract(plugin_id, instance)
                         logger.debug(f"插件 {plugin_id} v{manifest.version} 加载成功")
                         return PluginMeta(

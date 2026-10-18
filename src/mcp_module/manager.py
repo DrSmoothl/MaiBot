@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable, List, Optional
 import asyncio
 
 from src.cli.console import console
+from src.common.startup_diagnostics import diagnostic_stage
 from src.core.tooling import (
     ToolExecutionResult,
     ToolInvocation,
@@ -22,7 +23,6 @@ from .config import (
     build_mcp_client_runtime_config,
     build_mcp_server_runtime_configs,
 )
-from .connection import MCPConnection, MCP_AVAILABLE
 from .hooks import MCPHostCallbacks
 from .models import (
     MCPPromptResult,
@@ -39,6 +39,10 @@ from .models import (
 
 if TYPE_CHECKING:
     from src.config.official_configs import MCPConfig
+
+# 连接层加载包含 SDK 子阶段，两者属于嵌套墙钟耗时，不能相加。
+with diagnostic_stage("mcp.import_connection"):
+    from .connection import MCPConnection, MCP_AVAILABLE
 
 # 内置工具名称集合 —— MCP 工具不允许与这些名称冲突
 BUILTIN_TOOL_NAMES = frozenset(

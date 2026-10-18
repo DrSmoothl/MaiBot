@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 import asyncio
 import httpx
 import logging
+import sys
 
 from src.cli.console import console
+from src.common.startup_diagnostics import diagnostic_stage
 from src.core.tooling import ToolExecutionResult
 
 from .config import MCPClientRuntimeConfig, MCPServerRuntimeConfig
@@ -35,7 +37,10 @@ if TYPE_CHECKING:
 # MCPManager.from_app_config() 会检测到并返回 None，不影响主程序运行。
 
 try:
-    from mcp import ClientSession, types as mcp_types
+    # 已有 SDK 模块时可能命中缓存或等待另一线程；与首次导入阶段区分。
+    sdk_import_stage = "mcp.resolve_sdk" if "mcp" in sys.modules else "mcp.import_sdk"
+    with diagnostic_stage(sdk_import_stage):
+        from mcp import ClientSession, types as mcp_types
 
     try:
         from mcp.client.stdio import StdioServerParameters

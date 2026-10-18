@@ -233,7 +233,9 @@ def _detect_startup_format_work(
     conn: Optional[sqlite3.Connection],
 ) -> Dict[str, Any]:
     record_exists = conn is not None and _migration_record_exists(conn)
-    sqlite_required = conn is not None and _sqlite_legacy_metadata_exists(conn)
+    # 完成记录与 SQLite 转换在同一事务提交；恢复旧数据库时也会恢复其迁移状态。
+    # 已完成的库不必每次遍历四张业务表，文件通道仍需独立检查旧文件恢复等情况。
+    sqlite_required = conn is not None and not record_exists and _sqlite_legacy_metadata_exists(conn)
     vectors = [
         _vector_format_work(data_dir / relative, migration_record_exists=record_exists)
         for relative in ("vectors", "vectors/paragraph", "vectors/graph")
