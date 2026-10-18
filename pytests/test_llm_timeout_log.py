@@ -7,10 +7,12 @@ from src.llm_models.exceptions import ModelAttemptFailed, NetworkConnectionError
 from src.llm_models.model_client.base_client import ResponseRequest
 from src.llm_models.utils_model import LLMOrchestrator
 import src.llm_models.utils_model as utils_model
+import src.services.model_task_usage_service as usage_service
 
 
 @pytest.mark.asyncio
 async def test_api_timeout_logs_provider_limit_attempts_and_replay(monkeypatch, tmp_path):
+    monkeypatch.setattr(usage_service, "record_model_task_usage", lambda *args, **kwargs: None)
     warnings = []
     errors = []
     monkeypatch.setattr(utils_model.logger, "warning", warnings.append)
@@ -28,7 +30,7 @@ async def test_api_timeout_logs_provider_limit_attempts_and_replay(monkeypatch, 
         timeout=42, retry_interval=1,
     )
     request = ResponseRequest(
-        model_info=ModelInfo(name="test-model", model_identifier="test-model", api_provider="test-provider"),
+        model_info=ModelInfo(model_type="llm", name="test-model", model_identifier="test-model", api_provider="test-provider"),
         context_items=[],
     )
 
@@ -38,6 +40,7 @@ async def test_api_timeout_logs_provider_limit_attempts_and_replay(monkeypatch, 
             raise error from APITimeoutError(request=httpx.Request("POST", "https://example.com/v1/chat/completions"))
 
     orchestrator = object.__new__(LLMOrchestrator)
+    orchestrator.task_name = "planner"
     orchestrator.request_type = "A_Memorix.ChatSummarization"
     with pytest.raises(ModelAttemptFailed):
         await orchestrator._attempt_request_on_model(provider, FailingClient(), request, retry_limit=2)

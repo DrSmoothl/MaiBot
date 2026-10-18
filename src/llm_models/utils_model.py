@@ -32,7 +32,6 @@ from src.llm_models.exceptions import (
     RespNotOkException,
     RespParseException,
 )
-from src.llm_models.model_client import ensure_configured_clients_loaded
 from src.llm_models.model_client.base_client import (
     APIResponse,
     AudioTranscriptionRequest,
@@ -892,7 +891,7 @@ class LLMOrchestrator:
             )
         raise ValueError(f"不支持的请求类型: {request_type}")
 
-    def _select_model(
+    async def _select_model(
         self,
         exclude_models: Optional[Set[str]] = None,
         model_name: Optional[str] = None,
@@ -924,8 +923,6 @@ class LLMOrchestrator:
 
         if not available_models:
             raise RuntimeError("没有可用的模型可供选择。所有模型均已尝试失败。")
-
-        ensure_configured_clients_loaded()
 
         if self.task_name in EMBEDDING_TASK_NAMES:
             # 嵌入模型的向量空间必须保持一致，多模型间随机或均衡切换会污染向量库，
@@ -960,9 +957,15 @@ class LLMOrchestrator:
 
         model_info = TempMethodsLLMUtils.get_model_info_by_name(selected_model_name)
         api_provider = TempMethodsLLMUtils.get_provider_by_name(model_info.api_provider)
-        client = client_registry.get_client_class_instance(api_provider)
-        logger.debug(f"选择请求模型: {model_info.name} (策略: {strategy})")
+        # 初始化现在会让出循环，先占用名额，避免冷启动的并发请求全部选中同一模型。
         self._adjust_model_usage(model_info.name, usage_penalty_delta=1)
+        try:
+            client = await client_registry.get_client_class_instance_async(api_provider)
+        except BaseException:
+            # 初始化失败或请求取消时，尚未发送请求，必须归还模型选择名额。
+            self._adjust_model_usage(model_info.name, usage_penalty_delta=-1)
+            raise
+        logger.debug(f"选择请求模型: {model_info.name} (策略: {strategy})")
         return model_info, api_provider, client
 
     def _record_success_generation_attempt(
@@ -1350,7 +1353,7 @@ class LLMOrchestrator:
         )
 
         for model_index in range(max_attempts):
-            model_info, api_provider, client = self._select_model(
+            model_info, api_provider, client = await self._select_model(
                 exclude_models=failed_models_this_request,
                 model_name=model_name,
             )
