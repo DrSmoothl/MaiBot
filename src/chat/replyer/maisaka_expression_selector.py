@@ -181,7 +181,7 @@ class MaisakaExpressionSelector:
             f"""- 当"{expression['situation']}"时，可以用"{expression['style']}"来表达。"""
             for expression in selected_expressions
         ]
-        return "【表达习惯参考，请视情况自然的使用】\n" + "\n".join(lines)
+        return "你可以视情况自由使用以下句式：\n" + "\n".join(lines)
 
     @staticmethod
     def _normalize_history_line(message: LLMContextMessage) -> str:

@@ -9,6 +9,8 @@ import json
 import time
 import uuid
 
+from src.chat.debounce import MessageDebouncer
+from src.chat.debounce.message_adapter import get_message_shape
 from src.chat.heart_flow.heartFC_utils import CycleDetail
 from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
 from src.chat.message_receive.message import SessionMessage
@@ -186,6 +188,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._deferred_message_turn_task: Optional[asyncio.Task[None]] = None
         self._message_debounce_seconds = 1.0
         self._message_debounce_required = False
+        self._fixed_message_debouncer = MessageDebouncer()
+        self._message_debounce_was_enabled = False
         self._last_message_received_at = 0.0
         self._last_external_message_received_at: Optional[float] = None
         self._talk_frequency_adjust = 1.0
@@ -542,6 +546,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return
 
         self._running = False
+        self._fixed_message_debouncer.consume()
         self._mark_message_turn_unscheduled()
         self._clear_message_debounce_required()
         self._cancel_deferred_message_turn_task()
@@ -1001,6 +1006,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._last_message_received_at = max(self._last_message_received_at, received_at)
         self._record_external_message_interval(message, received_at)
         self._update_message_trigger_state(message)
+        self._observe_message_debounce(message, received_at)
         self.message_cache.append(message)
         self._emit_monitor_message_ingested(message)
         self._prune_processed_message_cache()
@@ -1832,6 +1838,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return []
 
         self._last_processed_index = len(self.message_cache)
+        self._fixed_message_debouncer.consume()
         if pending_messages:
             focus_mode_manager.mark_read(self.session_id)
         # logger.info(
@@ -1841,7 +1848,11 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         return pending_messages
 
     async def _wait_for_message_quiet_period(self) -> None:
-        """等待消息静默窗口结束后，再启动由打断触发的新一轮。"""
+        """等待消息批次允许判断；关闭固定防抖时沿用打断后的静默窗口。"""
+        if self._is_message_debounce_enabled():
+            await self._wait_for_fixed_message_debounce()
+            self._clear_message_debounce_required()
+            return
         if not self._message_debounce_required:
             return
 
@@ -1857,6 +1868,57 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             await asyncio.sleep(remaining)
 
         self._clear_message_debounce_required()
+
+    def _is_message_debounce_enabled(self) -> bool:
+        return global_config.chat.reply_timing.message_debounce_mode != "off"
+
+    def _observe_message_debounce(self, message: SessionMessage, received_at: float) -> None:
+        """在触发调度之前更新截止时间；开关热重载时清除旧批次。"""
+        mode = global_config.chat.reply_timing.message_debounce_mode
+        enabled = mode != "off"
+        if enabled != self._message_debounce_was_enabled:
+            self._fixed_message_debouncer.consume()
+            self._message_debounce_was_enabled = enabled
+        if mode == "off":
+            return
+        if message.is_notify or message.is_command or is_bot_self(message.platform, message.message_info.user_info.user_id):
+            return
+        kind, length = get_message_shape(message)
+        reason = self._fixed_message_debouncer.observe(
+            author=message.message_info.user_info.user_id,
+            is_bare_image=kind == 1 and length == 0,
+            is_pure_emoji=kind == 2 and length == 0,
+            mode=mode,
+            at_bot=message.is_at or message.is_mentioned,
+            received_at=received_at,
+            wall_time=time.time(),
+            now=time.monotonic(),
+        )
+        deadline = self._fixed_message_debouncer.deadline
+        if deadline is not None:
+            mode_label = {"fast": "快速", "natural": "自然", "steady": "沉稳"}[mode]
+            logger.info(
+                f"{self.log_prefix} 消息防抖：档位={mode_label}，规则={reason}，"
+                f"剩余等待={max(0.0, deadline - time.monotonic()):.3f} 秒，"
+                f"待处理={self._get_pending_message_count() + 1} 条，消息编号={message.message_id}"
+            )
+
+    async def _wait_for_fixed_message_debounce(self) -> None:
+        """新消息会唤醒等待并重算，兼容截止时间提前和延后；停止时可取消。"""
+        debouncer = self._fixed_message_debouncer
+        while self._running and self._is_message_debounce_enabled():
+            deadline = debouncer.deadline
+            if deadline is None:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            debouncer.changed.clear()
+            try:
+                # 定期读取开关，使关闭配置也能结束本轮等待，无需再来一条消息。
+                await asyncio.wait_for(debouncer.changed.wait(), timeout=min(remaining, 0.5))
+            except TimeoutError:
+                pass
 
     def _enter_stop_state(self) -> None:
         """切换到停止状态。"""
