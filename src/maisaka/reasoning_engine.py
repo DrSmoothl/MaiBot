@@ -676,10 +676,14 @@ class MaisakaReasoningEngine:
         return CycleEnd("max_rounds", f"已达到内部思考轮次上限 {max_internal_rounds}，本轮处理结束。")
 
     async def _ingest_pending_steering_messages(self) -> List[SessionMessage]:
-        """立即接入待处理消息，沿用当前思考循环，不等待连发消息静默。"""
+        """沿用当前思考循环接入待处理消息；默认立即接入，开启固定防抖时先等本批。"""
 
         if not self._runtime._has_pending_messages():
             return []
+
+        # 开启固定防抖时，引导路径也先收齐当前批次，再沿用当前思考循环。
+        if self._runtime._is_message_debounce_enabled():
+            await self._runtime._wait_for_message_quiet_period()
 
         self._runtime._mark_message_turn_unscheduled()
         self._runtime._clear_message_debounce_required()
@@ -765,11 +769,18 @@ class MaisakaReasoningEngine:
             return TurnStartContext([], None, timeout_triggered, proactive_triggered, silent_reply_frequency)
 
         if message_triggered:
-            if global_config.experimental.planner_message_steering:
+            if (
+                global_config.experimental.planner_message_steering
+                and not self._runtime._is_message_debounce_enabled()
+            ):
                 self._runtime._clear_message_debounce_required()
             else:
                 await self._runtime._wait_for_message_quiet_period()
             self._runtime._mark_message_turn_unscheduled()
+
+        elif self._runtime._has_pending_messages() and self._runtime._is_message_debounce_enabled():
+            # timeout/主动任务也可能带走消息缓存，不能绕过当前批次的等待。
+            await self._runtime._wait_for_message_quiet_period()
 
         cached_messages = self._runtime._collect_pending_messages() if self._runtime._has_pending_messages() else []
         continuation_logical_turn_id: str | None = None
