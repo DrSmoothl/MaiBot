@@ -2470,7 +2470,7 @@ function createStringListHook(options: StringListHookOptions): FieldHookComponen
             {items.map((item, itemIndex) => (
               <div
                 key={itemIndex}
-                className={`grid gap-2 sm:grid-cols-[minmax(0,1fr)_2.5rem]${options.borderless ? '' : ' rounded-md border bg-muted/20 p-3'}`}
+                className={`grid grid-cols-[minmax(0,1fr)_2.5rem] items-start gap-2${options.borderless ? '' : ' rounded-md border bg-muted/20 p-3'}`}
               >
                 <InputComponent
                   value={item}
@@ -2536,6 +2536,7 @@ export const AliasNamesHook: FieldHookComponent = (props) => {
 
 export const MultipleReplyStyleHook = createStringListHook({
   addLabel: '添加表达风格',
+  borderless: true,
   emptyText: '暂无备用表达风格。',
   label: '备用表达风格',
   multiline: true,

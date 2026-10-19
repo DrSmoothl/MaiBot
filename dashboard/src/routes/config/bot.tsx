@@ -39,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
@@ -973,6 +974,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
   const initialActiveTab = tabGroups[0]?.id ?? ''
   const [expandedSubtabGroups, setExpandedSubtabGroups] = useState<Record<string, boolean>>({})
   const [activeSubtabByGroup, setActiveSubtabByGroup] = useState<Record<string, string>>({})
+  const [alternateStylesOpen, setAlternateStylesOpen] = useState(false)
   const [experimentalNoticeOpen, setExperimentalNoticeOpen] = useState(
     () =>
       initialActiveTab === 'experimental' &&
@@ -1006,6 +1008,9 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     const frameId = window.requestAnimationFrame(() => {
       setActiveTab(targetTab.id)
       setAdvancedVisible(true)
+      if (searchFieldPath === 'personality.multiple_probability' || searchFieldPath === 'personality.multiple_reply_style') {
+        setAlternateStylesOpen(true)
+      }
 
       if (subcategoryName) {
         const isChatQuoteField = searchFieldPath === 'chat.reply_style.private_quote_frequency' ||
@@ -1045,7 +1050,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
         window.cancelAnimationFrame(nestedFrameId)
       }
     }
-  }, [activeSubtabByGroup, activeTab, advancedVisible, searchFieldPath])
+  }, [activeSubtabByGroup, activeTab, advancedVisible, alternateStylesOpen, searchFieldPath])
 
   if (tabGroups.length === 0 || !configSchema?.nested) {
     return null
@@ -1100,7 +1105,18 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
       .map((field) => ({ ...field, advanced: false, 'x-row': 'chat-quote-frequency' })),
     nested: {},
   } : null
-  const hasPersonalitySchema = Boolean(configSchema.nested.personality)
+  const personalitySchema = configSchema.nested.personality
+  const hasPersonalitySchema = Boolean(personalitySchema)
+  const alternateStyleFieldNames = ['multiple_probability', 'multiple_reply_style']
+  // 备用风格集中放在表达风格后的浮层中，不再依赖全局高级设置。
+  const alternateStyleSchema: ConfigSchema | null = personalitySchema ? {
+    ...personalitySchema,
+    fields: alternateStyleFieldNames.flatMap((name) => {
+      const field = personalitySchema.fields.find((item) => item.name === name)
+      return field ? [{ ...field, advanced: false }] : []
+    }),
+    nested: {},
+  } : null
   const identitySchema: ConfigSchema | null = botSchema ? {
     ...botSchema,
     fields: botSchema.fields
@@ -1157,18 +1173,45 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
       />
     ),
   }
-  const fieldTrailingContent = basicChatPromptSchema ? {
+  const fieldTrailingContent = {
     'personality.reply_style': (
-      <DynamicConfigForm
-        schema={basicChatPromptSchema}
-        values={(sectionValues.chat?.reply_style as ConfigSectionData) ?? {}}
-        onChange={(field, value) => updateSectionValueByPath('chat', ['reply_style', field], value)}
-        basePath="chat.reply_style"
-        hooks={fieldHooks}
-        advancedVisible={advancedVisible}
-      />
+      <div className="space-y-3">
+        {alternateStyleSchema && alternateStyleSchema.fields.length > 0 && (
+          <Popover open={alternateStylesOpen} onOpenChange={setAlternateStylesOpen}>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="outline" size="sm">
+                备用表达风格
+                <ChevronDown className={cn('ml-2 h-4 w-4 transition-transform', alternateStylesOpen && 'rotate-180')} />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              className="max-h-[min(24rem,var(--radix-popover-content-available-height))] w-[28rem] max-w-[calc(100vw-2rem)] overflow-y-auto p-3"
+              aria-label="备用表达风格设置"
+            >
+              <DynamicConfigForm
+                schema={alternateStyleSchema}
+                values={sectionValues.personality ?? {}}
+                onChange={(field, value) => updateSectionValueByPath('personality', [field], value)}
+                basePath="personality"
+                hooks={fieldHooks}
+              />
+            </PopoverContent>
+          </Popover>
+        )}
+        {basicChatPromptSchema && (
+          <DynamicConfigForm
+            schema={basicChatPromptSchema}
+            values={(sectionValues.chat?.reply_style as ConfigSectionData) ?? {}}
+            onChange={(field, value) => updateSectionValueByPath('chat', ['reply_style', field], value)}
+            basePath="chat.reply_style"
+            hooks={fieldHooks}
+            advancedVisible={advancedVisible}
+          />
+        )}
+      </div>
     ),
-  } : undefined
+  }
 
   // 仅调整展示归属，身份信息与聊天提示词仍通过原配置路径读写。
   const getDisplaySectionSchema = (sectionName: string, schema: ConfigSchema): ConfigSchema => {
@@ -1176,7 +1219,11 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
       return { ...schema, fields: schema.fields.filter((field) => !identityFieldNames.has(field.name)) }
     }
     if (sectionName === 'personality') {
-      return { ...schema, uiLabel: '身份与人格' }
+      return {
+        ...schema,
+        uiLabel: '身份与人格',
+        fields: schema.fields.filter((field) => !alternateStyleFieldNames.includes(field.name)),
+      }
     }
     if (sectionName === 'chat' && replyStyleSchema) {
       return {
