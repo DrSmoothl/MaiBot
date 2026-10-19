@@ -681,19 +681,33 @@ class ChatReplyStyleConfig(ConfigBase):
     __ui_label__ = "如何发言"
     __ui_icon__ = "message-square"
 
-    enable_reply_quote: bool = Field(
-        default=True,
+    group_quote_frequency: Literal["never", "occasionally", "often"] = Field(
+        default="occasionally",
         json_schema_extra={
             "label": {
-                "zh_CN": "启用引用回复",
-                "en_US": "Enable quoted replies",
-                "ja_JP": "引用返信を有効化",
+                "zh_CN": "群聊引用频率",
+                "en_US": "Group reply quote frequency",
+                "ja_JP": "グループチャットの引用返信頻度",
             },
-            "x-widget": "switch",
-            "advanced": True,
+            "x-widget": "discrete-slider",
+            "x-option-labels": {"never": "不引用", "occasionally": "偶尔引用", "often": "经常引用"},
         },
     )
-    """回复时是否可以引用上一条或相关消息。"""
+    """全局群聊引用频率：不引用、偶尔引用、经常引用。按固定规律随机决定，经常引用的概率为偶尔引用的两倍；不影响私聊。"""
+
+    private_quote_frequency: Literal["never", "occasionally", "often"] = Field(
+        default="occasionally",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "私聊引用频率",
+                "en_US": "Private reply quote frequency",
+                "ja_JP": "個人チャットの引用返信頻度",
+            },
+            "x-widget": "discrete-slider",
+            "x-option-labels": {"never": "不引用", "occasionally": "偶尔引用", "often": "经常引用"},
+        },
+    )
+    """全局私聊引用频率：不引用、偶尔引用、经常引用。结合用户连发条数、发言间隔和回复目标位置随机决定；经常引用的概率为偶尔引用的两倍。"""
 
     group_chat_prompt: str = Field(
         default=(

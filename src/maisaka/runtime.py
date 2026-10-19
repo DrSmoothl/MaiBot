@@ -29,6 +29,7 @@ from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.expression_learner import ExpressionLearner
 from src.learners.jargon_learner import JargonLearner
 from src.learners.jargon_miner import JargonMiner
+from src.maisaka.quote import ReplyQuoteContext, ReplyQuoteCounter
 from src.llm_models.payload_content.resp_format import RespFormat, RespFormatType
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 from src.maisaka.builtin_tool.provider import MaisakaBuiltinToolProvider
@@ -161,6 +162,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             is_group_chat=self.chat_stream.is_group_session,
         )
         self._chat_history: list[LLMContextMessage] = []
+        self._quote_counter = ReplyQuoteCounter(session_id)
 
         # Keep all original messages for batching and later learning.
         self.message_cache: list[SessionMessage] = []
@@ -341,6 +343,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         for message in recent_messages:
             if message.is_notify:
                 continue
+
+            self._quote_counter.record(message)
 
             source_kind = self._resolve_restored_message_source_kind(message)
             history_message = await self._reasoning_engine._build_history_message(
@@ -607,6 +611,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                 source_kind=source_kind,
             )
             self._chat_history.append(history_message)
+            self._quote_counter.record(message)
             self._schedule_sent_image_recognition(message)
             self._emit_monitor_message_sent(
                 message=message,
@@ -987,6 +992,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             self._ensure_background_tasks_running()
         if message.received_at is None:
             raise ValueError("入站消息缺少主程序记录的 received_at")
+        self._quote_counter.record(message)
         received_at = message.received_at.timestamp()
         # 媒体预处理可能使较早收到的消息较晚入队，不能回退静默窗口。
         self._last_message_received_at = max(self._last_message_received_at, received_at)
@@ -1276,6 +1282,10 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                 return history_message.original_message
 
         return None
+
+    def get_reply_quote_context(self, target: SessionMessage) -> ReplyQuoteContext | None:
+        """读取发送前快照；合法历史目标无序号时由规则直接引用。"""
+        return self._quote_counter.snapshot(target)
 
     def expand_message_id_aliases(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """把工具参数中模型可见的消息 ID 别名换回原始消息 ID；别名冲突时取最新的消息。"""
