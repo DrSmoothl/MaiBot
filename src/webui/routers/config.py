@@ -4,6 +4,7 @@
 
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Tuple, Union, get_args, get_origin
+import asyncio
 import copy
 import json
 import os
@@ -14,7 +15,7 @@ import types
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 import tomlkit
 
 from src.common.logger import get_logger
@@ -1666,10 +1667,38 @@ def update_compat_bot_config_raw(raw_content: RawContentBody):
     return update_bot_config_raw(raw_content)
 
 
+def _save_web_config_section(section_data: Any) -> None:
+    """整体替换联网配置，避免递归合并使已删除或改名的服务复活。"""
+    if not isinstance(section_data, dict):
+        raise HTTPException(status_code=400, detail="联网配置必须是对象")
+    config_path = Path(CONFIG_DIR) / "model_config.toml"
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail="配置文件不存在")
+    doc = tomlkit.loads(config_path.read_text(encoding="utf-8"))
+    plain = _toml_to_plain_dict(doc)
+    plain["web"] = section_data
+    plain = _coerce_config_numeric_values(plain, ModelConfig)
+    try:
+        ModelConfig.from_dict(AttributeData(), copy.deepcopy(plain))
+    except ValidationError as exc:
+        # 不把 Pydantic 的输入快照返回给前端，其中可能包含服务密钥。
+        errors = exc.errors(include_input=False, include_context=False, include_url=False)
+        detail = "; ".join(f"{'.'.join(map(str, item['loc']))}: {item['msg']}" for item in errors)
+        raise HTTPException(status_code=400, detail=f"配置数据验证失败: {detail}") from exc
+    # 直接保存 TOMLDocument，保留其他配置节的注释，且不再次与磁盘旧字典合并。
+    doc["web"] = plain["web"]
+    save_toml_with_format(doc, str(config_path))
+
+
 @router.post("/model/section/{section_name}")
 async def update_model_config_section(section_name: str, section_data: SectionBody):
     """更新模型配置的指定节（保留注释和格式）"""
     try:
+        if section_name == "web":
+            await asyncio.to_thread(_save_web_config_section, section_data)
+            await _reload_model_config_after_save()
+            return {"success": True, "message": "配置节 'web' 已保存"}
+
         # 读取现有配置
         config_path = os.path.join(CONFIG_DIR, "model_config.toml")
         if not os.path.exists(config_path):

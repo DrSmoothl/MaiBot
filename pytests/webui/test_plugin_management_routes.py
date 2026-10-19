@@ -570,18 +570,11 @@ def test_install_plugin_cleans_config_only_residue(client: TestClient, monkeypat
 def test_clone_repository_reports_plugin_and_mirror_progress(tmp_path, monkeypatch):
     events = []
 
-    class FakeMirrorConfig:
-        def get_enabled_mirrors(self):
-            return [
-                {
-                    "id": "test-mirror",
-                    "name": "测试镜像源",
-                    "clone_prefix": "https://example.com/https://github.com",
-                    "raw_prefix": "https://example.com/https://raw.githubusercontent.com",
-                    "enabled": True,
-                    "priority": 1,
-                }
-            ]
+    from src.common.git_source import GitSource
+    from src.webui.services import plugin_market_service
+
+    monkeypatch.setattr(plugin_market_service, "download_source", lambda: GitSource.select("cnb"))
+    monkeypatch.setattr(mirror_service_module, "_validate_custom_outbound_url", lambda value: value)
 
     async def collect_progress(**kwargs):
         events.append(kwargs)
@@ -590,7 +583,7 @@ def test_clone_repository_reports_plugin_and_mirror_progress(tmp_path, monkeypat
         assert cmd[:2] == ["git", "clone"]
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    service = mirror_service_module.GitMirrorService(max_retries=1, timeout=1, config=FakeMirrorConfig())
+    service = mirror_service_module.GitMirrorService(max_retries=1)
     monkeypatch.setattr(mirror_service_module, "_run_git_process", fake_run)
     mirror_service_module.set_update_progress_callback(collect_progress)
 
@@ -609,7 +602,7 @@ def test_clone_repository_reports_plugin_and_mirror_progress(tmp_path, monkeypat
 
     assert result["success"] is True
     assert any(event.get("plugin_id") == "market.plugin" for event in events)
-    assert any(event.get("mirror_name") == "测试镜像源" for event in events)
+    assert any(event.get("mirror_name") == "CNB 镜像" for event in events)
     assert any(event.get("attempt") == 1 and event.get("max_attempts") == 1 for event in events)
 
 
@@ -622,7 +615,7 @@ def test_clone_repository_cleans_partial_directory_on_git_failure(tmp_path, monk
         (target_path / ".git").mkdir()
         return SimpleNamespace(returncode=128, stdout="", stderr="network failed")
 
-    service = mirror_service_module.GitMirrorService(max_retries=1, timeout=1)
+    service = mirror_service_module.GitMirrorService(max_retries=1)
     monkeypatch.setattr(mirror_service_module, "_run_git_process", fake_run)
 
     result = asyncio.run(

@@ -1,5 +1,19 @@
 {
   "pluginWebUI": {
+    "settingsTitle": "Plugin pages",
+    "settingsHint": "Choose which plugin pages appear in the top bar and in what order. Saved only in this browser; plugin permissions are unchanged.",
+    "topbarPreview": "Top bar preview",
+    "moreShort": "More",
+    "topbarLimit": "Up to {{count}} plugins in the top bar; the rest appear under More",
+    "orderAndVisibility": "Order and visibility",
+    "pluginCount": "{{count}} plugins",
+    "hiddenLabel": "Hidden",
+    "topbarLabel": "Top bar",
+    "overflowLabel": "More menu",
+    "sidebarLabel": "Sidebar",
+    "overflowGroup": "The following appear in the More menu",
+    "sidebarGroup": "These plugins provide sidebar pages only",
+    "visibleLabel": "Show",
     "customReload": "Reload page",
     "customStop": "Stop page",
     "customStopped": "Page stopped. Reload the page to run again.",
@@ -619,11 +633,18 @@
       "resetAllSettingsBtn": "Reset All Settings to Defaults",
       "confirmResetAll": "Confirm Reset All Settings",
       "confirmResetAllDesc": "This will restore all interface settings to their defaults, including theme, colors, animation, and other preferences. This will not affect your login status. Are you sure?",
-      "configWizardDesc": "Re-run the initial setup wizard to reconfigure system basics.",
+      "configWizardDesc": "Run setup again, optionally resetting the login password to start with password setup.",
       "rerunSetup": "Re-run Initial Setup",
+      "resetSetupPassword": "Also reset the login password",
+      "resetSetupPasswordDesc": "The old password will stop working immediately. Other browsers must sign in again. This browser stays signed in and opens password setup. A temporary credential is used until you save a new password and will change on restart.",
+      "setupPasswordResetSuccess": "Password reset. Opening password setup.",
+      "setupResetSuccess": "Setup reset. Opening the setup wizard.",
+      "setupResetFailed": "Unable to reset setup. Please try again.",
       "confirmRerunSetup": "Confirm Re-run Setup",
       "confirmRerunSetupDesc": "This will take you back to the initial setup wizard. You can reconfigure the system basics. Are you sure?",
       "devToolsDesc": "The following features are for development and debugging only. They may cause crashes or abnormal behavior.",
+      "alwaysShowUpdateButton": "Always show update button",
+      "alwaysShowUpdateButtonDesc": "Always show the main program update button in the top-right corner, even when no update is detected. Takes effect immediately.",
       "alwaysShowUpdateNotice": "Always Show Update Notice",
       "alwaysShowUpdateNoticeDesc": "When enabled, the update details and plugin compatibility notice appear every time you enter the WebUI. Takes effect after a refresh.",
       "triggerError": "Trigger Test Error",
@@ -795,7 +816,8 @@
       },
       "customToken": {
         "title": "Set Login Token",
-        "description": "Replace this startup's random token with a fixed custom token"
+        "description": "Without a saved password, a random one is generated on every startup.",
+        "label": "Password"
       },
       "botBasic": {
         "title": "Bot Basics",
@@ -857,7 +879,7 @@
       "next": "Next",
       "skip": "Skip Wizard",
       "complete": "Complete Setup",
-      "saveToken": "Save Token",
+      "saveToken": "Save and continue",
       "saving": "Saving...",
       "completing": "Completing..."
     },
@@ -887,11 +909,19 @@
         "noticeTitle": "You are still using the random startup token",
         "noticeDescription": "The random token changes on the next startup. Set a fixed custom token and use it for future WebUI sign-ins.",
         "label": "Custom Token *",
-        "placeholder": "Enter a secure token you can store safely",
+        "placeholder": "Enter a new password",
         "description": "After saving, your current session will expire and you will need to sign in with the new token.",
         "requirements": "Token requirements",
-        "show": "Show token",
-        "hide": "Hide token"
+        "show": "Show",
+        "hide": "Hide",
+        "met": "Met",
+        "unmet": "Not met",
+        "rules": {
+          "minLength": "10+ characters",
+          "hasUppercase": "Uppercase",
+          "hasLowercase": "Lowercase",
+          "hasSpecialChar": "Special symbol"
+        }
       },
       "botBasic": {
         "platform": {

@@ -22,7 +22,7 @@ from src.maisaka.context.messages import (
     FOCUS_COOLDOWN_WAKEUP_SOURCE,
     FOCUS_WAKEUP_SOURCE_KINDS,
     LLMContextMessage,
-    SessionBackedMessage,
+    InternalContextMessage,
     ToolResultMessage,
 )
 from src.maisaka.mode_policy import is_idle_cycle_reason
@@ -336,8 +336,9 @@ class MaisakaFocusRuntimeMixin:
         wakeup_message.processed_plain_text = wakeup_notice
 
         self._chat_history.append(
-            SessionBackedMessage.from_session_message(
-                wakeup_message,
+            InternalContextMessage(
+                timestamp=wakeup_timestamp,
+                message_id=wakeup_id,
                 raw_message=wakeup_message.raw_message,
                 visible_text=wakeup_notice,
                 source_kind=FOCUS_AT_WAKEUP_SOURCE if wakeup_reason == "at" else FOCUS_COOLDOWN_WAKEUP_SOURCE,
@@ -496,7 +497,9 @@ class MaisakaFocusRuntimeMixin:
                 if message_id in seen_message_ids:
                     continue
                 seen_message_ids.add(message_id)
-            message_timestamp = message.timestamp
+            message_timestamp = message.received_at
+            if message_timestamp is None:
+                continue
             if oldest_timestamp is None or message_timestamp < oldest_timestamp:
                 oldest_timestamp = message_timestamp
         return oldest_timestamp
@@ -727,8 +730,9 @@ class MaisakaFocusRuntimeMixin:
         switch_trigger_message.processed_plain_text = switch_notice
 
         copied_history.append(
-            SessionBackedMessage.from_session_message(
-                switch_trigger_message,
+            InternalContextMessage(
+                timestamp=switch_timestamp,
+                message_id=switch_message_id,
                 raw_message=switch_trigger_message.raw_message,
                 visible_text=switch_notice,
                 source_kind="focus_switch",

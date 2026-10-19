@@ -73,7 +73,6 @@ from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
 from .attention_drift import build_attention_drift_prompt_block
 
-PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "emotion": "emoji.selector",
     "expression_selector": "expression.selector",
@@ -345,7 +344,7 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具透传给 replyer 的额外参数，不含目标消息 ID 等内部参数。",
                         },
                     },
                     required=[
@@ -430,7 +429,7 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具透传给 replyer 的额外参数，不含目标消息 ID 等内部参数。",
                         },
                     },
                     required=[
@@ -510,7 +509,7 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具透传给 replyer 的额外参数，不含目标消息 ID 等内部参数。",
                         },
                         "prompt_tokens": {
                             "type": "integer",
@@ -826,6 +825,7 @@ class MaisakaChatLoopService:
             "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
             "query_memory_rule": self._build_query_memory_rule(),
             "subagent_rule": self._build_subagent_rule(),
+            "stop_rule": self._build_stop_rule(),
         }
 
     @staticmethod
@@ -905,6 +905,19 @@ class MaisakaChatLoopService:
             }
         )
 
+    def _build_stop_rule(self) -> str:
+        """开启 stop 工具时，说明它可显式替代无工具输出的结束方式。"""
+
+        if not global_config.experimental.planner_stop_tool:
+            return ""
+        return "\n" + self._localized_text(
+            {
+                "en-US": "- stop(): As an exception to the no-tool rule above, you can call stop() with no arguments to explicitly end this thinking round and wait for new messages. It has the same effect as calling no tools; it sends no reply and schedules no timed wait. Call it alone, after completing any other actions.",
+                "ja-JP": "- stop()：上記のツールを使わない終了方法の例外として、引数なしの stop() でこの思考を明示的に終了し、新しいメッセージを待つこともできます。ツールを呼ばずに終了する場合と同じで、返信の送信や時間指定の待機は行いません。他の操作を完了してから単独で呼んでください。",
+                "zh-CN": "- stop()：作为上述不使用工具结束方式的例外，也可以调用无参数的 stop() 显式结束本轮思考并等待新消息，效果与不输出任何工具一致，不发送回复，也不设置定时等待。请在其他操作完成后单独调用。",
+            }
+        )
+
     def _build_subagent_rule(self) -> str:
         """开启子代理时说明何时该把任务交给 subagent；未开启时为空，不占提示词。"""
 
@@ -979,7 +992,7 @@ class MaisakaChatLoopService:
 
         # 按历史顺序更新，保留最近一次明确提供的昵称；不要把配置昵称当成平台信息。
         for entry in history:
-            if not isinstance(entry, SessionBackedMessage) or entry.original_message is None:
+            if not isinstance(entry, SessionBackedMessage):
                 continue
             message = entry.original_message
             if not self._session_id or message.session_id != self._session_id:
@@ -1062,6 +1075,7 @@ class MaisakaChatLoopService:
             context_items = build_context_items_from_history_entry(
                 msg,
                 enable_visual_message=enable_visual_message,
+                limit_emoji_size=True,
             )
             if not context_items:
                 continue
@@ -1173,7 +1187,9 @@ class MaisakaChatLoopService:
             max_context_size=max_context_size,
             is_group_chat=self._is_group_chat,
         )
-        built_messages, history_item_count = self._build_request_messages(
+        # 上下文可能触发表情包解码、缩放和缓存等待，在线程池执行，避免阻塞事件循环。
+        built_messages, history_item_count = await asyncio.to_thread(
+            self._build_request_messages,
             selected_history,
             enable_visual_message=enable_visual_message,
             include_day_boundary_time_messages=request_kind == "planner",
@@ -1363,20 +1379,22 @@ class MaisakaChatLoopService:
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
         }
-        prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
-            built_messages,
-            category=self._resolve_prompt_preview_category(request_kind),
-            chat_id=self._session_id,
-            request_kind=request_kind,
-            selection_reason=prompt_selection_reason,
-            tool_definitions=list(all_tools),
-            output_items=final_output_items,
-            metadata=prompt_metadata,
-            generation_attempts=generation_result.generation_attempts,
-        )
-        prompt_html_uri = prompt_section_result.preview_access.preview_web_uri
-        if global_config.debug.show_maisaka_thinking:
-            prompt_section = prompt_section_result.panel
+        if global_config.debug.save_maisaka_reasoning:
+            prompt_section_result = await asyncio.to_thread(
+                PromptCLIVisualizer.build_prompt_section_result,
+                built_messages,
+                category=self._resolve_prompt_preview_category(request_kind),
+                chat_id=self._session_id,
+                request_kind=request_kind,
+                selection_reason=prompt_selection_reason,
+                tool_definitions=list(all_tools),
+                output_items=final_output_items,
+                metadata=prompt_metadata,
+                generation_attempts=generation_result.generation_attempts,
+            )
+            prompt_html_uri = prompt_section_result.preview_access.preview_web_uri
+            if global_config.debug.show_maisaka_thinking:
+                prompt_section = prompt_section_result.panel
 
         return ChatResponse(
             output_items=tuple(final_output_items),

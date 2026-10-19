@@ -129,7 +129,8 @@ class DynamicReplyTurnGate:
         # 近期活跃度属于整个聊天流；虚拟轮次评分与放行评分必须使用同一批待处理消息统计。
         current_time = datetime.fromtimestamp(now)
         recent_pending_count = sum(
-            (current_time - message.timestamp).total_seconds() <= RECENT_PRESENCE_WINDOW_SECONDS
+            message.received_at is not None
+            and (current_time - message.received_at).total_seconds() <= RECENT_PRESENCE_WINDOW_SECONDS
             for message in pending_messages
         )
         recent_message_count = recent_history_count + recent_pending_count
@@ -154,14 +155,16 @@ class DynamicReplyTurnGate:
         for message in reversed(self._runtime._chat_history):
             if not message.count_in_context:
                 continue
-            elapsed_seconds = (current_time - message.timestamp).total_seconds()
             is_self_message = message.source == "guided_reply"
+            # 外部消息按接收时刻统计活跃度；自身发言仍按本机发送时间计算。
+            activity_time = message.timestamp if is_self_message else message.received_at
+            if activity_time is None:
+                continue
+            elapsed_seconds = (current_time - activity_time).total_seconds()
             if is_self_message and seconds_since_bot is None:
                 seconds_since_bot = max(0.0, elapsed_seconds)
             if elapsed_seconds > RECENT_PRESENCE_WINDOW_SECONDS:
-                # 窗口外只需要继续找到麦麦最近一次发言
-                if seconds_since_bot is not None:
-                    break
+                # 媒体处理可能乱序完成，历史列表不保证按接收时刻排序。
                 continue
             recent_total_count += 1
             if is_self_message:

@@ -29,7 +29,9 @@ class Messages(SQLModel, table=True):
 
     # 消息元数据
     message_id: str = Field(index=True, max_length=255)  # 消息id
-    timestamp: datetime = Field(sa_column=Column(DateTime))  # 消息时间，单位为秒
+    timestamp: datetime = Field(sa_column=Column(DateTime))  # 上游消息时间，保留原始精度
+    received_at: Optional[datetime] = Field(default=None, sa_column=Column(DateTime, nullable=True, index=True))
+    # 主程序实际接收时间，保留微秒；旧消息与出站消息不补造接收时间。
     platform: str = Field(index=True, max_length=100)  # 顶层平台字段
     account_id: Optional[str] = Field(default=None, max_length=255, nullable=True)  # 机器人账号归属
     scope: Optional[str] = Field(default=None, max_length=255, nullable=True)  # 路由作用域
@@ -60,6 +62,21 @@ class Messages(SQLModel, table=True):
     additional_config: Optional[str] = Field(default=None)  # 额外配置，JSON格式存储
     reply_frequency: Optional[float] = Field(default=None, sa_column=Column(Float, nullable=True))
     # 消息发生时当前会话的生效回复频率；无法解析时为空
+
+
+class ModelTaskUsage(SQLModel, table=True):
+    """模型任务的分钟级调用汇总，包含失败尝试，不保存请求内容。"""
+
+    __tablename__ = "model_task_usage"  # type: ignore
+
+    bucket_time: datetime = Field(primary_key=True, index=True)
+    task_name: str = Field(primary_key=True, max_length=100)
+    model_name: str = Field(primary_key=True, max_length=255)
+    model_identifier: str = Field(primary_key=True, max_length=255)
+    provider_name: str = Field(primary_key=True, max_length=255)
+    request_count: int = Field(default=0)
+    failure_count: int = Field(default=0)
+    success_duration: float = Field(default=0.0)
 
 
 class ModelUsage(SQLModel, table=True):

@@ -494,8 +494,7 @@ class StatisticOutputTask(AsyncTask):
 
         output = [
             self.SEP_LINE,
-            f"  最近1小时的统计数据  (自{now.strftime('%Y-%m-%d %H:%M:%S')}开始，详细信息见文件：{self.record_file_path})",
-            self.SEP_LINE,
+            f"最近1小时统计 · {now:%Y-%m-%d %H:%M:%S}",
             self._format_total_stat(stats["last_hour"]),
             "",
             self._format_model_classified_stat(stats["last_hour"]),
@@ -1148,188 +1147,81 @@ class StatisticOutputTask(AsyncTask):
 
     @staticmethod
     def _format_total_stat(stats: StatPeriodData) -> str:
-        """
-        格式化总统计数据
-        """
+        """格式化控制台总览，只保留核心统计。"""
         # 计算总token数（从所有模型的token数中累加）
-        total_tokens = sum(stats[TOTAL_TOK_BY_MODEL].values()) if stats[TOTAL_TOK_BY_MODEL] else 0
-        total_input_tokens = sum(stats[IN_TOK_BY_MODEL].values()) if stats[IN_TOK_BY_MODEL] else 0
-        total_output_tokens = sum(stats[OUT_TOK_BY_MODEL].values()) if stats[OUT_TOK_BY_MODEL] else 0
+        total_tokens = sum(stats[TOTAL_TOK_BY_MODEL].values())
+        total_input_tokens = sum(stats[IN_TOK_BY_MODEL].values())
+        total_output_tokens = sum(stats[OUT_TOK_BY_MODEL].values())
         cache_hit_tokens = cast(int, stats.get(CACHE_HIT_TOK, 0))
         cache_miss_tokens = cast(int, stats.get(CACHE_MISS_TOK, 0))
-
-        # 计算花费/消息数量指标（每100条）
-        cost_per_100_messages = (stats[TOTAL_COST] / stats[TOTAL_MSG_CNT] * 100) if stats[TOTAL_MSG_CNT] > 0 else 0.0
-
-        # 计算花费/时间指标（花费/小时）
-        online_hours = stats[ONLINE_TIME] / 3600.0 if stats[ONLINE_TIME] > 0 else 0.0
-        cost_per_hour = stats[TOTAL_COST] / online_hours if online_hours > 0 else 0.0
-
-        # 计算token/时间指标（token/小时）
-        tokens_per_hour = (total_tokens / online_hours) if online_hours > 0 else 0.0
-
-        # 计算花费/回复数量指标（每100条）
         total_replies = stats.get(TOTAL_REPLY_CNT, 0)
-        cost_per_100_replies = (stats[TOTAL_COST] / total_replies * 100) if total_replies > 0 else 0.0
-
-        # 计算花费/消息数量（排除自己回复）指标（每100条）
-        total_messages_excluding_replies = stats[TOTAL_MSG_CNT] - total_replies
-        cost_per_100_messages_excluding_replies = (
-            (stats[TOTAL_COST] / total_messages_excluding_replies * 100)
-            if total_messages_excluding_replies > 0
-            else 0.0
-        )
 
         output = [
-            f"总在线时间: {_format_online_time(int(stats[ONLINE_TIME]))}",
-            f"总消息数: {_format_large_number(stats[TOTAL_MSG_CNT])}",
-            f"总回复数: {_format_large_number(total_replies)}",
-            f"总请求数: {_format_large_number(stats[TOTAL_REQ_CNT])}",
-            f"总Token数: {_format_large_number(total_tokens)}",
-            f"总输入Token: {_format_large_number(total_input_tokens)}",
-            f"总输出Token: {_format_large_number(total_output_tokens)}",
-            f"Prompt缓存命中率: {_format_cache_hit_rate(cache_hit_tokens, cache_miss_tokens)}",
-            f"Prompt缓存命中Token: {_format_large_number(cache_hit_tokens)}",
-            f"Prompt缓存未命中Token: {_format_large_number(cache_miss_tokens)}",
-            f"总花费: {stats[TOTAL_COST]:.2f}¥",
-            f"花费/消息数量: {cost_per_100_messages:.4f}¥/100条" if stats[TOTAL_MSG_CNT] > 0 else "花费/消息数量: N/A",
-            f"花费/接受消息数量: {cost_per_100_messages_excluding_replies:.4f}¥/100条"
-            if total_messages_excluding_replies > 0
-            else "花费/消息数量(排除回复): N/A",
-            f"花费/回复消息数量: {cost_per_100_replies:.4f}¥/100条" if total_replies > 0 else "花费/回复数量: N/A",
-            f"花费/时间: {cost_per_hour:.2f}¥/小时" if online_hours > 0 else "花费/时间: N/A",
-            f"Token/时间: {_format_large_number(tokens_per_hour)}/小时" if online_hours > 0 else "Token/时间: N/A",
-            "",
+            f"在线 {_format_online_time(int(stats[ONLINE_TIME]))}  "
+            f"消息 {_format_large_number(stats[TOTAL_MSG_CNT])}  "
+            f"回复 {_format_large_number(total_replies)}  "
+            f"请求 {_format_large_number(stats[TOTAL_REQ_CNT])}",
+            f"Token {_format_large_number(total_tokens)} "
+            f"(输入 {_format_large_number(total_input_tokens)} / 输出 {_format_large_number(total_output_tokens)})  "
+            f"缓存命中 {_format_cache_hit_rate(cache_hit_tokens, cache_miss_tokens)}",
+            f"花费 {stats[TOTAL_COST]:.2f}¥",
         ]
-
         return "\n".join(output)
 
     @staticmethod
     def _format_model_classified_stat(stats: StatPeriodData) -> str:
-        """
-        格式化按模型分类的统计数据
-        """
+        """格式化按模型分类的控制台核心统计。"""
         if stats[TOTAL_REQ_CNT] <= 0:
             return ""
-        data_fmt = "{:<32}  {:>10}  {:>12}  {:>12}  {:>12}  {:>9.2f}¥  {:>10.1f}  {:>10.1f}  {:>12}  {:>12}  {:>12}  {:>12}"
-
-        total_replies = stats.get(TOTAL_REPLY_CNT, 0)
-
+        data_fmt = "{:<32}  {:>6}  {:>8}  {:>6.2f}¥  {:>6.1f}s  {:>7}"
         output = [
-            "按模型分类统计:",
-            " 模型名称                          调用次数    输入Token     输出Token     Token总量     累计花费    平均耗时(秒)  标准差(秒)  每次回复平均调用次数  每次回复平均Token数  每次调用平均Token     缓存命中率",
+            "模型                              调用     Token     花费      耗时     缓存命中",
         ]
         for model_name, count in sorted(stats[REQ_CNT_BY_MODEL].items()):
             name = f"{model_name[:29]}..." if len(model_name) > 32 else model_name
-            in_tokens = stats[IN_TOK_BY_MODEL][model_name]
-            out_tokens = stats[OUT_TOK_BY_MODEL][model_name]
-            tokens = stats[TOTAL_TOK_BY_MODEL][model_name]
-            cost = stats[COST_BY_MODEL][model_name]
-            avg_time_cost = stats[AVG_TIME_COST_BY_MODEL][model_name]
-            std_time_cost = stats[STD_TIME_COST_BY_MODEL][model_name]
             cache_hit_rate = _format_cache_hit_rate(
                 stats[CACHE_HIT_TOK_BY_MODEL][model_name],
                 stats[CACHE_MISS_TOK_BY_MODEL][model_name],
             )
-
-            # 计算每次回复平均值
-            avg_count_per_reply = count / total_replies if total_replies > 0 else 0.0
-            avg_tokens_per_reply = tokens / total_replies if total_replies > 0 else 0.0
-
-            # 计算每次调用平均token
-            avg_tokens_per_call = tokens / count if count > 0 else 0.0
-
-            # 格式化大数字
-            formatted_count = _format_large_number(count)
-            formatted_in_tokens = _format_large_number(in_tokens)
-            formatted_out_tokens = _format_large_number(out_tokens)
-            formatted_tokens = _format_large_number(tokens)
-            formatted_avg_count = _format_large_number(avg_count_per_reply) if total_replies > 0 else "N/A"
-            formatted_avg_tokens = _format_large_number(avg_tokens_per_reply) if total_replies > 0 else "N/A"
-            formatted_avg_tokens_per_call = _format_large_number(avg_tokens_per_call) if count > 0 else "N/A"
-
+            # 格式化大数字，省略输入输出拆分及每次回复等派生指标。
             output.append(
                 data_fmt.format(
                     name,
-                    formatted_count,
-                    formatted_in_tokens,
-                    formatted_out_tokens,
-                    formatted_tokens,
-                    cost,
-                    avg_time_cost,
-                    std_time_cost,
-                    formatted_avg_count,
-                    formatted_avg_tokens,
-                    formatted_avg_tokens_per_call,
+                    _format_large_number(count),
+                    _format_large_number(stats[TOTAL_TOK_BY_MODEL][model_name]),
+                    stats[COST_BY_MODEL][model_name],
+                    stats[AVG_TIME_COST_BY_MODEL][model_name],
                     cache_hit_rate,
                 )
             )
-
-        output.append("")
         return "\n".join(output)
 
     @staticmethod
     def _format_module_classified_stat(stats: StatPeriodData) -> str:
-        """
-        格式化按模块分类的统计数据
-        """
+        """格式化按模块分类的控制台核心统计。"""
         if stats[TOTAL_REQ_CNT] <= 0:
             return ""
-        data_fmt = "{:<32}  {:>10}  {:>12}  {:>12}  {:>12}  {:>9.2f}¥  {:>10.1f}  {:>10.1f}  {:>12}  {:>12}  {:>12}  {:>12}"
-
-        total_replies = stats.get(TOTAL_REPLY_CNT, 0)
-
+        data_fmt = "{:<32}  {:>6}  {:>8}  {:>6.2f}¥  {:>6.1f}s  {:>7}"
         output = [
-            "按模块分类统计:",
-            " 模块名称                          调用次数    输入Token     输出Token     Token总量     累计花费    平均耗时(秒)  标准差(秒)  每次回复平均调用次数  每次回复平均Token数  每次调用平均Token     缓存命中率",
+            "模块                              调用     Token     花费      耗时     缓存命中",
         ]
         for module_name, count in sorted(stats[REQ_CNT_BY_MODULE].items()):
             name = f"{module_name[:29]}..." if len(module_name) > 32 else module_name
-            in_tokens = stats[IN_TOK_BY_MODULE][module_name]
-            out_tokens = stats[OUT_TOK_BY_MODULE][module_name]
-            tokens = stats[TOTAL_TOK_BY_MODULE][module_name]
-            cost = stats[COST_BY_MODULE][module_name]
-            avg_time_cost = stats[AVG_TIME_COST_BY_MODULE][module_name]
-            std_time_cost = stats[STD_TIME_COST_BY_MODULE][module_name]
             cache_hit_rate = _format_cache_hit_rate(
                 stats[CACHE_HIT_TOK_BY_MODULE][module_name],
                 stats[CACHE_MISS_TOK_BY_MODULE][module_name],
             )
-
-            # 计算每次回复平均值
-            avg_count_per_reply = count / total_replies if total_replies > 0 else 0.0
-            avg_tokens_per_reply = tokens / total_replies if total_replies > 0 else 0.0
-
-            # 计算每次调用平均token
-            avg_tokens_per_call = tokens / count if count > 0 else 0.0
-
-            # 格式化大数字
-            formatted_count = _format_large_number(count)
-            formatted_in_tokens = _format_large_number(in_tokens)
-            formatted_out_tokens = _format_large_number(out_tokens)
-            formatted_tokens = _format_large_number(tokens)
-            formatted_avg_count = _format_large_number(avg_count_per_reply) if total_replies > 0 else "N/A"
-            formatted_avg_tokens = _format_large_number(avg_tokens_per_reply) if total_replies > 0 else "N/A"
-            formatted_avg_tokens_per_call = _format_large_number(avg_tokens_per_call) if count > 0 else "N/A"
-
+            # 格式化大数字，省略输入输出拆分及每次回复等派生指标。
             output.append(
                 data_fmt.format(
                     name,
-                    formatted_count,
-                    formatted_in_tokens,
-                    formatted_out_tokens,
-                    formatted_tokens,
-                    cost,
-                    avg_time_cost,
-                    std_time_cost,
-                    formatted_avg_count,
-                    formatted_avg_tokens,
-                    formatted_avg_tokens_per_call,
+                    _format_large_number(count),
+                    _format_large_number(stats[TOTAL_TOK_BY_MODULE][module_name]),
+                    stats[COST_BY_MODULE][module_name],
+                    stats[AVG_TIME_COST_BY_MODULE][module_name],
                     cache_hit_rate,
                 )
             )
-
-        output.append("")
         return "\n".join(output)
 
     def _format_chat_stat(self, stats: StatPeriodData) -> str:
@@ -1338,8 +1230,9 @@ class StatisticOutputTask(AsyncTask):
         """
         if stats[TOTAL_MSG_CNT] <= 0:
             return ""
-        output = ["聊天消息统计:", " 联系人/群组名称                  消息数量"]
-        for chat_id, count in sorted(stats[MSG_CNT_BY_CHAT].items()):
+        output = ["聊天消息（前5）:"]
+        chats = sorted(stats[MSG_CNT_BY_CHAT].items(), key=lambda item: item[1], reverse=True)
+        for chat_id, count in chats[:5]:
             try:
                 chat_name = self.name_mapping.get(chat_id, ("未知聊天", 0))[0]
                 formatted_count = _format_large_number(count)
@@ -1348,7 +1241,9 @@ class StatisticOutputTask(AsyncTask):
                 logger.warning(f"格式化聊天统计时发生错误，chat_id: {chat_id}, 错误: {e}")
                 formatted_count = _format_large_number(count)
                 output.append(f"{'未知聊天':<32}  {formatted_count:>10}")
-        output.append("")
+        if len(chats) > 5:
+            other_count = sum(count for _, count in chats[5:])
+            output.append(f"其余 {len(chats) - 5} 个会话合计: {_format_large_number(other_count)} 条")
         return "\n".join(output)
 
     def _get_chat_display_name_from_id(self, chat_id: str) -> str:
@@ -2547,7 +2442,7 @@ class StatisticOutputTask(AsyncTask):
         query_start_timestamp = start_time.timestamp()
         messages = fetch_messages_since(start_time)
         for message in messages:
-            message_time_ts = message.timestamp.timestamp()
+            message_time_ts = message.statistics_time.timestamp()
 
             # 找到对应的时间间隔索引
             time_diff = message_time_ts - query_start_timestamp
@@ -2926,7 +2821,7 @@ class StatisticOutputTask(AsyncTask):
         query_start_timestamp = start_time.timestamp()
         messages = fetch_messages_since(start_time)
         for message in messages:
-            message_time_ts = message.timestamp.timestamp()
+            message_time_ts = message.statistics_time.timestamp()
 
             time_diff = message_time_ts - query_start_timestamp
             interval_index = int(time_diff // interval_seconds)

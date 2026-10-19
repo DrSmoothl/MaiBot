@@ -53,10 +53,16 @@ TOOL_RESULT_CONDENSER_SYSTEM_PROMPT = (
 )
 
 
-def should_condense_tool_result(tool_name: str, history_content: str, *, success: bool) -> bool:
+def should_condense_tool_result(
+    tool_name: str,
+    history_content: str,
+    *,
+    success: bool,
+    already_previewed: bool = False,
+) -> bool:
     """判断一次工具结果是否需要交给子代理整理。"""
 
-    if not success or tool_name in TOOL_RESULT_CONDENSE_EXCLUDED_TOOL_NAMES:
+    if not success or already_previewed or tool_name in TOOL_RESULT_CONDENSE_EXCLUDED_TOOL_NAMES:
         return False
     return len(history_content) >= global_config.experimental.tool_result_condense_threshold
 

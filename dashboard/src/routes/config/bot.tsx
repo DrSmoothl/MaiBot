@@ -604,7 +604,7 @@ function BotConfigPageContent() {
       viewportClassName="max-lg:h-auto max-lg:!overflow-visible max-lg:overscroll-auto"
       scrollbars="vertical"
     >
-      <div className="max-w-full space-y-4 p-4 sm:space-y-6 sm:p-6">
+      <div className={cn('max-w-full p-4 sm:p-6', editMode === 'detail' ? 'space-y-2' : 'space-y-4 sm:space-y-6')}>
         {/* 顶部操作栏整体吸顶：手机端分两行，PC 端导航与操作按钮同一行。 */}
         <div data-config-section-navigation="true" className="bg-background sticky top-0 z-20 flex min-w-0 flex-col gap-3 py-2 lg:flex-row lg:items-center">
           <div className="flex w-full min-w-0 items-center gap-3 max-lg:hidden lg:flex-1">
@@ -1008,7 +1008,9 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
       setAdvancedVisible(true)
 
       if (subcategoryName) {
-        const subtabId = `${sectionName}.${subcategoryName}`
+        const isChatQuoteField = searchFieldPath === 'chat.reply_style.private_quote_frequency' ||
+          searchFieldPath === 'chat.reply_style.group_quote_frequency'
+        const subtabId = isChatQuoteField ? 'chat' : `${sectionName}.${subcategoryName}`
         setActiveSubtabByGroup((current) => ({
           ...current,
           [targetTab.id]: subtabId,
@@ -1067,6 +1069,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
 
   const identityFieldNames = new Set(['nickname', 'alias_names'])
   const basicChatPromptFieldNames = new Set(['group_chat_prompt', 'private_chat_prompts'])
+  const chatQuoteFieldNames = new Set(['private_quote_frequency', 'group_quote_frequency'])
   const basicChatContextFieldNames = new Set(['max_context_size', 'max_private_context_size'])
   const basicChatTimingFieldNames = new Set([
     'talk_value', 'private_talk_value', 'mentioned_bot_reply', 'inevitable_at_reply', 'reply_trigger_mode',
@@ -1089,6 +1092,14 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
     nested: {},
   } : null
   const replyStyleSchema = configSchema.nested.chat?.nested?.reply_style
+  // 群聊与私聊的引用频率展示在聊天设置中，仍通过 reply_style 路径读写。
+  const chatQuoteSchema: ConfigSchema | null = replyStyleSchema ? {
+    ...replyStyleSchema,
+    fields: replyStyleSchema.fields
+      .filter((field) => chatQuoteFieldNames.has(field.name))
+      .map((field) => ({ ...field, advanced: false, 'x-row': 'chat-quote-frequency' })),
+    nested: {},
+  } : null
   const hasPersonalitySchema = Boolean(configSchema.nested.personality)
   const identitySchema: ConfigSchema | null = botSchema ? {
     ...botSchema,
@@ -1177,9 +1188,10 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
             uiLabel: '聊天流prompt',
             uiSubLabel: '聊天流prompt',
             uiAdvanced: false,
-            fields: hasPersonalitySchema
-              ? replyStyleSchema.fields.filter((field) => !basicChatPromptFieldNames.has(field.name))
-              : replyStyleSchema.fields,
+            fields: replyStyleSchema.fields.filter((field) =>
+              !chatQuoteFieldNames.has(field.name) &&
+              (!hasPersonalitySchema || !basicChatPromptFieldNames.has(field.name))
+            ),
           },
         },
       }
@@ -1289,17 +1301,30 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
           id: sectionName,
           label: sectionSchema.uiRootSubLabel || getSubtabLabel(sectionSchema, sectionName),
           content: (
-            <DynamicConfigForm
-              schema={rootSchema}
-              values={sectionValue}
-              onChange={(fieldPath, value) =>
-                updateSectionValueByPath(sectionName, fieldPath.split('.'), value)
-              }
-              basePath={sectionName}
-              hooks={fieldHooks}
-              advancedVisible={advancedVisible}
-              sectionColumns={1}
-            />
+            <div className="space-y-3">
+              <DynamicConfigForm
+                schema={rootSchema}
+                values={sectionValue}
+                onChange={(fieldPath, value) =>
+                  updateSectionValueByPath(sectionName, fieldPath.split('.'), value)
+                }
+                basePath={sectionName}
+                hooks={fieldHooks}
+                advancedVisible={advancedVisible}
+                sectionColumns={1}
+              />
+              {sectionName === 'chat' && chatQuoteSchema && (
+                <DynamicConfigForm
+                  schema={chatQuoteSchema}
+                  values={(sectionValue.reply_style as ConfigSectionData) ?? {}}
+                  onChange={(field, value) => updateSectionValueByPath('chat', ['reply_style', field], value)}
+                  basePath="chat.reply_style"
+                  hooks={fieldHooks}
+                  advancedVisible={advancedVisible}
+                  sectionColumns={1}
+                />
+              )}
+            </div>
           ),
         })
       }

@@ -9,6 +9,7 @@
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -35,6 +36,7 @@ import tomlkit
 from src.common.paths import PACKAGE_ROOT, get_instance_root
 from src.common.logger import get_logger
 from src.common.shutdown import is_shutdown_requested
+from src.common.startup_diagnostics import diagnostic_stage
 from src.config.config import config_manager
 from src.config.file_watcher import FileChange, FileWatcher
 from src.platform_io import DeliveryBatch, InboundMessageEnvelope, get_platform_io_manager
@@ -277,6 +279,7 @@ class PluginRuntimeManager(
         Args:
             envelope: Platform IO 产出的入站封装。
         """
+        received_at = envelope.received_at if envelope.received_at is not None else datetime.now()
         session_message = envelope.session_message
         if session_message is None and envelope.payload is not None:
             from src.plugin_runtime.host.message_utils import PluginMessageUtils
@@ -284,6 +287,7 @@ class PluginRuntimeManager(
             session_message = PluginMessageUtils._build_session_message_from_dict(dict(envelope.payload))
         if session_message is None:
             raise ValueError("Platform IO 入站封装缺少可用的 SessionMessage 或 payload")
+        session_message.received_at = received_at
 
         from src.chat.message_receive.bot import chat_bot
 
@@ -787,19 +791,23 @@ class PluginRuntimeManager(
             logger.info("未找到任何插件目录，跳过插件运行时启动")
             return
 
-        dependency_sync_state = await self._sync_plugin_dependencies(builtin_dirs + third_party_dirs)
+        with diagnostic_stage("plugin_runtime.sync_dependencies"):
+            dependency_sync_state = await self._sync_plugin_dependencies(builtin_dirs + third_party_dirs)
         if dependency_sync_state.environment_changed:
             logger.info("插件依赖流水线已更新当前 Python 环境，启动时将直接加载最新环境")
 
         self.ensure_builtin_hook_specs_registered()
         platform_io_manager = get_platform_io_manager()
-        self._build_supervisors(builtin_dirs, third_party_dirs)
+        with diagnostic_stage("plugin_runtime.build_supervisors"):
+            self._build_supervisors(builtin_dirs, third_party_dirs)
 
         started_supervisors: List["PluginSupervisor"] = []
         try:
             platform_io_manager.set_inbound_dispatcher(self._dispatch_platform_inbound)
-            await platform_io_manager.ensure_send_pipeline_ready()
-            started_supervisors = await self._start_supervisors(builtin_dirs, third_party_dirs)
+            with diagnostic_stage("plugin_runtime.prepare_send_pipeline"):
+                await platform_io_manager.ensure_send_pipeline_ready()
+            with diagnostic_stage("plugin_runtime.start_runners"):
+                started_supervisors = await self._start_supervisors(builtin_dirs, third_party_dirs)
 
             await self._start_plugin_file_watcher()
             config_manager.register_reload_callback(self._config_reload_callback)

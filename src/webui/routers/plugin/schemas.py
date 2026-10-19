@@ -41,37 +41,6 @@ class CloneRepositoryResponse(BaseModel):
     message: Optional[str] = Field(None, description="附加信息")
 
 
-class MirrorConfigResponse(BaseModel):
-    id: str = Field(..., description="镜像源 ID")
-    name: str = Field(..., description="镜像源名称")
-    raw_prefix: str = Field(..., description="Raw 文件前缀")
-    clone_prefix: str = Field(..., description="克隆前缀")
-    enabled: bool = Field(..., description="是否启用")
-    priority: int = Field(..., description="优先级（数字越小优先级越高）")
-
-
-class AvailableMirrorsResponse(BaseModel):
-    mirrors: List[MirrorConfigResponse] = Field(..., description="镜像源列表")
-    default_priority: List[str] = Field(..., description="默认优先级顺序（ID 列表）")
-
-
-class AddMirrorRequest(BaseModel):
-    id: str = Field(..., description="镜像源 ID", examples=["custom-mirror"])
-    name: str = Field(..., description="镜像源名称", examples=["自定义镜像源"])
-    raw_prefix: str = Field(..., description="Raw 文件前缀", examples=["https://example.com/raw"])
-    clone_prefix: str = Field(..., description="克隆前缀", examples=["https://example.com/clone"])
-    enabled: bool = Field(True, description="是否启用")
-    priority: Optional[int] = Field(None, description="优先级")
-
-
-class UpdateMirrorRequest(BaseModel):
-    name: Optional[str] = Field(None, description="镜像源名称")
-    raw_prefix: Optional[str] = Field(None, description="Raw 文件前缀")
-    clone_prefix: Optional[str] = Field(None, description="克隆前缀")
-    enabled: Optional[bool] = Field(None, description="是否启用")
-    priority: Optional[int] = Field(None, description="优先级")
-
-
 class GitStatusResponse(BaseModel):
     installed: bool = Field(..., description="是否已安装 Git")
     version: Optional[str] = Field(None, description="Git 版本号")

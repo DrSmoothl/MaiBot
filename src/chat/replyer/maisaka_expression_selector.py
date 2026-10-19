@@ -20,7 +20,7 @@ from src.learners.expression_style_utils import (
     normalize_expression_style_for_learning,
 )
 from src.learners.weighted_sampling import weighted_sample
-from src.maisaka.context.messages import LLMContextMessage, ModelOutputContextMessage, SessionBackedMessage
+from src.maisaka.context.messages import ContentContextMessage, LLMContextMessage, ModelOutputContextMessage
 
 logger = get_logger("maisaka_expression_selector")
 
@@ -349,7 +349,7 @@ class MaisakaExpressionSelector:
     def _serialize_context_message(message: LLMContextMessage) -> dict[str, Any]:
         timestamp = message.timestamp.isoformat() if isinstance(message.timestamp, datetime) else ""
         # chat_history 还含表情候选快照、工具结果等没有 source_kind 字段的消息，这些消息改用基类的 source。
-        if isinstance(message, (SessionBackedMessage, ModelOutputContextMessage)):
+        if isinstance(message, (ContentContextMessage, ModelOutputContextMessage)):
             source_kind = message.source_kind
         else:
             source_kind = message.source

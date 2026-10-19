@@ -9,8 +9,9 @@ Worker（WebUI）只负责检查更新与登记更新请求；真正改动代码
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import quote
 
+import base64
 import importlib.util
 import json
 import os
@@ -21,12 +22,15 @@ import sys
 import time
 import tomllib
 
+from .git_source import GitSource
 from .package_update import (
+    PACKAGE_INDEXES,
     PACKAGE_RUNNER_ENV,
     SelfUpdateError,
     ensure_other_instances_stopped,
     fetch_releases,
     latest_release,
+    package_index,
     release_exists,
     run_update,
     tool_environment,
@@ -37,8 +41,7 @@ from .version import read_project_version
 
 PROJECT_ROOT = get_instance_root() if PACKAGED_INSTALL else SOURCE_ROOT
 
-# 更新只会拉取这个仓库：直连官方地址，或经由插件市场镜像源配置里启用的镜像。
-# 不读取本地 remote 配置，也不接受任何外部传入的地址。
+# 更新只拉取官方仓库或用户本次选择的镜像，不读取本地 remote 或插件市场设置。
 OFFICIAL_REPOSITORY_PATH = "Mai-with-u/MaiBot"
 OFFICIAL_REPOSITORY_URL = f"https://github.com/{OFFICIAL_REPOSITORY_PATH}.git"
 OFFICIAL_SOURCE_ID = "github"
@@ -54,9 +57,7 @@ MAX_LISTED_DIRTY_FILES = 20
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _STATE_DIR_PARTS = ("data", "self_update")
-# 与插件市场共用的镜像源配置，由 GitMirrorConfig 维护。
-_MIRROR_CONFIG_PARTS = ("data", "webui.json")
-# 连接上但几乎不传数据的镜像尽快放弃，换下一个来源。
+# 连接上但几乎不传数据的来源尽快报错，交由用户重新选择。
 _GIT_STALL_OPTIONS = ("-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30")
 _COMMIT_FIELD_SEPARATOR = "\x1f"
 
@@ -140,6 +141,8 @@ class PendingUpdate:
     base_commit: str
     branch: str
     requested_at: float
+    source_id: Optional[str] = None
+    custom_prefix: str = ""
 
 
 @dataclass
@@ -252,9 +255,9 @@ def _list_commits(root: Path, base: str, target: str) -> List[UpdateCommit]:
 def detect_dependency_tool(root: Path = PROJECT_ROOT) -> Optional[str]:
     """判断当前运行环境的依赖应当用哪种方式同步。"""
 
-    # uv 管理的项目环境按 uv.lock 同步，得到与发布时一致的依赖版本。
+    # uv 管理的项目环境直接按项目依赖及源策略安装。
     in_project_venv = Path(sys.prefix).resolve() == (root / ".venv").resolve()
-    if in_project_venv and (root / "uv.lock").is_file() and shutil.which("uv") is not None:
+    if in_project_venv and (root / "pyproject.toml").is_file() and shutil.which("uv") is not None:
         return "uv"
     if importlib.util.find_spec("pip") is not None and (root / "requirements.txt").is_file():
         return "pip"
@@ -263,8 +266,9 @@ def detect_dependency_tool(root: Path = PROJECT_ROOT) -> Optional[str]:
 
 def _dependency_command(tool: str) -> List[str]:
     if tool == "uv":
-        # --inexact：不卸载锁文件之外的包（插件依赖装在同一个环境里）。
-        return ["uv", "sync", "--frozen", "--inexact", "--no-dev", "--no-install-project"]
+        # 与普通 uv run 一样检查并更新依赖解析，沿用 pyproject 中的源和版本约束。
+        # --inexact 保留插件额外安装的包；这里只同步运行依赖，不安装项目本体。
+        return ["uv", "sync", "--inexact", "--no-dev", "--no-install-project"]
     return [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt"]
 
 
@@ -360,103 +364,120 @@ def evaluate_update(local: LocalState, target: str, checked_at: float, root: Pat
     )
 
 
-def load_update_sources(root: Path = PROJECT_ROOT) -> List[UpdateSource]:
-    """按优先级列出更新来源，与插件市场使用同一份镜像源配置。
-
-    尚未生成镜像源配置时只有官方地址。
-    """
-
-    official = UpdateSource(id=OFFICIAL_SOURCE_ID, name="GitHub 官方源", url=OFFICIAL_REPOSITORY_URL)
-    instance_root = get_instance_root() if root == PROJECT_ROOT else root
-    config_path = instance_root.joinpath(*_MIRROR_CONFIG_PARTS)
-    if not config_path.is_file():
-        return [official]
-    mirrors: List[Dict[str, Any]] = json.loads(config_path.read_text(encoding="utf-8")).get("git_mirrors", [])
-    if not mirrors:
-        return [official]
-
-    sources: List[UpdateSource] = []
-    for mirror in sorted(mirrors, key=lambda item: item.get("priority", 999)):
-        if not mirror.get("enabled", False):
-            continue
-        mirror_id = str(mirror["id"])
-        if mirror_id == OFFICIAL_SOURCE_ID:
-            sources.append(official)
-            continue
-        prefix = str(mirror["clone_prefix"]).rstrip("/")
-        parsed = urlsplit(prefix)
-        # 只走 HTTPS：其他传输方式（本地路径、ext 等）不应出现在更新来源里。
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise SelfUpdateError("invalid_source", f"镜像源 {mirror_id} 的克隆前缀不是合法的 HTTPS 地址")
-        sources.append(
-            UpdateSource(
-                id=mirror_id,
-                name=str(mirror.get("name") or mirror_id),
-                url=f"{prefix}/{OFFICIAL_REPOSITORY_PATH}.git",
-            )
-        )
-    if not sources:
-        raise SelfUpdateError(
-            "no_update_source", "镜像源配置中没有启用任何来源，请在插件市场的镜像源设置里启用至少一个"
-        )
-    return sources
+def select_update_source(source_id: str, custom_prefix: str = "") -> UpdateSource:
+    """本体源码只允许单个 CNB、GitHub 或自定义 HTTPS 前缀。"""
+    try:
+        source = GitSource.select(source_id, custom_prefix)
+        return UpdateSource(source.id, source.name, source.clone_url("Mai-with-u", "MaiBot"))
+    except ValueError as exc:
+        raise SelfUpdateError("invalid_source", str(exc)) from exc
 
 
-def _fetch_branch_head(root: Path, branch: str) -> Tuple[str, UpdateSource]:
-    """依次尝试各个来源取回官方仓库的指定分支，返回其最新提交与实际使用的来源。"""
-
-    failures: List[str] = []
-    for source in load_update_sources(root):
-        try:
-            _git(
-                root,
-                *_GIT_STALL_OPTIONS,
-                "fetch",
-                "--no-tags",
-                "--quiet",
-                source.url,
-                f"refs/heads/{branch}",
-                timeout=GIT_FETCH_TIMEOUT_SECONDS,
-            )
-        except SelfUpdateError as exc:
-            reason = exc.message.strip().splitlines()[-1]
-            failures.append(f"- {source.name}: {reason}")
-            continue
-        return _git(root, "rev-parse", "FETCH_HEAD^{commit}").strip(), source
-    raise SelfUpdateError("fetch_failed", "所有更新来源均获取失败:\n" + "\n".join(failures))
+def _fetch_branch_head(
+    root: Path, branch: str, source_id: str = "github", custom_prefix: str = ""
+) -> Tuple[str, UpdateSource]:
+    """只从本次选择的来源取回指定分支，失败不自动换源。"""
+    source = select_update_source(source_id, custom_prefix)
+    # CNB 公开镜像匿名读取，避免凭据管理器里的过期 Token 把公开请求变成认证失败。
+    anonymous_options = (
+        "-c", "credential.helper=", "-c", "http.extraHeader=",
+        "-c", "http.https://cnb.cool/.extraHeader=",
+    ) if source_id == "cnb" else ()
+    try:
+        _git(root, *anonymous_options, *_GIT_STALL_OPTIONS, "fetch", "--no-tags", "--quiet", source.url,
+             f"refs/heads/{branch}", timeout=GIT_FETCH_TIMEOUT_SECONDS)
+    except SelfUpdateError as exc:
+        raise SelfUpdateError("fetch_failed", f"{source.name} 获取更新失败：{exc.message}") from exc
+    return _git(root, "rev-parse", "FETCH_HEAD^{commit}").strip(), source
 
 
-def check_for_update(root: Path = PROJECT_ROOT) -> UpdateCheck:
+def _get_update_json(path: str) -> Dict[str, Any]:
+    """只读官方 API；沿用 urllib 的环境/系统代理，不依赖 Git 配置。"""
+    try:
+        source = GitSource.select("github")
+        return source.read_json(source.api_url("Mai-with-u", "MaiBot", path), timeout=5)
+    except (OSError, ValueError) as exc:
+        raise SelfUpdateError("fetch_failed", f"GitHub API 检查更新失败：{exc}") from exc
+
+
+def _check_source_api(local: LocalState, root: Path, source: UpdateSource) -> UpdateCheck:
+    """检查只获取元数据；CNB 匿名 API 不可用，下载镜像与官方检查源分离。"""
+    if local.branch is None or local.commit is None:
+        raise ValueError("本地仓库状态缺少当前分支或提交")
+    try:
+        branch = _get_update_json(f"branches/{quote(local.branch, safe='')}")
+        target = branch["commit"]["sha"]
+        if not isinstance(target, str) or _COMMIT_PATTERN.fullmatch(target) is None:
+            raise ValueError("无效的远端提交 SHA")
+        check = UpdateCheck(local=local, checked_at=time.time(), latest_commit=target, source=source)
+        if local.dirty_files:
+            check.blockers.append("dirty_worktree")
+        if target == local.commit:
+            check.latest_version = local.version
+            return check
+        comparison = _get_update_json(f"compare/{local.commit}...{target}?per_page=100")
+        check.behind = int(comparison["ahead_by"])
+        check.ahead = int(comparison["behind_by"])
+        if check.ahead:
+            check.blockers.append("diverged")
+        changed = {item["filename"] for item in comparison["files"]}
+        check.dependencies_changed = bool(DEPENDENCY_FILES & changed)
+        if check.dependencies_changed and local.dependency_tool is None:
+            check.blockers.append("no_dependency_tool")
+        check.commits = [
+            UpdateCommit(item["sha"][:8], item["commit"]["message"].splitlines()[0], item["commit"]["committer"]["date"])
+            for item in comparison["commits"][:MAX_LISTED_COMMITS]
+        ]
+        contents = _get_update_json(f"contents/pyproject.toml?ref={target}")
+        project = base64.b64decode(contents["content"]).decode("utf-8")
+        check.latest_version, requires_python = _parse_pyproject(project)
+        if _parse_pyproject((root / "pyproject.toml").read_text(encoding="utf-8"))[1] != requires_python:
+            check.blockers.append("python_requirement_changed")
+        return check
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SelfUpdateError("fetch_failed", f"更新 API 数据不完整：{exc}") from exc
+
+
+def check_for_update(
+    root: Path = PROJECT_ROOT, source_id: Optional[str] = None, custom_prefix: str = ""
+) -> UpdateCheck:
     """联网检查官方仓库是否有新版本。"""
 
     local = inspect_local(root)
     if local.blocker is not None:
         return UpdateCheck(local=local, blockers=[local.blocker])
     if local.deployment_type == "package":
-        return evaluate_update(local, latest_release(local.version), time.time(), root)
+        selected = source_id or "pypi"
+        index = package_index(selected)
+        check = evaluate_update(local, latest_release(local.version, selected), time.time(), root)
+        check.source = UpdateSource(selected, PACKAGE_INDEXES[selected][0], index)
+        return check
     if local.branch is None:
         raise ValueError("本地仓库状态缺少当前分支，无法检查更新")
-    target, source = _fetch_branch_head(root, local.branch)
-    check = evaluate_update(local, target, time.time(), root)
-    check.source = source
-    return check
+    source = select_update_source(source_id or "github", custom_prefix)
+    source.name = f"{source.name}（版本检查：GitHub API）"
+    return _check_source_api(local, root, source)
 
 
-def request_update(expected_commit: str, root: Path = PROJECT_ROOT) -> PendingUpdate:
+def request_update(
+    expected_commit: str, root: Path = PROJECT_ROOT, source_id: Optional[str] = None, custom_prefix: str = ""
+) -> PendingUpdate:
     """登记更新请求，等待 Runner 在下次重启时执行。
 
     expected_commit 是用户在界面上确认过的目标提交；Runner 只会更新到这个提交。
     """
 
     if PACKAGED_INSTALL:
+        selected = source_id or "pypi"
+        package_index(selected)
         local = inspect_local(root)
         if local.blocker:
             raise SelfUpdateError(local.blocker, BLOCKER_MESSAGES[local.blocker])
         if version_tuple(expected_commit) <= version_tuple(local.version):
             raise SelfUpdateError("already_up_to_date", "目标版本必须高于当前版本")
-        if not release_exists(fetch_releases(), expected_commit):
-            raise SelfUpdateError("unknown_version", "PyPI 上没有这个可用的正式版本，请重新检查")
-        pending = PendingUpdate(expected_commit, local.version, "pypi", time.time())
+        if not release_exists(fetch_releases(selected), expected_commit):
+            raise SelfUpdateError("unknown_version", "所选包源没有这个可用的正式版本，请重新检查")
+        pending = PendingUpdate(expected_commit, local.version, "pypi", time.time(), selected)
         path = _pending_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -465,6 +486,8 @@ def request_update(expected_commit: str, root: Path = PROJECT_ROOT) -> PendingUp
         except FileExistsError as exc:
             raise SelfUpdateError("package_busy", "已有更新请求，请等待更新完成") from exc
         return pending
+    selected = source_id or "github"
+    select_update_source(selected, custom_prefix)
     if _COMMIT_PATTERN.fullmatch(expected_commit) is None:
         raise SelfUpdateError("invalid_commit", "目标提交格式不正确")
 
@@ -476,6 +499,8 @@ def request_update(expected_commit: str, root: Path = PROJECT_ROOT) -> PendingUp
     if expected_commit == local.commit:
         raise SelfUpdateError("already_up_to_date", "当前已经是这个版本")
 
+    # 用户确认更新后才拉取对象；Runner 重启后仍会重新验证来源与快进条件。
+    _fetch_branch_head(root, local.branch, selected, custom_prefix)
     object_check = _run_command(["git", "cat-file", "-e", f"{expected_commit}^{{commit}}"], root, GIT_TIMEOUT_SECONDS)
     if object_check.returncode != 0:
         raise SelfUpdateError("unknown_commit", "本地没有这个目标提交，请重新检查更新")
@@ -490,6 +515,8 @@ def request_update(expected_commit: str, root: Path = PROJECT_ROOT) -> PendingUp
         base_commit=local.commit,
         branch=local.branch,
         requested_at=time.time(),
+        source_id=selected,
+        custom_prefix=custom_prefix if selected == "custom" else "",
     )
     _write_json(_pending_path(root), asdict(pending))
     return pending
@@ -522,10 +549,10 @@ def _execute_update(pending: PendingUpdate, result: UpdateResult, logger: Any, r
     result.from_version = local.version
 
     # 重新取回官方分支确认：目标提交必须在它的历史里，状态文件本身不被信任。
-    # 来源只从镜像源配置推导，状态文件无法指定地址。
+    # 来源限制为本次选中的内置源或一个合法的 HTTPS 自定义前缀。
     result.stage = "verify"
     logger.info(f"自更新：正在确认官方仓库的 {pending.branch} 分支")
-    official_head, source = _fetch_branch_head(root, pending.branch)
+    official_head, source = _fetch_branch_head(root, pending.branch, pending.source_id or "github", pending.custom_prefix)
     result.source_name = source.name
     logger.info(f"自更新：更新来源 {source.name}")
     if not _is_ancestor(root, pending.target_commit, official_head):
@@ -612,7 +639,9 @@ def apply_pending_update(logger: Any, root: Path = PROJECT_ROOT) -> Optional[Upd
                 raise SelfUpdateError("stale_request", "更新请求已过期或不属于包安装，请重新检查更新")
             if os.environ.get(PACKAGE_RUNNER_ENV) != "1":
                 raise SelfUpdateError("package_runner_missing", BLOCKER_MESSAGES["package_runner_missing"])
-            result = UpdateResult(**run_update(root, pending.base_commit, pending.target_commit, asdict(result)))
+            result = UpdateResult(**run_update(
+                root, pending.base_commit, pending.target_commit, asdict(result), pending.source_id or "pypi"
+            ))
         else:
             _execute_update(pending, result, logger, root)
     except SelfUpdateError as exc:

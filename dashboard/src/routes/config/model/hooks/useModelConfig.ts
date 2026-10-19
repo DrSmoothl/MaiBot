@@ -43,6 +43,7 @@ import type { APIProvider, DeleteConfirmState } from '../../modelProvider/types'
 import { cleanProviderData } from '../../modelProvider/utils'
 import { useModelAutoSave } from './useModelAutoSave'
 import { useEmbeddingWarning, type PendingEmbeddingUpdate } from './useEmbeddingWarning'
+import { readWebSearchConfig, type WebSearchConfig } from '../../webSearch/types'
 
 const ADVANCED_MODEL_TASK_NAMES = new Set(['memory', 'learner', 'emoji', 'voice'])
 
@@ -148,6 +149,7 @@ export function useModelConfig() {
   const [apiProviders, setApiProviders] = useState<APIProvider[]>([])
   const [modelNames, setModelNames] = useState<string[]>([])
   const [taskConfig, setTaskConfig] = useState<ModelTaskConfig | null>(null)
+  const [webConfig, setWebConfig] = useState<WebSearchConfig>(() => readWebSearchConfig(undefined))
 
   // ---- 加载 / 保存状态 ----
   const [loading, setLoading] = useState(true)
@@ -329,7 +331,8 @@ export function useModelConfig() {
       const emptyTaskList: string[] = []
 
       for (const [key, task] of Object.entries(taskConf)) {
-        if (!task) continue
+        // 联网任务引用 web.services，不属于 LLM/嵌入模型的引用检查范围。
+        if (!task || key === 'web_search') continue
 
         // 检查是否有模型
         if (!task.model_list || task.model_list.length === 0) {
@@ -414,6 +417,7 @@ export function useModelConfig() {
         return
       }
       const config = unwrapModelConfig(result.value)
+      setWebConfig(readWebSearchConfig(config.web))
       const modelList = (config.models as ModelInfo[]) || []
       for (const model of modelList) {
         if (!['llm', 'embedding', 'image_embedding'].includes(model.model_type)) {
@@ -528,6 +532,10 @@ export function useModelConfig() {
 
       const nextTaskConfig: ModelTaskConfig = {}
       for (const [taskName, task] of Object.entries(sourceTaskConfig)) {
+        if (taskName === 'web_search') {
+          nextTaskConfig[taskName] = task
+          continue
+        }
         nextTaskConfig[taskName] = {
           ...task,
           model_list: (task?.model_list || []).filter(
@@ -765,6 +773,10 @@ export function useModelConfig() {
 
     // 遍历所有任务，过滤掉无效的模型引用
     for (const [key, task] of Object.entries(taskConfig)) {
+      if (key === 'web_search') {
+        newTaskConfig[key] = task
+        continue
+      }
       if (task && task.model_list) {
         newTaskConfig[key] = {
           ...task,
@@ -1102,7 +1114,7 @@ export function useModelConfig() {
 
       newTaskConfig = {}
       for (const [key, task] of Object.entries(taskConfig)) {
-        newTaskConfig[key] = { ...task, model_list: updateModelList(task?.model_list || []) }
+        newTaskConfig[key] = key === 'web_search' ? task : { ...task, model_list: updateModelList(task?.model_list || []) }
       }
     }
 
@@ -1482,13 +1494,23 @@ export function useModelConfig() {
   const isModelUsed = useCallback(
     (modelName: string): boolean => {
       if (!taskConfig) return false
-      return Object.values(taskConfig).some((task) => task?.model_list?.includes(modelName))
+      return Object.entries(taskConfig).some(([name, task]) => name !== 'web_search' && task?.model_list?.includes(modelName))
     },
     [taskConfig]
   )
 
+  const saveWebConfig = useCallback(async (next: WebSearchConfig) => {
+    // 与模型自动保存共用写入队列，避免整份配置保存覆盖联网服务的修改。
+    await enqueueConfigWrite(async () => {
+      await updateModelConfigSection('web', next)
+      setWebConfig(next)
+    })
+  }, [enqueueConfigWrite])
+
   return {
     // 草稿态
+    webConfig,
+    saveWebConfig,
     models,
     providers,
     apiProviders,

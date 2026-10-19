@@ -12,6 +12,7 @@ from PIL import ImageDraw, ImageFont
 from pydantic import BaseModel
 from pydantic import Field as PydanticField
 
+from src.cli.maisaka_cli_sender import CLI_PLATFORM_NAME
 from src.common.data_models.image_data_model import MaiEmoji
 from src.common.data_models.message_component_data_model import ImageComponent, MessageSequence, TextComponent
 from src.common.logger import get_logger
@@ -24,7 +25,7 @@ from src.maisaka.context.messages import (
     LLMContextMessage,
     ReferenceMessage,
     ReferenceMessageType,
-    SessionBackedMessage,
+    InternalContextMessage,
 )
 from src.prompt.prompt_manager import prompt_manager
 
@@ -196,7 +197,7 @@ def _merge_emoji_tiles(image_bytes_list: List[bytes], start_index: int = 1) -> b
     return output.getvalue()
 
 
-async def _build_emoji_candidate_message(emojis: list[MaiEmoji]) -> SessionBackedMessage:
+async def _build_emoji_candidate_message(emojis: list[MaiEmoji]) -> InternalContextMessage:
     """构建供子代理挑选的拼图候选消息。"""
 
     image_bytes_list = await asyncio.gather(*[_load_emoji_bytes(emoji) for emoji in emojis])
@@ -207,7 +208,7 @@ async def _build_emoji_candidate_message(emojis: list[MaiEmoji]) -> SessionBacke
             ImageComponent(binary_hash="", binary_data=merged_image_bytes),
         ]
     )
-    return SessionBackedMessage(
+    return InternalContextMessage(
         raw_message=raw_message,
         visible_text="[表情包拼图候选]",
         timestamp=datetime.now(),
@@ -510,7 +511,7 @@ async def handle_tool(
             f"描述={send_result.description!r} 情绪标签={send_result.emotions} "
             f"命中情绪={send_result.matched_emotion!r}"
         )
-        if send_result.sent_message is None:
+        if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
             tool_ctx.append_sent_emoji_to_chat_history(
                 emoji_base64=send_result.emoji_base64,
                 success_message=_EMOJI_SUCCESS_MESSAGE,

@@ -1464,6 +1464,11 @@ class OpenaiClient(AdapterClient[AsyncStream[ChatCompletionChunk], ChatCompletio
             default_query=client_config.default_query or None,
         )
 
+    def prepare_sync_resources(self) -> None:
+        """在客户端初始化阶段加载 SDK 资源，避免首次请求在事件循环中同步导入。"""
+        # SDK 将这些资源定义为 cached_property；这里只构造资源，不发起请求。
+        _ = self.client.chat.completions, self.client.embeddings, self.client.audio.transcriptions, self.client.responses
+
     def _build_request_headers(self, extra_headers: Dict[str, str]) -> Dict[str, str | Omit] | None:
         """构造单次请求的附加请求头。
 

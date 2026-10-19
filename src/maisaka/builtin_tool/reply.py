@@ -1,19 +1,22 @@
 ﻿"""reply 内置工具。"""
 
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import asyncio
 import json
 import traceback
 
 from src.chat.replyer.replyer_manager import replyer_manager
+from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import is_bot_self
 from src.cli.maisaka_cli_sender import CLI_PLATFORM_NAME, render_cli_message
+from src.common.data_models.message_component_data_model import TextComponent
 from src.common.data_models.reply_generation_data_models import ReplyGenerationResult, build_reply_monitor_detail
 from src.common.logger import get_logger
 from src.config import config as config_module
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
+from src.maisaka.quote import decide_quote
 from src.maisaka.context.message_adapter import build_visible_text_from_sequence, parse_speaker_content
 from src.maisaka.context.message_id_alias import to_display_message_id
 from src.maisaka.context.messages import LLMContextMessage, SessionBackedMessage
@@ -25,7 +28,7 @@ from src.services import send_service
 from .context import BuiltinToolRuntimeContext, PostProcessedReplyMessage
 
 logger = get_logger("maisaka_builtin_reply")
-_REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "set_quote", "_reply_id", "_plugin_reply_prompt"}
+_REPLY_TOOL_INTERNAL_ARGUMENTS = {"msg_id", "_reply_id", "_plugin_reply_prompt"}
 _DUPLICATE_TARGET_REPLY_REMINDER_ARG = "_duplicate_target_reply_reminder"
 _DUPLICATE_TARGET_REPLY_REMINDER_TEMPLATE = (
     "你刚刚已经回复过这条消息，你刚刚的发言是：“{previous_reply}”\n"
@@ -121,11 +124,6 @@ def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec
         "msg_id": {
             "type": "string",
             "description": "要回复的消息msg_id。",
-        },
-        "set_quote": {
-            "type": "boolean",
-            "description": "以引用回复的方式发送这条回复，适合应用在发言时间较早或者间隔消息数较多的msg_id",
-            "default": True,
         },
         "reply_reference": {
             "type": "string",
@@ -282,6 +280,28 @@ def _resolve_segment_reply_context(
     return False, target_message
 
 
+async def _resolve_reply_quote(
+    tool_ctx: BuiltinToolRuntimeContext,
+    text: str,
+    target_message: SessionMessage,
+) -> Tuple[bool, Optional[float]]:
+    """群聊和私聊分别按固定公式及频率决定引用。"""
+    stream = tool_ctx.runtime.chat_stream
+    frequency = (
+        config_module.global_config.chat.reply_style.group_quote_frequency if stream.is_group_session
+        else config_module.global_config.chat.reply_style.private_quote_frequency
+    )
+    if frequency == "never" or stream.platform == CLI_PLATFORM_NAME:
+        return False, 0.0
+    bot_user_id = str(stream.account_id or "").strip()
+    if not bot_user_id:
+        raise ValueError("固定引用规则需要明确的 bot 发送账号")
+    return decide_quote(
+        context=tool_ctx.runtime.get_reply_quote_context(target_message), bot_user_id=bot_user_id,
+        text=text, frequency=frequency, is_group=stream.is_group_session,
+    )
+
+
 def _extract_guided_reply_text(message: SessionBackedMessage) -> str:
     """提取 bot 已发送 guided reply 的可见正文。"""
 
@@ -360,7 +380,6 @@ async def handle_tool(
     # 工具上下文的 reasoning 是兼容字段，由 Planner 可见正文填充，不包含 Provider 原生 reasoning。
     latest_thought = context.reasoning if context is not None else invocation.reasoning
     target_message_id = str(invocation_arguments.get("msg_id") or "").strip()
-    set_quote = bool(invocation_arguments.get("set_quote", True))
     if invocation_arguments.get("attach_at") and not config_module.global_config.chat.enable_reply_at:
         return tool_ctx.build_failure_result(invocation.tool_name, "回复时 @ 用户已关闭，不能使用 attach_at。")
     if invocation_arguments.get("attach_emoji") is not None and not config_module.global_config.emoji.use_new_send_logic:
@@ -374,8 +393,6 @@ async def handle_tool(
     }
     if not _use_expression_intent():
         reply_tool_args.pop("expression_intent", None)
-    enable_reply_quote = bool(config_module.global_config.chat.reply_style.enable_reply_quote)
-    effective_set_quote = set_quote and enable_reply_quote
 
     if not target_message_id:
         return tool_ctx.build_failure_result(
@@ -566,6 +583,16 @@ async def handle_tool(
     reply_metadata = _build_monitor_metadata(reply_result, extension_execution.reply_id)
     if extension_execution.targets:
         reply_metadata["reply_extensions"] = list(extension_execution.parameters)
+    # 最终正文生成后，按首段正文与当前聊天情境抽样一次，后续分段不重复抽样。
+    first_text = (
+        "".join(c.text for c in reply_sequences[0].components if isinstance(c, TextComponent))
+        if reply_sequences else ""
+    )
+    set_quote, quote_probability = await _resolve_reply_quote(tool_ctx, first_text, target_message)
+    # 群聊与私聊均由各自的三档频率控制。
+    effective_set_quote = set_quote
+    if quote_probability is not None:
+        reply_metadata["quote_probability"] = quote_probability
     sent_message_ids: list[str] = []
     send_results: list[dict[str, Any]] = []
     try:
@@ -589,7 +616,13 @@ async def handle_tool(
                 segment = reply_segments[index]
                 segment_set_quote, segment_reply_message = _resolve_segment_reply_context(
                     index=index,
-                    quote_previous=reply_item.quote_previous,
+                    quote_previous=reply_item.quote_previous and (
+                        (
+                            config_module.global_config.chat.reply_style.group_quote_frequency
+                            if tool_ctx.runtime.chat_stream.is_group_session
+                            else config_module.global_config.chat.reply_style.private_quote_frequency
+                        ) != "never"
+                    ),
                     effective_set_quote=effective_set_quote,
                     target_message=target_message,
                     previous_sent_message=previous_sent_message,

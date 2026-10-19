@@ -16,4 +16,4 @@ You need to judge the current situation, make a next-step plan, and explain why 
 - tool_search(): When you need one of the deferred tools listed in <system-reminder>, call this first to search for and discover the corresponding tool. It only makes the tool available in later rounds and does not execute the tool directly.
 - view_forward_message: View the full content of a merged forwarded message by msg_id. Use it when the context shows a forwarded-message preview and you need more details.
 - wait(): Use this when you need to pause for a while and judge again after the wait ends.
-- No tool use: When there are no more operations to perform, or when no new content has arrived after a long wait, end your thinking without calling any tools. In all other cases (including replying), you need to call tools.
+- No tool use: When there are no more operations to perform, or when no new content has arrived after a long wait, end your thinking without calling any tools. In all other cases (including replying), you need to call tools.{stop_rule}

@@ -466,7 +466,7 @@ class TalkRulesItem(ConfigBase):
 class ChatReplyTimingConfig(ConfigBase):
     """聊天回复时机与频率配置类"""
 
-    __ui_label__ = "什么时候发言"
+    __ui_label__ = "回复频率"
     __ui_icon__ = "activity"
 
     talk_value: float = Field(
@@ -681,19 +681,33 @@ class ChatReplyStyleConfig(ConfigBase):
     __ui_label__ = "如何发言"
     __ui_icon__ = "message-square"
 
-    enable_reply_quote: bool = Field(
-        default=True,
+    group_quote_frequency: Literal["never", "occasionally", "often"] = Field(
+        default="occasionally",
         json_schema_extra={
             "label": {
-                "zh_CN": "启用引用回复",
-                "en_US": "Enable quoted replies",
-                "ja_JP": "引用返信を有効化",
+                "zh_CN": "群聊引用频率",
+                "en_US": "Group reply quote frequency",
+                "ja_JP": "グループチャットの引用返信頻度",
             },
-            "x-widget": "switch",
-            "advanced": True,
+            "x-widget": "discrete-slider",
+            "x-option-labels": {"never": "不引用", "occasionally": "偶尔引用", "often": "经常引用"},
         },
     )
-    """回复时是否可以引用上一条或相关消息。"""
+    """全局群聊引用频率：不引用、偶尔引用、经常引用。按固定规律随机决定，经常引用的概率为偶尔引用的两倍；不影响私聊。"""
+
+    private_quote_frequency: Literal["never", "occasionally", "often"] = Field(
+        default="occasionally",
+        json_schema_extra={
+            "label": {
+                "zh_CN": "私聊引用频率",
+                "en_US": "Private reply quote frequency",
+                "ja_JP": "個人チャットの引用返信頻度",
+            },
+            "x-widget": "discrete-slider",
+            "x-option-labels": {"never": "不引用", "occasionally": "偶尔引用", "often": "经常引用"},
+        },
+    )
+    """全局私聊引用频率：不引用、偶尔引用、经常引用。结合用户连发条数、发言间隔和回复目标位置随机决定；经常引用的概率为偶尔引用的两倍。"""
 
     group_chat_prompt: str = Field(
         default=(
@@ -750,7 +764,7 @@ class ChatConfig(ConfigBase):
     __ui_label__ = "聊天"
     __ui_order__ = 20
     __ui_use_subtabs__ = True
-    __ui_root_sub_label__ = "基础设置"
+    __ui_root_sub_label__ = "聊天设置"
 
     enable_reply_at: bool = Field(
         default=True,
@@ -862,9 +876,7 @@ class AttentionDriftConfig(ConfigBase):
                 "en_US": "Drift level",
                 "ja_JP": "ドリフト段階",
             },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-widget": "discrete-slider",
             "x-option-labels": ATTENTION_DRIFT_LEVEL_OPTION_LABELS,
             "x-option-descriptions": ATTENTION_DRIFT_LEVEL_OPTION_DESCRIPTIONS,
             "x-row": "attention-drift-style",
@@ -880,9 +892,7 @@ class AttentionDriftConfig(ConfigBase):
                 "en_US": "Anchor policy",
                 "ja_JP": "アンカー方針",
             },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-widget": "discrete-slider",
             "x-option-labels": ATTENTION_DRIFT_ANCHOR_OPTION_LABELS,
             "x-option-descriptions": ATTENTION_DRIFT_ANCHOR_OPTION_DESCRIPTIONS,
             "x-row": "attention-drift-style",
@@ -898,9 +908,7 @@ class AttentionDriftConfig(ConfigBase):
                 "en_US": "Short reaction style",
                 "ja_JP": "短い反応スタイル",
             },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
+            "x-widget": "discrete-slider",
             "x-option-labels": ATTENTION_DRIFT_REACTION_OPTION_LABELS,
             "x-option-descriptions": ATTENTION_DRIFT_REACTION_OPTION_DESCRIPTIONS,
             "x-row": "attention-drift-reaction",
@@ -955,18 +963,18 @@ class ExperimentalConfig(ConfigBase):
     )
     """Planner 改用优化版提示词：以“你的名字是……”的第二人称描述麦麦自己，去掉“替麦麦做决策”的旁观者设定并精简任务说明。Focus 模式仍使用原提示词。"""
 
-    planner_unsent_reply_retry: bool = Field(
+    planner_stop_tool: bool = Field(
         default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "回复丢失提醒重试",
-                "en_US": "Unsent reply retry",
-                "ja_JP": "未送信返信のリトライ",
+                "zh_CN": "优化工具使用",
+                "en_US": "Optimize tool usage",
+                "ja_JP": "ツール使用の最適化",
             },
             "x-widget": "switch",
         },
     )
-    """Planner 在分析里写了要回复、却没有调用任何工具就结束时，提醒一次并让它重新决策；每个回合最多重试一次。"""
+    """给 Planner 提供无参数的 stop() 工具，调用后结束本轮思考并等待新消息，与不输出任何工具时一致。"""
 
     tool_result_condense: bool = Field(
         default=False,
@@ -4984,17 +4992,30 @@ class DebugConfig(ConfigBase):
     """在交互式终端中启用本地消息和指令输入。"""
 
     show_maisaka_thinking: bool = Field(
-        default=True,
+        default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "显示思考过程",
-                "en_US": "Show thinking process",
-                "ja_JP": "思考過程を表示",
+                "zh_CN": "显示终端思考大框",
+                "en_US": "Show thinking panels in terminal",
+                "ja_JP": "ターミナルに思考パネルを表示",
             },
             "x-widget": "switch",
         },
     )
-    """在日志或界面中显示麦麦的思考过程。"""
+    """在终端显示思考过程大框，不影响推理记录保存和 WebUI 查看。"""
+
+    save_maisaka_reasoning: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "保存推理记录",
+                "en_US": "Save reasoning records",
+                "ja_JP": "推論記録を保存",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """保存 Planner、工具调用及聊天回想的完整推理记录，供 WebUI 查看，与终端显示独立。"""
 
     enable_reply_effect_tracking: bool = Field(
         default=False,
@@ -5108,6 +5129,19 @@ class MaimMessageConfig(ConfigBase):
     """maim_message配置类"""
 
     __ui_parent__ = "debug"
+
+    enabled: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用 maim_message 服务",
+                "en_US": "Enable maim_message service",
+                "ja_JP": "maim_message サービスを有効化",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """消息服务总开关；关闭后不启动旧版 WS 和新版 API 服务，重启生效，不影响插件式适配器。"""
 
     ws_server_host: str = Field(
         default="127.0.0.1",

@@ -1,5 +1,19 @@
 {
   "pluginWebUI": {
+    "settingsTitle": "插件页面",
+    "settingsHint": "决定哪些插件页面出现在顶栏、按什么顺序。只保存在当前浏览器，不影响插件权限。",
+    "topbarPreview": "顶栏预览",
+    "moreShort": "更多",
+    "topbarLimit": "顶栏最多放 {{count}} 个，其余进入「更多」",
+    "orderAndVisibility": "排序与显示",
+    "pluginCount": "{{count}} 个插件",
+    "hiddenLabel": "已隐藏",
+    "topbarLabel": "顶栏",
+    "overflowLabel": "更多菜单",
+    "sidebarLabel": "侧栏",
+    "overflowGroup": "以下进入「更多」菜单",
+    "sidebarGroup": "以下插件仅提供侧栏页面",
+    "visibleLabel": "显示",
     "customReload": "重载页面",
     "customStop": "停止页面",
     "customStopped": "页面已停止。点击重载页面可再次运行。",
@@ -619,11 +633,18 @@
       "resetAllSettingsBtn": "重置所有设置为默认值",
       "confirmResetAll": "确认重置所有设置",
       "confirmResetAllDesc": "这将把所有界面设置恢复为默认值，包括主题、颜色、动画等偏好设置。此操作不会影响您的登录状态。确定要继续吗？",
-      "configWizardDesc": "重新进行初次配置向导，可以帮助您重新设置系统的基础配置。",
+      "configWizardDesc": "重新进行初次配置，可同时重置登录密码，从密码设置步骤重新开始。",
       "rerunSetup": "重新进行初次配置",
+      "resetSetupPassword": "同时重置登录密码",
+      "resetSetupPasswordDesc": "旧密码将立即失效，其他浏览器需要重新登录。当前浏览器会保持登录并进入密码设置页；新密码保存前使用临时凭证，重启后会重新生成。",
+      "setupPasswordResetSuccess": "密码已重置，即将进入密码设置页。",
+      "setupResetSuccess": "配置向导已重置，即将重新进入。",
+      "setupResetFailed": "无法重置配置向导，请重试。",
       "confirmRerunSetup": "确认重新配置",
       "confirmRerunSetupDesc": "这将带您重新进入初次配置向导。您可以重新设置系统的基础配置项。确定要继续吗？",
       "devToolsDesc": "以下功能仅供开发调试使用，可能会导致页面崩溃或异常。",
+      "alwaysShowUpdateButton": "永远显示更新按钮",
+      "alwaysShowUpdateButtonDesc": "开启后，无论是否检测到更新，始终显示右上角的主程序更新按钮。立即生效。",
       "alwaysShowUpdateNotice": "永远显示更新日志",
       "alwaysShowUpdateNoticeDesc": "开启后，每次进入 WebUI 都会依次弹出更新内容和插件兼容性提醒。刷新页面后生效。",
       "triggerError": "触发测试错误",
@@ -795,7 +816,8 @@
       },
       "customToken": {
         "title": "设置登录密码",
-        "description": ""
+        "description": "不设置的话，每次启动都会换一个随机密码。",
+        "label": "登录密码"
       },
       "botBasic": {
         "title": "Bot基础",
@@ -857,7 +879,7 @@
       "next": "下一步",
       "skip": "跳过向导",
       "complete": "完成配置",
-      "saveToken": "保存密码",
+      "saveToken": "保存并继续",
       "saving": "保存中...",
       "completing": "完成中..."
     },
@@ -887,11 +909,19 @@
         "noticeTitle": "当前仍在使用启动时随机密码",
         "noticeDescription": "需要修改登录密码，如果不修改，每次会随机生成密码",
         "label": "自定义密码 *",
-        "placeholder": "请输入一个安全且容易保存的密码",
+        "placeholder": "输入新密码",
         "description": "",
         "requirements": "密码要求",
-        "show": "显示密码",
-        "hide": "隐藏密码"
+        "show": "显示",
+        "hide": "隐藏",
+        "met": "已满足",
+        "unmet": "未满足",
+        "rules": {
+          "minLength": "10 位以上",
+          "hasUppercase": "大写字母",
+          "hasLowercase": "小写字母",
+          "hasSpecialChar": "特殊符号"
+        }
       },
       "botBasic": {
         "platform": {
@@ -1007,7 +1037,7 @@
       "modelSetup": {
         "planner": {
           "identifier": {
-            "label": "用于规划的 模型 名称",
+            "label": "用于 规划思考 的模型",
             "description": "填写 API 服务商对应的模型标识，例如 deepseek-chat。"
           },
           "visual": {
@@ -1016,7 +1046,7 @@
         },
         "replyer": {
           "identifier": {
-            "label": "用于回复的 模型 名称",
+            "label": "用于 回复发言 的模型",
             "description": "填写 API 服务商对应的模型标识，例如 deepseek-chat。"
           },
           "visual": {

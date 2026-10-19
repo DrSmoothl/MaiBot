@@ -24,11 +24,12 @@ from src.common.data_models.message_component_data_model import (
 from src.common.logger import get_logger
 from src.common.message_repository import find_messages
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils, JargonConfigUtils
-from src.config.config import global_config
+from src.config.config import global_config, model_config
 from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.expression_learner import ExpressionLearner
 from src.learners.jargon_learner import JargonLearner
 from src.learners.jargon_miner import JargonMiner
+from src.maisaka.quote import ReplyQuoteContext, ReplyQuoteCounter
 from src.llm_models.payload_content.resp_format import RespFormat, RespFormatType
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 from src.maisaka.builtin_tool.provider import MaisakaBuiltinToolProvider
@@ -37,6 +38,8 @@ from src.maisaka.context.history import drop_leading_orphan_tool_results
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.message_id_alias import build_alias_map, expand_message_id_aliases
 from src.maisaka.context.messages import (
+    ContentContextMessage,
+    InternalContextMessage,
     LLMContextMessage,
     ModelOutputContextMessage,
     ReferenceMessage,
@@ -61,10 +64,13 @@ from src.maisaka.monitor.message_payload import (
 )
 from src.maisaka.reply_effect import ReplyEffectTracker
 from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
-from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids, message_id_from_context_message
+from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids
 from src.maisaka.turn_trigger import IdleBackoffController, MessageTurnScheduler
 from src.mcp_module.provider import MCPToolProvider
 from src.mcp_module.service import get_mcp_service
+from src.web_search.provider import WebSearchToolProvider
+from src.web_search.config import resolve_web_search_config
+from src.web_search.service import WebSearchService
 from src.plugin_runtime.tool_provider import PluginToolProvider
 from src.services.message_word_frequency_service import update_high_frequency_terms_from_context_messages
 
@@ -159,6 +165,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             is_group_chat=self.chat_stream.is_group_session,
         )
         self._chat_history: list[LLMContextMessage] = []
+        self._quote_counter = ReplyQuoteCounter(session_id)
 
         # Keep all original messages for batching and later learning.
         self.message_cache: list[SessionMessage] = []
@@ -339,6 +346,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         for message in recent_messages:
             if message.is_notify:
                 continue
+
+            self._quote_counter.record(message)
 
             source_kind = self._resolve_restored_message_source_kind(message)
             history_message = await self._reasoning_engine._build_history_message(
@@ -605,6 +614,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                 source_kind=source_kind,
             )
             self._chat_history.append(history_message)
+            self._quote_counter.record(message)
             self._schedule_sent_image_recognition(message)
             self._emit_monitor_message_sent(
                 message=message,
@@ -698,7 +708,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         )
         visible_text = "\n".join(detail_lines)
         self._chat_history.append(
-            SessionBackedMessage(
+            InternalContextMessage(
                 raw_message=MessageSequence([TextComponent(visible_text)]),
                 visible_text=visible_text,
                 timestamp=datetime.now(),
@@ -762,7 +772,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         )
         visible_text = "\n".join(detail_lines)
         self._chat_history.append(
-            SessionBackedMessage(
+            InternalContextMessage(
                 raw_message=MessageSequence([TextComponent(visible_text)]),
                 visible_text=visible_text,
                 timestamp=datetime.now(),
@@ -944,6 +954,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                 content=self._build_monitor_message_content(message),
                 message_id=message.message_id,
                 timestamp=message.timestamp.timestamp(),
+                received_at=message.received_at.timestamp() if message.received_at is not None else None,
                 platform=message.platform,
                 user_id=user_info.user_id,
                 group_id=group_info.group_id if group_info else "",
@@ -967,6 +978,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                     content=self._build_monitor_message_content(message),
                     message_id=message.message_id,
                     timestamp=message.timestamp.timestamp(),
+                    received_at=message.received_at.timestamp() if message.received_at is not None else None,
                     platform=message.platform,
                     user_id=user_info.user_id,
                     group_id=group_info.group_id if group_info else "",
@@ -981,8 +993,12 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         """缓存一条新消息并唤醒主循环。"""
         if self._running:
             self._ensure_background_tasks_running()
-        received_at = time.time()
-        self._last_message_received_at = received_at
+        if message.received_at is None:
+            raise ValueError("入站消息缺少主程序记录的 received_at")
+        self._quote_counter.record(message)
+        received_at = message.received_at.timestamp()
+        # 媒体预处理可能使较早收到的消息较晚入队，不能回退静默窗口。
+        self._last_message_received_at = max(self._last_message_received_at, received_at)
         self._record_external_message_interval(message, received_at)
         self._update_message_trigger_state(message)
         self.message_cache.append(message)
@@ -1164,19 +1180,19 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                 continue
             speaker_name, visible_text = parse_speaker_content(raw_text)
             item: dict[str, Any] = {
-                "message_id": message_id_from_context_message(message),
+                "message_id": (message.message_id or "") if isinstance(message, ContentContextMessage) else "",
                 "source": message.source,
                 "role": message.role,
                 "timestamp": message.timestamp.isoformat(timespec="seconds"),
                 "text": visible_text.strip(),
-                "quote_target_ids": extract_quote_target_ids(getattr(message, "raw_message", None)),
-                "attachments": extract_visual_attachments_from_sequence(getattr(message, "raw_message", None)),
+                "quote_target_ids": extract_quote_target_ids(message.raw_message if isinstance(message, ContentContextMessage) else None),
+                "attachments": extract_visual_attachments_from_sequence(message.raw_message if isinstance(message, ContentContextMessage) else None),
             }
             if visible_text != raw_text:
                 item["raw_text"] = raw_text
 
-            original_message = getattr(message, "original_message", None)
-            if original_message is not None:
+            if isinstance(message, SessionBackedMessage):
+                original_message = message.original_message
                 user_info = original_message.message_info.user_info
                 display_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
                 item["sender"] = {
@@ -1239,6 +1255,9 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return
 
         previous_received_at = self._last_external_message_received_at
+        if previous_received_at is not None and received_at <= previous_received_at:
+            # 乱序完成的旧消息保留其真实接收时间，不生成倒序的间隔样本。
+            return
         self._last_external_message_received_at = received_at
         if previous_received_at is None:
             return
@@ -1262,20 +1281,20 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             return None
 
         for history_message in reversed(self._chat_history):
-            if str(getattr(history_message, "message_id", "") or "").strip() != normalized_message_id:
-                continue
-
-            original_message = getattr(history_message, "original_message", None)
-            if original_message is None:
-                continue
-            return original_message
+            if isinstance(history_message, SessionBackedMessage) and history_message.message_id == normalized_message_id:
+                return history_message.original_message
 
         return None
+
+    def get_reply_quote_context(self, target: SessionMessage) -> ReplyQuoteContext | None:
+        """读取发送前快照；合法历史目标无序号时由规则直接引用。"""
+        return self._quote_counter.snapshot(target)
 
     def expand_message_id_aliases(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """把工具参数中模型可见的消息 ID 别名换回原始消息 ID；别名冲突时取最新的消息。"""
         alias_map = build_alias_map(
-            getattr(history_message, "message_id", "") for history_message in reversed(self._chat_history)
+            history_message.message_id for history_message in reversed(self._chat_history)
+            if isinstance(history_message, ContentContextMessage)
         )
         return expand_message_id_aliases(arguments, alias_map)
 
@@ -1499,6 +1518,12 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         self._tool_registry.register_provider(
             MaisakaBuiltinToolProvider(self._reasoning_engine.build_builtin_tool_handlers())
+        )
+        self._tool_registry.register_provider(
+            WebSearchToolProvider(
+                WebSearchService(get_mcp_service()),
+                lambda: resolve_web_search_config(model_config.web, model_config.model_task_config.web_search),
+            )
         )
         self._tool_registry.register_provider(PluginToolProvider())
         self._tool_registry.register_provider(MCPToolProvider(get_mcp_service()))

@@ -22,7 +22,7 @@ You need to first gather information that can help {bot_name} take the next acti
 - If you encounter an error or problem, try to resolve it or use an alternative tool; ask the user for help or clarification when necessary.
 - view_forward_message: View the full content of a merged forwarded message by msg_id. Use it when the context shows a forwarded-message preview and you need more details.
 - wait(): Use this only when you need to pause for a while and judge again after the wait ends.
-- No tool use: When there are no more operations to perform, or when no new content has arrived after a long wait, end your thinking without calling any tools. In all other cases, you need to call tools.
+- No tool use: When there are no more operations to perform, or when no new content has arrived after a long wait, end your thinking without calling any tools. In all other cases, you need to call tools.{stop_rule}
 
 Remember, you cannot reply directly without calling reply; you must use the reply tool to send replies.
 Now, please output your analysis of how {bot_name} should speak, providing textual analysis and making tool calls as appropriate:

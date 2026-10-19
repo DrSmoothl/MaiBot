@@ -2,18 +2,22 @@
 
 from time import monotonic
 from typing import Any, Dict, List, Literal, Optional, Tuple
+from urllib.error import HTTPError
 
 from fastapi import APIRouter, Cookie, HTTPException
 from packaging.version import Version
 from pydantic import BaseModel, Field, ValidationError
 import asyncio
 
-import httpx
-
 from src.config.config import MMC_VERSION
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator
-from src.webui.services.git_mirror_service import get_git_mirror_service
-from src.webui.services.plugin_market_service import request_market_detail, use_github_market_data
+from src.webui.services.plugin_market_service import (
+    fetch_information_file,
+    load_source_settings,
+    request_market,
+    request_market_detail,
+    use_github_market_data,
+)
 
 from .support import require_plugin_token
 
@@ -49,15 +53,18 @@ class PluginReleaseIndex(BaseModel):
 
 _cache: Optional[PluginReleaseIndex] = None
 _cache_time = 0.0
+_cache_source: Optional[str] = None
 
 
 async def load_release_index() -> PluginReleaseIndex:
-    global _cache, _cache_time
-    if _cache is not None and monotonic() - _cache_time < 5 * 60:
+    global _cache, _cache_time, _cache_source
+    source = (await asyncio.to_thread(load_source_settings)).information_source
+    if _cache_source == source and _cache is not None and monotonic() - _cache_time < 5 * 60:
         return _cache
-    response = await get_git_mirror_service().fetch_raw_file(
-        owner="Mai-with-u", repo="plugin-repo", branch="main", file_path="plugin_versions.json"
-    )
+    try:
+        response = await fetch_information_file("plugin_versions.json", source)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{exc}") from exc
     if not response.get("success"):
         raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{response.get('error', '未知错误')}")
     try:
@@ -80,11 +87,12 @@ async def load_release_index() -> PluginReleaseIndex:
                 if release.manifest.get("manifest_version") == 2 and release.manifest.get("id") != entry.manifest_id:
                     raise ValueError(f"版本索引 manifest ID 不匹配：{entry.id}")
                 seen.add(release.version)
-            if bool(entry.versions or entry.rejected_releases) != (entry.mode == "releases"):
+            # Release 待审核时两个列表都可为空，但不能因此退回分支安装。
+            if entry.mode == "branch" and (entry.versions or entry.rejected_releases):
                 raise ValueError(f"版本索引安装模式不匹配：{entry.id}")
     except (ValidationError, ValueError, KeyError) as exc:
         raise HTTPException(status_code=502, detail=f"插件版本索引无效：{exc}") from exc
-    _cache, _cache_time = index, monotonic()
+    _cache, _cache_time, _cache_source = index, monotonic(), source
     return index
 
 
@@ -121,7 +129,8 @@ def parse_market_release_entry(data: Dict[str, Any], plugin_id: Optional[str] = 
     })
     if plugin_id is not None and plugin_id.casefold() not in {entry.id.casefold(), (entry.manifest_id or "").casefold()}:
         raise ValueError("插件中心返回的插件 ID 与请求不一致")
-    if bool(entry.versions or entry.rejected_releases) != (entry.mode == "releases"):
+    # Release 待审核时两个列表都可为空，但不能因此退回分支安装。
+    if entry.mode == "branch" and (entry.versions or entry.rejected_releases):
         raise ValueError(f"版本索引安装模式不匹配：{entry.id}")
     seen = set()
     for release in entry.versions:
@@ -145,11 +154,11 @@ async def load_plugin_release_entry(plugin_id: str) -> Optional[PluginReleaseEnt
     try:
         data = await request_market_detail(plugin_id, MMC_VERSION)
         return await asyncio.to_thread(parse_market_release_entry, data, plugin_id)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
+    except HTTPError as exc:
+        if exc.code == 404:
             return None
         raise HTTPException(status_code=502, detail=f"获取插件中心版本失败：{exc}") from exc
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=502, detail=f"插件中心版本数据无效：{exc}") from exc
 
 
@@ -163,6 +172,8 @@ async def resolve_release(plugin_id: str, version: str) -> Tuple[PluginReleaseEn
         if version != "latest":
             raise HTTPException(status_code=400, detail="该插件尚未发布 Release，只支持分支安装")
         return entry, None
+    if not entry.versions:
+        raise HTTPException(status_code=400, detail="暂无可安装版本")
     description = await asyncio.to_thread(describe_entry, entry)
     target = description["recommended_version"] if version == "latest" else version
     release = next((item for item in entry.versions if item.version == target), None)
@@ -177,5 +188,13 @@ async def resolve_release(plugin_id: str, version: str) -> Tuple[PluginReleaseEn
 @router.get("/releases")
 async def get_plugin_releases(maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Any]:
     require_plugin_token(maibot_session)
+    if not await asyncio.to_thread(use_github_market_data):
+        try:
+            data = await request_market("plugins/summary", {"maibot_version": MMC_VERSION, "compatible_only": "false"})
+            from .marketplace import describe_market_list
+
+            return (await asyncio.to_thread(describe_market_list, data))["catalog"]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(status_code=502, detail=f"获取插件版本索引失败：{exc}") from exc
     index = await load_release_index()
     return {"plugins": [describe_entry(entry) for entry in index.plugins]}

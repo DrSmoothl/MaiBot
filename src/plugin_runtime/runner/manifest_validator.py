@@ -1087,7 +1087,7 @@ class ManifestValidator:
                 manifest.sdk.max_version,
             )
             if not sdk_ok:
-                self.errors.append(f"SDK 版本不兼容: {sdk_message} (当前 SDK: {self._sdk_version})")
+                self.warnings.append(f"SDK 版本超出插件声明范围，已放行: {sdk_message} (当前 SDK: {self._sdk_version})")
 
         if self._validate_python_package_dependencies:
             self._validate_python_package_dependencies_against_runtime(manifest)
@@ -1233,13 +1233,14 @@ class ManifestValidator:
             self._LOGGED_WARNING_KEYS.add((source_key, warning))
 
         warning_summary = "；".join(pending_warnings)
+        log = logger.warning if any(warning.startswith("SDK 版本") for warning in pending_warnings) else logger.info
         if source:
             if len(pending_warnings) < 2:
-                logger.info(f"插件 [{source}]: {warning_summary}")
+                log(f"插件 [{source}]: {warning_summary}")
             else:
-                logger.info(f"插件 [{source}]: 共 {len(pending_warnings)} 项，{warning_summary}")
+                log(f"插件 [{source}]: 共 {len(pending_warnings)} 项，{warning_summary}")
             return
-        logger.info(f"插件: 共 {len(pending_warnings)} 项，{warning_summary}")
+        log(f"插件: 共 {len(pending_warnings)} 项，{warning_summary}")
 
     @classmethod
     def _resolve_project_root(cls) -> Path:

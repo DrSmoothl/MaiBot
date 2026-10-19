@@ -1,3 +1,8 @@
+[a_memorix_chat_summary]
+display_name = "长期记忆聊天总结"
+advanced = false
+description = "从当前聊天窗口提取可写入长期记忆的增量信息与重要知识。"
+
 [maisaka_chat]
 display_name = "规划器"
 advanced = false
@@ -122,11 +127,6 @@ description = "Focus 模式下的 Maisaka 规划模板，负责基于当前关�
 display_name = "规划器（优化版）"
 advanced = true
 description = "开启实验功能 experimental.planner_optimized_prompt 后使用的 Maisaka 主规划模板，以第二人称描述麦麦自己并精简了任务说明；Focus 模式仍使用 Focus 规划器。"
-
-[maisaka_timing_gate]
-display_name = "时机"
-advanced = true
-description = "Maisaka 节奏控制模板，负责在每轮主循环前判断当前应该等待、停止，还是继续进入思考与回复流程。"
 
 [memory_fuzzy_modify_plan]
 display_name = "长期记忆模糊修改"
