@@ -206,8 +206,8 @@ def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec
     if config_module.global_config.emoji.use_new_send_logic:
         properties["attach_emoji"] = {
             "type": "integer",
-            "minimum": 1,
-            "description": "可选。从 show_emoji_list 的拼图选择一个表情包，填写图片序号，在文字后发送。",
+            "minimum": 0,
+            "description": "可选。从 show_emoji_list 的拼图选择一个表情包，填写图片序号，在文字后发送；0 或不填表示不发送表情包。",
         }
     if config_module.global_config.chat.enable_reply_at:
         properties["attach_at"] = {
@@ -370,6 +370,8 @@ async def handle_tool(
             f"{tool_ctx.runtime.log_prefix} 检测到 reply 工具参数被重复包裹，已自动解包: "
             f"调用编号={invocation.call_id}"
         )
+    if type(invocation_arguments.get("attach_emoji")) is int and invocation_arguments["attach_emoji"] == 0:
+        invocation_arguments.pop("attach_emoji")
     reply_reference = invocation_arguments.get("reply_reference")
     if not isinstance(reply_reference, str) or not reply_reference.strip():
         return tool_ctx.build_failure_result(
