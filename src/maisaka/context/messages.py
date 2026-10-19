@@ -505,7 +505,6 @@ class ReferenceMessageType(str, Enum):
     CUSTOM = "custom"
     JARGON = "jargon"
     MEMORY = "memory"
-    PLANNER_TOOL_HINT = "planner_tool_hint"
     TOOL_HINT = "tool_hint"
 
 

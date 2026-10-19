@@ -73,7 +73,6 @@ from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
 from .attention_drift import build_attention_drift_prompt_block
 
-PLANNER_TOOL_HINT_SOURCE = "planner_tool_hint"
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "emotion": "emoji.selector",
     "expression_selector": "expression.selector",

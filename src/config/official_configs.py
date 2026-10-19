@@ -967,27 +967,14 @@ class ExperimentalConfig(ConfigBase):
         default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "使用 stop() 工具",
-                "en_US": "Use stop() tool",
-                "ja_JP": "stop() ツールを使用",
+                "zh_CN": "优化工具使用",
+                "en_US": "Optimize tool usage",
+                "ja_JP": "ツール使用の最適化",
             },
             "x-widget": "switch",
         },
     )
     """给 Planner 提供无参数的 stop() 工具，调用后结束本轮思考并等待新消息，与不输出任何工具时一致。"""
-
-    planner_unsent_reply_retry: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "回复丢失提醒重试",
-                "en_US": "Unsent reply retry",
-                "ja_JP": "未送信返信のリトライ",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """Planner 在分析里写了要回复、却没有调用任何工具就结束时，提醒一次并让它重新决策；每个回合最多重试一次。"""
 
     tool_result_condense: bool = Field(
         default=False,

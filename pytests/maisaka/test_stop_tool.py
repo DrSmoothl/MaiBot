@@ -1,6 +1,5 @@
 """实验性 stop 工具的可用性与收尾行为。"""
 
-from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -12,7 +11,6 @@ from src.core.tooling import ToolRegistry
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.maisaka.builtin_tool.provider import MaisakaBuiltinToolProvider
 from src.maisaka.chat_loop_service import MaisakaChatLoopService
-from src.maisaka.context.messages import ReferenceMessage, ReferenceMessageType
 from src.maisaka.mode_policy import is_idle_cycle_reason
 from src.maisaka.reasoning_engine import CycleRuntimeState, MaisakaReasoningEngine
 
@@ -36,15 +34,10 @@ def test_stop_prompt_follows_switch(monkeypatch: pytest.MonkeyPatch, locale: str
 
 @pytest.mark.asyncio
 async def test_stop_ends_thinking_like_no_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    hint = ReferenceMessage(
-        content="旧的无工具重试提醒",
-        timestamp=datetime.now(),
-        reference_type=ReferenceMessageType.PLANNER_TOOL_HINT,
-    )
     registry = ToolRegistry()
     runtime = SimpleNamespace(
         _tool_registry=registry,
-        _chat_history=[hint],
+        _chat_history=[],
         session_id="test-stop",
         chat_stream=SimpleNamespace(is_group_session=True, group_id="group", user_id="", platform="test"),
         is_action_tool_currently_available=lambda name: True,
@@ -85,3 +78,32 @@ async def test_stop_ends_thinking_like_no_tools(monkeypatch: pytest.MonkeyPatch)
     runtime._reset_consecutive_wait_count.assert_any_call("planner_no_tool_end")
     assert runtime._chat_history == []
     engine._append_tool_execution_result.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", ["决定：调用 reply 回复。", "没有新消息，保持安静。"])
+async def test_no_tool_response_ends_without_retry(content: str) -> None:
+    runtime = SimpleNamespace(
+        _chat_history=[],
+        _end_planner_continuation=Mock(),
+        _reset_consecutive_wait_count=Mock(),
+        _enter_stop_state=Mock(),
+        log_prefix="[test]",
+    )
+    engine = MaisakaReasoningEngine(runtime)
+    engine._emit_planner_progress = AsyncMock()
+    state = CycleRuntimeState()
+
+    should_end = await engine._handle_planner_response_actions(
+        response=SimpleNamespace(content=content, raw_messages=[], tool_calls=None),
+        cycle_detail=SimpleNamespace(),
+        state=state,
+        planner_extra_lines=state.planner_extra_lines,
+    )
+
+    assert should_end
+    assert state.cycle_end.reason == "planner_no_tool_end"
+    assert state.planner_extra_lines == ["状态：已结束本轮思考"]
+    assert runtime._chat_history == []
+    runtime._end_planner_continuation.assert_called_once_with()
+    runtime._enter_stop_state.assert_called_once_with()
