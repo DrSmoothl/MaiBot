@@ -69,7 +69,8 @@ class ModelTaskUsage(SQLModel, table=True):
 
     __tablename__ = "model_task_usage"  # type: ignore
 
-    bucket_time: datetime = Field(primary_key=True, index=True)
+    # 与历史数据及统计查询保持本地无时区时间，避免依赖 SQLModel 的默认 UTC 类型。
+    bucket_time: datetime = Field(primary_key=True, index=True, sa_type=DateTime(timezone=False))
     task_name: str = Field(primary_key=True, max_length=100)
     model_name: str = Field(primary_key=True, max_length=255)
     model_identifier: str = Field(primary_key=True, max_length=255)
