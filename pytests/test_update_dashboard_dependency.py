@@ -1,9 +1,7 @@
 from importlib.util import module_from_spec, spec_from_file_location
-from io import BytesIO
 from pathlib import Path
+from subprocess import CalledProcessError, CompletedProcess
 from unittest.mock import patch
-from urllib.error import HTTPError
-import json
 
 from packaging.version import Version
 import pytest
@@ -15,44 +13,47 @@ assert SPEC is not None and SPEC.loader is not None
 updater = module_from_spec(SPEC)
 SPEC.loader.exec_module(updater)
 VERSION = Version("1.9.4.dev20261019539")
-WHEEL = f"maibot_dashboard-{VERSION}-py3-none-any.whl"
+REQUIREMENT = f"maibot-dashboard=={VERSION}"
 
 
-def index_response(filename: str, yanked: bool = False) -> BytesIO:
-    return BytesIO(json.dumps({"files": [{"filename": filename, "yanked": yanked}]}).encode())
-
-
-def test_waits_for_exact_non_yanked_wheel() -> None:
+def test_waits_until_uv_can_resolve_exact_version() -> None:
     responses = [
-        index_response("maibot_dashboard-1.9.4.dev20261018538-py3-none-any.whl"),
-        index_response(WHEEL, yanked=True),
-        index_response(f"maibot_dashboard-{VERSION}.tar.gz"),
-        index_response(WHEEL),
+        CompletedProcess([], 1, "", f"Because there is no version of {REQUIREMENT}"),
+        CompletedProcess([], 0, REQUIREMENT, "Resolved 1 package"),
     ]
-    with patch.object(updater, "urlopen", side_effect=responses) as fetch, patch.object(updater, "sleep") as sleep:
+    with patch.object(updater, "run", side_effect=responses) as resolve, patch.object(updater, "sleep") as sleep:
         updater.wait_for_pypi_version(VERSION)
 
-    assert fetch.call_count == 4
-    assert sleep.call_count == 3
-    assert fetch.call_args.args[0].get_header("Accept") == "application/vnd.pypi.simple.v1+json"
+    assert resolve.call_count == 2
+    assert sleep.call_count == 1
+    assert resolve.call_args.kwargs["input"] == f"{REQUIREMENT}\n"
+    command = resolve.call_args.args[0]
+    assert command[:3] == ["uv", "pip", "compile"]
+    assert command[command.index("--index") + 1] == updater.PYPI_INDEX_URL
+    assert "--refresh-package" in command
 
 
 def test_missing_version_times_out() -> None:
     with (
         patch.object(updater, "monotonic", side_effect=[0, 0, 300, 300]),
-        patch.object(updater, "urlopen", return_value=index_response("old.tar.gz")),
+        patch.object(updater, "run", return_value=CompletedProcess(
+            [], 1, "", f"Because there is no version of {REQUIREMENT}"
+        )),
         patch.object(updater, "sleep"),
         pytest.raises(TimeoutError, match=str(VERSION).replace(".", r"\.")),
     ):
         updater.wait_for_pypi_version(VERSION)
 
 
-def test_http_errors_are_reported_without_retry() -> None:
-    error = HTTPError(updater.PYPI_SIMPLE_URL, 403, "Forbidden", None, None)
-    with patch.object(updater, "urlopen", side_effect=error), patch.object(updater, "sleep") as sleep:
-        with pytest.raises(HTTPError) as caught:
+@pytest.mark.parametrize("error", ["HTTP 403 Forbidden", "incompatible Python version", "invalid index metadata"])
+def test_other_errors_are_reported_without_retry(error: str) -> None:
+    with (
+        patch.object(updater, "run", return_value=CompletedProcess([], 1, "", error)),
+        patch.object(updater, "sleep") as sleep,
+    ):
+        with pytest.raises(CalledProcessError) as caught:
             updater.wait_for_pypi_version(VERSION)
-    assert caught.value is error
+    assert caught.value.stderr == error
     sleep.assert_not_called()
 
 

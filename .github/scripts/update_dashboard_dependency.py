@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CalledProcessError, run
 from time import monotonic, sleep
 from typing import Iterable
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name, parse_wheel_filename
+from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 import json
 import os
@@ -20,29 +21,33 @@ DASHBOARD_PACKAGE_PATH = Path("dashboard/package.json")
 PYPROJECT_PATH = Path("pyproject.toml")
 REQUIREMENTS_PATH = Path("requirements.txt")
 PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
-PYPI_SIMPLE_URL = f"https://pypi.org/simple/{canonicalize_name(PACKAGE_NAME)}/"
+PYPI_INDEX_URL = "https://pypi.org/simple"
 
 
 def wait_for_pypi_version(version: Version, timeout: float = 300, interval: float = 10) -> None:
-    # 上传成功并不代表解析器使用的 Simple 索引已可见，修改依赖前先确认目标 wheel 已就绪。
+    # PyPI 按 Accept/Accept-Encoding 区分缓存，urllib 查询成功不能代表 uv 已可见。
+    # 用实际解析器检查精确版本；只等待新包尚不可见，其他解析或网络错误立即暴露。
     deadline = monotonic() + timeout
-    request = Request(PYPI_SIMPLE_URL, headers={"Accept": "application/vnd.pypi.simple.v1+json"})
+    requirement = f"{PACKAGE_NAME}=={version}"
+    command = [
+        "uv", "pip", "compile", "--no-deps", "--no-config",
+        "--index", PYPI_INDEX_URL, "--refresh-package", PACKAGE_NAME,
+        "--no-header", "--no-annotate", "-",
+    ]
     while True:
         remaining = deadline - monotonic()
         if remaining <= 0:
-            raise TimeoutError(f"等待 {PACKAGE_NAME}=={version} 出现在 {PYPI_SIMPLE_URL} 超时（{timeout:g}s）")
+            raise TimeoutError(f"等待 uv 从 {PYPI_INDEX_URL} 解析 {requirement} 超时（{timeout:g}s）")
 
-        with urlopen(request, timeout=min(30, remaining)) as response:
-            index_data = json.load(response)
-        for release_file in index_data["files"]:
-            if release_file.get("yanked", False) or not release_file["filename"].endswith(".whl"):
-                continue
-            name, wheel_version, _, _ = parse_wheel_filename(release_file["filename"])
-            if name == canonicalize_name(PACKAGE_NAME) and wheel_version == version:
-                print(f"PyPI Simple 索引已就绪: {PACKAGE_NAME}=={version}", flush=True)
-                return
+        result = run(command, input=f"{requirement}\n", capture_output=True, text=True, timeout=remaining)
+        if result.returncode == 0:
+            print(f"uv 已确认 PyPI 目标版本可解析: {requirement}", flush=True)
+            return
+        print(result.stderr, flush=True)
+        if f"there is no version of {requirement}" not in result.stderr:
+            raise CalledProcessError(result.returncode, command, output=result.stdout, stderr=result.stderr)
 
-        print(f"PyPI Simple 索引尚未包含 {PACKAGE_NAME}=={version}，继续等待", flush=True)
+        print(f"uv 尚未看到 {requirement}，继续等待", flush=True)
         sleep(min(interval, max(0, deadline - monotonic())))
 
 

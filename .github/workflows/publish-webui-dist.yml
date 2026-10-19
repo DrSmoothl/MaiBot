@@ -127,7 +127,7 @@ jobs:
           DASHBOARD_DEV_VERSION: ${{ needs.build-and-publish.outputs.webui_version }}
         run: |
           uv run --no-project --with packaging --with tomlkit python .github/scripts/update_dashboard_dependency.py
-          uv lock --upgrade-package maibot-dashboard
+          uv lock --upgrade-package maibot-dashboard --verbose
 
       - name: Commit dependency update
         env:

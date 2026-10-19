@@ -13,6 +13,8 @@ concurrency:
 jobs:
   update-dev-dependency:
     runs-on: ubuntu-24.04
+    env:
+      UV_INDEX: https://pypi.org/simple
     steps:
       - name: Checkout dev
         uses: actions/checkout@v4
@@ -28,7 +30,7 @@ jobs:
           uv run --no-project --with packaging --with tomlkit python .github/scripts/update_dashboard_dependency.py
 
       - name: Update dependency lock
-        run: uv lock --upgrade-package maibot-dashboard
+        run: uv lock --upgrade-package maibot-dashboard --verbose
 
       - name: Commit dependency update
         run: |
