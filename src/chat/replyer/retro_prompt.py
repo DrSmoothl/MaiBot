@@ -40,7 +40,6 @@ from src.llm_models.payload_content.context_item import (
     RoleType,
     UserMessageItem,
 )
-from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.history import build_session_message_visible_text
 from src.maisaka.context.message_adapter import (
     build_visible_text_from_sequence,
@@ -49,7 +48,6 @@ from src.maisaka.context.message_adapter import (
 )
 from src.maisaka.context.messages import (
     LLMContextMessage,
-    ModelOutputContextMessage,
     ContentContextMessage,
     SessionBackedMessage,
     build_context_items_from_history_entry,
@@ -126,8 +124,7 @@ class RetroReplyPromptMixin:
         chat_history = [
             message
             for message in chat_history
-            if not isinstance(message, ModelOutputContextMessage)
-            and not self._is_replyer_filtered_history_message(message)
+            if not self._is_replyer_filtered_history_message(message)
         ]
         visual_parts: Dict[int, List[ContextImagePart]] = {}
         if enable_visual_message:
