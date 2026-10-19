@@ -20,14 +20,15 @@ def diagnostic_stage(stage: str) -> Iterator[None]:
     """记录阶段边界，异常继续向调用者传播。"""
     started_at = time.perf_counter()
     identity = f"stage={stage} pid={os.getpid()} thread={threading.current_thread().name}"
-    logger.info(f"诊断阶段开始: {identity}")
+    logger.debug(f"诊断阶段开始: {identity}")
     outcome = "failed"
     try:
         yield
         outcome = "completed"
     finally:
         elapsed = time.perf_counter() - started_at
-        log = logger.warning if elapsed >= 1.0 or outcome == "failed" else logger.info
+        # 阶段耗时可能包含正常的异步等待；真实循环卡顿由看门狗单独告警。
+        log = logger.warning if outcome == "failed" else logger.debug
         log(f"诊断阶段结束: {identity} 耗时={elapsed:.3f}s outcome={outcome}")
 
 
