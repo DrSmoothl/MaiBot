@@ -173,8 +173,8 @@ function SetupPageContent() {
 
     setModelFetchStatus('loading')
     let cancelled = false
-    // 等待用户停止输入；切换地址或 Key 后忽略旧请求，避免串用提供商的列表。
-    const timer = window.setTimeout(async () => {
+    let timer: ReturnType<typeof window.setTimeout>
+    const fetchModels = async () => {
       try {
         const models = await fetchSetupModels({
           provider_name: '',
@@ -196,13 +196,18 @@ function SetupPageContent() {
             replyer_model_name: replyer,
           }
         })
+        setModelFetchError('')
         setModelFetchStatus('success')
       } catch (error) {
         if (cancelled) return
         setModelFetchError(error instanceof Error ? error.message : '获取模型列表失败')
         setModelFetchStatus('error')
+        // 失败后等待 1 秒再重试，避免请求重叠；重试期间保留错误状态以允许手动填写。
+        timer = window.setTimeout(fetchModels, 1000)
       }
-    }, 600)
+    }
+    // 等待用户停止输入；切换地址或 Key 后忽略旧请求，避免串用提供商的列表。
+    timer = window.setTimeout(fetchModels, 600)
     return () => {
       cancelled = true
       window.clearTimeout(timer)
