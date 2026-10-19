@@ -6,7 +6,7 @@ from src.maisaka.tool_result_condenser import build_tool_result_condense_task, s
 
 
 def test_condenser_only_targets_long_successful_query_results() -> None:
-    long_result = "x" * global_config.experimental.tool_result_condense_threshold
+    long_result = "x" * global_config.capabilities.tool_result_condense_threshold
 
     assert should_condense_tool_result("maibot_release_info", long_result, success=True)
     assert not should_condense_tool_result("maibot_release_info", long_result[:-1], success=True)
@@ -26,7 +26,7 @@ def test_condense_task_is_self_contained() -> None:
 
 
 def test_condenser_threshold_follows_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(global_config.experimental, "tool_result_condense_threshold", 800)
+    monkeypatch.setattr(global_config.capabilities, "tool_result_condense_threshold", 800)
 
     assert should_condense_tool_result("maibot_release_info", "x" * 800, success=True)
     assert not should_condense_tool_result("maibot_release_info", "x" * 799, success=True)

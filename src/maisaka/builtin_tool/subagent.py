@@ -4,7 +4,7 @@
 它可以自己多轮调用这些工具，最后只把结论交还给 Planner，中间过程不进入 Planner 上下文。
 
 默认情况下 Planner 等子代理跑完，结论作为本次工具结果返回。开启
-``experimental.advanced_sub_agent`` 后子代理改在后台运行：调用立刻返回任务 id，结论在任务结束时
+``capabilities.advanced_sub_agent`` 后子代理改在后台运行：调用立刻返回任务 id，结论在任务结束时
 作为一条新的 user 消息送回并唤醒 Planner，另外提供 subagent_status / subagent_stop 查看和终止任务。
 """
 
@@ -85,7 +85,7 @@ _STATUS_LABELS = {"running": "运行中", "completed": "已完成", "failed": "�
 def get_tool_spec() -> ToolSpec:
     """获取 subagent 工具声明。"""
 
-    if global_config.experimental.advanced_sub_agent:
+    if global_config.capabilities.advanced_sub_agent:
         result_description = (
             "子代理在后台运行：调用后立刻返回任务 id，你可以继续处理聊天，不需要为它等待；"
             "它结束时结论会作为一条 <subagent_result> 消息送回给你，中间的原始结果不会进入你的上下文。"
@@ -392,7 +392,7 @@ async def handle_tool(
     )
 
     task_manager = runtime._subagent_tasks
-    run_in_background_mode = global_config.experimental.advanced_sub_agent
+    run_in_background_mode = global_config.capabilities.advanced_sub_agent
     max_rounds = SUBAGENT_BACKGROUND_MAX_ROUNDS if run_in_background_mode else SUBAGENT_MAX_ROUNDS
     if run_in_background_mode and task_manager.running_count >= SUBAGENT_MAX_RUNNING_TASKS:
         return tool_ctx.build_failure_result(

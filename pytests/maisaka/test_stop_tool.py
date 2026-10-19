@@ -1,4 +1,4 @@
-"""实验性 stop 工具的可用性与收尾行为。"""
+"""默认 stop 工具的可用性与收尾行为。"""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from src.common.i18n import use_locale
-from src.config.config import global_config
 from src.core.tooling import ToolRegistry
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.maisaka.builtin_tool.provider import MaisakaBuiltinToolProvider
@@ -16,24 +15,20 @@ from src.maisaka.reasoning_engine import CycleRuntimeState, MaisakaReasoningEngi
 
 
 @pytest.mark.parametrize("locale", ["zh-CN", "en-US", "ja-JP"])
-@pytest.mark.parametrize("prompt_name", ["maisaka_chat", "maisaka_chat_optimized", "maisaka_chat_focus"])
-def test_stop_prompt_follows_switch(monkeypatch: pytest.MonkeyPatch, locale: str, prompt_name: str) -> None:
+@pytest.mark.parametrize("prompt_name", ["maisaka_chat", "maisaka_chat_focus"])
+def test_stop_prompt_is_always_available(monkeypatch: pytest.MonkeyPatch, locale: str, prompt_name: str) -> None:
     service = MaisakaChatLoopService(is_group_chat=True)
     monkeypatch.setattr(service, "_get_chat_prompt_name", lambda: prompt_name)
     with use_locale(locale):
-        monkeypatch.setattr(global_config.experimental, "planner_stop_tool", False)
-        disabled = service._build_chat_system_prompt()
-        monkeypatch.setattr(global_config.experimental, "planner_stop_tool", True)
-        enabled = service._build_chat_system_prompt()
+        prompt = service._build_chat_system_prompt()
 
-    assert "stop()" not in disabled
-    stop_lines = [line for line in enabled.splitlines() if line.startswith("- stop()")]
+    stop_lines = [line for line in prompt.splitlines() if line.startswith("- stop()")]
     assert len(stop_lines) == 1
-    assert enabled.replace("\n" + stop_lines[0], "") == disabled
+    assert "{stop_rule}" not in prompt
 
 
 @pytest.mark.asyncio
-async def test_stop_ends_thinking_like_no_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stop_ends_thinking_like_no_tools() -> None:
     registry = ToolRegistry()
     runtime = SimpleNamespace(
         _tool_registry=registry,
@@ -54,9 +49,7 @@ async def test_stop_ends_thinking_like_no_tools(monkeypatch: pytest.MonkeyPatch)
     engine._append_tool_execution_result = Mock()
     engine._emit_planner_progress = AsyncMock()
 
-    monkeypatch.setattr(global_config.experimental, "planner_stop_tool", False)
-    assert not await registry.has_tool("stop")
-    monkeypatch.setattr(global_config.experimental, "planner_stop_tool", True)
+    assert await registry.has_tool("stop")
     spec = await registry.get_tool_spec("stop")
     assert spec is not None
     assert spec.parameters_schema == {"type": "object", "properties": {}, "required": []}

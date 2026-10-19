@@ -92,11 +92,10 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "sub_agent": "sub_agent",
 }
 CONTEXT_SELECTION_CACHE_STABILITY_RATIO = 2.0
-PLANNER_FINAL_USER_REMINDER_TEMPLATE = (
+FOCUS_PLANNER_FINAL_USER_REMINDER_TEMPLATE = (
     "你需要输出对{bot_name}发言的分析，视情况输出文本内容的分析，思考是否进行工具调用"
 )
-# 优化版 Planner 提示词（experimental.planner_optimized_prompt）配套的末尾提醒
-PLANNER_OPTIMIZED_FINAL_USER_REMINDER = (
+PLANNER_FINAL_USER_REMINDER = (
     "请你进行分析，是不调用工具，进行思考和等待\n还是使用工具搜集处理信息或使用reply回复"
 )
 
@@ -762,7 +761,7 @@ class MaisakaChatLoopService:
 
         Args:
             tools_section: 额外注入到提示词中的工具说明片段。
-            bot_nickname_notice: 优化版模板中紧跟在名字之后的平台昵称说明；其他模板不使用。
+            bot_nickname_notice: 普通聊天模板中紧跟在名字之后的平台昵称说明；其他模板不使用。
         """
 
         system_prompt = load_prompt(
@@ -777,28 +776,19 @@ class MaisakaChatLoopService:
     def _build_planner_final_user_reminder(self) -> str:
         """构造每轮 Planner 请求末尾的一次性 user 提醒。"""
 
-        if self._uses_optimized_planner_prompt():
-            return PLANNER_OPTIMIZED_FINAL_USER_REMINDER
-        return PLANNER_FINAL_USER_REMINDER_TEMPLATE.format(bot_name=global_config.bot.nickname.strip())
-
-    def _uses_optimized_planner_prompt(self) -> bool:
-        """当前聊天是否使用优化版 Planner 提示词；Focus 模式有自己的模板，不受该实验开关影响。"""
-
-        if not global_config.experimental.planner_optimized_prompt:
-            return False
-        return not focus_mode_manager.is_enabled_for_session(self._session_id, is_group_chat=self._is_group_chat)
+        if self._get_chat_prompt_name() == "maisaka_chat":
+            return PLANNER_FINAL_USER_REMINDER
+        return FOCUS_PLANNER_FINAL_USER_REMINDER_TEMPLATE.format(bot_name=global_config.bot.nickname.strip())
 
     def _get_chat_prompt_name(self) -> str:
         """选择当前聊天使用的 Planner 模板。"""
 
         if focus_mode_manager.is_enabled_for_session(self._session_id, is_group_chat=self._is_group_chat):
             return "maisaka_chat_focus"
-        if global_config.experimental.planner_optimized_prompt:
-            return "maisaka_chat_optimized"
         return "maisaka_chat"
 
     def _build_bot_alias_notice(self) -> str:
-        """构造优化版模板中紧跟在名字之后的别名说明；没有配置别名时为空。"""
+        """构造普通聊天模板中紧跟在名字之后的别名说明；没有配置别名时为空。"""
 
         alias_names = [alias_name.strip() for alias_name in global_config.bot.alias_names if alias_name.strip()]
         if not alias_names:
@@ -825,7 +815,6 @@ class MaisakaChatLoopService:
             "planner_idle_focus_rule": self._build_planner_idle_focus_rule(),
             "query_memory_rule": self._build_query_memory_rule(),
             "subagent_rule": self._build_subagent_rule(),
-            "stop_rule": self._build_stop_rule(),
         }
 
     @staticmethod
@@ -905,23 +894,10 @@ class MaisakaChatLoopService:
             }
         )
 
-    def _build_stop_rule(self) -> str:
-        """开启 stop 工具时，说明它可显式替代无工具输出的结束方式。"""
-
-        if not global_config.experimental.planner_stop_tool:
-            return ""
-        return "\n" + self._localized_text(
-            {
-                "en-US": "- stop(): As an exception to the no-tool rule above, you can call stop() with no arguments to explicitly end this thinking round and wait for new messages. It has the same effect as calling no tools; it sends no reply and schedules no timed wait. Call it alone, after completing any other actions.",
-                "ja-JP": "- stop()：上記のツールを使わない終了方法の例外として、引数なしの stop() でこの思考を明示的に終了し、新しいメッセージを待つこともできます。ツールを呼ばずに終了する場合と同じで、返信の送信や時間指定の待機は行いません。他の操作を完了してから単独で呼んでください。",
-                "zh-CN": "- stop()：作为上述不使用工具结束方式的例外，也可以调用无参数的 stop() 显式结束本轮思考并等待新消息，效果与不输出任何工具一致，不发送回复，也不设置定时等待。请在其他操作完成后单独调用。",
-            }
-        )
-
     def _build_subagent_rule(self) -> str:
         """开启子代理时说明何时该把任务交给 subagent；未开启时为空，不占提示词。"""
 
-        if not global_config.experimental.planner_subagent:
+        if not global_config.capabilities.planner_subagent:
             return ""
         rule = self._localized_text(
             {
@@ -930,7 +906,7 @@ class MaisakaChatLoopService:
                 "zh-CN": "- subagent()：遇到需要查资料才能回答或判断的事（查文档、搜网页、查版本或插件信息、找图、核实某个说法等），优先交给子代理：写清楚要查什么，把用得上的工具授权给它；它查完只把结论交给你。只有一步就能完成的事才直接调用对应工具。",
             }
         )
-        if global_config.experimental.advanced_sub_agent:
+        if global_config.capabilities.advanced_sub_agent:
             rule += self._localized_text(
                 {
                     "en-US": " The sub-agent runs in the background: after dispatching it you do not need to wait and can keep chatting; its conclusion will be sent back to you later.",
@@ -1051,8 +1027,8 @@ class MaisakaChatLoopService:
         items: List[ContextItem] = []
         system_item = ContextItemBuilder().set_role(RoleType.System)
         uses_builtin_system_prompt = system_prompt is None and self._custom_chat_system_prompt is None
-        if uses_builtin_system_prompt and self._uses_optimized_planner_prompt():
-            # 优化版模板自己写明了名字：昵称说明跟在名字之后，且只说明与名字不同的昵称
+        if uses_builtin_system_prompt and self._get_chat_prompt_name() == "maisaka_chat":
+            # 普通聊天模板自己写明了名字：昵称说明跟在名字之后，且只说明与名字不同的昵称
             bot_nickname_notice = self._build_bot_nickname_notice(selected_history, skip_same_as_bot_name=True)
             resolved_system_prompt = self._build_chat_system_prompt(bot_nickname_notice=bot_nickname_notice)
         else:

@@ -942,64 +942,11 @@ class AttentionDriftConfig(ConfigBase):
     """控制短句、吐槽、语气词等短反应在漂移风格中的使用方式。"""
 
 
-class ExperimentalConfig(ConfigBase):
-    """实验性功能配置类"""
+class CapabilitiesConfig(ConfigBase):
+    """能力配置类"""
 
-    __ui_label__ = "实验性功能"
-    __ui_advanced__ = True
-    __ui_order__ = 140
-
-    planner_message_steering: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "快速反应模式",
-                "en_US": "Quick reaction mode",
-                "ja_JP": "即応モード",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """强制 Planner 使用流式请求；思考或输出期间收到新消息立即中断并重新请求，wait 等待也可被新消息提前结束。不等待静默窗口，也不限制连续打断次数。"""
-
-    replyer_retro_prompt: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "复古回复提示词",
-                "en_US": "Retro reply prompt",
-                "ja_JP": "レトロ返信プロンプト",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
-
-    planner_optimized_prompt: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "优化 Planner 提示词",
-                "en_US": "Optimized planner prompt",
-                "ja_JP": "Planner プロンプトの最適化",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """Planner 改用优化版提示词：以“你的名字是……”的第二人称描述麦麦自己，去掉“替麦麦做决策”的旁观者设定并精简任务说明。Focus 模式仍使用原提示词。"""
-
-    planner_stop_tool: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "优化工具使用",
-                "en_US": "Optimize tool usage",
-                "ja_JP": "ツール使用の最適化",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """给 Planner 提供无参数的 stop() 工具，调用后结束本轮思考并等待新消息，与不输出任何工具时一致。"""
+    __ui_label__ = "能力"
+    __ui_order__ = 30
 
     tool_result_condense: bool = Field(
         default=False,
@@ -1054,6 +1001,40 @@ class ExperimentalConfig(ConfigBase):
         },
     )
     """子代理改为在后台运行：派发后立刻返回任务 id，麦麦可以继续聊天，子代理结束时结论作为一条新消息送回并唤醒 Planner；同时提供查看和终止后台任务的工具。需要先开启“子代理任务派发”。"""
+
+
+class ExperimentalConfig(ConfigBase):
+    """实验性功能配置类"""
+
+    __ui_label__ = "实验性功能"
+    __ui_advanced__ = True
+    __ui_order__ = 140
+
+    planner_message_steering: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "快速反应模式",
+                "en_US": "Quick reaction mode",
+                "ja_JP": "即応モード",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """强制 Planner 使用流式请求；思考或输出期间收到新消息立即中断并重新请求，wait 等待也可被新消息提前结束。不等待静默窗口，也不限制连续打断次数。"""
+
+    replyer_retro_prompt: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "复古回复提示词",
+                "en_US": "Retro reply prompt",
+                "ja_JP": "レトロ返信プロンプト",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""

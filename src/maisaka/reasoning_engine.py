@@ -2078,7 +2078,7 @@ class MaisakaReasoningEngine:
             # 超长结果先交给子代理按当前意图整理，Planner 历史里只留整理后的结论
             condensed_content: str | None = None
             raw_history_content = result.get_history_content()
-            if global_config.experimental.tool_result_condense and should_condense_tool_result(
+            if global_config.capabilities.tool_result_condense and should_condense_tool_result(
                 invocation.tool_name,
                 raw_history_content,
                 success=result.success,

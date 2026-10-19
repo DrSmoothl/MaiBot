@@ -64,7 +64,7 @@ def should_condense_tool_result(
 
     if not success or already_previewed or tool_name in TOOL_RESULT_CONDENSE_EXCLUDED_TOOL_NAMES:
         return False
-    return len(history_content) >= global_config.experimental.tool_result_condense_threshold
+    return len(history_content) >= global_config.capabilities.tool_result_condense_threshold
 
 
 def build_tool_result_condense_task(tool_call: ToolCall, history_content: str, latest_thought: str) -> str:
