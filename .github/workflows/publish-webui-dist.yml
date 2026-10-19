@@ -122,7 +122,7 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Update dashboard dev dependency
+      - name: Wait for PyPI index and update dashboard dev dependency
         env:
           DASHBOARD_DEV_VERSION: ${{ needs.build-and-publish.outputs.webui_version }}
         run: |

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Iterable
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name
+from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 import json
 import os
@@ -19,6 +20,30 @@ DASHBOARD_PACKAGE_PATH = Path("dashboard/package.json")
 PYPROJECT_PATH = Path("pyproject.toml")
 REQUIREMENTS_PATH = Path("requirements.txt")
 PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
+PYPI_SIMPLE_URL = f"https://pypi.org/simple/{canonicalize_name(PACKAGE_NAME)}/"
+
+
+def wait_for_pypi_version(version: Version, timeout: float = 300, interval: float = 10) -> None:
+    # 上传成功并不代表解析器使用的 Simple 索引已可见，修改依赖前先确认目标 wheel 已就绪。
+    deadline = monotonic() + timeout
+    request = Request(PYPI_SIMPLE_URL, headers={"Accept": "application/vnd.pypi.simple.v1+json"})
+    while True:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"等待 {PACKAGE_NAME}=={version} 出现在 {PYPI_SIMPLE_URL} 超时（{timeout:g}s）")
+
+        with urlopen(request, timeout=min(30, remaining)) as response:
+            index_data = json.load(response)
+        for release_file in index_data["files"]:
+            if release_file.get("yanked", False) or not release_file["filename"].endswith(".whl"):
+                continue
+            name, wheel_version, _, _ = parse_wheel_filename(release_file["filename"])
+            if name == canonicalize_name(PACKAGE_NAME) and wheel_version == version:
+                print(f"PyPI Simple 索引已就绪: {PACKAGE_NAME}=={version}", flush=True)
+                return
+
+        print(f"PyPI Simple 索引尚未包含 {PACKAGE_NAME}=={version}，继续等待", flush=True)
+        sleep(min(interval, max(0, deadline - monotonic())))
 
 
 def find_dashboard_requirement(requirements: Iterable[str]) -> Requirement:
@@ -152,6 +177,7 @@ def main() -> None:
     latest_version = get_target_dev_version(target_base_version)
     print(f"Dashboard {target_base_version} 序列目标 dev 版本: {latest_version}")
 
+    wait_for_pypi_version(latest_version)
     pyproject_updated = update_pyproject(latest_version)
     requirements_updated = update_requirements(latest_version)
 
