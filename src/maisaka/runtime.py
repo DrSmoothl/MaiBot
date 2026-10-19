@@ -210,6 +210,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._min_extraction_interval = 30
         self._last_expression_extraction_time = 0.0
         self._trimmed_history_learning_task: Optional[asyncio.Task[None]] = None
+        self._queued_trimmed_learning_progress: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None
         self._expression_learner = ExpressionLearner(session_id)
         self._jargon_learner = JargonLearner(session_id)
         self._jargon_miner = JargonMiner(session_id, session_name=session_name)
@@ -2074,42 +2075,66 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         if not context_messages:
             await report_skip("没有可用于学习的裁切消息")
             return
-        if self._trimmed_history_learning_task is not None and not self._trimmed_history_learning_task.done():
-            logger.info(f"{self.log_prefix} 裁切历史学习仍在后台运行，跳过新的学习批次")
-            await report_skip("上一批学习仍在运行，本次未提交新批次")
-            return
-
         enable_expression_learning = self._enable_expression_learning
         enable_jargon_learning = self._enable_jargon_learning
         enable_high_frequency_learning = enable_expression_learning or enable_jargon_learning
-        if (
-            not enable_expression_learning
-            and not enable_jargon_learning
-            and not enable_high_frequency_learning
+        # 必须在检查后台任务/触发间隔之前收集，否则等待期间裁切的素材会永久漏学。
+        for enabled, learner in (
+            (enable_expression_learning, self._expression_learner),
+            (enable_jargon_learning, self._jargon_learner),
         ):
-            logger.debug(f"{self.log_prefix} 表达学习、黑话学习和高频词学习均未启用，跳过裁切历史学习")
+            if enabled:
+                learner.collect_context_messages(context_messages)
+            else:
+                learner.pending_messages.clear()
+        if not enable_high_frequency_learning:
             await report_skip("表达与黑话学习未启用")
             return
 
-        pending_context_count = len(context_messages)
-        if not self._should_trigger_learning(
-            enabled=(
-                enable_expression_learning
-                or enable_jargon_learning
-                or enable_high_frequency_learning
-            ),
-            feature_name="表达/黑话/高频词学习",
-            last_extraction_time=self._last_expression_extraction_time,
-            pending_count=pending_context_count,
-            min_messages_for_extraction=min(
-                self._expression_learner.min_messages_for_extraction,
-                self._jargon_learner.min_messages_for_extraction,
-            ),
-        ):
-            await report_skip("未达到学习的消息数量或间隔条件")
+        if self._trimmed_history_learning_task is not None and not self._trimmed_history_learning_task.done():
+            if on_progress is not None:
+                async def report_queued_result(progress: Dict[str, Any]) -> None:
+                    # 后续批次复用后台任务；新卡片也要收到结果，不能永久停在“等待”。
+                    await on_progress({
+                        **progress,
+                        "learners": [
+                            {**item, "status": "skipped", "detail": "本轮与上一批合并学习，未单独统计高频词", "contents": []}
+                            if item["name"] == "高频词学习" else item
+                            for item in progress["learners"]
+                        ],
+                    })
+
+                previous_progress = self._queued_trimmed_learning_progress
+                self._queued_trimmed_learning_progress = report_queued_result
+                if previous_progress is not None:
+                    await previous_progress({
+                        "status": "skipped", "detail": "素材已合并到后续裁切批次，结果请查看最新的学习卡片", "learners": [],
+                    })
+                await on_progress({
+                    "status": "waiting",
+                    "detail": "上一批学习仍在运行，已收集本轮素材；达到门槛后自动继续学习",
+                    "learners": [
+                        {
+                            "name": name,
+                            "status": "waiting" if enabled else "disabled",
+                            "contents": [],
+                            "detail": (
+                                learner.pending_messages.waiting_detail(learner.min_messages_for_extraction)
+                                if enabled else "学习未启用"
+                            ),
+                        }
+                        for name, enabled, learner in (
+                            ("表达学习", enable_expression_learning, self._expression_learner),
+                            ("黑话学习", enable_jargon_learning, self._jargon_learner),
+                        )
+                    ] + [{
+                        "name": "高频词学习", "status": "skipped", "contents": [],
+                        "detail": "上一批学习仍在运行，本轮未执行高频词统计",
+                    }],
+                })
             return
 
-        self._last_expression_extraction_time = time.time()
+        pending_context_count = len(context_messages)
         logger.info(
             f"{self.log_prefix} 提交裁切历史后台学习: "
             f"裁切上下文消息数量={pending_context_count} "
@@ -2118,6 +2143,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             f"是否启用高频词学习={enable_high_frequency_learning}"
         )
 
+        self._queued_trimmed_learning_progress = None
         self._trimmed_history_learning_task = asyncio.create_task(
             self._run_trimmed_history_learning(
                 list(context_messages),
@@ -2150,23 +2176,45 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         ]
 
         async def publish(status: str) -> None:
+            progress = {"status": status, "detail": "", "learners": [dict(item) for item in learners]}
             if on_progress is not None:
                 # 每次发送完整快照，回放时同一张裁切卡片可恢复到最后状态。
-                await on_progress({"status": status, "detail": "", "learners": [dict(item) for item in learners]})
+                await on_progress(progress)
+            if self._queued_trimmed_learning_progress is not None:
+                await self._queued_trimmed_learning_progress(progress)
 
-        async def run_learning(item: Dict[str, Any]) -> bool:
+        learning_sources = {
+            "表达学习": self._expression_learner,
+            "黑话学习": self._jargon_learner,
+        }
+
+        async def run_learning(item: Dict[str, Any], delay: float) -> bool:
             contents: List[str] = []
             try:
-                if item["name"] == "表达学习":
-                    changed = await self._expression_learner.learn_from_context_messages(
-                        context_messages, learned_contents=contents
-                    )
-                    item["detail"] = f"写入 {len(contents)} 条表达" if changed else "无新增成果或未满足学习条件"
-                elif item["name"] == "黑话学习":
-                    changed = await self._jargon_learner.learn_from_context_messages(
-                        context_messages, self._jargon_miner, learned_contents=contents
-                    )
-                    item["detail"] = f"处理 {len(contents)} 个黑话候选" if contents else "无候选或未满足学习条件"
+                if item["name"] in learning_sources:
+                    learner = learning_sources[item["name"]]
+                    if len(learner.pending_messages) >= learner.min_messages_for_extraction and delay > 0:
+                        item.update(status="waiting", detail=f"距离上次学习不足 {self._min_extraction_interval} 秒，等待 {delay:.1f} 秒后自动执行")
+                        await publish("waiting")
+                        await asyncio.sleep(delay)
+                    enabled = self._enable_expression_learning if item["name"] == "表达学习" else self._enable_jargon_learning
+                    if not enabled:
+                        learner.pending_messages.clear()
+                        item.update(status="disabled", detail="学习开关已关闭，已清空待学习素材")
+                        return False
+                    dropped_count = learner.pending_messages.dropped_count
+                    item["status"] = "running"
+                    if len(learner.pending_messages) >= learner.min_messages_for_extraction:
+                        self._last_expression_extraction_time = time.time()
+                    if item["name"] == "表达学习":
+                        changed = await self._expression_learner.learn_from_context_messages([], learned_contents=contents)
+                    else:
+                        changed = await self._jargon_learner.learn_from_context_messages(
+                            [], self._jargon_miner, learned_contents=contents
+                        )
+                    item.update(status=learner.learning_status, detail=learner.learning_detail)
+                    if dropped_count and "淘汰" not in item["detail"]:
+                        item["detail"] += f"；积压超过 100 条，已淘汰最旧的 {dropped_count} 条素材"
                 else:
                     updated_count = await asyncio.to_thread(
                         update_high_frequency_terms_from_context_messages,
@@ -2174,36 +2222,56 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                         learned_contents=contents,
                     )
                     changed = updated_count > 0
-                    item["detail"] = f"更新 {updated_count} 个词条"
-                item.update(status="completed", contents=contents)
+                    item.update(
+                        status="completed" if changed else "no_results",
+                        detail=f"更新 {updated_count} 个词条" if changed else "用户正文中没有出现至少 2 次的有效词条",
+                    )
             except asyncio.CancelledError:
-                item.update(status="cancelled", contents=contents, detail="学习已取消")
+                item.update(status="cancelled", detail="学习已取消")
                 raise
             except Exception as exc:
                 logger.exception(f"{self.log_prefix} 裁切历史{item['name']}异常")
-                item.update(status="failed", contents=contents, detail=str(exc))
+                item.update(status="failed", detail=str(exc))
                 changed = False
             finally:
+                item["contents"] = contents
                 await publish("running")
             return changed
 
         await publish("running")
-        try:
-            results = await asyncio.gather(*(run_learning(item) for item in learners if item["status"] == "running"))
-        except asyncio.CancelledError:
-            await publish("cancelled")
-            raise
-        await publish("failed" if any(item["status"] == "failed" for item in learners) else "completed")
-        if any(results):
-            logger.info(f"{self.log_prefix} 裁切历史学习成功")
-        else:
-            logger.debug(f"{self.log_prefix} 裁切历史学习未产生结果")
+        batch = [item for item in learners if item["status"] == "running"]
+        while batch:
+            delay = max(0.0, self._min_extraction_interval - (time.time() - self._last_expression_extraction_time))
+            try:
+                results = await asyncio.gather(*(run_learning(item, delay) for item in batch))
+            except asyncio.CancelledError:
+                await publish("cancelled")
+                raise
+            statuses = {item["status"] for item in learners}
+            final_status = next(
+                (status for status in ("failed", "waiting", "completed", "no_results") if status in statuses),
+                "skipped",
+            )
+            await publish(final_status)
+            if any(results):
+                logger.info(f"{self.log_prefix} 裁切历史学习成功")
+            # 执行期间的新素材和并发闸门暂拒的素材，满足数量条件后自动继续；
+            # 无效配置、无法解析聊天流等明确跳过的情况不会自动重试。
+            batch = [
+                item for item in learners
+                if item["name"] in learning_sources
+                and item["status"] not in ("disabled", "failed")
+                and not learning_sources[item["name"]].learning_retry_blocked
+                and len(learning_sources[item["name"]].pending_messages)
+                >= learning_sources[item["name"]].min_messages_for_extraction
+            ]
 
     def _handle_trimmed_history_learning_done(self, task: asyncio.Task[None]) -> None:
         """清理裁切历史后台学习任务状态。"""
 
         if self._trimmed_history_learning_task is task:
             self._trimmed_history_learning_task = None
+            self._queued_trimmed_learning_progress = None
         if task.cancelled():
             logger.debug(f"{self.log_prefix} 裁切历史后台学习已取消")
             return
@@ -2234,39 +2302,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         finally:
             if self._trimmed_history_learning_task is task:
                 self._trimmed_history_learning_task = None
-
-    def _should_trigger_learning(
-        self,
-        *,
-        enabled: bool,
-        feature_name: str,
-        last_extraction_time: float,
-        pending_count: int,
-        min_messages_for_extraction: int,
-    ) -> bool:
-        """判断周期性学习任务是否满足执行条件。"""
-
-        if not enabled:
-            logger.debug(f"{self.log_prefix} {feature_name}未启用，跳过本轮学习")
-            return False
-
-        elapsed = time.time() - last_extraction_time
-        if elapsed < self._min_extraction_interval:
-            logger.debug(
-                f"{self.log_prefix} {feature_name}触发间隔不足: "
-                f"已过={elapsed:.2f} 秒 阈值={self._min_extraction_interval} 秒"
-            )
-            return False
-
-        if pending_count < min_messages_for_extraction:
-            logger.debug(
-                f"{self.log_prefix} {feature_name}待处理消息不足: "
-                f"待处理={pending_count} 阈值={min_messages_for_extraction} "
-                f"缓存总量={len(self.message_cache)}"
-            )
-            return False
-
-        return True
 
     async def _init_mcp(self) -> None:
         """初始化 MCP 工具并注册到统一工具层。"""

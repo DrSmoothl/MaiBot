@@ -78,11 +78,11 @@ export interface FlowStepEvent {
     removed_count: number
     remaining_count: number
     learning: {
-      status: 'pending' | 'running' | 'completed' | 'skipped' | 'cancelled' | 'failed'
+      status: 'pending' | 'running' | 'waiting' | 'completed' | 'no_results' | 'skipped' | 'cancelled' | 'failed'
       detail: string
       learners: {
         name: string
-        status: 'running' | 'completed' | 'disabled' | 'failed' | 'cancelled'
+        status: 'running' | 'waiting' | 'completed' | 'no_results' | 'skipped' | 'disabled' | 'failed' | 'cancelled'
         detail: string
         contents: string[]
       }[]

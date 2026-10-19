@@ -2169,8 +2169,8 @@ function ContextTrimCard({ data, open, onOpenChange }: {
 }) {
   const trim = data.trim
   const labels = {
-    pending: '准备学习', running: '正在构建', completed: '已完成',
-    skipped: '未提交学习', cancelled: '已取消', disabled: '未启用', failed: '失败',
+    pending: '准备学习', running: '正在学习', waiting: '等待学习', completed: '已完成',
+    no_results: '无成果', skipped: '已跳过', cancelled: '已取消', disabled: '未启用', failed: '失败',
   }
   const statusVariant = (status: keyof typeof labels) =>
     status === 'completed' ? 'success' : status === 'failed' ? 'destructive' : 'outline'
