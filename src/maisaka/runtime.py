@@ -24,7 +24,7 @@ from src.common.data_models.message_component_data_model import (
 from src.common.logger import get_logger
 from src.common.message_repository import find_messages
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils, JargonConfigUtils
-from src.config.config import global_config
+from src.config.config import global_config, model_config
 from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.expression_learner import ExpressionLearner
 from src.learners.jargon_learner import JargonLearner
@@ -68,6 +68,9 @@ from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids
 from src.maisaka.turn_trigger import IdleBackoffController, MessageTurnScheduler
 from src.mcp_module.provider import MCPToolProvider
 from src.mcp_module.service import get_mcp_service
+from src.web_search.provider import WebSearchToolProvider
+from src.web_search.config import resolve_web_search_config
+from src.web_search.service import WebSearchService
 from src.plugin_runtime.tool_provider import PluginToolProvider
 from src.services.message_word_frequency_service import update_high_frequency_terms_from_context_messages
 
@@ -1515,6 +1518,12 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         self._tool_registry.register_provider(
             MaisakaBuiltinToolProvider(self._reasoning_engine.build_builtin_tool_handlers())
+        )
+        self._tool_registry.register_provider(
+            WebSearchToolProvider(
+                WebSearchService(get_mcp_service()),
+                lambda: resolve_web_search_config(model_config.web, model_config.model_task_config.web_search),
+            )
         )
         self._tool_registry.register_provider(PluginToolProvider())
         self._tool_registry.register_provider(MCPToolProvider(get_mcp_service()))

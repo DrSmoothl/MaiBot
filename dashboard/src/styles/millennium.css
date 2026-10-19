@@ -1745,6 +1745,16 @@
   margin-top: 0;
 }
 
+/* 联网服务与厂商共用列表，分隔线放在服务条目前，不在列表末尾留底线。 */
+:root[data-dashboard-style='millennium']
+  [data-model-config-page='true']
+  aside.border
+  > div:last-child
+  > button[data-web-service-row='true'] {
+  border-top: 2px dashed var(--mil-rule);
+  border-bottom: 0;
+}
+
 :root[data-dashboard-style='millennium']
   [data-model-config-page='true']
   aside.border

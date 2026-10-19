@@ -114,6 +114,8 @@ import {
 } from './model/deepSeekExtraParams'
 import { ProviderForm } from './modelProvider/ProviderForm'
 import { ProviderSidebar } from './modelProvider/ProviderSidebar'
+import { WebSearchDialog } from './webSearch/WebSearchDialog'
+import { WebSearchTaskCard } from './webSearch/WebSearchTaskCard'
 import type { APIProvider } from './modelProvider/types'
 
 // 导入模块化的类型定义和组件
@@ -221,6 +223,7 @@ function ModelConfigPageContent() {
 
   // 核心领域 hook：models / apiProviders / model_task_config 三份草稿及其全部编排
   const mc = useModelConfig()
+  const [webSearchEditor, setWebSearchEditor] = useState<{ name: string | null } | null>(null)
   const {
     // 草稿态
     models,
@@ -348,7 +351,7 @@ function ModelConfigPageContent() {
         (field) =>
           field.type === 'object' &&
           (advancedTaskSettingsVisible || !field.advanced || (taskConfig?.[field.name]?.model_list.length ?? 0) > 0)
-      ) ?? [],
+      ).sort((a, b) => Number(a.name === 'web_search') - Number(b.name === 'web_search')) ?? [],
     [advancedTaskSettingsVisible, taskConfig, taskConfigSchema]
   )
   const selectedTaskField =
@@ -825,6 +828,10 @@ function ModelConfigPageContent() {
                 testResults={testResults}
                 onSelectProvider={setModelProviderFilter}
                 onAdd={() => openProviderDialog(null, null)}
+                onAddWebSearch={() => setWebSearchEditor({ name: null })}
+                onEditWebSearch={(name) => setWebSearchEditor({ name })}
+                webConfig={mc.webConfig}
+                assignedWebService={taskConfig?.web_search?.model_list[0] ?? ''}
               />
 
               <section
@@ -988,11 +995,11 @@ function ModelConfigPageContent() {
             <div className="grid min-h-0 gap-4 lg:flex-1 lg:grid-cols-4 lg:overflow-hidden">
               <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border lg:h-full">
                 <div className="flex items-center justify-between gap-2 border-b px-3 py-2.5">
-                  <h2 className="text-sm font-semibold">模型类别</h2>
+                  <h2 className="text-sm font-semibold">功能任务</h2>
                   {taskConfigSchema.fields.some((field) => field.advanced) && (
                     <div className="flex shrink-0 items-center gap-2">
                       <Label htmlFor="advanced-task-settings" className="cursor-pointer whitespace-nowrap text-xs">
-                        高级设置
+                        高级
                       </Label>
                       <Switch
                         id="advanced-task-settings"
@@ -1005,7 +1012,7 @@ function ModelConfigPageContent() {
                 {/* 移动端用紧凑选择器，避免类别列表占满屏幕并接管页面纵向滚动。 */}
                 <div className="min-w-0 p-2 lg:hidden">
                   <Select value={selectedTaskField.name} onValueChange={setSelectedTaskName}>
-                    <SelectTrigger className="w-full min-w-0" aria-label="模型类别">
+                    <SelectTrigger className="w-full min-w-0" aria-label="功能任务">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1014,7 +1021,7 @@ function ModelConfigPageContent() {
 
                         return (
                           <SelectItem key={field.name} value={field.name}>
-                            {resolveFieldLabel(field, i18n.language)}
+                            {TASK_CONFIGS.find((task) => task.key === field.name)?.title ?? resolveFieldLabel(field, i18n.language)}
                             {field.advanced ? ' · 高级' : ''}
                             {assignedCount > 0 ? ` · 已配置 ${assignedCount}` : ' · 未配置'}
                           </SelectItem>
@@ -1050,7 +1057,7 @@ function ModelConfigPageContent() {
                           <span className="min-w-0 flex-1">
                             <span className="flex min-w-0 items-center gap-1.5">
                               <span className="truncate text-sm font-medium">
-                                {resolveFieldLabel(field, i18n.language)}
+                                {TASK_CONFIGS.find((task) => task.key === field.name)?.title ?? resolveFieldLabel(field, i18n.language)}
                               </span>
                               {field.advanced && (
                                 <span
@@ -1102,8 +1109,15 @@ function ModelConfigPageContent() {
                     exit={reduceTaskMotion ? undefined : { opacity: 0, x: -8 }}
                     transition={{ duration: reduceTaskMotion ? 0 : 0.16, ease: 'easeOut' }}
                   >
-                    <TaskConfigCard
-                      title={resolveFieldLabel(selectedTaskField, i18n.language)}
+                    {selectedTaskField.name === 'web_search' ? (
+                      <WebSearchTaskCard
+                        config={mc.webConfig}
+                        selected={taskConfig.web_search?.model_list[0] ?? ''}
+                        onChange={(names) => updateTaskConfig('web_search', 'model_list', names)}
+                        onAdd={() => setWebSearchEditor({ name: null })}
+                      />
+                    ) : <TaskConfigCard
+                      title={selectedTaskMetadata?.title ?? resolveFieldLabel(selectedTaskField, i18n.language)}
                       description={selectedTaskField.description}
                       taskConfig={taskConfig[selectedTaskField.name] ?? { model_list: [] }}
                       modelNames={selectedTaskModelNames}
@@ -1120,8 +1134,8 @@ function ModelConfigPageContent() {
                           selectedEmbeddingModel={taskConfig.embedding?.model_list[0] ?? ''}
                         />
                       )}
-                    />
-                    {(taskConfig[selectedTaskField.name]?.model_list.length ?? 0) > 0 && (
+                    />}
+                    {selectedTaskField.name !== 'web_search' && (taskConfig[selectedTaskField.name]?.model_list.length ?? 0) > 0 && (
                       <TaskUsageStats
                         key={selectedTaskField.name}
                         taskName={selectedTaskField.name}
@@ -2504,14 +2518,26 @@ function ModelConfigPageContent() {
       </AlertDialog>
 
       {/* 重启遮罩层 */}
-      {/* 手机页头右上角的「+」：添加模型与厂商 */}
+      {webSearchEditor && (
+        <WebSearchDialog
+          config={mc.webConfig}
+          providers={apiProviders}
+          models={models}
+          editingName={webSearchEditor.name}
+          assignedService={taskConfig?.web_search?.model_list[0] ?? ''}
+          onClose={() => setWebSearchEditor(null)}
+          onSave={mc.saveWebConfig}
+        />
+      )}
+      {/* 手机页头右上角的「+」：添加模型、厂商与联网服务 */}
       <MobileHeaderActions>
         <MobileAddMenu
           label="添加"
           items={[
             { label: '添加 LLM 模型', onSelect: () => openAddModelDialog('llm') },
             { label: '添加嵌入模型', onSelect: () => openAddModelDialog('embedding') },
-            { label: '添加厂商', onSelect: () => openProviderDialog(null, null) },
+            { label: '添加 LLM 模型提供商', onSelect: () => openProviderDialog(null, null) },
+            { label: '添加联网搜索', onSelect: () => setWebSearchEditor({ name: null }) },
           ]}
         />
       </MobileHeaderActions>

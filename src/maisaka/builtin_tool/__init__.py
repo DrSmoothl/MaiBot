@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional
 
-from src.config.config import global_config
+from src.config.config import global_config, model_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 from src.maisaka.focus import focus_mode_manager
@@ -174,8 +174,8 @@ def _is_builtin_tool_enabled_by_config(entry: BuiltinToolEntry) -> bool:
         # 只有后台子代理才有需要查看和终止的任务
         return global_config.experimental.planner_subagent and global_config.experimental.advanced_sub_agent
     if entry.name == "read_tool_result":
-        # 只有开启超长结果整理时才会有被暂存的原文可读
-        return global_config.experimental.tool_result_condense
+        # 长结果整理和统一联网工具均会暂存原文，任一开启都需要回查入口。
+        return global_config.experimental.tool_result_condense or bool(model_config.model_task_config.web_search.model_list)
     return True
 
 
