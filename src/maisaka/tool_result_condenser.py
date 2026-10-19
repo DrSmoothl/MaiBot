@@ -139,11 +139,10 @@ async def condense_tool_result(
         f"{runtime.log_prefix} 工具 {tool_call.func_name} 的结果已由子代理整理 "
         f"原始={len(history_content)}字 整理后={len(condensed_content)}字"
     )
-    # 原文暂存起来，并在整理结论下面告诉 Planner 怎么取回
+    # 原文暂存起来，并在整理结论顶部告诉 Planner 怎么取回
     result_id = tool_result_store.save(str(runtime.session_id), tool_call.func_name, history_content)
     return (
-        f"[以下是子代理对 {tool_call.func_name} 原始结果（共 {len(history_content)} 字）的整理]\n"
-        f"{condensed_content}\n"
-        f'（原始结果已保存为 {result_id}。需要上面没有的细节时，调用 read_tool_result(result_id="{result_id}") 分段读取原文，'
-        "或加 keyword 参数直接查找。）"
+        f'<压缩后信息；原始结果已保存为 {result_id}。需要上面没有的细节时，调用 read_tool_result(result_id="{result_id}") 分段读取原文，'
+        "或加 keyword 参数直接查找。>\n"
+        f"{condensed_content}"
     )

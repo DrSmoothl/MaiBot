@@ -1,4 +1,4 @@
-"""WebUI 出站请求的 SSL 上下文复用。
+"""Host 与 WebUI 出站请求的 SSL 上下文复用。
 
 httpx.AsyncClient 在构造时会创建 3 个 SSLContext（主 transport 与 http/https
 两个代理 transport），每个 SSLContext 都要完整加载一遍 CA 证书包
@@ -12,16 +12,19 @@ httpx.AsyncClient 在构造时会创建 3 个 SSLContext（主 transport 与 htt
 """
 
 from ssl import SSLContext
+from threading import Lock
 from typing import Optional
 
 import httpx
 
 _shared_ssl_context: Optional[SSLContext] = None
+_ssl_context_lock = Lock()
 
 
 def get_shared_ssl_context() -> SSLContext:
     """获取进程内共享的 SSLContext，仅在首次调用时创建。"""
     global _shared_ssl_context
-    if _shared_ssl_context is None:
-        _shared_ssl_context = httpx.create_ssl_context()
-    return _shared_ssl_context
+    with _ssl_context_lock:
+        if _shared_ssl_context is None:
+            _shared_ssl_context = httpx.create_ssl_context()
+        return _shared_ssl_context

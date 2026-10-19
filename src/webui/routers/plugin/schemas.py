@@ -3,24 +3,6 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-class FetchRawFileRequest(BaseModel):
-    owner: str = Field(..., description="仓库所有者", examples=["MaiM-with-u"])
-    repo: str = Field(..., description="仓库名称", examples=["plugin-repo"])
-    branch: str = Field(..., description="分支名称", examples=["main"])
-    file_path: str = Field(..., description="文件路径", examples=["plugin_details.json"])
-    mirror_id: Optional[str] = Field(None, description="指定镜像源 ID")
-    custom_url: Optional[str] = Field(None, description="自定义完整 URL")
-
-
-class FetchRawFileResponse(BaseModel):
-    success: bool = Field(..., description="是否成功")
-    data: Optional[str] = Field(None, description="文件内容")
-    error: Optional[str] = Field(None, description="错误信息")
-    mirror_used: Optional[str] = Field(None, description="使用的镜像源")
-    attempts: int = Field(..., description="尝试次数")
-    url: Optional[str] = Field(None, description="实际请求的 URL")
-
-
 class CloneRepositoryRequest(BaseModel):
     owner: str = Field(..., description="仓库所有者", examples=["MaiM-with-u"])
     repo: str = Field(..., description="仓库名称", examples=["plugin-repo"])

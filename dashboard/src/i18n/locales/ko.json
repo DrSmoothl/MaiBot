@@ -162,6 +162,14 @@
       "messages": "메시지 수"
     },
     "distributions": {
+      "metric": "통계 지표",
+      "costs": "비용",
+      "tokens": "Token",
+      "ownerTokens": "호출 출처별 Token 분포",
+      "modelTokens": "모델별 Token 분포",
+      "moduleTokens": "모듈별 Token 분포",
+      "requestTypeTokens": "요청 유형별 Token 분포",
+      "chatTokens": "채팅별 Token 분포",
       "ownerCosts": "호출 소스 비용 분포",
       "modelCosts": "모델 비용 분포",
       "moduleCosts": "모듈 비용 분포",

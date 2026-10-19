@@ -71,7 +71,7 @@ import { cn } from '@/lib/utils'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
 import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
-import { fetchPluginList, getLocalPluginChangelog, getLocalPluginReadme, getPluginRuntimeComponents } from '@/lib/plugin-api'
+import { fetchPluginList, fetchPluginDocument, getPluginRuntimeComponents } from '@/lib/plugin-api'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
 import { PluginStats } from '@/components/plugin-stats'
 import { PluginWebUIManagerPanel } from '@/components/plugin-webui-manager'
@@ -676,7 +676,7 @@ function PluginDetailsPanel({
   useEffect(() => {
     let cancelled = false
 
-    getLocalPluginReadme(plugin.id)
+    fetchPluginDocument(plugin.id, 'readme', { preferLocal: true })
       .then((content) => {
         if (!cancelled) {
           setReadme(content)
@@ -895,7 +895,7 @@ function PluginDocumentFloatingPanel({ plugin, onClose }: PluginDocumentFloating
       setError('')
       try {
         if (mode === 'readme') {
-          const content = await getLocalPluginReadme(plugin.id)
+          const content = await fetchPluginDocument(plugin.id, 'readme', { preferLocal: true })
           if (!cancelled) {
             setReadme(content)
           }
@@ -904,7 +904,7 @@ function PluginDocumentFloatingPanel({ plugin, onClose }: PluginDocumentFloating
 
         const localChangelog = plugin.changelog?.trim()
           ? plugin.changelog
-          : await getLocalPluginChangelog(plugin.id)
+          : await fetchPluginDocument(plugin.id, 'changelog', { preferLocal: true })
         if (!cancelled) {
           setChangelog(localChangelog ?? '')
         }

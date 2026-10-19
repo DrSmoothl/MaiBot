@@ -571,9 +571,9 @@ def test_clone_repository_reports_plugin_and_mirror_progress(tmp_path, monkeypat
     events = []
 
     from src.common.git_source import GitSource
-    from src.webui.services import plugin_market_service
+    from src.plugin_market import sources as market_sources
 
-    monkeypatch.setattr(plugin_market_service, "download_source", lambda: GitSource.select("cnb"))
+    monkeypatch.setattr(market_sources, "download_source", lambda: GitSource.select("cnb"))
     monkeypatch.setattr(mirror_service_module, "_validate_custom_outbound_url", lambda value: value)
 
     async def collect_progress(**kwargs):

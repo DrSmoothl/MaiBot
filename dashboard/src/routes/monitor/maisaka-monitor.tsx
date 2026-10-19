@@ -2218,6 +2218,40 @@ function ContextTrimCard({ data, open, onOpenChange }: {
   )
 }
 
+function CollapsedPlannerToolSummary({ data, isProgress }: {
+  data: PlannerFinalizedEvent
+  isProgress: boolean
+}) {
+  const results = new Map((data.tools ?? []).map((tool) => [tool.tool_call_id, tool]))
+  const calls = new Map((data.planner?.tool_calls ?? []).map((tool) => [tool.id, tool.name]))
+  for (const tool of results.values()) calls.set(tool.tool_call_id, tool.tool_name)
+
+  if (calls.size === 0) return <>{isProgress ? '进行中' : data.final_state.end_detail}</>
+
+  return (
+    <span className="inline-flex max-w-full items-center gap-3 align-middle">
+      {Array.from(calls, ([id, name]) => {
+        const result = results.get(id)
+        const running = isProgress && data.active_tool_call_id === id && !result
+        const status = result ? result.success ? '执行成功' : '执行失败' : running ? '执行中' : isProgress ? '等待执行' : '无执行结果'
+        return (
+          <span key={id} className="inline-flex min-w-0 items-center gap-1.5" title={`${name}：${status}`}>
+            <span
+              role="img"
+              aria-label={status}
+              className={cn(
+                'h-2 w-2 shrink-0 rounded-full',
+                result ? result.success ? 'bg-emerald-500' : 'bg-red-500' : running ? 'animate-pulse bg-amber-500' : 'bg-muted-foreground/40'
+              )}
+            />
+            <span className="truncate font-mono">{name}</span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
 export function TimelineEventRenderer({
   entry,
   onJumpToMessage,
@@ -2295,7 +2329,9 @@ export function TimelineEventRenderer({
         <TraceRound
           label={`第 ${data.cycle_id} 轮`}
           time={<EventTimestamp startedAt={data.planner_started_at} endedAt={data.planner_ended_at} />}
-          summary={entry.type === 'planner.progress' ? '进行中' : roundOpen ? undefined : endDetail}
+          summary={roundOpen
+            ? entry.type === 'planner.progress' ? '进行中' : undefined
+            : <CollapsedPlannerToolSummary data={data} isProgress={entry.type === 'planner.progress'} />}
           metrics={data.planner && (
             <span title={`Planner 输入 ${data.planner.prompt_tokens} + 输出 ${data.planner.completion_tokens} tokens`}>
               {formatMs(data.planner.duration_ms)} · {data.planner.prompt_tokens + data.planner.completion_tokens} tok

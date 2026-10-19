@@ -11,7 +11,7 @@ import httpx
 import jieba
 
 from src.common.logger import get_logger
-from src.webui.utils.http_client import get_shared_ssl_context
+from src.common.http_client import get_shared_ssl_context
 
 from .ai_search_models import AISearchCandidate
 

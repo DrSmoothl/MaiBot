@@ -2,7 +2,9 @@
 
 from os import getenv
 from pathlib import Path
+from pydantic import BaseModel, model_validator
 from threading import RLock
+from time import monotonic
 from typing import Any, Dict, Literal, Optional
 from urllib.parse import quote, urlencode
 import asyncio
@@ -10,13 +12,18 @@ import json
 import os
 import tempfile
 
-from pydantic import BaseModel, model_validator
-
 from src.common.git_source import GitSource
-from src.webui.utils.http_client import get_shared_ssl_context
+from src.common.logger import get_logger
+from src.common.http_client import get_shared_ssl_context
+
+from .cache import market_cache
 
 SETTINGS_FILE = Path("data/plugin_market.json")
 MARKET_BASE_URL = getenv("MAIBOT_PLUGIN_MARKET_BASE_URL", "http://hyybuth.xyz:10059").rstrip("/")
+CATALOG_TTL = 30 * 60
+MARKET_TTL = 5 * 60
+REQUEST_TIMEOUT = 8
+logger = get_logger("plugin_market")
 _settings_lock = RLock()
 
 
@@ -45,12 +52,8 @@ def load_source_settings() -> PluginSourceSettings:
         return PluginSourceSettings.model_validate(data)
 
 
-def use_github_market_data() -> bool:
-    return load_source_settings().information_source != "official"
-
-
 def save_source_settings(settings: PluginSourceSettings) -> None:
-    from src.webui.utils.network_security import validate_public_url
+    from src.common.network_security import validate_public_url
 
     if settings.custom_download_prefix:
         settings = settings.model_copy(update={
@@ -74,20 +77,50 @@ def download_source() -> GitSource:
     return GitSource.select(settings.download_source, settings.custom_download_prefix or "")
 
 
-async def fetch_information_file(file_path: str, source: Optional[str] = None) -> Dict[str, Any]:
-    from src.webui.utils.network_security import validate_public_url
+async def fetch_information_file(
+    file_path: str, source: Optional[str] = None, force_refresh: bool = False,
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(_fetch_information_file, file_path, source, force_refresh)
 
-    selected = source if source is not None else (await asyncio.to_thread(load_source_settings)).information_source
+
+def _fetch_information_file(file_path: str, source: Optional[str], force_refresh: bool) -> Dict[str, Any]:
+    from src.common.network_security import validate_public_url
+
+    selected = source if source is not None else load_source_settings().information_source
     url = GitSource.select(selected).raw_url("Mai-with-u", "plugin-repo", "main", file_path)
-    url = await asyncio.to_thread(validate_public_url, url, allow_fake_ip=True)
-    data = await asyncio.to_thread(GitSource.read_text, url, 20, get_shared_ssl_context())
-    return {"success": True, "data": data, "mirror_used": selected, "attempts": 1, "url": url}
+
+    def load() -> str:
+        validate_public_url(url, allow_fake_ip=True)
+        return GitSource.read_text(url, REQUEST_TIMEOUT, get_shared_ssl_context())
+
+    ttl = MARKET_TTL if file_path == "plugin_versions.json" else CATALOG_TTL
+    data, cache = market_cache.get(url, load, ttl, force_refresh)
+    logger.debug(f"插件市场索引: source={selected} cache={cache} url={url}")
+    return {"success": True, "data": data, "mirror_used": selected, "attempts": 1, "url": url, "cache": cache}
 
 
-async def request_market(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+async def request_market(path: str, params: Dict[str, Any], force_refresh: bool = False) -> Dict[str, Any]:
     url = f"{MARKET_BASE_URL}/api/v2/market/{path}?{urlencode(params)}"
-    return await asyncio.to_thread(GitSource.read_json, url, 20, get_shared_ssl_context())
+
+    def load() -> Dict[str, Any]:
+        return GitSource.read_json(url, REQUEST_TIMEOUT, get_shared_ssl_context())
+
+    def read() -> Dict[str, Any]:
+        started = monotonic()
+        try:
+            data, cache = market_cache.get(url, load, MARKET_TTL, force_refresh)
+        except (OSError, ValueError):
+            logger.warning(f"插件市场请求失败: url={url} elapsed={monotonic() - started:.2f}s")
+            raise
+        logger.debug(f"插件市场请求: url={url} cache={cache} elapsed={monotonic() - started:.2f}s")
+        return {**data, "cache": cache, "source_url": url}
+
+    return await asyncio.to_thread(read)
 
 
-async def request_market_detail(plugin_id: str, maibot_version: str) -> Dict[str, Any]:
-    return await request_market(f"plugins/{quote(plugin_id, safe='')}", {"maibot_version": maibot_version})
+async def request_market_detail(
+    plugin_id: str, maibot_version: str, force_refresh: bool = False,
+) -> Dict[str, Any]:
+    return await request_market(
+        f"plugins/{quote(plugin_id, safe='')}", {"maibot_version": maibot_version}, force_refresh,
+    )

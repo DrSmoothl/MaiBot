@@ -11,11 +11,11 @@ import json
 import shutil
 import subprocess
 
+from src.plugin_market.releases import PluginRelease, PluginReleaseEntry
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator, PluginDependencyDefinition
 from src.webui.services.git_mirror_service import get_git_mirror_service
 
 from .progress import update_progress
-from .releases import PluginRelease, PluginReleaseEntry
 from .support import (
     get_plugin_candidate_paths,
     iter_plugin_directories,

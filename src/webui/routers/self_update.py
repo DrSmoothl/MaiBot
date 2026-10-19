@@ -25,7 +25,7 @@ from src.common.self_update import (
 )
 from src.webui.dependencies import require_auth
 from src.webui.routers.system import schedule_restart
-from src.webui.utils.network_security import validate_public_url
+from src.common.network_security import validate_public_url
 
 router = APIRouter(prefix="/system/self-update", tags=["system"], dependencies=[Depends(require_auth)])
 logger = get_logger("webui_self_update")

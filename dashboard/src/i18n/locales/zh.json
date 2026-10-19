@@ -188,6 +188,14 @@
       "messages": "消息数量"
     },
     "distributions": {
+      "metric": "统计指标",
+      "costs": "花费",
+      "tokens": "Token",
+      "ownerTokens": "调用来源Token分布",
+      "modelTokens": "模型Token分布",
+      "moduleTokens": "模块Token分布",
+      "requestTypeTokens": "请求类型Token分布",
+      "chatTokens": "聊天流Token分布",
       "ownerCosts": "调用来源花费分布",
       "modelCosts": "模型花费分布",
       "moduleCosts": "模块花费分布",

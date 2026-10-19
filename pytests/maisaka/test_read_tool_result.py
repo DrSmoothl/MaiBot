@@ -50,9 +50,10 @@ async def test_condensed_result_tells_planner_how_to_fetch_the_original() -> Non
     history_content = await condense_tool_result(runtime, tool_call, original, "想推荐插件")
 
     result_id = history_content.split("原始结果已保存为 ")[1].split("。")[0]
-    assert history_content.startswith("[以下是子代理对 maibot_plugin_list 原始结果")
-    assert "共 200 个插件，代表：插件A。" in history_content
-    assert f'read_tool_result(result_id="{result_id}")' in history_content.splitlines()[-1]
+    assert history_content.splitlines() == [
+        f'<压缩后信息；原始结果已保存为 {result_id}。需要上面没有的细节时，调用 read_tool_result(result_id="{result_id}") 分段读取原文，或加 keyword 参数直接查找。>',
+        "共 200 个插件，代表：插件A。",
+    ]
     assert tool_result_store.get("chat-condense", result_id).content == original
 
 

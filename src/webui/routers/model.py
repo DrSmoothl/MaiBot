@@ -30,8 +30,8 @@ from src.llm_models.payload_content.tool_option import ToolCall
 from src.llm_models.request_snapshot import format_request_snapshot_log_info
 from src.llm_models.utils_model import LLMOrchestrator, LLMResponseResult
 from src.webui.dependencies import require_auth
-from src.webui.utils.http_client import get_shared_ssl_context
-from src.webui.utils.network_security import validate_public_url
+from src.common.http_client import get_shared_ssl_context
+from src.common.network_security import validate_public_url
 
 logger = get_logger("webui")
 

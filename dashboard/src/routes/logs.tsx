@@ -1149,15 +1149,15 @@ export function LogViewerPage({ defaultTab }: LogViewerPageProps) {
           data-log-viewer-switcher-compact={includeTopbarActions && compact ? 'true' : undefined}
         >
           <TabsTrigger value="terminal" size={includeTopbarActions ? 'sm' : 'default'} className={triggerClassName} aria-label="终端">
-            <Terminal className="h-4 w-4" />
+            <Terminal className="h-4 w-4 shrink-0" />
             <span className={labelClassName}>终端</span>
           </TabsTrigger>
           <TabsTrigger value="reasoning" size={includeTopbarActions ? 'sm' : 'default'} className={triggerClassName} aria-label="推理过程">
-            <BrainCircuit className="h-4 w-4" />
+            <BrainCircuit className="h-4 w-4 shrink-0" />
             <span className={labelClassName}>推理过程</span>
           </TabsTrigger>
           <TabsTrigger value="statistics" size={includeTopbarActions ? 'sm' : 'default'} className={triggerClassName} aria-label="详细统计">
-            <BarChart3 className="h-4 w-4" />
+            <BarChart3 className="h-4 w-4 shrink-0" />
             <span className={labelClassName}>详细统计</span>
           </TabsTrigger>
         </TabsList>

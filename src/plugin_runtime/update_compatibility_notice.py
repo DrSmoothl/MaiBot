@@ -2,11 +2,9 @@
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
 
-import asyncio
 import json
-import time
 
 from src.common.logger import get_logger
 from src.common.version import PROJECT_ROOT
@@ -17,13 +15,6 @@ logger = get_logger("plugin_update_compatibility")
 
 UpdateCheckStatus = Literal["checking", "available", "unavailable", "not_found", "check_failed"]
 MarketplaceLoader = Callable[[], Awaitable[List[Dict[str, Any]]]]
-
-_PLUGIN_DETAILS_FILE = "plugin_details.json"
-_MARKETPLACE_CACHE_TTL_SECONDS = 5 * 60
-_MARKETPLACE_FETCH_TIMEOUT_SECONDS = 10
-_marketplace_cache: Optional[Tuple[float, List[Dict[str, Any]]]] = None
-_marketplace_cache_source: Optional[str] = None
-
 
 @dataclass(frozen=True)
 class IncompatiblePluginNotice:
@@ -210,46 +201,11 @@ def mark_compatible_marketplace_updates(
 
 
 async def _fetch_marketplace_plugins() -> List[Dict[str, Any]]:
-    global _marketplace_cache, _marketplace_cache_source
+    from src.plugin_market.service import get_catalog
 
-    from src.webui.services.plugin_market_service import load_source_settings
-
-    source = (await asyncio.to_thread(load_source_settings)).information_source
-    now = time.monotonic()
-    if _marketplace_cache_source == source and _marketplace_cache is not None and now - _marketplace_cache[0] < _MARKETPLACE_CACHE_TTL_SECONDS:
-        return _marketplace_cache[1]
-
-    # 启动检查与商店使用同一信息源，不跟随代码下载镜像或自动切换来源。
-    from src.webui.services.plugin_market_service import fetch_information_file, request_market, use_github_market_data
-
-    async def fetch() -> Dict[str, Any]:
-        if await asyncio.to_thread(use_github_market_data):
-            return await fetch_information_file(_PLUGIN_DETAILS_FILE)
-        from src.config.config import MMC_VERSION
-
-        response = await request_market("plugins/summary", {"maibot_version": MMC_VERSION, "compatible_only": "false"})
-        plugins = [{"id": item["marketplace_id"], "manifest": item["manifest"]} for item in response["plugins"]]
-        return {"success": True, "data": json.dumps(plugins)}
-
-    try:
-        result = await asyncio.wait_for(fetch(), timeout=_MARKETPLACE_FETCH_TIMEOUT_SECONDS)
-    except TimeoutError as exc:
-        raise RuntimeError("获取插件市场清单超时") from exc
-
-    if not result.get("success"):
-        raise RuntimeError(str(result.get("error") or "获取插件市场清单失败"))
-
-    raw_data = result.get("data")
-    if not isinstance(raw_data, str):
-        raise ValueError("插件市场清单响应缺少 data 字段")
-    marketplace_plugins = json.loads(raw_data)
-    if not isinstance(marketplace_plugins, list):
-        raise ValueError("插件市场清单顶层必须为数组")
-
-    normalized_plugins = [item for item in marketplace_plugins if isinstance(item, dict)]
-    _marketplace_cache = (time.monotonic(), normalized_plugins)
-    _marketplace_cache_source = source
-    return normalized_plugins
+    # 启动检查同样使用公共市场服务，不维护独立索引或缓存。
+    catalog = await get_catalog()
+    return [{"id": item["marketplace_id"], "manifest": item["manifest"]} for item in catalog["plugins"]]
 
 
 async def collect_update_incompatible_plugins(

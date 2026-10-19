@@ -1,3 +1,5 @@
+"""Host 与 WebUI 共用的出站地址校验。"""
+
 from typing import Iterable, Set
 from urllib.parse import urlparse
 

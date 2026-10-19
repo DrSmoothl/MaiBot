@@ -146,6 +146,14 @@
       "chat": "連絡先/グループ", "messages": "メッセージ数"
     },
     "distributions": {
+      "metric": "統計指標",
+      "costs": "費用",
+      "tokens": "Token",
+      "ownerTokens": "呼び出し元別Token分布",
+      "modelTokens": "モデル別Token分布",
+      "moduleTokens": "モジュール別Token分布",
+      "requestTypeTokens": "リクエスト種別Token分布",
+      "chatTokens": "チャット別Token分布",
       "ownerCosts": "呼び出し元の費用分布", "modelCosts": "モデル費用分布", "moduleCosts": "モジュール費用分布",
       "requestTypeCosts": "リクエスト種別の費用分布", "chatMessages": "チャットメッセージ分布", "chatCosts": "チャットストリーム費用分布"
     },

@@ -2,19 +2,16 @@
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.error import HTTPError
 from urllib.parse import urlparse
 
 import asyncio
-import json
 import os
 import shutil
 import subprocess
 
 from src.common.git_source import GitSource
 from src.common.logger import get_logger
-from src.webui.utils.http_client import get_shared_ssl_context
-from src.webui.utils.network_security import validate_public_url
+from src.common.network_security import validate_public_url
 
 logger = get_logger("webui.git_mirror")
 
@@ -118,29 +115,6 @@ class GitMirrorService:
             logger.error(f"检测 Git 时发生错误: {e}")
             return {"installed": False, "error": f"检测 Git 时发生错误: {str(e)}"}
 
-    async def fetch_raw_file(
-        self, owner: str, repo: str, branch: str, file_path: str,
-        mirror_id: Optional[str] = None, custom_url: Optional[str] = None,
-        report_progress: bool = True,
-    ) -> Dict[str, Any]:
-        """只读取选定的信息源；旧 mirror_id 参数不覆盖独立的源设置。"""
-        from .plugin_market_service import load_source_settings
-
-        settings = await asyncio.to_thread(load_source_settings)
-        # 官方市场服务不提供任意仓库 Raw；附件使用其权威 GitHub 地址。
-        source = GitSource.select("github" if settings.information_source == "official" else settings.information_source)
-        try:
-            url = custom_url or source.raw_url(owner, repo, branch, file_path)
-            url = await asyncio.to_thread(_validate_custom_outbound_url, url)
-            data = await asyncio.to_thread(GitSource.read_text, url, 20, get_shared_ssl_context())
-            if file_path.endswith(".json"):
-                json.loads(data)
-            return {"success": True, "data": data, "mirror_used": "custom" if custom_url else source.id,
-                    "attempts": 1, "url": url}
-        except (OSError, ValueError) as exc:
-            return {"success": False, "error": str(exc), "mirror_used": source.id,
-                    "attempts": 1, "status_code": exc.code if isinstance(exc, HTTPError) else 400 if isinstance(exc, ValueError) else 502}
-
     async def pull_repository(
         self,
         repository_path: Path,
@@ -230,7 +204,7 @@ class GitMirrorService:
             checked = await _run_git_process(["git", "check-ref-format", f"refs/heads/{branch}"], cwd=repository_path)
             if checked.returncode or branch.startswith("-"):
                 return {"success": False, "error": "无效的更新分支", "status_code": 400}
-            from .plugin_market_service import download_source
+            from src.plugin_market.sources import download_source
 
             source = await asyncio.to_thread(download_source)
             try:
@@ -318,7 +292,7 @@ class GitMirrorService:
             )
 
         # 插件下载固定使用设置中唯一选中的源，旧请求的 mirror_id 不再覆盖全局选择。
-        from .plugin_market_service import download_source
+        from src.plugin_market.sources import download_source
 
         source = await asyncio.to_thread(download_source)
         return await self._clone_from_mirror(

@@ -395,6 +395,14 @@
   padding-inline: 0.625rem;
 }
 
+/* 日志紧凑切换键只显示图标，清除文字标签的内边距以保留图标空间。 */
+:root[data-dashboard-style='millennium']
+  [data-dashboard-header='true']
+  [data-log-viewer-switcher-compact='true']
+  [data-dashboard-tabs-trigger='true'] {
+  padding-inline: 0;
+}
+
 :root[data-dashboard-style='millennium']
   [data-dashboard-header='true']
   [data-dashboard-tabs-trigger='true']

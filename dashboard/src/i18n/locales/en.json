@@ -188,6 +188,14 @@
       "messages": "Messages"
     },
     "distributions": {
+      "metric": "Statistics metric",
+      "costs": "Cost",
+      "tokens": "Tokens",
+      "ownerTokens": "Tokens by caller",
+      "modelTokens": "Tokens by model",
+      "moduleTokens": "Tokens by module",
+      "requestTypeTokens": "Tokens by request type",
+      "chatTokens": "Tokens by chat",
       "ownerCosts": "Call source cost distribution",
       "modelCosts": "Model cost distribution",
       "moduleCosts": "Module cost distribution",
