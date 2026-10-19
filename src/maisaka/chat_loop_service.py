@@ -344,7 +344,7 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具透传给 replyer 的额外参数，不含目标消息 ID 等内部参数。",
                         },
                     },
                     required=[
@@ -429,7 +429,7 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具透传给 replyer 的额外参数，不含目标消息 ID 等内部参数。",
                         },
                     },
                     required=[
@@ -509,7 +509,7 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         },
                         "reply_tool_args": {
                             "type": "object",
-                            "description": "reply 工具里除 msg_id、set_quote 外透传给 replyer 的额外参数。",
+                            "description": "reply 工具透传给 replyer 的额外参数，不含目标消息 ID 等内部参数。",
                         },
                         "prompt_tokens": {
                             "type": "integer",
