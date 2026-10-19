@@ -795,17 +795,6 @@ export function ToolCallsCollapsible({ toolCalls }: { toolCalls: unknown[] }) {
                 <Badge variant="secondary" className="font-mono">
                   {toolCall.name}
                 </Badge>
-                {toolCall.sourceLabel && (
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      'px-1.5 py-0 text-[11px]',
-                      getToolCallSourceClassName(toolCall.source)
-                    )}
-                  >
-                    {toolCall.sourceLabel}
-                  </Badge>
-                )}
               </div>
               <pre className="bg-muted/20 mt-2 rounded-md border p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
                 {stringifyStructuredValue(toolCall.arguments)}
