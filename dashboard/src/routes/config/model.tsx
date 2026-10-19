@@ -47,6 +47,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { SplitDropdownSelect } from '@/components/ui/split-dropdown-select'
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
@@ -758,53 +759,44 @@ function ModelConfigPageContent() {
               <TabsTrigger value="tasks" className="w-full" data-tour="tasks-tab-trigger">功能分配</TabsTrigger>
             </TabsList>
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
-              <Select
+              <SplitDropdownSelect
                 value="active"
+                label="模型配置副本"
+                icon={<History />}
+                className="flex-1 sm:w-[190px] sm:flex-none"
+                disabled={versionsLoading || saving || autoSaving || Boolean(switchingConfigVersion)}
                 onValueChange={(value) => {
                   if (value !== 'active') {
                     void handleSwitchConfigVersion(value)
                   }
                 }}
-                disabled={versionsLoading || saving || autoSaving || Boolean(switchingConfigVersion)}
-              >
-                <SelectTrigger className="min-w-0 flex-1 sm:w-[190px] sm:flex-none" aria-label="模型配置副本">
-                  <History className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
-                  <SelectValue placeholder={activeConfigVersion?.label || '默认配置'} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">
-                    {activeConfigVersion?.label || '默认配置'}
-                  </SelectItem>
-                  {configVersions.map((version) => (
-                    <SelectItem key={version.id} value={version.id} disabled={!version.valid}>
-                      {version.label} · {formatVersionTime(version.modified_at)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                title="保存当前配置副本"
-                aria-label="保存当前配置副本"
-                disabled={saving || autoSaving || creatingConfigVersion}
-                onClick={() => setCreateVersionDialogOpen(true)}
-              >
-                {creatingConfigVersion ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                title="管理配置副本"
-                aria-label="管理配置副本"
-                onClick={() => setManageVersionsDialogOpen(true)}
-              >
-                <History className="h-4 w-4" />
-              </Button>
+                options={[
+                  { value: 'active', label: activeConfigVersion?.label || '默认配置' },
+                  ...configVersions.map((version) => ({
+                    value: version.id,
+                    label: version.label,
+                    description: formatVersionTime(version.modified_at),
+                    disabled: !version.valid,
+                  })),
+                ]}
+                actions={[
+                  {
+                    id: 'save',
+                    label: '保存副本',
+                    ariaLabel: '保存当前配置副本',
+                    icon: creatingConfigVersion ? <Loader2 className="animate-spin" /> : <Copy />,
+                    disabled: saving || autoSaving || creatingConfigVersion,
+                    onSelect: () => setCreateVersionDialogOpen(true),
+                  },
+                  {
+                    id: 'manage',
+                    label: '管理副本',
+                    ariaLabel: '管理配置副本',
+                    icon: <History />,
+                    onSelect: () => setManageVersionsDialogOpen(true),
+                  },
+                ]}
+              />
             </div>
           </div>
           {/* 厂商与模型合并配置视图 */}

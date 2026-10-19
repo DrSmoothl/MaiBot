@@ -4,7 +4,7 @@ import { SegmentedControl } from '@/components/ui/management'
 import { formatTalkTimeRange, getTimelineSegments } from '@/lib/time-range'
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ArrowLeft, Hand, Maximize, Minus, Moon, MousePointer2, Palette, Plus, Sun, ThumbsUp, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Copy, Hand, History, Maximize, Minus, Moon, MousePointer2, Palette, Plus, Sun, ThumbsUp, Trash2, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { StatusLight } from '@/components/ui/status-light'
@@ -19,6 +19,7 @@ import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { DataPanel, PageFrame } from '@/components/ui/surface'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SplitDropdownSelect } from '@/components/ui/split-dropdown-select'
 import { Slider } from '@/components/ui/slider'
 import { DiscreteSlider } from '@/components/ui/discrete-slider'
 import { Switch } from '@/components/ui/switch'
@@ -108,6 +109,8 @@ function Samples({ label, dark }: { label: string; dark: boolean }) {
   const [scope, setScope] = useState('all')
   const [quoteFrequency, setQuoteFrequency] = useState('occasionally')
   const [driftLevel, setDriftLevel] = useState('active')
+  const [configVersion, setConfigVersion] = useState('default')
+  const [configAction, setConfigAction] = useState('可切换配置或点击左侧操作')
   return (
     <main className="control-samples">
       <h1>全部控件 <small>{label} · {dark ? '夜间' : '日间'}</small></h1>
@@ -159,6 +162,29 @@ function Samples({ label, dark }: { label: string; dark: boolean }) {
           <Select defaultValue="small"><SelectTrigger controlSize="sm" aria-label="紧凑下拉"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="small">紧凑下拉</SelectItem></SelectContent></Select>
           <Button size="sm" variant="outline">紧凑按钮</Button>
         </div>
+      </section>
+      <section id="split-dropdown-select">
+        <h2>左右布局下拉菜单 · 内凹入口 / 操作按钮 / 配置列表</h2>
+        <div className="sample-fields">
+          <SplitDropdownSelect
+            label="配置副本示例"
+            value={configVersion}
+            onValueChange={setConfigVersion}
+            icon={<History />}
+            options={[
+              { value: 'default', label: '默认配置' },
+              { value: 'daily', label: '日常聊天', description: '2026-10-19 10:00' },
+              { value: 'reasoning', label: '深度思考', description: '2026-10-18 18:30' },
+              { value: 'disabled', label: '不可用配置', disabled: true },
+            ]}
+            actions={[
+              { id: 'save', label: '保存副本', icon: <Copy />, onSelect: () => setConfigAction('已点击保存副本') },
+              { id: 'manage', label: '管理副本', icon: <History />, onSelect: () => setConfigAction('已点击管理副本') },
+            ]}
+          />
+          <SplitDropdownSelect label="禁用的配置菜单" value="default" onValueChange={setConfigVersion} options={[{ value: 'default', label: '不可用' }]} actions={[]} disabled />
+        </div>
+        <p role="status" className="text-sm text-muted-foreground">{configAction}</p>
       </section>
       <section>
         <h2>拖动条 · 普通 / 数值 / 禁用</h2>
