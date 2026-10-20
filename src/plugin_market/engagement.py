@@ -4,10 +4,9 @@ from dataclasses import dataclass
 from pydantic import BaseModel, Field, model_validator
 from typing import Any, Dict, Optional
 from urllib.parse import quote
-import asyncio
 import httpx
 
-from src.common.http_client import get_shared_ssl_context
+from src.common.http_client import get_shared_ssl_context_async
 
 from . import sources
 from .cache import market_cache
@@ -55,7 +54,7 @@ async def _request(method: str, path: str, payload: Optional[Dict[str, Any]] = N
     url = f"{sources.MARKET_BASE_URL}{path}"
     try:
         # SSLContext 的首次创建也在线程池执行，避免占住任意一个事件循环。
-        ssl_context = await asyncio.to_thread(get_shared_ssl_context)
+        ssl_context = await get_shared_ssl_context_async()
         async with httpx.AsyncClient(verify=ssl_context, timeout=sources.REQUEST_TIMEOUT) as client:
             response = await client.request(method, url, json=payload)
     except httpx.HTTPError as exc:

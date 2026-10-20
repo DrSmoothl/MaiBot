@@ -6,6 +6,8 @@ import json
 
 import httpx
 
+from src.common.http_client import get_shared_ssl_context_async
+
 from ..config import WebServiceConfig
 from ..models import WebSearchError
 
@@ -23,6 +25,7 @@ class HTTPAdapter:
         # 每次调用拥有自己的客户端，避免 bot 与 WebUI 的事件循环共享连接池。
         try:
             async with httpx.AsyncClient(
+                verify=await get_shared_ssl_context_async(),
                 timeout=self.config.timeout, transport=self.transport, follow_redirects=False
             ) as client:
                 async with client.stream(
