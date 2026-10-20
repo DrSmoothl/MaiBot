@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from src.webui.utils import network_security
+from src.common import network_security
 
 
 def _install_webui_url_check_config(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> None:

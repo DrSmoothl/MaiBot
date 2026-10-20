@@ -162,7 +162,7 @@ class PersonalityConfig(ConfigBase):
     __ui_label__ = "人格"
 
     personality: str = Field(
-        default="是一个大二女大学生，现在正在上网和群友聊天。善于用人类的角度思考问题，聊天偏日常。",
+        default="是女大学生，现在正在上网和群友聊天。一般不包容且善良，但有时候有点一反常态，表现出锐利攻击性。善于用人类的角度思考问题，聊天比较日常。",
         json_schema_extra={
             "label": {
                 "zh_CN": "人格设定",
@@ -179,7 +179,7 @@ class PersonalityConfig(ConfigBase):
 
     behavior_style: str = Field(
         default=(
-            "是大二女大学生，现在正在上网和群友聊天。善于用人类的角度思考问题，聊天偏日常。不会没话题硬找话题，"
+            "是大二女大学生，现在正在上网和群友聊天。善于用人类的角度思考问题，聊天偏日常。不会没话题硬找话题，具有足够的自主性，会自行搜集信息理解内容。"
         ),
         json_schema_extra={
             "label": {
@@ -736,10 +736,10 @@ class ChatReplyStyleConfig(ConfigBase):
 
     group_chat_prompt: str = Field(
         default=(
-            "你正在qq群里聊天，下面是群里正在聊的内容，聊天中包含文字，图片和表情包等消息。\n"
-            "回复尽量简短一些。最好一次对一个话题进行回复，但必须考虑不同群友发言之间的交互，免得啰嗦或者回复内容太乱。请注意把握聊天内容。\n"
-            "不要总是提及自己的身份背景，根据聊天内容自由发挥，但是要日常不浮夸，不要刻意找话题。\n"
-            "不用刻意回复其他人发送的表情包，只要关注表情包表达的含义。你可以适当发送表情包表达情绪。控制回复的频率，不要每个人的消息都回复，优先回复你感兴趣的或者主动提及你的，适当回复其他话题。\n"
+            "下面是聊天中的的内容，聊天中包含文字，图片和表情包等消息。\n"
+            "回复尽量简短一些。最好一次对一个话题进行回复，但必须考虑不同群友发言之间的交互，免得啰嗦或者回复内容太乱。\n"
+            "根据聊天内容自由发挥，但是要日常不浮夸，不要刻意找话题。\n"
+            "不用刻意回复其他人发送的表情包。你可以适当发送表情包表达情绪。如果有人不喜欢你或者不理你，就不要强行回复，回复前读空气。不要每个人的消息都回复，适当回复其他话题。可以适当回过头回复之前用户的消息。\n"
         ),
         json_schema_extra={
             "label": {
@@ -942,64 +942,11 @@ class AttentionDriftConfig(ConfigBase):
     """控制短句、吐槽、语气词等短反应在漂移风格中的使用方式。"""
 
 
-class ExperimentalConfig(ConfigBase):
-    """实验性功能配置类"""
+class CapabilitiesConfig(ConfigBase):
+    """能力配置类"""
 
-    __ui_label__ = "实验性功能"
-    __ui_advanced__ = True
-    __ui_order__ = 140
-
-    planner_message_steering: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "快速反应模式",
-                "en_US": "Quick reaction mode",
-                "ja_JP": "即応モード",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """强制 Planner 使用流式请求；思考或输出期间收到新消息立即中断并重新请求，wait 等待也可被新消息提前结束。不等待静默窗口，也不限制连续打断次数。"""
-
-    replyer_retro_prompt: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "复古回复提示词",
-                "en_US": "Retro reply prompt",
-                "ja_JP": "レトロ返信プロンプト",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。"""
-
-    planner_optimized_prompt: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "优化 Planner 提示词",
-                "en_US": "Optimized planner prompt",
-                "ja_JP": "Planner プロンプトの最適化",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """Planner 改用优化版提示词：以“你的名字是……”的第二人称描述麦麦自己，去掉“替麦麦做决策”的旁观者设定并精简任务说明。Focus 模式仍使用原提示词。"""
-
-    planner_stop_tool: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "优化工具使用",
-                "en_US": "Optimize tool usage",
-                "ja_JP": "ツール使用の最適化",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """给 Planner 提供无参数的 stop() 工具，调用后结束本轮思考并等待新消息，与不输出任何工具时一致。"""
+    __ui_label__ = "能力"
+    __ui_order__ = 30
 
     tool_result_condense: bool = Field(
         default=False,
@@ -1055,6 +1002,27 @@ class ExperimentalConfig(ConfigBase):
     )
     """子代理改为在后台运行：派发后立刻返回任务 id，麦麦可以继续聊天，子代理结束时结论作为一条新消息送回并唤醒 Planner；同时提供查看和终止后台任务的工具。需要先开启“子代理任务派发”。"""
 
+
+class ExperimentalConfig(ConfigBase):
+    """实验性功能配置类"""
+
+    __ui_label__ = "实验性功能"
+    __ui_advanced__ = True
+    __ui_order__ = 140
+
+    planner_message_steering: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "快速反应模式",
+                "en_US": "Quick reaction mode",
+                "ja_JP": "即応モード",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """强制 Planner 使用流式请求；思考或输出期间收到新消息立即中断并重新请求，wait 等待也可被新消息提前结束。不等待静默窗口，也不限制连续打断次数。"""
+
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""
 
@@ -1069,7 +1037,7 @@ class ExperimentalConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """让麦麦同一时间只专注一个聊天流，适合直播或高强度聊天场景。"""
+    """让同组聊天共享一个持续思考的 Planner；全部消息共同进入上下文，工具通过 session_id 指定处理目标。"""
 
     focus_on_private: bool = Field(
         default=False,
@@ -1108,24 +1076,7 @@ class ExperimentalConfig(ConfigBase):
             "x-widget": "custom",
         },
     )
-    """_wrap_把聊天流分组后，同组共享 Focus，不同组互不抢占。"""
-
-    focus_cool_time: int = Field(
-        default=120,
-        ge=1,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "Focus 冷却时间",
-                "en_US": "Focus cool time",
-                "ja_JP": "Focus クールタイム",
-            },
-            "x-widget": "input",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-row": "focus-cool-time",
-        },
-    )
-    """当前关注的聊天多久没继续处理后，允许被其他聊天唤醒。"""
+    """_wrap_同组聊天共享 Planner 与完整上下文，不同组独立运行；未匹配的聊天各自形成独立组。"""
 
 
 class MessageReceiveConfig(ConfigBase):
@@ -4898,18 +4849,6 @@ class LogConfig(ConfigBase):
     )
     """每个聊天最多保留多少组 Prompt 预览。"""
 
-    maisaka_reply_effect_limit: int = Field(
-        default=256,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "回复效果记录数",
-                "en_US": "Reply effect record limit",
-                "ja_JP": "返信効果記録数",
-            },
-            "x-widget": "input",
-        },
-    )
-    """每个聊天最多保留多少条回复效果记录。"""
 
     event_loop_watchdog_enabled: bool = Field(
         default=False,
@@ -5003,6 +4942,19 @@ class DebugConfig(ConfigBase):
     __ui_parent__ = "log"
     __ui_label__ = "其他"
 
+    replyer_retro_prompt: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "复古回复提示词",
+                "en_US": "Retro reply prompt",
+                "ja_JP": "レトロ返信プロンプト",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。模型名称或标识包含 mai_replier（兼容 mai-replier），或为 v2p1-contract、v2p1-raw 时自动开启且不可关闭，全部移走后自动关闭；其他模型可手动开启。"""
+
     enable_console_input: bool = Field(
         default=True,
         json_schema_extra={
@@ -5042,18 +4994,6 @@ class DebugConfig(ConfigBase):
     )
     """保存 Planner、工具调用及聊天回想的完整推理记录，供 WebUI 查看，与终端显示独立。"""
 
-    enable_reply_effect_tracking: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "记录回复效果",
-                "en_US": "Track reply effects",
-                "ja_JP": "返信効果を記録",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """记录回复效果评分，方便观察回复质量。"""
 
     keep_prompt_preview_json_base64: bool = Field(
         default=False,

@@ -16,7 +16,7 @@ def test_sampler_captures_blocked_loop_without_locals_and_stops(monkeypatch):
         messages.append(message)
         sampled.set()
 
-    monkeypatch.setattr(diagnostics.logger, "warning", record)
+    monkeypatch.setattr(diagnostics.logger, "debug", record)
 
     async def blocked_startup():
         secret = "sensitive-local-value"

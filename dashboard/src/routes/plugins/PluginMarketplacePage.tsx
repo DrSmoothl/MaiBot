@@ -29,8 +29,6 @@ import {
   type InstalledPlugin,
 } from '@/lib/plugin-api'
 import {
-  getCachedPluginStatsSummary,
-  getPluginStatsSummary,
   getPluginUserStates,
   likePlugin,
   recordPluginDownload,
@@ -75,31 +73,15 @@ interface PluginMarketplacePageProps {
   embedded?: boolean
 }
 
-const resolvePluginStats = (
-  plugin: PluginInfo,
-  statsSummary: Record<string, PluginStatsData>
-): PluginStatsData | undefined => {
-  // 服务模式的清单与统计来自同一份快照，缓存首屏和刷新后都使用它，避免混入独立统计缓存。
-  if (plugin.market_data_source === 'service') {
-    return plugin.marketplace_stats
-  }
-  const statsIds = [
-    plugin.manifest?.id,
-  ].filter((id): id is string => Boolean(id))
-
-  return statsIds.map(id => statsSummary[id]).find(Boolean)
-}
-
 type PluginVoteOverlay = PluginVoteState & Partial<Pick<PluginStatsData, 'likes' | 'dislikes'>>
 
 const buildPluginStatsMap = (
-  pluginList: PluginInfo[],
-  statsSummary: Record<string, PluginStatsData>
+  pluginList: PluginInfo[]
 ): Record<string, PluginStatsData> => {
   const statsMap: Record<string, PluginStatsData> = {}
 
   for (const plugin of pluginList) {
-    const stats = resolvePluginStats(plugin, statsSummary)
+    const stats = plugin.marketplace_stats
     if (!stats) {
       continue
     }
@@ -373,7 +355,6 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
     const init = async () => {
       const cachedPluginList = getCachedPluginList(showCompatibleOnly)
-      const cachedStatsSummary = getCachedPluginStatsSummary()
       // 已点赞状态只影响按钮样式，不阻塞清单加载；本次会话内已产生的点赞结果优先
       void getPluginUserStates().then((userStates) => {
         if (!isUnmounted) {
@@ -382,7 +363,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
       })
       if (cachedPluginList?.length && !isUnmounted) {
         setPlugins(cachedPluginList)
-        setPluginStats(buildPluginStatsMap(cachedPluginList, cachedStatsSummary ?? {}))
+        setPluginStats(buildPluginStatsMap(cachedPluginList))
         setLoading(false)
         console.info('加载插件市场中：展示缓存')
       } else {
@@ -454,7 +435,7 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
             setLoading(true)
           }
           setError(null)
-          // 插件中心的复合列表直接携带统计；GitHub 模式仍单独请求统计摘要。
+          // 所有信息源都读取公共市场列表，统计能力和可用数据随列表返回。
           // 清单失败时不等待统计请求，保证错误提示及时返回。
           const [gitStatus, maimaiVersion, marketPlugins, installed] = await Promise.all([
             checkGitStatus(),
@@ -485,19 +466,9 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
           syncInstalledPlugins(installed)
           const mergedData = mergeInstalledPluginInfo(marketPlugins, installed)
 
-          setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary ?? {}))
+          setPluginStats(buildPluginStatsMap(mergedData))
           setPlugins(mergedData)
           setLoading(false)
-          if (marketPlugins.some((plugin) => plugin.market_data_source === 'service')) return
-          // 统计是附加信息；请求失败时明确记录错误，保留已经加载的市场清单。
-          try {
-            const statsSummary = await getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
-            if (isUnmounted) return
-            setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
-            console.info('插件市场已更新')
-          } catch (error) {
-            console.warn('刷新插件统计失败:', error)
-          }
         } catch (error) {
           if (!isUnmounted) {
             const message = error instanceof Error ? error.message : '加载插件失败'

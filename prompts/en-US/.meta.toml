@@ -121,7 +121,12 @@ description = "Extracts group-specific jargon candidates from real chat and lets
 [maisaka_chat_focus]
 display_name = "Focus Planner"
 advanced = true
-description = "Maisaka planner template for Focus mode, choosing the next action from the active chat and cross-chat overview."
+description = "Shared Focus planner for all chats in a group, selecting each tool's target through session_id."
+
+[maisaka_focus_summary]
+display_name = "Focus context compression"
+advanced = true
+description = "Compress older shared context while preserving chat provenance, facts, completed actions and unfinished tasks."
 
 [maisaka_chat_optimized]
 display_name = "Planner (Optimized)"

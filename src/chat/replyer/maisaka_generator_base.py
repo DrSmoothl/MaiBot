@@ -48,16 +48,12 @@ from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.messages import (
     ContentContextMessage,
-    ToolResultMediaMessage,
     LLMContextMessage,
     ModelOutputContextMessage,
-    ReferenceMessage,
     SessionBackedMessage,
-    ToolResultMessage,
     build_context_items_from_history_entry,
 )
 from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
-from src.maisaka.memory.mid_term import MemorySummaryMessage
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
@@ -677,7 +673,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         think_level: int = 1,
     ) -> List[ContextItem]:
         # 复古模式将人设与注意事项放在首条 system 消息，其余模板作为一条 user 消息发送
-        if global_config.experimental.replyer_retro_prompt:
+        if global_config.debug.replyer_retro_prompt:
             return self._build_retro_request_messages(
                 chat_history=chat_history,
                 reply_message=reply_message,
@@ -959,11 +955,14 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
     def _is_replyer_filtered_history_message(message: LLMContextMessage) -> bool:
         """判断 replyer 侧需要过滤掉的非真实聊天上下文。"""
 
-        return isinstance(message, (ToolResultMediaMessage, MemorySummaryMessage, ReferenceMessage, ToolResultMessage))
+        # user 角色不代表真实聊天：子代理结论、插件主动任务和焦点通知也使用该角色。
+        # 只接收真实收发的 IM 消息（含复杂消息子类），避免新增内部消息类型时再次漏入。
+        # 平台通知同样带有原始 IM 消息，必须根据原消息的通知标记统一排除。
+        return not isinstance(message, SessionBackedMessage) or message.original_message.is_notify
 
     @classmethod
     def _should_keep_replyer_history_message(cls, message: LLMContextMessage) -> bool:
-        """replyer 只接收真实聊天上下文，不接收参考、工具结果、工具媒体和聊天回想。"""
+        """replyer 只接收真实聊天上下文，排除内部通知、模型输出、参考、工具结果和聊天回想。"""
 
         return not cls._is_replyer_filtered_history_message(message)
 

@@ -203,6 +203,10 @@ class MainSystem:
         logger.info(t("startup.chat_manager_initialized"))
         await memory_automation_service.start()
 
+        from src.computer.service import computer_service
+
+        await computer_service.start()
+
         # await asyncio.sleep(0.5) #防止logger输出飞了
 
         # 触发 ON_START 事件，事件总线会统一桥接到 IPC 插件运行时。
@@ -289,6 +293,17 @@ async def main() -> None:
         await system.initialize()
         await system.schedule_tasks()
     finally:
+        from src.chat.heart_flow.heartflow_manager import heartflow_manager
+        from src.common.logger import stop_ws_broadcasts
+        from src.common.shutdown import request_shutdown
+        from src.computer.service import computer_service
+
+        request_shutdown("main_finally")
+        await stop_ws_broadcasts()
+        if system.app is not None:
+            await system.app.stop()
+        await heartflow_manager.shutdown()
+        await computer_service.stop()
         if system.webui_server:
             await system.webui_server.shutdown()
         if system.watchdog_task is not None:

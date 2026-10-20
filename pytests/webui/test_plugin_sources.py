@@ -6,14 +6,16 @@ import json
 import pytest
 
 from src.webui.services import git_mirror_service as git
-from src.webui.services import plugin_market_service as market
+from src.plugin_market import sources as market
+from src.plugin_market.cache import MarketCache
 
 
 @pytest.fixture(autouse=True)
 def isolated_sources(tmp_path, monkeypatch):
+    monkeypatch.setattr(market, "market_cache", MarketCache())
     monkeypatch.setattr(market, "SETTINGS_FILE", tmp_path / "sources.json")
     monkeypatch.setattr(git, "_validate_custom_outbound_url", lambda value: value)
-    monkeypatch.setattr("src.webui.utils.network_security.validate_public_url", lambda value, **kw: value)
+    monkeypatch.setattr("src.common.network_security.validate_public_url", lambda value, **kw: value)
 
 
 def configure(**values):
@@ -59,45 +61,38 @@ def test_download_uses_only_selected_source_even_on_failure(monkeypatch, tmp_pat
 
 
 def test_release_index_cache_does_not_cross_information_sources(monkeypatch):
-    from src.webui.routers.plugin import releases
+    from src.plugin_market import service as releases
 
-    monkeypatch.setattr(releases, "_cache", None)
-    monkeypatch.setattr(releases, "_cache_source", None)
     calls = []
 
-    async def fetch(path, source):
-        calls.append(source)
-        return {"success": True, "data": '{"schema_version": 1, "plugins": []}'}
+    def fetch(url, *args):
+        calls.append(urlsplit(url).hostname)
+        return '{"schema_version": 1, "plugins": []}'
 
-    monkeypatch.setattr(releases, "fetch_information_file", fetch)
+    monkeypatch.setattr(market.GitSource, "read_text", fetch)
     configure(information_source="cnb")
     asyncio.run(releases.load_release_index())
     asyncio.run(releases.load_release_index())
     configure(information_source="github")
     asyncio.run(releases.load_release_index())
-    assert calls == ["cnb", "github"]
+    assert calls == ["cnb.cool", "raw.githubusercontent.com"]
 
 
 @pytest.mark.parametrize("source", ["official", "cnb", "github"])
 def test_marketplace_listing_only_calls_selected_information_source(monkeypatch, source):
-    from src.webui.routers.plugin import marketplace
+    from src.plugin_market import service
 
     configure(information_source=source)
-    monkeypatch.setattr(marketplace, "require_plugin_token", lambda token: None)
     calls = []
 
-    async def request(path, params):
-        calls.append(path)
+    def fail(url, *args):
+        calls.append(url)
         raise OSError("offline")
 
-    monkeypatch.setattr(marketplace, "request_market", request)
-    if source == "official":
-        from fastapi import HTTPException
-
-        with pytest.raises(HTTPException) as error:
-            asyncio.run(marketplace.get_marketplace(False, None))
-        assert error.value.status_code == 502
-        assert calls == ["plugins/summary"]
-    else:
-        assert asyncio.run(marketplace.get_marketplace(False, None)) == {"source": "github"}
-        assert calls == []
+    monkeypatch.setattr(market.GitSource, "read_json", fail)
+    monkeypatch.setattr(market.GitSource, "read_text", fail)
+    with pytest.raises(OSError, match="offline"):
+        asyncio.run(service.get_catalog())
+    assert calls
+    expected = {"official": "hyybuth.xyz", "cnb": "cnb.cool", "github": "raw.githubusercontent.com"}[source]
+    assert all(urlsplit(url).hostname == expected for url in calls)

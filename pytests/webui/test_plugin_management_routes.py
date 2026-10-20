@@ -164,20 +164,8 @@ def test_toggle_plugin_applies_enabled_state_before_returning(client: TestClient
     (plugin_path / "config.toml").write_text("[plugin]\nenabled = false\n", encoding="utf-8")
     waited_states: List[Tuple[str, bool]] = []
 
-    async def fake_inspect_plugin_config(
-        plugin_id: str,
-        config_data: Optional[Dict[str, Any]] = None,
-        *,
-        use_provided_config: bool = False,
-    ) -> InspectPluginConfigResultPayload:
-        assert plugin_id == "test.demo"
-        assert config_data is None
-        assert use_provided_config is False
-        return InspectPluginConfigResultPayload(
-            success=True,
-            enabled=False,
-            normalized_config={"plugin": {"enabled": False}},
-        )
+    # 缺包插件无法冷导入；切换开关必须先保存 enabled，再交给运行时安装依赖。
+    inspect_config = AsyncMock(side_effect=AssertionError("toggle imported plugin before installing dependencies"))
 
     async def fake_apply_config(plugin_id: str, write_config) -> str:
         await write_config()
@@ -185,7 +173,7 @@ def test_toggle_plugin_applies_enabled_state_before_returning(client: TestClient
         assert "enabled = true" in (plugin_path / "config.toml").read_text(encoding="utf-8")
         return "success"
 
-    monkeypatch.setattr(config_routes_module, "_inspect_plugin_config_via_runtime", fake_inspect_plugin_config)
+    monkeypatch.setattr(config_routes_module, "_inspect_plugin_config_via_runtime", inspect_config)
     monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "apply_plugin_config", fake_apply_config)
     monkeypatch.setattr(config_routes_module, "require_plugin_token", lambda _: "ok")
 
@@ -203,6 +191,7 @@ def test_toggle_plugin_applies_enabled_state_before_returning(client: TestClient
         "note": "状态更改已同步到插件运行时",
     }
     assert waited_states == [("test.demo", True)]
+    inspect_config.assert_not_awaited()
 
 
 def test_toggle_exposes_runtime_failure_instead_of_reporting_success(client: TestClient, monkeypatch) -> None:
@@ -571,9 +560,9 @@ def test_clone_repository_reports_plugin_and_mirror_progress(tmp_path, monkeypat
     events = []
 
     from src.common.git_source import GitSource
-    from src.webui.services import plugin_market_service
+    from src.plugin_market import sources as market_sources
 
-    monkeypatch.setattr(plugin_market_service, "download_source", lambda: GitSource.select("cnb"))
+    monkeypatch.setattr(market_sources, "download_source", lambda: GitSource.select("cnb"))
     monkeypatch.setattr(mirror_service_module, "_validate_custom_outbound_url", lambda value: value)
 
     async def collect_progress(**kwargs):

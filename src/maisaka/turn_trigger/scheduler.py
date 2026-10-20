@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from src.common.logger import get_logger
 from src.config.config import global_config
-from src.maisaka.focus import focus_mode_manager
 from src.maisaka.mode_policy import is_dynamic_reply_trigger_enabled
 
 from .gates import DynamicReplyTurnGate, FrequencyThresholdTurnGate
@@ -30,13 +29,6 @@ class MessageTurnScheduler:
 
     def schedule_message_turn(self) -> None:
         runtime = self._runtime
-        if not focus_mode_manager.can_decide(
-            runtime.session_id,
-            is_group_chat=runtime.chat_stream.is_group_session,
-        ):
-            logger.debug(f"{runtime.log_prefix} 当前不在 focus 状态，跳过 Maisaka 决策调度")
-            return
-
         if runtime._agent_state == runtime._STATE_WAIT:
             if not runtime._is_reply_frequency_silent():
                 if global_config.experimental.planner_message_steering:

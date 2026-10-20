@@ -54,6 +54,7 @@ from src.plugin_runtime.host.hook_dispatcher import HookDispatchResult, HookDisp
 from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistry
 from src.plugin_runtime.protocol.envelope import InspectPluginConfigResultPayload
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator, is_reserved_plugin_directory
+from src.plugin_runtime.runner.plugin_enabled import is_plugin_disabled
 
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
@@ -200,6 +201,24 @@ class PluginRuntimeManager(
                 supervisor = await asyncio.to_thread(self._find_supervisor_by_plugin_directory, plugin_id)
             if supervisor is None:
                 raise RuntimeError(f"插件 {plugin_id} 没有对应的运行时")
+
+            if plugin_id not in supervisor.get_loaded_plugin_ids():
+                plugin_path = await asyncio.to_thread(self._get_plugin_path_for_supervisor, supervisor, plugin_id)
+                if plugin_path is not None:
+                    if await asyncio.to_thread(is_plugin_disabled, plugin_path):
+                        return "inactive"
+                    # 配置解析会冷导入插件，启用时必须先补齐依赖，避免在检查配置之前就因缺包失败。
+                    dependency_state = await self._sync_plugin_dependencies(list(self._iter_plugin_dirs()))
+                    if blocked_reason := self._blocked_plugin_reasons.get(plugin_id):
+                        raise RuntimeError(blocked_reason)
+                    if dependency_state.environment_changed or dependency_state.blocked_changed_plugin_ids:
+                        if not await self._restart_supervisors(reason="config_enabled_dependencies"):
+                            raise RuntimeError("启用插件时同步依赖后重启运行时失败")
+                        supervisor = self._get_supervisor_for_plugin(plugin_id)
+                        if supervisor is None:
+                            supervisor = await asyncio.to_thread(self._find_supervisor_by_plugin_directory, plugin_id)
+                        if supervisor is None:
+                            raise RuntimeError(f"插件 {plugin_id} 没有对应的运行时")
             snapshot = await supervisor.inspect_plugin_config(plugin_id)
             loaded = plugin_id in supervisor.get_loaded_plugin_ids()
             if snapshot.config_error:
@@ -316,7 +335,7 @@ class PluginRuntimeManager(
             log_compat_warnings=False,
             force_plugin_compatibility=is_force_plugin_compatibility_enabled(),
         )
-        return validator.build_plugin_dependency_map(plugin_dirs)
+        return validator.build_plugin_dependency_map(plugin_dirs, enabled_only=True)
 
     @classmethod
     def _discover_llm_provider_conflicts(
@@ -341,7 +360,9 @@ class PluginRuntimeManager(
         )
         excluded_ids = excluded_plugin_ids or set()
         provider_owners: Dict[str, List[str]] = {}
-        for _plugin_path, manifest in validator.iter_plugin_manifests(plugin_dirs, require_entrypoint=True):
+        for _plugin_path, manifest in validator.iter_plugin_manifests(
+            plugin_dirs, require_entrypoint=True, enabled_only=True
+        ):
             if manifest.id in excluded_ids:
                 continue
             for client_type in manifest.llm_provider_client_types:
@@ -1200,7 +1221,7 @@ class PluginRuntimeManager(
         }
 
     async def take_adapters_offline(self) -> AdapterRuntimeTransitionResult:
-        """卸载当前所有适配器插件，并记录可恢复的插件集合。"""
+        """卸载当前所有适配器插件，停止失去发送链路的聊天流并记录可恢复的插件集合。"""
 
         if not self._started:
             return AdapterRuntimeTransitionResult(
@@ -1230,6 +1251,12 @@ class PluginRuntimeManager(
                 self._offline_adapter_plugin_ids.update(result.unloaded_plugins)
                 self._notify_status_changed()
                 failed_plugins.update(result.failed_plugins)
+
+            from src.chat.heart_flow.heartflow_manager import heartflow_manager
+
+            # 卸载完成后按实际剩余链路复用名单清理，取消思考和唤醒任务。
+            # 部分适配器卸载失败时，仍有可用链路的会话继续运行。
+            await heartflow_manager.close_policy_blocked_chats()
 
             return AdapterRuntimeTransitionResult(
                 success=not failed_plugins,

@@ -35,6 +35,7 @@ export interface FieldSchema {
   label: LocalizedText
   description: string
   required: boolean
+  readOnly?: boolean
   default?: unknown
   options?: string[]
   minValue?: number

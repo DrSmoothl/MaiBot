@@ -26,7 +26,6 @@ import {
   Info,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { backendApi } from '@/lib/http'
 import { pluginProgressClient } from '@/lib/plugin-progress-client'
 import { buildLocalPluginInfo } from '@/lib/plugin-info'
 import type { PluginInfo } from '@/types/plugin'
@@ -41,6 +40,7 @@ import {
   fetchPluginList,
   getCachedPluginList,
   fetchPluginDetail,
+  fetchPluginDocument,
   getInstalledPluginVersion,
   getInstalledPlugins,
   type InstalledPlugin,
@@ -59,199 +59,6 @@ function formatPluginUpdateDate(timestamp?: string): string {
   const date = timestamp ? new Date(timestamp) : null
   if (!date || !Number.isFinite(date.getTime())) return '时间未知'
   return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-}
-
-function isAbortError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false
-  }
-
-  const cause = error.cause
-  return (
-    error.name === 'AbortError'
-    || (cause instanceof Error && cause.name === 'AbortError')
-  )
-}
-
-async function loadPluginReadme(
-  plugin: PluginInfo,
-  isInstalled: boolean,
-  signal: AbortSignal,
-  ref: string = 'main'
-): Promise<string> {
-  const repositoryUrl = plugin.manifest.repository_url
-  if (!repositoryUrl) {
-    return ''
-  }
-
-  // 如果插件已安装，优先尝试从本地读取 README。
-  if (isInstalled) {
-    try {
-      const localResult = await backendApi.get<{ success: boolean; data?: string }>(
-        `/api/webui/plugins/local-readme/${plugin.id}`,
-        { signal }
-      )
-
-      if (localResult.success && localResult.data) {
-        return localResult.data
-      }
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error
-      }
-      // 本地未读到时继续尝试远程 README。
-    }
-  }
-
-  // 从 repository_url 解析仓库信息。
-  const match = repositoryUrl.match(/github\.com\/([^/]+)\/([^/\s]+)/)
-  if (!match) {
-    return '无法解析仓库地址'
-  }
-
-  const [, owner, repo] = match
-  const cleanRepo = repo.replace(/\.git$/, '')
-
-  const result = await backendApi.post<{ success: boolean; data?: string }>(
-    '/api/webui/plugins/fetch-raw',
-    {
-      body: {
-        owner,
-        repo: cleanRepo,
-        branch: ref,
-        file_path: 'README.md',
-      },
-      errorMessage: '获取 README 失败',
-      signal,
-    }
-  )
-
-  if (result.success && result.data) {
-    return result.data
-  }
-
-  return '该插件暂无 README 文档'
-}
-
-function getInlineChangelog(changelog: string | undefined): string | null {
-  if (!changelog?.trim()) {
-    return null
-  }
-
-  const normalizedChangelog = changelog.trim()
-  if (
-    normalizedChangelog.includes('\n')
-    || normalizedChangelog.startsWith('#')
-    || normalizedChangelog.startsWith('- ')
-  ) {
-    return normalizedChangelog
-  }
-
-  return null
-}
-
-async function fetchUndeclaredRepositoryChangelog(
-  owner: string,
-  repo: string,
-  signal: AbortSignal
-): Promise<string> {
-  const response = await fetch(
-    `https://raw.githubusercontent.com/${owner}/${repo}/main/CHANGELOG.md`,
-    { signal }
-  )
-
-  if (!response.ok) {
-    return ''
-  }
-
-  return response.text()
-}
-
-async function loadPluginChangelog(
-  plugin: PluginInfo,
-  isInstalled: boolean,
-  signal: AbortSignal
-): Promise<string> {
-  const inlineChangelog = getInlineChangelog(plugin.changelog)
-  if (inlineChangelog) {
-    return inlineChangelog
-  }
-
-  if (isInstalled) {
-    try {
-      const localResult = await backendApi.get<{ success: boolean; data?: string }>(
-        `/api/webui/plugins/local-changelog/${plugin.id}`,
-        { signal }
-      )
-
-      if (localResult.success && localResult.data) {
-        return localResult.data
-      }
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error
-      }
-    }
-  }
-
-  const manifestChangelog = plugin.manifest.changelog?.trim() || plugin.changelog?.trim()
-  if (manifestChangelog && /^https?:\/\//.test(manifestChangelog)) {
-    const result = await backendApi.post<{ success: boolean; data?: string }>(
-      '/api/webui/plugins/fetch-raw',
-      {
-        body: {
-          owner: 'custom',
-          repo: 'custom',
-          branch: 'main',
-          file_path: 'CHANGELOG.md',
-          custom_url: manifestChangelog,
-        },
-        errorMessage: '获取更新日志失败',
-        signal,
-      }
-    )
-
-    return result.success && result.data ? result.data : ''
-  }
-
-  const repositoryUrl = plugin.manifest.repository_url
-  if (!repositoryUrl || !manifestChangelog) {
-    return ''
-  }
-
-  const match = repositoryUrl.match(/github\.com\/([^/]+)\/([^/\s]+)/)
-  if (!match) {
-    return ''
-  }
-
-  const [, owner, repo] = match
-  const cleanRepo = repo.replace(/\.git$/, '')
-  if (!manifestChangelog) {
-    try {
-      return await fetchUndeclaredRepositoryChangelog(owner, cleanRepo, signal)
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error
-      }
-      return ''
-    }
-  }
-
-  const result = await backendApi.post<{ success: boolean; data?: string }>(
-    '/api/webui/plugins/fetch-raw',
-    {
-      body: {
-        owner,
-        repo: cleanRepo,
-        branch: 'main',
-        file_path: manifestChangelog,
-      },
-      errorMessage: '获取更新日志失败',
-      signal,
-    }
-  )
-
-  return result.success && result.data ? result.data : ''
 }
 
 interface PluginDetailPageProps {
@@ -370,7 +177,7 @@ export function PluginDetailPage({
       const list = await fetchPluginList()
       const foundPlugin = list.find((p) => p.id === pluginId || p.marketplace_id === pluginId)
       if (foundPlugin) {
-        return foundPlugin.market_data_source === 'service' ? fetchPluginDetail(foundPlugin) : foundPlugin
+        return fetchPluginDetail(foundPlugin)
       }
 
       const installed = await getInstalledPlugins()
@@ -451,9 +258,10 @@ export function PluginDetailPage({
     queryKey: ['plugin-readme', plugin?.id, isInstalled, selectedRelease?.commit],
     enabled: !!plugin && !deferContent && !pluginQuery.isPlaceholderData && installedPluginsQuery.isSuccess,
     staleTime: 5 * 60 * 1000,
-    queryFn: ({ signal }) => loadPluginReadme(
-      plugin!, isInstalled && (!selectedRelease || selectedRelease.version === installedVersion), signal, selectedRelease?.commit
-    ),
+    queryFn: ({ signal }) => fetchPluginDocument(plugin!.id, 'readme', {
+      preferLocal: isInstalled && (!selectedRelease || selectedRelease.version === installedVersion),
+      signal, branch: selectedRelease?.commit,
+    }),
   })
   const readme = readmeQuery.isError ? '加载 README 失败' : (readmeQuery.data ?? '')
   const readmeLoading = deferContent || readmeQuery.isPending
@@ -462,7 +270,7 @@ export function PluginDetailPage({
     queryKey: ['plugin-changelog', plugin?.id, isInstalled, plugin?.manifest.changelog, plugin?.changelog],
     enabled: !!plugin && !deferContent && !pluginQuery.isPlaceholderData && installedPluginsQuery.isSuccess,
     staleTime: 5 * 60 * 1000,
-    queryFn: ({ signal }) => loadPluginChangelog(plugin!, isInstalled, signal),
+    queryFn: ({ signal }) => fetchPluginDocument(plugin!.id, 'changelog', { preferLocal: isInstalled, signal }),
   })
   const changelog = selectedRelease ? selectedRelease.release_notes : changelogQuery.isError ? '加载更新日志失败' : (changelogQuery.data ?? '')
   const changelogLoading = deferContent || (!selectedRelease && changelogQuery.isPending)

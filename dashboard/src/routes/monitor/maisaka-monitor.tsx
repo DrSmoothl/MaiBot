@@ -12,7 +12,6 @@ import { elementScroll, useVirtualizer } from '@tanstack/react-virtual'
 import {
   Activity,
   AlertCircle,
-  ArrowLeftRight,
   ArrowRight,
   Bot,
   Brain,
@@ -24,7 +23,6 @@ import {
   Database,
   Forward,
   Globe2,
-  History,
   Hourglass,
   ImageIcon,
   ImageOff,
@@ -146,24 +144,15 @@ function formatRelativeTime(ts: number): string {
   return `${Math.round(diff / 3600)}小时前`
 }
 
-function getToolCallSourceLabel(source?: string, fallbackLabel?: string): string {
-  const normalizedSource = (source ?? '').trim().toLowerCase()
-  if (normalizedSource === 'reasoning') return '推理中调用'
-  if (normalizedSource === 'response') return '正文调用'
-  return fallbackLabel?.trim() || ''
-}
-
 /** 内置工具使用各自的图标，其余工具统一用扳手 */
 const BUILTIN_TOOL_ICONS: Record<string, LucideIcon> = {
   reply: MessageCircle,
   wait: Hourglass,
-  fetch_history: History,
   query_memory: Database,
   query_image_memory: Images,
   query_person_profile: UserRound,
   send_emoji: Smile,
   send_image: ImagePlus,
-  switch_chat: ArrowLeftRight,
   tool_search: Search,
   view_forward_message: Forward,
 }
@@ -176,25 +165,14 @@ function isWaitTool(toolName?: string) {
   return (toolName ?? '').trim().toLowerCase() === 'wait'
 }
 
-/** wait 为内置工具，只需一句「等待 x 秒」，参数、JSON 与执行结果都不展示 */
-function formatWaitToolText(toolArgs?: Record<string, unknown>) {
+/** wait 为内置工具，只显示等待时长及完成状态，参数、JSON 与执行结果都不展示。 */
+function formatWaitToolText(toolArgs?: Record<string, unknown>, completed = false) {
   const seconds = Number(toolArgs?.seconds ?? 30)
-  return `等待 ${Number.isFinite(seconds) ? Math.max(0, Math.trunc(seconds)) : 30} 秒`
+  return `${completed ? '已等待' : '等待'} ${Number.isFinite(seconds) ? Math.max(0, Math.trunc(seconds)) : 30} 秒`
 }
 
 function getToolIcon(toolName?: string): LucideIcon {
   return BUILTIN_TOOL_ICONS[(toolName ?? '').trim().toLowerCase()] ?? Wrench
-}
-
-function getToolCallSourceBadgeClassName(source?: string): string {
-  const normalizedSource = (source ?? '').trim().toLowerCase()
-  if (normalizedSource === 'reasoning') {
-    return 'border-teal-500/45 bg-teal-500/10 text-teal-700 dark:text-teal-300'
-  }
-  if (normalizedSource === 'response') {
-    return 'border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-  }
-  return 'border-muted-foreground/30 bg-muted/40 text-muted-foreground'
 }
 
 function getFallbackInitial(label: string, fallback: string) {
@@ -1097,16 +1075,6 @@ function ToolCallBadges({ toolCalls }: { toolCalls: MaisakaToolCall[] }) {
         <Badge key={`${tc.id || tc.name}-${idx}`} variant="secondary" className="gap-1 text-[10px]">
           <Wrench className="h-2.5 w-2.5" />
           {tc.name}
-          {getToolCallSourceLabel(tc.source, tc.source_label) && (
-            <span
-              className={cn(
-                'ml-1 rounded-full border px-1 py-0 text-[9px] leading-4',
-                getToolCallSourceBadgeClassName(tc.source)
-              )}
-            >
-              {getToolCallSourceLabel(tc.source, tc.source_label)}
-            </span>
-          )}
         </Badge>
       ))}
     </div>
@@ -1556,7 +1524,11 @@ function ToolResultImages({ images }: { images: MaisakaFinalizedToolResult['imag
 }
 
 /** 倒计时只刷新等待条目，避免每秒重绘整个时间线。 */
-function WaitToolLabel({ args, waitUntil }: { args?: Record<string, unknown>; waitUntil?: number }) {
+function WaitToolLabel({ args, waitUntil, pending = false }: {
+  args?: Record<string, unknown>
+  waitUntil?: number
+  pending?: boolean
+}) {
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     if (waitUntil === undefined) return
@@ -1564,13 +1536,14 @@ function WaitToolLabel({ args, waitUntil }: { args?: Record<string, unknown>; wa
     return () => window.clearInterval(timer)
   }, [waitUntil])
   const remaining = waitUntil === undefined ? undefined : Math.max(0, Math.ceil(waitUntil - now))
+  const completed = remaining === 0 || (remaining === undefined && !pending)
   return (
     <span className="inline-flex items-center gap-2">
       <Hourglass
         className={cn('h-4 w-4 text-teal-500', remaining !== undefined && remaining > 0 && 'animate-spin')}
         style={{ animationDuration: '3s' }}
       />
-      <span>{remaining === undefined ? formatWaitToolText(args) : `等待 ${remaining} 秒`}</span>
+      <span>{completed ? formatWaitToolText(args, true) : remaining === undefined ? formatWaitToolText(args) : `等待 ${remaining} 秒`}</span>
     </span>
   )
 }
@@ -1607,7 +1580,6 @@ function ToolDiscoveryBlock({ tools }: { tools: DisplayTool[] }) {
 function PlannerToolResultCard({
   tool,
   index,
-  hideSourceLabel = false,
   hideHeader = false,
   waitUntil,
   onOpenReasoning,
@@ -1616,8 +1588,6 @@ function PlannerToolResultCard({
 }: ReplyToolMessageProps & {
   tool: DisplayTool
   index: number
-  /** 所有工具来源一致时由卡片右上角统一展示，单条工具不再重复 */
-  hideSourceLabel?: boolean
   /** 单个工具时名称、耗时与推理入口已合并到卡片标题行 */
   hideHeader?: boolean
   waitUntil?: number
@@ -1632,7 +1602,6 @@ function PlannerToolResultCard({
         : tool.success
           ? '执行成功'
           : '执行失败'
-  const sourceLabel = getToolCallSourceLabel(tool.tool_call_source, tool.tool_call_source_label)
   const promptHtmlUri = tool.prompt_html_uri?.trim() ?? ''
   const canOpenReasoning = Boolean(promptHtmlUri && parsePromptHtmlReasoningTarget(promptHtmlUri))
 
@@ -1646,7 +1615,7 @@ function PlannerToolResultCard({
       >
         <div data-maisaka-trace-meta="true" className="flex flex-wrap items-center gap-1.5">
           <span className="text-foreground text-sm font-medium">
-            <WaitToolLabel key={waitUntil} args={tool.tool_args} waitUntil={waitUntil} />
+            <WaitToolLabel key={waitUntil} args={tool.tool_args} waitUntil={waitUntil} pending={Boolean(tool.status)} />
           </span>
           <EventTimestamp startedAt={tool.started_at} />
           <span className="text-muted-foreground ml-auto text-[10px]">#{index + 1}</span>
@@ -1674,6 +1643,11 @@ function PlannerToolResultCard({
       data-maisaka-active-tool={!hideHeader && tool.status === 'running' ? tool.tool_call_id : undefined}
       className="space-y-1.5"
     >
+      {tool.session_name && (
+        <div className="text-muted-foreground text-xs" title={tool.session_id}>
+          目标聊天：{tool.session_name}
+        </div>
+      )}
       {!hideHeader && (
         <div
           data-maisaka-trace-meta="true"
@@ -1696,17 +1670,6 @@ function PlannerToolResultCard({
                 {statusText}
               </Badge>
             </>
-          )}
-          {sourceLabel && !hideSourceLabel && (
-            <Badge
-              variant="outline"
-              className={cn(
-                'h-5 px-1.5 text-[10px]',
-                getToolCallSourceBadgeClassName(tool.tool_call_source)
-              )}
-            >
-              {sourceLabel}
-            </Badge>
           )}
           {tool.duration_ms > 0 && (
             <span className="text-muted-foreground text-xs font-normal opacity-65">
@@ -1819,17 +1782,6 @@ function PlannerToolCallsBlock({
   const plannerStopped =
     finishTools.some((tool) => !tool.status) ||
     data.final_state.end_reason === 'tool_stop_after_execution'
-  const sharedSource = regularTools[0]?.tool_call_source
-  const sharedSourceLabel =
-    regularTools.length > 0 &&
-    regularTools.every(
-      (tool) =>
-        tool.tool_call_source === sharedSource &&
-        getToolCallSourceLabel(tool.tool_call_source, tool.tool_call_source_label) ===
-          getToolCallSourceLabel(sharedSource, regularTools[0].tool_call_source_label)
-    )
-      ? getToolCallSourceLabel(sharedSource, regularTools[0].tool_call_source_label)
-      : ''
   const singleTool = regularTools.length === 1 ? regularTools[0] : null
   const ToolIcon = singleTool ? getToolIcon(singleTool.tool_name) : Wrench
   const singleToolIsWait = Boolean(singleTool && isWaitTool(singleTool.tool_name))
@@ -1871,7 +1823,7 @@ function PlannerToolCallsBlock({
             className={cn('text-sm font-semibold', !singleToolIsWait && 'font-mono')}
           >
             {singleToolIsWait
-              ? <WaitToolLabel key={waitUntil} args={singleTool?.tool_args} waitUntil={waitUntil} />
+              ? <WaitToolLabel key={waitUntil} args={singleTool?.tool_args} waitUntil={waitUntil} pending={Boolean(singleTool?.status)} />
               : regularTools.map((tool) => tool.tool_name || 'unknown').join('、')}
           </CardTitle>
           <ModelNameBadge modelName={singleTool?.model_name} />
@@ -1896,21 +1848,10 @@ function PlannerToolCallsBlock({
               {formatMs(singleTool.duration_ms)}
             </span>
           )}
-          {sharedSourceLabel && (
-            <Badge
-              variant="outline"
-              className={cn(
-                'ml-auto px-1.5 text-[10px]',
-                getToolCallSourceBadgeClassName(sharedSource)
-              )}
-            >
-              {sharedSourceLabel}
-            </Badge>
-          )}
           {!singleTool && (
             <Badge
               variant="secondary"
-              className={cn('text-[10px]', !sharedSourceLabel && 'ml-auto')}
+              className="ml-auto text-[10px]"
             >
               {regularTools.length} 个
             </Badge>
@@ -1919,7 +1860,7 @@ function PlannerToolCallsBlock({
             <Button
               variant="outline"
               size="icon-xs"
-              className={cn(!sharedSourceLabel && 'ml-auto')}
+              className="ml-auto"
               onClick={() => onOpenReasoning(singleToolPromptHtmlUri)}
               aria-label="查看推理"
               data-maisaka-reasoning-button="true"
@@ -1946,7 +1887,6 @@ function PlannerToolCallsBlock({
                 onJumpToMessage={onJumpToMessage}
                 tool={tool}
                 index={idx}
-                hideSourceLabel={Boolean(sharedSourceLabel)}
                 hideHeader={Boolean(singleTool)}
                 waitUntil={isWaitTool(tool.tool_name) ? waitUntil : undefined}
                 onOpenReasoning={onOpenReasoning}
@@ -2230,8 +2170,8 @@ function ContextTrimCard({ data, open, onOpenChange }: {
 }) {
   const trim = data.trim
   const labels = {
-    pending: '准备学习', running: '正在构建', completed: '已完成',
-    skipped: '未提交学习', cancelled: '已取消', disabled: '未启用', failed: '失败',
+    pending: '准备学习', running: '正在学习', waiting: '等待学习', completed: '已完成',
+    no_results: '无成果', skipped: '已跳过', cancelled: '已取消', disabled: '未启用', failed: '失败',
   }
   const statusVariant = (status: keyof typeof labels) =>
     status === 'completed' ? 'success' : status === 'failed' ? 'destructive' : 'outline'
@@ -2276,6 +2216,40 @@ function ContextTrimCard({ data, open, onOpenChange }: {
         </TraceStep>
       ))}
     </TraceRound>
+  )
+}
+
+function CollapsedPlannerToolSummary({ data, isProgress }: {
+  data: PlannerFinalizedEvent
+  isProgress: boolean
+}) {
+  const results = new Map((data.tools ?? []).map((tool) => [tool.tool_call_id, tool]))
+  const calls = new Map((data.planner?.tool_calls ?? []).map((tool) => [tool.id, tool.name]))
+  for (const tool of results.values()) calls.set(tool.tool_call_id, tool.tool_name)
+
+  if (calls.size === 0) return <>{isProgress ? '进行中' : data.final_state.end_detail}</>
+
+  return (
+    <span className="inline-flex max-w-full items-center gap-3 align-middle">
+      {Array.from(calls, ([id, name]) => {
+        const result = results.get(id)
+        const running = isProgress && data.active_tool_call_id === id && !result
+        const status = result ? result.success ? '执行成功' : '执行失败' : running ? '执行中' : isProgress ? '等待执行' : '无执行结果'
+        return (
+          <span key={id} className="inline-flex min-w-0 items-center gap-1.5" title={`${name}：${status}`}>
+            <span
+              role="img"
+              aria-label={status}
+              className={cn(
+                'h-2 w-2 shrink-0 rounded-full',
+                result ? result.success ? 'bg-emerald-500' : 'bg-red-500' : running ? 'animate-pulse bg-amber-500' : 'bg-muted-foreground/40'
+              )}
+            />
+            <span className="truncate font-mono">{name}</span>
+          </span>
+        )
+      })}
+    </span>
   )
 }
 
@@ -2356,7 +2330,9 @@ export function TimelineEventRenderer({
         <TraceRound
           label={`第 ${data.cycle_id} 轮`}
           time={<EventTimestamp startedAt={data.planner_started_at} endedAt={data.planner_ended_at} />}
-          summary={entry.type === 'planner.progress' ? '进行中' : roundOpen ? undefined : endDetail}
+          summary={roundOpen
+            ? entry.type === 'planner.progress' ? '进行中' : undefined
+            : <CollapsedPlannerToolSummary data={data} isProgress={entry.type === 'planner.progress'} />}
           metrics={data.planner && (
             <span title={`Planner 输入 ${data.planner.prompt_tokens} + 输出 ${data.planner.completion_tokens} tokens`}>
               {formatMs(data.planner.duration_ms)} · {data.planner.prompt_tokens + data.planner.completion_tokens} tok

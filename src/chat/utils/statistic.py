@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from html import escape
 from os import getenv
 from pathlib import Path
-from typing import TYPE_CHECKING, DefaultDict, cast
+from typing import TYPE_CHECKING, DefaultDict, Dict, Mapping, cast
 
 import asyncio
 import concurrent.futures
@@ -138,6 +138,7 @@ class StatPeriodData(TypedDict):
     tokens_by_model: defaultdict[str, int]
     tokens_by_module: defaultdict[str, int]
     tokens_by_task: DefaultDict[str, int]
+    tokens_by_chat: DefaultDict[str, int]
     costs_by_type: defaultdict[str, float]
     costs_by_user: defaultdict[str, float]
     costs_by_model: defaultdict[str, float]
@@ -201,6 +202,7 @@ TOTAL_TOK_BY_USER = "tokens_by_user"
 TOTAL_TOK_BY_MODEL = "tokens_by_model"
 TOTAL_TOK_BY_MODULE = "tokens_by_module"
 TOTAL_TOK_BY_TASK = "tokens_by_task"
+TOTAL_TOK_BY_CHAT = "tokens_by_chat"
 COST_BY_TYPE = "costs_by_type"
 COST_BY_USER = "costs_by_user"
 COST_BY_MODEL = "costs_by_model"
@@ -397,11 +399,10 @@ def _json_for_html_script(value: object) -> str:
     )
 
 
-def _build_llm_owner_costs(costs_by_type: defaultdict[str, float]) -> dict[str, float]:
-    """按 LLM 调用来源聚合花费，区分本体与各插件。"""
-
+def _build_llm_owner_distribution(values_by_type: Mapping[str, float]) -> Dict[str, float]:
+    """按相同的调用来源规则聚合花费或 Token，区分本体与各插件。"""
     owner_costs: defaultdict[str, float] = defaultdict(float)
-    for request_type, cost in costs_by_type.items():
+    for request_type, cost in values_by_type.items():
         normalized_request_type = str(request_type or "").strip()
         if normalized_request_type.startswith("plugin."):
             plugin_id = normalized_request_type.removeprefix("plugin.").strip()
@@ -585,6 +586,7 @@ class StatisticOutputTask(AsyncTask):
             TOTAL_TOK_BY_MODEL: defaultdict(int),
             TOTAL_TOK_BY_MODULE: defaultdict(int),
             TOTAL_TOK_BY_TASK: defaultdict(int),
+            TOTAL_TOK_BY_CHAT: defaultdict(int),
             TOTAL_COST: 0.0,
             COST_BY_TYPE: defaultdict(float),
             COST_BY_USER: defaultdict(float),
@@ -701,6 +703,9 @@ class StatisticOutputTask(AsyncTask):
                         prompt_tokens = cast(int | None, record["prompt_tokens"]) or 0
                         completion_tokens = cast(int | None, record["completion_tokens"]) or 0
                         total_tokens = prompt_tokens + completion_tokens
+                        StatisticOutputTask._add_defaultdict_int(
+                            stats[period_key], TOTAL_TOK_BY_CHAT, chat_cost_key, total_tokens
+                        )
                         prompt_cache_enabled = bool(record.get("prompt_cache_enabled"))
                         prompt_cache_hit_tokens = 0
                         prompt_cache_miss_tokens = 0
@@ -952,10 +957,11 @@ class StatisticOutputTask(AsyncTask):
         last_all_time_stat: dict[str, object] | None = None
 
         try:
-            # 新增任务维度后旧缓存缺少此数据，首次刷新重新收集完整历史。
+            # 新增统计维度后旧缓存缺少历史数据，首次刷新重新收集完整历史。
             if (
                 "last_full_statistics" in local_storage
                 and REQ_CNT_BY_TASK in local_storage["last_full_statistics"]["stat_data"]
+                and TOTAL_TOK_BY_CHAT in local_storage["last_full_statistics"]["stat_data"]
             ):
                 # 如果存在上次完整统计数据，则使用该数据进行增量统计
                 last_stat = cast(dict[str, object], local_storage["last_full_statistics"])
@@ -1405,9 +1411,22 @@ class StatisticOutputTask(AsyncTask):
                 else str(self.name_mapping.get(chat_id, (self._get_chat_display_name_from_id(chat_id), 0))[0])
             )
             chat_costs[chat_name] += cost
-        owner_costs = _build_llm_owner_costs(stat_data[COST_BY_TYPE])
+        owner_costs = _build_llm_owner_distribution(stat_data[COST_BY_TYPE])
+        chat_tokens: DefaultDict[str, int] = defaultdict(int)
+        for chat_id, tokens in stat_data[TOTAL_TOK_BY_CHAT].items():
+            chat_name = (
+                "全局"
+                if chat_id == GLOBAL_COST_SESSION_KEY
+                else str(self.name_mapping.get(chat_id, (self._get_chat_display_name_from_id(chat_id), 0))[0])
+            )
+            chat_tokens[chat_name] += tokens
 
         return DetailedStatisticsDistributions(
+            owner_tokens=self._build_distribution_items(_build_llm_owner_distribution(stat_data[TOTAL_TOK_BY_TYPE])),
+            model_tokens=self._build_distribution_items(dict(stat_data[TOTAL_TOK_BY_MODEL])),
+            module_tokens=self._build_distribution_items(dict(stat_data[TOTAL_TOK_BY_MODULE])),
+            request_type_tokens=self._build_distribution_items(dict(stat_data[TOTAL_TOK_BY_TYPE])),
+            chat_tokens=self._build_distribution_items(dict(chat_tokens)),
             owner_costs=self._build_distribution_items(dict(owner_costs)),
             model_costs=self._build_distribution_items(dict(stat_data[COST_BY_MODEL])),
             module_costs=self._build_distribution_items(dict(stat_data[COST_BY_MODULE])),
@@ -1646,7 +1665,7 @@ class StatisticOutputTask(AsyncTask):
             chat_cost_labels_json = _json_for_html_script(chat_cost_labels)
             chat_costs_json = _json_for_html_script(chat_costs)
 
-            owner_costs_by_label = _build_llm_owner_costs(stat_data[COST_BY_TYPE])
+            owner_costs_by_label = _build_llm_owner_distribution(stat_data[COST_BY_TYPE])
             owner_cost_labels = list(owner_costs_by_label.keys())
             owner_costs = [owner_costs_by_label[label] for label in owner_cost_labels]
             owner_cost_labels_json = _json_for_html_script(owner_cost_labels)

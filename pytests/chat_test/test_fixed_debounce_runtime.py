@@ -127,7 +127,6 @@ def test_consuming_messages_resets_batch_without_dropping_messages(runtime, monk
     runtime._observe_message_debounce(message, time.time())
     runtime.message_cache = [message, message]
     runtime.session_id = "test"
-    monkeypatch.setattr(runtime_module.focus_mode_manager, "mark_read", Mock())
     assert runtime._collect_pending_messages() == [message, message]
     assert runtime._last_processed_index == 2
     assert runtime._fixed_message_debouncer.deadline is None
@@ -140,7 +139,6 @@ async def test_steering_path_waits_before_consuming_messages(runtime, monkeypatc
     runtime.log_prefix = "[test]"
     runtime._cycle_counter = 1
     runtime._wait_for_message_quiet_period = AsyncMock()
-    monkeypatch.setattr(runtime_module.focus_mode_manager, "mark_read", Mock())
     engine = MaisakaReasoningEngine(runtime)
     engine._ingest_messages = AsyncMock()
     engine._emit_flow_step = AsyncMock()
@@ -156,12 +154,10 @@ async def test_all_turn_start_paths_wait_before_collecting(runtime, monkeypatch,
     runtime.message_cache = [message]
     runtime._agent_state = runtime._STATE_STOP
     runtime._is_reply_frequency_silent = Mock(return_value=False)
-    runtime._clear_focus_cooldown_wakeup_scheduled = Mock()
     runtime._enter_running_state = Mock()
     runtime._update_stage_status = Mock()
     runtime._has_pending_wait_tool_call = Mock(return_value=False)
     runtime._wait_for_message_quiet_period = AsyncMock()
-    monkeypatch.setattr(runtime_module.focus_mode_manager, "mark_read", Mock())
     engine = MaisakaReasoningEngine(runtime)
     engine._drain_ready_turn_triggers = Mock(
         return_value=(trigger == "message", trigger == "timeout", trigger == "proactive")

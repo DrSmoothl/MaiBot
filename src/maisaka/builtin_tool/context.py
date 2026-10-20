@@ -391,10 +391,14 @@ class BuiltinToolRuntimeContext:
             if segment.text.strip()
         ]
         attachment_args = dict(attachments or {})
+        raw_emoji = attachment_args.get("attach_emoji")
+        # 0 表示不附加表情包，与省略参数一致；其他无效类型仍交给严格校验。
+        if type(raw_emoji) is int and raw_emoji == 0:
+            raw_emoji = None
 
         if attachment_args.get("attach_at") and not global_config.chat.enable_reply_at:
             raise ValueError("回复时 @ 用户已关闭，不能使用 attach_at。")
-        if attachment_args.get("attach_emoji") is not None and not global_config.emoji.use_new_send_logic:
+        if raw_emoji is not None and not global_config.emoji.use_new_send_logic:
             raise ValueError("新表情包发送逻辑未开启，请使用 send_emoji 工具。")
 
         at_components = [
@@ -405,7 +409,6 @@ class BuiltinToolRuntimeContext:
             await self._resolve_image_attachment(raw_attachment)
             for raw_attachment in self._normalize_attachment_list(attachment_args.get("attach_pic"), "attach_pic")
         ]
-        raw_emoji = attachment_args.get("attach_emoji")
         emoji_components = [await self._resolve_emoji_attachment(raw_emoji)] if raw_emoji is not None else []
 
         if not at_components and not image_components and not emoji_components:

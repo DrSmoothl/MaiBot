@@ -566,24 +566,59 @@ function DistributionGrid({
   locale: string
 }) {
   const { t } = useTranslation()
+  const [metric, setMetric] = useState<'costs' | 'tokens'>('costs')
+  const valueKind = metric === 'costs' ? 'currency' : 'count'
   const charts = [
-    [t('statisticsPage.distributions.ownerCosts'), period.distributions.owner_costs, 'currency'],
-    [t('statisticsPage.distributions.modelCosts'), period.distributions.model_costs, 'currency'],
-    [t('statisticsPage.distributions.moduleCosts'), period.distributions.module_costs, 'currency'],
     [
-      t('statisticsPage.distributions.requestTypeCosts'),
-      period.distributions.request_type_costs,
-      'currency',
+      t(`statisticsPage.distributions.${metric === 'costs' ? 'ownerCosts' : 'ownerTokens'}`),
+      period.distributions[`owner_${metric}`],
+      valueKind,
+    ],
+    [
+      t(`statisticsPage.distributions.${metric === 'costs' ? 'modelCosts' : 'modelTokens'}`),
+      period.distributions[`model_${metric}`],
+      valueKind,
+    ],
+    [
+      t(`statisticsPage.distributions.${metric === 'costs' ? 'moduleCosts' : 'moduleTokens'}`),
+      period.distributions[`module_${metric}`],
+      valueKind,
+    ],
+    [
+      t(`statisticsPage.distributions.${metric === 'costs' ? 'requestTypeCosts' : 'requestTypeTokens'}`),
+      period.distributions[`request_type_${metric}`],
+      valueKind,
     ],
     [t('statisticsPage.distributions.chatMessages'), period.distributions.chat_messages, 'count'],
-    [t('statisticsPage.distributions.chatCosts'), period.distributions.chat_costs, 'currency'],
+    [
+      t(`statisticsPage.distributions.${metric === 'costs' ? 'chatCosts' : 'chatTokens'}`),
+      period.distributions[`chat_${metric}`],
+      valueKind,
+    ],
   ] as const
 
   return (
     <section className="space-y-4">
-      <div className="border-border flex items-center gap-3 border-b pb-3">
+      <div className="border-border flex flex-wrap items-center gap-3 border-b pb-3">
         <span className="bg-primary h-6 w-1 rounded-full" aria-hidden="true" />
         <h2 className="text-lg font-semibold">{t('statisticsPage.sections.distributions')}</h2>
+        <div
+          className="ml-auto flex gap-1"
+          role="group"
+          aria-label={t('statisticsPage.distributions.metric')}
+        >
+          {(['costs', 'tokens'] as const).map((value) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={metric === value ? 'secondary' : 'ghost'}
+              aria-pressed={metric === value}
+              onClick={() => setMetric(value)}
+            >
+              {t(`statisticsPage.distributions.${value}`)}
+            </Button>
+          ))}
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-1 sm:gap-4 xl:grid-cols-2">
         {charts.map(([title, data, valueKind]) => (
