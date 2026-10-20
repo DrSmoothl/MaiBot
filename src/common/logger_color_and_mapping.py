@@ -256,8 +256,6 @@ MODULE_ALIASES = {
     "maisaka_monitor_message_payload": "监控消息载荷",
     "maisaka_person_profile_injector": "人物画像注入",
     "maisaka_reasoning_engine": "麦麦推理引擎",
-    "maisaka_reply_effect": "回复效果追踪",
-    "maisaka_reply_effect_storage": "回复效果存储",
     "maisaka_tool_post_execution": "工具执行后处理",
     "maisaka_visual_mode": "麦麦视觉模式",
     # 平台、MCP 与插件运行时

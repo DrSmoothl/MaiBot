@@ -30,7 +30,6 @@ from src.webui.routers.news import router as news_router
 from src.webui.routers.person import router as person_router
 from src.webui.routers.plugin import router as plugin_router
 from src.webui.routers.reasoning_process import router as reasoning_process_router
-from src.webui.routers.reply_effects import router as reply_effects_router
 from src.webui.routers.search import router as search_router
 from src.webui.routers.self_update import router as self_update_router
 from src.webui.routers.statistics import router as statistics_router
@@ -72,7 +71,6 @@ router.include_router(computer_router)
 router.include_router(self_update_router)
 router.include_router(data_transfer_router)
 router.include_router(reasoning_process_router)
-router.include_router(reply_effects_router)
 router.include_router(search_router)
 # 注册模型列表获取路由
 router.include_router(model_router)

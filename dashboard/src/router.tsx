@@ -84,11 +84,6 @@ const statisticsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/logs'), 'StatisticsLogViewerPage'),
 })
 
-const replyEffectsRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: '/reply-effects',
-  component: lazyRouteComponent(() => import('./routes/reply-effects'), 'ReplyEffectsPage'),
-})
 
 // 配置路由 - 麦麦主程序配置
 const botConfigRoute = createRoute({
@@ -393,7 +388,6 @@ const routeTree = rootRoute.addChildren([
     pluginWebUIManagerRoute,
     indexRoute,
     statisticsRoute,
-    replyEffectsRoute,
     botConfigRoute,
     modelConfigRoute,
     promptManagementRoute,

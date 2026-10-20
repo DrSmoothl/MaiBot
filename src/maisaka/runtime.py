@@ -33,12 +33,11 @@ from src.learners.expression_learner import ExpressionLearner
 from src.learners.jargon_learner import JargonLearner
 from src.learners.jargon_miner import JargonMiner
 from src.maisaka.quote import ReplyQuoteContext, ReplyQuoteCounter
-from src.llm_models.payload_content.resp_format import RespFormat, RespFormatType
+from src.llm_models.payload_content.resp_format import RespFormat
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 from src.maisaka.builtin_tool.provider import MaisakaBuiltinToolProvider
 from src.maisaka.context.clear_context import select_messages_after_latest_clear_marker
 from src.maisaka.context.history import drop_leading_orphan_tool_results
-from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.message_id_alias import build_alias_map, expand_message_id_aliases
 from src.maisaka.context.messages import (
     ContentContextMessage,
@@ -65,9 +64,6 @@ from src.maisaka.monitor.message_payload import (
     build_monitor_message_media,
     build_monitor_reply_preview,
 )
-from src.maisaka.reply_effect import ReplyEffectTracker
-from src.maisaka.reply_effect.image_utils import extract_visual_attachments_from_sequence
-from src.maisaka.reply_effect.quote_utils import extract_quote_target_ids
 from src.maisaka.turn_trigger import IdleBackoffController, MessageTurnScheduler
 from src.mcp_module.provider import MCPToolProvider
 from src.mcp_module.service import get_mcp_service
@@ -233,12 +229,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         self._monitor_session_start_task: Optional[asyncio.Task[None]] = None
         self._monitor_visual_refresh_keys: set[tuple[str, str]] = set()
         self._tool_registry = ToolRegistry()
-        self._reply_effect_tracker = ReplyEffectTracker(
-            session_id=self.session_id,
-            session_name=self.session_name,
-            chat_stream=self.chat_stream,
-            judge_runner=self._run_reply_effect_judge,
-        )
         self._register_tool_providers()
         self._emit_monitor_session_start()
 
@@ -291,11 +281,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         except RuntimeError:
             logger.debug("MaiSaka 监控会话开始事件未发送：当前没有运行中的事件循环")
 
-    @staticmethod
-    def _is_reply_effect_tracking_enabled() -> bool:
-        """判断是否启用回复效果评分追踪。"""
-
-        return bool(global_config.debug.enable_reply_effect_tracking)
 
     def _update_stage_status(
         self, stage: str, detail: str = "", *, round_text: str = "", wait_until: Optional[float] = None,
@@ -326,8 +311,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
 
         await self._restore_recent_context_from_db()
         self._running = True
-        if self._is_reply_effect_tracking_enabled():
-            await self._reply_effect_tracker.start()
         if self._is_focus_mode_active_for_current_chat():
             await focus_mode_manager.attach(self)
         self._ensure_background_tasks_running()
@@ -582,8 +565,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             finally:
                 self._internal_loop_task = None
 
-        if self._is_reply_effect_tracking_enabled():
-            await self._reply_effect_tracker.stop()
         await self._tool_registry.close()
         remove_stage_status(self.session_id)
 
@@ -1051,8 +1032,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         self.message_cache.append(message)
         self._emit_monitor_message_ingested(message)
         self._prune_processed_message_cache()
-        if self._is_reply_effect_tracking_enabled():
-            asyncio.create_task(self._reply_effect_tracker.observe_user_message(message))
         if self._focus_group is not None:
             history_message = await self._reasoning_engine._build_history_message(message)
             if history_message is not None:
@@ -1145,98 +1124,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         """判断当前会话是否处于回复频率为 0 的静默接收模式。"""
         return self._get_effective_reply_frequency() <= 0.0
 
-    async def track_reply_effect(
-        self,
-        *,
-        tool_call_id: str,
-        target_message: SessionMessage,
-        set_quote: bool,
-        reply_text: str,
-        reply_segments: list[str],
-        planner_reasoning: str,
-        tool_context: Optional[dict[str, Any]] = None,
-        send_results: Optional[list[dict[str, Any]]] = None,
-        reply_metadata: Optional[dict[str, Any]] = None,
-        replyer_context_messages: Optional[Sequence[LLMContextMessage]] = None,
-    ) -> None:
-        """登记一次已成功发送的 reply 工具回复，供后续用户反馈评分。"""
-
-        if not self._is_reply_effect_tracking_enabled():
-            return
-
-        try:
-            context_snapshot = self._build_reply_effect_context_snapshot(
-                context_messages=replyer_context_messages,
-                exclude_reply_segments=reply_segments if replyer_context_messages is None else None,
-            )
-            enriched_reply_metadata = dict(reply_metadata or {})
-            enriched_reply_metadata["replyer_context_count"] = (
-                len(replyer_context_messages) if replyer_context_messages is not None else len(self._chat_history)
-            )
-            enriched_reply_metadata["recorded_context_count"] = len(context_snapshot)
-            await self._reply_effect_tracker.record_reply(
-                tool_call_id=tool_call_id,
-                target_message=target_message,
-                set_quote=set_quote,
-                reply_text=reply_text,
-                reply_segments=reply_segments,
-                planner_reasoning=planner_reasoning,
-                tool_context=tool_context,
-                send_results=send_results,
-                reply_metadata=enriched_reply_metadata,
-                context_snapshot=context_snapshot,
-            )
-        except Exception as exc:
-            logger.warning(f"{self.log_prefix} 创建回复效果观察记录失败: {exc}")
-
-    def _build_reply_effect_context_snapshot(
-        self,
-        *,
-        context_messages: Optional[Sequence[LLMContextMessage]] = None,
-        exclude_reply_segments: Optional[Sequence[str]] = None,
-    ) -> list[dict[str, Any]]:
-        """构建回复效果观察使用的上下文快照。
-
-        优先记录 replyer 当次生成时实际收到的完整上下文列表；只有旧调用未传入时才回退到当前运行时历史。
-        """
-
-        source_messages = list(context_messages) if context_messages is not None else list(self._chat_history)
-        snapshot: list[dict[str, Any]] = []
-        excluded_segments = [segment.strip() for segment in (exclude_reply_segments or []) if segment.strip()]
-        for message in source_messages:
-            raw_text = str(message.processed_plain_text or "").strip()
-            if not raw_text:
-                continue
-            if message.source == "guided_reply" and any(segment in raw_text for segment in excluded_segments):
-                continue
-            speaker_name, visible_text = parse_speaker_content(raw_text)
-            item: dict[str, Any] = {
-                "message_id": (message.message_id or "") if isinstance(message, ContentContextMessage) else "",
-                "source": message.source,
-                "role": message.role,
-                "timestamp": message.timestamp.isoformat(timespec="seconds"),
-                "text": visible_text.strip(),
-                "quote_target_ids": extract_quote_target_ids(message.raw_message if isinstance(message, ContentContextMessage) else None),
-                "attachments": extract_visual_attachments_from_sequence(message.raw_message if isinstance(message, ContentContextMessage) else None),
-            }
-            if visible_text != raw_text:
-                item["raw_text"] = raw_text
-
-            if isinstance(message, SessionBackedMessage):
-                original_message = message.original_message
-                user_info = original_message.message_info.user_info
-                display_name = user_info.user_cardname or user_info.user_nickname or user_info.user_id
-                item["sender"] = {
-                    "user_id": user_info.user_id,
-                    "nickname": user_info.user_nickname,
-                    "cardname": user_info.user_cardname or "",
-                    "display_name": display_name,
-                    "platform": original_message.platform,
-                }
-            elif speaker_name:
-                item["sender"] = {"display_name": speaker_name}
-            snapshot.append(item)
-        return snapshot
 
     def _get_message_trigger_threshold(self) -> int:
         """根据回复触发模式和频率折算出触发一轮循环所需的消息数。"""
@@ -1642,27 +1529,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         trimmed_history, _ = drop_leading_orphan_tool_results(trimmed_history)
         return trimmed_history
 
-    async def _run_reply_effect_judge(self, prompt: str) -> str:
-        """运行回复效果观察器使用的临时 LLM 评审。"""
-
-        judge_message = ReferenceMessage(
-            content=prompt,
-            timestamp=datetime.now(),
-            reference_type=ReferenceMessageType.TOOL_HINT,
-            remaining_uses_value=1,
-            display_prefix="[回复效果评分任务]",
-        )
-        response = await self.run_sub_agent(
-            context_message_limit=1,
-            system_prompt="你是回复效果评分器。请严格按用户给出的 JSON 格式输出，不要输出 JSON 之外的内容。",
-            request_kind="reply_effect_judge",
-            extra_messages=[judge_message],
-            model_task_name="utils",
-            response_format=RespFormat(format_type=RespFormatType.JSON_OBJ),
-            tool_definitions=[],
-            include_parent_context=False,
-        )
-        return (response.content or "").strip()
 
     def set_current_action_tool_names(self, tool_names: Sequence[str]) -> None:
         """记录当前 Action Loop 已实际暴露给 planner 的工具名集合。"""

@@ -43,7 +43,6 @@ vi.mock('@/routes/logs', () => ({
   ReasoningLogViewerPage: StubPage,
   StatisticsLogViewerPage: StubPage,
 }))
-vi.mock('@/routes/reply-effects', () => ({ ReplyEffectsPage: StubPage }))
 vi.mock('@/routes/config/bot', () => ({ BotConfigPage: StubPage }))
 vi.mock('@/routes/config/model', () => ({ ModelConfigPage: StubPage }))
 vi.mock('@/routes/config/prompts', () => ({ PromptManagementPage: StubPage }))
@@ -82,7 +81,6 @@ const expectedPaths = [
   '/plugin-mirrors/embed',
   '/',
   '/statistics',
-  '/reply-effects',
   '/config/bot',
   '/config/model',
   '/config/prompts',

@@ -78,17 +78,14 @@ REQUEST_TYPE_BY_REQUEST_KIND = {
     "expression_selector": "expression.selector",
     "focus_summary": "maisaka.focus_summary",
     "planner": "maisaka.planner",
-    "reply_effect_judge": "reply.effect_judge",
     "sub_agent": "maisaka.sub_agent",
 }
 MODEL_TASK_NAME_BY_REQUEST_KIND: dict[str, str] = {
     "expression_selector": "fast_model",
     "focus_summary": "utils",
-    "reply_effect_judge": "utils",
 }
 PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "planner": "planner",
-    "reply_effect_judge": "reply_effect_judge",
     "expression_selector": "expression_selector",
     "emotion": "emotion",
     "sub_agent": "sub_agent",
@@ -1570,6 +1567,6 @@ class MaisakaChatLoopService:
     def _resolve_enable_visual_message(request_kind: str) -> bool:
         if request_kind == "planner":
             return resolve_enable_visual_planner()
-        if request_kind in {"expression_selector", "reply_effect_judge"}:
+        if request_kind == "expression_selector":
             return False
         return True

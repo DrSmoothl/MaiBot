@@ -1,6 +1,5 @@
 import { createElement } from 'react'
 import {
-  Activity,
   Box,
   Database,
   FileText,
@@ -29,7 +28,6 @@ const PluginConfigIcon = createStreamlineIcon('application-add-remix', Puzzle)
 const AdapterManagementIcon = createStreamlineIcon('router-wifi-network-solid', Wifi)
 const PluginMarketIcon = createStreamlineIcon('store-2-solid', Store)
 const DataTransferIcon: MenuIcon = (props) => createElement(HardDrive, props)
-const ReplyEffectsIcon: MenuIcon = (props) => createElement(Activity, props)
 
 export const menuSections: MenuSection[] = [
   {
@@ -100,12 +98,6 @@ export const menuSections: MenuSection[] = [
     title: 'sidebar.groups.advancedTools',
     items: [
       { icon: PromptIcon, label: 'sidebar.menu.promptManagement', path: '/config/prompts' },
-      {
-        icon: ReplyEffectsIcon,
-        label: 'sidebar.menu.replyEffects',
-        path: '/reply-effects',
-        featureFlag: 'replyEffects',
-      },
       {
         icon: DataTransferIcon,
         label: 'sidebar.menu.dataTransfer',

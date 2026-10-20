@@ -379,8 +379,6 @@ async def handle_tool(
             "reply 工具必须提供非空字符串 `reply_reference`，请填写本次回复的上下文关键信息与回复方向后重新调用。",
         )
     invocation_arguments["reply_reference"] = reply_reference.strip()
-    # 工具上下文的 reasoning 是兼容字段，由 Planner 可见正文填充，不包含 Provider 原生 reasoning。
-    latest_thought = context.reasoning if context is not None else invocation.reasoning
     target_message_id = str(invocation_arguments.get("msg_id") or "").strip()
     if invocation_arguments.get("attach_at") and not config_module.global_config.chat.enable_reply_at:
         return tool_ctx.build_failure_result(invocation.tool_name, "回复时 @ 用户已关闭，不能使用 attach_at。")
@@ -701,25 +699,6 @@ async def handle_tool(
     reply_metadata["sent_message_ids"] = sent_message_ids
     reply_metadata["send_results"] = send_results
     tool_ctx.runtime.record_planner_reply()
-    track_reply_effect = getattr(tool_ctx.runtime, "track_reply_effect", None)
-    if track_reply_effect is not None:
-        await track_reply_effect(
-            tool_call_id=invocation.call_id,
-            target_message=target_message,
-            set_quote=effective_set_quote,
-            reply_text=combined_reply_text,
-            reply_segments=reply_segments,
-            planner_reasoning=latest_thought,
-            tool_context={
-                "tool_name": invocation.tool_name,
-                "call_id": invocation.call_id,
-                "arguments": dict(invocation.arguments or {}),
-                "reasoning": latest_thought,
-            },
-            send_results=send_results,
-            reply_metadata=reply_metadata,
-            replyer_context_messages=replyer_chat_history,
-        )
     return tool_ctx.build_success_result(
         invocation.tool_name,
         reply_receipt,

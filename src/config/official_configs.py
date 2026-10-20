@@ -4849,18 +4849,6 @@ class LogConfig(ConfigBase):
     )
     """每个聊天最多保留多少组 Prompt 预览。"""
 
-    maisaka_reply_effect_limit: int = Field(
-        default=256,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "回复效果记录数",
-                "en_US": "Reply effect record limit",
-                "ja_JP": "返信効果記録数",
-            },
-            "x-widget": "input",
-        },
-    )
-    """每个聊天最多保留多少条回复效果记录。"""
 
     event_loop_watchdog_enabled: bool = Field(
         default=False,
@@ -5006,18 +4994,6 @@ class DebugConfig(ConfigBase):
     )
     """保存 Planner、工具调用及聊天回想的完整推理记录，供 WebUI 查看，与终端显示独立。"""
 
-    enable_reply_effect_tracking: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "记录回复效果",
-                "en_US": "Track reply effects",
-                "ja_JP": "返信効果を記録",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """记录回复效果评分，方便观察回复质量。"""
 
     keep_prompt_preview_json_base64: bool = Field(
         default=False,

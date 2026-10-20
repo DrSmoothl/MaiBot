@@ -39,7 +39,6 @@ const STAGE_LABELS: Record<string, string> = {
   jargon_learning_update: '黑话含义推断',
   llm_error: 'LLM 请求异常',
   planner: '规划器',
-  reply_effect_judge: '回复效果评估',
   replyer: '回复器',
   timing_gate: '时机判断',
 }

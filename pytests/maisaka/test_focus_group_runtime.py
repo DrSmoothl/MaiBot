@@ -679,7 +679,6 @@ async def test_real_chat_services_share_one_planner_without_starting_individual_
     monkeypatch.setattr(MaisakaHeartFlowChatting, "_emit_monitor_message_ingested", Mock())
     monkeypatch.setattr(MaisakaHeartFlowChatting, "_ensure_expression_vector_history_backfill_running", Mock())
     monkeypatch.setattr(MaisakaHeartFlowChatting, "_restore_recent_context_from_db", AsyncMock())
-    monkeypatch.setattr(MaisakaHeartFlowChatting, "_is_reply_effect_tracking_enabled", staticmethod(lambda: False))
     monkeypatch.setattr(group_module, "FocusCheckpointStore", lambda scope: FocusCheckpointStore(scope, tmp_path))
     a = MaisakaHeartFlowChatting("A")
     b = MaisakaHeartFlowChatting("B")
