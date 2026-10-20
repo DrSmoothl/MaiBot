@@ -373,6 +373,7 @@
     "title": "WebUI 설정",
     "description": "앱 환경 설정 관리",
     "tabs": {
+      "general": "일반",
       "appearance": "외관",
       "security": "보안",
       "other": "기타",
@@ -1152,9 +1153,8 @@
       "model": "모델 설정",
       "modelDesc": "모델 매개변수 구성",
       "emoji": "이모티콘 관리",
-      "emojiDesc": "속 이모티콘 관리",
       "expression": "표현 관리",
-      "learningDesc": "학습한 표현과 슬랭 관리",
+      "learningDesc": "학습한 표현, 슬랭 및 이모티콘 관리",
       "expressionDesc": "속 표현 관리",
       "person": "인물 정보",
       "personDesc": "인물 정보 관리",

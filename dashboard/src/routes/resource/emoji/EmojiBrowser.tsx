@@ -37,6 +37,7 @@ export interface EmojiFilters {
 }
 
 interface EmojiBrowserProps extends ComponentProps<typeof EmojiList> {
+  browserHeader?: ReactNode
   stats: EmojiStats | null
   filters: EmojiFilters
   onFilterChange: <K extends keyof EmojiFilters>(key: K, value: EmojiFilters[K]) => void
@@ -57,8 +58,9 @@ interface EmojiBrowserProps extends ComponentProps<typeof EmojiList> {
   onRetry: () => void
 }
 
-/** 表情包独立入口，沿用学习页的数据浏览框架；不在这里拼接学习页签。 */
+/** 表情包浏览框架，学习页负责注入导航页签。 */
 export function EmojiBrowser({
+  browserHeader,
   stats,
   filters,
   onFilterChange,
@@ -104,7 +106,8 @@ export function EmojiBrowser({
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <DataBrowserHeader
-        title="表情包"
+        title="学习"
+        navigation={browserHeader}
         summary={
           <>
             <MetricStrip

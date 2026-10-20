@@ -6,14 +6,14 @@ import type { LanguageCode } from '@/components/layout/language-options'
 import { Card } from '@/components/ui/card'
 
 /**
- * 手机端的语言切换：桌面端在顶栏里，手机上顶栏隐藏后收进「WebUI 设置」页底部。
+ * 通用设置：桌面端与手机端统一在此切换界面语言。
  */
-export function MobileAccountCard() {
+export function GeneralTab() {
   const { t, i18n } = useTranslation()
   const currentLang = (i18n.resolvedLanguage ?? i18n.language).split('-')[0] as LanguageCode
 
   return (
-    <div data-settings-mobile-account="true" className="mt-6 space-y-4 lg:hidden">
+    <div className="space-y-6 sm:space-y-8">
       <Card className="overflow-hidden p-0">
         <label className="relative flex h-12 items-center gap-3 px-4 text-base">
           <span className="flex-1">{t('header.switchLanguage')}</span>

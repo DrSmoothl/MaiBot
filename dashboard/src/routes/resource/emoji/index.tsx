@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -69,7 +69,7 @@ function alignEmojiPageSize(preferredSize: number, columns: number): number {
   return rows * columns
 }
 
-export function EmojiManagementPage() {
+export function EmojiManagementPage({ browserHeader }: { browserHeader?: ReactNode }) {
   const [selectedEmoji, setSelectedEmoji] = useState<Emoji | null>(null)
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -167,7 +167,7 @@ export function EmojiManagementPage() {
   }
 
   // 查看详情
-  const handleViewDetail = async (emoji: Emoji) => {
+  const handleViewDetail = (emoji: Emoji) => {
     setSelectedEmoji(emoji)
     setDetailDialogOpen(true)
   }
@@ -283,7 +283,7 @@ export function EmojiManagementPage() {
   }
 
   // 获取格式选项
-  const formatOptions = stats?.formats ? Object.keys(stats.formats) : []
+  const formatOptions = stats ? Object.keys(stats.formats) : []
   const statusOptions = stats
     ? [
         { value: 'known' as const, label: '认识', count: stats.known },
@@ -297,6 +297,7 @@ export function EmojiManagementPage() {
     <div className="flex h-full min-h-0 min-w-0 flex-col p-3 pb-4 max-lg:h-auto sm:p-4">
       {!isMobile && (
         <EmojiBrowser
+          browserHeader={browserHeader}
           stats={stats}
           filters={list.filters}
           onFilterChange={list.setFilter}

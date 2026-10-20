@@ -31,7 +31,8 @@ describe('useMenuSections', () => {
     // 其它常规入口不受特性开关影响
     expect(paths).toContain('/')
     expect(paths).toContain('/config/bot')
-    expect(paths).toContain('/resource/emoji')
+    expect(paths).toContain('/resource/learning')
+    expect(paths).not.toContain('/resource/emoji')
     // 五个分组都保留（没有分组被过滤成空）
     expect(result.current).toHaveLength(5)
   })

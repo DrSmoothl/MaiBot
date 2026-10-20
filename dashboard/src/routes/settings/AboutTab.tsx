@@ -40,7 +40,7 @@ export function AboutTab() {
             </p>
             <Button asChild>
               <a
-                href="https://github.com/Mai-with-u/MaiBot-Dashboard"
+                href="https://github.com/Mai-with-u/MaiBot"
                 target="_blank"
                 rel="noopener noreferrer"
               >

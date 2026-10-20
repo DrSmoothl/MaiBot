@@ -10,7 +10,6 @@ import {
   MessageSquare,
   Puzzle,
   Settings,
-  Smile,
   Store,
   Wifi,
 } from 'lucide-react'
@@ -24,7 +23,6 @@ const LocalChatIcon = createStreamlineIcon('desktop-chat-remix', MessageCircle)
 const BotConfigIcon = createStreamlineIcon('page-setting-remix', Settings)
 const ModelIcon = createStreamlineIcon('module-remix', Box)
 const PromptIcon = createStreamlineIcon('script-1-remix', FileText)
-const EmojiIcon = createStreamlineIcon('happy-face-remix', Smile)
 const LearningIcon = createStreamlineIcon('chat-bubble-square-write-remix', MessageSquare)
 const KnowledgeIcon = createStreamlineIcon('user-sticker-square-remix', Database)
 const PluginConfigIcon = createStreamlineIcon('application-add-remix', Puzzle)
@@ -72,12 +70,6 @@ export const menuSections: MenuSection[] = [
   {
     title: 'sidebar.groups.botResources',
     items: [
-      {
-        icon: EmojiIcon,
-        label: 'sidebar.menu.emojiManagement',
-        path: '/resource/emoji',
-        searchDescription: 'search.items.emojiDesc',
-      },
       {
         icon: LearningIcon,
         label: 'sidebar.menu.learning',
