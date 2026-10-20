@@ -10,6 +10,7 @@ from src.chat.heart_flow.heartflow_manager import HeartflowManager
 from src.config.config import ConfigManager
 from src.config.file_watcher import FileChange
 from src.platform_io.adapter_policy import AdapterPolicyManager
+from src.plugin_runtime.integration import PluginRuntimeManager
 
 
 @pytest.mark.asyncio
@@ -86,3 +87,70 @@ async def test_blocked_session_cannot_recreate_runtime(monkeypatch):
     runtime = await manager.get_or_create_heartflow_chat("session")
     assert manager.heartflow_chat_list["session"] is runtime
     runtime.start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial_failure", [False, True])
+async def test_offline_closes_chats_after_adapter_unload(monkeypatch, partial_failure):
+    manager = HeartflowManager()
+    chats = {}
+    for name, platform, is_group in (
+        ("group", "qq", True),
+        ("private", "qq", False),
+        ("other_adapter", "other", True),
+        ("local", "maisaka_cli", False),
+        ("webui", "webui", True),
+    ):
+        chat = SimpleNamespace(
+            chat_stream=SimpleNamespace(
+                platform=platform, account_id="bot", scope="main", is_group_session=is_group,
+                group_id=name if is_group else None, user_id=name,
+            ),
+            stop=AsyncMock(),
+        )
+        chats[name] = chat
+        manager.heartflow_chat_list[name] = chat
+        manager._touch_chat(name)
+
+    loaded = {"qq_adapter", "other_adapter"}
+
+    async def unload(plugin_ids, *, reason):
+        assert reason == "local_operator_offline"
+        # 模拟卸载驱动后才移除路由，保证清理使用卸载后的链路状态。
+        unloaded = {"qq_adapter"} if partial_failure else set(plugin_ids)
+        loaded.difference_update(unloaded)
+        return SimpleNamespace(
+            unloaded_plugins=unloaded,
+            failed_plugins={"other_adapter": "unload failed"} if partial_failure else {},
+        )
+
+    runtime_manager = PluginRuntimeManager()
+    runtime_manager._started = True
+    runtime_manager._builtin_supervisor = SimpleNamespace(
+        get_loaded_plugin_ids_by_type=lambda plugin_type: sorted(loaded), unload_plugins=unload,
+    )
+    platform_manager = SimpleNamespace(
+        ensure_send_pipeline_ready=AsyncMock(),
+        is_target_allowed=AsyncMock(
+            side_effect=lambda route, **kwargs: f"{route.platform}_adapter" in loaded
+        ),
+    )
+    clear_context = AsyncMock()
+    monkeypatch.setattr("src.chat.heart_flow.heartflow_manager.get_platform_io_manager", lambda: platform_manager)
+    monkeypatch.setattr("src.chat.heart_flow.heartflow_manager.heartflow_manager", manager)
+    monkeypatch.setattr("src.chat.heart_flow.heartflow_manager.focus_mode_manager.clear_context", clear_context)
+
+    result = await runtime_manager.take_adapters_offline()
+
+    remaining = {"local", "webui"} | ({"other_adapter"} if partial_failure else set())
+    assert result.success is not partial_failure
+    assert set(result.changed_plugin_ids) == {"qq_adapter", "other_adapter"} - loaded
+    assert set(result.pending_plugin_ids) == set(result.changed_plugin_ids)
+    assert set(manager.heartflow_chat_list) == remaining
+    assert set(manager._chat_last_active_at) == remaining
+    for name, chat in chats.items():
+        if name in remaining:
+            chat.stop.assert_not_awaited()
+        else:
+            chat.stop.assert_awaited_once()
+            assert any(call.args == (name,) for call in clear_context.await_args_list)

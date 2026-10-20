@@ -1200,7 +1200,7 @@ class PluginRuntimeManager(
         }
 
     async def take_adapters_offline(self) -> AdapterRuntimeTransitionResult:
-        """卸载当前所有适配器插件，并记录可恢复的插件集合。"""
+        """卸载当前所有适配器插件，停止失去发送链路的聊天流并记录可恢复的插件集合。"""
 
         if not self._started:
             return AdapterRuntimeTransitionResult(
@@ -1230,6 +1230,12 @@ class PluginRuntimeManager(
                 self._offline_adapter_plugin_ids.update(result.unloaded_plugins)
                 self._notify_status_changed()
                 failed_plugins.update(result.failed_plugins)
+
+            from src.chat.heart_flow.heartflow_manager import heartflow_manager
+
+            # 卸载完成后按实际剩余链路复用名单清理，取消思考和唤醒任务。
+            # 部分适配器卸载失败时，仍有可用链路的会话继续运行。
+            await heartflow_manager.close_policy_blocked_chats()
 
             return AdapterRuntimeTransitionResult(
                 success=not failed_plugins,
