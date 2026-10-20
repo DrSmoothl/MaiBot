@@ -266,7 +266,7 @@ function getContextItemContentBlocks(item: ContextItemSnapshot): ContextItemCont
   return blocks
 }
 
-function ContextItemImagePreview({ image, index }: { image: ContextItemImage; index: number }) {
+export function ContextItemImagePreview({ image, index }: { image: ContextItemImage; index: number }) {
   const [src, setSrc] = useState('')
 
   useEffect(() => {

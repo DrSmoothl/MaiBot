@@ -957,7 +957,8 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
         # user 角色不代表真实聊天：子代理结论、插件主动任务和焦点通知也使用该角色。
         # 只接收真实收发的 IM 消息（含复杂消息子类），避免新增内部消息类型时再次漏入。
-        return not isinstance(message, SessionBackedMessage)
+        # 平台通知同样带有原始 IM 消息，必须根据原消息的通知标记统一排除。
+        return not isinstance(message, SessionBackedMessage) or message.original_message.is_notify
 
     @classmethod
     def _should_keep_replyer_history_message(cls, message: LLMContextMessage) -> bool:

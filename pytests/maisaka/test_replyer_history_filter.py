@@ -72,6 +72,23 @@ def _build_mixed_history() -> List[LLMContextMessage]:
             output_item=ContextItemBuilder().set_role(RoleType.Assistant).add_text_content("Planner 内部输出").build(),
         ),
     ])
+    for message_type, text in (
+        (SessionBackedMessage, "[事件-群消息表情回应] 用户对消息表达了赞"),
+        (SessionBackedMessage, "平台通知：戳一戳、撤回、禁言、入群退群"),
+        (ComplexSessionMessage, "未来平台的复杂通知"),
+    ):
+        original = SessionMessage(message_id=f"notice-{len(history)}", timestamp=timestamp, platform="test")
+        original.is_notify = True
+        notification = message_type(
+            original_message=original,
+            message_id=original.message_id,
+            timestamp=timestamp,
+            raw_message=MessageSequence([TextComponent(text)]),
+            visible_text=text,
+        )
+        if isinstance(notification, ComplexSessionMessage):
+            notification.prompt_text = text
+        history.append(notification)
     return history
 
 
@@ -114,4 +131,5 @@ def test_request_history_excludes_internal_messages(monkeypatch, retro: bool, vi
         assert message.processed_plain_text not in text
     # 过滤不能删除或改写 Planner 共享历史里的内部上下文。
     assert history[3].source_kind == "subagent_result"
-    assert len(history) == 16
+    assert len(history) == 19
+    assert all(message.original_message.is_notify for message in history[-3:])
