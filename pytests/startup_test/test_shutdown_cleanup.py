@@ -17,7 +17,7 @@ def test_shutdown_stops_chat_before_dependencies(monkeypatch):
     namespace, system, _ = load_bot_functions(events, install_module=lambda k, v: monkeypatch.setitem(sys.modules, k, v))
     assert asyncio.run(namespace["graceful_shutdown"](system))
     assert events.index("app_stop") < events.index("chat_stop")
-    assert events.index("chat_stop") < events.index("plugin_stop")
+    assert events.index("chat_stop") < events.index("computer_stop") < events.index("plugin_stop")
     assert events.index("chat_stop") < events.index("memory_producer_stop") < events.index("memory_stop")
 
 

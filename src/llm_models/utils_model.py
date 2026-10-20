@@ -77,6 +77,7 @@ DATA_URI_LIMIT_PATTERN = re.compile(
 DATA_URI_RETRY_MARGIN_BYTES = 128 * 1024
 MIN_COMPRESSED_IMAGE_TARGET_SIZE_BYTES = 512 * 1024
 EMPTY_TASK_FALLBACKS = {
+    "computer": "planner",
     "fast_model": "utils",
     "learner": "utils",
     "mid_memory": "fast_model",

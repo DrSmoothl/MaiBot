@@ -13,6 +13,7 @@ from src.common.paths import get_instance_root
 from src.common.i18n import t
 from src.common.logger import get_logger
 from src.common.version import read_project_version
+from src.computer.config import ComputerConfig
 from src.web_search.config import WebConfig, resolve_web_search_config
 
 from .config_base import AttributeData, ConfigBase, Field
@@ -71,8 +72,8 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.15.21"
-MODEL_CONFIG_VERSION: str = "1.17.19"
+CONFIG_VERSION: str = "8.15.26"
+MODEL_CONFIG_VERSION: str = "1.17.21"
 
 logger = get_logger("config")
 
@@ -96,6 +97,9 @@ class _ReloadCallbackRegistration:
 
 class Config(ConfigBase):
     """总配置类"""
+
+    computer: ComputerConfig = Field(default_factory=ComputerConfig)
+    """电脑使用配置"""
 
     bot: BotConfig = Field(default_factory=BotConfig)
     """机器人配置类"""

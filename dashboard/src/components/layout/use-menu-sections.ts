@@ -7,10 +7,12 @@ import type { MenuSection } from './types'
 
 interface MenuFeatureFlags {
   replyEffects: boolean
+  computer: boolean
 }
 
 function resolveMenuFeatureFlags(config: Record<string, unknown> | null): MenuFeatureFlags {
   const debug = config?.debug
+  const computer = config?.computer
   const replyEffects =
     debug && typeof debug === 'object'
       ? (debug as Record<string, unknown>).enable_reply_effect_tracking === true
@@ -18,6 +20,8 @@ function resolveMenuFeatureFlags(config: Record<string, unknown> | null): MenuFe
 
   return {
     replyEffects,
+    computer: computer !== null && typeof computer === 'object'
+      && (computer as Record<string, unknown>).enabled === true,
   }
 }
 
@@ -27,6 +31,7 @@ function filterMenuSections(flags: MenuFeatureFlags | null): MenuSection[] {
       ...section,
       items: section.items.filter((item) => {
         if (item.featureFlag === 'replyEffects') return flags?.replyEffects === true
+        if (item.featureFlag === 'computer') return flags?.computer === true
         return true
       }),
     }))
@@ -48,7 +53,7 @@ export function useMenuSections(): MenuSection[] {
         })
         .catch(() => {
           if (!cancelled) {
-            setFeatureFlags({ replyEffects: false })
+            setFeatureFlags({ replyEffects: false, computer: false })
           }
         })
     }

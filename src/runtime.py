@@ -250,9 +250,17 @@ async def graceful_shutdown(main_system: MainSystem | None = None) -> bool:
             success = (
                 await _await_shutdown_step(main_system.app.stop(), timeout=5.0, step_name="停止消息入口") and success
             )
-        # 消息生产者先于插件及存储关闭，避免在依赖销毁后继续调用工具。
+        # 消息生产者先于插件、电脑及存储关闭，避免在依赖销毁后继续调用工具。
         success = (
             await _await_shutdown_step(heartflow_manager.shutdown(), timeout=5.0, step_name="停止聊天循环")
+            and success
+        )
+
+        from src.computer.service import computer_service
+
+        # 实际 CLI 入口不经过 src.main.main 的 finally；保存电脑状态，保留沙盒供下次恢复。
+        success = (
+            await _await_shutdown_step(computer_service.stop(), timeout=8.0, step_name="保存并断开电脑")
             and success
         )
 

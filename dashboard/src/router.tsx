@@ -205,6 +205,12 @@ const plannerMonitorRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/monitor/index.tsx'), 'PlannerMonitorPage'),
 })
 
+const computerRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/computer',
+  component: lazyRouteComponent(() => import('./routes/computer'), 'ComputerPage'),
+})
+
 // 移动端管理页路由：底部标签栏「管理」，汇总侧栏的全部入口
 const manageRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -408,6 +414,7 @@ const routeTree = rootRoute.addChildren([
     logsRoute,
     reasoningProcessRoute,
     plannerMonitorRoute,
+    computerRoute,
     chatManagementRoute,
     chatRoute,
     manageRoute,

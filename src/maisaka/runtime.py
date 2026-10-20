@@ -27,6 +27,7 @@ from src.common.logger import get_logger
 from src.common.message_repository import find_messages
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils, JargonConfigUtils
 from src.config.config import global_config, model_config
+from src.computer.provider import ComputerToolProvider
 from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.expression_learner import ExpressionLearner
 from src.learners.jargon_learner import JargonLearner
@@ -746,6 +747,22 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             "task_id": task_id,
             "queued": True,
         }
+
+    def enqueue_internal_task(
+        self, *, source_kind: str, text: str, reason: str, images: Sequence[ImageComponent] = (),
+    ) -> Dict[str, Any]:
+        """本体后台任务复用真实会话上下文和正常 Planner 调度。"""
+        if not self._running:
+            raise RuntimeError("不能向已停止的聊天运行实例投递任务")
+        task_id = f"{source_kind}:{uuid.uuid4().hex}"
+        self._chat_history.append(InternalContextMessage(
+            raw_message=MessageSequence([TextComponent(text), *images]), visible_text=text,
+            timestamp=datetime.now(), message_id=task_id, source_kind=source_kind,
+        ))
+        self._ensure_background_tasks_running()
+        self._arm_forced_turn_state(message_id=task_id, reason=reason)
+        self._queue_proactive_turn(self._build_proactive_trigger_message(task_id))
+        return {"task_id": task_id, "queued": True}
 
     async def _stop_background_subagents(self) -> None:
         """运行时停止时终止全部后台子代理，并让观察页知道它们已被终止。"""
@@ -1543,6 +1560,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             )
         )
         self._tool_registry.register_provider(PluginToolProvider())
+        self._tool_registry.register_provider(ComputerToolProvider())
         self._tool_registry.register_provider(MCPToolProvider(get_mcp_service()))
         self._chat_loop_service.set_tool_registry(self._tool_registry)
 
