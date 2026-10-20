@@ -95,21 +95,22 @@ def test_force_compatibility_loads_plugin_out_of_host_and_sdk_range() -> None:
     ]
 
 
-def test_force_compatibility_still_blocks_python_package_conflicts() -> None:
-    """强制插件兼容只放开版本范围校验，不放开 Python 包依赖冲突。"""
+@pytest.mark.parametrize("force_compatibility", [False, True])
+def test_installed_python_package_version_mismatch_only_warns(force_compatibility: bool) -> None:
+    """已有依赖沿用当前版本，普通和强制兼容模式均允许插件尝试加载。"""
 
     manifest = _build_manifest()
     manifest["host_application"] = {"min_version": "1.0.0", "max_version": "1.2.3"}
     manifest["dependencies"] = [{"type": "python_package", "name": "packaging", "version_spec": ">=999.0.0"}]
     validator = _build_validator(
-        "2.0.0",
-        force_plugin_compatibility=True,
+        "1.0.0",
+        force_plugin_compatibility=force_compatibility,
         validate_python_package_dependencies=True,
     )
 
-    assert validator.parse_manifest(manifest) is None
-    assert len(validator.errors) == 1
-    assert validator.errors[0].startswith("Python 包依赖冲突: packaging 需要 >=999.0.0")
+    assert validator.parse_manifest(manifest) is not None
+    assert validator.errors == []
+    assert any(warning.startswith("Python 包依赖版本不匹配: packaging 需要 >=999.0.0") for warning in validator.warnings)
 
 
 def test_plugin_loader_force_compatibility_loads_incompatible_plugin(tmp_path: Path) -> None:

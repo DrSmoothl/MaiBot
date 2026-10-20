@@ -1093,7 +1093,7 @@ class ManifestValidator:
             self._validate_python_package_dependencies_against_runtime(manifest)
 
     def _validate_python_package_dependencies_against_runtime(self, manifest: PluginManifest) -> None:
-        """校验 Python 包依赖与主程序运行环境是否冲突。
+        """检查 Python 包依赖；已有包版本不符只提示，仍尝试加载插件。
 
         Args:
             manifest: 已通过结构校验的强类型 Manifest。
@@ -1110,14 +1110,13 @@ class ManifestValidator:
             installed_version = self._get_installed_package_version(dependency.name)
             host_requirement = host_requirements.get(normalized_package_name)
 
-            if installed_version is not None and not self._version_matches_specifier(
-                installed_version,
-                dependency.version_spec,
-            ):
-                self.errors.append(
-                    f"Python 包依赖冲突: {dependency.name} 需要 {dependency.version_spec}，"
-                    f"当前运行环境为 {installed_version}"
-                )
+            if installed_version is not None:
+                if not self._version_matches_specifier(installed_version, dependency.version_spec):
+                    self.warnings.append(
+                        f"Python 包依赖版本不匹配: {dependency.name} 需要 {dependency.version_spec}，"
+                        f"当前运行环境为 {installed_version}，沿用已安装版本并尝试加载"
+                    )
+                # 安装、更新和 Runner 加载使用相同规则，不再用宿主约束二次拦截已有包。
                 continue
 
             if host_requirement is None:
