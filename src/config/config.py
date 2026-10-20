@@ -71,7 +71,7 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.15.20"
+CONFIG_VERSION: str = "8.15.21"
 MODEL_CONFIG_VERSION: str = "1.17.19"
 
 logger = get_logger("config")
@@ -263,6 +263,10 @@ def _normalize_loaded_bot_config_dict(config_data: dict[str, Any]) -> dict[str, 
     # 将已稳定的能力配置移入独立栏目，保留用户原有开关与阈值。
     experimental_config = normalized.get("experimental")
     if isinstance(experimental_config, dict):
+        if "replyer_retro_prompt" in experimental_config:
+            normalized.setdefault("debug", {}).setdefault(
+                "replyer_retro_prompt", experimental_config.pop("replyer_retro_prompt")
+            )
         for field_name in (
             "tool_result_condense",
             "tool_result_condense_threshold",
@@ -297,6 +301,26 @@ class ConfigManager:
         self._last_hot_reload_monotonic: float = 0.0
         self._config_file_fingerprints: dict[str, str] = {}
         self.reload_revision: int = 0
+        self.retro_prompt_forced: bool = False
+
+    def _sync_retro_reply_prompt(self, config: Config, models: ModelConfig) -> None:
+        """指定模型存在时强制开启，最后一个指定模型移走时清除自动开关。"""
+        retro_models = {"v2p1-contract", "v2p1-raw"}
+        forced = any(
+            model_name in retro_models or "mai-replier" in model_name
+            for model in models.models
+            for value in (model.name, model.model_identifier)
+            for model_name in (value.strip().lower().replace("_", "-"),)
+        )
+        if forced or self.retro_prompt_forced:
+            # 仅更新该字段，保留磁盘上其他配置、注释以及尚未热重载的修改。
+            doc = tomlkit.loads(self.bot_config_path.read_text(encoding="utf-8"))
+            debug = doc.setdefault("debug", tomlkit.table())
+            if debug.get("replyer_retro_prompt") != forced:
+                debug["replyer_retro_prompt"] = forced
+                self.bot_config_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+            config.debug.replyer_retro_prompt = forced
+        self.retro_prompt_forced = forced
 
     def initialize(self):
         logger.info(t("config.current_version", version=MMC_VERSION))
@@ -308,6 +332,7 @@ class ConfigManager:
             MODEL_CONFIG_VERSION,
             True,
         )
+        self._sync_retro_reply_prompt(self.global_config, self.model_config)
         if global_updated or model_updated:
             logger.info("配置已自动升级，将继续使用更新后的配置启动")
         self._update_config_file_fingerprints(("bot", "model"))
@@ -629,6 +654,7 @@ class ConfigManager:
                         MODEL_CONFIG_VERSION,
                         True,
                     )
+                await asyncio.to_thread(self._sync_retro_reply_prompt, global_config_new, model_config_new)
             except Exception as exc:
                 logger.error(t("config.reload_failed", error=exc))
                 return False

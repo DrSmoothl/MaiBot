@@ -673,7 +673,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         think_level: int = 1,
     ) -> List[ContextItem]:
         # 复古模式将人设与注意事项放在首条 system 消息，其余模板作为一条 user 消息发送
-        if global_config.experimental.replyer_retro_prompt:
+        if global_config.debug.replyer_retro_prompt:
             return self._build_retro_request_messages(
                 chat_history=chat_history,
                 reply_message=reply_message,

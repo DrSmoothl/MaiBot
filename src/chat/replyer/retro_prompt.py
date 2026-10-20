@@ -1,6 +1,6 @@
 """复古 replyer 提示词组装。
 
-开启 `experimental.replyer_retro_prompt` 后，replyer 按旧版（0.12.x）的组织方式生成提示词：
+开启 `debug.replyer_retro_prompt` 后，replyer 按旧版（0.12.x）的组织方式生成提示词：
 
 - 人设和聊天注意事项合并为首条 system 消息，其余回复指令由模板占位符拼接而成；
 - 群聊、群聊简短回复、私聊、私聊补充自己发言各用一套模板；

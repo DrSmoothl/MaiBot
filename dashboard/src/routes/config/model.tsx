@@ -1308,9 +1308,9 @@ function ModelConfigPageContent() {
                         {!isEmbeddingTest && (
                           <>
                             <div>
-                              <span className="text-muted-foreground">工具调用</span>
-                              <p className={selectedModelTestResult.tool_call_ok ? 'font-medium text-green-600' : 'font-medium text-destructive'}>
-                                {selectedModelTestResult.tool_call_ok ? '已返回测试工具调用' : '未返回测试工具调用'}
+                              <span className="text-muted-foreground">{selectedModelTestResult.test_kind === 'replyer' ? '测试方式' : '工具调用'}</span>
+                              <p className={selectedModelTestResult.test_kind === 'replyer' || selectedModelTestResult.tool_call_ok ? 'font-medium' : 'font-medium text-destructive'}>
+                                {selectedModelTestResult.test_kind === 'replyer' ? '模拟 replyer 任务（仅文本回复）' : selectedModelTestResult.tool_call_ok ? '已返回测试工具调用' : '未返回测试工具调用'}
                               </p>
                             </div>
                             <div>

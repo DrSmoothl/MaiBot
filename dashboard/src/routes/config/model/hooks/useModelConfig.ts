@@ -41,6 +41,7 @@ import type { ModelInfo, ModelPricePeriod, ModelTaskConfig, ProviderConfig, Task
 import { serializeModel } from '../serializeModel'
 import type { APIProvider, DeleteConfirmState } from '../../modelProvider/types'
 import { cleanProviderData } from '../../modelProvider/utils'
+import { PROVIDER_TEMPLATES } from '../../providerTemplates'
 import { useModelAutoSave } from './useModelAutoSave'
 import { useEmbeddingWarning, type PendingEmbeddingUpdate } from './useEmbeddingWarning'
 import { readWebSearchConfig, type WebSearchConfig } from '../../webSearch/types'
@@ -976,7 +977,7 @@ export function useModelConfig() {
   }, [])
 
   const handleSaveProviderEdit = useCallback(
-    async (provider: APIProvider, index: number | null) => {
+    async (provider: APIProvider, index: number | null, templateId?: string) => {
       const providerToSave = cleanProviderData(provider)
       const nextProviders = [...apiProviders]
       if (index !== null) {
@@ -992,13 +993,30 @@ export function useModelConfig() {
 
       try {
         setSaving(true)
-        if (hasLinkedModels) {
-          // 改名只迁移供应商引用；与供应商一起写入，避免触发级联删除或留下无效引用。
+        const template = PROVIDER_TEMPLATES.find((item) => item.id === templateId)
+        const presetModels = template?.base_url === providerToSave.base_url ? template.models : undefined
+        if (hasLinkedModels || presetModels?.length) {
+          // 改名迁移供应商引用；预设模型与供应商一起写入，避免留下无效引用。
           const nextModels = models.map((model) =>
-            model.api_provider === oldProviderName
+            providerRenamed && model.api_provider === oldProviderName
               ? { ...model, api_provider: providerToSave.name }
               : model
           )
+          // 重复保存只补齐缺失项，保留已有模型参数；全局重名时加供应商后缀。
+          const usedNames = new Set(nextModels.map((model) => model.name.toLowerCase()))
+          for (const preset of presetModels ?? []) {
+            if (nextModels.some((model) =>
+              model.api_provider === providerToSave.name && model.model_identifier === preset.model_identifier
+            )) continue
+            let name = preset.name
+            let suffix = 2
+            while (usedNames.has(name.toLowerCase())) {
+              name = `${preset.name} (${providerToSave.name}${suffix === 2 ? '' : ` ${suffix}`})`
+              suffix += 1
+            }
+            usedNames.add(name.toLowerCase())
+            nextModels.push({ ...preset, name, api_provider: providerToSave.name })
+          }
           const persistResult = await persistModelConfigDraft(nextModels, taskConfig, nextProviders)
           if (persistResult.applyProviders) {
             syncProviderState(nextProviders)
@@ -1026,7 +1044,9 @@ export function useModelConfig() {
         setEditingProviderIndex(null)
         toast({
           title: index !== null ? '提供商已更新' : '提供商已添加',
-          description: hasLinkedModels
+          description: presetModels?.length
+            ? '提供商及全部预设模型已保存，请在回复模型中选择使用'
+            : hasLinkedModels
             ? '供应商名称及关联模型已同步保存，任务分配已保留'
             : '模型配置已保存',
         })
@@ -1335,13 +1355,13 @@ export function useModelConfig() {
         if (testResult.success) {
           toast({
             title: '模型测试通过',
-            description: `${modelName} 已完成文本${testResult.visual_tested ? '、视觉' : ''}与工具调用测试 (${testResult.latency_ms != null ? `${(testResult.latency_ms / 1000).toFixed(2)}s` : '-'})`,
+            description: `${modelName} ${testResult.test_kind === 'replyer' ? '已完成模拟 replyer 回复测试' : `已完成文本${testResult.visual_tested ? '、视觉' : ''}与工具调用测试`} (${testResult.latency_ms != null ? `${(testResult.latency_ms / 1000).toFixed(2)}s` : '-'})`,
             duration: 8000,
             action: buildModelTestDetailAction(testResult),
           })
         } else {
           toast({
-            title: testResult.tool_call_ok ? '模型响应异常' : '工具调用未通过',
+            title: testResult.test_kind === 'replyer' ? '回复测试未通过' : testResult.tool_call_ok ? '模型响应异常' : '工具调用未通过',
             description: `${modelName} 未通过模型能力测试，请点击“详情”查看完整错误信息`,
             variant: 'destructive',
             duration: 10000,

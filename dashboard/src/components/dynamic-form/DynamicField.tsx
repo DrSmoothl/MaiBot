@@ -501,6 +501,7 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
         <Switch
           className="shrink-0 justify-self-end"
           checked={checked}
+          disabled={schema.readOnly}
           onCheckedChange={(checked) => onChange(checked)}
         />
       </div>
