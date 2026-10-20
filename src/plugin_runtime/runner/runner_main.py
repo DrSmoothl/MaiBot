@@ -1241,7 +1241,7 @@ class PluginRunner:
             return None, False, error_message
 
         try:
-            meta = self._loader.load_candidate(plugin_id, candidate)
+            meta = self._loader.load_candidate(plugin_id, candidate, for_config_request=True)
         except Exception as exc:
             return None, False, str(exc)
         if meta is None:
@@ -1609,6 +1609,9 @@ class PluginRunner:
         返回禁用或初始化失败的终止状态；配置错误时仅注册管理状态，跳过业务激活。
         启动、重载和回滚共用此阶段，配置只读取和归一化一次。
         """
+        if meta.explicitly_disabled:
+            logger.debug(f"插件 {meta.plugin_id} 已在配置中禁用，跳过加载")
+            return PluginActivationStatus.INACTIVE
         self._inject_context(meta.plugin_id, meta.instance, meta.plugin_dir)
         try:
             plugin_config = self._apply_plugin_config(meta)

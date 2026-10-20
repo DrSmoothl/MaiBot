@@ -47,6 +47,44 @@ def _manifest(plugin_id: str, requirements: Dict[str, str]) -> PluginManifest:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("enabled_value", ["false", '"off"', "0"])
+async def test_disabled_plugin_is_skipped_before_manifest_and_dependency_analysis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled_value: str
+) -> None:
+    plugin_root = tmp_path / "plugins"
+    disabled_dir = plugin_root / "disabled"
+    enabled_dir = plugin_root / "enabled"
+    disabled_dir.mkdir(parents=True)
+    enabled_dir.mkdir()
+    (disabled_dir / "config.toml").write_text(f"[plugin]\nenabled = {enabled_value}\n", encoding="utf-8")
+    # 无法解析的清单也不应被读取，更不应参与冲突检测或依赖安装。
+    (disabled_dir / "_manifest.json").write_text("invalid manifest", encoding="utf-8")
+    (disabled_dir / "plugin.py").write_text('raise RuntimeError("must not import")\n', encoding="utf-8")
+    (enabled_dir / "_manifest.json").write_text(
+        _manifest("test.enabled", {"missing-package": ">=1"}).model_dump_json(), encoding="utf-8"
+    )
+    (enabled_dir / "plugin.py").write_text("", encoding="utf-8")
+    pipeline = PluginDependencyPipeline(project_root=tmp_path)
+    original_load = pipeline._manifest_validator.load_from_plugin_path
+
+    def load_manifest(path: Path, require_entrypoint: bool = True) -> Optional[PluginManifest]:
+        assert path != disabled_dir
+        return original_load(path, require_entrypoint=require_entrypoint)
+
+    monkeypatch.setattr(pipeline._manifest_validator, "load_from_plugin_path", load_manifest)
+    monkeypatch.setattr(ManifestValidator, "get_installed_package_version", lambda self, name: None)
+    installer = AsyncMock(return_value=(True, ""))
+    monkeypatch.setattr(pipeline, "_install_requirements", installer)
+
+    result = await pipeline.execute([plugin_root])
+
+    assert result.blocked_plugin_reasons == {}
+    installer.assert_awaited_once()
+    assert [item.requirement_text for item in result.install_requirements] == ["missing-package>=1"]
+    assert result.install_requirements[0].plugin_ids == ("test.enabled",)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("installed_version, requirement", [("13.0.0", ">=11,<13"), ("10.0.0", ">=11")])
 @pytest.mark.parametrize("loaded", [False, True])
 async def test_installed_version_conflict_skips_install_without_blocking_plugin(

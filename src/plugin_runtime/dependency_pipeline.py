@@ -193,7 +193,7 @@ class PluginDependencyPipeline:
         """
 
         manifests: Dict[str, PluginManifest] = {}
-        for _plugin_path, manifest in self._manifest_validator.iter_plugin_manifests(plugin_dirs):
+        for _plugin_path, manifest in self._manifest_validator.iter_plugin_manifests(plugin_dirs, enabled_only=True):
             manifests[manifest.id] = manifest
         return manifests
 

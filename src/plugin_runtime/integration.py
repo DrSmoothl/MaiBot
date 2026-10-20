@@ -54,6 +54,7 @@ from src.plugin_runtime.host.hook_dispatcher import HookDispatchResult, HookDisp
 from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistry
 from src.plugin_runtime.protocol.envelope import InspectPluginConfigResultPayload
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator, is_reserved_plugin_directory
+from src.plugin_runtime.runner.plugin_enabled import is_plugin_disabled
 
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
@@ -200,6 +201,24 @@ class PluginRuntimeManager(
                 supervisor = await asyncio.to_thread(self._find_supervisor_by_plugin_directory, plugin_id)
             if supervisor is None:
                 raise RuntimeError(f"插件 {plugin_id} 没有对应的运行时")
+
+            if plugin_id not in supervisor.get_loaded_plugin_ids():
+                plugin_path = await asyncio.to_thread(self._get_plugin_path_for_supervisor, supervisor, plugin_id)
+                if plugin_path is not None:
+                    if await asyncio.to_thread(is_plugin_disabled, plugin_path):
+                        return "inactive"
+                    # 配置解析会冷导入插件，启用时必须先补齐依赖，避免在检查配置之前就因缺包失败。
+                    dependency_state = await self._sync_plugin_dependencies(list(self._iter_plugin_dirs()))
+                    if blocked_reason := self._blocked_plugin_reasons.get(plugin_id):
+                        raise RuntimeError(blocked_reason)
+                    if dependency_state.environment_changed or dependency_state.blocked_changed_plugin_ids:
+                        if not await self._restart_supervisors(reason="config_enabled_dependencies"):
+                            raise RuntimeError("启用插件时同步依赖后重启运行时失败")
+                        supervisor = self._get_supervisor_for_plugin(plugin_id)
+                        if supervisor is None:
+                            supervisor = await asyncio.to_thread(self._find_supervisor_by_plugin_directory, plugin_id)
+                        if supervisor is None:
+                            raise RuntimeError(f"插件 {plugin_id} 没有对应的运行时")
             snapshot = await supervisor.inspect_plugin_config(plugin_id)
             loaded = plugin_id in supervisor.get_loaded_plugin_ids()
             if snapshot.config_error:
@@ -316,7 +335,7 @@ class PluginRuntimeManager(
             log_compat_warnings=False,
             force_plugin_compatibility=is_force_plugin_compatibility_enabled(),
         )
-        return validator.build_plugin_dependency_map(plugin_dirs)
+        return validator.build_plugin_dependency_map(plugin_dirs, enabled_only=True)
 
     @classmethod
     def _discover_llm_provider_conflicts(
@@ -341,7 +360,9 @@ class PluginRuntimeManager(
         )
         excluded_ids = excluded_plugin_ids or set()
         provider_owners: Dict[str, List[str]] = {}
-        for _plugin_path, manifest in validator.iter_plugin_manifests(plugin_dirs, require_entrypoint=True):
+        for _plugin_path, manifest in validator.iter_plugin_manifests(
+            plugin_dirs, require_entrypoint=True, enabled_only=True
+        ):
             if manifest.id in excluded_ids:
                 continue
             for client_type in manifest.llm_provider_client_types:

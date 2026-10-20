@@ -23,6 +23,8 @@ from src.common.logger import get_logger
 from src.plugin_runtime import detect_host_application_version
 from src.plugin_runtime.local_sdk import read_local_sdk_version
 
+from .plugin_enabled import is_plugin_disabled
+
 logger = get_logger("plugin_runtime.runner.manifest_validator")
 
 _SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
@@ -865,11 +867,15 @@ class ManifestValidator:
         """
         return self.parse_manifest(manifest) is not None
 
-    def parse_manifest(self, manifest: Dict[str, Any], source: Optional[str] = None) -> Optional[PluginManifest]:
+    def parse_manifest(
+        self, manifest: Dict[str, Any], source: Optional[str] = None, *, skip_runtime_validation: bool = False
+    ) -> Optional[PluginManifest]:
         """解析并校验 manifest 字典。
 
         Args:
             manifest: 待解析的 Manifest 原始字典。
+            source: 日志中的清单来源。
+            skip_runtime_validation: 禁用插件仅解析管理元数据，不检查运行时兼容性或依赖。
 
         Returns:
             Optional[PluginManifest]: 解析成功时返回强类型 Manifest；失败时返回 ``None``。
@@ -893,7 +899,8 @@ class ManifestValidator:
             self._log_errors(source=source)
             return None
 
-        self._validate_runtime_compatibility(parsed_manifest)
+        if not skip_runtime_validation:
+            self._validate_runtime_compatibility(parsed_manifest)
         if self.errors:
             self._log_errors(source=source or parsed_manifest.id)
             return None
@@ -940,18 +947,22 @@ class ManifestValidator:
             return None
 
         manifest_source = str(manifest_data.get("id", "")).strip() or str(plugin_path)
-        return self.parse_manifest(manifest_data, source=manifest_source)
+        return self.parse_manifest(
+            manifest_data, source=manifest_source, skip_runtime_validation=is_plugin_disabled(plugin_path)
+        )
 
     def iter_plugin_manifests(
         self,
         plugin_dirs: Iterable[Path],
         require_entrypoint: bool = True,
+        enabled_only: bool = False,
     ) -> Iterable[Tuple[Path, PluginManifest]]:
         """扫描插件根目录并迭代所有可成功解析的 Manifest。
 
         Args:
             plugin_dirs: 一个或多个插件根目录。
             require_entrypoint: 是否要求每个插件目录内存在 ``plugin.py``。
+            enabled_only: 是否在读取 Manifest 前跳过明确禁用的插件。
 
         Yields:
             Tuple[Path, PluginManifest]: ``(插件目录路径, 解析结果)`` 二元组。
@@ -966,6 +977,8 @@ class ManifestValidator:
                 for entry in normalized_root.iterdir()
                 if entry.is_dir() and not is_reserved_plugin_directory(entry)
             ):
+                if enabled_only and is_plugin_disabled(candidate_path):
+                    continue
                 parsed_manifest = self.load_from_plugin_path(candidate_path, require_entrypoint=require_entrypoint)
                 if parsed_manifest is None:
                     continue
@@ -975,18 +988,22 @@ class ManifestValidator:
         self,
         plugin_dirs: Iterable[Path],
         require_entrypoint: bool = True,
+        enabled_only: bool = False,
     ) -> Dict[str, List[str]]:
         """扫描目录并构建 ``plugin_id -> 依赖插件 ID 列表`` 映射。
 
         Args:
             plugin_dirs: 一个或多个插件根目录。
             require_entrypoint: 是否要求每个插件目录内存在 ``plugin.py``。
+            enabled_only: 是否忽略禁用插件及其依赖关系。
 
         Returns:
             Dict[str, List[str]]: 所有成功解析到的插件依赖映射。
         """
         dependency_map: Dict[str, List[str]] = {}
-        for _plugin_path, manifest in self.iter_plugin_manifests(plugin_dirs, require_entrypoint=require_entrypoint):
+        for _plugin_path, manifest in self.iter_plugin_manifests(
+            plugin_dirs, require_entrypoint=require_entrypoint, enabled_only=enabled_only
+        ):
             dependency_map[manifest.id] = manifest.plugin_dependency_ids
         return dependency_map
 
