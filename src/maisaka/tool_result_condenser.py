@@ -30,7 +30,6 @@ PLANNER_THOUGHT_MAX_CHARS = 800
 # 这些工具的结果本身就是控制信号、聊天原文、子代理已经给出的结论，或 Planner 主动取回的原文，不做整理
 TOOL_RESULT_CONDENSE_EXCLUDED_TOOL_NAMES = frozenset(
     {
-        "fetch_history",
         "read_tool_result",
         "reply",
         "subagent",

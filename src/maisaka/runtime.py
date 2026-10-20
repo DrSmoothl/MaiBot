@@ -3,7 +3,7 @@
 from collections import deque
 from datetime import datetime
 from math import ceil
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Literal, Optional, Sequence
 import asyncio
 import json
 import time
@@ -51,7 +51,7 @@ from src.maisaka.context.messages import (
 )
 from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
 from src.maisaka.display.stage_status_board import remove_stage_status, update_stage_status
-from src.maisaka.focus import MaisakaFocusRuntimeMixin, focus_mode_manager
+from src.maisaka.focus import focus_mode_manager
 from src.maisaka.monitor.events import (
     emit_message_ingested,
     emit_message_sent,
@@ -79,6 +79,9 @@ from src.services.message_word_frequency_service import update_high_frequency_te
 from .chat_loop_service import ChatResponse, MaisakaChatLoopService
 from .reasoning_engine import MaisakaReasoningEngine
 from .subagent_tasks import SubAgentTask, SubAgentTaskManager, format_tool_usage
+
+if TYPE_CHECKING:
+    from .focus.group_runtime import FocusGroupRuntime
 
 logger = get_logger("maisaka_runtime")
 
@@ -145,8 +148,10 @@ class PlannerInterruptController:
         return "request"
 
 
-class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMixin):
+class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
     """会话级别的 Maisaka 运行时。"""
+
+    _focus_group: Optional["FocusGroupRuntime"] = None
 
     _STATE_RUNNING: Literal["running"] = "running"
     _STATE_WAIT: Literal["wait"] = "wait"
@@ -176,8 +181,9 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._proactive_trigger_message: Optional[SessionMessage] = None
         self._proactive_logical_turn_id: Optional[str] = None
         self._subagent_tasks = SubAgentTaskManager()
-        self._focus_cooldown_wakeup_scheduled = False
-        self._focus_cooldown_timer_task: Optional[asyncio.Task[None]] = None
+        # Focus 成员保留自己的聊天服务，前台 Planner 只在所属共享组中运行。
+        self._focus_group: Optional[FocusGroupRuntime] = None
+        self._message_ingest_lock = asyncio.Lock()
 
         self._current_cycle_detail: Optional[CycleDetail] = None
         self._running = False
@@ -290,9 +296,14 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         return bool(global_config.debug.enable_reply_effect_tracking)
 
-    def _update_stage_status(self, stage: str, detail: str = "", *, round_text: str = "") -> None:
+    def _update_stage_status(
+        self, stage: str, detail: str = "", *, round_text: str = "", wait_until: Optional[float] = None,
+    ) -> None:
         """更新当前会话的阶段状态。"""
-
+        if (wait_until is None and self._agent_state == self._STATE_WAIT
+                and self._wait_timeout_task is not None and self._pending_wait_started_at is not None
+                and self._pending_wait_seconds is not None):
+            wait_until = self._pending_wait_started_at + self._pending_wait_seconds
         update_stage_status(
             session_id=self.session_id,
             session_name=self.session_name,
@@ -300,14 +311,7 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
             detail=detail,
             round_text=round_text,
             agent_state=self._agent_state,
-            wait_until=(
-                self._pending_wait_started_at + self._pending_wait_seconds
-                if self._agent_state == self._STATE_WAIT
-                and self._wait_timeout_task is not None
-                and self._pending_wait_started_at is not None
-                and self._pending_wait_seconds is not None
-                else None
-            ),
+            wait_until=wait_until,
         )
 
     async def start(self) -> None:
@@ -323,6 +327,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._running = True
         if self._is_reply_effect_tracking_enabled():
             await self._reply_effect_tracker.start()
+        if self._is_focus_mode_active_for_current_chat():
+            await focus_mode_manager.attach(self)
         self._ensure_background_tasks_running()
         self._schedule_message_turn()
         self._update_stage_status("空闲", "等待消息触发")
@@ -543,15 +549,20 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
     async def stop(self) -> None:
         """停止运行时主循环。"""
+        async with self._message_ingest_lock:
+            await self._stop_runtime()
+
+    async def _stop_runtime(self) -> None:
+        """在入站边界完成归属撤销，再停止会话自身的后台服务。"""
         if not self._running:
             return
 
         self._running = False
+        await focus_mode_manager.detach(self)
         self._fixed_message_debouncer.consume()
         self._mark_message_turn_unscheduled()
         self._clear_message_debounce_required()
         self._cancel_deferred_message_turn_task()
-        self._cancel_focus_cooldown_timer_task()
         self._cancel_wait_timeout_task()
         await self._cancel_trimmed_history_learning_task()
         await self._stop_background_subagents()
@@ -569,7 +580,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         if self._is_reply_effect_tracking_enabled():
             await self._reply_effect_tracker.stop()
-        focus_mode_manager.release_focus(self.session_id)
         await self._tool_registry.close()
         remove_stage_status(self.session_id)
 
@@ -620,6 +630,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
                 source_kind=source_kind,
             )
             self._chat_history.append(history_message)
+            if self._focus_group is not None:
+                self._focus_group.record_sent_message(self, history_message)
             self._quote_counter.record(message)
             self._schedule_sent_image_recognition(message)
             self._emit_monitor_message_sent(
@@ -817,6 +829,9 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         logical_turn_id: str | None = None,
     ) -> None:
         """设置主动触发消息，并投递 proactive 内部循环。"""
+        if self._focus_group is not None:
+            self._focus_group.register_proactive(self, trigger_message)
+            return
 
         self._proactive_trigger_message = trigger_message
         self._proactive_logical_turn_id = logical_turn_id
@@ -836,11 +851,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         logical_turn_id = self._proactive_logical_turn_id
         self._proactive_logical_turn_id = None
         return logical_turn_id
-
-    def _clear_focus_cooldown_wakeup_scheduled(self) -> None:
-        """清理 focus 冷却唤醒排队标记。"""
-
-        self._focus_cooldown_wakeup_scheduled = False
 
     def _emit_monitor_message_sent(
         self,
@@ -997,6 +1007,16 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
     async def register_message(self, message: SessionMessage) -> None:
         """缓存一条新消息并唤醒主循环。"""
+        await focus_mode_manager.reconcile(self)
+        async with self._message_ingest_lock:
+            if not self._running:
+                raise RuntimeError(f"聊天运行时已停止，不能接收入站消息：{self.session_id}")
+            await self._register_message(message)
+
+    async def _register_message(self, message: SessionMessage) -> None:
+        """按聊天串行登记，避免媒体构建期间同一条消息重复进入共享上下文。"""
+        if self._focus_group is not None and self._focus_group.has_message(self.session_id, message.message_id):
+            return
         if self._running:
             self._ensure_background_tasks_running()
         if message.received_at is None:
@@ -1013,7 +1033,11 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         self._prune_processed_message_cache()
         if self._is_reply_effect_tracking_enabled():
             asyncio.create_task(self._reply_effect_tracker.observe_user_message(message))
-        if not self._should_continue_after_focus_gate(message):
+        if self._focus_group is not None:
+            history_message = await self._reasoning_engine._build_history_message(message)
+            if history_message is not None:
+                self._chat_history.append(history_message)
+            await self._focus_group.register_message(self, message, history_message)
             return
         if self._agent_state == self._STATE_RUNNING:
             self._mark_message_debounce_required()
@@ -1021,30 +1045,10 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         if self._running:
             self._schedule_message_turn()
 
-    def _should_continue_after_focus_gate(self, message: SessionMessage) -> bool:
-        """处理 focus 模式准入与唤醒调度，返回是否继续进入 Maisaka 决策。"""
-
-        if not self._is_focus_mode_active_for_current_chat():
-            return True
-
-        if message.is_at and focus_mode_manager.unblock_focus_entry(self.session_id):
-            logger.info(f"{self.log_prefix} 收到 @ 消息，已解除连续空闲退出 Focus 后的重新进入限制")
-        can_enter_focus = focus_mode_manager.try_enter_focus(
-            self.session_id,
-            is_group_chat=self.chat_stream.is_group_session,
+    def _is_focus_mode_active_for_current_chat(self) -> bool:
+        return focus_mode_manager.is_enabled_for_session(
+            self.session_id, is_group_chat=self.chat_stream.is_group_session
         )
-        if not can_enter_focus and message.is_at:
-            self._maybe_schedule_focus_at_wakeup(trigger_session_id=self.session_id)
-        else:
-            self._maybe_schedule_focus_cooldown_wakeup(trigger_session_id=self.session_id)
-        if can_enter_focus:
-            return True
-
-        logger.debug(
-            f"{self.log_prefix} focus_mode 已启用且当前会话未获得关注槽，"
-            f"仅缓存消息不进入 Maisaka 决策；消息编号={message.message_id}"
-        )
-        return False
 
     def _request_planner_interrupt_for_message(self, message: SessionMessage) -> None:
         """打断运行中的 Planner；实验性消息引导不限制连续打断次数。"""
@@ -1485,6 +1489,9 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
         """确保后台任务仍在运行，若崩溃则自动拉起。"""
         if not self._running:
             return
+        if self._focus_group is not None:
+            self._ensure_expression_vector_history_backfill_running()
+            return
 
         if self._internal_loop_task is None or self._internal_loop_task.done():
             is_restart = self._internal_loop_task is not None
@@ -1829,6 +1836,8 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
     def _schedule_message_turn(self) -> None:
         """为当前待处理消息安排一次内部 turn。"""
+        if self._focus_group is not None:
+            return
         self._message_turn_scheduler.schedule_message_turn()
 
     def _collect_pending_messages(self) -> list[SessionMessage]:
@@ -1840,8 +1849,6 @@ class MaisakaHeartFlowChatting(MaisakaFocusRuntimeMixin, MaisakaRuntimeDisplayMi
 
         self._last_processed_index = len(self.message_cache)
         self._fixed_message_debouncer.consume()
-        if pending_messages:
-            focus_mode_manager.mark_read(self.session_id)
         # logger.info(
         # f"{self.log_prefix} 已从消息缓存区[{start_index}:{self._last_processed_index}] "
         # f"收集 {len(pending_messages)} 条新消息"

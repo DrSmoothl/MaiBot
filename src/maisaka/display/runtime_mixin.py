@@ -46,12 +46,13 @@ class MaisakaRuntimeDisplayMixin:
         planner_prompt_section: Optional[RenderableType] = None,
         planner_extra_lines: Optional[list[str]] = None,
         tool_prompt_panels: Optional[Dict[str, List[RenderableType]]] = None,
+        scope_lines: Optional[List[str]] = None,
     ) -> None:
         """在终端展示当前聊天流本轮 cycle 的最终结果。"""
         if not global_config.debug.show_maisaka_thinking:
             return
 
-        body_lines = [
+        body_lines = scope_lines if scope_lines is not None else [
             f"聊天流名称：{getattr(self, 'session_name', self.session_id)}",
             f"聊天流ID：{self.session_id}",
             f"当前回复频率：{self._format_reply_frequency_for_display(self._get_effective_reply_frequency())}",

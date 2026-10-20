@@ -272,6 +272,8 @@ export interface MaisakaTimingGateBlock {
 }
 
 export interface MaisakaFinalizedToolResult {
+  session_id?: string
+  session_name?: string
   started_at?: number
   ended_at?: number
   tool_call_id: string
@@ -292,6 +294,8 @@ export interface MaisakaFinalizedToolResult {
 }
 
 export interface PlannerFinalizedEvent {
+  focus_scope_id?: string
+  focus_session_ids?: string[]
   planner_started_at?: number | null
   planner_ended_at?: number | null
   session_id: string

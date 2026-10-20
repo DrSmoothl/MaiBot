@@ -475,7 +475,7 @@ async def handle_tool(
         send_result = await send_emoji_for_maisaka(
             stream_id=tool_ctx.runtime.session_id,
             requested_emotion=requested_emotion,
-            reasoning=tool_ctx.engine.last_reasoning_content,
+            reasoning=invocation.reasoning,
             context_texts=context_texts,
             emoji_selector=lambda _requested_emotion, reasoning, context_texts, sample_size: (
                 _select_emoji_with_sub_agent(

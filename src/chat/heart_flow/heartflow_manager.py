@@ -9,6 +9,7 @@ from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
 from src.common.logger import get_logger
 from src.core.local_operator import LOCAL_PLATFORM_BOT_IDS
 from src.maisaka.runtime import MaisakaHeartFlowChatting
+from src.maisaka.focus import focus_mode_manager
 from src.platform_io.manager import get_platform_io_manager
 from src.platform_io.types import RouteKey
 
@@ -28,6 +29,7 @@ class HeartflowManager:
 
     async def get_or_create_heartflow_chat(self, session_id: str) -> MaisakaHeartFlowChatting:
         """获取或创建指定会话对应的 Maisaka runtime。"""
+        focus_mode_manager.bind_loop()
         try:
             if chat := self.heartflow_chat_list.get(session_id):
                 self._touch_chat(session_id)
@@ -91,6 +93,8 @@ class HeartflowManager:
             return
 
         try:
+            if reason in {"clear_context_command", "adapter_policy_block"}:
+                await focus_mode_manager.clear_context(session_id)
             await chat.stop()
             logger.info(f"已淘汰心流聊天 {session_id}: reason={reason}")
         except Exception as exc:
@@ -100,6 +104,7 @@ class HeartflowManager:
         """停止并移除当前会话运行时，使其短期历史上下文立即失效。"""
 
         if session_id not in self.heartflow_chat_list:
+            await focus_mode_manager.clear_context(session_id)
             return False
 
         await self._evict_chat(session_id, reason="clear_context_command")

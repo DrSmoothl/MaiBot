@@ -76,12 +76,14 @@ from .attention_drift import build_attention_drift_prompt_block
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "emotion": "emoji.selector",
     "expression_selector": "expression.selector",
+    "focus_summary": "maisaka.focus_summary",
     "planner": "maisaka.planner",
     "reply_effect_judge": "reply.effect_judge",
     "sub_agent": "maisaka.sub_agent",
 }
 MODEL_TASK_NAME_BY_REQUEST_KIND: dict[str, str] = {
     "expression_selector": "fast_model",
+    "focus_summary": "utils",
     "reply_effect_judge": "utils",
 }
 PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
@@ -868,9 +870,9 @@ class MaisakaChatLoopService:
 
         return self._localized_text(
             {
-                "en-US": "If the current chat has nothing worth acting on, prefer using `switch_chat` to check another chat. Use `wait` only when you need to wait before judging again; otherwise end this thought without calling a tool.",
-                "ja-JP": "現在チャットに行動すべき内容がない場合は、`switch_chat` で別チャットを確認することを優先してください。待ってから再判断すべき場合だけ `wait` を使い、それ以外はツールを呼ばずにこの思考を終了してください。",
-                "zh-CN": "如果当前聊天没有值得行动的内容，应优先考虑使用 `switch_chat` 去其他聊天看看；只有需要等待后重新判断时才使用 `wait`，否则不调用工具结束这轮思考。",
+                "en-US": "Consider all chats in the shared context. Every tool requires its target session_id. Use wait only to pause the entire group; otherwise finish this thought when no action is needed.",
+                "ja-JP": "共有コンテキスト内の全チャットを判断してください。すべてのツールに対象の session_id が必要です。wait はグループ全体を待機させる場合だけ使い、行動が不要なら思考を終了してください。",
+                "zh-CN": "结合共享上下文中的所有聊天判断，每个工具填写目标 session_id；只有需要整个组暂停等待时才使用 wait，没有需要执行的动作时结束本轮思考。",
             }
         )
 

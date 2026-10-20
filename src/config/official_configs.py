@@ -1050,7 +1050,7 @@ class ExperimentalConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """让麦麦同一时间只专注一个聊天流，适合直播或高强度聊天场景。"""
+    """让同组聊天共享一个持续思考的 Planner；全部消息共同进入上下文，工具通过 session_id 指定处理目标。"""
 
     focus_on_private: bool = Field(
         default=False,
@@ -1089,24 +1089,7 @@ class ExperimentalConfig(ConfigBase):
             "x-widget": "custom",
         },
     )
-    """_wrap_把聊天流分组后，同组共享 Focus，不同组互不抢占。"""
-
-    focus_cool_time: int = Field(
-        default=120,
-        ge=1,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "Focus 冷却时间",
-                "en_US": "Focus cool time",
-                "ja_JP": "Focus クールタイム",
-            },
-            "x-widget": "input",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-row": "focus-cool-time",
-        },
-    )
-    """当前关注的聊天多久没继续处理后，允许被其他聊天唤醒。"""
+    """_wrap_同组聊天共享 Planner 与完整上下文，不同组独立运行；未匹配的聊天各自形成独立组。"""
 
 
 class MessageReceiveConfig(ConfigBase):

@@ -121,7 +121,12 @@ description = "実際のチャットからグループ固有の隠語候補を�
 [maisaka_chat_focus]
 display_name = "Focus Planner"
 advanced = true
-description = "Focus モード用の Maisaka 計画テンプレート。現在注目しているチャットとチャット横断概要をもとに次の行動を選択する。"
+description = "同グループの全チャットを共有して思考し、ツールの session_id で操作対象を指定する Focus Planner。"
+
+[maisaka_focus_summary]
+display_name = "Focus コンテキスト圧縮"
+advanced = true
+description = "出所チャット、重要な事実、完了した操作と未完了の課題を保ちながら、古い共有コンテキストを圧縮する。"
 
 [maisaka_chat_optimized]
 display_name = "Planner（最適化版）"

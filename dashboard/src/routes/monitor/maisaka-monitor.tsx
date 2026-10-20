@@ -12,7 +12,6 @@ import { elementScroll, useVirtualizer } from '@tanstack/react-virtual'
 import {
   Activity,
   AlertCircle,
-  ArrowLeftRight,
   ArrowRight,
   Bot,
   Brain,
@@ -24,7 +23,6 @@ import {
   Database,
   Forward,
   Globe2,
-  History,
   Hourglass,
   ImageIcon,
   ImageOff,
@@ -150,13 +148,11 @@ function formatRelativeTime(ts: number): string {
 const BUILTIN_TOOL_ICONS: Record<string, LucideIcon> = {
   reply: MessageCircle,
   wait: Hourglass,
-  fetch_history: History,
   query_memory: Database,
   query_image_memory: Images,
   query_person_profile: UserRound,
   send_emoji: Smile,
   send_image: ImagePlus,
-  switch_chat: ArrowLeftRight,
   tool_search: Search,
   view_forward_message: Forward,
 }
@@ -1647,6 +1643,11 @@ function PlannerToolResultCard({
       data-maisaka-active-tool={!hideHeader && tool.status === 'running' ? tool.tool_call_id : undefined}
       className="space-y-1.5"
     >
+      {tool.session_name && (
+        <div className="text-muted-foreground text-xs" title={tool.session_id}>
+          目标聊天：{tool.session_name}
+        </div>
+      )}
       {!hideHeader && (
         <div
           data-maisaka-trace-meta="true"

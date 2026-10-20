@@ -51,18 +51,16 @@ SUBAGENT_TOOL_RESULT_MAX_CHARS = 20000
 SUBAGENT_CONTEXT_MESSAGE_LIMIT = 60
 # 状态列表里任务说明的展示长度
 SUBAGENT_TASK_PREVIEW_CHARS = 80
-# 这些工具负责发言、等待和切换聊天，只能由 Planner 自己调用；子代理也不能再派发或管理子代理
+# 这些工具负责发言和等待，只能由 Planner 自己调用；子代理也不能再派发或管理子代理
 SUBAGENT_FORBIDDEN_TOOL_NAMES = frozenset(
     {
         SUBAGENT_TOOL_NAME,
         SUBAGENT_STATUS_TOOL_NAME,
         SUBAGENT_STOP_TOOL_NAME,
-        "fetch_history",
         "react_message",
         "reply",
         "send_emoji",
         "show_emoji_list",
-        "switch_chat",
         "tool_search",
         "wait",
     }

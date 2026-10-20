@@ -46,9 +46,6 @@ from src.llm_models.payload_content.tool_option import ToolCall
 from src.maisaka.visual.emoji_image_cache import emoji_image_cache
 
 FORWARD_PREVIEW_LIMIT = 4
-FOCUS_COOLDOWN_WAKEUP_SOURCE = "focus_cooldown_wakeup"
-FOCUS_AT_WAKEUP_SOURCE = "focus_at_wakeup"
-FOCUS_WAKEUP_SOURCE_KINDS = frozenset({FOCUS_COOLDOWN_WAKEUP_SOURCE, FOCUS_AT_WAKEUP_SOURCE})
 # 不受支持格式图片的转码结果缓存条数；规划器每轮都会重建上下文，缓存可避免同一张图片被反复解码转码。
 TRANSCODED_IMAGE_CACHE_SIZE = 16
 # 以图片字节的 SHA-256 摘要为键缓存转码结果，缓存键不长期持有原始图片字节；字典按插入顺序充当 LRU。
@@ -608,6 +605,7 @@ class ToolResultMediaMessage(InternalContextMessage):
     """工具返回的媒体，显式关联所属调用，不从消息编号解析归属。"""
 
     tool_call_id: str = field(kw_only=True)
+    session_id: str = ""
     source_kind: str = "tool_result_media"
 
     def __post_init__(self) -> None:

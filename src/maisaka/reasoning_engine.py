@@ -68,7 +68,6 @@ from src.maisaka.context.messages import (
     ToolResultMessage,
     contains_complex_message,
 )
-from src.maisaka.focus import focus_mode_manager
 from src.maisaka.context.post_processor import process_chat_history_after_cycle
 from src.maisaka.context.history import (
     build_prefixed_message_sequence,
@@ -548,7 +547,6 @@ class MaisakaReasoningEngine:
         try:
             response = await self._run_interruptible_planner(
                 injected_user_messages=injected_user_messages or None,
-                tail_user_messages=self._runtime.build_focus_tail_user_messages() or None,
                 tool_definitions=action_tool_definitions,
             )
         finally:
@@ -750,8 +748,6 @@ class MaisakaReasoningEngine:
         """消费触发信号并准备本轮初始消息与触发消息。"""
 
         message_triggered, timeout_triggered, proactive_triggered = self._drain_ready_turn_triggers(queued_trigger)
-        if proactive_triggered:
-            self._runtime._clear_focus_cooldown_wakeup_scheduled()
         silent_reply_frequency = self._runtime._is_reply_frequency_silent()
 
         if (
@@ -901,7 +897,6 @@ class MaisakaReasoningEngine:
             end_detail=cycle_end.detail,
         )
         self._runtime._idle_backoff.record_cycle_result(cycle_end.reason)
-        self._runtime.record_idle_cycle_result(cycle_end.reason)
         return cycle_end
 
     async def run_loop(self) -> None:
@@ -909,14 +904,6 @@ class MaisakaReasoningEngine:
         try:
             while self._runtime._running:
                 queued_trigger = await self._runtime._internal_turn_queue.get()
-                if not focus_mode_manager.can_decide(
-                    self._runtime.session_id,
-                    is_group_chat=self._runtime.chat_stream.is_group_session,
-                ):
-                    self._runtime._mark_message_turn_unscheduled()
-                    logger.debug(f"{self._runtime.log_prefix} 当前不在 focus 状态，忽略已排队的 Maisaka 触发")
-                    continue
-
                 turn_start_context = await self._prepare_turn_start_context(queued_trigger)
                 if turn_start_context.trigger_message is None:
                     continue
@@ -1260,8 +1247,6 @@ class MaisakaReasoningEngine:
     def _start_cycle(self) -> CycleDetail:
         """开始一轮 Maisaka 思考循环。"""
         self._runtime._cycle_counter += 1
-        focus_mode_manager.mark_cycle(self._runtime.session_id)
-        self._runtime._arm_focus_cooldown_timer()
         self._runtime._current_cycle_detail = CycleDetail(cycle_id=self._runtime._cycle_counter)
         self._runtime._current_cycle_detail.thinking_id = f"maisaka_tid{round(time.time(), 2)}"
         return self._runtime._current_cycle_detail
@@ -1811,6 +1796,7 @@ class MaisakaReasoningEngine:
             self._runtime._chat_history.append(
                 ToolResultMediaMessage(
                     tool_call_id=tool_call.call_id,
+                    session_id=self._runtime.session_id,
                     raw_message=media_sequence,
                     visible_text=visible_text,
                     timestamp=datetime.now(),
