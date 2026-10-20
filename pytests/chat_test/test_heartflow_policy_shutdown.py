@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 from watchfiles import Change
 
+import asyncio
 import pytest
 
 from src.chat.heart_flow.heartflow_manager import HeartflowManager
@@ -11,6 +12,70 @@ from src.config.config import ConfigManager
 from src.config.file_watcher import FileChange
 from src.platform_io.adapter_policy import AdapterPolicyManager
 from src.plugin_runtime.integration import PluginRuntimeManager
+
+
+@pytest.mark.asyncio
+async def test_shutdown_stops_all_chats_concurrently_and_blocks_creation():
+    manager = HeartflowManager()
+    entered = []
+    release = asyncio.Event()
+
+    async def stop(name):
+        entered.append(name)
+        if len(entered) == 2:
+            release.set()
+        await asyncio.wait_for(release.wait(), timeout=1)
+
+    for name in ("first", "second"):
+        manager.heartflow_chat_list[name] = SimpleNamespace(stop=lambda name=name: stop(name))
+        manager._touch_chat(name)
+
+    await manager.shutdown()
+    assert set(entered) == {"first", "second"}
+    assert not manager.heartflow_chat_list
+    assert not manager._chat_last_active_at
+    with pytest.raises(RuntimeError, match="正在关停"):
+        await manager.get_or_create_heartflow_chat("new")
+
+
+@pytest.mark.asyncio
+async def test_shutdown_reports_failure_after_attempting_every_chat():
+    manager = HeartflowManager()
+    failed = AsyncMock(side_effect=ValueError("stop failed"))
+    stopped = AsyncMock()
+    manager.heartflow_chat_list["failed"] = SimpleNamespace(stop=failed)
+    manager.heartflow_chat_list["ok"] = SimpleNamespace(stop=stopped)
+    with pytest.raises(RuntimeError, match="1 个聊天") as error:
+        await manager.shutdown()
+    assert isinstance(error.value.__cause__, ValueError)
+    stopped.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_includes_chat_whose_start_is_in_flight(monkeypatch):
+    manager = HeartflowManager()
+    starting = asyncio.Event()
+    release = asyncio.Event()
+
+    async def start():
+        starting.set()
+        await release.wait()
+
+    chat = SimpleNamespace(start=start, stop=AsyncMock())
+    monkeypatch.setattr(manager, "_is_session_allowed", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        "src.chat.heart_flow.heartflow_manager.chat_manager.get_session_by_session_id", lambda _: object()
+    )
+    monkeypatch.setattr("src.chat.heart_flow.heartflow_manager.MaisakaHeartFlowChatting", lambda **_: chat)
+    create = asyncio.create_task(manager.get_or_create_heartflow_chat("pending"))
+    await starting.wait()
+    stop = asyncio.create_task(manager.shutdown())
+    await asyncio.sleep(0)
+    assert not stop.done()
+    release.set()
+    await asyncio.gather(create, stop)
+    chat.stop.assert_awaited_once()
+    assert not manager.heartflow_chat_list
 
 
 @pytest.mark.asyncio

@@ -558,6 +558,10 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             return
 
         self._running = False
+        # 先向普通推理循环发出取消，再等待 Focus、学习器或子代理的清理。
+        # 否则后台服务退出期间仍可能继续规划和调用即将销毁的插件。
+        if self._internal_loop_task is not None:
+            self._internal_loop_task.cancel()
         await focus_mode_manager.detach(self)
         self._fixed_message_debouncer.consume()
         self._mark_message_turn_unscheduled()
@@ -570,7 +574,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             _ = self._internal_turn_queue.get_nowait()
 
         if self._internal_loop_task is not None:
-            self._internal_loop_task.cancel()
             try:
                 await self._internal_loop_task
             except asyncio.CancelledError:
