@@ -58,6 +58,7 @@ from src.maisaka.context.messages import (
 from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
+from src.maisaka.visual.deferred_images import defer_context_image_encoding
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 from src.plugin_runtime.hook_payloads import deserialize_prompt_items, serialize_prompt_items
 
@@ -662,6 +663,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
         return items
 
+    @defer_context_image_encoding(lambda items: items)
     def _build_request_messages(
         self,
         chat_history: List[LLMContextMessage],

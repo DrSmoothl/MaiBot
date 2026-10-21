@@ -15,6 +15,7 @@ from __future__ import annotations
 from copy import copy
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
@@ -52,6 +53,7 @@ from src.maisaka.context.messages import (
     SessionBackedMessage,
     build_context_items_from_history_entry,
 )
+from src.maisaka.visual.deferred_images import transform_context_image
 
 RETRO_GROUP_PROMPT = "retro_replyer"
 """群聊复古模板名。"""
@@ -230,7 +232,9 @@ class RetroReplyPromptMixin:
         for image_index, (message_index, media_index, part) in enumerate(retained):
             # 按实际发送的图片计数，同一发言中的多张图片和表情包也各占一个位置。
             max_side = RETRO_RECENT_IMAGE_MAX_SIDE if image_index >= recent_start else RETRO_OLDER_IMAGE_MAX_SIDE
-            visual_parts.setdefault(message_index, []).append(_resize_retro_image(part, max_side))
+            visual_parts.setdefault(message_index, []).append(
+                transform_context_image(part, partial(_resize_retro_image, max_side=max_side))
+            )
             visual_indices.setdefault(message_index, set()).add(media_index)
 
         def without_visual_descriptions(sequence: MessageSequence, sent_indices: Set[int]) -> MessageSequence:
