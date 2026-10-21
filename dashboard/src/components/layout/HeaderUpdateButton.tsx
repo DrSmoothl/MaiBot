@@ -64,12 +64,21 @@ export function HeaderUpdateButton({ children, highlighted, onPointerEnter, onPo
           title={t('settings.selfUpdate.title')}
           aria-label={t('settings.selfUpdate.title')}
           data-dashboard-header-action="true"
+          data-header-update-available={status?.update_available ? 'true' : 'false'}
           data-header-action-highlighted={highlighted ? 'true' : 'false'}
           onPointerEnter={onPointerEnter}
           onPointerLeave={onPointerLeave}
         >
           {children}
           <ArrowUpToLine className="h-4 w-4" />
+          {status?.update_available && (
+            <>
+              <span className="relative z-10 whitespace-nowrap text-sm font-bold">
+                {t('home.versionCard.updateAvailable')} {status.latest_version ? `V${status.latest_version}` : status.latest_commit?.slice(0, 8)}
+              </span>
+              <span aria-hidden="true" className="absolute -right-1 -top-1 z-20 h-2.5 w-2.5 rounded-full border border-background bg-yellow-400" />
+            </>
+          )}
         </Button>
       </DialogTrigger>
       <DialogContent className="[--dialog-width:48rem]" aria-describedby={undefined}>
