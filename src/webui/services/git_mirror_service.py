@@ -11,7 +11,7 @@ import subprocess
 
 from src.common.git_source import GitSource
 from src.common.logger import get_logger
-from src.common.network_security import validate_public_url
+from src.common.network_security import NonPublicAddressError, validate_public_url
 
 logger = get_logger("webui.git_mirror")
 
@@ -55,9 +55,19 @@ async def _run_git_process(cmd: List[str], cwd: Optional[Path] = None) -> subpro
         raise
 
 
-def _validate_custom_outbound_url(url: str) -> str:
+def _validate_custom_outbound_url(url: str, source_name: str = "自定义源") -> str:
     try:
         return validate_public_url(url, allow_fake_ip=True)
+    except NonPublicAddressError as e:
+        logger.warning(
+            f"下载源解析异常: source={source_name} host={e.hostname} "
+            f"addresses={','.join(sorted(e.resolved_addresses))} blocked={e.address}"
+        )
+        raise ValueError(
+            f"下载源 {source_name} 的目标 {e.hostname} 被当前系统解析为非公网地址 {e.address}，已阻止下载。"
+            "请检查运行麦麦的机器或容器的 DNS、hosts 和代理设置，"
+            "或在插件市场的下载源设置中切换来源后重试。"
+        ) from e
     except ValueError as e:
         raise ValueError(f"目标 URL 非法: {e}") from e
 
@@ -208,7 +218,7 @@ class GitMirrorService:
 
             source = await asyncio.to_thread(download_source)
             try:
-                url = await asyncio.to_thread(_validate_custom_outbound_url, source.clone_url(owner, repo))
+                url = await asyncio.to_thread(_validate_custom_outbound_url, source.clone_url(owner, repo), source.name)
             except ValueError as exc:
                 return {"success": False, "error": str(exc), "mirror_used": source.id, "status_code": 400}
             cmd = ["git", "fetch", "--no-tags", url, f"refs/heads/{branch}"]
@@ -315,7 +325,7 @@ class GitMirrorService:
     ) -> Dict[str, Any]:
         """从指定镜像源克隆仓库"""
         try:
-            url = await asyncio.to_thread(_validate_custom_outbound_url, source.clone_url(owner, repo))
+            url = await asyncio.to_thread(_validate_custom_outbound_url, source.clone_url(owner, repo), source.name)
         except ValueError as e:
             return {
                 "success": False,

@@ -7,6 +7,16 @@ import ipaddress
 import socket
 
 
+class NonPublicAddressError(ValueError):
+    """保留被拦截目标与完整解析结果，供调用方提供具体诊断。"""
+
+    def __init__(self, hostname: str, address: str, resolved_addresses: Set[str]) -> None:
+        self.hostname = hostname
+        self.address = address
+        self.resolved_addresses = resolved_addresses
+        super().__init__(f"禁止访问非公网地址: {address}")
+
+
 def _resolve_ip_addresses(hostname: str, port: int) -> Set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     try:
         address_infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
@@ -116,7 +126,8 @@ def validate_public_url(
         raise ValueError("URL 端口非法") from exc
 
     if enforce_public_network:
-        for address in _resolve_ip_addresses(parsed.hostname, port):
+        resolved_addresses = _resolve_ip_addresses(parsed.hostname, port)
+        for address in resolved_addresses:
             if (
                 allow_fake_ip
                 and parsed.scheme.lower() == "https"
@@ -130,6 +141,8 @@ def validate_public_url(
                 else _is_non_public_ip_address(address)
             )
             if is_forbidden:
-                raise ValueError(f"禁止访问非公网地址: {address}")
+                raise NonPublicAddressError(
+                    parsed.hostname, str(address), {str(item) for item in resolved_addresses},
+                )
 
     return normalized_url
