@@ -63,7 +63,7 @@ async def handle_tool(
 
     wait_detail = (
         f"当前对话循环进入等待状态，最多等待 {wait_seconds} 秒；新消息可提前结束等待并继续思考。"
-        if global_config.experimental.planner_message_steering
+        if global_config.chat.reply_timing.planner_message_steering
         else f"当前对话循环进入等待状态，将固定等待 {wait_seconds} 秒；期间收到的新消息不会提前打断本次等待。"
     )
     return tool_ctx.build_success_result(

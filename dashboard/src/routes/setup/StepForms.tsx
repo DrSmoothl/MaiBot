@@ -228,11 +228,11 @@ export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
                     hideScrollbarWhenIdle
               id={key}
               autoResize={false}
-              className="h-20 resize-none overflow-y-auto"
+              className="h-[104px] resize-none overflow-y-auto"
               placeholder={placeholder}
               value={config[key]}
               onChange={(e) => onChange({ ...config, [key]: e.target.value })}
-              rows={2}
+              rows={3}
             />
           </div>
         )

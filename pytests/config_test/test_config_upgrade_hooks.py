@@ -261,3 +261,19 @@ def test_learning_rule_merge_hook_drops_dead_defaults_and_skips_clean_config():
     result = apply_config_upgrade_hooks(clean_config, "bot_config.toml", "8.14.59", "8.14.60")
     assert result.reason == "8.14.60:jargon.learning_list"
     assert result.data["jargon"]["learning_list"] == [_learning_rule("qq", "", "group", True)]
+
+
+def test_planner_message_steering_moves_to_reply_timing():
+    config_data = {"experimental": {"planner_message_steering": True}, "chat": {"reply_timing": {}}}
+
+    result = apply_config_upgrade_hooks(
+        config_data,
+        config_name="bot_config.toml",
+        old_ver="8.15.36",
+        new_ver="8.15.37",
+    )
+
+    assert result.migrated is True
+    assert "planner_message_steering" not in result.data["experimental"]
+    assert result.data["chat"]["reply_timing"]["planner_message_steering"] is True
+    assert result.reason == "8.15.37:chat.reply_timing.planner_message_steering"

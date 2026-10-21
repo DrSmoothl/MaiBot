@@ -31,7 +31,7 @@ class TurnGateResult:
 
     decision: TurnGateDecision
     detail: str
-    delay_seconds: Optional[float] = None
+    delay_seconds: float = 0.0
 
     @property
     def should_trigger(self) -> bool:

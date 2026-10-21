@@ -1299,7 +1299,7 @@ class MaisakaChatLoopService:
                 tool_options=all_tools if all_tools else None,
                 response_format=response_format,
                 interrupt_flag=self._interrupt_flag,
-                force_stream_mode=request_kind == "planner" and global_config.experimental.planner_message_steering,
+                force_stream_mode=request_kind == "planner" and global_config.chat.reply_timing.planner_message_steering,
             ),
         )
         if logical_turn_id:

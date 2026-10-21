@@ -91,18 +91,11 @@ CONTEXT_RESTORE_DAY_SECONDS = 24 * 60 * 60
 
 
 class PlannerInterruptController:
-    """维护当前可打断 Planner 请求与连续打断计数。"""
+    """维护当前可打断的 Planner 请求；同一次请求只打断一次。"""
 
     def __init__(self) -> None:
         self._flag: Optional[asyncio.Event] = None
         self._requested = False
-        self._consecutive_count = 0
-
-    @property
-    def consecutive_count(self) -> int:
-        """返回连续打断次数。"""
-
-        return self._consecutive_count
 
     def bind(self, interrupt_flag: asyncio.Event) -> None:
         """绑定当前可打断请求使用的中断标记。"""
@@ -110,27 +103,22 @@ class PlannerInterruptController:
         self._flag = interrupt_flag
         self._requested = False
 
-    def unbind(self, interrupt_flag: asyncio.Event, *, interrupted: bool) -> None:
-        """解绑当前可打断请求的中断标记，并维护连续打断计数。"""
+    def unbind(self, interrupt_flag: asyncio.Event) -> None:
+        """解绑当前可打断请求的中断标记。"""
 
         if self._flag is interrupt_flag:
             self._flag = None
         self._requested = False
-        if not interrupted:
-            self._consecutive_count = 0
 
-    def request(self, *, max_consecutive_count: Optional[int]) -> str:
-        """尝试发起打断，返回 request/duplicate/limit/idle。"""
+    def request(self) -> Literal["request", "duplicate", "idle"]:
+        """尝试发起打断，返回 request/duplicate/idle。"""
 
         if self._flag is None:
             return "idle"
         if self._requested:
             return "duplicate"
-        if max_consecutive_count is not None and self._consecutive_count >= max_consecutive_count:
-            return "limit"
 
         self._requested = True
-        self._consecutive_count += 1
         self._flag.set()
         return "request"
 
@@ -179,8 +167,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         self._internal_loop_task: Optional[asyncio.Task] = None
         self._message_turn_scheduled = False
         self._deferred_message_turn_task: Optional[asyncio.Task[None]] = None
-        self._message_debounce_seconds = 1.0
-        self._message_debounce_required = False
         self._fixed_message_debouncer = MessageDebouncer()
         self._message_debounce_was_enabled = False
         self._last_message_received_at = 0.0
@@ -230,12 +216,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             else global_config.chat.max_private_context_size
         )
         return max(1, int(configured_context_size))
-
-    @property
-    def _planner_interrupt_max_consecutive_count(self) -> int:
-        """返回当前实时生效的 Planner 连续打断上限。"""
-
-        return max(0, int(global_config.chat.reply_timing.planner_interrupt_max_consecutive_count))
 
     @property
     def _enable_expression_learning(self) -> bool:
@@ -537,7 +517,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         await focus_mode_manager.detach(self)
         self._fixed_message_debouncer.consume()
         self._mark_message_turn_unscheduled()
-        self._clear_message_debounce_required()
         self._cancel_deferred_message_turn_task()
         self._cancel_wait_timeout_task()
         await self._cancel_trimmed_history_learning_task()
@@ -1025,8 +1004,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
                 self._chat_history.append(history_message)
             await self._focus_group.register_message(self, message, history_message)
             return
-        if self._agent_state == self._STATE_RUNNING:
-            self._mark_message_debounce_required()
         self._request_planner_interrupt_for_message(message)
         if self._running:
             self._schedule_message_turn()
@@ -1037,43 +1014,24 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         )
 
     def _request_planner_interrupt_for_message(self, message: SessionMessage) -> None:
-        """打断运行中的 Planner；实验性消息引导不限制连续打断次数。"""
-        if self._agent_state != self._STATE_RUNNING:
+        """快速反应模式下，用新消息打断运行中的 Planner。"""
+        if not global_config.chat.reply_timing.planner_message_steering or self._agent_state != self._STATE_RUNNING:
             return
 
-        planner_interrupt_max_count = (
-            None if global_config.experimental.planner_message_steering else self._planner_interrupt_max_consecutive_count
-        )
-        limit_label = "不限" if planner_interrupt_max_count is None else str(planner_interrupt_max_count)
-        request_result = self._planner_interrupt.request(max_consecutive_count=planner_interrupt_max_count)
+        request_result = self._planner_interrupt.request()
         if request_result == "idle":
             return
-
-        consecutive_count = self._planner_interrupt.consecutive_count
         if request_result == "duplicate":
             logger.info(
                 f"{self.log_prefix} 收到新消息，但当前请求已发起过一次规划器打断，"
-                f"本次不重复打断; 消息编号={message.message_id} "
-                f"连续打断次数={consecutive_count}/"
-                f"{limit_label}"
-            )
-            return
-
-        if request_result == "limit":
-            logger.info(
-                f"{self.log_prefix} 收到新消息，但已达到规划器连续打断上限，"
-                f"将等待当前请求自然完成; 消息编号={message.message_id} "
-                f"连续打断次数={consecutive_count}/"
-                f"{limit_label}"
+                f"本次不重复打断; 消息编号={message.message_id}"
             )
             return
 
         logger.info(
             f"{self.log_prefix} 收到新消息，发起规划器打断; "
             f"消息编号={message.message_id} 缓存条数={len(self.message_cache)} "
-            f"时间戳={time.time():.3f} "
-            f"连续打断次数={consecutive_count}/"
-            f"{limit_label}"
+            f"时间戳={time.time():.3f}"
         )
 
     def _get_effective_reply_frequency(self) -> float:
@@ -1185,16 +1143,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
 
         self._message_turn_scheduled = False
 
-    def _mark_message_debounce_required(self) -> None:
-        """标记下一轮消息处理前需要等待静默窗口。"""
-
-        self._message_debounce_required = True
-
-    def _clear_message_debounce_required(self) -> None:
-        """清理消息静默窗口等待标记。"""
-
-        self._message_debounce_required = False
-
     async def _schedule_deferred_message_turn(self, delay_seconds: float) -> None:
         """延迟结束后再次检查是否应触发循环。"""
         try:
@@ -1303,19 +1251,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         """判断当前是否保持连续 Planner 状态。"""
 
         return self._planner_continuation_active
-
-    def _bind_planner_interrupt_flag(self, interrupt_flag: asyncio.Event) -> None:
-        """绑定当前可打断请求使用的中断标记。"""
-        self._planner_interrupt.bind(interrupt_flag)
-
-    def _unbind_planner_interrupt_flag(
-        self,
-        interrupt_flag: asyncio.Event,
-        *,
-        interrupted: bool,
-    ) -> None:
-        """解绑当前可打断请求的中断标记，并维护连续打断计数。"""
-        self._planner_interrupt.unbind(interrupt_flag, interrupted=interrupted)
 
     def _ensure_background_tasks_running(self) -> None:
         """确保后台任务仍在运行，若崩溃则自动拉起。"""
@@ -1667,27 +1602,26 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         # )
         return pending_messages
 
+    def _get_message_quiet_period_remaining_seconds(self) -> float:
+        """返回本批消息距离防抖截止还需等待的秒数；关闭防抖或批次已到期时为 0。"""
+        if not self._is_message_debounce_enabled():
+            return 0.0
+        deadline = self._fixed_message_debouncer.deadline
+        return 0.0 if deadline is None else max(0.0, deadline - time.monotonic())
+
     async def _wait_for_message_quiet_period(self) -> None:
-        """等待消息批次允许判断；关闭固定防抖时沿用打断后的静默窗口。"""
-        if self._is_message_debounce_enabled():
-            await self._wait_for_fixed_message_debounce()
-            self._clear_message_debounce_required()
-            return
-        if not self._message_debounce_required:
-            return
-
-        if self._message_debounce_seconds <= 0:
-            self._clear_message_debounce_required()
-            return
-
+        """等待消息批次允许判断；新消息会唤醒等待并重算，兼容截止时间提前和延后；停止时可取消。"""
+        debouncer = self._fixed_message_debouncer
         while self._running:
-            elapsed = time.time() - self._last_message_received_at
-            remaining = self._message_debounce_seconds - elapsed
+            remaining = self._get_message_quiet_period_remaining_seconds()
             if remaining <= 0:
                 break
-            await asyncio.sleep(remaining)
-
-        self._clear_message_debounce_required()
+            debouncer.changed.clear()
+            try:
+                # 定期重算，使关闭配置也能结束本轮等待，无需再来一条消息。
+                await asyncio.wait_for(debouncer.changed.wait(), timeout=min(remaining, 0.5))
+            except TimeoutError:
+                pass
 
     def _is_message_debounce_enabled(self) -> bool:
         return global_config.chat.reply_timing.message_debounce_mode != "off"
@@ -1722,23 +1656,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
                 f"剩余等待={max(0.0, deadline - time.monotonic()):.3f} 秒，"
                 f"待处理={self._get_pending_message_count() + 1} 条，消息编号={message.message_id}"
             )
-
-    async def _wait_for_fixed_message_debounce(self) -> None:
-        """新消息会唤醒等待并重算，兼容截止时间提前和延后；停止时可取消。"""
-        debouncer = self._fixed_message_debouncer
-        while self._running and self._is_message_debounce_enabled():
-            deadline = debouncer.deadline
-            if deadline is None:
-                return
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return
-            debouncer.changed.clear()
-            try:
-                # 定期读取开关，使关闭配置也能结束本轮等待，无需再来一条消息。
-                await asyncio.wait_for(debouncer.changed.wait(), timeout=min(remaining, 0.5))
-            except TimeoutError:
-                pass
 
     def _enter_stop_state(self) -> None:
         """切换到停止状态。"""
@@ -1818,7 +1735,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             self._wait_timeout_task = asyncio.create_task(
                 self._schedule_wait_timeout(seconds=seconds, tool_call_id=tool_call_id)
             )
-        if global_config.experimental.planner_message_steering and self._has_pending_messages():
+        if global_config.chat.reply_timing.planner_message_steering and self._has_pending_messages():
             # 工具执行期间收到的消息也能唤醒刚进入的 wait，避免漏掉已有新输入。
             self._schedule_message_turn()
 
