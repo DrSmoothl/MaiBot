@@ -1,6 +1,5 @@
 """Maisaka 非 CLI 运行时。"""
 
-from collections import deque
 from datetime import datetime
 from math import ceil
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Literal, Optional, Sequence
@@ -89,15 +88,6 @@ CONTEXT_RESTORE_SHORT_RESTART_SECONDS = 5 * 60
 CONTEXT_RESTORE_SHORT_OFFLINE_SECONDS = 30 * 60
 CONTEXT_RESTORE_LONG_SLEEP_SECONDS = 6 * 60 * 60
 CONTEXT_RESTORE_DAY_SECONDS = 24 * 60 * 60
-EXTERNAL_MESSAGE_INTERVAL_SAMPLE_WINDOW_SECONDS = 1800.0
-# 低于该间隔的相邻外部消息视为同一阵「连发」抖动，不计入平均消息间隔统计，
-# 避免连发把平均间隔严重拉低、令空窗补偿过早触发。
-# 注意：判定只看时间间隔、不区分发言者——同一人连续敲几条短消息是常见成因，
-# 但跨发言者的快速对答同样会被过滤。
-EXTERNAL_MESSAGE_BURST_INTERVAL_SECONDS = 5.0
-# 空窗补偿所用平均消息间隔的下限：即便统计值偏小也不会低于该值，
-# 限制「沉默时间」被折算成消息的速度，避免低活跃群聊里反复触发回复。
-IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS = 30.0
 
 
 class PlannerInterruptController:
@@ -194,9 +184,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         self._fixed_message_debouncer = MessageDebouncer()
         self._message_debounce_was_enabled = False
         self._last_message_received_at = 0.0
-        self._last_external_message_received_at: Optional[float] = None
         self._talk_frequency_adjust = 1.0
-        self._recent_external_message_intervals: deque[tuple[float, float]] = deque()
         self._wait_timeout_task: Optional[asyncio.Task[None]] = None
         self._max_internal_rounds = MAX_INTERNAL_ROUNDS
         self._agent_state: Literal["running", "wait", "stop"] = self._STATE_STOP
@@ -1026,7 +1014,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         received_at = message.received_at.timestamp()
         # 媒体预处理可能使较早收到的消息较晚入队，不能回退静默窗口。
         self._last_message_received_at = max(self._last_message_received_at, received_at)
-        self._record_external_message_interval(message, received_at)
         self._update_message_trigger_state(message)
         self._observe_message_debounce(message, received_at)
         self.message_cache.append(message)
@@ -1125,72 +1112,10 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         return self._get_effective_reply_frequency() <= 0.0
 
 
-    def _get_message_trigger_threshold(self) -> int:
-        """根据回复触发模式和频率折算出触发一轮循环所需的消息数。"""
-        effective_frequency = min(1.0, self._get_effective_reply_frequency())
-        if effective_frequency <= 0:
-            return 0
-        return max(1, int(ceil(1.0 / effective_frequency)))
-
     def _get_pending_message_count(self) -> int:
         """统计当前尚未进入内部循环的新消息数量。"""
         pending_messages = self.message_cache[self._last_processed_index :]
         return len(pending_messages)
-
-    def _prune_recent_external_message_intervals(self, now: Optional[float] = None) -> None:
-        """仅保留最近 30 分钟内的外部消息间隔记录。"""
-        current_time = time.time() if now is None else now
-        expire_before = current_time - EXTERNAL_MESSAGE_INTERVAL_SAMPLE_WINDOW_SECONDS
-        while self._recent_external_message_intervals and self._recent_external_message_intervals[0][0] < expire_before:
-            self._recent_external_message_intervals.popleft()
-
-    def _get_recent_average_external_message_interval(self) -> Optional[float]:
-        """获取最近 30 分钟外部消息的平均接收间隔。
-
-        返回值会施加 ``IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS`` 下限，
-        避免统计值过小导致空窗补偿把沉默时间过快折算成消息、反复触发回复。
-
-        见过外部消息但暂无可用间隔样本时（如启动后只收到一阵全被 burst 过滤的连发、
-        或样本已因超出 30 分钟窗口而全部过期），回退到下限值作为保守估计，
-        确保空窗补偿与延迟自唤醒不会因返回 None 而失效、令待处理消息在
-        没有新消息到来时永久挂起；从未见过外部消息时仍返回 None。
-        """
-        self._prune_recent_external_message_intervals()
-        if not self._recent_external_message_intervals:
-            if self._last_external_message_received_at is None:
-                return None
-            return IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS
-
-        total_interval = sum(interval for _, interval in self._recent_external_message_intervals)
-        average_interval = total_interval / len(self._recent_external_message_intervals)
-        return max(average_interval, IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS)
-
-    def _record_external_message_interval(self, message: SessionMessage, received_at: float) -> None:
-        """记录最近外部消息之间的接收间隔，用于低频触发补偿。"""
-
-        user_info = message.message_info.user_info
-        if is_bot_self(message.platform, user_info.user_id):
-            return
-
-        previous_received_at = self._last_external_message_received_at
-        if previous_received_at is not None and received_at <= previous_received_at:
-            # 乱序完成的旧消息保留其真实接收时间，不生成倒序的间隔样本。
-            return
-        self._last_external_message_received_at = received_at
-        if previous_received_at is None:
-            return
-
-        message_interval = max(0.0, received_at - previous_received_at)
-        if message_interval < EXTERNAL_MESSAGE_BURST_INTERVAL_SECONDS:
-            # 连发抖动：同一阵内的短间隔不代表真实发言节奏，跳过以免拉低平均间隔。
-            return
-
-        self._recent_external_message_intervals.append((received_at, message_interval))
-        self._prune_recent_external_message_intervals(received_at)
-        logger.debug(
-            f"{self.log_prefix} 已记录外部消息接收间隔: {message_interval:.2f} 秒 "
-            f"最近30分钟样本数={len(self._recent_external_message_intervals)}"
-        )
 
     def find_source_message_by_id(self, message_id: str) -> Optional[SessionMessage]:
         """从 Maisaka 历史中查找指定消息编号对应的原始消息。"""
@@ -1237,7 +1162,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         )
 
     def _cancel_deferred_message_turn_task(self) -> None:
-        """取消等待空窗补偿触发的延迟任务。"""
+        """取消延迟重新检查消息触发的任务。"""
         if self._deferred_message_turn_task is None:
             return
         self._deferred_message_turn_task.cancel()
@@ -1271,7 +1196,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         self._message_debounce_required = False
 
     async def _schedule_deferred_message_turn(self, delay_seconds: float) -> None:
-        """在预计满足空窗补偿条件时再次检查是否应触发循环。"""
+        """延迟结束后再次检查是否应触发循环。"""
         try:
             if delay_seconds > 0:
                 await asyncio.sleep(delay_seconds)

@@ -1088,7 +1088,7 @@ function DynamicConfigTabs(props: DynamicConfigTabsProps) {
   const chatQuoteFieldNames = new Set(['private_quote_frequency', 'group_quote_frequency'])
   const basicChatContextFieldNames = new Set(['max_context_size', 'max_private_context_size'])
   const basicChatTimingFieldNames = new Set([
-    'talk_value', 'private_talk_value', 'mentioned_bot_reply', 'inevitable_at_reply', 'reply_trigger_mode',
+    'talk_value', 'private_talk_value', 'mentioned_bot_reply', 'inevitable_at_reply',
   ])
   const botSchema = configSchema.nested.bot
   const chatSchema = configSchema.nested.chat

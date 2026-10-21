@@ -305,7 +305,6 @@ def _split_chat_config_sections(data: dict[str, Any]) -> list[str]:
         "private_talk_value",
         "mentioned_bot_reply",
         "inevitable_at_reply",
-        "reply_trigger_mode",
         "planner_interrupt_max_consecutive_count",
         "max_consecutive_wait_count",
         "no_action_backoff_base_seconds",
@@ -440,18 +439,6 @@ def _reset_expression_defaults(data: Dict[str, Any]) -> List[str]:
         del expression["expression_selection_mode"]
         reasons.append("expression.expression_selection_mode")
     return reasons
-
-
-def _migrate_removed_reply_necessity_trigger_mode(data: dict[str, Any]) -> list[str]:
-    """8.14.54: 将已移除的 reply_necessity 回复触发模式迁移为 dynamic。"""
-
-    chat = _as_dict(data.get("chat"))
-    reply_timing = _as_dict(chat.get("reply_timing")) if chat is not None else None
-    if reply_timing is None or reply_timing.get("reply_trigger_mode") != "reply_necessity":
-        return []
-
-    reply_timing["reply_trigger_mode"] = "dynamic"
-    return ["chat.reply_timing.reply_trigger_mode"]
 
 
 def _learning_default_item(source: Optional[Dict[str, Any]], rule_type: str) -> Dict[str, Any]:
@@ -602,11 +589,6 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.14.40",
         config_names=("bot_config.toml",),
         migrate=_migrate_removed_expression_selection_mode,
-    ),
-    ConfigUpgradeHook(
-        target_version="8.14.54",
-        config_names=("bot_config.toml",),
-        migrate=_migrate_removed_reply_necessity_trigger_mode,
     ),
     ConfigUpgradeHook(
         target_version="8.14.58",

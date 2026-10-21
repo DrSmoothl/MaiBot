@@ -14,16 +14,6 @@ OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
     "discard": "丢弃超过最大大小的图片组件",
 }
 
-REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS = {
-    "frequency": "按照新消息数量决定思考",
-    "dynamic": "估计每批消息的回复可能性并动态调整门槛，让回复次数贴近回复频率",
-}
-
-REPLY_TRIGGER_MODE_OPTION_LABELS = {
-    "frequency": "频率触发",
-    "dynamic": "动态触发",
-}
-
 ATTENTION_DRIFT_LEVEL_OPTION_LABELS = {
     "subtle": "轻微漂移",
     "active": "活跃联想",
@@ -555,23 +545,6 @@ class ChatReplyTimingConfig(ConfigBase):
         },
     )
     """开启后，被 @ 时会尽量回复。"""
-
-    reply_trigger_mode: Literal["frequency", "dynamic"] = Field(
-        default="frequency",
-        json_schema_extra={
-            "label": {
-                "zh_CN": "回复触发模式",
-                "en_US": "Reply trigger mode",
-                "ja_JP": "返信トリガーモード",
-            },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-option-labels": REPLY_TRIGGER_MODE_OPTION_LABELS,
-            "x-option-descriptions": REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS,
-        },
-    )
-    """控制新消息何时进入 Planner。"""
 
     planner_interrupt_max_consecutive_count: int = Field(
         default=0,

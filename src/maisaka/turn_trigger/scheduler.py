@@ -4,9 +4,8 @@ from typing import TYPE_CHECKING
 
 from src.common.logger import get_logger
 from src.config.config import global_config
-from src.maisaka.mode_policy import is_dynamic_reply_trigger_enabled
 
-from .gates import DynamicReplyTurnGate, FrequencyThresholdTurnGate
+from .gates import DynamicReplyTurnGate
 
 if TYPE_CHECKING:
     from src.maisaka.runtime import MaisakaHeartFlowChatting
@@ -20,7 +19,6 @@ class MessageTurnScheduler:
     def __init__(self, runtime: "MaisakaHeartFlowChatting") -> None:
         self._runtime = runtime
         self._dynamic_reply_gate = DynamicReplyTurnGate(runtime)
-        self._frequency_threshold_gate = FrequencyThresholdTurnGate(runtime)
 
     def record_reply(self) -> None:
         """记录 Planner 实际调用了一次 reply，供动态门控统计回复次数。"""
@@ -77,29 +75,13 @@ class MessageTurnScheduler:
         if runtime._idle_backoff.should_delay(pending_count):
             return
 
-        trigger_threshold = runtime._get_message_trigger_threshold()
-        schedule_detail = f"待处理={pending_count} 阈值={trigger_threshold} 频率={formatted_frequency}"
-        if is_dynamic_reply_trigger_enabled():
-            dynamic_result = self._dynamic_reply_gate.evaluate(
-                pending_messages=runtime.message_cache[runtime._last_processed_index :],
-                frequency=effective_frequency,
-            )
-            logger.info(
-                f"{runtime.log_prefix} 回复调度 待处理={pending_count} 频率={formatted_frequency} "
-                f"{dynamic_result.detail}"
-            )
-            if dynamic_result.should_trigger:
-                runtime._enqueue_message_turn()
-            return
-
-        frequency_result = self._frequency_threshold_gate.evaluate(
-            pending_count=pending_count,
-            trigger_threshold=trigger_threshold,
+        dynamic_result = self._dynamic_reply_gate.evaluate(
+            pending_messages=runtime.message_cache[runtime._last_processed_index :],
+            frequency=effective_frequency,
         )
-        logger.info(f"{runtime.log_prefix} 回复调度 {schedule_detail} {frequency_result.detail}")
-        if frequency_result.should_trigger:
+        logger.info(
+            f"{runtime.log_prefix} 回复调度 待处理={pending_count} 频率={formatted_frequency} "
+            f"{dynamic_result.detail}"
+        )
+        if dynamic_result.should_trigger:
             runtime._enqueue_message_turn()
-            return
-
-        if frequency_result.decision == "delay" and frequency_result.delay_seconds is not None:
-            runtime._defer_message_turn_check(frequency_result.delay_seconds)
