@@ -111,6 +111,9 @@ class MainSystem:
         from src.common.event_loop_watchdog import start_watchdog
 
         self.watchdog_task = start_watchdog("main")
+        from src.common.memory_diagnostics import start_memory_diagnostics
+
+        start_memory_diagnostics()
 
         try:
             # 启动现场采样默认开启，完成初始化后关闭；常驻看门狗仍由原配置控制。

@@ -705,6 +705,9 @@ if __name__ == "__main__":
 
             # 关闭日志系统，释放文件句柄
             try:
+                from src.common.memory_diagnostics import stop_memory_diagnostics
+
+                stop_memory_diagnostics()
                 shutdown_logging()
             except Exception as e:
                 print(t("startup.logging_shutdown_error", error=e))
