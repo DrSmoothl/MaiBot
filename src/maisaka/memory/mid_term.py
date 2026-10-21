@@ -44,6 +44,7 @@ from src.maisaka.context.messages import (
 )
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
+from src.maisaka.visual.deferred_images import defer_context_image_encoding
 
 MID_TERM_MEMORY_COMPONENT_TYPE = "mid_term_memory"
 MID_TERM_MEMORY_SOURCE_KIND = "mid_term_memory"
@@ -434,6 +435,7 @@ def _build_summary_instruction_prompt(
     )
 
 
+@defer_context_image_encoding(lambda items: items)
 def _build_summary_prompt_messages(
     source_messages: Sequence[LLMContextMessage],
     *,

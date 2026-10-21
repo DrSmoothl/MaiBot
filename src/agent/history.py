@@ -1,4 +1,4 @@
-"""电脑 Agent 的独立 rollout；图片单独保存，模型窗口与完整记录分开。"""
+"""外接 Agent 的完整执行记录；图片单独保存。"""
 
 from copy import deepcopy
 from pathlib import Path
@@ -11,9 +11,10 @@ import json
 
 from src.common.async_work import run_sync_work
 from src.llm_models.payload_content.context_item import ContextItem
+from src.llm_models.payload_content.context_snapshot import deserialize_context_item_snapshot, serialize_context_item_snapshot
 
 
-class ComputerHistory:
+class AgentHistory:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.records: List[Dict[str, Any]] = []
@@ -27,9 +28,6 @@ class ComputerHistory:
         self._record_ids = {record["id"] for record in self.records}
 
     def pack(self, items: Sequence[ContextItem]) -> List[Dict[str, Any]]:
-        # 快照适配层会加载模型客户端；在实际序列化时导入，避免会话初始化时形成循环依赖。
-        from src.llm_models.request_snapshot import serialize_context_item_snapshot
-
         snapshots = [serialize_context_item_snapshot(item) for item in items]
         for raw in snapshots:
             for part in raw.get("parts", []):
@@ -42,19 +40,13 @@ class ComputerHistory:
                     part["image_file"] = filename
         return snapshots
 
-    def unpack(self, snapshots: Sequence[Dict[str, Any]], *, images: bool = True) -> List[ContextItem]:
-        from src.llm_models.request_snapshot import deserialize_context_item_snapshot
-
+    def unpack(self, snapshots: Sequence[Dict[str, Any]]) -> List[ContextItem]:
         restored = deepcopy(snapshots)
         for raw in restored:
             for part in raw.get("parts", []):
                 if part["type"] == "image":
                     filename = part.pop("image_file")
-                    if images:
-                        part["image_base64"] = base64.b64encode((self.root / "images" / filename).read_bytes()).decode()
-                    else:
-                        part.clear()
-                        part.update(type="text", text="[旧图片已归档，图片文件见完整记录]")
+                    part["image_base64"] = base64.b64encode((self.root / "images" / filename).read_bytes()).decode()
         return [deserialize_context_item_snapshot(raw) for raw in restored]
 
     async def append(self, record: Dict[str, Any]) -> None:
@@ -71,14 +63,6 @@ class ComputerHistory:
             output.flush()
         self.records.append(record)
         self._record_ids.add(record["id"])
-
-    def context(self, start: int = 0) -> List[ContextItem]:
-        records = self.records[start:]
-        image_records = [index for index, record in enumerate(records)
-                         if any(part["type"] == "image" for raw in record["items"] for part in raw.get("parts", []))]
-        recent = set(image_records[-3:])
-        return [item for index, record in enumerate(records)
-                for item in self.unpack(record["items"], images=index in recent)]
 
     def events(self, after: int = 0) -> List[Dict[str, Any]]:
         return [{"index": index, "id": record["id"], "time": record["time"], "kind": record["kind"],

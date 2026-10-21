@@ -377,7 +377,6 @@ const IndexPageContent = memo(function IndexPageContent({ botVersion }: { botVer
     hitokoto,
     hitokotoLoading,
     hitokotoSettings,
-    selfUpdateStatus,
     versionCompatibility,
     fetchHitokoto,
     saveHitokotoSettings,
@@ -923,7 +922,6 @@ const IndexPageContent = memo(function IndexPageContent({ botVersion }: { botVer
     ...homeCards.filter((card) => card.id === hitokotoCardId),
     ...homeCards.filter((card) => !firstRowCardIds.includes(card.id) && card.id !== hitokotoCardId),
   ]
-  const maibotUpdateAvailable = Boolean(selfUpdateStatus?.update_available)
   const versionsMismatch =
     versionCompatibility?.status !== undefined && versionCompatibility.status !== 'compatible'
   // 移动端由 Layout 的 main 滚动，内层按内容撑高并允许滚动传递，避免拦截触摸滑动。
@@ -1002,21 +1000,6 @@ const IndexPageContent = memo(function IndexPageContent({ botVersion }: { botVer
             </span>
             <span className="text-base">V{APP_VERSION}</span>
           </button>
-          {maibotUpdateAvailable && selfUpdateStatus && (
-            <a
-              href={selfUpdateStatus.deployment_type === 'package'
-                ? 'https://pypi.org/project/maibot/'
-                : `https://github.com/Mai-with-u/MaiBot/compare/${selfUpdateStatus.current_commit}...${selfUpdateStatus.latest_commit}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm text-sky-600 hover:underline dark:text-sky-400"
-            >
-              {t('home.versionCard.updateAvailable')} {selfUpdateStatus.deployment_type === 'package'
-                ? `V${selfUpdateStatus.latest_version}`
-                : `${selfUpdateStatus.branch} · ${selfUpdateStatus.latest_commit?.slice(0, 8)}`}
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          )}
           {versionsMismatch && <span className="text-sm">{t('home.versionCard.mismatch')}</span>}
           <span
             aria-hidden="true"

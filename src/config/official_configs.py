@@ -4850,6 +4850,15 @@ class LogConfig(ConfigBase):
     """每个聊天最多保留多少组 Prompt 预览。"""
 
 
+    memory_diagnostics_enabled: bool = Field(default=True)
+    """启用独立内存诊断日志；最多四个 5 MiB 文件，修改后重启生效。"""
+
+    memory_diagnostics_deep_enabled: bool = Field(default=False)
+    """启用 tracemalloc 分配位置对比（每十分钟）；有额外内存和 CPU 开销，排查时开启，重启生效。"""
+
+    memory_diagnostics_interval_seconds: float = Field(default=60.0, ge=10.0)
+    """轻量内存诊断采集间隔（秒，至少 10 秒），修改后重启生效。"""
+
     event_loop_watchdog_enabled: bool = Field(
         default=False,
         json_schema_extra={

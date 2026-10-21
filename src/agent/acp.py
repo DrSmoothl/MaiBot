@@ -1,6 +1,7 @@
-"""ACP v1 的双向 NDJSON/stdio 连接，不解释终端文本或重试请求。"""
+"""ACP v1 的双向 NDJSON 连接，支持子进程 stdio 和 Desktop 本机桥接。"""
 
 from collections import deque
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import asyncio
@@ -14,6 +15,8 @@ class ACPConnection:
     def __init__(self, update: Callable[[Dict[str, Any]], Awaitable[None]]) -> None:
         self.update = update
         self.process: Optional[asyncio.subprocess.Process] = None
+        self.stdout: Optional[asyncio.StreamReader] = None
+        self.stdin: Optional[asyncio.StreamWriter] = None
         self._reader: Optional[asyncio.Task[None]] = None
         self._stderr: Optional[asyncio.Task[None]] = None
         self._errors = deque(maxlen=20)
@@ -31,17 +34,42 @@ class ACPConnection:
             executable, *args, cwd=cwd, env={**os.environ, **env}, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=64 * 1024 * 1024, **options,
         )
-        self._reader = asyncio.create_task(self._read(), name="computer.acp.read")
-        self._stderr = asyncio.create_task(self._read_errors(), name="computer.acp.stderr")
+        self.stdout, self.stdin = self.process.stdout, self.process.stdin
+        self._reader = asyncio.create_task(self._read(), name="agent.acp.read")
+        self._stderr = asyncio.create_task(self._read_errors(), name="agent.acp.stderr")
+
+    async def connect_desktop(self, manifest: Path, timeout: float) -> None:
+        def read_manifest() -> Dict[str, Any]:
+            if not manifest.is_file():
+                raise FileNotFoundError("未找到 dsh Desktop 桥接信息；请安装 dsh-maibot-bridge 插件并启动 Desktop。")
+            return json.loads(manifest.read_text(encoding="utf-8"))
+
+        info = await asyncio.to_thread(read_manifest)
+        if info["version"] != 1 or info["host"] != "127.0.0.1":
+            raise ValueError("Desktop 桥接只接受本机的 v1 连接信息。")
+        if not isinstance(info["port"], int) or not 1 <= info["port"] <= 65535 or not isinstance(info["token"], str) or not info["token"]:
+            raise ValueError("无效的 Desktop 桥接端口或认证信息。")
+        async with asyncio.timeout(timeout):
+            self.stdout, self.stdin = await asyncio.open_connection(info["host"], info["port"], limit=64 * 1024 * 1024)
+            try:
+                self.stdin.write((json.dumps({"token": info["token"]}) + "\n").encode())
+                await self.stdin.drain()
+                if json.loads(await self.stdout.readline()) != {"authenticated": True}:
+                    raise PermissionError("dsh Desktop 桥接认证失败。")
+            except BaseException:
+                self.stdin.close()
+                await self.stdin.wait_closed()
+                raise
+        self._reader = asyncio.create_task(self._read(), name="agent.desktop-acp.read")
 
     async def send(self, message: Dict[str, Any]) -> None:
         if self.failure is not None:
             raise self.failure
-        if self.process is None or self.process.returncode is not None:
-            raise ConnectionError("ACP 进程未运行")
+        if self.stdin is None or self.stdin.is_closing():
+            raise ConnectionError("ACP 连接未运行")
         async with self._write_lock:
-            self.process.stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode())
-            await self.process.stdin.drain()
+            self.stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode())
+            await self.stdin.drain()
 
     async def notify(self, method: str, params: Dict[str, Any]) -> None:
         await self.send({"jsonrpc": "2.0", "method": method, "params": params})
@@ -68,7 +96,7 @@ class ACPConnection:
 
     async def _read(self) -> None:
         try:
-            while line := await self.process.stdout.readline():
+            while line := await self.stdout.readline():
                 try:
                     message = json.loads(line)
                 except json.JSONDecodeError as exc:
@@ -109,8 +137,11 @@ class ACPConnection:
         await self.send(response)
 
     async def close(self, timeout: float) -> None:
+        if self.stdin is not None:
+            self.stdin.close()
+            if self.process is None:
+                await self.stdin.wait_closed()
         if self.process is not None and self.process.returncode is None:
-            self.process.stdin.close()
             try:
                 await asyncio.wait_for(self.process.wait(), timeout)
             except asyncio.TimeoutError:

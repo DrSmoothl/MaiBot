@@ -107,6 +107,10 @@ jobs:
     needs: build-and-publish
     if: github.ref_name == 'dev'
     runs-on: ubuntu-24.04
+    # 构建发布仍可并行，仅串行执行向 dev 写入依赖的阶段。
+    concurrency:
+      group: dashboard-dependency-dev
+      cancel-in-progress: false
     env:
       # 优先从官方 PyPI 解析刚发布的包，避免镜像同步延迟。
       UV_INDEX: https://pypi.org/simple

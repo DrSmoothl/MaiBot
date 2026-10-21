@@ -14,12 +14,12 @@ import time
 
 from src.common.async_work import run_sync_work
 
-from .config import ComputerConfig
+from src.agent.config import AgentConfig
 from .actions import validate_actions
-from .persistence import read_json, write_json
+from src.agent.persistence import read_json, write_json
 
 
-def sandbox_xml(bootstrap: Path, exchange: Path, workspace: Path, config: ComputerConfig) -> str:
+def sandbox_xml(bootstrap: Path, exchange: Path, workspace: Path, config: AgentConfig) -> str:
     root = Element("Configuration")
     for name, value in {
         "Networking": "Enable" if config.networking else "Disable", "ClipboardRedirection": "Disable",
@@ -43,7 +43,7 @@ def sandbox_xml(bootstrap: Path, exchange: Path, workspace: Path, config: Comput
 
 
 class SandboxBridge:
-    def __init__(self, runtime_dir: Path, workspace: Path, config: ComputerConfig) -> None:
+    def __init__(self, runtime_dir: Path, workspace: Path, config: AgentConfig) -> None:
         self.runtime_dir = runtime_dir
         self.workspace = workspace
         self.config = config
@@ -99,10 +99,10 @@ class SandboxBridge:
         if self.sandbox_id not in [item["Id"] for item in environments["WindowsSandboxEnvironments"]]:
             self.connected = False
             self.observed_running = False
-            raise ConnectionError("记录的沙盒已关闭；使用 computer_control restart 创建新桌面，工作目录仍保留。")
+            raise ConnectionError("记录的沙盒已关闭；在 WebUI 重建沙盒 创建新桌面，工作目录仍保留。")
         ready = await self._wait_json(exchange / "ready.json", self.config.startup_timeout)
         if ready.get("protocol") != 2:
-            raise ConnectionError("原沙盒代理版本不支持恢复，请使用 computer_control restart 更新代理。")
+            raise ConnectionError("原沙盒代理版本不支持恢复，请在 WebUI 重建沙盒 更新代理。")
         if self.pending is not None:
             claimed = [exchange / f"{self.pending}.{suffix}.json" for suffix in ("request", "running", "result")]
             if not any(await asyncio.gather(*(asyncio.to_thread(path.exists) for path in claimed))):
@@ -184,7 +184,7 @@ class SandboxBridge:
                     self.connected = False
                     raise ConnectionError("沙盒实例仍存在，但来宾代理心跳已中断；原请求未重放，请检查桌面或重建代理。")
             await asyncio.sleep(0.1)
-        raise TimeoutError("沙盒请求仍未返回，未重放操作；调用 computer_desktop(actions=[]) 继续领取原请求结果。")
+        raise TimeoutError("沙盒请求仍未返回，未重放操作；使用 computer_poll(operation_id) 查询原操作结果。")
 
     async def _start(self) -> None:
         async with self._start_lock:
@@ -242,17 +242,17 @@ class SandboxBridge:
             raise
 
     async def perform(self, actions: List[Dict[str, Any]], timeout: Optional[float] = None) -> Dict[str, Any]:
+        if not actions:
+            raise ValueError("actions 不能为空；观察桌面请使用 computer_observe，查询操作请使用 computer_poll。")
         validate_actions(actions)
         async with self._lock:
             await self._start()
             if self.exchange is None:
                 raise ConnectionError("沙盒交换目录未初始化")
-            if self.pending is not None and actions:
-                raise RuntimeError("上一条操作尚未领取结果；先调用 computer_desktop(actions=[])，不会重复输入。")
-            if self.pending is None:
-                self.pending = uuid4().hex
-                request = {"id": self.pending, "actions": actions if actions else [{"action": "observe"}]}
-                await self._publish(request, "request")
+            if self.pending is not None:
+                raise RuntimeError(f"上一条操作尚未领取结果；请调用 computer_poll(operation_id={self.pending})。")
+            self.pending = uuid4().hex
+            await self._publish({"id": self.pending, "actions": actions}, "request")
             return await self._collect(self.pending, timeout)
 
     async def _collect(self, operation_id: str, timeout: Optional[float]) -> Dict[str, Any]:

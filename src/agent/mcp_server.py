@@ -1,4 +1,4 @@
-"""向外部 Agent 提供现有电脑工具；临时 HTTP 端口仅监听本机并使用独立令牌。"""
+"""向外部 Agent 提供麦麦工具；临时 HTTP 端口仅监听本机并使用独立令牌。"""
 
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from .acp_agent import AcpAgent
 
 
-class ComputerMCPServer:
+class AgentMCPServer:
     def __init__(self, agent: "AcpAgent") -> None:
         self.agent = agent
         self.token = secrets.token_urlsafe(32)
@@ -33,10 +33,10 @@ class ComputerMCPServer:
         self.task: Optional[asyncio.Task[None]] = None
 
     async def start(self) -> Dict[str, Any]:
-        from .provider import ComputerToolProvider
+        from .provider import AgentToolProvider
 
-        provider = ComputerToolProvider(self.agent.service)
-        server = Server("maibot-computer")
+        provider = AgentToolProvider(self.agent.service)
+        server = Server("maibot-agent")
 
         @server.list_tools()
         async def list_tools() -> List[types.Tool]:
@@ -49,9 +49,6 @@ class ComputerMCPServer:
             content = [types.TextContent(type="text", text=result.get_history_content())]
             content.extend(types.ImageContent(type="image", data=item.data, mimeType=item.mime_type)
                            for item in result.content_items if item.content_type == "image")
-            if result.stop_after_execution:
-                # 工具已完成才通知外部回合收尾，不能在工具处理器内等待自己所属回合退出。
-                self.agent.request_stop()
             return types.CallToolResult(content=content, isError=not result.success)
 
         sock = socket.socket()
@@ -83,20 +80,20 @@ class ComputerMCPServer:
 
         app = Starlette(routes=[Route("/mcp", AuthorizedEndpoint(), methods=["GET", "POST", "DELETE"])], lifespan=lifespan)
         self.server = uvicorn.Server(uvicorn.Config(app, log_config=None, access_log=False, log_level="warning", ws="none"))
-        self.task = asyncio.create_task(self.server.serve(sockets=[sock]), name="computer.mcp")
+        self.task = asyncio.create_task(self.server.serve(sockets=[sock]), name="agent.mcp")
         try:
             async def ready():
                 while not self.server.started:
                     if self.task.done():
                         await self.task
-                        raise RuntimeError("电脑 MCP 服务未能启动")
+                        raise RuntimeError("外接 Agent MCP 服务未能启动")
                     await asyncio.sleep(0.01)
             await asyncio.wait_for(ready(), self.agent.config.acp_timeout)
         except BaseException:
             await self.close()
             sock.close()
             raise
-        return {"type": "http", "name": "maibot-computer", "url": self.url,
+        return {"type": "http", "name": "maibot-agent", "url": self.url,
                 "headers": [{"name": "Authorization", "value": "Bearer " + self.token}]}
 
     async def close(self) -> None:

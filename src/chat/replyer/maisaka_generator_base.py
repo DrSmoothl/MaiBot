@@ -43,7 +43,9 @@ from src.llm_models.payload_content.context_item import (
     replace_output_projection,
 )
 from src.llm_models.payload_content.context_protocol import ContextProtocolMode
-from src.llm_models.request_snapshot import serialize_context_items_snapshot
+from src.llm_models.payload_content.context_snapshot import (
+    serialize_context_items_snapshot,
+)
 from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.messages import (
@@ -56,6 +58,7 @@ from src.maisaka.context.messages import (
 from src.maisaka.context.planner_messages import extract_quote_ids_from_message_sequence
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
+from src.maisaka.visual.deferred_images import defer_context_image_encoding
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 from src.plugin_runtime.hook_payloads import deserialize_prompt_items, serialize_prompt_items
 
@@ -660,6 +663,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
         return items
 
+    @defer_context_image_encoding(lambda items: items)
     def _build_request_messages(
         self,
         chat_history: List[LLMContextMessage],
@@ -987,6 +991,10 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             result.request_messages = preview.payload["request_items"]
             result.output_items = preview.payload["output_items"]
 
+    def _build_generation_options(self, model_name: Optional[str]) -> LLMGenerationOptions:
+        """构建本次请求选项，供长文等专用 Replyer 明确指定生成模型。"""
+        return LLMGenerationOptions(model_name=model_name)
+
     async def generate_reply_with_context(
         self,
         extra_info: str = "",
@@ -1085,6 +1093,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         aggregate_completion_tokens = 0
         aggregate_total_tokens = 0
         reasoning_continuation_count = 0
+        reasoning_regeneration_requested = False
         default_task_name = str(getattr(self.express_model, "task_name", "") or "replyer").strip() or "replyer"
 
         while True:
@@ -1211,7 +1220,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                         request_type=self.request_type,
                         session_id=preview_chat_id,
                     )
-                generation_options = LLMGenerationOptions(model_name=active_model_name)
+                generation_options = self._build_generation_options(active_model_name)
                 generation_result = await active_model.generate_response_with_context(
                     context_factory=context_factory,
                     options=generation_options,
@@ -1342,6 +1351,21 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             matched_regex_pattern = str(after_response_kwargs.get("matched_regex_pattern") or "").strip()
             matched_regex_description = str(after_response_kwargs.get("matched_regex_description") or "").strip()
             retry_reason = str(after_response_kwargs.get("retry_reason") or "").strip()
+            # Chat 不回放推理项；纯推理且 Hook 未补正文时，复用重生成流程尝试一次。
+            if (
+                active_client_type == "openai"
+                and not reasoning_regeneration_requested
+                and not response_text
+                and generation_result.output_items
+                and all(isinstance(item, ReasoningItem) for item in generation_result.output_items)
+                and retry_count < REPLYER_MAX_HOOK_RETRIES
+            ):
+                reasoning_regeneration_requested = True
+                retry_requested = True
+                retry_reason = "；".join(filter(None, (
+                    retry_reason,
+                    "上一次只返回了思考内容，正文为空。请生成要发送的回复正文，不要只输出思考过程。",
+                )))
             if retry_requested and retry_count < REPLYER_MAX_HOOK_RETRIES:
                 reason_parts = []
                 if matched_regex:

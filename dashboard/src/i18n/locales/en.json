@@ -103,7 +103,7 @@
       "logViewer": "Log Viewer",
       "reasoningProcess": "Reasoning Process",
       "maisakaMonitor": "MaiSaka Chat Monitor",
-      "computer": "MaiMai Computer",
+      "agent": "Independent Agent",
       "localChat": "Local Chat",
       "settings": "WebUI Settings"
     }
@@ -238,6 +238,15 @@
   "chat": {
     "computerDesktop": "Computer desktop and takeover",
     "computer": {
+      "desktopSetup": "Connect dsh Desktop",
+      "desktopInstall": "Install the bridge with the dsh command bundled with Desktop (0.2.1-rc.2 or later):",
+      "desktopConnect": "Start or restart Desktop. Leave the bridge file and model option empty to use its defaults. Tasks appear in the MaiMai session in Desktop. Stopping MaiBot does not quit Desktop.",
+      "dshSetup": "Connect dsh in three steps",
+      "dshInstall": "If dsh is not installed, run:",
+      "dshModel": "Configure the model and API key in dsh (skip if configured):",
+      "dshEnable": "Select the dsh CLI connection, enable and save the Agent, then send a task on its page. If the executable is not found, set ACP executable to the absolute path of dsh.cmd on Windows.",
+      "dshCommand": "The preset runs:",
+      "disabled": "Agent is disabled",
       "reasoning": "Thinking history",
       "connecting": "Connecting",
       "disabled": "Computer use disabled",
@@ -266,11 +275,10 @@
       "userMessage": "User",
       "systemEvent": "Autonomous wake",
       "queued": "Queued",
-      "builtin": "Built-in agent",
       "noEvents": "No activity yet",
       "inputEvent": "Input and requests",
       "stepEvent": "Model and tools",
-      "message": "Give the computer agent a task",
+      "message": "Give the Agent a task",
       "send": "Send",
       "thinking": "Thinking",
       "tool": "Using a tool",

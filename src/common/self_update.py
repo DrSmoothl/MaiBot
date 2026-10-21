@@ -6,10 +6,12 @@ Worker（WebUI）只负责检查更新与登记更新请求；真正改动代码
 本模块会被 Runner 加载，只能依赖标准库。
 """
 
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 import base64
 import importlib.util
@@ -391,36 +393,62 @@ def _fetch_branch_head(
     return _git(root, "rev-parse", "FETCH_HEAD^{commit}").strip(), source
 
 
-def _get_update_json(path: str) -> Dict[str, Any]:
-    """只读官方 API；沿用 urllib 的环境/系统代理，不依赖 Git 配置。"""
+def _get_update_json(path: str, api_source: str, deadline: float) -> Dict[str, Any]:
+    """读取选定的公开元数据接口，每次请求共用整轮检查的截止时间。"""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SelfUpdateError("fetch_failed", "检查更新超时（60 秒）")
+    if api_source == "cnb":
+        url = f"https://cnb.cool/Mai-with-u/maibot/-/git/{path}"
+    else:
+        url = GitSource.select("github").api_url("Mai-with-u", "MaiBot", path)
     try:
-        source = GitSource.select("github")
-        return source.read_json(source.api_url("Mai-with-u", "MaiBot", path), timeout=5)
+        # CNB 需要明确的 JSON Accept，避免返回网页 HTML。
+        request = Request(url, headers={"Accept": "application/json", "User-Agent": "MaiBot"})
+        with urlopen(request, timeout=remaining) as response:
+            payload = json.load(response)
+        if not isinstance(payload, dict):
+            raise ValueError("API 响应不是对象")
+        return payload
     except (OSError, ValueError) as exc:
-        raise SelfUpdateError("fetch_failed", f"GitHub API 检查更新失败：{exc}") from exc
+        raise SelfUpdateError("fetch_failed", f"{api_source} 检查更新失败：{exc}") from exc
 
 
-def _check_source_api(local: LocalState, root: Path, source: UpdateSource) -> UpdateCheck:
-    """检查只获取元数据；CNB 匿名 API 不可用，下载镜像与官方检查源分离。"""
+def _check_source_api(
+    local: LocalState, root: Path, source: UpdateSource, api_source: str, deadline: float,
+) -> UpdateCheck:
+    """从单个信息源获取完整检查结果，下载源仍由用户选择。"""
+    def read(path: str) -> Dict[str, Any]:
+        return _get_update_json(path, api_source, deadline)
+
     if local.branch is None or local.commit is None:
         raise ValueError("本地仓库状态缺少当前分支或提交")
     try:
-        branch = _get_update_json(f"branches/{quote(local.branch, safe='')}")
+        branch = read(f"branches/{quote(local.branch, safe='')}")
         target = branch["commit"]["sha"]
         if not isinstance(target, str) or _COMMIT_PATTERN.fullmatch(target) is None:
             raise ValueError("无效的远端提交 SHA")
-        check = UpdateCheck(local=local, checked_at=time.time(), latest_commit=target, source=source)
+        check = UpdateCheck(
+            local=local, checked_at=time.time(), latest_commit=target,
+            source=UpdateSource(source.id, f"{source.name}（版本检查：{api_source}）", source.url),
+        )
         if local.dirty_files:
             check.blockers.append("dirty_worktree")
         if target == local.commit:
             check.latest_version = local.version
             return check
-        comparison = _get_update_json(f"compare/{local.commit}...{target}?per_page=100")
-        check.behind = int(comparison["ahead_by"])
-        check.ahead = int(comparison["behind_by"])
+        comparison = read(f"compare/{local.commit}...{target}?per_page=100")
+        if api_source == "cnb":
+            check.behind = int(comparison["total_commits"])
+            # CNB 没有 behind_by；只有分叉或本地领先时才反向比较。
+            if comparison["merge_base_commit"]["sha"] != local.commit:
+                check.ahead = int(read(f"compare/{target}...{local.commit}")["total_commits"])
+        else:
+            check.behind = int(comparison["ahead_by"])
+            check.ahead = int(comparison["behind_by"])
         if check.ahead:
             check.blockers.append("diverged")
-        changed = {item["filename"] for item in comparison["files"]}
+        changed = {item["path" if api_source == "cnb" else "filename"] for item in comparison["files"]}
         check.dependencies_changed = bool(DEPENDENCY_FILES & changed)
         if check.dependencies_changed and local.dependency_tool is None:
             check.blockers.append("no_dependency_tool")
@@ -428,8 +456,17 @@ def _check_source_api(local: LocalState, root: Path, source: UpdateSource) -> Up
             UpdateCommit(item["sha"][:8], item["commit"]["message"].splitlines()[0], item["commit"]["committer"]["date"])
             for item in comparison["commits"][:MAX_LISTED_COMMITS]
         ]
-        contents = _get_update_json(f"contents/pyproject.toml?ref={target}")
-        project = base64.b64decode(contents["content"]).decode("utf-8")
+        if api_source == "cnb":
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SelfUpdateError("fetch_failed", "检查更新超时（60 秒）")
+            project = GitSource.read_text(
+                GitSource.select("cnb").raw_url("Mai-with-u", "MaiBot", target, "pyproject.toml"),
+                timeout=remaining,
+            )
+        else:
+            contents = read(f"contents/pyproject.toml?ref={target}")
+            project = base64.b64decode(contents["content"]).decode("utf-8")
         check.latest_version, requires_python = _parse_pyproject(project)
         if _parse_pyproject((root / "pyproject.toml").read_text(encoding="utf-8"))[1] != requires_python:
             check.blockers.append("python_requirement_changed")
@@ -455,8 +492,24 @@ def check_for_update(
     if local.branch is None:
         raise ValueError("本地仓库状态缺少当前分支，无法检查更新")
     source = select_update_source(source_id or "github", custom_prefix)
-    source.name = f"{source.name}（版本检查：GitHub API）"
-    return _check_source_api(local, root, source)
+    # 两个源同时检查，失败的一路不掩盖另一路的有效结果；不等待慢源退出。
+    deadline = time.monotonic() + 60
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="update-check")
+    pending = {executor.submit(_check_source_api, local, root, source, name, deadline) for name in ("github", "cnb")}
+    errors: List[str] = []
+    try:
+        while pending:
+            done, pending = wait(pending, timeout=max(0, deadline - time.monotonic()), return_when=FIRST_COMPLETED)
+            if not done:
+                raise SelfUpdateError("fetch_failed", "检查更新超时（60 秒）")
+            for future in done:
+                try:
+                    return future.result()
+                except (SelfUpdateError, OSError, ValueError, KeyError, TypeError) as exc:
+                    errors.append(str(exc))
+        raise SelfUpdateError("fetch_failed", "GitHub 和 CNB 检查均失败：" + "；".join(errors))
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def request_update(

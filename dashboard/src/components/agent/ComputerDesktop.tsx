@@ -34,7 +34,7 @@ export function ComputerDesktop() {
       try {
         const current = await getComputerStatus(abort.signal)
         setStatus(current)
-        if (current.enabled && current.sandbox_running) {
+        if (current.enabled && current.desktop_enabled && current.sandbox_running) {
           const image = await getComputerFrame(abort.signal)
           if (!abort.signal.aborted) setFrame(URL.createObjectURL(image))
         } else {

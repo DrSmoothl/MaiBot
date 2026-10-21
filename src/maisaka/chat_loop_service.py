@@ -68,6 +68,7 @@ from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.memory.mid_term import is_mid_term_memory_message
 from src.maisaka.focus import focus_mode_manager
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
+from src.maisaka.visual.deferred_images import defer_context_image_encoding
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
 from src.maisaka.visual.mode_utils import resolve_enable_visual_planner
 
@@ -1003,6 +1004,7 @@ class MaisakaChatLoopService:
             }))
         return (" " if get_locale() == "en-US" else "").join(lines)
 
+    @defer_context_image_encoding(lambda result: result[0])
     def _build_request_messages(
         self,
         selected_history: List[LLMContextMessage],
@@ -1112,6 +1114,14 @@ class MaisakaChatLoopService:
 
         # 跨日时间提示由本方法生成，不能代替真实 user 消息充当工具调用锚点
         self._validate_function_call_context_anchors(history_context_items)
+        if enable_visual_message:
+            items = limit_latest_images_in_messages(
+                items,
+                max_image_num=global_config.visual.max_image_num,
+                preserved_item_ids={
+                    msg.item.meta.item_id for msg in selected_history if isinstance(msg, EmojiCandidateMessage)
+                },
+            )
         return items, history_item_count
 
     @staticmethod

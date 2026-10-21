@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: update-dashboard-dependency-dev
+  group: dashboard-dependency-dev
   cancel-in-progress: false
 
 jobs:

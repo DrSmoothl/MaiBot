@@ -103,7 +103,7 @@
       "logViewer": "ログビューア",
       "reasoningProcess": "推論プロセス",
       "maisakaMonitor": "MaiSaka チャット監視",
-      "computer": "麦麦のコンピューター",
+      "agent": "独立 Agent",
       "localChat": "ローカルチャット",
       "settings": "WebUI 設定"
     }
@@ -171,6 +171,15 @@
   "chat": {
     "computerDesktop": "デスクトップと操作引き継ぎ",
     "computer": {
+      "desktopSetup": "dsh Desktop に接続",
+      "desktopInstall": "Desktop 同梱の dsh コマンドでブリッジをインストール（0.2.1-rc.2 以降）：",
+      "desktopConnect": "Desktop を起動または再起動します。ブリッジファイルとモデル選択は空欄で既定値を使います。タスクは Desktop の「麦麦」会話に表示され、麦麦を終了しても Desktop は終了しません。",
+      "dshSetup": "dsh の接続手順",
+      "dshInstall": "dsh が未インストールの場合：",
+      "dshModel": "dsh でモデルと API キーを設定（設定済みなら省略）：",
+      "dshEnable": "接続方式で dsh CLI を選択して有効にし、保存してから Agent ページでタスクを送信します。プログラムが見つからない場合、Windows では ACP 起動プログラムに dsh.cmd の絶対パスを指定します。",
+      "dshCommand": "プリセットの起動コマンド：",
+      "disabled": "Agent は無効です",
       "reasoning": "思考履歴",
       "connecting": "接続中",
       "disabled": "コンピューター機能は無効です",
@@ -199,11 +208,10 @@
       "userMessage": "ユーザー",
       "systemEvent": "自律起床",
       "queued": "処理待ち",
-      "builtin": "内蔵 Agent",
       "noEvents": "実行記録はありません",
       "inputEvent": "入力と依頼",
       "stepEvent": "モデルとツール",
-      "message": "コンピューター Agent に依頼する",
+      "message": "Agent にタスクを依頼",
       "send": "送信",
       "thinking": "思考中",
       "tool": "操作中",

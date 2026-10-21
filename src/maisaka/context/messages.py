@@ -44,6 +44,7 @@ from src.llm_models.payload_content.context_item import (
 )
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.maisaka.visual.emoji_image_cache import emoji_image_cache
+from src.maisaka.visual.deferred_images import append_context_image
 
 FORWARD_PREVIEW_LIMIT = 4
 # 不受支持格式图片的转码结果缓存条数；规划器每轮都会重建上下文，缓存可避免同一张图片被反复解码转码。
@@ -128,14 +129,17 @@ def _append_emoji_component(
 ) -> bool:
     """将表情组件追加到 LLM 消息构建器。"""
     if enable_visual_message and limit_emoji_size and component.binary_data:
-        part = emoji_image_cache.get(component.binary_hash, component.binary_data)
-        builder.add_image_content(part.image_format, part.image_base64)
+        def encode_emoji() -> Tuple[str, str]:
+            part = emoji_image_cache.get(component.binary_hash, component.binary_data)
+            return part.image_format, part.image_base64
+
+        append_context_image(builder, encode_emoji)
         return True
 
     image_format = _guess_image_format(component.binary_data)
     if enable_visual_message and image_format and component.binary_data:
         builder.add_text_content("[消息类型]表情包")
-        builder.add_image_content(*_encode_image_for_context(component.binary_data, image_format))
+        append_context_image(builder, lambda: _encode_image_for_context(component.binary_data, image_format))
         return True
 
     normalized_content = component.content.strip()
@@ -156,7 +160,7 @@ def _append_image_component(
     """将图片组件追加到 LLM 消息构建器。"""
     image_format = _guess_image_format(component.binary_data)
     if enable_visual_message and image_format and component.binary_data:
-        builder.add_image_content(*_encode_image_for_context(component.binary_data, image_format))
+        append_context_image(builder, lambda: _encode_image_for_context(component.binary_data, image_format))
         return True
 
     normalized_content = component.content.strip()

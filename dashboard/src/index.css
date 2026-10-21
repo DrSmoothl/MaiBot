@@ -1213,6 +1213,67 @@
   box-shadow: inset 0 0 0 2px hsl(var(--background)) !important;
 }
 
+/* 收起时整个角色倒挂在顶边上方，只露出反向叶子；悬停后绕叶茎旋转下来。 */
+:root [data-dashboard-header-collapsed='true'] [data-topbar-mascot-toggle='true'] {
+  width: 96px !important;
+  height: 24px !important;
+  align-self: flex-start;
+  padding: 0;
+  overflow: visible;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  perspective: 280px;
+}
+
+:root [data-topbar-mascot-toggle='true']::before {
+  display: none;
+}
+
+:root [data-topbar-mascot-toggle='true']:focus-visible {
+  outline: 2px solid #80c440;
+  outline-offset: 3px;
+}
+
+.topbar-mascot {
+  display: block;
+  position: relative;
+  width: 96px;
+  height: 24px;
+  transform-origin: 71.5% 18px;
+  transform: translateY(-18px) rotate(-180deg);
+  transition: transform 480ms cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+[data-topbar-mascot-toggle='true']:is(:hover, :focus-visible) .topbar-mascot {
+  transform: rotate(0deg);
+}
+
+.topbar-mascot-leaves {
+  position: absolute;
+  top: 0;
+  left: 51px;
+  width: 35px;
+  height: 20px;
+  z-index: 1;
+}
+
+.topbar-mascot-body {
+  position: absolute;
+  top: 18px;
+  left: 0;
+  width: 96px;
+  height: 50px;
+  filter: drop-shadow(0 3px 2px rgb(0 0 0 / 18%));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-mascot {
+    transition: none;
+  }
+}
+
 :root[data-dashboard-style='future-retro'] [data-dashboard-topbar-toggle='true'] {
   position: relative;
   background: transparent !important;
@@ -1491,6 +1552,15 @@
   width: 2rem !important;
   height: 2rem !important;
   top: -1px;
+}
+
+/* 更新提示与顶栏按钮合并时，按版本文字撑开按钮。 */
+:root[data-dashboard-style] [data-dashboard-header='true']
+  [data-dashboard-header-action='true'][data-header-update-available='true'] {
+  width: auto !important;
+  padding-inline: 0.625rem !important;
+  gap: 0.375rem;
+  overflow: visible;
 }
 
 :root [data-dashboard-header-action='true'] svg {
