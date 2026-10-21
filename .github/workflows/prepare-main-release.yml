@@ -16,6 +16,10 @@ jobs:
     name: Prepare Dashboard Stable Release
     runs-on: ubuntu-24.04
     environment: webui
+    # 与开发版依赖更新共用锁，避免发布期间并发改写同一组依赖文件。
+    concurrency:
+      group: dashboard-dependency-dev
+      cancel-in-progress: false
     steps:
       - name: Check out dev
         uses: actions/checkout@v4
