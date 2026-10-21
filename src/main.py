@@ -206,9 +206,9 @@ class MainSystem:
         logger.info(t("startup.chat_manager_initialized"))
         await memory_automation_service.start()
 
-        from src.computer.service import computer_service
+        from src.agent.service import agent_service
 
-        await computer_service.start()
+        await agent_service.start()
 
         # await asyncio.sleep(0.5) #防止logger输出飞了
 
@@ -299,14 +299,14 @@ async def main() -> None:
         from src.chat.heart_flow.heartflow_manager import heartflow_manager
         from src.common.logger import stop_ws_broadcasts
         from src.common.shutdown import request_shutdown
-        from src.computer.service import computer_service
+        from src.agent.service import agent_service
 
         request_shutdown("main_finally")
         await stop_ws_broadcasts()
         if system.app is not None:
             await system.app.stop()
         await heartflow_manager.shutdown()
-        await computer_service.stop()
+        await agent_service.stop()
         if system.webui_server:
             await system.webui_server.shutdown()
         if system.watchdog_task is not None:

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { parse as parseToml } from 'smol-toml'
 
+import { AgentACPField, AgentConnectionSettings, AgentCustomArgs, AgentDesktopField } from '@/components/agent/AgentConnectionSettings'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
@@ -340,6 +341,16 @@ function BotConfigPageContent() {
 
   useEffect(() => {
     const hookEntries = [
+      ['agent.connection', AgentConnectionSettings, 'wrapper'],
+      ['agent.desktop_manifest', AgentDesktopField, 'wrapper'],
+      ['agent.acp_args', AgentCustomArgs, 'wrapper'],
+      ['agent.acp_command', AgentACPField, 'wrapper'],
+      ['agent.acp_cwd', AgentACPField, 'wrapper'],
+      ['agent.acp_env', AgentACPField, 'wrapper'],
+      ['agent.acp_model', AgentACPField, 'wrapper'],
+      ['agent.acp_timeout', AgentACPField, 'wrapper'],
+      ['agent.computer_tools', AgentACPField, 'wrapper'],
+
       ['bot.platform', HiddenFieldHook, 'hidden'],
       ['bot.alias_names', AliasNamesHook],
       ['bot.qq_account', HiddenFieldHook, 'hidden'],

@@ -1,4 +1,4 @@
-"""外部 ACP Agent 后端：会话由外部 harness 持久化，图文、工具和 WebUI 仍由电脑工作区提供。"""
+"""独立 ACP Agent：会话由外部 harness 持久化，麦麦提供图文传话和可选能力。"""
 
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import asyncio
 import json
+import os
 
 from src.llm_models.payload_content.context_item import (
     ContextImagePart, ContextItemBuilder, ContextItemMeta, ContextTextPart, ProviderActivityItem, RoleType,
@@ -14,54 +15,71 @@ from src.llm_models.payload_content.context_item import (
 
 from .acp import ACPConnection
 from .session import AgentSession
-from .mcp_server import ComputerMCPServer
+from .mcp_server import AgentMCPServer
 
 if TYPE_CHECKING:
-    from .service import ComputerService
+    from .service import AgentService
 
 
 class AcpAgent(AgentSession):
     backend = "acp"
 
-    def __init__(self, service: "ComputerService") -> None:
-        super().__init__(service)
-        self.config = service.bridge.config.model_copy(deep=True)
+    def __init__(self, service: "AgentService") -> None:
+        super().__init__(service, service.root)
+        self.config = service.config.model_copy(deep=True)
         self.connection: Optional[ACPConnection] = None
-        self.mcp: Optional[ComputerMCPServer] = None
+        self.mcp: Optional[AgentMCPServer] = None
         self.capabilities: Dict[str, Any] = {}
-        self._stop = asyncio.Event()
+        self._connected_session_id: Optional[str] = None
+
+    @property
+    def desktop_manifest(self) -> Path:
+        return (Path(self.config.desktop_manifest).expanduser() if self.config.desktop_manifest
+                else Path.home() / ".dsh" / "maibot-desktop.json").absolute()
+
+    @property
+    def state_key(self) -> str:
+        # 每个 Desktop 桥接文件对应独立 Host，测试实例和正式实例不能共用会话 ID。
+        return ("acp_desktop:" + os.path.normcase(str(self.desktop_manifest))
+                if self.config.connection == "dsh_desktop" else self.backend)
 
     async def connect(self) -> None:
         if self.connection is not None:
             if self.connection.failure is None:
                 return
             await self.close()
-        cwd = Path(self.config.acp_cwd).expanduser().resolve() if self.config.acp_cwd else self.history.root / "workspace"
+        cwd = await asyncio.to_thread(Path(self.config.acp_cwd).expanduser().resolve) if self.config.acp_cwd else self.history.root / "workspace"
         await asyncio.to_thread(cwd.mkdir, parents=True, exist_ok=True)
         if self.backend_state.get("cwd", str(cwd)) != str(cwd):
-            raise ValueError("ACP 会话的主机工作目录已改变，请恢复原目录，或在外部会话停止后移走 acp/state.json 以新建会话")
-        self.mcp = ComputerMCPServer(self)
+            raise ValueError("ACP 会话的主机工作目录已改变，请恢复原工作目录再连接。")
+        self.mcp = AgentMCPServer(self)
         self.connection = ACPConnection(self._update)
         try:
             mount = await self.mcp.start()
-            await self.connection.start(self.config.acp_command, self.config.acp_args, str(cwd), self.config.acp_env)
+            if self.config.connection == "dsh_desktop":
+                await self.connection.connect_desktop(self.desktop_manifest, self.config.acp_timeout)
+            else:
+                args = ["--profile", "acp"] if self.config.connection == "dsh" else self.config.acp_args
+                await self.connection.start(self.config.acp_command, args, str(cwd), self.config.acp_env)
             initialized = await self.connection.request("initialize", {
-                "protocolVersion": 1, "clientInfo": {"name": "maibot-computer", "version": "1"},
+                "protocolVersion": 1, "clientInfo": {"name": "maibot-agent", "version": "1"},
                 "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
             }, self.config.acp_timeout)
             if initialized["protocolVersion"] != 1:
                 raise ValueError("外部 Agent 未协商 ACP v1")
             self.capabilities = initialized["agentCapabilities"]
             if not self.capabilities.get("mcpCapabilities", {}).get("http", False):
-                raise ValueError("外部 Agent 未声明 HTTP MCP 能力，无法挂载电脑工具")
+                raise ValueError("外部 Agent 未声明 HTTP MCP 能力，无法挂载麦麦工具")
             params = {"cwd": str(cwd), "mcpServers": [mount]}
             if self.backend_state.get("session_id"):
                 if "resume" not in self.capabilities.get("sessionCapabilities", {}):
                     raise ValueError("外部 Agent 未声明 session/resume 能力，不能恢复已记录的会话")
                 params["sessionId"] = self.backend_state["session_id"]
                 session = await self.connection.request("session/resume", params, self.config.acp_timeout)
+                self._connected_session_id = params["sessionId"]
             else:
                 session = await self.connection.request("session/new", params, self.config.acp_timeout)
+                self._connected_session_id = session["sessionId"]
                 self.backend_state.update(session_id=session["sessionId"], cwd=str(cwd))
                 await self.save()
             if self.config.acp_model:
@@ -111,9 +129,6 @@ class AcpAgent(AgentSession):
                 raw["display_kind"] = "tool_result"
             await self.history.append(record)
 
-    def request_stop(self) -> None:
-        self._stop.set()
-
     async def _cancel_prompt(self, prompt: asyncio.Task[Any]) -> None:
         await self.connection.notify("session/cancel", {"sessionId": self.backend_state["session_id"]})
         grace = min(self.config.acp_timeout, 2) if self.service._closing else self.config.acp_timeout
@@ -158,15 +173,10 @@ class AcpAgent(AgentSession):
                 self.inbox.remove(record)
             await self.save()
             self.state = "thinking"
-            self._stop.clear()
             task = asyncio.create_task(self.connection.request("session/prompt", {
                 "sessionId": self.backend_state["session_id"], "prompt": prompt,
-            }), name="computer.acp.prompt")
-            stopping = asyncio.create_task(self._stop.wait())
+            }), name="agent.acp.prompt")
             try:
-                await asyncio.wait([task, stopping], return_when=asyncio.FIRST_COMPLETED)
-                if not task.done():
-                    await self._cancel_prompt(task)
                 result = await asyncio.shield(task)
             except asyncio.CancelledError:
                 await self._cancel_prompt(task)
@@ -175,10 +185,9 @@ class AcpAgent(AgentSession):
                 await self.save()
                 raise
             finally:
-                stopping.cancel()
                 if not task.done():
                     task.cancel()
-                await asyncio.gather(task, stopping, return_exceptions=True)
+                await asyncio.gather(task, return_exceptions=True)
             self.backend_state["policy_sent"] = True
             self.backend_state["stop_reason"] = result["stopReason"]
             self.pending = None
@@ -188,6 +197,7 @@ class AcpAgent(AgentSession):
 
     async def close(self) -> None:
         connection, mcp = self.connection, self.mcp
+        session_id, self._connected_session_id = self._connected_session_id, None
         self.connection, self.mcp = None, None
         async with AsyncExitStack() as cleanup:
             cleanup.push_async_callback(self.save)
@@ -195,5 +205,5 @@ class AcpAgent(AgentSession):
                 cleanup.push_async_callback(mcp.close)
             if connection is not None:
                 cleanup.push_async_callback(connection.close, 1)
-                if connection.failure is None and self.backend_state.get("session_id") and "close" in self.capabilities.get("sessionCapabilities", {}):
-                    await connection.request("session/close", {"sessionId": self.backend_state["session_id"]}, min(self.config.acp_timeout, 2))
+                if connection.failure is None and session_id is not None and "close" in self.capabilities.get("sessionCapabilities", {}):
+                    await connection.request("session/close", {"sessionId": session_id}, min(self.config.acp_timeout, 2))

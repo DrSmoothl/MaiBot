@@ -121,7 +121,7 @@ describe('menuSections 菜单结构', () => {
     expect(flaggedItems).toHaveLength(1)
     expect(flaggedItems).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ path: '/computer', featureFlag: 'computer' }),
+        expect.objectContaining({ path: '/agent', featureFlag: 'agent' }),
       ])
     )
   })

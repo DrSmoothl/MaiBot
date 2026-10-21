@@ -69,7 +69,8 @@ exclude = ["src.MaiBot.egg-info*", "src.data*", "*.__pycache__*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"src.computer" = ["guest.ps1", "prompts/*.txt"]
+"src.computer" = ["guest.ps1"]
+"src.agent" = ["prompts/*/*.txt"]
 "*" = ["_manifest.json", "config_schema.json", "LICENSE", "LICENSE-MAIBOT-GPL.md"]
 
 [dependency-groups]

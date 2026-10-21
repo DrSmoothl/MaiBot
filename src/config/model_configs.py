@@ -467,16 +467,6 @@ class ModelTaskConfig(ConfigBase):
     )
     """规划模型，决定麦麦的行动，需要有一定Agent能力的模型"""
 
-    computer: TaskConfig = Field(
-        default_factory=TaskConfig,
-        json_schema_extra={
-            "x-widget": "custom",
-            "advanced": True,
-            "label": {"zh_CN": "电脑使用", "en_US": "Computer use", "ja_JP": "コンピューター操作"},
-        },
-    )
-    """电脑流的独立模型配置，需要支持图片输入和工具调用；模型列表留空时使用 planner 的完整任务配置。"""
-
     memory: TaskConfig = Field(
         default_factory=TaskConfig,
         json_schema_extra={

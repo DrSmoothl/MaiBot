@@ -1,16 +1,15 @@
 import { BrainCircuit, Check, ChevronRight, CircleAlert, Clock3, MessageSquare, Monitor, Send, Wrench } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PageFrame } from '@/components/ui/surface'
-import { controlComputer, getComputerEvents, sendComputerMessage, type ComputerEvent } from '@/lib/computer-api'
+import { type AgentApi, type AgentEvent } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 
-import { ComputerDesktop } from './ComputerDesktop'
 
-function HistoryItem({ item }: { item: ComputerEvent['items'][number] }) {
+function HistoryItem({ item }: { item: AgentEvent['items'][number] }) {
   const { t } = useTranslation()
   if (item.tool_call || item.item_type === 'FunctionCallOutputItem' || item.display_kind === 'tool_result') {
     const failed = item.success === false
@@ -34,13 +33,12 @@ function HistoryItem({ item }: { item: ComputerEvent['items'][number] }) {
   </div>
 }
 
-function AgentHistory({ submitted }: { submitted: ComputerEvent[] }) {
+function AgentHistory({ submitted, api, onDesktopEnabled }: { submitted: AgentEvent[]; api: AgentApi; onDesktopEnabled: (enabled: boolean) => void }) {
   const { t } = useTranslation()
-  const [events, setEvents] = useState<ComputerEvent[]>([])
-  const [queued, setQueued] = useState<ComputerEvent[]>([])
+  const [events, setEvents] = useState<AgentEvent[]>([])
+  const [queued, setQueued] = useState<AgentEvent[]>([])
   const [error, setError] = useState('')
   const [state, setState] = useState('idle')
-  const [backend, setBackend] = useState('')
   const [pending, setPending] = useState(false)
   const [resuming, setResuming] = useState(false)
   const scroll = useRef<HTMLDivElement>(null)
@@ -51,21 +49,15 @@ function AgentHistory({ submitted }: { submitted: ComputerEvent[] }) {
   useEffect(() => {
     const abort = new AbortController()
     let after = 0
-    let currentBackend = ''
     let timer: ReturnType<typeof setTimeout>
     const tick = async () => {
       try {
-        const result = await getComputerEvents(after, abort.signal)
+        const result = await api.events(after, abort.signal)
         if (!abort.signal.aborted) {
-          const changed = currentBackend !== '' && result.backend !== currentBackend
-          currentBackend = result.backend
-          setBackend(result.backend)
-          if (changed) {
-            after = 0
-            setEvents([])
-          } else {
-            if (result.events.length) setEvents(current => [...current, ...result.events])
-            if (result.events.length) after = result.events[result.events.length - 1].index + 1
+          onDesktopEnabled(result.desktop_enabled)
+          if (result.events.length) {
+            setEvents(current => [...current, ...result.events])
+            after = result.events[result.events.length - 1].index + 1
           }
           setQueued(result.queued)
           setState(result.state)
@@ -80,20 +72,20 @@ function AgentHistory({ submitted }: { submitted: ComputerEvent[] }) {
     }
     void tick()
     return () => { abort.abort(); clearTimeout(timer) }
-  }, [])
+  }, [api, onDesktopEnabled])
   const working = state === 'thinking' || state === 'tool'
   const committed = new Set(events.map(event => event.id))
-  const visible = [...new Map([...submitted.filter(event => !backend || event.backend === backend), ...queued, ...events].map(event => [event.id, event] as const)).values()]
+  const visible = [...new Map([...submitted, ...queued, ...events].map(event => [event.id, event] as const)).values()]
     .sort((a, b) => Date.parse(a.time) - Date.parse(b.time))
   return <div className="flex min-h-0 flex-1 flex-col">
     <div role="status" className="flex items-center gap-2 border-b bg-muted/10 px-5 py-2.5 text-xs text-muted-foreground">
       <span className={cn('size-1.5 rounded-full bg-muted-foreground/40', working && 'animate-pulse bg-primary')} />
       {t(`chat.computer.${state}`)}
-      {backend && <span className="rounded bg-muted px-2 py-0.5">{backend === 'acp' ? 'ACP' : t('chat.computer.builtin')}</span>}
+      <span className="rounded bg-muted px-2 py-0.5">ACP</span>
       {state === 'paused' && <Button size="sm" variant="outline" disabled={resuming} onClick={async () => {
         setResuming(true)
         try {
-          const result = await controlComputer('resume', new AbortController().signal)
+          const result = await api.resume(new AbortController().signal)
           setState(result.agent_state)
           setError(result.error)
         } catch (cause) { setError(String(cause)) }
@@ -109,7 +101,7 @@ function AgentHistory({ submitted }: { submitted: ComputerEvent[] }) {
         {error && <p role="alert" className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"><CircleAlert className="size-4 shrink-0" />{error}</p>}
         {!visible.length && !error && <div className="flex min-h-60 flex-col items-center justify-center gap-3 text-muted-foreground"><BrainCircuit className="size-8 opacity-40" /><p className="text-sm">{t('chat.computer.noEvents')}</p></div>}
         {visible.map(event => {
-          const input = event.kind === 'user' || event.kind === 'input'
+          const input = event.kind === 'user'
           const Icon = input ? MessageSquare : BrainCircuit
           return <article key={event.id} className="relative border-l border-border/70 pb-7 pl-6 last:border-transparent">
             <span className={cn('absolute -left-3 top-0 flex size-6 items-center justify-center rounded-full border bg-background', input && 'text-primary')}><Icon className="size-3" /></span>
@@ -129,27 +121,29 @@ function AgentHistory({ submitted }: { submitted: ComputerEvent[] }) {
   </div>
 }
 
-export function ComputerPage() {
+export function AgentWorkspace({ api, titleKey, desktopView }: { api: AgentApi; titleKey: string; desktopView?: ReactNode }) {
   const { t } = useTranslation()
+  const messageKey = 'chat.computer.message'
+  const [desktopEnabled, setDesktopEnabled] = useState(false)
   const [desktop, setDesktop] = useState(false)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [submitted, setSubmitted] = useState<ComputerEvent[]>([])
+  const [submitted, setSubmitted] = useState<AgentEvent[]>([])
   return <PageFrame className="flex h-full min-h-0 flex-col">
     <header className="flex flex-wrap items-center gap-2 border-b p-4">
-      <h1 className="mr-auto font-semibold">{t('sidebar.menu.computer')}</h1>
+      <h1 className="mr-auto font-semibold">{t(titleKey)}</h1>
       <Button size="sm" variant={desktop ? 'ghost' : 'secondary'} aria-pressed={!desktop} onClick={() => setDesktop(false)}><BrainCircuit className="mr-1.5 size-4" />{t('chat.computer.reasoning')}</Button>
-      <Button size="sm" variant={desktop ? 'secondary' : 'ghost'} aria-pressed={desktop} onClick={() => setDesktop(true)}><Monitor className="mr-1.5 size-4" />{t('chat.computerDesktop')}</Button>
+      {desktopView && desktopEnabled && <Button size="sm" variant={desktop ? 'secondary' : 'ghost'} aria-pressed={desktop} onClick={() => setDesktop(true)}><Monitor className="mr-1.5 size-4" />{t('chat.computerDesktop')}</Button>}
     </header>
-    {desktop ? <ComputerDesktop /> : <AgentHistory submitted={submitted} />}
+    {desktop && desktopView ? desktopView : <AgentHistory submitted={submitted} api={api} onDesktopEnabled={setDesktopEnabled} />}
     <form className="flex gap-2 border-t p-4" onSubmit={async event => {
       event.preventDefault()
       if (!text.trim() || busy) return
       setBusy(true)
       setError('')
       try {
-        const { id, backend } = await sendComputerMessage(text)
+        const { id, backend } = await api.message(text)
         setSubmitted(current => [...current, {
           id, backend, index: -1, time: new Date().toISOString(), kind: 'user',
           items: [{ item_type: 'UserMessageItem', parts: [{ type: 'text', text }] }],
@@ -160,7 +154,7 @@ export function ComputerPage() {
       catch (cause) { setError(String(cause)) }
       finally { setBusy(false) }
     }}>
-      <Input value={text} onChange={event => setText(event.target.value)} disabled={busy} placeholder={t('chat.computer.message')} aria-label={t('chat.computer.message')} />
+      <Input value={text} onChange={event => setText(event.target.value)} disabled={busy} placeholder={t(messageKey)} aria-label={t(messageKey)} />
       <Button type="submit" disabled={busy || !text.trim()}><Send className="mr-1.5 size-4" />{t('chat.computer.send')}</Button>
     </form>
     {error && <p role="alert" className="px-4 pb-3 text-sm text-destructive">{error}</p>}

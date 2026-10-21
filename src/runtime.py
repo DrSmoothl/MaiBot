@@ -256,11 +256,11 @@ async def graceful_shutdown(main_system: MainSystem | None = None) -> bool:
             and success
         )
 
-        from src.computer.service import computer_service
+        from src.agent.service import agent_service
 
         # 实际 CLI 入口不经过 src.main.main 的 finally；保存电脑状态，保留沙盒供下次恢复。
         success = (
-            await _await_shutdown_step(computer_service.stop(), timeout=8.0, step_name="保存并断开电脑")
+            await _await_shutdown_step(agent_service.stop(), timeout=8.0, step_name="保存并断开电脑")
             and success
         )
 
