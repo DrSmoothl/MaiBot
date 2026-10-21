@@ -46,6 +46,7 @@ import type { WebUIExtension } from '@/lib/plugin-webui'
 import { splitWorkspaceTabs } from '@/lib/workspace-tabs'
 
 import { HeaderUpdateButton } from './HeaderUpdateButton'
+import { TopbarMascot } from './TopbarMascot'
 import type { WorkspaceMode } from './types'
 
 const LOG_WORKSPACE_COMPACT_GAP = 12
@@ -374,12 +375,14 @@ export function Header({
           <button
             type="button"
             data-dashboard-topbar-toggle="true"
+            data-topbar-mascot-toggle="true"
             onClick={onTopbarToggle}
             aria-label={t('header.expandTopbar')}
             aria-expanded={!topbarCollapsed}
             title={t('header.expandTopbar')}
             className="bg-foreground/70 relative z-10 h-2 w-24 transition-shadow"
           >
+            <TopbarMascot />
             <span className="sr-only">{t('header.expandTopbar')}</span>
           </button>
         </div>
