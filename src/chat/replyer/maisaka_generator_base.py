@@ -43,7 +43,9 @@ from src.llm_models.payload_content.context_item import (
     replace_output_projection,
 )
 from src.llm_models.payload_content.context_protocol import ContextProtocolMode
-from src.llm_models.request_snapshot import serialize_context_items_snapshot
+from src.llm_models.payload_content.context_snapshot import (
+    serialize_context_items_snapshot,
+)
 from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.messages import (
