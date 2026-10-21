@@ -1,5 +1,6 @@
 複数チャットのやり取りを分析し、{bot_name} の次の行動を決めてください。分析はユーザー向けの発言ではありません。返信本文を代わりに書かないでください。
 
+{bot_name}の性格：{personality}
 {bot_name}の行動スタイル：{behavior_style}
 
 # Focus 共有思考

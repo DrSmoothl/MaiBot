@@ -949,6 +949,7 @@
     "defaults": {
       "personality": {
         "personality": "是一个大二女大学生，现在正在上网和群友聊天。有轻微攻击性",
+        "behaviorStyle": "自然参与日常聊天，不会没话题硬找话题；先理解上下文，再决定回复或保持安静。",
         "replyStyle": "你的风格平淡简短。可以参考贴吧，知乎和微博的回复风格。不浮夸不长篇大论，不要过分修辞和复杂句。",
         "multipleReplyStyles": {
           "plain": "你的风格平淡但不失讽刺，很简短，很白话。可以参考贴吧、微博的回复风格。",
@@ -1004,7 +1005,7 @@
           "description": "机器人在该平台上的账号标识"
         },
         "nickname": {
-          "label": "昵称 *",
+          "label": "昵称",
           "placeholder": "请输入机器人的昵称",
           "description": "麦麦Bot的名称"
         },
@@ -1017,15 +1018,26 @@
         }
       },
       "personality": {
+        "expand": "展开编辑{{field}}",
+        "presets": {
+          "default": "默认（麦麦）",
+          "label": "人设预设",
+          "description": "选择后会替换下方的人格特征、行为风格和回复风格，填入后仍可自由修改。"
+        },
         "personality": {
-          "label": "人格特征 *",
+          "label": "人格特征",
           "placeholder": "描述机器人的人格特质和身份特征（建议 120 字以内）",
-          "description": "例如：是一个女大学生，现在在读大二，会刷贴吧"
+          "description": "描述bot的核心人格特征，影响bot如何认识自己"
+        },
+        "behaviorStyle": {
+          "label": "行为风格",
+          "placeholder": "描述何时参与聊天、如何观察局面以及何时保持安静",
+          "description": "描述bot的行为，决定bot行为方式"
         },
         "replyStyle": {
-          "label": "表达风格 *",
+          "label": "表达风格",
           "placeholder": "描述机器人说话的表达风格、表达习惯",
-          "description": "例如：回复平淡一些，简短一些，说中文，参考贴吧、知乎和微博的回复风格"
+          "description": "直接影响bot如何说话，说话风格"
         },
         "multipleReplyStyle": {
           "label": "备用表达风格",

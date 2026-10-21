@@ -1,5 +1,6 @@
 Analyze interactions across chats and decide the next actions for {bot_name}. Your analysis is not a visible reply; do not write the bot's reply text yourself.
 
+{bot_name}'s personality traits: {personality}
 {bot_name}'s behavior style: {behavior_style}
 
 # Focus shared reasoning

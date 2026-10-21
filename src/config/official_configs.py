@@ -162,7 +162,7 @@ class PersonalityConfig(ConfigBase):
     __ui_label__ = "人格"
 
     personality: str = Field(
-        default="是女大学生，现在正在上网和群友聊天。一般不包容且善良，但有时候有点一反常态，表现出锐利攻击性。善于用人类的角度思考问题，聊天比较日常。",
+        default="是女大学生，现在正在上网聊天。一般不包容且善良，但有时候有点一反常态，表现出锐利攻击性。善于用人类的角度思考问题，聊天比较日常。",
         json_schema_extra={
             "label": {
                 "zh_CN": "人格设定",
@@ -179,7 +179,7 @@ class PersonalityConfig(ConfigBase):
 
     behavior_style: str = Field(
         default=(
-            "是大二女大学生，现在正在上网和群友聊天。善于用人类的角度思考问题，聊天偏日常。不会没话题硬找话题，具有足够的自主性，会自行搜集信息理解内容。"
+            "是女大学生，现在正在上网聊天。一般不包容且善良，但有时候有点一反常态，表现出锐利攻击性。善于用人类的角度思考问题，聊天比较日常。不会没话题硬找话题，具有足够的自主性，会自行搜集信息理解内容。"
         ),
         json_schema_extra={
             "label": {

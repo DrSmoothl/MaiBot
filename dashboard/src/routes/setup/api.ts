@@ -9,7 +9,7 @@ import {
 } from '@/routes/config/providerTemplates'
 import type { ProviderTemplate } from '@/routes/config/providerTemplates'
 import { setThinkingEnabled } from '@/routes/config/model/thinkingFormats'
-import { setDeepSeekThinkingEnabled } from '@/routes/config/model/deepSeekExtraParams'
+import { getDeepSeekReasoningEffort, setDeepSeekReasoningEffort, setDeepSeekThinkingEnabled } from '@/routes/config/model/deepSeekExtraParams'
 import type { ModelListItem } from '@/lib/config-api'
 import type { ModelPricePeriod } from '@/routes/config/model/types'
 
@@ -95,14 +95,16 @@ function buildThinkingExtraParams(
   thinkingEnabled: boolean,
   modelIdentifier: string,
   template: ProviderTemplate | null,
-  clientType: string
+  clientType: string,
+  effort: 'low' | 'high' | 'max' = 'high'
 ): Record<string, unknown> {
   const extraParams = { ...(existingParams || {}) }
   delete extraParams.thinking
   delete extraParams.enable_thinking
   delete extraParams.reasoning_effort
   if (template?.id === 'deepseek' && (clientType === 'openai' || clientType === 'openai_responses')) {
-    return setDeepSeekThinkingEnabled(extraParams, clientType, thinkingEnabled)
+    const params = setDeepSeekThinkingEnabled(extraParams, clientType, thinkingEnabled)
+    return thinkingEnabled ? setDeepSeekReasoningEffort(params, clientType, effort) : params
   }
   const format = resolveThinkingFormatForModel(template, modelIdentifier)
   if (!format) return extraParams
@@ -147,6 +149,7 @@ export async function loadPersonalityConfig(): Promise<PersonalityConfig> {
 
   return {
     personality: personalityConfig.personality || '',
+    behavior_style: personalityConfig.behavior_style ?? '',
     reply_style: personalityConfig.reply_style || '',
     multiple_reply_style: personalityConfig.multiple_reply_style || [],
     multiple_probability: personalityConfig.multiple_probability ?? 0.2,
@@ -200,10 +203,12 @@ export async function loadModelSetupConfig(): Promise<ModelSetupConfig> {
     planner_model_name: plannerName,
     planner_model_identifier: plannerModel?.model_identifier || plannerName,
     planner_visual: Boolean(plannerModel?.visual),
+    planner_reasoning_effort: getDeepSeekReasoningEffort(plannerModel?.extra_params ?? {}, 'openai'),
     planner_thinking: readThinkingEnabled(plannerModel, plannerName),
     replyer_model_name: replyerName,
     replyer_model_identifier: replyerModel?.model_identifier || replyerName,
     replyer_visual: Boolean(replyerModel?.visual),
+    replyer_reasoning_effort: getDeepSeekReasoningEffort(replyerModel?.extra_params ?? {}, 'openai'),
     replyer_thinking: readThinkingEnabled(replyerModel, replyerName),
   }
 }
@@ -234,7 +239,8 @@ function createBasicModel(
   thinking: boolean,
   template: ProviderTemplate | null,
   clientType: string,
-  existing?: ModelInfo
+  existing?: ModelInfo,
+  effort: 'low' | 'high' | 'max' = 'high'
 ): ModelInfo {
   return {
     price_in: 0,
@@ -242,7 +248,7 @@ function createBasicModel(
     price_out: 0,
     force_stream_mode: false,
     ...existing,
-    extra_params: buildThinkingExtraParams(existing?.extra_params, thinking, modelIdentifier, template, clientType),
+    extra_params: buildThinkingExtraParams(existing?.extra_params, thinking, modelIdentifier, template, clientType, effort),
     visual,
     model_identifier: modelIdentifier,
     model_type: 'llm',
@@ -304,7 +310,9 @@ export async function saveModelSetupConfig(config: ModelSetupConfig, providerNam
   const template = findTemplateByBaseUrl(provider?.base_url ?? '')
   const clientType = provider?.client_type ?? 'openai'
   const plannerModelIdentifier = config.planner_model_identifier.trim()
-  const plannerModelName = plannerModelIdentifier
+  // 同一模型用于两个角色时分别保存，避免思考开关和强度互相覆盖。
+  const plannerModelName = plannerModelIdentifier === config.replyer_model_identifier.trim()
+    ? `${plannerModelIdentifier}-planner` : plannerModelIdentifier
   const replyerModelIdentifier = config.replyer_model_identifier.trim()
   const replyerModelName = replyerModelIdentifier
 
@@ -322,7 +330,8 @@ export async function saveModelSetupConfig(config: ModelSetupConfig, providerNam
       config.planner_thinking,
       template,
       clientType,
-      existingPlannerModel
+      existingPlannerModel,
+      config.planner_reasoning_effort
     )
   )
   models = upsertModel(
@@ -335,7 +344,8 @@ export async function saveModelSetupConfig(config: ModelSetupConfig, providerNam
       config.replyer_thinking,
       template,
       clientType,
-      existingReplyerModel
+      existingReplyerModel,
+      config.replyer_reasoning_effort
     )
   )
 

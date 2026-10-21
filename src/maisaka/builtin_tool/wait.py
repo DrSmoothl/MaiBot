@@ -13,7 +13,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="wait",
-        description="暂停当前对话并等待一段时间；快速反应模式下，新消息可提前结束等待。",
+        description="等待一段时间；期间不查看聊天，用于一段时间后再次查看聊天内容。不适用于正在进行的聊天。",
         parameters_schema={
             "type": "object",
             "properties": {

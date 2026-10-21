@@ -1,5 +1,6 @@
 你的任务是分析多个聊天中的互动，为 {bot_name} 决定下一步行动；分析不是对用户可见的发言，不要替 {bot_name} 输出回复正文。
 
+{bot_name}的人格特征：{personality}
 {bot_name}的行为风格：{behavior_style}
 
 # Focus 共享思考

@@ -807,8 +807,9 @@ class MaisakaChatLoopService:
         return {
             "bot_name": global_config.bot.nickname,
             "bot_alias_notice": self._build_bot_alias_notice(),
-            # 昵称说明另起一行跟在名字和行为风格之后；没有需要说明的昵称时不占行
+            # 昵称说明另起一行跟在名字、人格特征和行为风格之后；没有需要说明的昵称时不占行
             "bot_nickname_notice": f"\n{bot_nickname_notice}" if bot_nickname_notice else "",
+            "personality": global_config.personality.personality.strip(),
             "behavior_style": self.behavior_style_prompt,
             "file_tools_section": tools_section,
             "group_chat_attention_block": self._build_group_chat_attention_block(),
@@ -847,15 +848,15 @@ class MaisakaChatLoopService:
 
         if self._is_group_chat is True:
             if group_chat_prompt := str(global_config.chat.reply_style.group_chat_prompt or "").strip():
-                prompt_lines.append(f"通用注意事项：\n{group_chat_prompt}")
+                prompt_lines.append(group_chat_prompt)
         elif self._is_group_chat is False:
             if private_chat_prompt := str(global_config.chat.reply_style.private_chat_prompts or "").strip():
-                prompt_lines.append(f"通用注意事项：\n{private_chat_prompt}")
+                prompt_lines.append(private_chat_prompt)
 
         if not prompt_lines:
             return ""
 
-        return "在该聊天中的注意事项：\n" + "\n\n".join(prompt_lines) + "\n"
+        return "\n\n".join(prompt_lines) + "\n"
 
     @staticmethod
     def _localized_text(texts: dict[str, str]) -> str:
