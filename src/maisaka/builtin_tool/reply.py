@@ -223,7 +223,7 @@ def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec
 
     return ToolSpec(
         name="reply",
-        description="根据当前思考生成并发送可见回复；需要向用户展示上下文或工具返回的图片时，使用 attach_pic 随回复附加图片。",
+        description="根据当前思考生成并发送可见回复；可以使用参数附加回复内容。",
         parameters_schema={
             "type": "object",
             "properties": properties,

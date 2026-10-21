@@ -1,6 +1,5 @@
 """Maisaka 非 CLI 运行时。"""
 
-from collections import deque
 from datetime import datetime
 from math import ceil
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Literal, Optional, Sequence
@@ -89,30 +88,14 @@ CONTEXT_RESTORE_SHORT_RESTART_SECONDS = 5 * 60
 CONTEXT_RESTORE_SHORT_OFFLINE_SECONDS = 30 * 60
 CONTEXT_RESTORE_LONG_SLEEP_SECONDS = 6 * 60 * 60
 CONTEXT_RESTORE_DAY_SECONDS = 24 * 60 * 60
-EXTERNAL_MESSAGE_INTERVAL_SAMPLE_WINDOW_SECONDS = 1800.0
-# 低于该间隔的相邻外部消息视为同一阵「连发」抖动，不计入平均消息间隔统计，
-# 避免连发把平均间隔严重拉低、令空窗补偿过早触发。
-# 注意：判定只看时间间隔、不区分发言者——同一人连续敲几条短消息是常见成因，
-# 但跨发言者的快速对答同样会被过滤。
-EXTERNAL_MESSAGE_BURST_INTERVAL_SECONDS = 5.0
-# 空窗补偿所用平均消息间隔的下限：即便统计值偏小也不会低于该值，
-# 限制「沉默时间」被折算成消息的速度，避免低活跃群聊里反复触发回复。
-IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS = 30.0
 
 
 class PlannerInterruptController:
-    """维护当前可打断 Planner 请求与连续打断计数。"""
+    """维护当前可打断的 Planner 请求；同一次请求只打断一次。"""
 
     def __init__(self) -> None:
         self._flag: Optional[asyncio.Event] = None
         self._requested = False
-        self._consecutive_count = 0
-
-    @property
-    def consecutive_count(self) -> int:
-        """返回连续打断次数。"""
-
-        return self._consecutive_count
 
     def bind(self, interrupt_flag: asyncio.Event) -> None:
         """绑定当前可打断请求使用的中断标记。"""
@@ -120,27 +103,22 @@ class PlannerInterruptController:
         self._flag = interrupt_flag
         self._requested = False
 
-    def unbind(self, interrupt_flag: asyncio.Event, *, interrupted: bool) -> None:
-        """解绑当前可打断请求的中断标记，并维护连续打断计数。"""
+    def unbind(self, interrupt_flag: asyncio.Event) -> None:
+        """解绑当前可打断请求的中断标记。"""
 
         if self._flag is interrupt_flag:
             self._flag = None
         self._requested = False
-        if not interrupted:
-            self._consecutive_count = 0
 
-    def request(self, *, max_consecutive_count: Optional[int]) -> str:
-        """尝试发起打断，返回 request/duplicate/limit/idle。"""
+    def request(self) -> Literal["request", "duplicate", "idle"]:
+        """尝试发起打断，返回 request/duplicate/idle。"""
 
         if self._flag is None:
             return "idle"
         if self._requested:
             return "duplicate"
-        if max_consecutive_count is not None and self._consecutive_count >= max_consecutive_count:
-            return "limit"
 
         self._requested = True
-        self._consecutive_count += 1
         self._flag.set()
         return "request"
 
@@ -189,14 +167,10 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         self._internal_loop_task: Optional[asyncio.Task] = None
         self._message_turn_scheduled = False
         self._deferred_message_turn_task: Optional[asyncio.Task[None]] = None
-        self._message_debounce_seconds = 1.0
-        self._message_debounce_required = False
         self._fixed_message_debouncer = MessageDebouncer()
         self._message_debounce_was_enabled = False
         self._last_message_received_at = 0.0
-        self._last_external_message_received_at: Optional[float] = None
         self._talk_frequency_adjust = 1.0
-        self._recent_external_message_intervals: deque[tuple[float, float]] = deque()
         self._wait_timeout_task: Optional[asyncio.Task[None]] = None
         self._max_internal_rounds = MAX_INTERNAL_ROUNDS
         self._agent_state: Literal["running", "wait", "stop"] = self._STATE_STOP
@@ -242,12 +216,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             else global_config.chat.max_private_context_size
         )
         return max(1, int(configured_context_size))
-
-    @property
-    def _planner_interrupt_max_consecutive_count(self) -> int:
-        """返回当前实时生效的 Planner 连续打断上限。"""
-
-        return max(0, int(global_config.chat.reply_timing.planner_interrupt_max_consecutive_count))
 
     @property
     def _enable_expression_learning(self) -> bool:
@@ -549,7 +517,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         await focus_mode_manager.detach(self)
         self._fixed_message_debouncer.consume()
         self._mark_message_turn_unscheduled()
-        self._clear_message_debounce_required()
         self._cancel_deferred_message_turn_task()
         self._cancel_wait_timeout_task()
         await self._cancel_trimmed_history_learning_task()
@@ -1026,7 +993,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         received_at = message.received_at.timestamp()
         # 媒体预处理可能使较早收到的消息较晚入队，不能回退静默窗口。
         self._last_message_received_at = max(self._last_message_received_at, received_at)
-        self._record_external_message_interval(message, received_at)
         self._update_message_trigger_state(message)
         self._observe_message_debounce(message, received_at)
         self.message_cache.append(message)
@@ -1038,8 +1004,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
                 self._chat_history.append(history_message)
             await self._focus_group.register_message(self, message, history_message)
             return
-        if self._agent_state == self._STATE_RUNNING:
-            self._mark_message_debounce_required()
         self._request_planner_interrupt_for_message(message)
         if self._running:
             self._schedule_message_turn()
@@ -1050,43 +1014,24 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         )
 
     def _request_planner_interrupt_for_message(self, message: SessionMessage) -> None:
-        """打断运行中的 Planner；实验性消息引导不限制连续打断次数。"""
-        if self._agent_state != self._STATE_RUNNING:
+        """快速反应模式下，用新消息打断运行中的 Planner。"""
+        if not global_config.chat.reply_timing.planner_message_steering or self._agent_state != self._STATE_RUNNING:
             return
 
-        planner_interrupt_max_count = (
-            None if global_config.experimental.planner_message_steering else self._planner_interrupt_max_consecutive_count
-        )
-        limit_label = "不限" if planner_interrupt_max_count is None else str(planner_interrupt_max_count)
-        request_result = self._planner_interrupt.request(max_consecutive_count=planner_interrupt_max_count)
+        request_result = self._planner_interrupt.request()
         if request_result == "idle":
             return
-
-        consecutive_count = self._planner_interrupt.consecutive_count
         if request_result == "duplicate":
             logger.info(
                 f"{self.log_prefix} 收到新消息，但当前请求已发起过一次规划器打断，"
-                f"本次不重复打断; 消息编号={message.message_id} "
-                f"连续打断次数={consecutive_count}/"
-                f"{limit_label}"
-            )
-            return
-
-        if request_result == "limit":
-            logger.info(
-                f"{self.log_prefix} 收到新消息，但已达到规划器连续打断上限，"
-                f"将等待当前请求自然完成; 消息编号={message.message_id} "
-                f"连续打断次数={consecutive_count}/"
-                f"{limit_label}"
+                f"本次不重复打断; 消息编号={message.message_id}"
             )
             return
 
         logger.info(
             f"{self.log_prefix} 收到新消息，发起规划器打断; "
             f"消息编号={message.message_id} 缓存条数={len(self.message_cache)} "
-            f"时间戳={time.time():.3f} "
-            f"连续打断次数={consecutive_count}/"
-            f"{limit_label}"
+            f"时间戳={time.time():.3f}"
         )
 
     def _get_effective_reply_frequency(self) -> float:
@@ -1125,72 +1070,10 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         return self._get_effective_reply_frequency() <= 0.0
 
 
-    def _get_message_trigger_threshold(self) -> int:
-        """根据回复触发模式和频率折算出触发一轮循环所需的消息数。"""
-        effective_frequency = min(1.0, self._get_effective_reply_frequency())
-        if effective_frequency <= 0:
-            return 0
-        return max(1, int(ceil(1.0 / effective_frequency)))
-
     def _get_pending_message_count(self) -> int:
         """统计当前尚未进入内部循环的新消息数量。"""
         pending_messages = self.message_cache[self._last_processed_index :]
         return len(pending_messages)
-
-    def _prune_recent_external_message_intervals(self, now: Optional[float] = None) -> None:
-        """仅保留最近 30 分钟内的外部消息间隔记录。"""
-        current_time = time.time() if now is None else now
-        expire_before = current_time - EXTERNAL_MESSAGE_INTERVAL_SAMPLE_WINDOW_SECONDS
-        while self._recent_external_message_intervals and self._recent_external_message_intervals[0][0] < expire_before:
-            self._recent_external_message_intervals.popleft()
-
-    def _get_recent_average_external_message_interval(self) -> Optional[float]:
-        """获取最近 30 分钟外部消息的平均接收间隔。
-
-        返回值会施加 ``IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS`` 下限，
-        避免统计值过小导致空窗补偿把沉默时间过快折算成消息、反复触发回复。
-
-        见过外部消息但暂无可用间隔样本时（如启动后只收到一阵全被 burst 过滤的连发、
-        或样本已因超出 30 分钟窗口而全部过期），回退到下限值作为保守估计，
-        确保空窗补偿与延迟自唤醒不会因返回 None 而失效、令待处理消息在
-        没有新消息到来时永久挂起；从未见过外部消息时仍返回 None。
-        """
-        self._prune_recent_external_message_intervals()
-        if not self._recent_external_message_intervals:
-            if self._last_external_message_received_at is None:
-                return None
-            return IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS
-
-        total_interval = sum(interval for _, interval in self._recent_external_message_intervals)
-        average_interval = total_interval / len(self._recent_external_message_intervals)
-        return max(average_interval, IDLE_COMPENSATION_MIN_AVERAGE_INTERVAL_SECONDS)
-
-    def _record_external_message_interval(self, message: SessionMessage, received_at: float) -> None:
-        """记录最近外部消息之间的接收间隔，用于低频触发补偿。"""
-
-        user_info = message.message_info.user_info
-        if is_bot_self(message.platform, user_info.user_id):
-            return
-
-        previous_received_at = self._last_external_message_received_at
-        if previous_received_at is not None and received_at <= previous_received_at:
-            # 乱序完成的旧消息保留其真实接收时间，不生成倒序的间隔样本。
-            return
-        self._last_external_message_received_at = received_at
-        if previous_received_at is None:
-            return
-
-        message_interval = max(0.0, received_at - previous_received_at)
-        if message_interval < EXTERNAL_MESSAGE_BURST_INTERVAL_SECONDS:
-            # 连发抖动：同一阵内的短间隔不代表真实发言节奏，跳过以免拉低平均间隔。
-            return
-
-        self._recent_external_message_intervals.append((received_at, message_interval))
-        self._prune_recent_external_message_intervals(received_at)
-        logger.debug(
-            f"{self.log_prefix} 已记录外部消息接收间隔: {message_interval:.2f} 秒 "
-            f"最近30分钟样本数={len(self._recent_external_message_intervals)}"
-        )
 
     def find_source_message_by_id(self, message_id: str) -> Optional[SessionMessage]:
         """从 Maisaka 历史中查找指定消息编号对应的原始消息。"""
@@ -1237,7 +1120,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         )
 
     def _cancel_deferred_message_turn_task(self) -> None:
-        """取消等待空窗补偿触发的延迟任务。"""
+        """取消延迟重新检查消息触发的任务。"""
         if self._deferred_message_turn_task is None:
             return
         self._deferred_message_turn_task.cancel()
@@ -1260,18 +1143,8 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
 
         self._message_turn_scheduled = False
 
-    def _mark_message_debounce_required(self) -> None:
-        """标记下一轮消息处理前需要等待静默窗口。"""
-
-        self._message_debounce_required = True
-
-    def _clear_message_debounce_required(self) -> None:
-        """清理消息静默窗口等待标记。"""
-
-        self._message_debounce_required = False
-
     async def _schedule_deferred_message_turn(self, delay_seconds: float) -> None:
-        """在预计满足空窗补偿条件时再次检查是否应触发循环。"""
+        """延迟结束后再次检查是否应触发循环。"""
         try:
             if delay_seconds > 0:
                 await asyncio.sleep(delay_seconds)
@@ -1378,19 +1251,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         """判断当前是否保持连续 Planner 状态。"""
 
         return self._planner_continuation_active
-
-    def _bind_planner_interrupt_flag(self, interrupt_flag: asyncio.Event) -> None:
-        """绑定当前可打断请求使用的中断标记。"""
-        self._planner_interrupt.bind(interrupt_flag)
-
-    def _unbind_planner_interrupt_flag(
-        self,
-        interrupt_flag: asyncio.Event,
-        *,
-        interrupted: bool,
-    ) -> None:
-        """解绑当前可打断请求的中断标记，并维护连续打断计数。"""
-        self._planner_interrupt.unbind(interrupt_flag, interrupted=interrupted)
 
     def _ensure_background_tasks_running(self) -> None:
         """确保后台任务仍在运行，若崩溃则自动拉起。"""
@@ -1742,27 +1602,26 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         # )
         return pending_messages
 
+    def _get_message_quiet_period_remaining_seconds(self) -> float:
+        """返回本批消息距离防抖截止还需等待的秒数；关闭防抖或批次已到期时为 0。"""
+        if not self._is_message_debounce_enabled():
+            return 0.0
+        deadline = self._fixed_message_debouncer.deadline
+        return 0.0 if deadline is None else max(0.0, deadline - time.monotonic())
+
     async def _wait_for_message_quiet_period(self) -> None:
-        """等待消息批次允许判断；关闭固定防抖时沿用打断后的静默窗口。"""
-        if self._is_message_debounce_enabled():
-            await self._wait_for_fixed_message_debounce()
-            self._clear_message_debounce_required()
-            return
-        if not self._message_debounce_required:
-            return
-
-        if self._message_debounce_seconds <= 0:
-            self._clear_message_debounce_required()
-            return
-
+        """等待消息批次允许判断；新消息会唤醒等待并重算，兼容截止时间提前和延后；停止时可取消。"""
+        debouncer = self._fixed_message_debouncer
         while self._running:
-            elapsed = time.time() - self._last_message_received_at
-            remaining = self._message_debounce_seconds - elapsed
+            remaining = self._get_message_quiet_period_remaining_seconds()
             if remaining <= 0:
                 break
-            await asyncio.sleep(remaining)
-
-        self._clear_message_debounce_required()
+            debouncer.changed.clear()
+            try:
+                # 定期重算，使关闭配置也能结束本轮等待，无需再来一条消息。
+                await asyncio.wait_for(debouncer.changed.wait(), timeout=min(remaining, 0.5))
+            except TimeoutError:
+                pass
 
     def _is_message_debounce_enabled(self) -> bool:
         return global_config.chat.reply_timing.message_debounce_mode != "off"
@@ -1797,23 +1656,6 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
                 f"剩余等待={max(0.0, deadline - time.monotonic()):.3f} 秒，"
                 f"待处理={self._get_pending_message_count() + 1} 条，消息编号={message.message_id}"
             )
-
-    async def _wait_for_fixed_message_debounce(self) -> None:
-        """新消息会唤醒等待并重算，兼容截止时间提前和延后；停止时可取消。"""
-        debouncer = self._fixed_message_debouncer
-        while self._running and self._is_message_debounce_enabled():
-            deadline = debouncer.deadline
-            if deadline is None:
-                return
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return
-            debouncer.changed.clear()
-            try:
-                # 定期读取开关，使关闭配置也能结束本轮等待，无需再来一条消息。
-                await asyncio.wait_for(debouncer.changed.wait(), timeout=min(remaining, 0.5))
-            except TimeoutError:
-                pass
 
     def _enter_stop_state(self) -> None:
         """切换到停止状态。"""
@@ -1893,7 +1735,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             self._wait_timeout_task = asyncio.create_task(
                 self._schedule_wait_timeout(seconds=seconds, tool_call_id=tool_call_id)
             )
-        if global_config.experimental.planner_message_steering and self._has_pending_messages():
+        if global_config.chat.reply_timing.planner_message_steering and self._has_pending_messages():
             # 工具执行期间收到的消息也能唤醒刚进入的 wait，避免漏掉已有新输入。
             self._schedule_message_turn()
 

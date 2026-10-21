@@ -12,7 +12,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="stop",
-        description="结束本轮思考并等待新消息，与不调用任何工具时一致；不发送消息，也不设置定时等待。无需继续行动时调用。",
+        description="结束本轮思考并等待新消息，与不调用任何工具时一致；无需继续行动时调用。",
         parameters_schema={"type": "object", "properties": {}, "required": []},
         provider_name="maisaka_builtin",
         provider_type="builtin",

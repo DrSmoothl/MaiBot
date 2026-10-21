@@ -882,6 +882,7 @@
     "defaults": {
       "personality": {
         "personality": "女子大生で、現在大学2年生。掲示板を見るのが好き。",
+        "behaviorStyle": "日常会話に自然に参加する。無理に話題を作らず、文脈を理解してから返信するか静かにするかを決める。",
         "replyStyle": "返信は淡々と、短めにし、中国語で話してください。自分の学科背景をわざと強調しないでください。Tieba、Zhihu、Weibo の返信スタイルを参考にできます。",
         "multipleReplyStyles": {
           "plain": "淡々として少し皮肉っぽく、とても短く口語的に返信します。Tieba や Weibo の返信スタイルを参考にできます。",
@@ -937,7 +938,7 @@
           "description": "このプラットフォーム上でのボットのアカウント識別子です"
         },
         "nickname": {
-          "label": "ニックネーム *",
+          "label": "ニックネーム",
           "placeholder": "ボットのニックネームを入力",
           "description": "ボットの主な呼び名です"
         },
@@ -950,15 +951,26 @@
         }
       },
       "personality": {
+        "expand": "{{field}}を拡大して編集",
+        "presets": {
+          "default": "デフォルト（マイマイ）",
+          "label": "キャラクター設定プリセット",
+          "description": "選択すると下の性格・行動スタイル・返信スタイルが置き換わります。適用後も自由に編集できます。"
+        },
         "personality": {
-          "label": "人格特性 *",
+          "label": "人格特性",
           "placeholder": "ボットの人格や設定を説明してください（120文字以内推奨）",
-          "description": "例：大学2年生の女子大生で、Tieba をよく見ている"
+          "description": "botの核となる性格を記述し、botの自己認識に影響します"
+        },
+        "behaviorStyle": {
+          "label": "行動スタイル",
+          "placeholder": "会話に参加するタイミングや、様子を見る・静かにする場面を記述",
+          "description": "botの行動を記述し、行動の仕方を決めます"
         },
         "replyStyle": {
-          "label": "話し方 *",
+          "label": "話し方",
           "placeholder": "ボットの話し方や表現の癖を説明してください",
-          "description": "例：返信は淡々と短めにし、中国語で話し、Tieba・Zhihu・Weibo の雰囲気を参考にする"
+          "description": "botの話し方や口調に直接影響します"
         },
         "multipleReplyStyle": {
           "label": "代替返信スタイル",

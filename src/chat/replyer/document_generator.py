@@ -18,6 +18,9 @@ class DocumentReplyGenerator(MaisakaReplyGenerator):
     def _build_generation_options(self, model_name: Optional[str]) -> LLMGenerationOptions:
         return super()._build_generation_options(model_name or self.document_model_name or None)
 
+    def _uses_retro_prompt(self) -> bool:
+        return False
+
     def _build_request_messages(
         self,
         chat_history: List[LLMContextMessage],

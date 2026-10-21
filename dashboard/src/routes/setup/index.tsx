@@ -7,6 +7,7 @@ import {
   Globe,
   ShieldCheck,
 } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { findTemplateByBaseUrl } from '@/routes/config/providerTemplates'
 import { APP_NAME } from '@/lib/version'
 import { useToast } from '@/hooks/use-toast'
 import { validateToken } from '@/lib/token-validator'
@@ -46,6 +48,7 @@ import {
   CustomTokenForm,
   ModelSetupForm,
   PersonalityForm,
+  PersonalityPresetSelect,
 } from './StepForms'
 import {
   loadBotBasicConfig,
@@ -77,11 +80,13 @@ export function SetupPage() {
 // 内部实现组件
 function SetupPageContent() {
   const navigate = useNavigate()
+  const reduceMotion = useReducedMotion()
   const { t, i18n: i18nInstance } = useTranslation()
   const { toast } = useToast()
   const currentLang = i18nInstance.resolvedLanguage || i18nInstance.language || 'zh'
   const createDefaultPersonalityConfig = (): PersonalityConfig => ({
     personality: t('setupPage.defaults.personality.personality'),
+    behavior_style: t('setupPage.defaults.personality.behaviorStyle'),
     reply_style: t('setupPage.defaults.personality.replyStyle'),
     multiple_reply_style: [
       t('setupPage.defaults.personality.multipleReplyStyles.plain'),
@@ -162,6 +167,22 @@ function SetupPageContent() {
   const [modelFetchStatus, setModelFetchStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [modelFetchError, setModelFetchError] = useState('')
 
+  // DeepSeek 的角色默认值在选择提供商后立即生效，不依赖 Key 或模型列表请求。
+  useEffect(() => {
+    if (findTemplateByBaseUrl(apiProviderSetup.base_url)?.id !== 'deepseek') return
+    setModelSetup((previous) => ({
+      ...previous,
+      planner_model_identifier: 'deepseek-flash',
+      planner_model_name: 'deepseek-flash',
+      planner_thinking: false,
+      planner_reasoning_effort: 'high',
+      replyer_model_identifier: 'deepseek-flash',
+      replyer_model_name: 'deepseek-flash',
+      replyer_thinking: true,
+      replyer_reasoning_effort: 'high',
+    }))
+  }, [apiProviderSetup.base_url])
+
   useEffect(() => {
     if (currentStepId !== 'model-setup') return
     setAvailableModels([])
@@ -183,19 +204,25 @@ function SetupPageContent() {
         })
         if (cancelled) return
         setAvailableModels(models)
-        setModelSetup((previous) => {
-          const planner = models.some((model) => model.id === previous.planner_model_identifier)
-            ? previous.planner_model_identifier : ''
-          const replyer = models.some((model) => model.id === previous.replyer_model_identifier)
-            ? previous.replyer_model_identifier : ''
-          return {
-            ...previous,
-            planner_model_identifier: planner,
-            planner_model_name: planner,
-            replyer_model_identifier: replyer,
-            replyer_model_name: replyer,
+        if (findTemplateByBaseUrl(apiProviderSetup.base_url)?.id === 'deepseek') {
+          if (!models.some((model) => model.id === 'deepseek-flash')) {
+            throw new Error('提供商返回的模型列表中没有 deepseek-flash，请检查模型列表或手动选择可用模型')
           }
-        })
+        } else {
+          setModelSetup((previous) => {
+            const planner = models.some((model) => model.id === previous.planner_model_identifier)
+              ? previous.planner_model_identifier : ''
+            const replyer = models.some((model) => model.id === previous.replyer_model_identifier)
+              ? previous.replyer_model_identifier : ''
+            return {
+              ...previous,
+              planner_model_identifier: planner,
+              planner_model_name: planner,
+              replyer_model_identifier: replyer,
+              replyer_model_name: replyer,
+            }
+          })
+        }
         setModelFetchError('')
         setModelFetchStatus('success')
       } catch (error) {
@@ -476,25 +503,47 @@ function SetupPageContent() {
         return (
           <div className="space-y-8">
             <BotBasicForm config={botBasic} onChange={setBotBasic} />
-            <div className="border-border border-t-2 pt-6">
-              <PersonalityForm config={personality} onChange={setPersonality} />
-            </div>
+            <PersonalityForm config={personality} onChange={setPersonality} />
           </div>
         )
       case 'model-setup':
         return (
-          <div className="space-y-8">
-            <ApiProviderSetupForm config={apiProviderSetup} onChange={setApiProviderSetup} />
-            <div className="border-border border-t-2 pt-6">
-              <ModelSetupForm
-                config={modelSetup}
-                onChange={setModelSetup}
-                models={availableModels}
-                fetchStatus={modelFetchStatus}
-                fetchError={modelFetchError}
-                providerBaseUrl={apiProviderSetup.base_url}
-              />
-            </div>
+          <div className="space-y-5">
+            <ApiProviderSetupForm config={apiProviderSetup} onChange={(next) => {
+              if (next.base_url !== apiProviderSetup.base_url) {
+                setModelSetup((previous) => ({
+                  ...previous,
+                  planner_model_identifier: '',
+                  planner_model_name: '',
+                  replyer_model_identifier: '',
+                  replyer_model_name: '',
+                }))
+              }
+              setApiProviderSetup(next)
+            }} />
+            <AnimatePresence initial={false}>
+              {apiProviderSetup.api_key.trim() && (
+                <motion.div
+                  key="model-setup-fields"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.2, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="border-border border-t-2 pt-4">
+                    <ModelSetupForm
+                      config={modelSetup}
+                      onChange={setModelSetup}
+                      models={availableModels}
+                      fetchStatus={modelFetchStatus}
+                      fetchError={modelFetchError}
+                      providerBaseUrl={apiProviderSetup.base_url}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )
       default:
@@ -547,6 +596,9 @@ function SetupPageContent() {
         <SetupWizardLayout
           steps={steps}
           currentStep={currentStep}
+          headerActions={currentStepId === 'bot-profile' ? (
+            <PersonalityPresetSelect config={personality} onChange={setPersonality} />
+          ) : undefined}
           actions={
             <>
               <AlertDialog>

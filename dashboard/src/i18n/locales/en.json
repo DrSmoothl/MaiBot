@@ -949,6 +949,7 @@
     "defaults": {
       "personality": {
         "personality": "She is a sophomore college student who spends time on Tieba.",
+        "behaviorStyle": "Join everyday conversations naturally. Understand the context before replying or staying quiet, and avoid forcing a topic.",
         "replyStyle": "Keep replies plain and concise, speak Chinese, and avoid deliberately emphasizing any academic background. You can refer to the reply styles commonly seen on Tieba, Zhihu, and Weibo.",
         "multipleReplyStyles": {
           "plain": "Your style is plain, lightly sarcastic, very short, and colloquial. You can reference Tieba and Weibo reply styles.",
@@ -1004,7 +1005,7 @@
           "description": "The bot's account identifier on this platform"
         },
         "nickname": {
-          "label": "Nickname *",
+          "label": "Nickname",
           "placeholder": "Enter the bot's nickname",
           "description": "The bot's primary display name"
         },
@@ -1017,15 +1018,26 @@
         }
       },
       "personality": {
+        "expand": "Expand editor for {{field}}",
+        "presets": {
+          "default": "Default (MaiMai)",
+          "label": "Persona presets",
+          "description": "Selecting a preset replaces the personality, behavior style, and reply style below. You can continue editing them."
+        },
         "personality": {
-          "label": "Personality Traits *",
+          "label": "Personality Traits",
           "placeholder": "Describe the bot's personality and identity traits (recommended within 120 characters)",
-          "description": "Example: a sophomore college girl who browses Tieba"
+          "description": "Describe the bot's core personality traits, shaping how it understands itself"
+        },
+        "behaviorStyle": {
+          "label": "Behavior style",
+          "placeholder": "Describe when to participate, observe, or stay quiet",
+          "description": "Describe the bot's behavior, determining how it acts"
         },
         "replyStyle": {
-          "label": "Reply Style *",
+          "label": "Reply Style",
           "placeholder": "Describe how the bot speaks and expresses itself",
-          "description": "Example: keep replies plain and concise, speak Chinese, and refer to styles seen on Tieba, Zhihu, and Weibo"
+          "description": "Directly shape how the bot speaks and its speaking style"
         },
         "multipleReplyStyle": {
           "label": "Alternate Reply Styles",

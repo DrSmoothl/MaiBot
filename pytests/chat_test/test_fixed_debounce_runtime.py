@@ -36,8 +36,6 @@ def runtime(monkeypatch):
     instance.log_prefix = "[test]"
     instance._fixed_message_debouncer = MessageDebouncer()
     instance._message_debounce_was_enabled = False
-    instance._message_debounce_required = False
-    instance._message_debounce_seconds = 1
     instance._last_message_received_at = time.time()
     instance.message_cache = []
     instance._last_processed_index = 0
@@ -109,17 +107,11 @@ async def test_stopping_cancels_debounce_without_leaking_tasks(runtime, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_disabled_switch_keeps_original_quiet_period(runtime, monkeypatch):
+async def test_disabled_switch_does_not_wait(runtime, monkeypatch):
     runtime_module.global_config.chat.reply_timing.message_debounce_mode = "off"
-    fixed_wait = AsyncMock()
-    monkeypatch.setattr(runtime, "_wait_for_fixed_message_debounce", fixed_wait)
-    runtime._message_debounce_required = False
-    await runtime._wait_for_message_quiet_period()
-    fixed_wait.assert_not_awaited()
-    runtime._message_debounce_required = True
-    runtime._last_message_received_at = time.time() - 2
-    await runtime._wait_for_message_quiet_period()
-    assert not runtime._message_debounce_required
+    runtime._observe_message_debounce(_message(), time.time())
+    assert runtime._get_message_quiet_period_remaining_seconds() == 0.0
+    await asyncio.wait_for(runtime._wait_for_message_quiet_period(), 0.1)
 
 
 def test_consuming_messages_resets_batch_without_dropping_messages(runtime, monkeypatch):
@@ -133,7 +125,7 @@ def test_consuming_messages_resets_batch_without_dropping_messages(runtime, monk
 
 
 @pytest.mark.asyncio
-async def test_steering_path_waits_before_consuming_messages(runtime, monkeypatch):
+async def test_ingest_path_waits_before_consuming_messages(runtime, monkeypatch):
     message = _message()
     runtime.message_cache = [message]
     runtime.log_prefix = "[test]"
@@ -142,7 +134,7 @@ async def test_steering_path_waits_before_consuming_messages(runtime, monkeypatc
     engine = MaisakaReasoningEngine(runtime)
     engine._ingest_messages = AsyncMock()
     engine._emit_flow_step = AsyncMock()
-    assert await engine._ingest_pending_steering_messages() == [message]
+    assert await engine._ingest_pending_messages() == [message]
     runtime._wait_for_message_quiet_period.assert_awaited_once()
     engine._ingest_messages.assert_awaited_once_with([message])
 

@@ -866,6 +866,7 @@
     "defaults": {
       "personality": {
         "personality": "여자 대학생이며 현재 2학년이고, Tieba 같은 커뮤니티를 자주 봅니다.",
+        "behaviorStyle": "일상 대화에 자연스럽게 참여합니다. 억지로 화제를 만들지 않고 맥락을 이해한 뒤 답변하거나 조용히 있을지 결정합니다.",
         "replyStyle": "답변은 담백하고 짧게 하며 중국어로 말하세요. 자신의 학과 배경을 일부러 강조하지 마세요. Tieba, Zhihu, Weibo의 답변 스타일을 참고할 수 있습니다.",
         "multipleReplyStyles": {
           "plain": "말투는 담백하지만 약간 냉소적이고, 매우 짧고 구어체입니다. Tieba 와 Weibo 답변 스타일을 참고할 수 있습니다.",
@@ -921,7 +922,7 @@
           "description": "이 플랫폼에서 봇을 식별하는 계정 ID입니다"
         },
         "nickname": {
-          "label": "닉네임 *",
+          "label": "닉네임",
           "placeholder": "봇의 닉네임을 입력하세요",
           "description": "봇의 대표 호칭입니다"
         },
@@ -934,15 +935,26 @@
         }
       },
       "personality": {
+        "expand": "{{field}} 확대 편집",
+        "presets": {
+          "default": "기본 (마이마이)",
+          "label": "페르소나 프리셋",
+          "description": "선택하면 아래 성격, 행동 스타일, 답변 스타일이 변경됩니다. 적용 후에도 자유롭게 수정할 수 있습니다."
+        },
         "personality": {
-          "label": "성격 특성 *",
+          "label": "성격 특성",
           "placeholder": "봇의 성격과 설정을 설명해 주세요 (권장 120자 이내)",
-          "description": "예: 대학 2학년 여자 대학생으로 Tieba 를 자주 본다"
+          "description": "bot의 핵심 성격을 설명하며, bot이 자신을 인식하는 방식에 영향을 줍니다"
+        },
+        "behaviorStyle": {
+          "label": "행동 스타일",
+          "placeholder": "대화에 참여하거나 상황을 관찰하거나 조용히 있을 때를 설명하세요",
+          "description": "bot의 행동을 설명하며, 행동 방식을 결정합니다"
         },
         "replyStyle": {
-          "label": "말투 *",
+          "label": "말투",
           "placeholder": "봇이 말하는 방식과 표현 습관을 설명해 주세요",
-          "description": "예: 답변은 담백하고 짧게, 중국어로 말하며 Tieba, Zhihu, Weibo 스타일을 참고한다"
+          "description": "bot의 말하는 방식과 말투에 직접 영향을 줍니다"
         },
         "multipleReplyStyle": {
           "label": "대체 답변 스타일",

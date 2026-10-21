@@ -14,16 +14,6 @@ OVERSIZED_IMAGE_HANDLE_METHOD_DESCRIPTIONS = {
     "discard": "丢弃超过最大大小的图片组件",
 }
 
-REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS = {
-    "frequency": "按照新消息数量决定思考",
-    "dynamic": "估计每批消息的回复可能性并动态调整门槛，让回复次数贴近回复频率",
-}
-
-REPLY_TRIGGER_MODE_OPTION_LABELS = {
-    "frequency": "频率触发",
-    "dynamic": "动态触发",
-}
-
 ATTENTION_DRIFT_LEVEL_OPTION_LABELS = {
     "subtle": "轻微漂移",
     "active": "活跃联想",
@@ -162,7 +152,7 @@ class PersonalityConfig(ConfigBase):
     __ui_label__ = "人格"
 
     personality: str = Field(
-        default="是女大学生，现在正在上网和群友聊天。一般不包容且善良，但有时候有点一反常态，表现出锐利攻击性。善于用人类的角度思考问题，聊天比较日常。",
+        default="是女大学生，现在正在上网聊天。一般不包容且善良，但有时候有点一反常态，表现出锐利攻击性。善于用人类的角度思考问题，聊天比较日常。",
         json_schema_extra={
             "label": {
                 "zh_CN": "人格设定",
@@ -179,7 +169,7 @@ class PersonalityConfig(ConfigBase):
 
     behavior_style: str = Field(
         default=(
-            "是大二女大学生，现在正在上网和群友聊天。善于用人类的角度思考问题，聊天偏日常。不会没话题硬找话题，具有足够的自主性，会自行搜集信息理解内容。"
+            "是女大学生，现在正在上网聊天。一般不包容且善良，但有时候有点一反常态，表现出锐利攻击性。善于用人类的角度思考问题，聊天比较日常。不会没话题硬找话题，具有足够的自主性，会自行搜集信息理解内容。"
         ),
         json_schema_extra={
             "label": {
@@ -480,7 +470,7 @@ class ChatReplyTimingConfig(ConfigBase):
             "x-widget": "discrete-slider",
             "x-option-labels": {"off": "关闭", "fast": "快速", "natural": "自然", "steady": "沉稳"},
             "x-option-descriptions": {
-                "off": "关闭固定规则防抖，沿用原有等待逻辑，包括被新消息打断后的短暂等待。",
+                "off": "关闭防抖，新消息不等待，直接进入判断。",
                 "fast": "安静 1 秒、活跃 3 秒，同人续发 1 秒、换人 0.5 秒。等待更少，但更容易漏接分段补充。",
                 "natural": "默认：安静 2 秒、活跃 5 秒，同人续发 2 秒、换人 0.5 秒。兼顾等待时间和补充消息。",
                 "steady": "安静 4 秒、活跃 7 秒，同人续发 4 秒、换人 2 秒。合并更多判断、多留补充时间，但没有补充时也更慢，并非每个群都能等得更齐。",
@@ -491,8 +481,21 @@ class ChatReplyTimingConfig(ConfigBase):
     一批指合并后一起送入判断的消息；新批次按上一条有效消息的间隔选择初始等待：超过 30 秒或没有历史为安静，否则为活跃。同人/换人均与紧邻的上一条消息比较，重新从新消息起计算等待，可提前或延后结束。
     快速为安静 1 秒、活跃 3 秒、同人 1 秒、换人 0.5 秒：更快，但更容易漏接分段补充。自然为 2/5/2/0.5 秒：默认折中。沉稳为 4/7/4/2 秒：减少更多判断、多留补充机会，也会让没有补充的消息多等，不能保证每个群、每次都更完整。
     三档共用：裸图开启新批次时至少等 4 秒，后续消息仍按续发规则重算；批次内纯表情包不能延长等待，但可以提前结束；整批从第一条实际收到起最多 8 秒，@或提及后最多 1 秒，连续提及取最早上限。上限优先于其他等待规则。
-    更换等待档位从下一条有效消息起生效，不重置批次或提及上限，不延长已到期批次；选择关闭会结束正在进行的固定规则等待，随后沿用原有等待逻辑。这里的时间仅指防抖排队，不包含模型生成和发送耗时。
+    更换等待档位从下一条有效消息起生效，不重置批次或提及上限，不延长已到期批次；选择关闭会结束正在进行的等待，之后新消息不再等待。这里的时间仅指防抖排队，不包含模型生成和发送耗时。
     """
+
+    planner_message_steering: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "快速反应模式",
+                "en_US": "Quick reaction mode",
+                "ja_JP": "即応モード",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """强制 Planner 使用流式请求；思考或输出期间收到新消息立即打断并带上新消息重新请求，wait 等待也可被新消息提前结束。"""
 
     talk_value: float = Field(
         default=1,
@@ -529,7 +532,7 @@ class ChatReplyTimingConfig(ConfigBase):
     """私聊里麦麦主动说话的频率；越小越安静。"""
 
     mentioned_bot_reply: bool = Field(
-        default=False,
+        default=True,
         json_schema_extra={
             "label": {
                 "zh_CN": "提及必回复",
@@ -555,38 +558,6 @@ class ChatReplyTimingConfig(ConfigBase):
         },
     )
     """开启后，被 @ 时会尽量回复。"""
-
-    reply_trigger_mode: Literal["frequency", "dynamic"] = Field(
-        default="frequency",
-        json_schema_extra={
-            "label": {
-                "zh_CN": "回复触发模式",
-                "en_US": "Reply trigger mode",
-                "ja_JP": "返信トリガーモード",
-            },
-            "x-widget": "select",
-            "x-layout": "inline-right",
-            "x-input-width": "12rem",
-            "x-option-labels": REPLY_TRIGGER_MODE_OPTION_LABELS,
-            "x-option-descriptions": REPLY_TRIGGER_MODE_OPTION_DESCRIPTIONS,
-        },
-    )
-    """控制新消息何时进入 Planner。"""
-
-    planner_interrupt_max_consecutive_count: int = Field(
-        default=0,
-        ge=0,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "规划器连续打断上限",
-                "en_US": "Planner consecutive interrupt limit",
-                "ja_JP": "プランナー連続中断上限",
-            },
-            "x-widget": "input",
-            "advanced": True,
-        },
-    )
-    """思考时来了新消息，最多重新思考多少次。"""
 
     max_consecutive_wait_count: int = Field(
         default=3,
@@ -1009,19 +980,6 @@ class ExperimentalConfig(ConfigBase):
     __ui_label__ = "实验性功能"
     __ui_advanced__ = True
     __ui_order__ = 140
-
-    planner_message_steering: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "快速反应模式",
-                "en_US": "Quick reaction mode",
-                "ja_JP": "即応モード",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """强制 Planner 使用流式请求；思考或输出期间收到新消息立即中断并重新请求，wait 等待也可被新消息提前结束。不等待静默窗口，也不限制连续打断次数。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""

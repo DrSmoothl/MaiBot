@@ -10,17 +10,19 @@ export function SetupWizardLayout({
   currentStep,
   children,
   actions,
+  headerActions,
 }: {
   steps: { id: string; title: string; description: string }[]
   currentStep: number
   children: ReactNode
   actions: ReactNode
+  headerActions?: ReactNode
 }) {
   const { t } = useTranslation()
   const step = steps[currentStep]
   return (
-    <main className="relative mx-auto w-full max-w-[800px] py-12">
-      <div className="mb-10 sm:px-16">
+    <main className="relative mx-auto w-full max-w-[800px] py-8">
+      <div className="mb-6 sm:px-16">
         <StepIndicator
           currentStep={currentStep}
           label={t('setupPage.header.title')}
@@ -30,16 +32,19 @@ export function SetupWizardLayout({
           }))}
         />
       </div>
-      <PageFrame className="p-5 sm:p-10">
-        <header className="mb-6">
-          <h1 className="text-2xl font-medium sm:text-[32px] sm:leading-tight">{step.title}</h1>
+      <PageFrame className="p-5 sm:p-7">
+        <header className="mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h1 className="text-2xl font-medium sm:text-[32px] sm:leading-tight">{step.title}</h1>
+            {headerActions && <div className="ml-auto">{headerActions}</div>}
+          </div>
           {step.description && (
             <p className="mt-3 text-sm leading-relaxed sm:text-base">{step.description}</p>
           )}
         </header>
         {children}
       </PageFrame>
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-3">{actions}</footer>
+      <footer className="mt-5 flex flex-wrap items-center justify-between gap-3">{actions}</footer>
     </main>
   )
 }

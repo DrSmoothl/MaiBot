@@ -663,6 +663,9 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
 
         return items
 
+    def _uses_retro_prompt(self) -> bool:
+        return global_config.debug.replyer_retro_prompt
+
     @defer_context_image_encoding(lambda items: items)
     def _build_request_messages(
         self,
@@ -677,7 +680,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         think_level: int = 1,
     ) -> List[ContextItem]:
         # 复古模式将人设与注意事项放在首条 system 消息，其余模板作为一条 user 消息发送
-        if global_config.debug.replyer_retro_prompt:
+        if self._uses_retro_prompt():
             return self._build_retro_request_messages(
                 chat_history=chat_history,
                 reply_message=reply_message,
@@ -1094,6 +1097,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         aggregate_total_tokens = 0
         reasoning_continuation_count = 0
         reasoning_regeneration_requested = False
+        retro_period_regeneration_requested = False
         default_task_name = str(getattr(self.express_model, "task_name", "") or "replyer").strip() or "replyer"
 
         while True:
@@ -1351,6 +1355,19 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             matched_regex_pattern = str(after_response_kwargs.get("matched_regex_pattern") or "").strip()
             matched_regex_description = str(after_response_kwargs.get("matched_regex_description") or "").strip()
             retry_reason = str(after_response_kwargs.get("retry_reason") or "").strip()
+            # 复古回复偶尔会脱离话题询问句号；每次生成流程仅为这两种句式重生成一次。
+            if (
+                self._uses_retro_prompt()
+                and not retro_period_regeneration_requested
+                and any(phrase in response_text for phrase in ("发个句号", "一个句号"))
+                and retry_count < REPLYER_MAX_HOOK_RETRIES
+            ):
+                retro_period_regeneration_requested = True
+                retry_requested = True
+                retry_reason = "；".join(filter(None, (
+                    retry_reason,
+                    "上一次回复出现了异常的句号问话，请根据实际聊天内容重新生成回复。",
+                )))
             # Chat 不回放推理项；纯推理且 Hook 未补正文时，复用重生成流程尝试一次。
             if (
                 active_client_type == "openai"
