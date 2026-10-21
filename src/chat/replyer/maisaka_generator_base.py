@@ -1085,6 +1085,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         aggregate_completion_tokens = 0
         aggregate_total_tokens = 0
         reasoning_continuation_count = 0
+        reasoning_regeneration_requested = False
         default_task_name = str(getattr(self.express_model, "task_name", "") or "replyer").strip() or "replyer"
 
         while True:
@@ -1342,6 +1343,21 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             matched_regex_pattern = str(after_response_kwargs.get("matched_regex_pattern") or "").strip()
             matched_regex_description = str(after_response_kwargs.get("matched_regex_description") or "").strip()
             retry_reason = str(after_response_kwargs.get("retry_reason") or "").strip()
+            # Chat 不回放推理项；纯推理且 Hook 未补正文时，复用重生成流程尝试一次。
+            if (
+                active_client_type == "openai"
+                and not reasoning_regeneration_requested
+                and not response_text
+                and generation_result.output_items
+                and all(isinstance(item, ReasoningItem) for item in generation_result.output_items)
+                and retry_count < REPLYER_MAX_HOOK_RETRIES
+            ):
+                reasoning_regeneration_requested = True
+                retry_requested = True
+                retry_reason = "；".join(filter(None, (
+                    retry_reason,
+                    "上一次只返回了思考内容，正文为空。请生成要发送的回复正文，不要只输出思考过程。",
+                )))
             if retry_requested and retry_count < REPLYER_MAX_HOOK_RETRIES:
                 reason_parts = []
                 if matched_regex:
