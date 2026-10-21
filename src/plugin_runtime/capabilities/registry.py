@@ -69,6 +69,7 @@ def register_capability_impls(manager: "PluginRuntimeManager", supervisor: "Plug
     _register("maisaka.context.append", manager._cap_maisaka_context_append)
     _register("maisaka.context.resolve_image", manager._cap_maisaka_context_resolve_image)
     _register("maisaka.proactive.trigger", manager._cap_maisaka_proactive_trigger)
+    _register("maisaka.reply.generate", manager._cap_maisaka_reply_generate)
 
     _register("person.get_id", manager._cap_person_get_id)
     _register("person.get_value", manager._cap_person_get_value)

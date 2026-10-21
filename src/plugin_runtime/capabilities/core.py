@@ -361,6 +361,62 @@ class RuntimeCoreCapabilityMixin:
             logger.error(f"[cap.maisaka.proactive.trigger] 执行失败: {exc}", exc_info=True)
             return {"success": False, "error": str(exc)}
 
+    async def _cap_maisaka_reply_generate(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """复用 Replyer 人格、表达选择与 Hook 生成文本，结果仅返回调用插件。"""
+
+        del plugin_id, capability
+        from src.chat.heart_flow.heartflow_manager import heartflow_manager
+        from src.chat.message_receive.chat_manager import chat_manager
+        from src.chat.replyer.document_generator import DocumentReplyGenerator
+
+        stream_id = args.get("stream_id")
+        reference = args.get("reference")
+        format_instruction = args.get("format_instruction", "")
+        model_name = args.get("model_name", "")
+        if not isinstance(stream_id, str) or not stream_id.strip():
+            return {"success": False, "error": "缺少必要参数 stream_id"}
+        if not isinstance(reference, str) or not reference.strip() or len(reference) > 500000:
+            return {"success": False, "error": "reference 必须是 1–500000 字的非空文本"}
+        if not isinstance(format_instruction, str) or len(format_instruction) > 8000:
+            return {"success": False, "error": "format_instruction 必须是不超过 8000 字的文本"}
+        if not isinstance(model_name, str) or len(model_name) > 200:
+            return {"success": False, "error": "model_name 必须是不超过 200 字的宿主模型名称"}
+
+        stream_id = stream_id.strip()
+        chat_session = await asyncio.to_thread(chat_manager.get_existing_session_by_session_id, stream_id)
+        if chat_session is None:
+            return {"success": False, "error": f"未找到已存在的聊天流: {stream_id}"}
+
+        try:
+            runtime = await heartflow_manager.get_or_create_heartflow_chat(stream_id)
+
+            async def select_expressions(system_prompt: str) -> str:
+                response = await runtime.run_sub_agent(
+                    context_message_limit=10, system_prompt=system_prompt, request_kind="expression_selector",
+                )
+                return (response.content or "").strip()
+
+            # 独立实例与材料避免后台写作混入正在进行的聊天回复；仍使用真实会话配置和完整 Replyer 链路。
+            replyer = DocumentReplyGenerator(
+                chat_stream=chat_session, request_type="plugin.replyer", model_name=model_name.strip(),
+            )
+            success, result = await replyer.generate_reply_with_context(
+                stream_id=stream_id, chat_history=[], reply_message=None,
+                reply_tool_args={
+                    "reply_reference": reference, "reply_style": "长回复", "_plugin_reply_prompt": format_instruction,
+                },
+                sub_agent_runner=select_expressions, log_reply=False,
+            )
+            if not success:
+                return {"success": False, "error": result.error_message or "Replyer 生成失败"}
+            text = result.completion.response_text.strip()
+            if not text:
+                return {"success": False, "error": "Replyer 返回了空文本"}
+            return {"success": True, "text": text, "selected_expression_ids": result.selected_expression_ids}
+        except Exception as exc:
+            logger.error(f"[cap.maisaka.reply.generate] 执行失败: {exc}", exc_info=True)
+            return {"success": False, "error": str(exc)}
+
     @staticmethod
     def _build_send_result(args: Dict[str, Any], sent_message: Any = None, error: str = "") -> Dict[str, Any]:
         """按调用方选择返回兼容布尔结果或包含平台消息 ID 的详细结果。"""

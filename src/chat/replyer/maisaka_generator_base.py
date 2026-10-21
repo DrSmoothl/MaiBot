@@ -991,6 +991,10 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
             result.request_messages = preview.payload["request_items"]
             result.output_items = preview.payload["output_items"]
 
+    def _build_generation_options(self, model_name: Optional[str]) -> LLMGenerationOptions:
+        """构建本次请求选项，供长文等专用 Replyer 明确指定生成模型。"""
+        return LLMGenerationOptions(model_name=model_name)
+
     async def generate_reply_with_context(
         self,
         extra_info: str = "",
@@ -1216,7 +1220,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                         request_type=self.request_type,
                         session_id=preview_chat_id,
                     )
-                generation_options = LLMGenerationOptions(model_name=active_model_name)
+                generation_options = self._build_generation_options(active_model_name)
                 generation_result = await active_model.generate_response_with_context(
                     context_factory=context_factory,
                     options=generation_options,
