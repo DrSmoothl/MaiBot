@@ -3,7 +3,6 @@ from typing import Dict
 
 import asyncio
 import time
-import traceback
 
 from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
 from src.common.logger import get_logger
@@ -17,6 +16,10 @@ logger = get_logger("heartflow")
 
 HEARTFLOW_ACTIVE_RETENTION_SECONDS = 24 * 60 * 60
 HEARTFLOW_MAX_ACTIVE_CHATS = 100
+
+
+class HeartflowPolicyDeniedError(PermissionError):
+    """适配器名单拒绝创建聊天运行实例。"""
 
 
 class HeartflowManager:
@@ -48,7 +51,7 @@ class HeartflowManager:
                 if not chat_session:
                     raise ValueError(f"未找到 session_id={session_id} 对应的聊天流")
                 if not await self._is_session_allowed(chat_session):
-                    raise PermissionError(f"适配器名单禁止创建聊天运行实例: {session_id}")
+                    raise HeartflowPolicyDeniedError(f"适配器名单禁止创建聊天运行实例: {session_id}")
                 self._ensure_running()
 
                 new_chat = MaisakaHeartFlowChatting(session_id=session_id)
@@ -57,9 +60,11 @@ class HeartflowManager:
                 self._touch_chat(session_id)
                 await self._evict_over_limit_chats(protected_session_id=session_id)
                 return new_chat
+        except HeartflowPolicyDeniedError as exc:
+            logger.warning(str(exc))
+            raise
         except Exception as exc:
             logger.error(f"创建心流聊天 {session_id} 失败: {exc}", exc_info=True)
-            traceback.print_exc()
             raise
 
     def _ensure_running(self) -> None:

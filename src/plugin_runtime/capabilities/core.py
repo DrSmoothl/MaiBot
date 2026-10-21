@@ -331,6 +331,8 @@ class RuntimeCoreCapabilityMixin:
     async def _cap_maisaka_proactive_trigger(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
         """请求 Maisaka 基于指定聊天流主动处理一轮对话。"""
 
+        from src.chat.heart_flow.heartflow_manager import HeartflowPolicyDeniedError, heartflow_manager
+
         del capability
 
         stream_id = str(args.get("stream_id") or args.get("chat_id") or args.get("session_id") or "").strip()
@@ -341,7 +343,6 @@ class RuntimeCoreCapabilityMixin:
             return {"success": False, "error": "缺少必要参数 intent"}
 
         try:
-            from src.chat.heart_flow.heartflow_manager import heartflow_manager
             from src.chat.message_receive.chat_manager import chat_manager
 
             chat_session = chat_manager.get_existing_session_by_session_id(stream_id)
@@ -357,6 +358,8 @@ class RuntimeCoreCapabilityMixin:
                 metadata=args.get("metadata") if isinstance(args.get("metadata"), dict) else None,
             )
             return {"success": True, **result}
+        except HeartflowPolicyDeniedError as exc:
+            return {"success": False, "error": str(exc), "error_code": "adapter_policy_denied"}
         except Exception as exc:
             logger.error(f"[cap.maisaka.proactive.trigger] 执行失败: {exc}", exc_info=True)
             return {"success": False, "error": str(exc)}
