@@ -109,30 +109,14 @@ def test_planner_uses_limit_before_encoding(monkeypatch):
     assert [item.parts for item in actual] == [item.parts for item in expected]
 
 
-def test_summary_matches_eager_output(monkeypatch):
-    from src.config.config import global_config
-    from src.maisaka.memory.mid_term import _build_summary_prompt_messages
-    monkeypatch.setattr(global_config.visual, "max_image_num", 2)
+def test_compaction_uses_image_descriptions_without_encoding_binary():
+    from src.maisaka.context.compaction import message_text_for_compaction
     entries = history()
-    kwargs = dict(instruction_prompt="summary", enable_visual_message=True)
-    expected = _build_summary_prompt_messages.__wrapped__(entries, **kwargs)
     with patch.object(context, "_encode_image_for_context", wraps=context._encode_image_for_context) as encode:
-        actual = _build_summary_prompt_messages(entries, **kwargs)
-    assert encode.call_count == 2
-    assert actual[1:] == expected[1:]
-    assert actual[0].parts == expected[0].parts
-
-
-def test_summary_early_return_preserves_existing_content(monkeypatch):
-    from src.config.config import global_config
-    from src.maisaka.memory import mid_term
-    monkeypatch.setattr(global_config.visual, "max_image_num", 0)
-    monkeypatch.setattr(mid_term, "MAX_SUMMARY_INPUT_CHARS", 1)
-    entries = history()
-    kwargs = dict(instruction_prompt="summary", enable_visual_message=True)
-    expected = mid_term._build_summary_prompt_messages.__wrapped__(entries, **kwargs)
-    actual = mid_term._build_summary_prompt_messages(entries, **kwargs)
-    assert [item.parts for item in actual] == [item.parts for item in expected]
+        batches = [message_text_for_compaction(entry) for entry in entries]
+    assert batches
+    assert encode.call_count == 0
+    assert all("base64" not in batch for batch in batches)
 
 
 def test_replyer_matches_eager_output(monkeypatch):
