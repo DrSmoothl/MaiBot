@@ -400,7 +400,7 @@ class ExpressionLearner:
     ) -> bool:
         """执行已经获得并发闸门的表达学习批次。"""
 
-        readable_message = "聊天记录将在后续多条 user message 中给出；请以每条消息中的 source_id 作为来源行编号。"
+        readable_message = "聊天记录将在后续多条 user message 中给出；请以每条消息中的 id 作为来源行编号。"
         prompt_template = prompt_manager.get_prompt("learn_style")
         prompt_template.add_context("bot_name", global_config.bot.nickname)
         prompt_template.add_context("chat_str", readable_message)
@@ -568,7 +568,7 @@ class ExpressionLearner:
             .set_role(RoleType.System)
             .add_text_content(
                 f"{system_prompt}\n\n"
-                "注意：聊天记录会在后续多条 user message 中给出。每条消息内的 source_id "
+                "注意：聊天记录会在后续多条 user message 中给出。每条消息内的 id "
                 "是本轮学习的来源编号；speaker=SELF 的消息只作为上下文，不要从 SELF 的发言中学习。"
             )
             .build()
@@ -588,10 +588,9 @@ class ExpressionLearner:
                 .add_text_content(
                     "\n".join(
                         [
-                            f"[source_id:{index}]",
+                            f"[id:{index}]",
                             f"[speaker:{speaker_kind}]",
                             f"[name:{speaker_name}]",
-                            f"[time:{message.timestamp.strftime('%H:%M:%S')}]",
                             "[content]",
                             content,
                         ]
@@ -669,7 +668,7 @@ class ExpressionLearner:
             source_id_str = source_id.strip()
             if not source_id_str.isdigit():
                 continue  # 无效的来源行编号，跳过
-            line_index = int(source_id_str) - 1  # 多 message 构造时的 source_id 从 1 开始
+            line_index = int(source_id_str) - 1  # 多 message 构造时的 id 从 1 开始
             if line_index < 0 or line_index >= len(messages):
                 continue  # 超出范围，跳过
             # 当前行的原始消息

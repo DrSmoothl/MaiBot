@@ -20,12 +20,12 @@ Output requirements:
 Only output a JSON array, and do not output duplicate content. Each element should be an object with the following fields:
 
 [
-  {{"content": "term", "source_id": "12"}},
-  {{"content": "term2", "source_id": "5"}}
+  {{"content": "term", "id": "12"}},
+  {{"content": "term2", "id": "5"}}
 ]
 
 Field descriptions:
 - content: the original jargon candidate text
-- source_id: the source number corresponding to that jargon, namely the numeric source_id in `<message source_id="3">` or `<learning-source source_id="3">` in the chat log above; output only the number itself
+- id: the source number corresponding to that jargon, namely the numeric id in `<message id="3">` or `<learning-source id="3">` in the chat log above; output only the number itself
 
 Output JSON:

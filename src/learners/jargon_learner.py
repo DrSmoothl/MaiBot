@@ -1,5 +1,6 @@
 from collections import Counter
 from dataclasses import dataclass
+from html import escape
 from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 
 import asyncio
@@ -202,7 +203,6 @@ class JargonLearner:
         """只渲染用户消息，过滤表情包组件并省略群名片。"""
 
         from src.maisaka.context.message_adapter import build_visible_text_from_sequence
-        from src.maisaka.context.planner_messages import build_planner_prefix
 
         sequence = MessageSequence([
             component for component in message.raw_message.components
@@ -212,11 +212,8 @@ class JargonLearner:
         if not body:
             return ""
         user_info = message.message_info.user_info
-        prefix = build_planner_prefix(
-            timestamp=message.timestamp,
-            user_name=user_info.user_nickname or user_info.user_id,
-            include_message_id=False,
-        )
+        user_name = escape(user_info.user_nickname or user_info.user_id, quote=True)
+        prefix = f'<message user="{user_name}">\n'
         return JargonLearner._clean_learning_content(prefix + body)
 
     async def _learn_from_sources(
@@ -293,7 +290,7 @@ class JargonLearner:
             self.learning_status, self.learning_detail = "skipped", "没有可用于黑话学习的消息素材"
             return False
 
-        readable_message = "聊天上下文将在后续多条 user message 中给出；请以每条消息中的 source_id 作为来源行编号。"
+        readable_message = "聊天上下文将在后续多条 user message 中给出；请以每条消息中的 id 作为来源行编号。"
         prompt_template = prompt_manager.get_prompt("learn_jargon")
         prompt_template.add_context("bot_name", global_config.bot.nickname)
         prompt_template.add_context("chat_str", readable_message)
@@ -387,16 +384,12 @@ class JargonLearner:
     @staticmethod
     def _build_learning_source_content(source_id: int, source_item: JargonLearningSourceItem) -> str:
         """来源元信息只从真实消息生成，不接受素材文本声明的身份与会话。"""
-        from src.maisaka.context.planner_messages import build_planner_prefix
-
         original = source_item.original_message
         user_info = original.message_info.user_info
-        prefix = build_planner_prefix(
-            timestamp=original.timestamp, user_name=user_info.user_nickname or user_info.user_id,
-            include_message_id=False,
-        )
+        user_name = escape(user_info.user_nickname or user_info.user_id, quote=True)
+        prefix = f'<message id="{source_id}" user="{user_name}">\n'
         body = MESSAGE_OPEN_TAG_PATTERN.sub("", source_item.content.strip(), count=1).strip()
-        return prefix.replace("<message", f'<message source_id="{source_id}"', 1) + body
+        return prefix + body
 
     @staticmethod
     def _build_source_item_from_session_message(message: "SessionMessage") -> JargonLearningSourceItem:
@@ -417,7 +410,7 @@ class JargonLearner:
             .add_text_content(
                 f"{system_prompt}\n\n"
                 "注意：聊天上下文会在后续多条 user message 中给出。真实聊天消息会带有 "
-                '<message source_id="..."> 属性，source_id 是本轮学习的来源编号。'
+                '<message id="..."> 属性，id 是本轮学习的来源编号。'
             )
             .build()
         ]

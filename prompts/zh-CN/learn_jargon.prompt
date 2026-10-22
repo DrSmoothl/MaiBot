@@ -20,12 +20,12 @@
 请仅输出 JSON 数组，不要输出重复内容。每个元素为一个对象，字段名如下：
 
 [
-  {{"content": "词条", "source_id": "12"}},
-  {{"content": "词条2", "source_id": "5"}}
+  {{"content": "词条", "id": "12"}},
+  {{"content": "词条2", "id": "5"}}
 ]
 
 字段说明：
 - content：黑话候选词条的原文
-- source_id：该黑话对应的来源编号，即上方聊天记录中 `<message source_id="3">` 或 `<learning-source source_id="3">` 的 source_id 数字，请只输出数字本身
+- id：该黑话对应的来源编号，即上方聊天记录中 `<message id="3">` 或 `<learning-source id="3">` 的 id 数字，请只输出数字本身
 
 输出 JSON：
