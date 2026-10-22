@@ -47,11 +47,12 @@ from src.maisaka.visual.emoji_image_cache import emoji_image_cache
 from src.maisaka.visual.deferred_images import append_context_image
 
 FORWARD_PREVIEW_LIMIT = 4
-# 不受支持格式图片的转码结果缓存条数；规划器每轮都会重建上下文，缓存可避免同一张图片被反复解码转码。
+IMAGE_QUALITY_MAX_SIDE: Dict[str, int] = {"normal": 512, "high": 1024}
+# 图片转码和缩图结果缓存条数；规划器每轮都会重建上下文，缓存可避免同一张图片被反复解码转码。
 TRANSCODED_IMAGE_CACHE_SIZE = 16
-# 以图片字节的 SHA-256 摘要为键缓存转码结果，缓存键不长期持有原始图片字节；字典按插入顺序充当 LRU。
+# 以图片字节的 SHA-256 摘要及尺寸限制为键缓存结果，缓存键不长期持有原始图片字节；字典按插入顺序充当 LRU。
 # 上下文也可能在 asyncio.to_thread 的工作线程中构建，读写需加锁。
-_transcoded_image_cache: Dict[str, Tuple[str, str]] = {}
+_transcoded_image_cache: Dict[Tuple[str, Optional[int]], Tuple[str, str]] = {}
 _transcoded_image_cache_lock = threading.Lock()
 
 
@@ -66,7 +67,7 @@ def _guess_image_format(image_bytes: bytes) -> Optional[str]:
         return None
 
 
-def _transcode_first_frame_for_context(image_bytes: bytes) -> Tuple[str, str]:
+def _transcode_first_frame_for_context(image_bytes: bytes, max_side: Optional[int] = None) -> Tuple[str, str]:
     """将图片首帧转码为上下文图片片段可接受的格式，返回 `(image_format, image_base64)`。
 
     首帧不含透明信息时编码为 JPEG（quality=95，与 `compress_messages` 一致）：MPO 本身就是 JPEG 容器，
@@ -78,6 +79,9 @@ def _transcode_first_frame_for_context(image_bytes: bytes) -> Tuple[str, str]:
         image.seek(0)
         # 转码结果不携带 EXIF 方向信息，先按 EXIF 方向摆正，避免照片转码后发生旋转。
         first_frame = ImageOps.exif_transpose(image)
+        if max_side is not None:
+            # 只改变本次模型输入，原始消息和磁盘图片保持不变；小图不放大。
+            first_frame.thumbnail((max_side, max_side), PILImage.Resampling.LANCZOS)
         output_buffer = BytesIO()
         if first_frame.has_transparency_data:
             # 含透明信息（RGBA/LA，或带 transparency 的 P 等模式）时保留为 PNG，避免透明区域被填黑。
@@ -94,26 +98,33 @@ def _transcode_first_frame_for_context(image_bytes: bytes) -> Tuple[str, str]:
     return transcoded_format, base64.b64encode(output_buffer.getvalue()).decode("utf-8")
 
 
-def _encode_image_for_context(image_bytes: bytes, image_format: str) -> Tuple[str, str]:
+def _encode_image_for_context(
+    image_bytes: bytes, image_format: str, max_side: Optional[int] = None
+) -> Tuple[str, str]:
     """将图片编码为上下文图片片段可接受的 `(image_format, image_base64)`。
 
-    受支持的格式直接透传原始字节，不做解码；MPO、BMP、TIFF 等其余格式取首帧转码为 JPEG（含透明信息时为 PNG），
-    转码结果按图片摘要放入容量为 `TRANSCODED_IMAGE_CACHE_SIZE` 的 LRU 缓存，同一张图片只解码一次。
+    未启用尺寸限制或尺寸未超限时，受支持的格式直接透传原始字节；其余格式取首帧转码为 JPEG（含透明信息时为 PNG）。
+    超限图片等比例缩小，结果按图片摘要和尺寸限制放入容量为 `TRANSCODED_IMAGE_CACHE_SIZE` 的 LRU 缓存。
     """
     if image_format in SUPPORTED_IMAGE_FORMATS:
-        return image_format, base64.b64encode(image_bytes).decode("utf-8")
+        if max_side is None:
+            return image_format, base64.b64encode(image_bytes).decode("utf-8")
+        with PILImage.open(BytesIO(image_bytes)) as image:
+            if max(image.size) <= max_side:
+                return image_format, base64.b64encode(image_bytes).decode("utf-8")
 
     image_digest = hashlib.sha256(image_bytes).hexdigest()
+    cache_key = (image_digest, max_side)
     with _transcoded_image_cache_lock:
-        cached_result = _transcoded_image_cache.pop(image_digest, None)
+        cached_result = _transcoded_image_cache.pop(cache_key, None)
         if cached_result is not None:
             # 重新插入到末尾，标记为最近使用。
-            _transcoded_image_cache[image_digest] = cached_result
+            _transcoded_image_cache[cache_key] = cached_result
             return cached_result
 
-    transcoded_result = _transcode_first_frame_for_context(image_bytes)
+    transcoded_result = _transcode_first_frame_for_context(image_bytes, max_side)
     with _transcoded_image_cache_lock:
-        _transcoded_image_cache[image_digest] = transcoded_result
+        _transcoded_image_cache[cache_key] = transcoded_result
         while len(_transcoded_image_cache) > TRANSCODED_IMAGE_CACHE_SIZE:
             # 字典按插入顺序迭代，第一个键即最久未使用的条目。
             _transcoded_image_cache.pop(next(iter(_transcoded_image_cache)))
@@ -156,11 +167,14 @@ def _append_image_component(
     component: ImageComponent,
     *,
     enable_visual_message: bool,
+    max_image_side: Optional[int] = None,
 ) -> bool:
     """将图片组件追加到 LLM 消息构建器。"""
     image_format = _guess_image_format(component.binary_data)
     if enable_visual_message and image_format and component.binary_data:
-        append_context_image(builder, lambda: _encode_image_for_context(component.binary_data, image_format))
+        append_context_image(
+            builder, lambda: _encode_image_for_context(component.binary_data, image_format, max_image_side)
+        )
         return True
 
     normalized_content = component.content.strip()
@@ -427,6 +441,7 @@ def _build_item_from_sequence(
     *,
     enable_visual_message: bool = True,
     limit_emoji_size: bool = False,
+    max_image_side: Optional[int] = None,
     tool_call_id: Optional[str] = None,
     tool_name: Optional[str] = None,
     meta: ContextItemMeta | None = None,
@@ -466,6 +481,7 @@ def _build_item_from_sequence(
                     builder,
                     component,
                     enable_visual_message=enable_visual_message,
+                    max_image_side=max_image_side,
                 )
                 or has_content
             )
@@ -585,7 +601,8 @@ class ContentContextMessage(LLMContextMessage):
         return self.source_kind
 
     def to_context_item(
-        self, enable_visual_message: bool = True, *, limit_emoji_size: bool = False
+        self, enable_visual_message: bool = True, *, limit_emoji_size: bool = False,
+        max_image_side: Optional[int] = None,
     ) -> ContextItem | None:
         return _build_item_from_sequence(
             RoleType.User,
@@ -593,6 +610,7 @@ class ContentContextMessage(LLMContextMessage):
             self.processed_plain_text,
             enable_visual_message=enable_visual_message,
             limit_emoji_size=limit_emoji_size,
+            max_image_side=max_image_side,
             meta=ContextItemMeta.create(item_id=self.context_item_id, timestamp=self.timestamp),
         )
 
@@ -679,9 +697,10 @@ class ComplexSessionMessage(SessionBackedMessage):
         return f"{self.source_kind}:{self.complex_message_type}"
 
     def to_context_item(
-        self, enable_visual_message: bool = True, *, limit_emoji_size: bool = False
+        self, enable_visual_message: bool = True, *, limit_emoji_size: bool = False,
+        max_image_side: Optional[int] = None,
     ) -> ContextItem | None:
-        del enable_visual_message, limit_emoji_size
+        del enable_visual_message, limit_emoji_size, max_image_side
         message_sequence = MessageSequence([TextComponent(self.prompt_text)])
         return _build_item_from_sequence(
             RoleType.User,
@@ -883,12 +902,17 @@ def build_context_items_from_history_entry(
     *,
     enable_visual_message: bool = True,
     limit_emoji_size: bool = False,
+    max_image_side: Optional[int] = None,
 ) -> tuple[ContextItem, ...]:
     """将 Maisaka 历史条目转换为发给 LLM 的统一 Context Items。"""
 
-    # 尺寸限制由普通 planner/replyer 显式启用，复古模式等已有调用保持原来的图片策略。
-    if isinstance(context_message, ContentContextMessage) and limit_emoji_size:
-        item = context_message.to_context_item(enable_visual_message=enable_visual_message, limit_emoji_size=True)
+    # 尺寸限制由 planner/replyer 显式启用，其他已有调用保持原来的图片策略。
+    if isinstance(context_message, ContentContextMessage) and (limit_emoji_size or max_image_side is not None):
+        item = context_message.to_context_item(
+            enable_visual_message=enable_visual_message,
+            limit_emoji_size=limit_emoji_size,
+            max_image_side=max_image_side,
+        )
     else:
         item = context_message.to_context_item(enable_visual_message=enable_visual_message)
     return (item,) if item is not None else ()

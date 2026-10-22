@@ -304,6 +304,24 @@ class VisualConfig(ConfigBase):
     __ui_label__ = "视觉"
     __ui_order__ = 60
 
+    image_quality: Literal["normal", "high"] = Field(
+        default="normal",
+        json_schema_extra={
+            "x-widget": "discrete-slider",
+            "label": {
+                "zh_CN": "图片画质",
+                "en_US": "Image quality",
+                "ja_JP": "画像品質",
+            },
+            "x-option-labels": {"normal": "普通", "high": "超清"},
+            "x-option-descriptions": {
+                "normal": "最长边 512 像素，默认档位。",
+                "high": "最长边 1024 像素，保留更多图片细节。",
+            },
+        },
+    )
+    """聊天普通图片发送给规划和回复模型时的画质：普通（normal）512、超清（high）1024 像素最长边。等比例缩小，小图不放大，不修改原图和表情包。"""
+
     max_image_num: int = Field(
         default=64,
         ge=0,

@@ -49,6 +49,7 @@ from src.llm_models.payload_content.context_snapshot import (
 from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.messages import (
+    IMAGE_QUALITY_MAX_SIDE,
     ContentContextMessage,
     LLMContextMessage,
     ModelOutputContextMessage,
@@ -650,6 +651,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                     message,
                     enable_visual_message=enable_visual_message,
                     limit_emoji_size=True,
+                    max_image_side=IMAGE_QUALITY_MAX_SIDE[global_config.visual.image_quality],
                 )
                 items.extend(context_items)
                 continue

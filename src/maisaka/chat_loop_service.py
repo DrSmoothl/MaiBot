@@ -50,6 +50,7 @@ from src.services.llm_service import LLMServiceClient
 from src.maisaka.builtin_tool import get_builtin_tools
 from src.maisaka.context.history import collect_tool_turn_anchor_indices, normalize_tool_call_result_pairs
 from src.maisaka.context.messages import (
+    IMAGE_QUALITY_MAX_SIDE,
     LLMContextMessage,
     ModelOutputContextMessage,
     ReferenceMessage,
@@ -1053,6 +1054,7 @@ class MaisakaChatLoopService:
                 msg,
                 enable_visual_message=enable_visual_message,
                 limit_emoji_size=True,
+                max_image_side=IMAGE_QUALITY_MAX_SIDE[global_config.visual.image_quality],
             )
             if not context_items:
                 continue
