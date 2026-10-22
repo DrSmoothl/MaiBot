@@ -19,6 +19,9 @@ class HTTPAdapter:
         self.config = config
         self.transport = transport
 
+    def auth_headers(self) -> Dict[str, str]:
+        return {"Authorization": f"Bearer {self.config.api_key}"}
+
     async def post(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.config.api_key.strip():
             raise WebSearchError("联网服务缺少 API Key")
@@ -32,7 +35,7 @@ class HTTPAdapter:
                     "POST",
                     endpoint,
                     json=payload,
-                    headers={"Authorization": f"Bearer {self.config.api_key}"},
+                    headers=self.auth_headers(),
                 ) as response:
                     if not response.is_success:
                         raise WebSearchError(f"联网服务返回 HTTP {response.status_code}")
