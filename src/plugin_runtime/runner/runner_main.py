@@ -1472,6 +1472,7 @@ class PluginRunner:
 
         reg_payload = RegisterPluginPayload(
             plugin_id=meta.plugin_id,
+            display_name=meta.manifest.name,
             webui=webui,
             plugin_version=meta.version,
             plugin_type=meta.plugin_type,

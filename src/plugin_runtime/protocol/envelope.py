@@ -227,6 +227,7 @@ class RegisterPluginPayload(BaseModel):
 
     plugin_id: str = Field(description="插件 ID")
     """插件 ID"""
+    display_name: str = Field(default="", description="插件清单中的可读名称")
     webui: Optional[WebUIExtension] = None
     """可选的声明式 WebUI 扩展，随插件注册和卸载同步。"""
     plugin_version: str = Field(default="1.0.0", description="插件版本")
