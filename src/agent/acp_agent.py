@@ -9,8 +9,8 @@ import json
 import os
 
 from src.llm_models.payload_content.context_item import (
-    ContextImagePart, ContextItemBuilder, ContextItemMeta, ContextTextPart, ProviderActivityItem, RoleType,
-    build_portable_output_items, get_item_text,
+    AssistantMessageItem, ContextImagePart, ContextItemBuilder, ContextItemMeta, ContextTextPart,
+    ProviderActivityItem, ReasoningItem, ReasoningRepresentation, RoleType, get_item_text,
 )
 
 from .acp import ACPConnection
@@ -100,11 +100,12 @@ class AcpAgent(AgentSession):
         if kind in {"agent_message_chunk", "agent_thought_chunk"}:
             content = update["content"]
             if content["type"] == "text" and content["text"]:
-                items = build_portable_output_items(
-                    content=content["text"] if kind == "agent_message_chunk" else None,
-                    reasoning=content["text"] if kind == "agent_thought_chunk" else None,
-                    logical_turn_id=str(update.get("messageId", params["sessionId"])),
-                )
+                meta = ContextItemMeta.create(logical_turn_id=str(update.get("messageId", params["sessionId"])))
+                # 流式片段必须原样保存；完整响应的归一化会吞掉片段间的空格和换行。
+                items = [ReasoningItem(meta=meta, text_parts=(content["text"],),
+                                       representation=ReasoningRepresentation.RAW_TEXT)
+                         if kind == "agent_thought_chunk" else
+                         AssistantMessageItem(meta=meta, parts=(ContextTextPart(content["text"]),))]
             elif content["type"] == "image":
                 items = [ContextItemBuilder().set_role(RoleType.Assistant).add_image_content(
                     content["mimeType"].split("/")[-1], content["data"],

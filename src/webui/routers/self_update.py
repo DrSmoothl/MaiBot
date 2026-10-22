@@ -6,12 +6,14 @@ WebUI 只负责检查更新与登记更新请求；代码与依赖的实际更�
 
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from typing import AsyncIterator, List, Literal, Optional
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import asyncio
+import json
 
 from src.common.logger import get_logger
 from src.common.self_update import (
@@ -185,6 +187,60 @@ def check_self_update(request: SelfUpdateCheckRequest) -> SelfUpdateStatusRespon
         raise HTTPException(status_code=status_code, detail=e.message) from e
 
     return _build_status_response(check)
+
+
+async def _stream_check_events(request: SelfUpdateCheckRequest) -> AsyncIterator[str]:
+    """同步检查在线程中执行，向页面推送真实阶段、最终结果或完整错误。"""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+    active = True
+
+    def emit(event: Dict[str, Any]) -> None:
+        if active:
+            loop.call_soon_threadsafe(queue.put_nowait, event)
+
+    def progress(message: str) -> None:
+        logger.info(f"检查更新进度: {message}")
+        emit({"type": "progress", "message": message})
+
+    def run() -> None:
+        try:
+            request.validate_prefix()
+            check = self_update_cache.get(
+                force=request.force, source_id=request.source_id, custom_prefix=request.custom_prefix,
+                on_progress=progress,
+            )
+            emit({"type": "result", "status": _build_status_response(check).model_dump()})
+        except SelfUpdateError as exc:
+            logger.warning(f"检查更新失败: {exc.message}")
+            emit({"type": "error", "message": exc.message})
+        except Exception as exc:
+            logger.exception("检查更新异常")
+            emit({"type": "error", "message": f"检查更新异常：{type(exc).__name__}: {exc}"})
+
+    task = asyncio.create_task(asyncio.to_thread(run))
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=10)
+            except TimeoutError:
+                # 保持长请求可见且不被反向代理按空闲连接关闭，心跳不代表业务进度。
+                event = {"type": "heartbeat"}
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+            if event["type"] in {"result", "error"}:
+                break
+    finally:
+        active = False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@router.post("/check-stream")
+def stream_check_self_update(request: SelfUpdateCheckRequest) -> StreamingResponse:
+    return StreamingResponse(
+        _stream_check_events(request), media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/apply", response_model=SelfUpdateApplyResponse)

@@ -137,7 +137,7 @@ export function PluginIcon({
   if (icon?.type === 'emoji') {
     return (
       <div className={baseClassName} style={style}>
-        <span className={cn('text-xl leading-none', iconClassName)} aria-hidden="true">
+        <span className={cn('flex items-center justify-center text-xl leading-none', iconClassName)} aria-hidden="true">
           {icon.value}
         </span>
       </div>

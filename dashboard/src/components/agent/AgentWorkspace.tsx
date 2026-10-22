@@ -9,6 +9,35 @@ import { type AgentApi, type AgentEvent } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 
 
+function itemText(item: AgentEvent['items'][number]) {
+  return [...(item.summary_parts ?? []), ...(item.text_parts ?? []),
+    ...(item.parts ?? []).filter(part => part.type === 'text').map(part => part.text)].filter(Boolean).join('\n')
+}
+
+function mergeTextEvents(events: AgentEvent[]): AgentEvent[] {
+  const merged: AgentEvent[] = []
+  for (const event of events) {
+    const item = event.items[0]
+    const previous = merged[merged.length - 1]
+    const previousItem = previous?.items[0]
+    // ACP 的连续文本事件是流式增量，直接拼接；用户输入、工具和消息类型切换都会分段。
+    if (event.kind === 'step' && event.items.length === 1 &&
+      (item.item_type === 'ReasoningItem' || item.item_type === 'AssistantMessageItem') &&
+      (item.parts ?? []).every(part => part.type === 'text') &&
+      previous?.kind === 'step' && previous.items.length === 1 &&
+      previousItem?.item_type === item.item_type && previousItem.logical_turn_id === item.logical_turn_id &&
+      (previousItem.parts ?? []).every(part => part.type === 'text')) {
+      merged[merged.length - 1] = {
+        ...previous,
+        items: [{ ...previousItem, summary_parts: [], parts: [], text_parts: [itemText(previousItem) + itemText(item)] }],
+      }
+    } else {
+      merged.push(event)
+    }
+  }
+  return merged
+}
+
 function HistoryItem({ item }: { item: AgentEvent['items'][number] }) {
   const { t } = useTranslation()
   if (item.tool_call || item.item_type === 'FunctionCallOutputItem' || item.display_kind === 'tool_result') {
@@ -23,8 +52,7 @@ function HistoryItem({ item }: { item: AgentEvent['items'][number] }) {
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-t px-3 py-2 text-xs leading-relaxed">{item.tool_call ? JSON.stringify(item.tool_call.args, null, 2) : item.output}</pre>
     </details>
   }
-  const text = [...(item.summary_parts ?? []), ...(item.text_parts ?? []),
-    ...(item.parts ?? []).filter(part => part.type === 'text').map(part => part.text)].filter(Boolean).join('\n')
+  const text = itemText(item)
   if (!text) return null
   const reasoning = item.item_type === 'ReasoningItem'
   return <div className={cn('whitespace-pre-wrap break-words text-sm leading-7', reasoning && 'rounded-lg bg-muted/30 px-3 py-2 text-muted-foreground')}>
@@ -75,8 +103,8 @@ function AgentHistory({ submitted, api, onDesktopEnabled }: { submitted: AgentEv
   }, [api, onDesktopEnabled])
   const working = state === 'thinking' || state === 'tool'
   const committed = new Set(events.map(event => event.id))
-  const visible = [...new Map([...submitted, ...queued, ...events].map(event => [event.id, event] as const)).values()]
-    .sort((a, b) => Date.parse(a.time) - Date.parse(b.time))
+  const visible = mergeTextEvents([...new Map([...submitted, ...queued, ...events].map(event => [event.id, event] as const)).values()]
+    .sort((a, b) => Date.parse(a.time) - Date.parse(b.time)))
   return <div className="flex min-h-0 flex-1 flex-col">
     <div role="status" className="flex items-center gap-2 border-b bg-muted/10 px-5 py-2.5 text-xs text-muted-foreground">
       <span className={cn('size-1.5 rounded-full bg-muted-foreground/40', working && 'animate-pulse bg-primary')} />

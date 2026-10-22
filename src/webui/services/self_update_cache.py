@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from threading import Lock, Timer
-from typing import Optional
+from typing import Callable, Optional
 import time
 
 from src.common.logger import get_logger
@@ -61,15 +61,22 @@ class SelfUpdateCache:
 
     def get(
         self, force: bool = False, source_id: Optional[str] = None, custom_prefix: str = "",
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> UpdateCheck:
         # 合并并发的自动检查；手动检查即使有缓存也明确重新联网。
+        if on_progress is not None:
+            on_progress("等待更新检查队列")
         with self._lock:
+            if on_progress is not None:
+                on_progress("读取本地更新状态")
             local = inspect_local()
             cached = self.peek(local)
             if local.blocker is not None:
                 self._schedule()
                 return cached
             if not force and cached.checked_at is not None and time.monotonic() < self._expires_at:
+                if on_progress is not None:
+                    on_progress("使用已有的更新检查结果")
                 return cached
             if source_id is not None:
                 self._source_id = source_id
@@ -77,7 +84,9 @@ class SelfUpdateCache:
             elif self._check is None:
                 self._source_id = "pypi" if local.deployment_type == "package" else "github"
             try:
-                check = check_for_update(source_id=self._source_id, custom_prefix=self._custom_prefix)
+                check = check_for_update(
+                    source_id=self._source_id, custom_prefix=self._custom_prefix, on_progress=on_progress,
+                )
                 self._check = check
                 self._expires_at = time.monotonic() + CACHE_TTL
                 return check

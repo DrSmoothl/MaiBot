@@ -8,6 +8,7 @@ export interface AgentEvent {
   kind: string
   items: Array<{
     item_type: string
+    logical_turn_id?: string | null
     parts?: Array<{ type: string; text?: string }>
     tool_call?: { func_name: string; args: unknown }
     output?: string

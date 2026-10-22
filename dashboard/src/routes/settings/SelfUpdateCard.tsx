@@ -71,11 +71,21 @@ function SelfUpdateCardContent() {
   const [status, setStatus] = useState<SelfUpdateStatus | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
+  const [checkProgress, setCheckProgress] = useState<string[]>([])
+  const [checkElapsed, setCheckElapsed] = useState(0)
+  const [operationError, setOperationError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
   const [sourceDialogOpen, setSourceDialogOpen] = useState(false)
   const [sourceId, setSourceId] = useState<SelfUpdateSourceSelection['source_id'] | ''>('')
   const [customPrefix, setCustomPrefix] = useState(getSelfUpdateCustomPrefix)
   const [checkedSource, setCheckedSource] = useState<SelfUpdateSourceSelection | null>(null)
+
+  useEffect(() => {
+    if (!checking) return
+    const started = Date.now()
+    const timer = window.setInterval(() => setCheckElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => window.clearInterval(timer)
+  }, [checking])
 
   useEffect(() => {
     let cancelled = false
@@ -108,13 +118,19 @@ function SelfUpdateCardContent() {
       ...(sourceId === 'custom' ? { custom_prefix: customPrefix.trim() } : {}),
     }
     setChecking(true)
+    setCheckElapsed(0)
+    setCheckProgress([])
+    setOperationError(null)
     setCheckedSource(null)
     try {
-      setStatus(await checkSelfUpdate(selection))
+      setStatus(await checkSelfUpdate(selection, true, (message) => {
+        setCheckProgress((previous) => [...previous.slice(-11), message])
+      }))
       setCheckedSource(selection)
       setSourceDialogOpen(false)
       setLoadError(null)
     } catch (error) {
+      setOperationError(errorMessage(error))
       toast({
         title: t('settings.selfUpdate.checkFailed'),
         description: errorMessage(error),
@@ -130,9 +146,11 @@ function SelfUpdateCardContent() {
     if (!targetCommit || !checkedSource) return
 
     setApplying(true)
+    setOperationError(null)
     try {
       await applySelfUpdate(targetCommit, checkedSource)
     } catch (error) {
+      setOperationError(errorMessage(error))
       toast({
         title: t('settings.selfUpdate.applyFailed'),
         description: errorMessage(error),
@@ -183,10 +201,10 @@ function SelfUpdateCardContent() {
       </div>
 
       <Dialog open={sourceDialogOpen} onOpenChange={(open) => { if (!checking) setSourceDialogOpen(open) }}>
-        <DialogContent preventOutsideClose={checking}>
+        <DialogContent preventOutsideClose={checking} className="max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>选择本体更新源</DialogTitle>
-            <DialogDescription>本次检查和更新使用同一个来源，失败后可重新选择。</DialogDescription>
+            <DialogDescription>下载使用所选来源；源码版本信息同时查询 GitHub 和 CNB，采用先完成的结果。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -215,6 +233,21 @@ function SelfUpdateCardContent() {
               <p className="text-sm text-muted-foreground">只填写一个源前缀，后面会追加 /Mai-with-u/MaiBot.git。</p>
             </div>}
           </div>
+          {(checking || checkProgress.length > 0) && (
+            <div role="status" className="space-y-2 text-sm">
+              <p className="text-muted-foreground">
+                {checking ? '正在检查更新' : operationError ? '检查未完成' : '检查完成'} · 已等待 {checkElapsed} 秒
+              </p>
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/50 p-3 text-xs">
+                {checkProgress.length > 0 ? checkProgress.join('\n') : '等待后端开始检查…'}
+              </pre>
+            </div>
+          )}
+          {operationError && (
+            <pre role="alert" className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive select-text">
+              {operationError}
+            </pre>
+          )}
           <DialogFooter>
             <Button variant="outline" disabled={checking} onClick={() => setSourceDialogOpen(false)}>取消</Button>
             <Button disabled={checking || !sourceId || (sourceId === 'custom' && !customPrefix.trim())} onClick={handleCheck}>
@@ -225,6 +258,11 @@ function SelfUpdateCardContent() {
       </Dialog>
 
       <div className="mt-3 space-y-3 text-xs sm:text-sm">
+        {operationError && !sourceDialogOpen && (
+          <pre role="alert" className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive select-text">
+            {operationError}
+          </pre>
+        )}
         {loadError && (
           <p className="text-destructive">
             {t('settings.selfUpdate.loadFailed')}: {loadError}
@@ -254,12 +292,9 @@ function SelfUpdateCardContent() {
           <AvailableUpdate status={status} busy={busy || !checkedSource} applying={applying} onApply={handleApply} />
         )}
         {status?.last_result && <LastResult result={status.last_result} />}
-        {status?.supported && (
+        {status?.supported && status.source_name && (
           <p className="text-muted-foreground break-all">
-            {status.source_name && `${t('settings.selfUpdate.source', { name: status.source_name })} · `}
-            {status.deployment_type === 'package'
-              ? '本体更新时选择 PyPI 官方、清华或阿里，失败不自动换源。版本信息从 PyPI 官方检查。'
-              : '本体更新时选择 CNB、GitHub 或一个自定义源，失败不自动换源。更新后的依赖按项目配置安装。'}
+            {t('settings.selfUpdate.source', { name: status.source_name })}
           </p>
         )}
       </div>

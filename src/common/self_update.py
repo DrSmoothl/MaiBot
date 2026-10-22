@@ -9,7 +9,8 @@ Worker（WebUI）只负责检查更新与登记更新请求；真正改动代码
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from threading import Lock
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -207,6 +208,16 @@ def _run_command(command: List[str], root: Path, timeout: float) -> "subprocess.
     )
 
 
+def _timeout_output(exc: subprocess.TimeoutExpired) -> str:
+    """TimeoutExpired 即使启用 text 也可能携带 bytes，保留命令超时前的诊断输出。"""
+    parts: List[str] = []
+    for label, output in (("标准输出", exc.stdout), ("错误输出", exc.stderr)):
+        if output:
+            text = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else output
+            parts.append(f"{label}（末尾最多 4000 字符）：\n{text[-4000:].strip()}")
+    return "\n".join(parts) if parts else "命令超时前没有输出。"
+
+
 def _git(root: Path, *args: str, timeout: float = GIT_TIMEOUT_SECONDS) -> str:
     """执行必须成功的 Git 命令，返回未裁剪的标准输出。"""
 
@@ -214,7 +225,9 @@ def _git(root: Path, *args: str, timeout: float = GIT_TIMEOUT_SECONDS) -> str:
     try:
         result = _run_command(["git", *args], root, timeout)
     except subprocess.TimeoutExpired as exc:
-        raise SelfUpdateError("git_timeout", f"Git 命令超时: {command_text}") from exc
+        raise SelfUpdateError(
+            "git_timeout", f"Git 命令超时（{timeout:g} 秒）: {command_text}\n{_timeout_output(exc)}",
+        ) from exc
     if result.returncode != 0:
         output = result.stderr.strip() or result.stdout.strip()
         raise SelfUpdateError("git_failed", f"Git 命令失败: {command_text}\n{output}")
@@ -279,7 +292,10 @@ def _sync_dependencies(root: Path, tool: str) -> None:
     try:
         result = _run_command(command, root, DEPENDENCY_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
-        raise SelfUpdateError("dependency_timeout", f"依赖同步超时: {' '.join(command)}") from exc
+        raise SelfUpdateError(
+            "dependency_timeout",
+            f"依赖同步超时（{DEPENDENCY_TIMEOUT_SECONDS:g} 秒）: {' '.join(command)}\n{_timeout_output(exc)}",
+        ) from exc
     if result.returncode != 0:
         output = (result.stderr.strip() or result.stdout.strip())[-4000:]
         raise SelfUpdateError("dependency_failed", f"依赖同步失败: {' '.join(command)}\n{output}")
@@ -411,19 +427,32 @@ def _get_update_json(path: str, api_source: str, deadline: float) -> Dict[str, A
             raise ValueError("API 响应不是对象")
         return payload
     except (OSError, ValueError) as exc:
-        raise SelfUpdateError("fetch_failed", f"{api_source} 检查更新失败：{exc}") from exc
+        raise SelfUpdateError(
+            "fetch_failed", f"请求 {url} 失败（本次请求超时上限 {remaining:.1f} 秒）：{type(exc).__name__}: {exc}",
+        ) from exc
 
 
 def _check_source_api(
     local: LocalState, root: Path, source: UpdateSource, api_source: str, deadline: float,
+    on_progress: Optional[Callable[[str], None]] = None,
 ) -> UpdateCheck:
     """从单个信息源获取完整检查结果，下载源仍由用户选择。"""
+    started = time.monotonic()
+    stage = "读取分支信息"
+
+    def report(message: str) -> None:
+        nonlocal stage
+        stage = message
+        if on_progress is not None:
+            on_progress(message)
+
     def read(path: str) -> Dict[str, Any]:
         return _get_update_json(path, api_source, deadline)
 
     if local.branch is None or local.commit is None:
         raise ValueError("本地仓库状态缺少当前分支或提交")
     try:
+        report(f"读取 {local.branch} 分支信息")
         branch = read(f"branches/{quote(local.branch, safe='')}")
         target = branch["commit"]["sha"]
         if not isinstance(target, str) or _COMMIT_PATTERN.fullmatch(target) is None:
@@ -437,11 +466,13 @@ def _check_source_api(
         if target == local.commit:
             check.latest_version = local.version
             return check
+        report("比较本地与远端提交")
         comparison = read(f"compare/{local.commit}...{target}?per_page=100")
         if api_source == "cnb":
             check.behind = int(comparison["total_commits"])
             # CNB 没有 behind_by；只有分叉或本地领先时才反向比较。
             if comparison["merge_base_commit"]["sha"] != local.commit:
+                report("检查分支是否分叉")
                 check.ahead = int(read(f"compare/{target}...{local.commit}")["total_commits"])
         else:
             check.behind = int(comparison["ahead_by"])
@@ -456,14 +487,16 @@ def _check_source_api(
             UpdateCommit(item["sha"][:8], item["commit"]["message"].splitlines()[0], item["commit"]["committer"]["date"])
             for item in comparison["commits"][:MAX_LISTED_COMMITS]
         ]
+        report("读取远端版本与依赖要求")
         if api_source == "cnb":
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise SelfUpdateError("fetch_failed", "检查更新超时（60 秒）")
-            project = GitSource.read_text(
-                GitSource.select("cnb").raw_url("Mai-with-u", "MaiBot", target, "pyproject.toml"),
-                timeout=remaining,
-            )
+            url = GitSource.select("cnb").raw_url("Mai-with-u", "MaiBot", target, "pyproject.toml")
+            try:
+                project = GitSource.read_text(url, timeout=remaining)
+            except (OSError, ValueError) as exc:
+                raise SelfUpdateError("fetch_failed", f"请求 {url} 失败：{type(exc).__name__}: {exc}") from exc
         else:
             contents = read(f"contents/pyproject.toml?ref={target}")
             project = base64.b64decode(contents["content"]).decode("utf-8")
@@ -471,21 +504,29 @@ def _check_source_api(
         if _parse_pyproject((root / "pyproject.toml").read_text(encoding="utf-8"))[1] != requires_python:
             check.blockers.append("python_requirement_changed")
         return check
-    except (KeyError, TypeError, ValueError) as exc:
-        raise SelfUpdateError("fetch_failed", f"更新 API 数据不完整：{exc}") from exc
+    except (SelfUpdateError, OSError, KeyError, TypeError, ValueError) as exc:
+        raise SelfUpdateError(
+            "fetch_failed",
+            f"{api_source} 检查失败（{stage}，已耗时 {time.monotonic() - started:.1f} 秒）：{type(exc).__name__}: {exc}",
+        ) from exc
 
 
 def check_for_update(
-    root: Path = PROJECT_ROOT, source_id: Optional[str] = None, custom_prefix: str = ""
+    root: Path = PROJECT_ROOT, source_id: Optional[str] = None, custom_prefix: str = "",
+    on_progress: Optional[Callable[[str], None]] = None,
 ) -> UpdateCheck:
     """联网检查官方仓库是否有新版本。"""
 
+    if on_progress is not None:
+        on_progress("检查本地安装与仓库状态")
     local = inspect_local(root)
     if local.blocker is not None:
         return UpdateCheck(local=local, blockers=[local.blocker])
     if local.deployment_type == "package":
         selected = source_id or "pypi"
         index = package_index(selected)
+        if on_progress is not None:
+            on_progress(f"{PACKAGE_INDEXES[selected][0]}：读取正式版本列表")
         check = evaluate_update(local, latest_release(local.version, selected), time.time(), root)
         check.source = UpdateSource(selected, PACKAGE_INDEXES[selected][0], index)
         return check
@@ -495,13 +536,34 @@ def check_for_update(
     # 两个源同时检查，失败的一路不掩盖另一路的有效结果；不等待慢源退出。
     deadline = time.monotonic() + 60
     executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="update-check")
-    pending = {executor.submit(_check_source_api, local, root, source, name, deadline) for name in ("github", "cnb")}
+    progress = {name: "等待查询" for name in ("github", "cnb")}
+    progress_lock = Lock()
+
+    def report(name: str, message: str) -> None:
+        # 两路并行查询共享诊断快照，超时时保留失败原因和仍在等待的阶段。
+        with progress_lock:
+            progress[name] = message
+        if on_progress is not None:
+            on_progress(f"{name}：{message}")
+
+    def check_source(name: str) -> UpdateCheck:
+        try:
+            result = _check_source_api(local, root, source, name, deadline, lambda message: report(name, message))
+        except (SelfUpdateError, OSError, ValueError, KeyError, TypeError) as exc:
+            report(name, f"失败：{exc}")
+            raise
+        report(name, "检查完成")
+        return result
+
+    pending = {executor.submit(check_source, name) for name in progress}
     errors: List[str] = []
     try:
         while pending:
             done, pending = wait(pending, timeout=max(0, deadline - time.monotonic()), return_when=FIRST_COMPLETED)
             if not done:
-                raise SelfUpdateError("fetch_failed", "检查更新超时（60 秒）")
+                with progress_lock:
+                    details = "；".join(f"{name}：{message}" for name, message in progress.items())
+                raise SelfUpdateError("fetch_failed", f"检查更新超时（60 秒）。各源最后状态：{details}")
             for future in done:
                 try:
                     return future.result()
