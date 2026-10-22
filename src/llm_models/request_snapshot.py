@@ -406,6 +406,7 @@ def serialize_response_request_snapshot(request: ResponseRequest) -> dict[str, A
         "response_format": serialize_response_format_snapshot(request.response_format),
         "temperature": request.temperature,
         "tool_options": serialize_tool_options_snapshot(request.tool_options),
+        "tool_choice": request.tool_choice,
     }
 
 

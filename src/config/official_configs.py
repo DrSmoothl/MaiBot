@@ -776,7 +776,7 @@ class ChatConfig(ConfigBase):
     """允许麦麦在回复开头 @ 一个或多个用户，由模型根据聊天内容决定是否使用。"""
 
     max_context_size: int = Field(
-        default=40,
+        default=30,
         json_schema_extra={
             "label": {
                 "zh_CN": "群聊上下文",
@@ -807,36 +807,36 @@ class ChatConfig(ConfigBase):
     )
     """私聊回复时参考的最近消息数量。"""
 
-    mid_term_memory: bool = Field(
-        default=True,
+    context_compaction_max_chars: int = Field(
+        default=48000,
+        ge=16000,
         json_schema_extra={
             "label": {
-                "zh_CN": "聊天回想",
-                "en_US": "Chat recall",
-                "ja_JP": "チャット回想",
-            },
-            "x-widget": "switch",
-            "x-row": "chat-recall-controls",
-        },
-    )
-    """打开后会主动召回最近聊天发生的事情。"""
-
-    mid_term_memory_lenth: int = Field(
-        default=10,
-        ge=0,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "聊天回想保留数",
-                "en_US": "Chat recall limit",
-                "ja_JP": "チャット回想保持数",
+                "zh_CN": "上下文文本预算",
+                "en_US": "Context text budget",
+                "ja_JP": "文脈テキスト上限",
             },
             "x-widget": "input",
-            "x-layout": "inline-right",
-            "x-input-width": "6.5rem",
-            "x-row": "chat-recall-controls",
+            "advanced": True,
         },
     )
-    """最多保留多少条聊天回想；设为 0 表示不保留。"""
+    """历史文字、工具参数与结果的字符预算；超过预算或近期消息数的两倍时生成滚动状态摘要。"""
+
+    context_compaction_summary_max_chars: int = Field(
+        default=6000,
+        ge=1000,
+        le=8000,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "状态摘要字符上限",
+                "en_US": "State summary character limit",
+                "ja_JP": "状態要約の文字数上限",
+            },
+            "x-widget": "input",
+            "advanced": True,
+        },
+    )
+    """滚动状态摘要的最大字符数；使用 utils 模型生成，摘要始终随 Planner 上下文发送。"""
 
     reply_timing: ChatReplyTimingConfig = Field(default_factory=ChatReplyTimingConfig)
     """什么时候回复、回复频率与等待退避配置。"""

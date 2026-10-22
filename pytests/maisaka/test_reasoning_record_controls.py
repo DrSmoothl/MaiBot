@@ -12,7 +12,7 @@ from src.llm_models.payload_content.context_item import ContextItemMeta, Context
 from src.maisaka.chat_loop_service import MaisakaChatLoopService
 from src.maisaka.display.prompt_preview_logger import PromptPreviewLogger
 from src.maisaka.display.runtime_mixin import MaisakaRuntimeDisplayMixin
-from src.maisaka.memory.mid_term import _save_mid_term_memory_prompt_preview
+from src.maisaka.context.compaction import save_compaction_prompt_preview
 from src.maisaka.monitor.events import _serialize_tool_results
 from src.maisaka.reasoning_engine import CycleEnd, CycleRuntimeState, MaisakaReasoningEngine
 
@@ -94,9 +94,9 @@ async def test_planner_and_memory_records_follow_save_switch(monkeypatch, saved_
     response = await service.chat_loop_step([])
     assert bool(response.prompt_html_uri) is save
     assert (response.prompt_section is not None) is (show and save)
-    _save_mid_term_memory_prompt_preview(
+    save_compaction_prompt_preview(
         [UserMessageItem(meta=ContextItemMeta.create(), parts=(ContextTextPart("回想输入"),))],
-        result=result, session_id="test-session", time_range="测试时段", participants=["测试用户"], log_prefix="测试",
+        result=result, session_id="test-session",
     )
     assert len(saved_records) == (2 if save else 0)
     if save:

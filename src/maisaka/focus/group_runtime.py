@@ -8,14 +8,12 @@ from html import escape
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set, Tuple
 
 import asyncio
-import json
 import time
 import uuid
 
 from src.chat.message_receive.message import SessionMessage
 from src.chat.message_receive.chat_manager import chat_manager
 from src.common.logger import get_logger
-from src.common.prompt_i18n import load_prompt
 from src.common.message_repository import find_messages
 from src.common.utils.utils_config import ChatConfigUtils
 from src.config.config import global_config
@@ -27,12 +25,13 @@ from src.maisaka.context.messages import (
     LLMContextMessage,
     ModelOutputContextMessage,
     ReferenceMessage,
-    ReferenceMessageType,
     SessionBackedMessage,
     ToolResultMessage,
     ToolResultMediaMessage,
 )
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
+from src.maisaka.context.compaction import ContextSummaryMessage, build_context_summary
+from src.maisaka.context.post_processor import process_chat_history_after_cycle
 from src.maisaka.monitor.events import emit_flow_step, emit_planner_snapshot
 from src.maisaka.tool_result_condenser import condense_tool_result, should_condense_tool_result
 
@@ -44,7 +43,6 @@ if TYPE_CHECKING:
 
 logger = get_logger("maisaka_focus")
 MAX_SEEN_MESSAGES = 20000
-SUMMARY_INPUT_CHARS = 16000
 
 
 class FocusChatLoopService(MaisakaChatLoopService):
@@ -224,6 +222,7 @@ class FocusGroupRuntime:
     async def remove_member(self, session_id: str, *, clear_context: bool) -> None:
         # 先撤销本轮资格，再取消本地请求；迟到结果不能继续产生动作。
         self._generation += 1
+        self._service.planner_request_snapshot = None
         await self._cancel_worker()
         task = self._debounce_tasks.pop(session_id, None)
         if task is not None:
@@ -526,6 +525,7 @@ class FocusGroupRuntime:
             )
             self._planner_ended_at = time.time()
             if generation != self._generation or self._closed:
+                self._service.planner_request_snapshot = None
                 return
             # 有效模型响应确认本次快照覆盖的消息；工具成功与否单独记录，不能误认为已回复。
             for sid, sequence in covered:
@@ -790,47 +790,53 @@ class FocusGroupRuntime:
         )
 
     async def _compact(self) -> None:
-        size = sum(entry.size for entry in self.entries)
-        text_size = sum(len(message.processed_plain_text) for message in self.history)
-        if size <= self.max_context_size and text_size <= self.max_context_size * 2000:
+        planner_snapshot = self._service.planner_request_snapshot
+        if planner_snapshot is None:
             return
-        split = max(1, len(self.entries) - 1)
-        recent_size = 0
-        for index in range(len(self.entries) - 1, -1, -1):
-            recent_size += self.entries[index].size
-            if recent_size >= max(1, self.max_context_size // 2):
-                split = max(1, index)
+        snapshot = list(self.entries)
+        generation = self._generation
+        history = self.history
+        plan = process_chat_history_after_cycle(
+            history, max_context_size=self.max_context_size,
+            max_context_chars=global_config.chat.context_compaction_max_chars, consume_references=False,
+        )
+        if not plan.removed_messages:
+            return
+        removed_ids = {id(message) for message in plan.removed_messages}
+        split = 0
+        # 共享时间线以完整入站片段或模型—工具批次为单位；不能在条目内部截断。
+        for item in snapshot:
+            if not all(id(message) in removed_ids or isinstance(message, ContextSummaryMessage) for message in item.messages):
                 break
-        old = self.entries[:split]
-        if (
-            sum(len(message.processed_plain_text) for entry in self.entries[split:] for message in entry.messages)
-            > self.max_context_size * 2000
-        ):
-            # 单条巨型消息/工具批次本身超预算时，把完整段纳入压缩，不能从中间裁断协议。
-            split = len(self.entries)
-            old = self.entries[:split]
+            split += 1
+        if split <= 0:
+            return
+        old = snapshot[:split]
         related = set().union(*(entry.session_ids for entry in old))
-        text = "\n\n".join(entry.summary_text() for entry in old)
-        summary = ""
-        self._set_stage("上下文压缩", "整理较早内容并保留会话来源")
-        service = MaisakaChatLoopService(model_task_name="utils")
-        # 大批消息分段整理，全部内容都进入摘要请求；不截断后假装已经处理。
-        for offset in range(0, len(text), SUMMARY_INPUT_CHARS):
-            task = ReferenceMessage(
-                content=f"已有摘要：\n{summary}\n\n待合并内容：\n{text[offset : offset + SUMMARY_INPUT_CHARS]}",
-                timestamp=datetime.now(),
-                remaining_uses_value=None,
+        previous = next((message for message in reversed(history) if isinstance(message, ContextSummaryMessage)), None)
+        sources = [
+            message for item in old for message in item.messages if not isinstance(message, ContextSummaryMessage)
+        ]
+        self._set_stage("上下文压缩", "复用 Planner 请求快照并保留会话来源与近期原文")
+        summary: ContextSummaryMessage | None = None
+        try:
+            summary = await build_context_summary(
+                sources, planner_snapshot=planner_snapshot, previous_summary=previous,
+                recent_messages=[message for item in snapshot[split:] for message in item.messages],
+                source_context="\n".join(
+                    f"session_ids={sorted(item.session_ids)}; "
+                    f"messages={[(message.timestamp.isoformat(), message.source) for message in item.messages]}"
+                    for item in snapshot
+                ),
+                session_id=self.scope_id, max_summary_chars=global_config.chat.context_compaction_summary_max_chars,
             )
-            response = await service.chat_loop_step(
-                [task],
-                request_kind="focus_summary",
-                tool_definitions=[],
-                max_context_size=1,
-                system_prompt=load_prompt("maisaka_focus_summary"),
-            )
-            summary = (response.content or "").strip()
-            if not summary:
-                raise RuntimeError("Focus 上下文压缩没有产生摘要，原始内容已保留")
+        except Exception:
+            logger.exception("Focus 上下文压缩失败，将丢弃本批旧原文并继续共享 Planner: scope=%s", self.scope_id)
+        # 清空/成员变更会使旧来源失效；不能在模型返回后恢复被移除的聊天材料。
+        if generation != self._generation or self._closed or len(snapshot) != len(self.entries) or any(
+            old_entry is not current for old_entry, current in zip(snapshot, self.entries, strict=True)
+        ):
+            return
         watermarks: Dict[str, int] = {}
         inputs = {}
         for item in old:
@@ -838,29 +844,29 @@ class FocusGroupRuntime:
                 watermarks[sid] = max(watermarks.get(sid, 0), sequence)
             for sid, records in item.inputs.items():
                 inputs.setdefault(sid, []).extend(records)
-        entry = FocusContextEntry(
-            [
-                ReferenceMessage(
-                    content=f"来源 session_ids={json.dumps(sorted(related), ensure_ascii=False)}\n{summary}",
-                    timestamp=datetime.now(),
-                    reference_type=ReferenceMessageType.CONTEXT_RESTORE,
-                    remaining_uses_value=None,
-                    display_prefix="[Focus 跨聊天历史摘要]",
-                )
-            ],
-            related,
-            watermarks=watermarks,
-            inputs=inputs,
-        )
+        if summary is not None:
+            source_names = [self.members[sid].session_name if sid in self.members else sid for sid in sorted(related)]
+            summary.display_prefix = f"[Focus 上下文状态摘要 来源：{'、'.join(source_names)}]"
+            entry = FocusContextEntry([summary], related, watermarks=watermarks, inputs=inputs)
+        else:
+            # 失败后保留已有有效摘要与进度，不保留本批旧原文或用于恢复它们的输入编号。
+            # 即使没有旧摘要，也保留一个仅含水位的条目，避免破坏后续输入进度的确认。
+            summaries = [message for item in old for message in item.messages if isinstance(message, ContextSummaryMessage)]
+            entry = FocusContextEntry(summaries, related, watermarks=watermarks)
         self.entries[:split] = [entry]
+        self._service.planner_request_snapshot = None
         if self.members:
             await emit_flow_step(
                 session_id=next(iter(self.members)),
                 run_id=self._run_id,
                 cycle_id=self._cycle,
-                step="focus.context.compacted",
-                title="共享上下文压缩",
-                detail=f"已压缩 {len(old)} 个完整片段，保留会话来源与近期完整轮次。",
+                step="focus.context.compacted" if summary is not None else "focus.context.trimmed",
+                title="共享上下文压缩" if summary is not None else "共享上下文裁切",
+                detail=(
+                    f"已压缩 {len(old)} 个完整片段，保留会话来源与近期完整轮次。"
+                    if summary is not None else
+                    f"压缩失败，已丢弃 {len(old)} 个旧片段，保留近期完整轮次并继续运行。"
+                ),
             )
         for sid, runtime in self.members.items():
             own = [

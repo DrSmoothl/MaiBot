@@ -80,12 +80,7 @@ from src.maisaka.jargon_context_matcher import (
 from src.maisaka.memory.heuristic_injector import heuristic_memory_injector
 from src.maisaka.memory.image_injector import image_memory_injector
 from src.maisaka.monitor.tool_media import build_tool_result_images
-from src.maisaka.memory.mid_term import (
-    build_mid_term_memory_message,
-    build_mid_term_memory_reference_message,
-    insert_mid_term_memory_message,
-    is_mid_term_memory_reference_message,
-)
+from src.maisaka.context.compaction import ContextSummaryMessage, build_context_summary
 from src.maisaka.monitor.events import (
     emit_flow_step,
     emit_planner_snapshot,
@@ -329,48 +324,6 @@ class MaisakaReasoningEngine:
         self._runtime._chat_history.append(reference_message)
         return reference_message
 
-    async def _refresh_mid_term_memory_reference_message(self) -> Optional[ReferenceMessage]:
-        """基于当前 planner 上下文刷新聊天回想参考消息。"""
-
-        if not bool(global_config.chat.mid_term_memory):
-            return None
-
-        selected_history, _ = self._runtime._chat_loop_service.select_llm_context_messages(
-            self._runtime._chat_history,
-            request_kind="planner",
-            max_context_size=self._runtime._max_context_size,
-            is_group_chat=self._runtime.chat_stream.is_group_session,
-        )
-        reference_message = await build_mid_term_memory_reference_message(
-            history=self._runtime._chat_history,
-            selected_history=selected_history,
-            session_id=str(self._runtime.session_id or ""),
-            log_prefix=self._runtime.log_prefix,
-        )
-        if reference_message is None:
-            return None
-
-        if self._has_mid_term_memory_reference_message(reference_message):
-            return None
-
-        self._runtime._chat_history.append(reference_message)
-        return reference_message
-
-    def _has_mid_term_memory_reference_message(self, reference_message: ReferenceMessage) -> bool:
-        """判断历史中是否已经存在相同的聊天回想参考。"""
-
-        normalized_content = " ".join(reference_message.content.split()).strip()
-        if not normalized_content:
-            return False
-
-        for history_message in self._runtime._chat_history:
-            if not is_mid_term_memory_reference_message(history_message):
-                continue
-            history_content = " ".join(str(history_message.content or "").split()).strip()
-            if history_content == normalized_content:
-                return True
-        return False
-
     def _end_planner_no_tool_cycle(
         self,
         planner_extra_lines: list[str],
@@ -546,19 +499,6 @@ class MaisakaReasoningEngine:
             state.planner_ended_at = time.time()
             state.planner_duration_ms = (state.planner_ended_at - planner_started_at) * 1000
         state.response = response
-
-    async def _refresh_mid_term_memory_reference_for_continuation(self, cycle_detail: CycleDetail) -> None:
-        """在一次连续 Planner 循环开始前刷新一次聊天回想参考。"""
-
-        started_at = time.time()
-        try:
-            mid_term_reference_message = await self._refresh_mid_term_memory_reference_message()
-            if mid_term_reference_message is not None:
-                logger.debug(f"{self._runtime.log_prefix} 已刷新聊天回想参考消息")
-        except Exception as exc:
-            logger.debug(f"{self._runtime.log_prefix} 聊天回想参考刷新失败，已跳过: {exc}", exc_info=True)
-        finally:
-            cycle_detail.time_records["mid_term_memory_recall"] = time.time() - started_at
 
     async def _handle_planner_interrupt(
         self,
@@ -874,7 +814,6 @@ class MaisakaReasoningEngine:
                     self._active_logical_turn_id = turn_start_context.logical_turn_id or uuid.uuid4().hex
                     if force_continue_reason := self._runtime._consume_forced_turn_reason():
                         logger.info(f"{self._runtime.log_prefix} {force_continue_reason}")
-                    mid_term_reference_refreshed = False
                     round_index = 0
                     while round_index < self._runtime._max_internal_rounds:
                         # 工具执行或整理上下文期间收到的消息，在下一次模型请求前补齐。
@@ -887,9 +826,7 @@ class MaisakaReasoningEngine:
                         state = CycleRuntimeState()
                         try:
                             await self._refresh_visual_placeholders_for_cycle(cycle_detail)
-                            if not mid_term_reference_refreshed:
-                                await self._refresh_mid_term_memory_reference_for_continuation(cycle_detail)
-                                mid_term_reference_refreshed = True
+                            await self._post_process_chat_history_after_cycle(cycle_detail, consume_references=False)
 
                             self._runtime._start_planner_continuation()
                             await self._run_planner_request(
@@ -989,7 +926,7 @@ class MaisakaReasoningEngine:
         cycle_detail = CycleDetail(cycle_id=self._runtime._cycle_counter)
         await self._post_process_chat_history_after_cycle(
             cycle_detail,
-            enable_mid_term_memory=False,
+            enable_compaction=False,
         )
         self._runtime._enter_stop_state()
         if self._runtime._running:
@@ -1220,54 +1157,66 @@ class MaisakaReasoningEngine:
         self,
         cycle_detail: CycleDetail,
         *,
-        enable_mid_term_memory: bool = True,
+        enable_compaction: bool = True,
+        consume_references: bool = True,
     ) -> None:
-        """裁剪聊天历史，保证用户消息数量不超过配置限制。"""
+        """生成滚动状态后提交裁切；压缩失败也丢弃本批旧原文，继续处理近期消息。"""
+        original_history = list(self._runtime._chat_history)
         process_result = process_chat_history_after_cycle(
             self._runtime._chat_history,
             max_context_size=self._runtime._max_context_size,
             pending_call_ids=self._runtime._get_pending_wait_tool_call_ids(),
+            max_context_chars=global_config.chat.context_compaction_max_chars,
+            consume_references=consume_references,
         )
         if process_result.changed_count <= 0:
             return
 
         final_history = process_result.history
-        if process_result.removed_messages and enable_mid_term_memory and bool(global_config.chat.mid_term_memory):
-            logger.info(
-                f"{self._runtime.log_prefix} 开始生成聊天回想: "
-                f"裁切上下文消息数量={len(process_result.removed_messages)} "
-                f"保留上限={global_config.chat.mid_term_memory_lenth}"
-            )
+        if process_result.removed_messages and enable_compaction:
+            planner_snapshot = self._runtime._chat_loop_service.planner_request_snapshot
+            if planner_snapshot is None:
+                # 冷启动或上次摘要提交后必须先完成一次 Planner 请求，才能复用真实前缀。
+                return
             summary_started_at = time.time()
+            previous_summary = next(
+                (message for message in reversed(original_history) if isinstance(message, ContextSummaryMessage)), None
+            )
+            summary: ContextSummaryMessage | None = None
             try:
-                summary_result = await build_mid_term_memory_message(
+                summary = await build_context_summary(
                     process_result.removed_messages,
+                    planner_snapshot=planner_snapshot,
+                    previous_summary=previous_summary,
+                    recent_messages=[message for message in final_history if not isinstance(message, ContextSummaryMessage)],
                     session_id=self._runtime.session_id,
-                    log_prefix=self._runtime.log_prefix,
+                    max_summary_chars=global_config.chat.context_compaction_summary_max_chars,
                 )
             except Exception:
-                logger.exception(f"{self._runtime.log_prefix} 生成聊天回想失败，已跳过本次插入")
-                summary_result = None
-
-            cycle_detail.time_records["mid_term_memory"] = time.time() - summary_started_at
-            if summary_result is not None:
-                final_history = insert_mid_term_memory_message(
-                    final_history,
-                    summary_result.message,
-                    max_summary_count=max(0, int(global_config.chat.mid_term_memory_lenth)),
-                )
+                logger.exception(f"{self._runtime.log_prefix} 上下文压缩失败，将直接裁切本批旧原文，不再重试本批内容")
+            finally:
+                cycle_detail.time_records["context_compaction"] = time.time() - summary_started_at
+            # /clear 或其他异步操作可能在模型请求期间改变历史，禁止用旧快照覆盖新状态。
+            if len(self._runtime._chat_history) != len(original_history) or any(
+                current is not original
+                for current, original in zip(self._runtime._chat_history, original_history, strict=True)
+            ):
+                logger.info(f"{self._runtime.log_prefix} 压缩期间上下文已改变，取消提交旧快照")
+                return
+            if summary is not None:
+                final_history = [summary, *[
+                    message for message in final_history if not isinstance(message, ContextSummaryMessage)
+                ]]
                 logger.info(
-                    f"{self._runtime.log_prefix} 已生成聊天回想: "
-                    f"msg_id={summary_result.message.message_id} "
-                    f"模型={summary_result.model_name or 'unknown'} "
-                    f"token={summary_result.total_tokens}"
+                    f"{self._runtime.log_prefix} 上下文压缩完成: "
+                    f"压缩={len(process_result.removed_messages)} 保留原文={process_result.remaining_context_count} "
+                    f"摘要字符={len(summary.content)}"
                 )
-            else:
-                logger.debug(f"{self._runtime.log_prefix} 聊天回想未产生可插入内容，已跳过")
-        elif process_result.removed_messages:
-            logger.debug(f"{self._runtime.log_prefix} 聊天回想未启用，跳过生成")
+            # 失败时直接提交已规划的裁切，保留上一份有效摘要；清除快照后不再尝试同一批旧原文。
 
         self._runtime._chat_history = final_history
+        if process_result.removed_messages:
+            self._runtime._chat_loop_service.planner_request_snapshot = None
         if process_result.removed_count <= 0:
             return
         # 常规收尾不单独展示，仅在确实裁切上下文后记录附加处理。

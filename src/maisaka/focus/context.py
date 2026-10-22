@@ -22,12 +22,12 @@ from src.maisaka.context.messages import (
     ModelOutputContextMessage,
     ReferenceMessage,
     ReferenceMessageType,
-    SessionBackedMessage,
     ToolResultMessage,
     ToolResultMediaMessage,
     build_context_items_from_history_entry,
 )
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
+from src.maisaka.context.compaction import ContextSummaryMessage, message_text_for_compaction
 
 CHECKPOINT_VERSION = 1
 _ITEM_TYPES = {
@@ -95,21 +95,12 @@ class FocusContextEntry:
         return sum(message.count_in_context for message in self.messages)
 
     def summary_text(self) -> str:
-        parts = []
-        for message in self.messages:
-            text = message.processed_plain_text
-            if isinstance(message, ModelOutputContextMessage) and message.tool_calls:
-                text += "\n" + json.dumps(
-                    [
-                        {"tool": call.func_name, "arguments": call.args, "call_id": call.call_id}
-                        for call in message.tool_calls
-                    ],
-                    ensure_ascii=False,
-                )
-            if isinstance(message, SessionBackedMessage):
-                text = f"msg_id={message.message_id} time={message.timestamp.isoformat()} " + text
-            parts.append(f"[{message.role}/{message.source}] {text}")
+        parts = [
+            text for message in self.messages if not isinstance(message, ContextSummaryMessage)
+            if (text := message_text_for_compaction(message))
+        ]
         return f"session_ids={json.dumps(sorted(self.session_ids), ensure_ascii=False)}\n" + "\n".join(parts)
+
 
 
 def _encode(value: Any) -> Any:
@@ -205,7 +196,8 @@ def deserialize_message(record: Dict[str, Any]) -> LLMContextMessage:
             context_item_id=item.meta.item_id,
         )
     if record["kind"] == "reference":
-        return ReferenceMessage(
+        reference_class = ContextSummaryMessage if record["source"] == "context_compaction" else ReferenceMessage
+        return reference_class(
             content=record["content"],
             timestamp=item.meta.timestamp,
             reference_type=ReferenceMessageType(record["reference_type"]),

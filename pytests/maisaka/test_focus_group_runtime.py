@@ -28,7 +28,6 @@ from src.llm_models.payload_content.context_item import (
     RoleType,
 )
 from src.maisaka.chat_loop_service import ChatResponse
-from src.maisaka import chat_loop_service as chat_service_module
 from src.maisaka.context.messages import (
     InternalContextMessage,
     ModelOutputContextMessage,
@@ -36,6 +35,8 @@ from src.maisaka.context.messages import (
     ToolResultMessage,
 )
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
+from src.maisaka.context import compaction as compaction_module
+from src.maisaka.context.compaction import ContextSummaryMessage, PlannerRequestSnapshot
 from src.maisaka.focus import group_runtime as group_module
 from src.maisaka.focus import context as context_module
 from src.maisaka.focus.context import FocusCheckpointStore, FocusContextEntry
@@ -443,24 +444,34 @@ async def test_clear_context_invalidates_mixed_summary_but_keeps_other_chat(setu
     await group.stop()
 
 
+def _seed_planner_snapshot(group):
+    from src.config.model_configs import ModelInfo
+    from src.llm_models.model_client.base_client import ResponseRequest
+    group._service.planner_request_snapshot = PlannerRequestSnapshot(
+        ResponseRequest(model_info=ModelInfo(model_type="llm", name="planner", model_identifier="remote", api_provider="test"),
+                        context_items=[]), tuple(group.history),
+    )
+
+
 @pytest.mark.asyncio
 async def test_compaction_keeps_source_progress_and_recent_complete_tool_turn(setup_group, monkeypatch):
     group, _, _ = setup_group
     monkeypatch.setattr(global_config.chat, "max_context_size", 4)
     summary_requests = []
 
-    clients = Mock()
-    monkeypatch.setattr(chat_service_module, "LLMServiceClient", clients)
+    class SummaryClient:
+        async def generate_response_from_snapshot(self, request):
+            summary_requests.extend(context_module.items.get_item_text(item) for item in request.context_items)
+            assert request.tool_choice is None
+            payload = {key: [] for key in compaction_module.STATE_LABELS}
+            payload["background"] = ["A 的事实"]
+            payload["pending"] = ["B 的未完成任务"]
+            return LLMResponseResult.from_portable_output(response=json.dumps(payload))
 
-    class SummaryService(chat_service_module.MaisakaChatLoopService):
-        async def chat_loop_step(self, messages, **kwargs):
-            # 使用真实的请求注册与客户端选择，防止摘要请求在首次压缩时才暴露漏注册。
-            self._get_llm_chat_client(kwargs["request_kind"])
-            summary_requests.extend(message.processed_plain_text for message in messages)
-            return _response("A 的事实；B 的未完成任务。")
-
-    monkeypatch.setattr(group_module, "MaisakaChatLoopService", lambda **kwargs: SummaryService(**kwargs))
-    group.entries = [FocusContextEntry([_history(str(i))], {"A" if i % 2 else "B"}, i) for i in range(1, 7)]
+    clients = Mock(return_value=SummaryClient())
+    monkeypatch.setattr(compaction_module, "LLMServiceClient", clients)
+    monkeypatch.setattr(compaction_module, "save_compaction_prompt_preview", Mock())
+    group.entries = [FocusContextEntry([_history(str(i))], {"A" if i % 2 else "B"}, i) for i in range(1, 11)]
     response = _response(calls=[ToolCall("recent", "echo", {"session_id": "B", "text": "recent"})])
     turn_id = next(message.output_item.meta.logical_turn_id for message in response.raw_messages if message.tool_calls)
     recent = FocusContextEntry(
@@ -477,26 +488,111 @@ async def test_compaction_keeps_source_progress_and_recent_complete_tool_turn(se
         {"A", "B"},
     )
     group.entries.append(recent)
+    _seed_planner_snapshot(group)
     await group._compact()
     assert group.entries[-1] is recent
     assert group.entries[0].session_ids == {"A", "B"}
     assert group.entries[0].progress["A"] > 0
     assert group.entries[0].progress["B"] > 0
     assert "session_ids=" in "\n".join(summary_requests)
-    clients.assert_called_once_with(task_name="utils", request_type="maisaka.focus_summary", session_id="")
+    assert "Focus" in "\n".join(summary_requests)
+    clients.assert_called_once_with(task_name="planner", request_type="maisaka.context_compaction", session_id=group.scope_id)
+    assert isinstance(group.entries[0].messages[0], ContextSummaryMessage)
 
 
 @pytest.mark.asyncio
-async def test_empty_summary_preserves_original_context(setup_group, monkeypatch):
+@pytest.mark.parametrize("error", [ValueError("摘要为空"), TimeoutError("硬超时"), RuntimeError("服务商重试耗尽")])
+@pytest.mark.parametrize("keep_previous", [False, True])
+async def test_failed_summary_discards_old_entries_and_preserves_progress(setup_group, monkeypatch, error, keep_previous):
     group, _, _ = setup_group
     monkeypatch.setattr(global_config.chat, "max_context_size", 2)
-    service = SimpleNamespace(chat_loop_step=AsyncMock(return_value=_response("")))
-    monkeypatch.setattr(group_module, "MaisakaChatLoopService", lambda **kwargs: service)
-    group.entries = [FocusContextEntry([_history(str(i))], {"A"}) for i in range(5)]
+    builder = AsyncMock(side_effect=error)
+    monkeypatch.setattr(group_module, "build_context_summary", builder)
+    previous = ContextSummaryMessage(content="上一份有效摘要", timestamp=datetime.now())
+    group.entries = [
+        *([FocusContextEntry([previous], {"A"})] if keep_previous else []),
+        *[FocusContextEntry([_history(str(i))], {"A"}, i, inputs={"A": [(i, f"message-{i}")]}) for i in range(1, 6)],
+    ]
     original = list(group.entries)
-    with pytest.raises(RuntimeError, match="原始内容已保留"):
-        await group._compact()
-    assert group.entries == original
+    _seed_planner_snapshot(group)
+    await group._compact()
+    assert group.entries[1:] == original[-2:]
+    assert group.entries[0].messages == ([previous] if keep_previous else [])
+    assert group.entries[0].progress == {"A": 3}
+    assert group.entries[0].inputs == {}
+    assert group._service.planner_request_snapshot is None
+    assert not group._failed
+    await group._compact()
+    builder.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_compaction_continues_to_planner_in_same_turn(setup_group, monkeypatch):
+    group, _, _ = setup_group
+    monkeypatch.setattr(global_config.chat, "max_context_size", 2)
+    builder = AsyncMock(side_effect=TimeoutError("服务商重试耗尽"))
+    monkeypatch.setattr(group_module, "build_context_summary", builder)
+    group.entries = [FocusContextEntry([_history(str(i))], {"A"}, i) for i in range(1, 6)]
+    _seed_planner_snapshot(group)
+    planner = AsyncMock(return_value=_response())
+    monkeypatch.setattr(group._service, "chat_loop_step", planner)
+    monkeypatch.setattr(group, "_build_references", AsyncMock(return_value=[]))
+    await group._run_turn()
+    planner.assert_awaited_once()
+    assert [message.processed_plain_text for message in planner.await_args.args[0]] == ["4", "5"]
+    assert not group._failed
+    assert group._considered == {"A": 5}
+
+
+def test_state_summary_survives_focus_checkpoint_round_trip():
+    summary = ContextSummaryMessage(
+        content="B 尚有未回答的问题", timestamp=datetime.now(), remaining_uses_value=None,
+        display_prefix="[Focus 状态摘要 session_ids=A,B]",
+    )
+    restored = context_module.deserialize_message(context_module.serialize_message(summary))
+    assert isinstance(restored, ContextSummaryMessage)
+    assert restored.content == summary.content
+    assert restored.display_prefix == summary.display_prefix
+    assert restored.remaining_uses_value is None
+    assert not restored.count_in_context
+
+
+@pytest.mark.asyncio
+async def test_focus_compaction_obeys_character_budget_and_keeps_latest_original(setup_group, monkeypatch):
+    group, _, _ = setup_group
+    monkeypatch.setattr(global_config.chat, "max_context_size", 100)
+    monkeypatch.setattr(global_config.chat, "context_compaction_max_chars", 16000)
+    group.entries = [FocusContextEntry([_history(str(i) * 9000)], {"A"}) for i in range(3)]
+    latest = group.entries[-1]
+    summary = ContextSummaryMessage(content="A 还有待解决的问题", timestamp=datetime.now(), remaining_uses_value=None)
+    builder = AsyncMock(return_value=summary)
+    monkeypatch.setattr(group_module, "build_context_summary", builder)
+    _seed_planner_snapshot(group)
+    await group._compact()
+    assert group.entries[-1] is latest
+    assert group.entries[0].messages == [summary]
+    assert builder.await_args.kwargs["recent_messages"] == latest.messages
+    assert "session_ids=['A']" in builder.await_args.kwargs["source_context"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail", [False, True])
+async def test_focus_clear_during_compaction_does_not_restore_removed_sources(setup_group, monkeypatch, fail):
+    group, _, _ = setup_group
+    monkeypatch.setattr(global_config.chat, "max_context_size", 2)
+    group.entries = [FocusContextEntry([_history(str(i))], {"A"}) for i in range(5)]
+
+    async def build(*args, **kwargs):
+        group.entries.clear()
+        group._generation += 1
+        if fail:
+            raise ValueError("摘要无效")
+        return ContextSummaryMessage(content="已失效的 A 状态", timestamp=datetime.now(), remaining_uses_value=None)
+
+    monkeypatch.setattr(group_module, "build_context_summary", build)
+    _seed_planner_snapshot(group)
+    await group._compact()
+    assert group.entries == []
 
 
 def test_routing_schema_does_not_mutate_native_spec():
@@ -798,3 +894,17 @@ async def test_background_result_is_saved_while_entire_group_is_waiting(setup_gr
     )
     assert group._worker is None
     await group.stop()
+
+
+@pytest.mark.asyncio
+async def test_focus_no_snapshot_keeps_originals_until_planner_runs(setup_group, monkeypatch):
+    group, _, _ = setup_group
+    monkeypatch.setattr(global_config.chat, "max_context_size", 2)
+    group.entries = [FocusContextEntry([_history(str(i))], {"A"}) for i in range(5)]
+    original = list(group.entries)
+    builder = AsyncMock()
+    monkeypatch.setattr(group_module, "build_context_summary", builder)
+    assert group._service.planner_request_snapshot is None
+    await group._compact()
+    assert group.entries == original
+    builder.assert_not_awaited()

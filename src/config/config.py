@@ -72,8 +72,8 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.15.37"
-MODEL_CONFIG_VERSION: str = "1.17.22"
+CONFIG_VERSION: str = "8.15.41"
+MODEL_CONFIG_VERSION: str = "1.17.24"
 
 logger = get_logger("config")
 

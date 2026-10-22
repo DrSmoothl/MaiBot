@@ -24,8 +24,9 @@ from google.genai.types import (
     ContentUnion,
     EmbedContentConfig,
     EmbedContentResponse,
-    FunctionDeclaration,
     FunctionCall,
+    FunctionCallingConfig,
+    FunctionDeclaration,
     FunctionResponse,
     GenerateContentConfig,
     GenerateContentResponse,
@@ -37,6 +38,7 @@ from google.genai.types import (
     SafetySetting,
     ThinkingConfig,
     Tool,
+    ToolConfig,
 )
 
 from src.common.logger import get_logger
@@ -1039,6 +1041,8 @@ class GeminiClient(AdapterClient[AsyncIterator[GenerateContentResponse], Generat
                 extra_params=request.extra_params,
                 enable_google_search=enable_google_search,
             )
+            if request.tool_choice == "none":
+                generation_config.tool_config = ToolConfig(function_calling_config=FunctionCallingConfig(mode="NONE"))
             snapshot_provider_request["request_kwargs"] = {
                 "config": generation_config,
                 "contents": contents,

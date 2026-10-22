@@ -123,11 +123,6 @@ display_name = "Focus 规划器"
 advanced = true
 description = "Focus 共享规划器，结合组内全部聊天，通过工具的 session_id 指定处理目标。"
 
-[maisaka_focus_summary]
-display_name = "Focus 上下文压缩"
-advanced = true
-description = "压缩共享组较早的上下文，保留聊天来源、重要事实、已完成动作与未完成任务。"
-
 [maisaka_chat_optimized]
 display_name = "规划器（优化版）"
 advanced = true
@@ -138,10 +133,15 @@ display_name = "长期记忆模糊修改"
 advanced = true
 description = "用于根据用户的自然语言修改描述和候选记忆，规划失效旧记忆与写入新记忆的操作。"
 
-[mid_term_memory_summary]
-display_name = "中期聊天摘要"
+[context_compaction]
+display_name = "普通聊天滚动状态摘要"
 advanced = true
-description = "用于在上下文裁切时，将被移出的聊天记录概括成 long_summary、brief 和 keywords。"
+description = "复用普通聊天 Planner 请求，将历史与旧摘要整理为话题、背景、进展、未完事项和对话约定。"
+
+[context_compaction_focus]
+display_name = "Focus 滚动状态摘要"
+advanced = true
+description = "复用 Focus Planner 请求，为共享组生成五类滚动摘要，并保留各聊天的来源归属。"
 
 [webui_ai_search]
 display_name = "WebUI AI 搜索"

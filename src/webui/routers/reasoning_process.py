@@ -394,18 +394,19 @@ def _latest_replyer_expressions(session_id: str) -> tuple[list[str], int | None]
 
 @router.get("/active-context", response_model=ChatActiveContextResponse)
 def get_chat_active_context(session_id: str = Query(..., min_length=1)):
-    """读取运行中聊天流保留的回想、黑话，以及可用表达方式。"""
+    """读取运行中聊天流的滚动状态摘要、黑话，以及可用表达方式。"""
 
     from src.chat.heart_flow.heartflow_manager import heartflow_manager
     from src.maisaka.context.messages import ReferenceMessage, ReferenceMessageType
-    from src.maisaka.memory.mid_term import is_mid_term_memory_message
+    from src.maisaka.context.compaction import ContextSummaryMessage
 
     chat_manager = _get_chat_manager()
     if chat_manager.get_existing_session_by_session_id(session_id) is None:
         raise HTTPException(status_code=404, detail="聊天流不存在")
     runtime = heartflow_manager.heartflow_chat_list.get(session_id)
     history = list(runtime._chat_history) if runtime is not None else []
-    memory = [message.visible_text for message in history if is_mid_term_memory_message(message)]
+    summary_history = runtime._focus_group.history if runtime is not None and runtime._focus_group is not None else history
+    memory = [message.processed_plain_text for message in summary_history if isinstance(message, ContextSummaryMessage)]
     jargon_by_name: dict[str, str] = {}
     for message in history:
         if isinstance(message, ReferenceMessage) and message.reference_type == ReferenceMessageType.JARGON:

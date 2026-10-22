@@ -251,7 +251,7 @@ MODULE_ALIASES = {
     "maisaka_heuristic_memory": "启发式记忆",
     "maisaka_idle_backoff": "空闲退避",
     "maisaka_jargon_context": "黑话上下文",
-    "maisaka_mid_term_memory": "中期记忆",
+    "maisaka_context_compaction": "上下文压缩",
     "maisaka_monitor": "麦麦监控",
     "maisaka_monitor_message_payload": "监控消息载荷",
     "maisaka_person_profile_injector": "人物画像注入",

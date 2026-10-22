@@ -123,11 +123,6 @@ display_name = "Focus Planner"
 advanced = true
 description = "Shared Focus planner for all chats in a group, selecting each tool's target through session_id."
 
-[maisaka_focus_summary]
-display_name = "Focus context compression"
-advanced = true
-description = "Compress older shared context while preserving chat provenance, facts, completed actions and unfinished tasks."
-
 [maisaka_chat_optimized]
 display_name = "Planner (Optimized)"
 advanced = true
@@ -138,10 +133,15 @@ display_name = "Memory Fuzzy Modification Plan"
 advanced = true
 description = "Template for planning which old memories to supersede and which new memories to write from a natural-language modification request."
 
-[mid_term_memory_summary]
-display_name = "Mid-term Chat Summary"
+[context_compaction]
+display_name = "Ordinary Chat Rolling Context State"
 advanced = true
-description = "Used during context trimming to summarize removed chat history into long_summary, brief, and keywords."
+description = "Reuses the ordinary chat Planner request to summarize history and prior state as topics, background, progress, pending matters, and agreements."
+
+[context_compaction_focus]
+display_name = "Focus Rolling Context State"
+advanced = true
+description = "Reuses the Focus Planner request to produce a five-category rolling summary for the shared group while preserving chat ownership."
 
 [memory_retrieval_react_prompt_head_memory]
 display_name = "Memory Retrieval ReAct Header"
