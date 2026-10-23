@@ -349,7 +349,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         """主动回合前确保上下文含有可回复的真实用户消息。
 
         主动任务触发于长期静默的聊天流，运行时历史中可能没有任何带
-        msg_id 的用户消息，Planner 唯一的文本出口 reply 会因缺少引用
+        msg_id 的用户消息，回复执行链路会因缺少引用
         目标而无法发言。此处复用启动恢复的取数与转换链路，从消息库
         回填最近的用户消息作为可引用目标。返回本次回填的消息条数。
         """
@@ -1577,7 +1577,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         return newly_discovered_tool_names
 
     def record_planner_reply(self) -> None:
-        """记录 Planner 成功调用了一次 reply，一次调用拆成多条消息发送也只计一次。"""
+        """记录 Planner 成功完成一次回复，一次回复拆成多条消息发送也只计一次。"""
 
         self._message_turn_scheduler.record_reply()
 

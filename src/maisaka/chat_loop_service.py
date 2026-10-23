@@ -95,9 +95,12 @@ CONTEXT_SELECTION_CACHE_STABILITY_RATIO = 2.0
 FOCUS_PLANNER_FINAL_USER_REMINDER_TEMPLATE = (
     "你需要输出对{bot_name}发言的分析，视情况输出文本内容的分析，思考是否进行工具调用"
 )
-PLANNER_FINAL_USER_REMINDER = (
-    "请你进行分析，是不调用工具，进行思考和等待\n还是使用工具搜集处理信息或使用reply回复"
-)
+PLANNER_FINAL_USER_REMINDER = "请你进行分析，是不调用工具，进行思考和等待\n还是使用工具搜集处理信息或使用reply回复"
+PASSIVE_PLANNER_FINAL_USER_REMINDERS = {
+    "zh-CN": "需要信息或操作时调用工具；决定发言时直接输出指导正文，不附带工具调用；不发言用 stop，需要稍后判断用 wait。",
+    "en-US": "Use tools for information or actions. To speak, output guidance without tool calls. Use stop to stay silent, or wait to reconsider later.",
+    "ja-JP": "情報や操作が必要ならツールを使い、発言する場合はツール呼び出しを伴わない指針本文を出力してください。発言しない場合は stop、後で再判断する場合は wait を使ってください。",
+}
 
 
 @dataclass(slots=True)
@@ -649,6 +652,7 @@ class MaisakaChatLoopService:
         self._prompt_load_lock = asyncio.Lock()
         self._llm_chat_clients: dict[str, LLMServiceClient] = {}
         self.planner_request_snapshot: PlannerRequestSnapshot | None = None
+        self.passive_replyer_override: Optional[bool] = None
 
     @property
     def behavior_style_prompt(self) -> str:
@@ -777,7 +781,10 @@ class MaisakaChatLoopService:
     def _build_planner_final_user_reminder(self) -> str:
         """构造每轮 Planner 请求末尾的一次性 user 提醒。"""
 
-        if self._get_chat_prompt_name() == "maisaka_chat":
+        prompt_name = self._get_chat_prompt_name()
+        if prompt_name == "maisaka_chat_passive":
+            return PASSIVE_PLANNER_FINAL_USER_REMINDERS.get(get_locale(), PASSIVE_PLANNER_FINAL_USER_REMINDERS["zh-CN"])
+        if prompt_name == "maisaka_chat":
             return PLANNER_FINAL_USER_REMINDER
         return FOCUS_PLANNER_FINAL_USER_REMINDER_TEMPLATE.format(bot_name=global_config.bot.nickname.strip())
 
@@ -786,6 +793,12 @@ class MaisakaChatLoopService:
 
         if focus_mode_manager.is_enabled_for_session(self._session_id, is_group_chat=self._is_group_chat):
             return "maisaka_chat_focus"
+        passive_replyer = (
+            self.passive_replyer_override if self.passive_replyer_override is not None
+            else global_config.experimental.passive_replyer
+        )
+        if passive_replyer:
+            return "maisaka_chat_passive"
         return "maisaka_chat"
 
     def _build_bot_alias_notice(self) -> str:
@@ -1030,7 +1043,7 @@ class MaisakaChatLoopService:
         items: List[ContextItem] = []
         system_item = ContextItemBuilder().set_role(RoleType.System)
         uses_builtin_system_prompt = system_prompt is None and self._custom_chat_system_prompt is None
-        if uses_builtin_system_prompt and self._get_chat_prompt_name() == "maisaka_chat":
+        if uses_builtin_system_prompt and self._get_chat_prompt_name() in {"maisaka_chat", "maisaka_chat_passive"}:
             # 普通聊天模板自己写明了名字：昵称说明跟在名字之后，且只说明与名字不同的昵称
             bot_nickname_notice = self._build_bot_nickname_notice(selected_history, skip_same_as_bot_name=True)
             resolved_system_prompt = self._build_chat_system_prompt(bot_nickname_notice=bot_nickname_notice)
@@ -1425,6 +1438,7 @@ class MaisakaChatLoopService:
         )
         base_context_size = max(1, int(max_context_size or global_config.chat.max_context_size))
         effective_context_size = max(
+            MIN_RETAINED_CHAT_MESSAGES,
             base_context_size,
             int(base_context_size * CONTEXT_SELECTION_CACHE_STABILITY_RATIO),
         )
@@ -1438,7 +1452,6 @@ class MaisakaChatLoopService:
         )
         always_selected_indices = MaisakaChatLoopService._collect_always_selected_reference_indices(
             filtered_history,
-            MIN_RETAINED_CHAT_MESSAGES,
             enable_visual_message=active_enable_visual_message,
         )
 

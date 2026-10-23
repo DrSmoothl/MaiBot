@@ -13,6 +13,11 @@ display_name = "规划器（合并时机）"
 advanced = false
 description = "独立时间感知关闭时使用的 Maisaka 主规划模板，将节奏控制判断合并到 Planner。"
 
+[maisaka_chat_passive]
+display_name = "规划器（被动式 replyer）"
+advanced = true
+description = "开启实验性被动式 replyer 时使用；Planner 最终正文作为回复指导，工具调用仍用于操作。"
+
 [maisaka_replyer]
 display_name = "回复"
 advanced = false

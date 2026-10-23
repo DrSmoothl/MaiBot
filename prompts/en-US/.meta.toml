@@ -13,6 +13,11 @@ display_name = "Planner (Timing merged)"
 advanced = false
 description = "Main Maisaka planning template used when independent timing awareness is disabled, with timing decisions merged into the planner."
 
+[maisaka_chat_passive]
+display_name = "Planner (Passive replyer)"
+advanced = true
+description = "Used when experimental passive replyer is enabled; final planner text guides a reply, while tool calls perform actions."
+
 [maisaka_replyer]
 display_name = "Replyer"
 advanced = false

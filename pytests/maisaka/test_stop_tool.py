@@ -74,8 +74,8 @@ async def test_stop_ends_thinking_like_no_tools() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", ["决定：调用 reply 回复。", "没有新消息，保持安静。"])
-async def test_no_tool_response_ends_without_retry(content: str) -> None:
+@pytest.mark.parametrize("content", ["", "   ", None])
+async def test_empty_no_tool_response_ends_without_retry(content: str | None) -> None:
     runtime = SimpleNamespace(
         _chat_history=[],
         _end_planner_continuation=Mock(),

@@ -59,9 +59,11 @@ async def handle_tool(
         collage = await asyncio.to_thread(_merge_emoji_tiles, list(images), indices[0])
     except Exception as exc:
         return tool_ctx.build_failure_result(invocation.tool_name, f"生成表情包拼图失败：{exc}")
+    passive_replyer = tool_ctx.runtime._focus_group is None and tool_ctx.engine.passive_replyer_enabled
+    options_tool = "set_reply_options" if passive_replyer else "reply"
     text = (
         f"表情包选择图，序号 {indices[0]}–{indices[-1]}。"
-        "请在 reply.attach_emoji 中填写选中的整数序号；表情包将于文字回复后单独发送。"
+        f"请在 {options_tool}.attach_emoji 中填写选中的整数序号；表情包将于文字回复后单独发送。"
     )
     timestamp = datetime.now()
     message = EmojiCandidateMessage(

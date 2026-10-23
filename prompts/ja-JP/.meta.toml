@@ -13,6 +13,11 @@ display_name = "Planner（タイミング統合）"
 advanced = false
 description = "独立したタイミング判断を使わない場合の Maisaka メイン計画テンプレート。発話タイミングの判断を Planner に統合する。"
 
+[maisaka_chat_passive]
+display_name = "Planner（受動型 replyer）"
+advanced = true
+description = "実験的な受動型 replyer の有効時に使用。Planner の最終本文を返信の指針とし、操作にはツールを使う。"
+
 [maisaka_replyer]
 display_name = "Replyer"
 advanced = false
