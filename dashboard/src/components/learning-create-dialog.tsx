@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, BookOpen, Loader2, PenLine } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import { LearningCandidateRow } from '@/components/learning-candidate-row'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -43,7 +44,7 @@ interface LearningCreateDialogProps {
   kind: LearningKind
   initialTargetIds?: string[]
   onManual: () => void
-  onSuccess: () => void
+  onSuccess: (isGlobal: boolean) => void
 }
 
 type ChunkState = { status: 'pending' | 'succeeded' | 'failed'; error?: string }
@@ -60,10 +61,12 @@ export function LearningCreateDialog({
   const [mode, setMode] = useState<'choose' | 'auto'>('choose')
   const [text, setText] = useState('')
   const [targetIds, setTargetIds] = useState<string[]>(initialTargetIds)
+  const [isGlobal, setIsGlobal] = useState(false)
   const [chunks, setChunks] = useState<string[]>([])
   const [chunkStates, setChunkStates] = useState<ChunkState[]>([])
   const [activeChunkIndex, setActiveChunkIndex] = useState<number | null>(null)
   const [candidates, setCandidates] = useState<LearnedCandidate[]>([])
+  const [candidateEdits, setCandidateEdits] = useState<Record<number, LearnedCandidate>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [running, setRunning] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -104,12 +107,16 @@ export function LearningCreateDialog({
   })
   const targets = targetQuery.data ?? []
   const validTargetIds = targetIds.filter((id) => targets.some((target) => target.value === id))
-  const targetKey = JSON.stringify([...validTargetIds].sort())
+  const targetKey = isGlobal ? 'global' : JSON.stringify([...validTargetIds].sort())
   const importedIndices = importedByTarget[targetKey]
   const availableIndices = candidates.flatMap((_, index) =>
     importedIndices?.has(index) ? [] : [index]
   )
   const selectedIndices = availableIndices.filter((index) => selected.has(index))
+  const editedCandidates = candidates.map((candidate, index) => candidateEdits[index] ?? candidate)
+  const invalidSelection = selectedIndices.some(
+    (index) => !editedCandidates[index].title.trim() || !editedCandidates[index].description.trim()
+  )
 
   const resetLearning = () => {
     if (learningBusy.current || importBusy.current) return
@@ -117,6 +124,7 @@ export function LearningCreateDialog({
     setChunkStates([])
     setActiveChunkIndex(null)
     setCandidates([])
+    setCandidateEdits({})
     setSelected(new Set())
     setError('')
     setImportResult('')
@@ -178,18 +186,25 @@ export function LearningCreateDialog({
   }
 
   const importSelected = async () => {
-    if (importBusy.current || !selectedIndices.length || !validTargetIds.length) return
+    if (
+      importBusy.current ||
+      !selectedIndices.length ||
+      (!isGlobal && !validTargetIds.length) ||
+      invalidSelection
+    )
+      return
     importBusy.current = true
     setImporting(true)
     setError('')
     try {
       const result = await importLearningCandidates(
         kind,
-        validTargetIds,
-        selectedIndices.map((index) => candidates[index])
+        isGlobal ? [] : validTargetIds,
+        selectedIndices.map((index) => editedCandidates[index]),
+        isGlobal
       )
       if (!result.success) throw new Error(result.message)
-      onSuccess()
+      onSuccess(isGlobal)
       const message = `成功导入 ${result.imported_count} 条，跳过重复 ${result.skipped_count} 条，失败 ${result.failed_count} 条`
       if (result.failed_count > 0) setError(`${message}，可重新导入所选，已导入的重复项会跳过。`)
       else {
@@ -323,49 +338,77 @@ export function LearningCreateDialog({
               {candidates.length > 0 && (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor={`${kind}-learning-target`}>导入到聊天</Label>
-                    {kind === 'expression' ? (
-                      <Select
-                        value={validTargetIds[0] ?? ''}
-                        onValueChange={(id) => setTargetIds([id])}
+                    <div role="group" aria-label="导入范围" className="flex flex-wrap gap-2">
+                      <Button
+                        variant={isGlobal ? 'outline' : 'default'}
+                        size="sm"
+                        aria-pressed={!isGlobal}
                         disabled={importing}
+                        onClick={() => setIsGlobal(false)}
                       >
-                        <SelectTrigger id={`${kind}-learning-target`}>
-                          <SelectValue placeholder="选择关联的聊天" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {targets.map((target) => (
-                            <SelectItem key={target.value} value={target.value}>
-                              {target.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <MultiSelect
-                        options={targets}
-                        selected={validTargetIds}
-                        onChange={setTargetIds}
-                        placeholder="选择关联的聊天"
-                        emptyText="没有可选聊天"
+                        指定聊天
+                      </Button>
+                      <Button
+                        variant={isGlobal ? 'default' : 'outline'}
+                        size="sm"
+                        aria-pressed={isGlobal}
                         disabled={importing}
-                      />
-                    )}
-                    {targetQuery.isPending && (
-                      <p className="text-muted-foreground text-xs">正在加载聊天列表…</p>
-                    )}
-                    {targetQuery.isError && (
-                      <div role="alert" className="text-destructive text-xs">
-                        {targetQuery.error.message}
-                        <Button variant="link" size="xs" onClick={() => targetQuery.refetch()}>
-                          重新加载
-                        </Button>
-                      </div>
-                    )}
-                    {targetQuery.isSuccess && !targets.length && (
+                        onClick={() => setIsGlobal(true)}
+                      >
+                        全局（所有聊天）
+                      </Button>
+                    </div>
+                    {isGlobal ? (
                       <p className="text-muted-foreground text-xs">
-                        暂无可用聊天，请先创建聊天流。
+                        所有现有及以后新增的聊天均可使用，仍遵守各聊天的使用开关。
                       </p>
+                    ) : (
+                      <>
+                        <Label htmlFor={`${kind}-learning-target`}>导入到聊天</Label>
+                        {kind === 'expression' ? (
+                          <Select
+                            value={validTargetIds[0] ?? ''}
+                            onValueChange={(id) => setTargetIds([id])}
+                            disabled={importing}
+                          >
+                            <SelectTrigger id={`${kind}-learning-target`}>
+                              <SelectValue placeholder="选择关联的聊天" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {targets.map((target) => (
+                                <SelectItem key={target.value} value={target.value}>
+                                  {target.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <MultiSelect
+                            options={targets}
+                            selected={validTargetIds}
+                            onChange={setTargetIds}
+                            placeholder="选择关联的聊天"
+                            emptyText="没有可选聊天"
+                            disabled={importing}
+                          />
+                        )}
+                        {targetQuery.isPending && (
+                          <p className="text-muted-foreground text-xs">正在加载聊天列表…</p>
+                        )}
+                        {targetQuery.isError && (
+                          <div role="alert" className="text-destructive text-xs">
+                            {targetQuery.error.message}
+                            <Button variant="link" size="xs" onClick={() => targetQuery.refetch()}>
+                              重新加载
+                            </Button>
+                          </div>
+                        )}
+                        {targetQuery.isSuccess && !targets.length && (
+                          <p className="text-muted-foreground text-xs">
+                            暂无可用聊天，请先创建聊天流。
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="flex items-center justify-between gap-2 text-sm">
@@ -395,40 +438,30 @@ export function LearningCreateDialog({
                     </span>
                   </div>
                   <div className="space-y-2">
-                    {candidates.map((candidate, index) => (
-                      <label
+                    {editedCandidates.map((candidate, index) => (
+                      <LearningCandidateRow
                         key={index}
-                        htmlFor={`${kind}-learning-candidate-${index}`}
-                        className="flex cursor-pointer items-start gap-3 rounded-md border p-3"
-                      >
-                        <Checkbox
-                          id={`${kind}-learning-candidate-${index}`}
-                          className="mt-1 shrink-0"
-                          checked={!importedIndices?.has(index) && selected.has(index)}
-                          disabled={importing || importedIndices?.has(index)}
-                          aria-label={`导入${noun}：${candidate.title}`}
-                          onCheckedChange={(checked) =>
-                            setSelected((previous) => {
-                              const next = new Set(previous)
-                              if (checked) next.add(index)
-                              else next.delete(index)
-                              return next
-                            })
-                          }
-                        />
-                        <span className="min-w-0 space-y-1 text-sm break-words">
-                          <span className="block font-medium">{candidate.title}</span>
-                          {importedIndices?.has(index) && (
-                            <span className="text-muted-foreground block text-xs">
-                              当前目标已导入或已存在
-                            </span>
-                          )}
-                          <span className="block">{candidate.description}</span>
-                          <span className="text-muted-foreground block text-xs">
-                            原文：{candidate.evidence}
-                          </span>
-                        </span>
-                      </label>
+                        candidate={candidate}
+                        index={index}
+                        kind={kind}
+                        selected={!importedIndices?.has(index) && selected.has(index)}
+                        imported={importedIndices?.has(index) === true}
+                        importing={importing}
+                        onChange={(change) =>
+                          setCandidateEdits((previous) => ({
+                            ...previous,
+                            [index]: { ...(previous[index] ?? candidates[index]), ...change },
+                          }))
+                        }
+                        onSelectedChange={(checked) =>
+                          setSelected((previous) => {
+                            const next = new Set(previous)
+                            if (checked) next.add(index)
+                            else next.delete(index)
+                            return next
+                          })
+                        }
+                      />
                     ))}
                   </div>
                 </>
@@ -534,7 +567,12 @@ export function LearningCreateDialog({
           )}
           {mode === 'auto' && candidates.length > 0 && (
             <Button
-              disabled={importing || !selectedIndices.length || !validTargetIds.length}
+              disabled={
+                importing ||
+                !selectedIndices.length ||
+                (!isGlobal && !validTargetIds.length) ||
+                invalidSelection
+              }
               onClick={importSelected}
             >
               {importing ? '导入中…' : `导入所选（${selectedIndices.length}）`}

@@ -58,4 +58,48 @@ describe('长文学习导入', () => {
       candidate,
     ])
   })
+
+  it('无原文表达导入全局时不写聊天 ID，保留编辑内容', async () => {
+    await importLearningCandidates(
+      'expression',
+      [],
+      [{ title: ' 编辑情境 ', description: ' 编辑表达 ' }],
+      true
+    )
+    expect(importExpressions).toHaveBeenCalledWith({
+      is_global: true,
+      expressions: [
+        expect.objectContaining({ situation: '编辑情境', style: '编辑表达', content_list: '[]' }),
+      ],
+    })
+    expect(vi.mocked(importExpressions).mock.calls[0][0]).not.toHaveProperty('chat_id')
+  })
+
+  it('黑话全局导入无需聊天，无原文也可以导入', async () => {
+    await importLearningCandidates(
+      'jargon',
+      [],
+      [{ title: '全局黑话', description: '编辑含义' }],
+      true
+    )
+    expect(importJargons).toHaveBeenCalledWith({
+      target_session_ids: [],
+      is_global: true,
+      conflict_strategy: 'skip',
+      jargons: [
+        expect.objectContaining({ content: '全局黑话', meaning: '编辑含义', is_global: true }),
+      ],
+    })
+  })
+
+  it('全局导入拒绝混入聊天目标，所选内容为空时阻止入库', async () => {
+    await expect(
+      importLearningCandidates('jargon', ['session'], [candidate], true)
+    ).rejects.toThrow('不能同时指定聊天')
+    await expect(
+      importLearningCandidates('expression', [], [{ title: ' ', description: '含义' }], true)
+    ).rejects.toThrow('请填写')
+    expect(importExpressions).not.toHaveBeenCalled()
+    expect(importJargons).not.toHaveBeenCalled()
+  })
 })

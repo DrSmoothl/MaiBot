@@ -331,7 +331,8 @@ class JargonExportResponse(BaseModel):
 class JargonImportRequest(BaseModel):
     """黑话导入请求。"""
 
-    target_session_ids: List[str] = Field(..., description="导入目标聊天流 ID 列表")
+    target_session_ids: List[str] = Field(default_factory=list, description="导入目标聊天流 ID 列表")
+    is_global: bool = False
     jargons: List[JargonExportItem]
     conflict_strategy: Literal["skip", "overwrite"] = "skip"
 
@@ -1080,10 +1081,12 @@ def export_jargons(request: JargonExportRequest) -> JargonExportResponse:
 
 @router.post("/import", response_model=JargonImportResponse)
 def import_jargons(request: JargonImportRequest) -> JargonImportResponse:
-    """将黑话 JSON 导入到用户选择的一个或多个真实聊天流。"""
+    """将黑话 JSON 导入到用户选择的真实聊天流或全局。"""
 
     try:
-        target_session_ids = require_existing_session_ids(request.target_session_ids)
+        if request.is_global and request.target_session_ids:
+            raise HTTPException(status_code=400, detail="全局导入不能同时指定聊天")
+        target_session_ids = [] if request.is_global else require_existing_session_ids(request.target_session_ids)
         if not request.jargons:
             raise HTTPException(status_code=400, detail="导入文件中没有黑话")
 
@@ -1104,7 +1107,8 @@ def import_jargons(request: JargonImportRequest) -> JargonImportResponse:
                 overlapping_jargons = [
                     jargon
                     for jargon in same_content_jargons
-                    if scopes_overlap(jargon, target_session_id_set, False)
+                    # 全局导入只与已有全局记录判重，局部同名记录不能阻止创建全局词条。
+                    if (jargon.is_global if request.is_global else scopes_overlap(jargon, target_session_id_set, False))
                 ]
 
                 if overlapping_jargons and request.conflict_strategy == "skip":
@@ -1128,7 +1132,7 @@ def import_jargons(request: JargonImportRequest) -> JargonImportResponse:
                     count=max(item.count, 0),
                     is_jargon=item.is_jargon and bool(meaning),
                     is_complete=item.is_complete,
-                    is_global=False,
+                    is_global=request.is_global,
                     created_by=JargonCreatedBy.MANUAL,
                     updated_timestamp=datetime.now(),
                 )
@@ -1197,8 +1201,11 @@ def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
             raise HTTPException(status_code=400, detail="黑话内容不能为空")
         meaning = (request.meaning or "").strip()
 
-        raw_session_ids = request.session_ids if request.session_ids is not None else [request.session_id]
-        session_ids = require_existing_session_ids(raw_session_ids)
+        raw_session_ids = request.session_ids if request.session_ids is not None else (
+            [request.session_id] if request.session_id else []
+        )
+        # 全局黑话不要求来源聊天；兼容已有调用方提供的真实来源聊天。
+        session_ids = require_existing_session_ids(raw_session_ids) if raw_session_ids or not request.is_global else []
         target_session_ids = set(session_ids)
         with get_db_session() as session:
             same_content_jargons = session.exec(select(Jargon).where(col(Jargon.content) == content)).all()
@@ -1207,7 +1214,7 @@ def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
                     jargon
                     for jargon in same_content_jargons
                     if normalize_jargon_created_by(jargon.created_by, jargon.id) == JargonCreatedBy.MANUAL
-                    and scopes_overlap(jargon, target_session_ids, request.is_global)
+                    and (jargon.is_global if request.is_global else scopes_overlap(jargon, target_session_ids, False))
                 ),
                 None,
             )
@@ -1218,7 +1225,10 @@ def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
             for existing_jargon in same_content_jargons:
                 if normalize_jargon_created_by(existing_jargon.created_by, existing_jargon.id) != JargonCreatedBy.AI:
                     continue
-                if not scopes_overlap(existing_jargon, target_session_ids, request.is_global):
+                if not (
+                    existing_jargon.is_global if request.is_global
+                    else scopes_overlap(existing_jargon, target_session_ids, False)
+                ):
                     continue
                 session.delete(existing_jargon)
                 replaced_ai_count += 1

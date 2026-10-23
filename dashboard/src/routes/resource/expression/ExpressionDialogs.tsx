@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
 import {
   Select,
@@ -391,7 +392,7 @@ export function ExpressionCreateDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   chatList: ChatInfo[]
-  onSuccess: () => void
+  onSuccess: (isGlobal: boolean) => void
 }) {
   const [formData, setFormData] = useState<ExpressionCreateRequest>({
     situation: '',
@@ -402,10 +403,10 @@ export function ExpressionCreateDialog({
   const { toast } = useToast()
 
   const handleCreate = async () => {
-    if (!formData.situation || !formData.style || !formData.chat_id) {
+    if (!formData.situation.trim() || !formData.style.trim() || (!formData.is_global && !formData.chat_id)) {
       toast({
         title: '验证失败',
-        description: '请填写必填字段：情境、风格和聚天',
+        description: formData.is_global ? '请填写必填字段：情境和风格' : '请填写必填字段：情境、风格和聊天',
         variant: 'destructive',
       })
       return
@@ -413,7 +414,9 @@ export function ExpressionCreateDialog({
 
     try {
       setSaving(true)
-      await createExpression(formData)
+      await createExpression(formData.is_global ? {
+        situation: formData.situation, style: formData.style, is_global: true,
+      } : formData)
       toast({
         title: '创建成功',
         description: '表达方式已创建',
@@ -423,7 +426,7 @@ export function ExpressionCreateDialog({
         style: '',
         chat_id: '',
       })
-      onSuccess()
+      onSuccess(formData.is_global === true)
     } catch (error) {
       toast({
         title: '创建失败',
@@ -470,7 +473,12 @@ export function ExpressionCreateDialog({
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Switch id="expression-create-global" checked={formData.is_global ?? false} disabled={saving}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })} />
+              <Label htmlFor="expression-create-global">全局（所有聊天）</Label>
+            </div>
+            {!formData.is_global && <div className="space-y-2">
               <Label htmlFor="chat_id">
                 聊天 <span className="text-destructive">*</span>
               </Label>
@@ -478,7 +486,7 @@ export function ExpressionCreateDialog({
                 value={formData.chat_id}
                 onValueChange={(value) => setFormData({ ...formData, chat_id: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger id="chat_id">
                   <SelectValue placeholder="选择关联的聊天" />
                 </SelectTrigger>
                 <SelectContent>
@@ -494,7 +502,7 @@ export function ExpressionCreateDialog({
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            </div>}
           </div>
         </DialogBody>
 

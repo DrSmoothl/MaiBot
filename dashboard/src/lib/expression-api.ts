@@ -150,7 +150,8 @@ export async function exportExpressions(params: {
  * 将表达方式 JSON 导入到指定聊天。
  */
 export async function importExpressions(params: {
-  chat_id: string
+  chat_id?: string
+  is_global?: boolean
   expressions: ExpressionExportItem[]
 }): Promise<ExpressionImportResponse> {
   return backendApi.post<ExpressionImportResponse>(`${API_BASE}/import`, {

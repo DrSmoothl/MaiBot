@@ -742,13 +742,17 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
         kind="expression"
         initialTargetIds={currentChat ? [currentChat.chat_id] : []}
         onManual={() => setIsCreateDialogOpen(true)}
-        onSuccess={refreshAll}
+        onSuccess={(isGlobal) => {
+          if (isGlobal) handleBrowseModeChange('all')
+          refreshAll()
+        }}
       />
       <ExpressionCreateDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
         chatList={chatTargetsQuery.data ?? []}
-        onSuccess={() => {
+        onSuccess={(isGlobal) => {
+          if (isGlobal) handleBrowseModeChange('all')
           refreshAll()
           setIsCreateDialogOpen(false)
         }}

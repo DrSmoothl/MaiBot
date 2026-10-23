@@ -103,6 +103,7 @@ export interface JargonExportResponse {
  */
 export interface JargonImportRequest {
   target_session_ids: string[]
+  is_global?: boolean
   jargons: JargonExportItem[]
   conflict_strategy?: 'skip' | 'overwrite'
 }

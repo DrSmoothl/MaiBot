@@ -80,9 +80,21 @@ def test_truncated_json_has_readable_error_and_preserves_cause():
     assert "pydantic.dev" not in str(error.value)
 
 
-def test_rejects_invented_evidence_and_too_many_candidates():
-    with pytest.raises(ValueError, match="不存在的原文编号"):
-        parse_learning_candidates(response([{**candidate(), "source_id": 99}]), "原文", "expression")
+def test_unknown_source_id_keeps_candidate_without_evidence():
+    result = parse_learning_candidates(response([{**candidate(), "source_id": 99}]), "原文", "expression")
+    assert result[0].title == "这波"
+    assert result[0].evidence == ""
+
+
+@pytest.mark.parametrize("source_fields", [{}, {"source_id": None}])
+def test_candidate_without_source_is_allowed(source_fields):
+    payload = {"title": "这波", "description": "这次", **source_fields}
+    result = parse_learning_candidates(response([payload]), "原文", "jargon")
+    assert len(result) == 1
+    assert result[0].evidence == ""
+
+
+def test_rejects_too_many_candidates():
     with pytest.raises(ValueError, match="30"):
         parse_learning_candidates(response([candidate()] * 31), "这波直接起飞", "expression")
 

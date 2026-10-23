@@ -650,13 +650,17 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
         kind="jargon"
         initialTargetIds={browseMode === 'chat' && filterChatId !== 'all' ? [filterChatId] : []}
         onManual={() => setIsCreateDialogOpen(true)}
-        onSuccess={invalidateJargon}
+        onSuccess={(isGlobal) => {
+          if (isGlobal) list.updateFilters((filters) => ({ ...filters, browseMode: 'all', summary: 'global_count' }))
+          invalidateJargon()
+        }}
       />
       <JargonCreateDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
         chatList={formChatList}
-        onSuccess={() => {
+        onSuccess={(isGlobal) => {
+          if (isGlobal) list.updateFilters((filters) => ({ ...filters, browseMode: 'all', summary: 'global_count' }))
           invalidateJargon()
           setIsCreateDialogOpen(false)
         }}

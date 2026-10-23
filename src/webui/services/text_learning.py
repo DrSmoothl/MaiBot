@@ -1,6 +1,6 @@
 """长文学习的分段、候选校验与模型调用；候选在用户确认前不写数据库。"""
 
-from typing import Dict, List, Literal
+from typing import Dict, List, Literal, Optional
 
 import asyncio
 import json
@@ -24,9 +24,9 @@ class LearnedCandidate(BaseModel):
 
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=1000)
-    evidence: str = Field(min_length=1, max_length=500)
+    evidence: str = Field(default="", max_length=500)
 
-    @field_validator("title", "description", "evidence")
+    @field_validator("title", "description")
     @classmethod
     def reject_blank(cls, value: str) -> str:
         if not value.strip():
@@ -35,13 +35,13 @@ class LearnedCandidate(BaseModel):
 
 
 class ExtractedCandidate(BaseModel):
-    """模型只选择原文编号，原文内容由程序提取，避免生成式复制改写引文。"""
+    """模型可选原文编号，原文内容由程序提取，避免生成式复制改写引文。"""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=1000)
-    source_id: int = Field(ge=1, strict=True)
+    source_id: Optional[int] = Field(default=None, ge=1, strict=True)
 
 
 class CandidateExtraction(BaseModel):
@@ -94,7 +94,7 @@ def split_learning_text(text: str) -> List[str]:
 
 
 def parse_learning_candidates(response: str, source: str, kind: LearningKind) -> List[LearnedCandidate]:
-    """严格校验模型 JSON 和原文依据；格式错误显式交由界面重试。"""
+    """校验模型 JSON，原文依据可选；缺少有效引用的候选仍供用户确认。"""
     payload = response.strip()
     if not payload:
         raise ValueError("学习模型未返回正文，请检查学习模型的输出 token 上限后重试当前段")
@@ -115,15 +115,19 @@ def parse_learning_candidates(response: str, source: str, kind: LearningKind) ->
     seen = set()
     sources = build_learning_sources(source)
     for candidate in candidates:
-        if candidate.source_id not in sources:
-            raise ValueError(f"学习模型引用了不存在的原文编号 {candidate.source_id}，请重试当前段")
+        evidence = ""
+        if candidate.source_id is not None:
+            if candidate.source_id in sources:
+                evidence = sources[candidate.source_id]
+            else:
+                logger.warning(f"学习候选引用不存在的原文编号，保留为无依据候选: kind={kind}, source_id={candidate.source_id}")
         key = candidate.title.casefold() if kind == "jargon" else (candidate.title, candidate.description)
         if key not in seen:
             seen.add(key)
             unique.append(LearnedCandidate(
                 title=candidate.title,
                 description=candidate.description,
-                evidence=sources[candidate.source_id],
+                evidence=evidence,
             ))
     return unique
 

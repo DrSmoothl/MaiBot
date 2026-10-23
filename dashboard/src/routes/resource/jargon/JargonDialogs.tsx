@@ -390,7 +390,7 @@ interface JargonCreateDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   chatList: JargonChatInfo[]
-  onSuccess: () => void
+  onSuccess: (isGlobal: boolean) => void
 }
 
 export function JargonCreateDialog({
@@ -409,10 +409,10 @@ export function JargonCreateDialog({
   const { toast } = useToast()
 
   const handleCreate = async () => {
-    if (!formData.content || !formData.session_ids?.length) {
+    if (!formData.content.trim() || (!formData.is_global && !formData.session_ids?.length)) {
       toast({
         title: '验证失败',
-        description: '请填写必填字段：内容和聊天',
+        description: formData.is_global ? '请填写必填字段：内容' : '请填写必填字段：内容和聊天',
         variant: 'destructive',
       })
       return
@@ -420,13 +420,15 @@ export function JargonCreateDialog({
 
     try {
       setSaving(true)
-      await createJargon(formData)
+      await createJargon(formData.is_global ? {
+        content: formData.content, meaning: formData.meaning, is_global: true, session_ids: [],
+      } : formData)
       toast({
         title: '创建成功',
         description: '黑话已创建',
       })
       setFormData({ content: '', meaning: '', session_ids: [], is_global: false })
-      onSuccess()
+      onSuccess(formData.is_global === true)
     } catch (error) {
       toast({
         title: '创建失败',
@@ -471,7 +473,12 @@ export function JargonCreateDialog({
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Switch id="jargon-create-global" checked={formData.is_global ?? false} disabled={saving}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })} />
+              <Label htmlFor="jargon-create-global">全局（所有聊天）</Label>
+            </div>
+            {!formData.is_global && <div className="space-y-2">
               <Label>
                 聊天 <span className="text-destructive">*</span>
               </Label>
@@ -487,16 +494,7 @@ export function JargonCreateDialog({
                 placeholder="选择关联的聊天"
                 emptyText="没有可选聊天"
               />
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="is_global"
-                checked={formData.is_global}
-                onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })}
-              />
-              <Label htmlFor="is_global">设为全局黑话</Label>
-            </div>
+            </div>}
           </div>
         </DialogBody>
 

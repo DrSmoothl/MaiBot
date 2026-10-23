@@ -186,7 +186,8 @@ export interface ExpressionDetailResponse {
 export interface ExpressionCreateRequest {
   situation: string
   style: string
-  chat_id: string
+  chat_id?: string
+  is_global?: boolean
 }
 
 /**

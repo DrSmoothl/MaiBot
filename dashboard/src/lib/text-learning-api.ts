@@ -7,7 +7,7 @@ export type LearningKind = 'expression' | 'jargon'
 export interface LearnedCandidate {
   title: string
   description: string
-  evidence: string
+  evidence?: string
 }
 
 export async function prepareLearningText(text: string): Promise<string[]> {
@@ -60,17 +60,28 @@ export function mergeLearningCandidates(
 export async function importLearningCandidates(
   kind: LearningKind,
   targetIds: string[],
-  candidates: LearnedCandidate[]
+  candidates: LearnedCandidate[],
+  isGlobal = false
 ) {
-  if (!targetIds.length || !candidates.length) throw new Error('请选择导入目标和候选')
+  if ((!isGlobal && !targetIds.length) || !candidates.length)
+    throw new Error('请选择导入目标和候选')
+  if (isGlobal && targetIds.length) throw new Error('全局导入不能同时指定聊天')
+  const items = candidates.map((candidate) => ({
+    ...candidate,
+    title: candidate.title.trim(),
+    description: candidate.description.trim(),
+    evidence: candidate.evidence?.trim(),
+  }))
+  if (items.some((item) => !item.title || !item.description))
+    throw new Error('请填写所选结果的内容和含义或表达')
   if (kind === 'expression') {
-    if (targetIds.length !== 1) throw new Error('表达方式请选择一个目标聊天')
+    if (!isGlobal && targetIds.length !== 1) throw new Error('表达方式请选择一个目标聊天')
     return importExpressions({
-      chat_id: targetIds[0],
-      expressions: candidates.map((candidate) => ({
+      ...(isGlobal ? { is_global: true } : { chat_id: targetIds[0] }),
+      expressions: items.map((candidate) => ({
         situation: candidate.title,
         style: candidate.description,
-        content_list: JSON.stringify([candidate.evidence]),
+        content_list: JSON.stringify(candidate.evidence ? [candidate.evidence] : []),
         count: 1,
         last_active_time: null,
         create_time: null,
@@ -81,14 +92,15 @@ export async function importLearningCandidates(
   }
   return importJargons({
     target_session_ids: targetIds,
+    ...(isGlobal ? { is_global: true } : {}),
     conflict_strategy: 'skip',
-    jargons: candidates.map((candidate) => ({
+    jargons: items.map((candidate) => ({
       content: candidate.title,
       meaning: candidate.description,
       count: 1,
       is_jargon: true,
       is_complete: true,
-      is_global: false,
+      is_global: isGlobal,
       created_by: 'MANUAL',
     })),
   })
