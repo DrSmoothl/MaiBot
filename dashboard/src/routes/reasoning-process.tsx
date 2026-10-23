@@ -100,7 +100,7 @@ const AUTO_SESSION = 'auto'
 const ALL_GROUP_SESSIONS = '__all_group_chats__'
 const CORE_STAGE_NAMES = ['planner', 'replyer']
 const LLM_ERROR_STAGE_NAMES = ['llm_error']
-const REMOVED_STAGE_NAMES = ['timing_gate']
+const REMOVED_STAGE_NAMES = ['timing_gate', 'reply_effect_judge']
 
 type StageCategoryRow = {
   key: string

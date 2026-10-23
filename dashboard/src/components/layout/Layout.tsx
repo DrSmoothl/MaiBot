@@ -505,7 +505,7 @@ export function Layout({ children }: LayoutProps) {
                 key={workspaceMode}
                 data-dashboard-workspace-content="true"
                 className={cn(
-                  'relative z-10 h-full min-w-0 origin-bottom will-change-transform',
+                  'relative z-10 h-full min-w-0 origin-bottom',
                   // 手机上页头与页面上下排列，页面占满剩余高度
                   'max-lg:flex max-lg:flex-col',
                   // 可滚动工作区在手机上按内容撑高，滚动容器底部的留白才不会被溢出内容越过
@@ -513,9 +513,15 @@ export function Layout({ children }: LayoutProps) {
                   targetWorkspaceWaiting && 'invisible'
                 )}
                 variants={{
-                  initial: { y: '100%' },
-                  animate: { y: 0 },
-                  exit: { y: '100%' },
+                  initial: { y: '100%', willChange: 'transform' },
+                  animate: {
+                    y: 0,
+                    willChange: 'transform',
+                    // 入场结束后释放整页变换层；Motion 也会自动保留 will-change，
+                    // 因此需要显式复原，避免子控件交互时整页内容反复像素对齐。
+                    transitionEnd: { willChange: 'auto' },
+                  },
+                  exit: { y: '100%', willChange: 'transform' },
                 }}
                 initial="initial"
                 animate={pageHidden ? 'exit' : 'animate'}
