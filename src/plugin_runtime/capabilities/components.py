@@ -465,6 +465,7 @@ class RuntimeComponentCapabilityMixin:
                 )
                 result[pid] = {
                     "name": pid,
+                    "display_name": reg.display_name,
                     "version": reg.plugin_version,
                     "description": "",
                     "author": "",

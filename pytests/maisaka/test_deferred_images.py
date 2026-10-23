@@ -109,30 +109,14 @@ def test_planner_uses_limit_before_encoding(monkeypatch):
     assert [item.parts for item in actual] == [item.parts for item in expected]
 
 
-def test_summary_matches_eager_output(monkeypatch):
-    from src.config.config import global_config
-    from src.maisaka.memory.mid_term import _build_summary_prompt_messages
-    monkeypatch.setattr(global_config.visual, "max_image_num", 2)
+def test_compaction_uses_image_descriptions_without_encoding_binary():
+    from src.maisaka.context.compaction import message_text_for_compaction
     entries = history()
-    kwargs = dict(instruction_prompt="summary", enable_visual_message=True)
-    expected = _build_summary_prompt_messages.__wrapped__(entries, **kwargs)
     with patch.object(context, "_encode_image_for_context", wraps=context._encode_image_for_context) as encode:
-        actual = _build_summary_prompt_messages(entries, **kwargs)
-    assert encode.call_count == 2
-    assert actual[1:] == expected[1:]
-    assert actual[0].parts == expected[0].parts
-
-
-def test_summary_early_return_preserves_existing_content(monkeypatch):
-    from src.config.config import global_config
-    from src.maisaka.memory import mid_term
-    monkeypatch.setattr(global_config.visual, "max_image_num", 0)
-    monkeypatch.setattr(mid_term, "MAX_SUMMARY_INPUT_CHARS", 1)
-    entries = history()
-    kwargs = dict(instruction_prompt="summary", enable_visual_message=True)
-    expected = mid_term._build_summary_prompt_messages.__wrapped__(entries, **kwargs)
-    actual = mid_term._build_summary_prompt_messages(entries, **kwargs)
-    assert [item.parts for item in actual] == [item.parts for item in expected]
+        batches = [message_text_for_compaction(entry) for entry in entries]
+    assert batches
+    assert encode.call_count == 0
+    assert all("base64" not in batch for batch in batches)
 
 
 def test_replyer_matches_eager_output(monkeypatch):
@@ -158,11 +142,13 @@ def test_replyer_matches_eager_output(monkeypatch):
 
 @pytest.mark.parametrize("limit", [0, 2, 5])
 @pytest.mark.parametrize("mode", ["RGB", "RGBA"])
-def test_retro_replyer_resizes_only_retained_images(monkeypatch, limit, mode):
+@pytest.mark.parametrize("quality,max_image_side", [("normal", 512), ("high", 1024)])
+def test_retro_replyer_resizes_only_retained_images(monkeypatch, limit, mode, quality, max_image_side):
     from src.chat.replyer.maisaka_generator_base import BaseMaisakaReplyGenerator
     from src.config.config import global_config
 
     monkeypatch.setattr(global_config.visual, "max_image_num", limit)
+    monkeypatch.setattr(global_config.visual, "image_quality", quality)
     monkeypatch.setattr(global_config.debug, "replyer_retro_prompt", True)
     service = object.__new__(BaseMaisakaReplyGenerator)
     # 仅隔离模板和 IM 来源依赖，保留实际入口、图片筛选、缩放及延迟编码链路。
@@ -193,12 +179,44 @@ def test_retro_replyer_resizes_only_retained_images(monkeypatch, limit, mode):
     for index, part in enumerate(parts):
         with Image.open(BytesIO(base64.b64decode(part.image_base64, validate=True))) as image:
             max_side = 128 if index < limit - 3 else 640
+            if (6 - limit + index) % 2 == 0:
+                max_side = min(max_side, max_image_side)
             assert image.size == (max_side, max_side // 2)
             assert image.mode == mode
             if mode == "RGBA":
                 assert image.getpixel((0, 0))[3] == 128
     assert all(entry.raw_message.components[1].binary_data == data for entry in entries)
     assert all(isinstance(entry.raw_message.components[2], EmojiComponent) for entry in entries)
+
+
+@pytest.mark.parametrize("mode", ["RGB", "RGBA"])
+def test_image_quality_resizes_cached_context_without_changing_source(mode):
+    output = BytesIO()
+    Image.new(mode, (1600, 800), (255, 0, 0, 128) if mode == "RGBA" else "red").save(output, format="PNG")
+    data = output.getvalue()
+    component = ImageComponent(binary_hash="quality-test", binary_data=data, content="image description")
+    entry = context.ContentContextMessage(
+        raw_message=MessageSequence([component]), visible_text="image", timestamp=datetime(2026, 1, 1),
+    )
+    for max_side in (512, 1024, 512):
+        item = context.build_context_items_from_history_entry(entry, max_image_side=max_side)[0]
+        part = next(p for p in item.parts if isinstance(p, ContextImagePart))
+        with Image.open(BytesIO(base64.b64decode(part.image_base64))) as image:
+            assert image.size == (max_side, max_side // 2)
+            assert image.mode == mode
+            if mode == "RGBA":
+                assert image.getpixel((0, 0))[3] == 128
+    assert component.binary_data == data
+    text_item = context.build_context_items_from_history_entry(entry, enable_visual_message=False, max_image_side=512)[0]
+    assert not any(isinstance(part, ContextImagePart) for part in text_item.parts)
+    assert context.get_item_text(text_item) == "image description"
+
+
+def test_image_quality_keeps_small_supported_images_unchanged():
+    data = image_bytes()
+    image_format, encoded = context._encode_image_for_context(data, "png", 512)
+    assert image_format == "png"
+    assert base64.b64decode(encoded) == data
 
 
 @pytest.mark.parametrize("limit", [0, 3])

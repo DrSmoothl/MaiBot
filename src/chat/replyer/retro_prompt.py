@@ -48,6 +48,7 @@ from src.maisaka.context.message_adapter import (
     parse_speaker_content,
 )
 from src.maisaka.context.messages import (
+    IMAGE_QUALITY_MAX_SIDE,
     LLMContextMessage,
     ContentContextMessage,
     SessionBackedMessage,
@@ -206,7 +207,7 @@ class RetroReplyPromptMixin:
     ) -> Tuple[List[LLMContextMessage], Dict[int, List[ContextImagePart]]]:
         """确定实际发送的图片并按新旧缩小，仅在本次模板副本中去掉对应的图片和表情包描述。"""
 
-        candidates: List[Tuple[int, int, ContextImagePart]] = []
+        candidates: List[Tuple[int, int, ContextImagePart, bool]] = []
         for message_index, message in enumerate(chat_history):
             if not isinstance(message, ContentContextMessage):
                 continue
@@ -219,7 +220,7 @@ class RetroReplyPromptMixin:
                 for item in build_context_items_from_history_entry(component_message, enable_visual_message=True):
                     if isinstance(item, UserMessageItem):
                         candidates.extend(
-                            (message_index, media_index, part)
+                            (message_index, media_index, part, isinstance(component, ImageComponent))
                             for part in item.parts
                             if isinstance(part, ContextImagePart)
                         )
@@ -229,9 +230,11 @@ class RetroReplyPromptMixin:
         visual_parts: Dict[int, List[ContextImagePart]] = {}
         visual_indices: Dict[int, Set[int]] = {}
         recent_start = max(0, len(retained) - RETRO_RECENT_IMAGE_COUNT)
-        for image_index, (message_index, media_index, part) in enumerate(retained):
+        for image_index, (message_index, media_index, part, is_image) in enumerate(retained):
             # 按实际发送的图片计数，同一发言中的多张图片和表情包也各占一个位置。
             max_side = RETRO_RECENT_IMAGE_MAX_SIDE if image_index >= recent_start else RETRO_OLDER_IMAGE_MAX_SIDE
+            if is_image:
+                max_side = min(max_side, IMAGE_QUALITY_MAX_SIDE[global_config.visual.image_quality])
             visual_parts.setdefault(message_index, []).append(
                 transform_context_image(part, partial(_resize_retro_image, max_side=max_side))
             )

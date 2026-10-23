@@ -34,11 +34,6 @@ export const TASK_CONFIGS = [
     description: '用于长期记忆总结、抽取和写回',
   },
   {
-    key: 'mid_memory' as const,
-    title: '聊天回想 (mid_memory)',
-    description: '用于回想聊天内容',
-  },
-  {
     key: 'learner' as const,
     title: '表达学习 (learner)',
     description: '用于表达方式和黑话学习',

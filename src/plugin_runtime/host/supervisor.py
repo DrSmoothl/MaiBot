@@ -188,10 +188,13 @@ class PluginRunnerSupervisor:
             codec=codec,
             host_version=self._host_version,
             logger_name=self._logger_name,
+            connection_lost_callback=self._handle_usage_connection_lost,
         )
 
         self._runner_process: Optional[asyncio.subprocess.Process] = None
         self._registered_plugins: Dict[str, RegisterPluginPayload] = {}
+        # 注册早于 on_load 完成；只在 Runner 确认加载成功后才开始累计使用时长。
+        self._usage_loaded_plugin_ids: Set[str] = set()
         self._message_gateway_states: Dict[str, Dict[str, _MessageGatewayRuntimeState]] = {}
         self._external_available_plugins: Dict[str, str] = {}
         self._blocked_plugin_reasons: Dict[str, str] = {}
@@ -306,6 +309,21 @@ class PluginRunnerSupervisor:
 
         return sorted(self._registered_plugins.keys())
 
+    def get_usage_active_plugin_ids(self) -> Set[str]:
+        """返回当前真正完成加载且 Runner 仍存活、连接正常的插件。"""
+        process = self._runner_process
+        if not self._running or process is None or process.returncode is not None or not self._rpc_server.is_connected:
+            return set()
+        return {
+            plugin_id for plugin_id in self._usage_loaded_plugin_ids
+            if (registration := self._registered_plugins.get(plugin_id)) is not None and not registration.config_error
+        }
+
+    def _handle_usage_connection_lost(self) -> None:
+        """断连时立即停止累计，避免把等待健康检查和重启的间隔算作使用时长。"""
+        self._usage_loaded_plugin_ids.clear()
+        self._notify_status_changed()
+
     def get_plugin_config_error(self, plugin_id: str) -> str:
         """返回已加载插件的配置错误；非空时业务组件未注册。"""
         registration = self._registered_plugins.get(plugin_id)
@@ -402,6 +420,8 @@ class PluginRunnerSupervisor:
 
         disabled_set.update(explicitly_disabled_plugins)
         self._plugin_recovery_targets.difference_update(explicitly_disabled_plugins)
+        self._usage_loaded_plugin_ids.update(reloaded_plugins)
+        self._usage_loaded_plugin_ids.difference_update(inactive_plugins, explicitly_disabled_plugins, failed_plugins)
 
         self._runner_ready_payloads = RunnerReadyPayload(
             loaded_plugins=sorted(loaded_set),
@@ -417,6 +437,7 @@ class PluginRunnerSupervisor:
         """从最近一次 Runner 加载状态中移除已卸载插件。"""
 
         unloaded_set = set(unloaded_plugins)
+        self._usage_loaded_plugin_ids.difference_update(unloaded_set)
         self._plugin_recovery_targets.difference_update(unloaded_set)
         self._runner_ready_payloads = RunnerReadyPayload(
             loaded_plugins=sorted(set(self._runner_ready_payloads.loaded_plugins) - unloaded_set),
@@ -610,6 +631,8 @@ class PluginRunnerSupervisor:
             return
 
         self._running = False
+        self._usage_loaded_plugin_ids.clear()
+        self._notify_status_changed()
         self._plugin_recovery_targets.clear()
         self._plugin_recovery_attempts.clear()
         self._rpc_server.abort_pending_requests("PluginRunnerSupervisor 正在停止")
@@ -1260,6 +1283,7 @@ class PluginRunnerSupervisor:
             removed_llm_providers = client_registry.unregister_plugin_providers(payload.plugin_id)
         self._authorization.revoke_permission_token(payload.plugin_id)
         removed_registration = self._registered_plugins.pop(payload.plugin_id, None) is not None
+        self._usage_loaded_plugin_ids.discard(payload.plugin_id)
         await self._unregister_all_message_gateway_drivers_for_plugin(payload.plugin_id)
         self._message_gateway_states.pop(payload.plugin_id, None)
         self._notify_status_changed()
@@ -1842,6 +1866,7 @@ class PluginRunnerSupervisor:
             return envelope.make_error_response(ErrorCode.E_BAD_PAYLOAD.value, str(exc))
 
         self._runner_ready_payloads = payload
+        self._usage_loaded_plugin_ids = set(payload.loaded_plugins)
         if payload.failed_plugins:
             failed_details = [
                 f"{plugin_id}: {payload.failed_plugin_reasons.get(plugin_id, '未知原因')}"
@@ -1938,6 +1963,8 @@ class PluginRunnerSupervisor:
         Args:
             reason: 关停原因。
         """
+        self._usage_loaded_plugin_ids.clear()
+        self._notify_status_changed()
         process = self._runner_process
         if process is None:
             return
@@ -2258,6 +2285,7 @@ class PluginRunnerSupervisor:
         self._api_registry.clear()
         self._component_registry.clear()
         self._registered_plugins.clear()
+        self._usage_loaded_plugin_ids.clear()
         self._message_gateway_states.clear()
         self._runner_ready_events = asyncio.Event()
         self._runner_ready_payloads = RunnerReadyPayload()

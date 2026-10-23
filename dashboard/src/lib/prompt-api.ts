@@ -11,6 +11,7 @@ export interface PromptFileInfo {
   description: string
   customized: boolean
   custom_version_count: number
+  validation?: PromptValidationResult
 }
 
 export interface PromptValidationResult {

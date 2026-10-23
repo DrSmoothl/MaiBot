@@ -34,6 +34,9 @@
     "component.reload_plugin",
     "component.update_plugin_config",
     "send.text",
+    "send.image",
+    "send.forward",
+    "render.html2png",
     "config.get",
     "config.get_plugin"
   ],

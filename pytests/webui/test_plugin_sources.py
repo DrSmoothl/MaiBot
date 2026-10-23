@@ -1,3 +1,6 @@
+from email.message import Message
+from io import BytesIO
+from unittest.mock import Mock
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 import asyncio
@@ -6,6 +9,7 @@ import json
 import pytest
 
 from src.webui.services import git_mirror_service as git
+from src.webui.routers.plugin import icon_routes
 from src.plugin_market import sources as market
 from src.plugin_market.cache import MarketCache
 
@@ -14,7 +18,7 @@ from src.plugin_market.cache import MarketCache
 def isolated_sources(tmp_path, monkeypatch):
     monkeypatch.setattr(market, "market_cache", MarketCache())
     monkeypatch.setattr(market, "SETTINGS_FILE", tmp_path / "sources.json")
-    monkeypatch.setattr(git, "_validate_custom_outbound_url", lambda value: value)
+    monkeypatch.setattr(git, "_validate_custom_outbound_url", lambda value, label: value)
     monkeypatch.setattr("src.common.network_security.validate_public_url", lambda value, **kw: value)
 
 
@@ -96,3 +100,51 @@ def test_marketplace_listing_only_calls_selected_information_source(monkeypatch,
     assert calls
     expected = {"official": "hyybuth.xyz", "cnb": "cnb.cool", "github": "raw.githubusercontent.com"}[source]
     assert all(urlsplit(url).hostname == expected for url in calls)
+
+
+@pytest.mark.parametrize("media_type,size,status", [
+    ("image/webp", 32, 200),
+    ("text/html", 32, 502),
+    ("image/webp", 512 * 1024 + 1, 502),
+])
+def test_cnb_icon_proxy_validates_and_caches_images(monkeypatch, media_type, size, status):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(icon_routes, "require_plugin_token", lambda token: None)
+    monkeypatch.setattr(icon_routes, "validate_public_url", lambda url, **kw: url)
+    monkeypatch.setattr(icon_routes, "_market_icon_cache", MarketCache())
+    monkeypatch.setattr(icon_routes, "get_shared_ssl_context", lambda: None)
+    response = BytesIO(b"x" * size)
+    response.headers = Message()
+    response.headers["Content-Type"] = media_type
+    opener = Mock()
+    opener.open.return_value = response
+    monkeypatch.setattr(icon_routes, "build_opener", lambda *args: opener)
+    url = "https://cnb.cool/Mai-with-u/plugin-repo/-/git/raw/main/icons/a.webp"
+    if status != 200:
+        with pytest.raises(HTTPException) as error:
+            icon_routes.get_market_icon(url, "session")
+        assert error.value.status_code == status
+    else:
+        first = icon_routes.get_market_icon(url, "session")
+        second = icon_routes.get_market_icon(url, "session")
+        assert first.body == second.body == b"x" * size
+        assert first.media_type == "image/webp"
+        assert first.headers["cache-control"].startswith("private, max-age=")
+        assert "cross-origin-resource-policy" not in first.headers
+    assert opener.open.call_count == 1
+    assert opener.open.call_args.args[0].full_url == url
+
+
+@pytest.mark.parametrize("url", [
+    "https://example.com/icon.webp",
+    "https://cnb.cool/other/repo/-/git/raw/main/icon.webp",
+    "https://cnb.cool/Mai-with-u/plugin-repo/-/git/raw/main/%2e%2e/icon.webp",
+])
+def test_cnb_icon_proxy_rejects_non_market_paths(monkeypatch, url):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(icon_routes, "require_plugin_token", lambda token: None)
+    with pytest.raises(HTTPException) as error:
+        icon_routes.get_market_icon(url, "session")
+    assert error.value.status_code == 400

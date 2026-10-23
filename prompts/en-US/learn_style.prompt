@@ -15,14 +15,14 @@ Output requirements:
 Only output a JSON array, and do not output duplicate content. Each element should be an object with the following fields:
 
 [
-  {{"situation": "expressing strong surprise", "style": "use 我嘞个xxxx", "source_id": "3"}},
-  {{"situation": "showing sarcastic agreement", "style": "use 对对对", "source_id": "4"}},
-  {{"situation": "praising in game topics", "style": "use 这么强！", "source_id": "5"}}
+  {{"situation": "expressing strong surprise", "style": "use 我嘞个xxxx", "id": "3"}},
+  {{"situation": "showing sarcastic agreement", "style": "use 对对对", "id": "4"}},
+  {{"situation": "praising in game topics", "style": "use 这么强！", "id": "5"}}
 ]
 
 Field descriptions:
 - situation: a short summary of "under what situation" (no more than 20 characters)
 - style: the corresponding language style or commonly used expression (no more than 20 characters)
-- source_id: the source number corresponding to that expression style, namely the number in the source_id field in the chat log above (for example [source_id:3] corresponds to "3"); output only the number itself
+- id: the source number corresponding to that expression style, namely the number in the id field in the chat log above (for example [id:3] corresponds to "3"); output only the number itself
 
 Output JSON:

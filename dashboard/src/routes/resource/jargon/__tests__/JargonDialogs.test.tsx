@@ -460,15 +460,13 @@ describe('JargonCreateDialog', () => {
     const { onSuccess } = renderCreate()
     await user.type(screen.getByLabelText(/内容/), '新词')
     await user.type(screen.getByLabelText('含义'), '解释')
-    await user.click(screen.getByRole('switch', { name: '设为全局黑话' }))
-    await user.click(screen.getByText('ms-add-s1'))
+    await user.click(screen.getByRole('switch', { name: '全局（所有聊天）' }))
     await user.click(screen.getByRole('button', { name: '创建' }))
     await waitFor(() =>
       expect(jargonApi.createJargon).toHaveBeenCalledWith({
         content: '新词',
         meaning: '解释',
-        session_ids: ['s1'],
-        session_id: 's1',
+        session_ids: [],
         is_global: true,
       })
     )

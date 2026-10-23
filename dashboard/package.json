@@ -1,7 +1,7 @@
 {
   "name": "maibot-dashboard",
   "private": true,
-  "version": "1.9.8",
+  "version": "1.9.9",
   "type": "module",
   "main": "./out/main/index.cjs",
   "scripts": {

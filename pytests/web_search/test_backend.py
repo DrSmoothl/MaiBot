@@ -265,3 +265,130 @@ async def test_missing_or_mismatched_session_is_rejected_before_network():
     invocation.session_id = "a"
     assert not (await provider.invoke(invocation, ToolExecutionContext(session_id="b"))).success
     assert not mcp.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter", ["anysearch", "exa", "firecrawl"])
+@pytest.mark.parametrize("versioned_base", [False, True])
+async def test_search_request_and_response(adapter: str, versioned_base: bool):
+    paths = {"anysearch": "/v1/search", "exa": "/search", "firecrawl": "/v2/search"}
+    item = {"title": "标题", "url": "https://example.com"}
+    responses = {
+        "anysearch": {"code": 0, "data": {"results": [{**item, "snippet": "片段"}]}},
+        "exa": {"results": [{**item, "highlights": ["片段", "第二段"], "publishedDate": "2026-10-23"}]},
+        "firecrawl": {"success": True, "data": {"web": [{**item, "description": "片段"}]}},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == paths[adapter]
+        if adapter == "exa":
+            assert request.headers["x-api-key"] == "test-secret"
+            assert "Authorization" not in request.headers
+        else:
+            assert request.headers["Authorization"] == "Bearer test-secret"
+        payload = json.loads(request.content)
+        expected = {
+            "anysearch": {"query": "test", "max_results": 2},
+            "exa": {"query": "test", "numResults": 2, "type": "auto", "contents": {"highlights": True}},
+            "firecrawl": {"query": "test", "limit": 2, "sources": ["web"]},
+        }
+        assert payload == expected[adapter]
+        return httpx.Response(200, json=responses[adapter])
+
+    settings = config(adapter)
+    if versioned_base:
+        settings.services["main"].base_url = "https://proxy.example" + paths[adapter].removesuffix("/search")
+    result = await WebSearchService(FakeMCP(), httpx.MockTransport(handler)).execute(
+        settings, ToolInvocation(tool_name="web_search", arguments={"query": " test ", "max_results": 2})
+    )
+    assert result.results[0].title == "标题"
+    assert result.results[0].snippet == ("片段\n第二段" if adapter == "exa" else "片段")
+    assert result.results[0].published_at == ("2026-10-23" if adapter == "exa" else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter", ["anysearch", "exa", "firecrawl"])
+async def test_fetch_preserves_full_body(adapter: str):
+    body = "# 正文\n" + "完整内容" * 400
+    url = "https://example.com/article"
+    responses = {
+        "anysearch": {"code": 0, "data": {"url": url, "title": "标题", "content": body}},
+        "exa": {"results": [{"url": url, "title": "标题", "text": body}], "statuses": [{"status": "success"}]},
+        "firecrawl": {"success": True, "data": {"metadata": {"title": "标题"}, "markdown": body}},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths = {"anysearch": "/v1/extract", "exa": "/contents", "firecrawl": "/v2/scrape"}
+        assert request.url.path == paths[adapter]
+        expected = {
+            "anysearch": {"url": url},
+            "exa": {"urls": [url], "text": True},
+            "firecrawl": {"url": url, "formats": ["markdown"]},
+        }
+        assert json.loads(request.content) == expected[adapter]
+        return httpx.Response(200, json=responses[adapter])
+
+    result = await WebSearchService(FakeMCP(), httpx.MockTransport(handler)).execute(
+        config(adapter), ToolInvocation(tool_name="web_fetch", arguments={"url": url})
+    )
+    assert result.content == body
+    assert result.title == "标题"
+    assert result.url == url
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter", ["anysearch", "exa", "firecrawl"])
+@pytest.mark.parametrize("status", [401, 429, 500])
+async def test_http_error_is_safe_and_not_retried(adapter: str, status: int):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(status, text="test-secret")
+
+    with pytest.raises(WebSearchError, match=str(status)) as exc:
+        await WebSearchService(FakeMCP(), httpx.MockTransport(handler)).execute(
+            config(adapter), ToolInvocation(tool_name="web_search", arguments={"query": "test"})
+        )
+    assert "test-secret" not in str(exc.value)
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "adapter,payload",
+    [
+        ("anysearch", {"code": -1, "message": "test-secret"}),
+        ("firecrawl", {"success": False, "message": "test-secret"}),
+        ("exa", {"results": None}),
+        ("anysearch", {"code": 0, "data": {}}),
+        ("firecrawl", {"success": True, "data": {}}),
+    ],
+)
+async def test_failure_is_not_empty_success(adapter: str, payload):
+    service = WebSearchService(FakeMCP(), httpx.MockTransport(lambda _: httpx.Response(200, json=payload)))
+    with pytest.raises(WebSearchError) as exc:
+        await service.execute(config(adapter), ToolInvocation(tool_name="web_search", arguments={"query": "test"}))
+    assert "test-secret" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_anysearch_result_limit_is_declared_and_enforced():
+    settings = config("anysearch")
+    service = WebSearchService(FakeMCP())
+    specs = await WebSearchToolProvider(service, lambda: settings).list_tools()
+    assert specs[0].parameters_schema["properties"]["max_results"]["maximum"] == 10
+    with pytest.raises(WebSearchError, match="不能超过 10"):
+        await service.execute(
+            settings, ToolInvocation(tool_name="web_search", arguments={"query": "test", "max_results": 11})
+        )
+
+
+@pytest.mark.asyncio
+async def test_firecrawl_query_limit_is_declared_and_enforced():
+    settings: WebRuntimeConfig = config("firecrawl")
+    service = WebSearchService(FakeMCP())
+    specs = await WebSearchToolProvider(service, lambda: settings).list_tools()
+    assert specs[0].parameters_schema["properties"]["query"]["maxLength"] == 500
+    with pytest.raises(WebSearchError, match="不能超过 500"):
+        await service.execute(settings, ToolInvocation(tool_name="web_search", arguments={"query": "a" * 501}))

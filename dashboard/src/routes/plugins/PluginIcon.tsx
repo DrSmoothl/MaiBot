@@ -110,7 +110,12 @@ function getImageSource(
     return `/api/webui/plugins/icon/${encodeURIComponent(pluginId)}`
   }
 
-  return marketplaceIconUrl?.trim() || null
+  const url = marketplaceIconUrl?.trim()
+  // CNB Raw 禁止跨站嵌图，由 WebUI 同源端点读取。
+  if (url?.startsWith('https://cnb.cool/Mai-with-u/plugin-repo/-/git/raw/')) {
+    return `/api/webui/plugins/market-icon?url=${encodeURIComponent(url)}`
+  }
+  return url || null
 }
 
 export function PluginIcon({
@@ -137,7 +142,7 @@ export function PluginIcon({
   if (icon?.type === 'emoji') {
     return (
       <div className={baseClassName} style={style}>
-        <span className={cn('text-xl leading-none', iconClassName)} aria-hidden="true">
+        <span className={cn('flex items-center justify-center text-xl leading-none', iconClassName)} aria-hidden="true">
           {icon.value}
         </span>
       </div>

@@ -827,7 +827,9 @@ class RuntimeDataCapabilityMixin:
         from src.chat.heart_flow.heartflow_manager import heartflow_manager
 
         heartflow_chat = heartflow_manager.heartflow_chat_list.get(chat_id)
-        return 1.0 if heartflow_chat is None else heartflow_chat._talk_frequency_adjust
+        if heartflow_chat is None or not heartflow_chat.chat_stream.is_group_session:
+            return 1.0
+        return heartflow_chat._talk_frequency_adjust
 
     async def _cap_frequency_get_current_talk_value(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
         from src.common.utils.utils_config import ChatConfigUtils

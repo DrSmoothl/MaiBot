@@ -582,7 +582,7 @@ function ActiveContextPopover({ sessionId }: { sessionId: string | null }) {
 
   const sections = context
     ? [
-        { title: '回想记忆', items: context.memory, emptyText: '当前聊天流尚未生成回想' },
+        { title: '上下文状态摘要', items: context.memory, emptyText: '当前上下文尚未进行压缩' },
         { title: '表达方式', items: context.expressions, emptyText: '最近一次 Replyer 请求中未使用' },
         { title: '黑话', items: context.jargon.map((entry) => entry.name), emptyText: '当前上下文没有黑话参考' },
         { title: '激活的工具', items: context.tools, emptyText: '当前尚未激活工具' },

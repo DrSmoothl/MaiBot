@@ -46,16 +46,16 @@ def test_expression_defaults_reset_once_and_remove_old_mode():
     assert result.data["expression"] == {
         "expression_checked_only": False,
         "expression_self_reflect": True,
-        "use_vector_expression": True,
+        "use_vector_expression": False,
     }
 
     # 跨版本只重置一次，用户随后设置的开关不能在同版本加载时被覆盖。
     result.data["expression"]["expression_checked_only"] = True
-    result.data["expression"]["use_vector_expression"] = False
+    result.data["expression"]["use_vector_expression"] = True
     reloaded = apply_config_upgrade_hooks(result.data, "bot_config.toml", "8.14.58", "8.14.58")
     assert reloaded.migrated is False
     assert reloaded.data["expression"]["expression_checked_only"] is True
-    assert reloaded.data["expression"]["use_vector_expression"] is False
+    assert reloaded.data["expression"]["use_vector_expression"] is True
 
 
 def test_split_chat_config_sections_upgrade_hook():

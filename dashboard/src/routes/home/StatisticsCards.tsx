@@ -219,9 +219,9 @@ function SummaryMetric({
   detailOnHover?: boolean
 }) {
   const metricLine = (
-    <div className="flex min-w-0 items-baseline justify-center gap-2.5 text-base leading-none">
-      <span className="text-muted-foreground min-w-0 truncate font-bold">{label}</span>
-      <span className="text-primary shrink-0 text-xl leading-none font-black">
+    <div className="flex min-w-0 flex-col items-start justify-center gap-1 text-xs leading-tight">
+      <span className="text-muted-foreground max-w-full truncate font-bold">{label}</span>
+      <span className="text-primary shrink-0 text-xl leading-tight font-black tabular-nums">
         {value}
       </span>
     </div>
@@ -261,10 +261,10 @@ function PrimarySummaryMetric({
   return (
     <div
       data-home-summary-primary="true"
-      className="flex min-h-0 min-w-0 flex-col justify-center px-3 py-1"
+      className="flex min-w-0 flex-col justify-center px-3 py-1"
     >
       <div className="text-muted-foreground truncate text-xs font-bold">{label}</div>
-      <div className="text-primary mt-1 truncate text-3xl leading-none font-black tracking-[-0.04em] tabular-nums">
+      <div className="text-primary mt-1 shrink-0 truncate text-3xl leading-tight font-black tracking-[-0.04em] tabular-nums">
         {value}
       </div>
     </div>
@@ -285,7 +285,7 @@ export function StatisticsOverviewCard() {
       {({ summary }) => (
         <div
           data-home-statistics-overview="true"
-          className="grid min-h-0 flex-1 grid-rows-2"
+          className="grid min-h-0 flex-1 grid-rows-[auto_1fr]"
         >
           <div
             data-home-summary-primary-group="true"

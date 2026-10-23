@@ -1,7 +1,22 @@
+[text_learning_expression]
+display_name = "Expressions from passages"
+advanced = true
+description = "Extracts expressions grounded in pasted passages for the user to select and import."
+
+[text_learning_jargon]
+display_name = "Jargon from passages"
+advanced = true
+description = "Extracts jargon and meanings from pasted passages for the user to select and import."
+
 [a_memorix_chat_summary]
 display_name = "Long-term Memory Chat Summary"
 advanced = false
 description = "Extracts incremental information and important knowledge from the current chat window for long-term memory."
+
+[maisaka_chat_passive]
+display_name = "Planner (Passive replyer)"
+advanced = true
+description = "Used when experimental passive replyer is enabled; final planner text guides a reply, while tool calls perform actions."
 
 [maisaka_chat]
 display_name = "Planner"
@@ -123,11 +138,6 @@ display_name = "Focus Planner"
 advanced = true
 description = "Shared Focus planner for all chats in a group, selecting each tool's target through session_id."
 
-[maisaka_focus_summary]
-display_name = "Focus context compression"
-advanced = true
-description = "Compress older shared context while preserving chat provenance, facts, completed actions and unfinished tasks."
-
 [maisaka_chat_optimized]
 display_name = "Planner (Optimized)"
 advanced = true
@@ -138,10 +148,15 @@ display_name = "Memory Fuzzy Modification Plan"
 advanced = true
 description = "Template for planning which old memories to supersede and which new memories to write from a natural-language modification request."
 
-[mid_term_memory_summary]
-display_name = "Mid-term Chat Summary"
+[context_compaction]
+display_name = "Ordinary Chat Rolling Context State"
 advanced = true
-description = "Used during context trimming to summarize removed chat history into long_summary, brief, and keywords."
+description = "Reuses the ordinary chat Planner request to summarize history and prior state as topics, background, progress, pending matters, and agreements."
+
+[context_compaction_focus]
+display_name = "Focus Rolling Context State"
+advanced = true
+description = "Reuses the Focus Planner request to produce a five-category rolling summary for the shared group while preserving chat ownership."
 
 [memory_retrieval_react_prompt_head_memory]
 display_name = "Memory Retrieval ReAct Header"

@@ -102,8 +102,7 @@ describe('ExpressionCreateDialog', () => {
     expect(toastMock).toHaveBeenCalledWith(
       expect.objectContaining({
         title: '验证失败',
-        // 现状特征化：源码文案中「聊天」误写为「聚天」
-        description: '请填写必填字段：情境、风格和聚天',
+        description: '请填写必填字段：情境、风格和聊天',
         variant: 'destructive',
       })
     )

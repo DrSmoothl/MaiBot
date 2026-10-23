@@ -1,4 +1,5 @@
 import { ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -8,6 +9,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useTheme } from '@/components/use-theme'
 import { useBackground } from '@/hooks/use-background'
 import { cn } from '@/lib/utils'
+import { promptCatalogQueryOptions } from '@/lib/prompt-query'
+import { queryClient } from '@/lib/query'
 
 import { LogoArea } from './LogoArea'
 import { NavItem } from './NavItem'
@@ -45,6 +48,15 @@ export function Sidebar({
   const inheritsPageBackground = inheritedFrom === 'page'
   const builtInMenuSections = useMenuSections()
   const menuSections = suppliedMenuSections ?? builtInMenuSections
+  const { data: promptCatalog } = useQuery({
+    ...promptCatalogQueryOptions,
+    enabled: menuSections.some((section) => section.items.some((item) => item.path === '/config/prompts')),
+    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
+  }, queryClient)
+  const hasPromptWarnings = Object.values(promptCatalog?.files ?? {}).some((files) =>
+    files.some((file) => file.validation?.valid === false)
+  )
   const [hoverExpanded, setHoverExpanded] = useState(false)
   const [groupFlyout, setGroupFlyout] = useState<{
     title: string
@@ -319,6 +331,7 @@ export function Sidebar({
                     <NavItem
                       key={item.path}
                       item={item}
+                      promptWarning={item.path === '/config/prompts' && hasPromptWarnings}
                       sidebarOpen={sidebarRevealed}
                       expandOnHover={isMillennium}
                       groupFlyoutWidth={isMillennium && groupFlyout?.title === section.title ? groupFlyout.width : undefined}

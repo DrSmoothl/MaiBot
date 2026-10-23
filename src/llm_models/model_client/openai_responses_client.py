@@ -693,6 +693,8 @@ class OpenAIResponsesClient(OpenaiClient):
             )
             request_overrides = split_openai_request_overrides(request.extra_params)
             extra_body = dict(request_overrides.extra_body)
+            if request.tool_choice is not None:
+                extra_body["tool_choice"] = request.tool_choice
 
             for protected_key in ("input", "model", "previous_response_id", "stream"):
                 if protected_key in extra_body:

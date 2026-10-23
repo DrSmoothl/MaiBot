@@ -1111,6 +1111,7 @@ function ChatTargetFields({
 function AddTargetScopeDialog<TScopeKind extends string>({
   description,
   defaultScope,
+  fixedRuleType,
   open,
   onAdd,
   onOpenChange,
@@ -1119,6 +1120,7 @@ function AddTargetScopeDialog<TScopeKind extends string>({
 }: {
   description: string
   defaultScope: TScopeKind
+  fixedRuleType?: ExpressionRuleType
   open: boolean
   onAdd: (scopeKind: TScopeKind, ruleType: ExpressionRuleType) => void
   onOpenChange: (open: boolean) => void
@@ -1162,24 +1164,26 @@ function AddTargetScopeDialog<TScopeKind extends string>({
               </button>
             ))}
           </div>
-          <div className="max-w-40 space-y-1">
-            <Label className="text-[11px] leading-none text-muted-foreground">聊天类型</Label>
-            <Select value={ruleType} onValueChange={(nextRuleType) => setRuleType(normalizeExpressionRuleType(nextRuleType))}>
-              <SelectTrigger className="h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="group">群聊</SelectItem>
-                <SelectItem value="private">私聊</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {!fixedRuleType && (
+            <div className="max-w-40 space-y-1">
+              <Label className="text-[11px] leading-none text-muted-foreground">聊天类型</Label>
+              <Select value={ruleType} onValueChange={(nextRuleType) => setRuleType(normalizeExpressionRuleType(nextRuleType))}>
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="group">群聊</SelectItem>
+                  <SelectItem value="private">私聊</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button type="button" onClick={() => onAdd(activeScope, ruleType)}>
+          <Button type="button" onClick={() => onAdd(activeScope, fixedRuleType ?? ruleType)}>
             添加
           </Button>
         </DialogFooter>
@@ -2052,16 +2056,12 @@ function TalkValueGroupedRuleEditor({
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-medium">聊天类型</Label>
-              <Select
-                value={group.ruleType === 'private' ? 'private' : 'group'}
-                onValueChange={(value) => updateGroupField(group, 'rule_type', value)}
-              >
+              <Select value="group" disabled>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="group">群聊</SelectItem>
-                  <SelectItem value="private">私聊</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2246,7 +2246,8 @@ function TalkValueRuleEditor({
       </div>
       <AddTargetScopeDialog
         defaultScope="chat"
-        description="选择规则作用范围和聊天类型。添加后可在规则区域继续填写平台、聊天流 ID、时间段和发言频率。"
+        fixedRuleType="group"
+        description="选择群聊规则的作用范围。添加后可继续填写平台、群聊 ID、时间段和发言频率。"
         open={addDialogOpen}
         onAdd={handleAddRule}
         onOpenChange={setAddDialogOpen}
@@ -2543,14 +2544,14 @@ export const MultipleReplyStyleHook = createStringListHook({
   placeholder: '输入一种备用表达风格',
 })
 
-export const ChatTalkValueRulesHook = createListItemEditorHook({
+const GroupTalkValueRulesHook = createListItemEditorHook({
   addLabel: '添加发言频率规则',
   addButtonPlacement: 'none',
   collapseWhen: ({ parentValues }) => parentValues?.enable_talk_value_rules === false,
   collapsedText: '动态发言频率规则未启用，规则列表已折叠。展开后仍可查看或编辑已有规则。',
   expandLabel: '展开规则',
   collapseLabel: '折叠规则',
-  helperText: '可按平台/聊天流/时段分别配置发言频率。平台和聊天流都空表示全局；只填平台或聊天流表示对应默认值；* 表示通配覆盖。时间留空表示兜底，* 表示强制全天。',
+  helperText: '仅对群聊生效，可按平台/群聊/时段配置频率。平台和群聊都空表示全局；只填其中一项表示对应默认值；* 表示通配覆盖。时间留空表示兜底，* 表示强制全天。',
   emptyText: '尚未配置任何规则，将使用全局默认频率。',
   collapseButtonDisplay: 'icon',
   fieldRows: [
@@ -2582,6 +2583,29 @@ export const ChatTalkValueRulesHook = createListItemEditorHook({
       typeof item.value === 'number' ? item.value.toFixed(2) : '—'
     return `${platformLabel(item)} · ${ruleTypeLabel(item.rule_type)} · ${time} · 频率 ${value}`
   },
+})
+
+export const ChatTalkValueRulesHook: FieldHookComponent = (props) => {
+  const rules = Array.isArray(props.value) ? props.value as Record<string, unknown>[] : []
+  const privateRules = rules.filter((rule) => rule.rule_type === 'private')
+  return (
+    <GroupTalkValueRulesHook
+      {...props}
+      value={rules.filter((rule) => rule.rule_type !== 'private')}
+      onChange={(value) => {
+        // 旧私聊频率规则不再展示或生效，编辑群聊时仍保留原配置。
+        props.onChange?.([...privateRules, ...(value as Record<string, unknown>[])])
+      }}
+    />
+  )
+}
+
+export const PrivateReplyPauseRulesHook = createListItemEditorHook({
+  addLabel: '添加私聊暂停规则',
+  helperText: '填写具体平台和用户 ID。开启开关暂停该私聊，关闭开关允许回复；删除规则后跟随全局私聊设置。也可直接在聊天流设置中切换。',
+  emptyText: '所有私聊都跟随全局暂停开关。',
+  fieldRows: [['platform', 'item_id', 'paused']],
+  itemTitle: (item) => `${String(item.platform || '平台')} · ${String(item.item_id || '用户')} · ${item.paused ? '暂停回复' : '正常回复'}`,
 })
 
 export const ChatPromptsHook = createListItemEditorHook({

@@ -399,13 +399,13 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
           return (
             <DiscreteSlider
               label={fieldLabel}
-              value={typeof value === 'string' ? value : String(schema.default ?? '')}
+              value={String(value ?? schema.default ?? '')}
               options={(schema.options ?? []).map(option => ({
                 value: option,
                 label: optionLabels[option] ?? option,
                 description: optionDescriptions[option],
               }))}
-              onValueChange={onChange}
+              onValueChange={nextValue => onChange(type === 'boolean' ? nextValue === 'true' : nextValue)}
             />
           )
         case 'input':

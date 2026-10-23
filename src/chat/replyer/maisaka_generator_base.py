@@ -49,6 +49,7 @@ from src.llm_models.payload_content.context_snapshot import (
 from src.maisaka.attention_drift import build_attention_drift_prompt_block
 from src.maisaka.context.message_adapter import parse_speaker_content
 from src.maisaka.context.messages import (
+    IMAGE_QUALITY_MAX_SIDE,
     ContentContextMessage,
     LLMContextMessage,
     ModelOutputContextMessage,
@@ -650,6 +651,7 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
                     message,
                     enable_visual_message=enable_visual_message,
                     limit_emoji_size=True,
+                    max_image_side=IMAGE_QUALITY_MAX_SIDE[global_config.visual.image_quality],
                 )
                 items.extend(context_items)
                 continue
@@ -935,12 +937,16 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         sub_agent_runner: Optional[Callable[[str], Awaitable[str]]],
         reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> MaisakaReplyContext:
+        # 复古模板不注入表达习惯，提前跳过召回和 LLM 选择，避免无效模型调用。
+        if self._uses_retro_prompt():
+            return MaisakaReplyContext()
+
         session_id = self._resolve_session_id(stream_id)
         if not session_id:
             logger.warning("构建 Maisaka 回复上下文失败：缺少会话标识")
             return MaisakaReplyContext()
 
-        if sub_agent_runner is None:
+        if sub_agent_runner is None and global_config.expression.use_vector_expression:
             logger.info("表达方式选择跳过：缺少子代理执行器")
             return MaisakaReplyContext()
 

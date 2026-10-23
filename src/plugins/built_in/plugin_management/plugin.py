@@ -5,12 +5,14 @@
 
 from typing import Any, ClassVar, Dict, List
 
+from maibot_sdk import Command, Field, MaiBotPlugin, PluginConfigBase
+
 import json
 import shlex
 
-from maibot_sdk import Command, Field, MaiBotPlugin, PluginConfigBase
-
 from src.core.local_operator import has_command_permission
+
+from .command_catalog import build_command_pages, collect_command_groups, format_command_text
 
 
 _VALID_COMPONENT_TYPES = ("tool", "command", "event_handler")
@@ -35,6 +37,12 @@ _COMMAND_ALIAS_TARGETS: dict[str, str] = {
     "config.help": "/pm config help",
     "config.get": "/pm config get",
     "config.set": "/pm config set",
+    "command": "/pm command",
+    "command.help": "/pm command help",
+    "command.list": "/pm command list",
+    "command.plugin": "/pm command plugin",
+    "cmd": "/pm cmd",
+    "cmd.help": "/pm cmd help",
 }
 
 
@@ -43,8 +51,20 @@ HELP_ALL = (
     "/pm help 管理命令提示\n"
     "/pm plugin 插件管理命令\n"
     "/pm component 组件管理命令\n"
+    "/pm cmd 查看插件指令列表（支持 pic 图片）\n"
     "/pm alias 管理命令别名\n"
-    "使用 /pm plugin help、/pm component help、/pm alias help 或 /pm config help 获取具体帮助"
+    "使用 /pm plugin help、/pm component help、/pm cmd help、/pm alias help 或 /pm config help 获取具体帮助"
+)
+HELP_COMMAND = (
+    "插件指令帮助\n"
+    "/pm cmd 按插件列出所有已注册指令\n"
+    "/pm cmd <插件> 列出指定插件的指令\n"
+    "/pm cmd pic 按插件生成指令列表图片\n"
+    "/pm cmd <插件> pic 生成指定插件的指令列表图片\n"
+    "<插件> 可用完整ID或最后一段唯一短名称，例如 builtin.plugin-management 可写 plugin-management。\n"
+    "短名称重名时请使用完整ID；pic、help 为保留字，同名插件请使用完整ID。\n"
+    "兼容旧命令 /pm command list [pic]、/pm command plugin <插件> [pic]。\n"
+    "列表包含已禁用指令。"
 )
 HELP_PLUGIN = (
     "插件管理命令帮助\n"
@@ -61,7 +81,7 @@ HELP_CONFIG = (
     "/pm config get <plugin_name> [key] 读取指定插件配置或点分隔配置项\n"
     "/pm config set <plugin_name> <key> <value_json> 修改指定插件配置项\n"
     "  - <key> 使用点分隔路径，例如 plugin.enabled\n"
-    "  - <value_json> 优先按 JSON 解析，例如 true、123、[\"文本\"]；解析失败时按字符串保存\n"
+    '  - <value_json> 优先按 JSON 解析，例如 true、123、["文本"]；解析失败时按字符串保存\n'
     "  - 指令别名建议使用 /pm alias add /别名 /pm plugin list"
 )
 HELP_COMPONENT = (
@@ -169,6 +189,10 @@ class PluginManagementPlugin(MaiBotPlugin):
         parts = self._split_command(raw_command) if raw_command else ["/pm"]
         n = len(parts)
 
+        if n >= 2 and parts[1] in ("command", "cmd"):
+            ok = await self._handle_command_catalog(parts[2:], stream_id, compact=parts[1] == "cmd")
+            return ok, "命令执行完成" if ok else "指令列表查询失败", True
+
         # /pm
         if n == 1:
             await self.ctx.send.text(HELP_ALL, stream_id)
@@ -269,6 +293,89 @@ class PluginManagementPlugin(MaiBotPlugin):
 
         await self.ctx.send.text("插件管理命令不合法", stream_id)
         return False, "命令不合法", True
+
+    # ------ command 子命令 ------
+
+    async def _handle_command_catalog(self, args: List[str], stream_id: str, *, compact: bool = False) -> bool:
+        """通过现有组件能力查询指令，文本与图片共享同一份数据。"""
+        # 简写只转换语法，权限、插件解析与输出均沿用旧命令链路。
+        if compact:
+            if not args or args == ["pic"]:
+                args = ["list", *args]
+            elif args != ["help"]:
+                if len(args) == 1 or (len(args) == 2 and args[1] == "pic"):
+                    args = ["plugin", *args]
+                else:
+                    await self.ctx.send.text(HELP_COMMAND, stream_id)
+                    return False
+        if not args or args == ["help"] or args == ["plugin"]:
+            await self.ctx.send.text(HELP_COMMAND, stream_id)
+            return True
+
+        plugin_id = ""
+        picture = False
+        if args in (["list"], ["list", "pic"]):
+            picture = len(args) == 2
+        elif len(args) in (2, 3) and args[0] == "plugin" and (len(args) == 2 or args[2] == "pic"):
+            plugin_id = args[1]
+            picture = len(args) == 3
+        else:
+            await self.ctx.send.text(HELP_COMMAND, stream_id)
+            return False
+
+        plugins = await self.ctx.component.get_all_plugins()
+        if not isinstance(plugins, dict) or plugins.get("success") is False:
+            await self.ctx.send.text(f"读取插件指令失败: {plugins}", stream_id)
+            return False
+        if plugin_id and plugin_id not in plugins:
+            matches = sorted(name for name in plugins if name.rsplit(".", 1)[-1] == plugin_id)
+            if not matches:
+                await self.ctx.send.text(f"未找到已注册插件: {plugin_id}", stream_id)
+                return False
+            if len(matches) > 1:
+                await self.ctx.send.text(
+                    f"插件短名称 {plugin_id} 对应多个插件，请使用完整ID:\n" + "\n".join(matches),
+                    stream_id,
+                )
+                return False
+            plugin_id = matches[0]
+        groups = collect_command_groups(plugins, plugin_id)
+        if not groups:
+            await self.ctx.send.text(f"插件 {plugin_id} 没有注册指令" if plugin_id else "没有注册的指令", stream_id)
+            return True
+        if not picture:
+            await self.ctx.send.text(format_command_text(groups), stream_id)
+            return True
+
+        webui_style = await self.ctx.config.get("webui.webui_style")
+        if type(webui_style) is not int or webui_style not in (0, 1, 2):
+            await self.ctx.send.text(f"无法读取有效的 WebUI 界面风格: {webui_style}", stream_id)
+            return False
+
+        # 优先生成单张长图；多页全部渲染成功后打包发送，避免散发图片或只发送部分目录。
+        images: List[str] = []
+        for page in build_command_pages(groups, webui_style):
+            result = await self.ctx.render.html2png(
+                page,
+                viewport={"width": 1000, "height": 600},
+                full_page=True,
+                device_scale_factor=1.5,
+            )
+            if not isinstance(result, dict) or not result.get("image_base64"):
+                await self.ctx.send.text(f"指令列表图片生成失败: {result}", stream_id)
+                return False
+            images.append(result["image_base64"])
+        if len(images) == 1:
+            sent = await self.ctx.send.image(images[0], stream_id)
+        else:
+            sent = await self.ctx.send.forward(
+                [{"nickname": "插件指令列表", "segments": [{"type": "image", "content": data}]} for data in images],
+                stream_id,
+            )
+        if not sent:
+            await self.ctx.send.text("指令列表图片发送失败", stream_id)
+            return False
+        return True
 
     # ------ plugin 子命令 ------
 

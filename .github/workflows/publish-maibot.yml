@@ -1,6 +1,26 @@
 name: Publish MaiBot
 
 on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+      publish:
+        default: false
+        type: boolean
+      report_commit:
+        default: ''
+        type: string
+      resume_run_id:
+        default: ''
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -24,7 +44,7 @@ on:
 
 # 防止两次正式发布同时创建同一个 tag 或向同一个项目上传。
 concurrency:
-  group: publish-maibot
+  group: maibot-${{ (inputs.publish || (github.event_name == 'pull_request' && github.event.action == 'closed')) && 'publish' || format('validate-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions:
@@ -33,6 +53,11 @@ permissions:
 
 jobs:
   build-and-check:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       startsWith(github.event.pull_request.head.ref, 'release/') &&
+       (github.event.action != 'closed' || github.event.pull_request.merged == true))
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.manifest.outputs.version }}
@@ -43,6 +68,19 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Resolve release identity
+        id: identity
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          VERSION="$INPUT_VERSION"
+          if [ -z "$VERSION" ]; then
+            VERSION="${RELEASE_BRANCH#release/}"
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - uses: astral-sh/setup-uv@v5
         with:
           version: '0.13.0'
@@ -50,7 +88,7 @@ jobs:
         id: recovery
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
           set -euo pipefail
@@ -80,7 +118,7 @@ jobs:
         if: steps.recovery.outputs.reuse == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: maibot-${{ inputs.version }}
+          name: maibot-${{ steps.identity.outputs.version }}
           path: release-dist
           run-id: ${{ steps.recovery.outputs.run_id }}
           github-token: ${{ github.token }}
@@ -88,14 +126,14 @@ jobs:
         if: steps.recovery.outputs.reuse != 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ github.event_name == 'pull_request' && (github.event.pull_request.merge_commit_sha || github.event.pull_request.head.sha) || inputs.ref }}
           path: source
           fetch-depth: 0
           persist-credentials: false
       - name: Check version, Dashboard availability and changelog
         if: steps.recovery.outputs.reuse != 'true'
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
         run: uv run --no-project --with packaging python .github/scripts/maibot_release.py prepare --version "$RELEASE_VERSION"
       - name: Build wheel and sdist from the fixed source commit
         if: steps.recovery.outputs.reuse != 'true'
@@ -112,7 +150,7 @@ jobs:
       - name: Verify artifact and expose fixed release identity
         id: manifest
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
         run: uv run --no-project --with packaging python .github/scripts/maibot_release.py verify --version "$RELEASE_VERSION"
       - name: Ensure existing tag belongs to the same source commit
         env:
@@ -127,14 +165,14 @@ jobs:
         if: steps.recovery.outputs.reuse != 'true' || steps.recovery.outputs.run_id != github.run_id
         uses: actions/upload-artifact@v4
         with:
-          name: maibot-${{ inputs.version }}
+          name: maibot-${{ steps.identity.outputs.version }}
           path: release-dist/
           if-no-files-found: error
           retention-days: 90
 
   publish-pypi:
     needs: build-and-check
-    if: inputs.publish
+    if: inputs.publish || (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true)
     runs-on: ubuntu-24.04
     environment: maibot
     permissions:
@@ -199,3 +237,25 @@ jobs:
             gh release create "$RELEASE_TAG" --target "$SOURCE_COMMIT" \
               --title "$RELEASE_TAG" --notes-file release-dist/notes.md
           fi
+
+  report-validation:
+    if: >-
+      always() && needs.build-and-check.result != 'skipped' &&
+      (inputs.report_commit != '' ||
+       (github.event_name == 'pull_request' && github.event.action != 'closed'))
+    needs: build-and-check
+    runs-on: ubuntu-24.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Report validation on the release PR commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.report_commit || github.event.pull_request.head.sha }}
+          RESULT: ${{ needs.build-and-check.result }}
+        run: |
+          STATE=failure
+          if [ "$RESULT" = success ]; then STATE=success; fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$RELEASE_COMMIT" \
+            -f state="$STATE" -f context='Release validation' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

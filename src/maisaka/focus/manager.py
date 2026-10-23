@@ -36,7 +36,7 @@ class FocusModeManager:
             self._owner_loop = loop
             self._lock = None
         if not self._reload_registered:
-            config_manager.register_reload_callback(self.reconcile_all, sections=("experimental",))
+            config_manager.register_reload_callback(self.reconcile_all, sections=("experimental", "chat.reply_timing"))
             self._reload_registered = True
 
     async def reconcile_all(self) -> None:
@@ -69,6 +69,8 @@ class FocusModeManager:
                 return False
             is_group_chat = session.is_group_session
         if not self.is_enabled_for_chat(is_group_chat=is_group_chat):
+            return False
+        if not is_group_chat and ChatConfigUtils.is_private_reply_paused(session_id):
             return False
         targets = global_config.experimental.focus_chat_whitelist
         return not targets or any(

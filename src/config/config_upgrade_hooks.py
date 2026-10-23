@@ -426,12 +426,12 @@ def _migrate_removed_expression_selection_mode(data: dict[str, Any]) -> list[str
 
 
 def _reset_expression_defaults(data: Dict[str, Any]) -> List[str]:
-    """8.14.58: 重置精选限制，移除旧表达模式并默认启用向量表达。"""
+    """8.14.58: 重置精选限制并移除旧表达模式；缺少档位时沿用当前默认的快速档。"""
 
     reasons: List[str] = []
     if set_nested_config_value(data, ("expression", "expression_checked_only"), False):
         reasons.append("expression.expression_checked_only")
-    if set_nested_config_value(data, ("expression", "use_vector_expression"), True, force=False):
+    if set_nested_config_value(data, ("expression", "use_vector_expression"), False, force=False):
         reasons.append("expression.use_vector_expression")
     expression = data["expression"]
     if "expression_selection_mode" in expression:

@@ -20,12 +20,12 @@
 JSON 配列だけを出力し、重複内容は出力しないでください。各要素は次のフィールドを持つオブジェクトです：
 
 [
-  {{"content": "語句", "source_id": "12"}},
-  {{"content": "語句2", "source_id": "5"}}
+  {{"content": "語句", "id": "12"}},
+  {{"content": "語句2", "id": "5"}}
 ]
 
 フィールド説明：
 - content: 黒話候補の原文
-- source_id: その黒話に対応する出典番号。上のチャット記録にある `<message source_id="3">` または `<learning-source source_id="3">` の source_id 数字だけを出力する
+- id: その黒話に対応する出典番号。上のチャット記録にある `<message id="3">` または `<learning-source id="3">` の id 数字だけを出力する
 
 JSON を出力してください：

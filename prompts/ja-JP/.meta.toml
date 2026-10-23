@@ -1,7 +1,22 @@
+[text_learning_expression]
+display_name = "文章からの表現学習"
+advanced = true
+description = "貼り付けた文章を根拠に表現候補を抽出し、ユーザーが選択して取り込みます。"
+
+[text_learning_jargon]
+display_name = "文章からの隠語学習"
+advanced = true
+description = "貼り付けた文章から隠語と意味を抽出し、ユーザーが選択して取り込みます。"
+
 [a_memorix_chat_summary]
 display_name = "長期記憶のチャット要約"
 advanced = false
 description = "現在のチャットから長期記憶に保存する追加情報と重要な知識を抽出します。"
+
+[maisaka_chat_passive]
+display_name = "Planner（受動型 replyer）"
+advanced = true
+description = "実験的な受動型 replyer の有効時に使用。Planner の最終本文を返信の指針とし、操作にはツールを使う。"
 
 [maisaka_chat]
 display_name = "Planner"
@@ -123,11 +138,6 @@ display_name = "Focus Planner"
 advanced = true
 description = "同グループの全チャットを共有して思考し、ツールの session_id で操作対象を指定する Focus Planner。"
 
-[maisaka_focus_summary]
-display_name = "Focus コンテキスト圧縮"
-advanced = true
-description = "出所チャット、重要な事実、完了した操作と未完了の課題を保ちながら、古い共有コンテキストを圧縮する。"
-
 [maisaka_chat_optimized]
 display_name = "Planner（最適化版）"
 advanced = true
@@ -138,10 +148,15 @@ display_name = "長期記憶の曖昧修正計画"
 advanced = true
 description = "自然言語の修正要求と候補記憶から、失効させる旧記憶と書き込む新記憶を計画するテンプレート。"
 
-[mid_term_memory_summary]
-display_name = "中期チャット要約"
+[context_compaction]
+display_name = "通常チャットのローリング状態要約"
 advanced = true
-description = "コンテキスト裁切時に、削除されるチャット履歴を long_summary、brief、keywords に要約するためのテンプレート。"
+description = "通常チャットの Planner リクエストを再利用し、履歴と既存の要約を話題、背景、進展、未完了事項、約束の五分類に整理します。"
+
+[context_compaction_focus]
+display_name = "Focus ローリング状態要約"
+advanced = true
+description = "Focus Planner リクエストを再利用して共有グループの五分類のローリング要約を作成し、各チャットの出所を保持します。"
 
 [memory_retrieval_react_prompt_head_memory]
 display_name = "記憶検索 ReAct ヘッダー"

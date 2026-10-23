@@ -8,7 +8,10 @@ import httpx
 
 from src.core.tooling import ToolExecutionContext, ToolInvocation
 
+from .adapters.anysearch import AnySearchAdapter
 from .adapters.deepseek import DeepSeekAdapter
+from .adapters.exa import ExaAdapter
+from .adapters.firecrawl import FirecrawlAdapter
 from .adapters.stepsearch import MCPCaller, StepSearchAdapter
 from .adapters.tavily import TavilyAdapter
 from .config import WebRuntimeConfig
@@ -50,6 +53,12 @@ class WebSearchService:
             adapter = DeepSeekAdapter(settings, self.transport)
         elif settings.adapter == "tavily":
             adapter = TavilyAdapter(settings, self.transport)
+        elif settings.adapter == "anysearch":
+            adapter = AnySearchAdapter(settings, self.transport)
+        elif settings.adapter == "exa":
+            adapter = ExaAdapter(settings, self.transport)
+        elif settings.adapter == "firecrawl":
+            adapter = FirecrawlAdapter(settings, self.transport)
         else:
             adapter = StepSearchAdapter(settings, self.mcp, invocation, context)
         arguments = invocation.arguments

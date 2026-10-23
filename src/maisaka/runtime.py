@@ -286,6 +286,29 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         self._update_stage_status("空闲", "等待消息触发")
         logger.info(f"{self.log_prefix} Maisaka 运行时已启动")
 
+    async def build_retro_reply_history(self) -> List[LLMContextMessage]:
+        """独立读取复古回复窗口，避免 Planner 裁切缩短回复器的聊天记录。"""
+
+        context_limit = max(1, int(self._max_context_size * 0.6))
+        recent_messages = await asyncio.to_thread(
+            find_messages,
+            session_id=self.session_id,
+            limit=context_limit,
+            limit_mode="latest",
+        )
+        recent_messages = select_messages_after_latest_clear_marker(recent_messages)
+        history: List[LLMContextMessage] = []
+        for message in recent_messages:
+            if message.is_notify:
+                continue
+            history_message = await self._reasoning_engine._build_history_message(
+                message,
+                source_kind=self._resolve_restored_message_source_kind(message),
+            )
+            if history_message is not None:
+                history.append(history_message)
+        return history
+
     async def _restore_recent_context_from_db(self) -> None:
         """启动时从消息库恢复最近上下文，避免重启后丢失短期对话窗口。"""
 
@@ -349,7 +372,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         """主动回合前确保上下文含有可回复的真实用户消息。
 
         主动任务触发于长期静默的聊天流，运行时历史中可能没有任何带
-        msg_id 的用户消息，Planner 唯一的文本出口 reply 会因缺少引用
+        msg_id 的用户消息，回复执行链路会因缺少引用
         目标而无法发言。此处复用启动恢复的取数与转换链路，从消息库
         回填最近的用户消息作为可引用目标。返回本次回填的消息条数。
         """
@@ -1036,6 +1059,9 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
 
     def _get_effective_reply_frequency(self) -> float:
         """返回当前会话生效的回复频率。"""
+        if not self.chat_stream.is_group_session:
+            # 私聊只使用暂停开关，忽略旧频率、动态频率规则与插件频率倍率。
+            return ChatConfigUtils.get_talk_value(self.session_id, is_group_chat=False)
         if self._is_focus_mode_active_for_current_chat():
             return 1.0
 
@@ -1063,10 +1089,10 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         """返回当前会话类型对应的基础回复频率。"""
         if self.chat_stream.is_group_session:
             return float(global_config.chat.reply_timing.talk_value)
-        return float(global_config.chat.reply_timing.private_talk_value)
+        return 0.0 if ChatConfigUtils.is_private_reply_paused(self.session_id) else 1.0
 
     def _is_reply_frequency_silent(self) -> bool:
-        """判断当前会话是否处于回复频率为 0 的静默接收模式。"""
+        """判断当前会话是否因群聊频率为 0 或私聊暂停而静默接收。"""
         return self._get_effective_reply_frequency() <= 0.0
 
 
@@ -1574,7 +1600,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         return newly_discovered_tool_names
 
     def record_planner_reply(self) -> None:
-        """记录 Planner 成功调用了一次 reply，一次调用拆成多条消息发送也只计一次。"""
+        """记录 Planner 成功完成一次回复，一次回复拆成多条消息发送也只计一次。"""
 
         self._message_turn_scheduler.record_reply()
 
@@ -1685,17 +1711,13 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         logger.debug(f"{self.log_prefix} 连续 wait 计数已重置: 原计数={self._consecutive_wait_count} 原因={reason}")
         self._consecutive_wait_count = 0
 
-    def _try_enter_wait_state(
+    def _enter_counted_wait_state(
         self,
         seconds: Optional[float] = None,
         tool_call_id: Optional[str] = None,
         logical_turn_id: Optional[str] = None,
-    ) -> tuple[bool, int, int]:
-        """尝试进入 wait 状态，并返回是否成功、当前连续次数和上限。"""
-
-        max_count = max(1, int(global_config.chat.reply_timing.max_consecutive_wait_count))
-        if self._consecutive_wait_count >= max_count:
-            return False, self._consecutive_wait_count, max_count
+    ) -> int:
+        """进入 wait 状态并返回连续次数；多次等待由下一轮上下文提醒，不强制停止。"""
 
         self._consecutive_wait_count += 1
         self._enter_wait_state(
@@ -1703,7 +1725,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             tool_call_id=tool_call_id,
             logical_turn_id=logical_turn_id,
         )
-        return True, self._consecutive_wait_count, max_count
+        return self._consecutive_wait_count
 
     def _resume_from_wait_for_proactive_trigger(self) -> None:
         """主动触发到来时从 wait 状态恢复运行。"""

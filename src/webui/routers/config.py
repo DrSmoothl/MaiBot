@@ -86,6 +86,15 @@ async def _reload_model_config_after_save() -> None:
     raise HTTPException(status_code=500, detail="模型配置已保存，但运行时热重载失败，请检查日志")
 
 
+class PromptValidationResult(BaseModel):
+    """Prompt 参数校验结果。"""
+
+    valid: bool = True
+    missing_placeholders: List[str] = Field(default_factory=list)
+    extra_placeholders: List[str] = Field(default_factory=list)
+    message: str = ""
+
+
 class PromptFileInfo(BaseModel):
     """Prompt 文件信息。"""
 
@@ -97,15 +106,7 @@ class PromptFileInfo(BaseModel):
     description: str = Field(default="", description="Prompt 描述")
     customized: bool = Field(default=False, description="是否存在用户自定义覆盖")
     custom_version_count: int = Field(default=0, description="用户自定义版本数量")
-
-
-class PromptValidationResult(BaseModel):
-    """Prompt 参数校验结果。"""
-
-    valid: bool = True
-    missing_placeholders: List[str] = Field(default_factory=list)
-    extra_placeholders: List[str] = Field(default_factory=list)
-    message: str = ""
+    validation: PromptValidationResult = Field(default_factory=PromptValidationResult)
 
 
 class PromptVersionInfo(BaseModel):
@@ -919,6 +920,12 @@ def list_prompt_files():
                 template_info = prompt_template_infos.get(prompt_file.stem)
                 metadata = template_info.metadata if template_info and template_info.path == prompt_file else None
                 versions = _list_prompt_versions(language, prompt_file.name)
+                default_content = prompt_file.read_text(encoding="utf-8")
+                effective_content = (
+                    custom_prompt_file.read_text(encoding="utf-8")
+                    if custom_prompt_file.exists()
+                    else default_content
+                )
                 prompt_files.append(
                     PromptFileInfo(
                         name=prompt_file.name,
@@ -929,6 +936,7 @@ def list_prompt_files():
                         description=metadata.description if metadata else "",
                         customized=custom_prompt_file.exists(),
                         custom_version_count=len(versions),
+                        validation=_build_prompt_validation(default_content, effective_content),
                     )
                 )
 
@@ -956,9 +964,7 @@ def get_prompt_file(language: str, filename: str):
         effective_prompt_path = custom_prompt_path if custom_prompt_path.exists() else prompt_path
         content = effective_prompt_path.read_text(encoding="utf-8")
         default_content = prompt_path.read_text(encoding="utf-8")
-        validation = (
-            _build_prompt_validation(default_content, content) if custom_prompt_path.exists() else PromptValidationResult()
-        )
+        validation = _build_prompt_validation(default_content, content)
         return PromptFileResponse(
             language=language,
             filename=filename,
@@ -990,6 +996,7 @@ def get_default_prompt_file(language: str, filename: str):
             filename=filename,
             content=content,
             customized=False,
+            validation=_build_prompt_validation(content, content),
             active_version_id=_get_active_prompt_version_id(language, filename),
             versions=_list_prompt_versions(language, filename),
         )
@@ -1242,7 +1249,7 @@ def _apply_retro_prompt_schema_lock(schema: Dict[str, Any]) -> None:
 def _validate_retro_prompt_setting(config_data: Dict[str, Any]) -> None:
     """模型要求复古模板时，所有主配置写入入口均禁止手动关闭。"""
     if config_manager.retro_prompt_forced and config_data.get("debug", {}).get("replyer_retro_prompt") is False:
-        raise HTTPException(status_code=400, detail="当前模型需要复古回复提示词，移除对应模型后才能关闭")
+        raise HTTPException(status_code=400, detail="当前 replyer 模型需要复古回复提示词，解除对应模型的 replyer 分配后才能关闭")
 
 
 @router.get("/schema/bot")

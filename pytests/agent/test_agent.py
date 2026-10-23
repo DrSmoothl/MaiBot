@@ -42,6 +42,26 @@ def image_bytes():
     return buffer.getvalue()
 
 
+@pytest.mark.parametrize("kind, field", [("agent_thought_chunk", "text_parts"), ("agent_message_chunk", "parts")])
+def test_stream_chunks_preserve_whitespace(service, kind, field):
+    async def scenario():
+        agent = AcpAgent(service)
+        await agent.load()
+        agent.backend_state = {"session_id": "stream-session"}
+        chunks = ["Let", " me check", " ", "status.\n\n", "Next"]
+        for text in chunks:
+            await agent._update({"sessionId": "stream-session", "update": {
+                "sessionUpdate": kind, "messageId": "message-1", "content": {"type": "text", "text": text},
+            }})
+        # WebUI 轮询与重新加载历史都应保留完整增量及其消息归属。
+        agent.history.load()
+        items = [event["items"][0] for event in agent.history.events()]
+        assert [item[field][0] if field == "text_parts" else item[field][0]["text"] for item in items] == chunks
+        assert all(item["logical_turn_id"] == "message-1" for item in items)
+
+    asyncio.run(scenario())
+
+
 def test_failed_resume_preserves_error_and_never_closes_unowned_session(service):
     async def scenario():
         service.config.acp_env["ACP_TEST_REJECT_RESUME"] = "1"

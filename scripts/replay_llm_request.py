@@ -58,6 +58,7 @@ def _build_response_request(snapshot: dict[str, Any]) -> ResponseRequest:
         response_format=deserialize_response_format_snapshot(snapshot.get("response_format")),
         temperature=snapshot.get("temperature"),
         tool_options=deserialize_tool_options_snapshot(snapshot.get("tool_options")),
+        tool_choice=snapshot.get("tool_choice"),
     )
 
 
@@ -97,6 +98,7 @@ def _build_unified_response_request(snapshot: dict[str, Any]) -> ResponseRequest
         response_format=deserialize_response_format_snapshot(request_parameters.get("response_format")),
         temperature=request_parameters.get("temperature"),
         tool_options=deserialize_tool_options_snapshot(snapshot.get("tool_definitions")),
+        tool_choice=request_parameters.get("tool_choice"),
     )
 
 

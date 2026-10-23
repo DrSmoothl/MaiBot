@@ -1,12 +1,14 @@
-import { ChevronsUpDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { LANGUAGE_CODES, LANGUAGE_NAMES } from '@/components/layout/language-options'
 import type { LanguageCode } from '@/components/layout/language-options'
 import { Card } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
+import { SelfUpdateCard } from './SelfUpdateCard'
 
 /**
- * 通用设置：桌面端与手机端统一在此切换界面语言。
+ * 通用设置：桌面端与手机端统一在此切换界面语言、管理主程序更新。
  */
 export function GeneralTab() {
   const { t, i18n } = useTranslation()
@@ -15,27 +17,27 @@ export function GeneralTab() {
   return (
     <div className="space-y-6 sm:space-y-8">
       <Card className="overflow-hidden p-0">
-        <label className="relative flex h-12 items-center gap-3 px-4 text-base">
+        <div className="flex min-h-12 items-center gap-3 px-4 py-2 text-base">
           <span className="flex-1">{t('header.switchLanguage')}</span>
-          <span className="text-muted-foreground">
-            {LANGUAGE_NAMES[currentLang] ?? currentLang}
-          </span>
-          <ChevronsUpDown className="text-muted-foreground h-4 w-4" aria-hidden="true" />
-          {/* 原生下拉在手机上会弹出系统选择器 */}
-          <select
+          <Select
             value={currentLang}
-            onChange={(event) => void i18n.changeLanguage(event.target.value)}
-            aria-label={t('header.switchLanguage')}
-            className="absolute inset-0 cursor-pointer opacity-0"
+            onValueChange={(value) => void i18n.changeLanguage(value)}
           >
-            {LANGUAGE_CODES.map((code) => (
-              <option key={code} value={code}>
-                {LANGUAGE_NAMES[code]}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger aria-label={t('header.switchLanguage')} className="w-36 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LANGUAGE_CODES.map((code) => (
+                <SelectItem key={code} value={code}>
+                  {LANGUAGE_NAMES[code]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </Card>
+      {/* 主程序更新 */}
+      <SelfUpdateCard />
     </div>
   )
 }

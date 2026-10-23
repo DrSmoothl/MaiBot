@@ -40,6 +40,17 @@ const ADAPTER_LABELS: Record<WebAdapter, string> = {
   deepseek: 'DeepSeek',
   tavily: 'Tavily',
   stepsearch_mcp: 'StepSearch MCP',
+  anysearch: 'AnySearch',
+  exa: 'Exa',
+  firecrawl: 'Firecrawl',
+}
+
+const HTTP_BASE_URLS: Record<Exclude<WebAdapter, 'stepsearch_mcp'>, string> = {
+  deepseek: 'https://api.deepseek.com',
+  tavily: 'https://api.tavily.com',
+  anysearch: 'https://api.anysearch.com',
+  exa: 'https://api.exa.ai',
+  firecrawl: 'https://api.firecrawl.dev',
 }
 
 function isDeepSeekProvider(provider: APIProvider, models: ModelInfo[]): boolean {
@@ -372,11 +383,7 @@ export function WebSearchDialog({
                       id="web-service-url"
                       value={service.base_url ?? ''}
                       onChange={(event) => patch({ base_url: event.target.value })}
-                      placeholder={
-                        service.adapter === 'deepseek'
-                          ? 'https://api.deepseek.com'
-                          : 'https://api.tavily.com'
-                      }
+                      placeholder={HTTP_BASE_URLS[service.adapter]}
                     />
                     <p className="text-muted-foreground text-xs">留空使用官方地址。</p>
                   </div>

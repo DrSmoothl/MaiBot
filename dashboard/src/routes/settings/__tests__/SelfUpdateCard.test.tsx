@@ -105,7 +105,7 @@ describe('SelfUpdateCard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'settings.selfUpdate.confirmAction' }))
 
     await waitFor(() => expect(triggerRestart).toHaveBeenCalledTimes(1))
-    expect(api.checkSelfUpdate).toHaveBeenCalledWith({ source_id: 'github' })
+    expect(api.checkSelfUpdate).toHaveBeenCalledWith({ source_id: 'github' }, true, expect.any(Function))
     expect(api.applySelfUpdate).toHaveBeenCalledWith(TARGET, { source_id: 'github' })
     expect(triggerRestart).toHaveBeenCalledWith({ skipApiCall: true, maxAttempts: 450 })
     expect(sessionStorage.getItem('maibot-self-update-pending')).toBe(TARGET)

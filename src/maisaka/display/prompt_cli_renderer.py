@@ -178,6 +178,12 @@ class PromptCLIVisualizer:
         if model_name:
             normalized["model_name"] = model_name
 
+        if isinstance(metadata.get("prompt_cache_reported"), bool):
+            normalized["prompt_cache_reported"] = metadata["prompt_cache_reported"]
+        for key in ("tool_choice", "request_source"):
+            if isinstance(metadata.get(key), str):
+                normalized[key] = metadata[key]
+
         raw_duration_ms = metadata.get("duration_ms")
         if raw_duration_ms is not None:
             try:
@@ -185,7 +191,10 @@ class PromptCLIVisualizer:
             except (TypeError, ValueError):
                 pass
 
-        for token_key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        for token_key in (
+            "prompt_tokens", "completion_tokens", "total_tokens",
+            "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
+        ):
             raw_token_count = metadata.get(token_key)
             if isinstance(raw_token_count, int) and not isinstance(raw_token_count, bool):
                 normalized[token_key] = max(raw_token_count, 0)

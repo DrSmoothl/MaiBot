@@ -44,7 +44,9 @@ class WebSearchToolProvider:
         specs = []
         annotation = ToolAnnotation(read_only=True, destructive=False, open_world=True)
         if config.search:
-            limit = 128 if config.services[config.search].adapter == "deepseek" else 1000
+            adapter = config.services[config.search].adapter
+            limit = {"deepseek": 128, "firecrawl": 500}.get(adapter, 1000)
+            max_results = 10 if adapter == "anysearch" else 20
             specs.append(
                 ToolSpec(
                     name="web_search",
@@ -59,7 +61,7 @@ class WebSearchToolProvider:
                         "type": "object",
                         "properties": {
                             "query": {"type": "string", "minLength": 1, "maxLength": limit},
-                            "max_results": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+                            "max_results": {"type": "integer", "minimum": 1, "maximum": max_results, "default": 5},
                         },
                         "required": ["query"],
                         "additionalProperties": False,

@@ -18,7 +18,7 @@ from src.maisaka.context.messages import (
     ToolResultMediaMessage,
     ToolResultMessage,
 )
-from src.maisaka.memory.mid_term import MemorySummaryMessage
+from src.maisaka.context.compaction import ContextSummaryMessage
 
 
 def _build_mixed_history() -> List[LLMContextMessage]:
@@ -60,10 +60,7 @@ def _build_mixed_history() -> List[LLMContextMessage]:
             raw_message=MessageSequence([TextComponent("工具媒体")]),
             visible_text="工具媒体", timestamp=timestamp, tool_call_id="call-1",
         ),
-        MemorySummaryMessage(
-            raw_message=MessageSequence([TextComponent("记忆摘要")]),
-            visible_text="记忆摘要", timestamp=timestamp, prompt_text="记忆摘要",
-        ),
+        ContextSummaryMessage(content="记忆摘要", timestamp=timestamp, remaining_uses_value=None),
         ReferenceMessage(content="参考资料", timestamp=timestamp),
         ToolResultMessage(
             content="工具结果", timestamp=timestamp, tool_call_id="call-1", logical_turn_id="turn-1",

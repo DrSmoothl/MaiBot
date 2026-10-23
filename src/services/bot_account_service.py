@@ -51,6 +51,25 @@ def normalize_account_id(account_id: str) -> str:
     return str(account_id or "").strip()
 
 
+def get_online_bot_accounts(platform: str) -> Set[str]:
+    """返回当前在线网关的账号，供回复门控识别自身消息；不读取历史身份。"""
+
+    from src.platform_io import DriverKind, get_platform_io_manager
+
+    normalized_platform = normalize_platform(platform)
+    if normalized_platform == "webui":
+        return {WEBUI_BOT_USER_ID}
+    if normalized_platform in LOCAL_PLATFORM_BOT_IDS:
+        return {LOCAL_PLATFORM_BOT_IDS[normalized_platform]}
+
+    # 网关 ready 时注册驱动，下线或插件退出时注销；历史身份记录不能代表在线状态。
+    return {
+        normalize_account_id(driver.descriptor.account_id)
+        for driver in get_platform_io_manager().driver_registry.list(kind=DriverKind.PLUGIN)
+        if normalize_platform(driver.descriptor.platform) == normalized_platform and driver.descriptor.account_id
+    }
+
+
 class BotAccountService:
     """维护数据库身份事实及供热路径读取的内存快照。"""
 

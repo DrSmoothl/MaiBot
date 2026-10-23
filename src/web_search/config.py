@@ -7,7 +7,7 @@ from src.config.config_base import ConfigBase, Field
 
 
 class WebServiceConfig(ConfigBase):
-    adapter: Literal["deepseek", "tavily", "stepsearch_mcp"] = "deepseek"
+    adapter: Literal["deepseek", "tavily", "stepsearch_mcp", "anysearch", "exa", "firecrawl"] = "deepseek"
     """服务协议类型，不需要配置模型列表。"""
 
     base_url: str = ""

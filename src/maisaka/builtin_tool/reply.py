@@ -1,4 +1,4 @@
-﻿"""reply 内置工具。"""
+﻿"""reply 工具适配与共用回复执行服务。"""
 
 from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
@@ -234,6 +234,23 @@ def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec
     )
 
 
+def get_reply_options_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec:
+    """被动式 replyer 保留参数设置能力，设置本身不生成或发送消息。"""
+
+    spec = get_tool_spec(context)
+    spec.name = "set_reply_options"
+    spec.description = (
+        "可选：设置下一次发言的附件、@、表达方式和插件参数，本工具不生成或发送回复。"
+        "每次调用整体替换已暂存参数，空对象清空；最终直接输出发言指导时应用一次。"
+        "本轮结束（含 stop、wait 或失败）后清空；普通文字回复无需调用。"
+    )
+    spec.parameters_schema["properties"].pop("msg_id")
+    spec.parameters_schema["properties"].pop("reply_reference")
+    spec.parameters_schema["required"] = []
+    spec.parameters_schema["additionalProperties"] = False
+    return spec
+
+
 def _build_monitor_metadata(reply_result: ReplyGenerationResult, reply_id: str = "") -> Dict[str, object]:
     """从 reply 结果中提取统一监控详情。"""
 
@@ -370,21 +387,38 @@ async def handle_tool(
             f"{tool_ctx.runtime.log_prefix} 检测到 reply 工具参数被重复包裹，已自动解包: "
             f"调用编号={invocation.call_id}"
         )
+    return await execute_reply(tool_ctx, invocation_arguments, call_id=invocation.call_id)
+
+
+async def execute_reply(
+    tool_ctx: BuiltinToolRuntimeContext,
+    arguments: Dict[str, Any],
+    *,
+    call_id: str,
+    target_message: Optional[SessionMessage] = None,
+) -> ToolExecutionResult:
+    """共用回复执行入口，保留附件、插件扩展、Hook 和发送统计。
+
+    普通 Planner 直接调用；Focus 的 reply 工具经参数解包后调用同一入口。
+    target_message 可传入请求前固定的真实消息，避免生成期间历史变化影响引用目标。
+    """
+
+    invocation_arguments = deepcopy(arguments)
     if type(invocation_arguments.get("attach_emoji")) is int and invocation_arguments["attach_emoji"] == 0:
         invocation_arguments.pop("attach_emoji")
     reply_reference = invocation_arguments.get("reply_reference")
     if not isinstance(reply_reference, str) or not reply_reference.strip():
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "reply 工具必须提供非空字符串 `reply_reference`，请填写本次回复的上下文关键信息与回复方向后重新调用。",
         )
     invocation_arguments["reply_reference"] = reply_reference.strip()
     target_message_id = str(invocation_arguments.get("msg_id") or "").strip()
     if invocation_arguments.get("attach_at") and not config_module.global_config.chat.enable_reply_at:
-        return tool_ctx.build_failure_result(invocation.tool_name, "回复时 @ 用户已关闭，不能使用 attach_at。")
+        return tool_ctx.build_failure_result("reply", "回复时 @ 用户已关闭，不能使用 attach_at。")
     if invocation_arguments.get("attach_emoji") is not None and not config_module.global_config.emoji.use_new_send_logic:
         return tool_ctx.build_failure_result(
-            invocation.tool_name, "新表情包发送逻辑未开启，请使用 send_emoji 工具。"
+            "reply", "新表情包发送逻辑未开启，请使用 send_emoji 工具。"
         )
     reply_tool_args = {
         key: value
@@ -396,14 +430,17 @@ async def handle_tool(
 
     if not target_message_id:
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "reply 工具需要提供有效的 `msg_id` 参数。",
         )
 
-    target_message = tool_ctx.runtime.find_source_message_by_id(target_message_id)
+    if target_message is None:
+        target_message = tool_ctx.runtime.find_source_message_by_id(target_message_id)
+    elif target_message.message_id != target_message_id:
+        raise ValueError("回复快照的消息 ID 与回复参数不一致")
     if target_message is None:
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             f"未找到要回复的目标消息，msg_id={to_display_message_id(target_message_id)}",
         )
 
@@ -414,7 +451,7 @@ async def handle_tool(
             platform=tool_ctx.runtime.chat_stream.platform,
         ),
         reply_message_id=target_message_id,
-        call_id=invocation.call_id,
+        call_id=call_id,
     )
     if invocation_arguments.get("plugin_options"):
         extension_execution.context.is_group_chat = tool_ctx.runtime.chat_stream.is_group_session
@@ -425,7 +462,7 @@ async def handle_tool(
     except Exception as exc:
         logger.exception(f"{tool_ctx.runtime.log_prefix} 准备插件回复扩展失败: {exc}")
         return tool_ctx.build_failure_result(
-            invocation.tool_name, f"准备插件回复扩展失败：{exc}",
+            "reply", f"准备插件回复扩展失败：{exc}",
             metadata={"reply_id": extension_execution.reply_id},
         )
     if extension_execution.targets:
@@ -443,7 +480,7 @@ async def handle_tool(
         logger.exception(f"{tool_ctx.runtime.log_prefix} 获取回复生成器时发生异常: 目标消息编号={target_message_id}")
         logger.info(traceback.format_exc())
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "获取 Maisaka 回复生成器时发生异常。",
             metadata={"reply_id": extension_execution.reply_id},
         )
@@ -451,12 +488,14 @@ async def handle_tool(
     if replyer is None:
         logger.error(f"{tool_ctx.runtime.log_prefix} 获取 Maisaka 回复生成器失败")
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "Maisaka 回复生成器当前不可用。",
             metadata={"reply_id": extension_execution.reply_id},
         )
 
     replyer_chat_history = list(tool_ctx.runtime._chat_history)
+    if config_module.global_config.debug.replyer_retro_prompt:
+        replyer_chat_history = await tool_ctx.runtime.build_retro_reply_history()
     previous_target_reply = _find_recent_reply_to_target(replyer_chat_history, target_message_id)
     if previous_target_reply:
         reply_tool_args = _with_duplicate_target_reply_reminder(reply_tool_args, previous_target_reply)
@@ -485,7 +524,7 @@ async def handle_tool(
             f"{tool_ctx.runtime.log_prefix} 回复生成器执行异常: 目标消息编号={target_message_id} 异常={exc}"
         )
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "生成可见回复时发生异常。",
             metadata={"reply_id": extension_execution.reply_id},
         )
@@ -500,7 +539,7 @@ async def handle_tool(
             f"目标消息编号={target_message_id} 错误信息={reply_result.error_message!r}"
         )
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "生成可见回复失败。",
             metadata=reply_metadata,
         )
@@ -524,7 +563,7 @@ async def handle_tool(
         reply_result.completion.response_text = ""
         reply_result.monitor_detail = build_reply_monitor_detail(reply_result)
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "回复文本后处理前 Hook 返回了空回复。",
             metadata=_build_monitor_metadata(reply_result, extension_execution.reply_id),
         )
@@ -541,7 +580,7 @@ async def handle_tool(
         reply_metadata = _build_monitor_metadata(reply_result, extension_execution.reply_id)
         logger.exception(f"{tool_ctx.runtime.log_prefix} 解析回复附件失败: {exc}")
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             f"解析回复附件失败：{exc}",
             metadata=reply_metadata,
         )
@@ -571,7 +610,7 @@ async def handle_tool(
         except Exception as exc:
             logger.exception(f"{tool_ctx.runtime.log_prefix} 插件回复扩展处理失败: {exc}")
             return tool_ctx.build_failure_result(
-                invocation.tool_name, f"插件回复扩展处理失败：{exc}",
+                "reply", f"插件回复扩展处理失败：{exc}",
                 metadata=_build_monitor_metadata(reply_result, extension_execution.reply_id),
             )
     reply_sequences = [item.sequence for item in reply_items]
@@ -595,6 +634,9 @@ async def handle_tool(
         reply_metadata["quote_probability"] = quote_probability
     sent_message_ids: list[str] = []
     send_results: list[dict[str, Any]] = []
+    # 逐段更新回执，后续发送抛错时也保留已经送达的消息，避免误判为完全未发送。
+    reply_metadata["sent_message_ids"] = sent_message_ids
+    reply_metadata["send_results"] = send_results
     try:
         sent = False
         if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
@@ -649,7 +691,7 @@ async def handle_tool(
                         )
                     )
                     break
-                sent_message_id = str(getattr(sent_message, "message_id", "") or "").strip()
+                sent_message_id = sent_message.message_id.strip()
                 if sent_message_id:
                     sent_message_ids.append(sent_message_id)
                 send_results.append(
@@ -665,14 +707,14 @@ async def handle_tool(
     except Exception:
         logger.exception(f"{tool_ctx.runtime.log_prefix} 发送文字消息时发生异常，目标消息编号={target_message_id}")
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "发送可见回复时发生异常。",
             metadata=reply_metadata,
         )
 
     if not sent:
         return tool_ctx.build_failure_result(
-            invocation.tool_name,
+            "reply",
             "可见回复生成成功，但发送失败。",
             structured_content={
                 "msg_id": target_message_id,
@@ -696,11 +738,9 @@ async def handle_tool(
 
     if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
-    reply_metadata["sent_message_ids"] = sent_message_ids
-    reply_metadata["send_results"] = send_results
     tool_ctx.runtime.record_planner_reply()
     return tool_ctx.build_success_result(
-        invocation.tool_name,
+        "reply",
         reply_receipt,
         structured_content={
             "msg_id": target_message_id,

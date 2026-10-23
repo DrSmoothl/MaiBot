@@ -6,6 +6,7 @@ from typing import Any, Iterator, List
 from fastapi import HTTPException
 
 import pytest
+import tomlkit
 
 from src.common.database.database_model import ChatSession
 from src.platform_io import AdapterPolicyManager, DriverKind
@@ -175,3 +176,47 @@ def test_chat_adapter_policy_still_updates_same_platform(adapter_runtime: Simple
     assert details[0]["policy"]["allowed"] is (action == "allow")
     telegram_session = ChatSession(session_id="tg-session", platform="telegram", group_id="123")
     assert routes._get_adapter_policy_details(telegram_session)[0]["policy"]["allowed"] is True
+
+
+def test_private_pause_switch_roundtrip_preserves_legacy_frequency(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "bot_config.toml"
+    config_path.write_text(
+        '[chat.reply_timing]\nprivate_talk_value = 0.2\nprivate_reply_paused = false\n'
+        'talk_value_rules = [{platform="qq", item_id="123", rule_type="private", time="*", value=0.0}]\n'
+        'private_reply_pause_rules = [{platform="telegram", item_id="123", paused=true}]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(routes, "BOT_CONFIG_PATH", config_path)
+    chat_session = ChatSession(session_id="private-session", platform="qq", user_id="123")
+    original = tomlkit.loads(config_path.read_text(encoding="utf-8"))["chat"]["reply_timing"]
+
+    for paused in [True, False, None]:
+        routes._write_private_reply_pause(chat_session, paused)
+        saved = tomlkit.loads(config_path.read_text(encoding="utf-8"))["chat"]["reply_timing"]
+        assert saved["private_talk_value"] == original["private_talk_value"]
+        assert saved["talk_value_rules"] == original["talk_value_rules"]
+        assert saved["private_reply_paused"] is False
+        expected = [{"platform": "telegram", "item_id": "123", "paused": True}]
+        if paused is not None:
+            expected.append({"platform": "qq", "item_id": "123", "paused": paused})
+        assert saved["private_reply_pause_rules"] == expected
+
+
+def test_group_cannot_use_private_pause_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "bot_config.toml"
+    monkeypatch.setattr(routes, "BOT_CONFIG_PATH", config_path)
+    chat_session = ChatSession(session_id="group-session", platform="qq", group_id="123")
+
+    with pytest.raises(HTTPException, match="只适用于私聊") as exc_info:
+        routes._write_private_reply_pause(chat_session, True)
+
+    assert exc_info.value.status_code == 400
+    assert not config_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_private_chat_cannot_save_legacy_frequency_rule() -> None:
+    chat_session = ChatSession(session_id="private-session", platform="qq", user_id="123")
+    with pytest.raises(HTTPException, match="暂停回复开关") as exc_info:
+        await routes._save_chat_talk_frequency_rule(chat_session, routes.TalkFrequencyUpdateRequest(value=0.5))
+    assert exc_info.value.status_code == 400

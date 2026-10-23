@@ -476,15 +476,6 @@ class ModelTaskConfig(ConfigBase):
     )
     """记忆模型配置，用于长期记忆总结、抽取、写回等高记忆任务；留空时由调用方按需回退"""
 
-    mid_memory: TaskConfig = Field(
-        default_factory=TaskConfig,
-        json_schema_extra={
-            "x-widget": "custom",
-            "advanced": True,
-        },
-    )
-    """聊天回想模型配置；留空时自动继用 fast_model 模型，fast_model 留空时使用 utils 模型"""
-
     utils: TaskConfig = Field(
         default_factory=TaskConfig,
         json_schema_extra={
