@@ -494,6 +494,8 @@ async def execute_reply(
         )
 
     replyer_chat_history = list(tool_ctx.runtime._chat_history)
+    if config_module.global_config.debug.replyer_retro_prompt:
+        replyer_chat_history = await tool_ctx.runtime.build_retro_reply_history()
     previous_target_reply = _find_recent_reply_to_target(replyer_chat_history, target_message_id)
     if previous_target_reply:
         reply_tool_args = _with_duplicate_target_reply_reminder(reply_tool_args, previous_target_reply)

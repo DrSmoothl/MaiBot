@@ -286,6 +286,29 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         self._update_stage_status("空闲", "等待消息触发")
         logger.info(f"{self.log_prefix} Maisaka 运行时已启动")
 
+    async def build_retro_reply_history(self) -> List[LLMContextMessage]:
+        """独立读取复古回复窗口，避免 Planner 裁切缩短回复器的聊天记录。"""
+
+        context_limit = max(1, int(self._max_context_size * 0.6))
+        recent_messages = await asyncio.to_thread(
+            find_messages,
+            session_id=self.session_id,
+            limit=context_limit,
+            limit_mode="latest",
+        )
+        recent_messages = select_messages_after_latest_clear_marker(recent_messages)
+        history: List[LLMContextMessage] = []
+        for message in recent_messages:
+            if message.is_notify:
+                continue
+            history_message = await self._reasoning_engine._build_history_message(
+                message,
+                source_kind=self._resolve_restored_message_source_kind(message),
+            )
+            if history_message is not None:
+                history.append(history_message)
+        return history
+
     async def _restore_recent_context_from_db(self) -> None:
         """启动时从消息库恢复最近上下文，避免重启后丢失短期对话窗口。"""
 
