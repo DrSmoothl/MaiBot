@@ -3,7 +3,7 @@ import { DAY_MINUTES, formatTimelineMinute, formatTalkTimeRange, getTimelineSegm
 /**
  * 麦麦聊天页的聊天流设置弹窗。
  *
- * 弹窗内展示 Session 基本信息、适配器规则、发言频率规则、聊天 Prompt 与学习配置，
+ * 弹窗内展示 Session 基本信息、适配器规则、群聊频率或私聊暂停开关、聊天 Prompt 与学习配置，
  * 并提供删除聊天流的严肃确认入口。
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -37,6 +37,7 @@ import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Slider } from '@/components/ui/slider'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { formatChatDisplayName, getChatTypeText } from '@/lib/chat-display'
@@ -49,6 +50,7 @@ import {
   getChatStreamDetail,
   updateChatStreamAdapterPolicy,
   updateChatStreamLearning,
+  updateChatStreamPrivateReplyPause,
   updateChatStreamTalkFrequency,
   upsertChatStreamPrompt,
   type ChatAdapterStatus,
@@ -614,6 +616,55 @@ function TalkFrequencyEditor({ detail }: { detail: ChatStreamDetail }) {
   )
 }
 
+function PrivateReplyPauseSection({ detail }: { detail: ChatStreamDetail }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const settings = detail.private_reply
+  const mutation = useMutation({
+    mutationFn: (paused: boolean | null) => updateChatStreamPrivateReplyPause(detail.session_id, paused),
+    onSuccess: (nextDetail) => {
+      queryClient.setQueryData(['chat-stream-detail', detail.session_id], nextDetail)
+      toast({ title: '私聊暂停设置已保存' })
+    },
+    onError: (error) => {
+      toast({
+        title: '私聊暂停设置保存失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    },
+  })
+  if (!settings) return null
+
+  return (
+    <section className="space-y-3 rounded-md border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <Label htmlFor="private-reply-paused" className="font-medium">暂停回复</Label>
+        <Switch
+          id="private-reply-paused"
+          checked={settings.paused}
+          disabled={mutation.isPending}
+          onCheckedChange={(paused) => mutation.mutate(paused)}
+        />
+      </div>
+      <p className="text-muted-foreground text-sm">
+        暂停后仍会接收消息并保留聊天历史，麦麦暂时不再思考和回复这个私聊。
+      </p>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="text-muted-foreground">
+          {settings.has_override ? '已为当前私聊单独设置' : '跟随全局私聊设置'}
+          {`（全局${settings.global_paused ? '已暂停' : '正常回复'}）`}
+        </span>
+        {settings.has_override && (
+          <Button size="sm" variant="outline" disabled={mutation.isPending} onClick={() => mutation.mutate(null)}>
+            恢复跟随全局
+          </Button>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function TalkFrequencySection({ detail }: { detail: ChatStreamDetail }) {
   return (
     <section className="space-y-3 rounded-md border p-3">
@@ -1107,7 +1158,7 @@ function ChatDetailContent({
       </section>
 
       <ChatAdapterSection detail={detail} />
-      <TalkFrequencySection detail={detail} />
+      {detail.chat_type === 'private' ? <PrivateReplyPauseSection detail={detail} /> : <TalkFrequencySection detail={detail} />}
       <ChatPromptSection detail={detail} />
       <ConfigStatusRows detail={detail} />
     </div>

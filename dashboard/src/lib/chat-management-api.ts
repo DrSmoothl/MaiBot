@@ -66,6 +66,12 @@ export interface ChatTalkFrequencyDetail {
   matched_rules: ChatTalkFrequencyRule[]
 }
 
+export interface ChatPrivateReplyDetail {
+  paused: boolean
+  global_paused: boolean
+  has_override: boolean
+}
+
 export interface ChatPromptDetail {
   base_prompt_type: ChatStreamType | string
   base_prompt_title: string
@@ -186,6 +192,7 @@ export interface ChatStreamDetail {
   expression: ChatLearningStatus
   jargon: ChatLearningStatus
   talk_frequency: ChatTalkFrequencyDetail
+  private_reply: ChatPrivateReplyDetail | null
   prompts: ChatPromptDetail
   adapters: ChatAdapterStatus[]
 }
@@ -343,6 +350,23 @@ export async function updateChatStreamTalkFrequency(
     {
       body: payload,
       errorMessage: '保存发言频率失败',
+    }
+  )
+  if (!result.detail) {
+    throw new Error('聊天流详情为空')
+  }
+  return result.detail
+}
+
+export async function updateChatStreamPrivateReplyPause(
+  sessionId: string,
+  paused: boolean | null
+): Promise<ChatStreamDetail> {
+  const result = await backendApi.put<ChatStreamDetailResponse>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/private-reply-pause`,
+    {
+      body: { paused },
+      errorMessage: '保存私聊暂停设置失败',
     }
   )
   if (!result.detail) {

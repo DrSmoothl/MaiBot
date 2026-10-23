@@ -3,6 +3,11 @@ from unittest.mock import Mock
 
 import pytest
 
+from src.common.utils import utils_config
+from src.common.utils.utils_config import ChatConfigUtils
+from src.config.official_configs import PrivateReplyPauseRule
+from src.maisaka.focus.manager import FocusModeManager
+from src.maisaka.runtime import MaisakaHeartFlowChatting
 from src.maisaka.turn_trigger import scheduler as scheduler_module
 from src.maisaka.turn_trigger.scheduler import MessageTurnScheduler
 
@@ -102,3 +107,69 @@ def test_steering_wait_resumes_only_after_debounce(monkeypatch) -> None:
     runtime._cancel_wait_timeout_task.assert_called_once()
     scheduler._dynamic_reply_gate.evaluate.assert_not_called()
     runtime._enqueue_message_turn.assert_called_once()
+
+
+@pytest.mark.parametrize("global_paused", [False, True])
+@pytest.mark.parametrize("override", [None, False, True])
+def test_private_reply_pause_ignores_legacy_frequency_and_plugin_adjustment(
+    monkeypatch: pytest.MonkeyPatch, global_paused: bool, override: bool | None
+) -> None:
+    runtime = object.__new__(MaisakaHeartFlowChatting)
+    runtime.session_id = "private-session"
+    runtime.chat_stream = SimpleNamespace(is_group_session=False, platform="qq", user_id="123")
+    runtime._talk_frequency_adjust = 0.0
+    rules = [] if override is None else [PrivateReplyPauseRule(platform="qq", item_id="123", paused=override)]
+    # 不提供旧频率和动态规则字段，确保私聊链路不会再读取它们。
+    monkeypatch.setattr(
+        utils_config,
+        "global_config",
+        SimpleNamespace(chat=SimpleNamespace(reply_timing=SimpleNamespace(
+            private_reply_paused=global_paused, private_reply_pause_rules=rules,
+        ))),
+    )
+    monkeypatch.setattr(ChatConfigUtils, "_get_chat_stream", lambda sid: runtime.chat_stream)
+    expected_paused = global_paused if override is None else override
+
+    assert runtime._get_effective_reply_frequency() == (0.0 if expected_paused else 1.0)
+    assert runtime._is_reply_frequency_silent() is expected_paused
+
+
+def test_private_reply_pause_override_does_not_match_another_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        utils_config,
+        "global_config",
+        SimpleNamespace(chat=SimpleNamespace(reply_timing=SimpleNamespace(
+            private_reply_paused=False,
+            private_reply_pause_rules=[PrivateReplyPauseRule(platform="telegram", item_id="123", paused=True)],
+        ))),
+    )
+    monkeypatch.setattr(
+        ChatConfigUtils, "_get_chat_stream",
+        lambda sid: SimpleNamespace(is_group_session=False, platform="qq", user_id="123"),
+    )
+
+    assert ChatConfigUtils.get_talk_value("private-session", is_group_chat=False) == 1.0
+
+
+def test_paused_private_consumes_messages_without_forced_or_dynamic_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    scheduler, runtime = _build_scheduler(monkeypatch, backoff_seconds=30.0, forced=True)
+    runtime.chat_stream.is_group_session = False
+    runtime._is_reply_frequency_silent = lambda: True
+    runtime._get_effective_reply_frequency = lambda: 0.0
+
+    scheduler.schedule_message_turn()
+
+    runtime._enqueue_message_turn.assert_called_once()
+    runtime._defer_message_turn_check.assert_not_called()
+    scheduler._dynamic_reply_gate.evaluate.assert_not_called()
+    scheduler._dynamic_reply_gate.record_forced_turn.assert_not_called()
+
+
+def test_paused_private_cannot_bypass_pause_through_focus(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = FocusModeManager()
+    monkeypatch.setattr(manager, "is_enabled_for_chat", lambda **kwargs: True)
+    pause_check = Mock(return_value=True)
+    monkeypatch.setattr(ChatConfigUtils, "is_private_reply_paused", pause_check)
+
+    assert manager.is_enabled_for_session("private-session", is_group_chat=False) is False
+    pause_check.assert_called_once_with("private-session")

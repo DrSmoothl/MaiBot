@@ -266,6 +266,8 @@ class ConfigSchemaGenerator:
         for field_name, field_info in config_class.model_fields.items():
             if field_name in {"field_docs", "_validate_any", "suppress_any_warning"}:
                 continue
+            if field_info.deprecated:
+                continue
 
             field_path = cls._join_field_path(resolved_path_prefix, field_name)
             nested_schema = cls._build_nested_schema(field_info.annotation, field_path) if include_nested else None

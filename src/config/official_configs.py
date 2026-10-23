@@ -471,6 +471,31 @@ class TalkRulesItem(ConfigBase):
     """该规则下的发言频率；0 更安静，1 按正常频率。"""
 
 
+class PrivateReplyPauseRule(ConfigBase):
+    platform: str = Field(
+        default="",
+        min_length=1,
+        json_schema_extra={"label": {"zh_CN": "平台", "en_US": "Platform", "ja_JP": "プラットフォーム"}},
+    )
+    """私聊所在的平台，需填写具体平台。"""
+
+    item_id: str = Field(
+        default="",
+        min_length=1,
+        json_schema_extra={"label": {"zh_CN": "用户 ID", "en_US": "User ID", "ja_JP": "ユーザー ID"}},
+    )
+    """私聊对象的用户 ID，需填写具体用户。"""
+
+    paused: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {"zh_CN": "暂停回复", "en_US": "Pause replies", "ja_JP": "返信を一時停止"},
+            "x-widget": "switch",
+        },
+    )
+    """开启后暂停这个私聊的回复；关闭则允许回复，覆盖全局私聊暂停设置。"""
+
+
 class ChatReplyTimingConfig(ConfigBase):
     """聊天回复时机与频率配置类"""
 
@@ -536,6 +561,7 @@ class ChatReplyTimingConfig(ConfigBase):
         default=1,
         ge=0,
         le=1,
+        deprecated=True,
         json_schema_extra={
             "label": {
                 "zh_CN": "私聊频率",
@@ -547,7 +573,34 @@ class ChatReplyTimingConfig(ConfigBase):
             "step": 0.001,
         },
     )
-    """私聊里麦麦主动说话的频率；越小越安静。"""
+    """旧版私聊频率，仅保留配置兼容，不再生效；请使用 private_reply_paused。"""
+
+    private_reply_paused: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "暂停私聊回复",
+                "en_US": "Pause private replies",
+                "ja_JP": "個別チャットの返信を一時停止",
+            },
+            "x-widget": "switch",
+            "x-row": "talk-values",
+        },
+    )
+    """开启后私聊只接收消息并维护历史，不进入思考；单个私聊可通过暂停规则覆盖此设置。"""
+
+    private_reply_pause_rules: List[PrivateReplyPauseRule] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "单个私聊暂停规则",
+                "en_US": "Private reply pause overrides",
+                "ja_JP": "個別チャットの返信一時停止ルール",
+            },
+            "x-widget": "custom",
+        },
+    )
+    """按具体平台和用户 ID 覆盖全局暂停设置，可在聊天流设置中切换或恢复跟随全局。"""
 
     mentioned_bot_reply: bool = Field(
         default=True,
@@ -668,7 +721,7 @@ class ChatReplyTimingConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """开启后，可以按聊天或时间段单独调整发言频率。"""
+    """开启后，可以按群聊或时间段单独调整发言频率；私聊不使用频率规则。"""
 
     talk_value_rules: list[TalkRulesItem] = Field(
         default_factory=lambda: [
@@ -685,7 +738,7 @@ class ChatReplyTimingConfig(ConfigBase):
         },
     )
     """
-    _wrap_动态发言频率规则；可让麦麦在某些群、私聊或时段更活跃或更安静。
+    _wrap_动态发言频率规则；可让麦麦在某些群或时段更活跃或更安静。旧的私聊频率规则不再生效。
     """
 
 

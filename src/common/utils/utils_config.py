@@ -4,6 +4,7 @@ import time
 
 from src.common.logger import get_logger
 from src.config.config import global_config
+from src.config.official_configs import PrivateReplyPauseRule
 
 logger = get_logger("config_utils")
 
@@ -463,15 +464,37 @@ class ChatConfigUtils:
         return bool(chat_stream.is_group_session)
 
     @staticmethod
+    def find_private_reply_pause_rule(session_id: Optional[str]) -> Optional[PrivateReplyPauseRule]:
+        """只匹配已存在私聊的具体平台和用户，不使用旧频率规则。"""
+        if not session_id:
+            return None
+        chat_stream = ChatConfigUtils._get_chat_stream(session_id)
+        if chat_stream is None or chat_stream.is_group_session:
+            return None
+        return next(
+            (
+                rule
+                for rule in global_config.chat.reply_timing.private_reply_pause_rules
+                if rule.platform == chat_stream.platform and rule.item_id == chat_stream.user_id
+            ),
+            None,
+        )
+
+    @staticmethod
+    def is_private_reply_paused(session_id: Optional[str]) -> bool:
+        """返回单个私聊覆盖后的暂停状态；没有覆盖时跟随全局开关。"""
+        rule = ChatConfigUtils.find_private_reply_pause_rule(session_id)
+        return rule.paused if rule is not None else global_config.chat.reply_timing.private_reply_paused
+
+    @staticmethod
     def get_talk_value(session_id: Optional[str], is_group_chat: Optional[bool] = None) -> float:
         if is_group_chat is None:
             is_group_chat = ChatConfigUtils._resolve_is_group_chat(session_id)
 
-        result = (
-            global_config.chat.reply_timing.talk_value
-            if is_group_chat is not False
-            else global_config.chat.reply_timing.private_talk_value
-        ) or 0.0
+        if is_group_chat is False:
+            return 0.0 if ChatConfigUtils.is_private_reply_paused(session_id) else 1.0
+
+        result = global_config.chat.reply_timing.talk_value
         if not global_config.chat.reply_timing.enable_talk_value_rules or not global_config.chat.reply_timing.talk_value_rules:
             return result
         local_time = time.localtime()
@@ -479,6 +502,8 @@ class ChatConfigUtils:
 
         matched_rules = []
         for rule in global_config.chat.reply_timing.talk_value_rules:
+            if rule.rule_type != "group":
+                continue
             target_priority = ChatConfigUtils._talk_rule_target_priority(rule, session_id, is_group_chat)
             if target_priority is None:
                 continue

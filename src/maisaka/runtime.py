@@ -1036,6 +1036,9 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
 
     def _get_effective_reply_frequency(self) -> float:
         """返回当前会话生效的回复频率。"""
+        if not self.chat_stream.is_group_session:
+            # 私聊只使用暂停开关，忽略旧频率、动态频率规则与插件频率倍率。
+            return ChatConfigUtils.get_talk_value(self.session_id, is_group_chat=False)
         if self._is_focus_mode_active_for_current_chat():
             return 1.0
 
@@ -1063,10 +1066,10 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         """返回当前会话类型对应的基础回复频率。"""
         if self.chat_stream.is_group_session:
             return float(global_config.chat.reply_timing.talk_value)
-        return float(global_config.chat.reply_timing.private_talk_value)
+        return 0.0 if ChatConfigUtils.is_private_reply_paused(self.session_id) else 1.0
 
     def _is_reply_frequency_silent(self) -> bool:
-        """判断当前会话是否处于回复频率为 0 的静默接收模式。"""
+        """判断当前会话是否因群聊频率为 0 或私聊暂停而静默接收。"""
         return self._get_effective_reply_frequency() <= 0.0
 
 

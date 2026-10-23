@@ -916,7 +916,7 @@ class MaisakaReasoningEngine:
         timeout_triggered: bool,
         proactive_triggered: bool,
     ) -> None:
-        """回复频率为 0 时只消费消息和维护历史，不进入 Planner。"""
+        """群聊频率为 0 或私聊暂停时只消费消息和维护历史，不进入 Planner。"""
 
         self._runtime._clear_forced_turn_state()
         if proactive_triggered:
@@ -929,8 +929,9 @@ class MaisakaReasoningEngine:
             enable_compaction=False,
         )
         self._runtime._enter_stop_state()
+        silent_reason = "回复频率为 0" if self._runtime.chat_stream.is_group_session else "私聊回复已暂停"
         if self._runtime._running:
-            self._runtime._update_stage_status("空闲", "回复频率为 0，已静默接收消息")
+            self._runtime._update_stage_status("空闲", f"{silent_reason}，已静默接收消息")
 
         trigger_labels: list[str] = []
         if cached_messages:
@@ -940,8 +941,8 @@ class MaisakaReasoningEngine:
         if proactive_triggered:
             trigger_labels.append("proactive")
         trigger_text = " ".join(trigger_labels) if trigger_labels else "无新消息"
-        logger.info(f"{self._runtime.log_prefix} 回复频率为 0，静默接收并完成历史维护，不进入 Planner；{trigger_text}")
-        await self._emit_flow_step("turn.silent", "本轮静默处理", "回复频率为 0，已接收消息并维护历史，不进入思考。")
+        logger.info(f"{self._runtime.log_prefix} {silent_reason}，静默接收并完成历史维护，不进入 Planner；{trigger_text}")
+        await self._emit_flow_step("turn.silent", "本轮静默处理", f"{silent_reason}，已接收消息并维护历史，不进入思考。")
 
     def _drain_ready_turn_triggers(
         self,

@@ -20,6 +20,7 @@ export {
   MCPRootItemsHook,
   MCPServersHook,
   MultipleReplyStyleHook,
+  PrivateReplyPauseRulesHook,
   RegexRulesHook,
 } from './complexFieldHooks'
 export { AMemorixRetrievalChatsHook } from './AMemorixRetrievalChatsHook'
