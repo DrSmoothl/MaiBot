@@ -6,6 +6,7 @@ from typing import List, Literal, Optional, Sequence, Set, TYPE_CHECKING
 import time
 
 from src.chat.message_receive.message import SessionMessage
+from src.common.logger import get_logger
 from src.services.bot_account_service import get_online_bot_accounts
 
 from .dynamic_gate import DynamicReplyGate
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 
 
 TurnGateDecision = Literal["trigger", "wait", "delay"]
+logger = get_logger("maisaka_turn_scheduler")
 RECENT_PRESENCE_WINDOW_SECONDS = 300.0
 """统计近期消息量与麦麦发言占比的时间窗口。"""
 
@@ -105,11 +107,17 @@ class DynamicReplyTurnGate:
 
     def _filter_external_messages(self, pending_messages: Sequence[SessionMessage]) -> List[SessionMessage]:
         online_accounts = {platform: get_online_bot_accounts(platform) for platform in {m.platform for m in pending_messages}}
-        return [
-            message
-            for message in pending_messages
-            if str(message.message_info.user_info.user_id).strip() not in online_accounts[message.platform]
-        ]
+        external_messages: List[SessionMessage] = []
+        filtered_accounts: Set[str] = set()
+        for message in pending_messages:
+            user_id = str(message.message_info.user_info.user_id).strip()
+            if user_id in online_accounts[message.platform]:
+                filtered_accounts.add(f"platform={message.platform} 过滤bot_id = {user_id}（自身消息）")
+            else:
+                external_messages.append(message)
+        for detail in sorted(filtered_accounts):
+            logger.info(f"{self._runtime.log_prefix} {detail}")
+        return external_messages
 
     def _build_likelihood_input(
         self,

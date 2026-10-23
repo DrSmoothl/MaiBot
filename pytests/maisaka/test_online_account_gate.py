@@ -10,7 +10,7 @@ from src.services.bot_account_service import get_online_bot_accounts
 def test_private_message_gate_tracks_gateway_disconnect_and_reconnect(monkeypatch) -> None:
     manager = PlatformIOManager()
     monkeypatch.setattr("src.platform_io.get_platform_io_manager", lambda: manager)
-    gate = DynamicReplyTurnGate(SimpleNamespace(chat_stream=SimpleNamespace(is_group_session=False)))
+    gate = DynamicReplyTurnGate(SimpleNamespace(log_prefix="[测试私聊]", chat_stream=SimpleNamespace(is_group_session=False)))
     message = SimpleNamespace(platform="qq", message_info=SimpleNamespace(user_info=SimpleNamespace(user_id="old-bot")))
 
     def register(driver_id: str, account_id: str, platform: str = "qq") -> None:
