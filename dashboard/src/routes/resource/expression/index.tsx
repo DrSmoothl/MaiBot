@@ -38,9 +38,10 @@ import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
-import { formatChatAccountLabel, formatChatDisplayName } from '@/lib/chat-display'
+import { formatChatDisplayName, formatChatTargetLabel } from '@/lib/chat-display'
 import { cn } from '@/lib/utils'
 
 import {
@@ -84,6 +85,7 @@ interface ExpressionFilters {
   selectedChatId: string
   selectedGroupIndex: number | null
   showLegacyExpressions: boolean
+  sortBy: 'time' | 'time_asc' | 'created' | 'created_asc'
   reviewFilter: ExpressionReviewFilter
 }
 
@@ -93,6 +95,7 @@ const INITIAL_FILTERS: ExpressionFilters = {
   selectedGroupIndex: null,
   showLegacyExpressions: false,
   reviewFilter: 'all',
+  sortBy: 'time',
 }
 
 const DEFAULT_STATS: StatsData = {
@@ -153,6 +156,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
         chat_ids: selectedGroup && !selectedGroup.is_global ? selectedGroup.chat_ids : undefined,
         include_legacy: filters.showLegacyExpressions,
         review_filter: filters.reviewFilter,
+        sort_by: filters.sortBy,
       })
       return { items: response.data, total: response.total }
     },
@@ -427,8 +431,8 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                   ? chatList.map((chat) => ({
                       id: chat.chat_id,
                       label: chat.chat_name,
-                      description: formatChatAccountLabel(chat.account_id),
-                      descriptionTitle: formatChatAccountLabel(chat.account_id),
+                      description: formatChatTargetLabel(chat),
+                      descriptionTitle: formatChatTargetLabel(chat),
                       meta: chat.expression_count?.toLocaleString(),
                       title: formatChatDisplayName(chat.chat_name, chat.account_id),
                       trailing: (
@@ -508,6 +512,20 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                 placeholder="搜索情境、风格或上下文..."
                 actions={
                   <>
+                    <Select
+                      value={filters.sortBy}
+                      onValueChange={(value: ExpressionFilters['sortBy']) => list.setFilter('sortBy', value)}
+                    >
+                      <SelectTrigger className="h-8 w-[130px]" aria-label="表达方式排序">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="time">最近活跃</SelectItem>
+                        <SelectItem value="time_asc">最早活跃</SelectItem>
+                        <SelectItem value="created">最新创建</SelectItem>
+                        <SelectItem value="created_asc">最早创建</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button
                       variant="outline"
                       size="sm"

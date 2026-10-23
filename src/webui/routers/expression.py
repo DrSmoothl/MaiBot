@@ -897,6 +897,7 @@ class ChatInfo(BaseModel):
     chat_name: str
     platform: Optional[str] = None
     account_id: Optional[str] = None
+    target_id: Optional[str] = None
     is_group: bool = False
     use_expression: bool = True
     enable_learning: bool = True
@@ -918,6 +919,7 @@ def build_chat_info(
         chat_name=get_chat_name(chat_id, db_session),
         platform=chat_session.platform if chat_session else None,
         account_id=chat_session.account_id if chat_session else None,
+        target_id=(chat_session.group_id or chat_session.user_id) if chat_session else None,
         is_group=bool(chat_session and chat_session.group_id),
         use_expression=use_expression,
         enable_learning=enable_learning,
@@ -1286,7 +1288,7 @@ def get_expression_list(
     chat_id: Optional[str] = Query(None, description="聊天ID筛选"),
     chat_ids: Optional[List[str]] = EXPRESSION_CHAT_IDS_QUERY,
     review_filter: str = Query("all", description="表达方式筛选: all/user_checked/unchecked"),
-    sort_by: str = Query("time", description="表达方式排序: time"),
+    sort_by: str = Query("time", description="表达方式排序: time/time_asc/created/created_asc"),
     include_legacy: bool = Query(False, description="是否显示旧格式/非当前账号的表达方式"),
 ) -> ExpressionListResponse:
     """获取表达方式列表。
@@ -1302,7 +1304,7 @@ def get_expression_list(
     """
     try:
         # 构建查询
-        if sort_by != "time":
+        if sort_by not in {"time", "time_asc", "created", "created_asc"}:
             raise HTTPException(status_code=400, detail=f"不支持的表达方式排序: {sort_by}")
 
         visible_chat_ids: set[str] = set()
@@ -1343,10 +1345,13 @@ def get_expression_list(
 
         statement = apply_expression_list_review_filter(statement, review_filter)
 
-        # 排序：最后活跃时间倒序（NULL 值放在最后）
+        # 在分页前按所选时间排序，空时间统一放在最后，并用 ID 保证分页稳定。
+        sort_column = col(Expression.create_time) if sort_by.startswith("created") else col(Expression.last_active_time)
+        ascending = sort_by.endswith("_asc")
         statement = statement.order_by(
-            case((col(Expression.last_active_time).is_(None), 1), else_=0),
-            col(Expression.last_active_time).desc(),
+            case((sort_column.is_(None), 1), else_=0),
+            sort_column.asc() if ascending else sort_column.desc(),
+            col(Expression.id).asc() if ascending else col(Expression.id).desc(),
         )
 
         offset = (page - 1) * page_size

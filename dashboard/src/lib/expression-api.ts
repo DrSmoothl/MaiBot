@@ -115,7 +115,7 @@ export async function getExpressionList(params: {
   chat_ids?: string[]
   include_legacy?: boolean
   review_filter?: 'all' | 'user_checked' | 'unchecked'
-  sort_by?: 'time'
+  sort_by?: 'time' | 'time_asc' | 'created' | 'created_asc'
 }): Promise<ExpressionListResponse> {
   const data = await backendApi.get<ExpressionListResponse>(`${API_BASE}/list`, {
     query: {

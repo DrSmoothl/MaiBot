@@ -6,7 +6,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, cast, func, not_, or_, String as SQLString
+from sqlalchemy import and_, case, cast, func, not_, or_, String as SQLString
 from sqlmodel import Session, col, delete, select
 
 from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
@@ -20,6 +20,7 @@ from src.webui.dependencies import require_auth
 logger = get_logger("webui.jargon")
 
 router = APIRouter(prefix="/jargon", tags=["Jargon"], dependencies=[Depends(require_auth)])
+JARGON_SESSION_IDS_QUERY = Query(None, description="按共享组内任一聊天流ID筛选")
 
 
 # ==================== 辅助函数 ====================
@@ -257,6 +258,7 @@ class ChatInfoResponse(BaseModel):
     chat_name: str
     platform: Optional[str] = None
     account_id: Optional[str] = None
+    target_id: Optional[str] = None
     is_group: bool = False
     jargon_count: int = 0
 
@@ -776,7 +778,7 @@ def get_jargon_list(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     session_id: Optional[str] = Query(None, description="按聊天流ID筛选"),
-    session_ids: Optional[List[str]] = Query(None, description="按共享组内任一聊天流ID筛选"),
+    session_ids: Optional[List[str]] = JARGON_SESSION_IDS_QUERY,
     jargon_status: Optional[Literal["confirmed_jargon", "confirmed_not_jargon", "manual_jargon", "pending"]] = Query(
         None,
         description="按黑话判定状态筛选",
@@ -784,6 +786,7 @@ def get_jargon_list(
     is_jargon: Optional[bool] = Query(None, description="按是否是黑话筛选"),
     is_complete: Optional[bool] = Query(None, description="按是否推断完成筛选"),
     is_global: Optional[bool] = Query(None, description="按是否全局筛选"),
+    sort_by: str = Query("time", description="黑话排序: time/time_asc/created/created_asc"),
 ) -> JargonListResponse:
     """获取黑话列表。
 
@@ -797,11 +800,15 @@ def get_jargon_list(
         is_jargon: 是否为黑话的筛选条件。
         is_complete: 是否推断完成的筛选条件。
         is_global: 是否为全局黑话的筛选条件。
+        sort_by: 按更新时间（活跃时间）或创建时间正反序排列。
 
     Returns:
         JargonListResponse: 分页后的黑话列表。
     """
     try:
+        if sort_by not in {"time", "time_asc", "created", "created_asc"}:
+            raise HTTPException(status_code=400, detail=f"不支持的黑话排序: {sort_by}")
+
         statement = apply_jargon_list_filters(
             build_jargon_list_select(),
             search=search,
@@ -810,7 +817,15 @@ def get_jargon_list(
             is_jargon=is_jargon,
             is_complete=is_complete,
             is_global=is_global,
-        ).order_by(col(Jargon.count).desc(), col(Jargon.id).desc())
+        )
+        # 黑话以更新时间表示最近活跃；排序在分页前完成，空时间放最后，ID 保证分页稳定。
+        sort_column = col(Jargon.created_timestamp) if sort_by.startswith("created") else col(Jargon.updated_timestamp)
+        ascending = sort_by.endswith("_asc")
+        statement = statement.order_by(
+            case((sort_column.is_(None), 1), else_=0),
+            sort_column.asc() if ascending else sort_column.desc(),
+            col(Jargon.id).asc() if ascending else col(Jargon.id).desc(),
+        )
 
         count_statement = apply_jargon_list_filters(
             select(Jargon.id),
@@ -897,6 +912,7 @@ def get_chat_list(include_empty: bool = Query(False, description="是否包含�
                     chat_name=display_name_cache[chat_session.session_id],
                     platform=chat_session.platform,
                     account_id=chat_session.account_id,
+                    target_id=chat_session.group_id or chat_session.user_id,
                     is_group=bool(chat_session.group_id),
                     jargon_count=jargon_counts.get(chat_session.session_id, 0),
                 )

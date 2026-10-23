@@ -33,6 +33,7 @@ export interface JargonChatInfo {
   chat_name: string
   platform: string | null
   account_id?: string | null
+  target_id?: string | null
   is_group: boolean
   jargon_count?: number
 }

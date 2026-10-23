@@ -25,6 +25,7 @@ export interface ChatInfo {
   chat_name: string
   platform: string | null
   account_id?: string | null
+  target_id?: string | null
   is_group: boolean
   use_expression: boolean
   enable_learning: boolean

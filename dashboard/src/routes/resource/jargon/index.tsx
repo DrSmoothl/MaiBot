@@ -11,6 +11,7 @@ import {
   DataToolbar,
   MetricStrip,
 } from '@/components/ui/data-browser'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageFrame } from '@/components/ui/surface'
 import {
   DropdownMenu,
@@ -22,7 +23,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
-import { formatChatAccountLabel, formatChatDisplayName } from '@/lib/chat-display'
+import { formatChatDisplayName, formatChatTargetLabel } from '@/lib/chat-display'
 import { cn } from '@/lib/utils'
 
 import {
@@ -52,6 +53,7 @@ import type { JargonExportScope } from './JargonDialogs'
 import type { StatsData } from './types'
 
 interface JargonFilters {
+  sortBy: 'time' | 'time_asc' | 'created' | 'created_asc'
   summary: JargonSummaryTab
   chatId: string
   browseMode: 'chat' | 'group' | 'all'
@@ -91,7 +93,7 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
   const list = useDataList<Jargon, JargonFilters, number>({
     domain: 'jargon',
     getId: (jargon) => jargon.id,
-    initialFilters: { summary: 'total', chatId: 'all', browseMode: 'all', groupIndex: null },
+    initialFilters: { summary: 'total', chatId: 'all', browseMode: 'all', groupIndex: null, sortBy: 'time' },
     preserveSelectionOnParamsChange: true,
     searchDebounceMs: 300,
     queryFn: async ({ page, pageSize, search, filters }) => {
@@ -125,6 +127,7 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
             : undefined,
         session_ids: group && !group.is_global ? group.session_ids : undefined,
         jargon_status: summaryStatus,
+        sort_by: filters.sortBy,
         is_complete: filters.summary === 'complete_count' ? true : undefined,
         is_global: filters.summary === 'global_count' ? true : undefined,
       })
@@ -399,6 +402,20 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
       placeholder="搜索黑话内容..."
       actions={
         <>
+          <Select
+            value={list.filters.sortBy}
+            onValueChange={(value: JargonFilters['sortBy']) => list.setFilter('sortBy', value)}
+          >
+            <SelectTrigger className="h-8 w-[130px]" aria-label="黑话排序">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="time">最近活跃</SelectItem>
+              <SelectItem value="time_asc">最早活跃</SelectItem>
+              <SelectItem value="created">最新创建</SelectItem>
+              <SelectItem value="created_asc">最早创建</SelectItem>
+            </SelectContent>
+          </Select>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -530,8 +547,8 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
                       id: chat.session_id,
                       label: chat.chat_name,
                       meta: chat.jargon_count?.toLocaleString(),
-                      description: formatChatAccountLabel(chat.account_id),
-                      descriptionTitle: formatChatAccountLabel(chat.account_id),
+                      description: formatChatTargetLabel(chat),
+                      descriptionTitle: formatChatTargetLabel(chat),
                       title: formatChatDisplayName(chat.chat_name, chat.account_id),
                     }))
                   : browseMode === 'group'
