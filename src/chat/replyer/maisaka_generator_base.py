@@ -937,12 +937,16 @@ class BaseMaisakaReplyGenerator(RetroReplyPromptMixin):
         sub_agent_runner: Optional[Callable[[str], Awaitable[str]]],
         reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> MaisakaReplyContext:
+        # 复古模板不注入表达习惯，提前跳过召回和 LLM 选择，避免无效模型调用。
+        if self._uses_retro_prompt():
+            return MaisakaReplyContext()
+
         session_id = self._resolve_session_id(stream_id)
         if not session_id:
             logger.warning("构建 Maisaka 回复上下文失败：缺少会话标识")
             return MaisakaReplyContext()
 
-        if sub_agent_runner is None:
+        if sub_agent_runner is None and global_config.expression.use_vector_expression:
             logger.info("表达方式选择跳过：缺少子代理执行器")
             return MaisakaReplyContext()
 

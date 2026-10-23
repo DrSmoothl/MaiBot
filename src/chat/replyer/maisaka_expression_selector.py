@@ -526,6 +526,13 @@ class MaisakaExpressionSelector:
         candidates: List[dict[str, Any]],
         sub_agent_runner: Optional[SubAgentRunner],
     ) -> MaisakaExpressionSelectionResult:
+        # 快速档直接使用加权抽样候选，由回复模型自行参考，不再额外请求选择模型。
+        if not self._use_vector_candidate_pool():
+            return self._build_direct_selection_result(
+                session_id=session_id,
+                candidates=candidates,
+            )
+
         if sub_agent_runner is None:
             logger.info("表达方式 LLM 选择已跳过：缺少子代理执行器，回退为直接注入")
             return self._build_direct_selection_result(

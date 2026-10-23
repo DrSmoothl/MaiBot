@@ -4041,19 +4041,24 @@ class ExpressionConfig(ConfigBase):
     """写入表达方式前先让 AI 检查，减少学到奇怪内容。"""
 
     use_vector_expression: bool = Field(
-        default=True,
+        default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "使用向量表达",
-                "en_US": "Use vector expressions",
-                "ja_JP": "ベクトル表現を使用",
+                "zh_CN": "表达选择",
+                "en_US": "Expression selection",
+                "ja_JP": "表現の選択",
             },
-            "x-widget": "switch",
-            "x-row": "expression-learning-switches",
+            "x-widget": "discrete-slider",
+            "options": ["false", "true"],
+            "x-option-labels": {"false": "快速", "true": "精细"},
+            "x-option-descriptions": {
+                "false": "默认档位。加权随机抽取表达，直接供回复参考，不额外调用选择模型。",
+                "true": "使用向量召回，再由 LLM 按语境筛选，需要配置嵌入模型。",
+            },
             "advanced": False,
         },
     )
-    """开启后使用表达意图与嵌入召回，需要配置嵌入模型；关闭时使用随手候选。"""
+    """表达选择档位：false 为快速，加权随机抽样后直接注入，不额外调用选择 LLM；true 为精细，使用表达意图与嵌入召回，再由 LLM 筛选，需要配置嵌入模型。复古回复不使用表达选择。"""
 
     expression_vector_index_path: str = Field(
         default="data/expression_selection/expression_vector_index.json",
