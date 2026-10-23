@@ -6,7 +6,7 @@ from typing import List, Literal, Optional, Sequence, Set, TYPE_CHECKING
 import time
 
 from src.chat.message_receive.message import SessionMessage
-from src.chat.utils.utils import is_bot_self
+from src.services.bot_account_service import get_online_bot_accounts
 
 from .dynamic_gate import DynamicReplyGate
 from .reply_likelihood import (
@@ -104,10 +104,11 @@ class DynamicReplyTurnGate:
         )
 
     def _filter_external_messages(self, pending_messages: Sequence[SessionMessage]) -> List[SessionMessage]:
+        online_accounts = {platform: get_online_bot_accounts(platform) for platform in {m.platform for m in pending_messages}}
         return [
             message
             for message in pending_messages
-            if not is_bot_self(message.platform, message.message_info.user_info.user_id)
+            if str(message.message_info.user_info.user_id).strip() not in online_accounts[message.platform]
         ]
 
     def _build_likelihood_input(
