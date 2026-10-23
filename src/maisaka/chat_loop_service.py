@@ -67,6 +67,7 @@ from src.maisaka.context.usage import (
 )
 from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.maisaka.context.compaction import ContextSummaryMessage, PlannerRequestSnapshot
+from src.maisaka.context.post_processor import MIN_RETAINED_CHAT_MESSAGES
 from src.maisaka.focus import focus_mode_manager
 from src.maisaka.visual.message_limiter import limit_latest_images_in_messages
 from src.maisaka.visual.deferred_images import defer_context_image_encoding
@@ -1437,6 +1438,7 @@ class MaisakaChatLoopService:
         )
         always_selected_indices = MaisakaChatLoopService._collect_always_selected_reference_indices(
             filtered_history,
+            MIN_RETAINED_CHAT_MESSAGES,
             enable_visual_message=active_enable_visual_message,
         )
 
@@ -1460,7 +1462,7 @@ class MaisakaChatLoopService:
         selected_indices = sorted({*always_selected_indices, *selected_indices})
 
         if not selected_indices:
-            return [], "实际发送 0 条消息（tool 0 条，普通消息 0 条）"
+            return [], "实际发送 0 条上下文（tool 0 条，聊天消息 0 条）"
 
         selected_history = [filtered_history[index] for index in selected_indices]
         selected_context_count_before_tool_expansion = sum(
@@ -1481,12 +1483,12 @@ class MaisakaChatLoopService:
                 f"after_expansion={selected_context_count} overflow={tool_turn_overflow}"
             )
         tool_message_count = sum(1 for message in selected_history if isinstance(message, ToolResultMessage))
-        normal_message_count = len(selected_history) - tool_message_count
+        normal_message_count = selected_context_count
         stability_text = f"|cache_window {base_context_size}->{effective_context_size}"
         overflow_text = f"|tool_turn_overflow +{tool_turn_overflow}" if tool_turn_overflow else ""
         selection_reason = (
-            f"实际发送 {len(selected_history)} 条消息"
-            f"|消息 {normal_message_count} 条|tool {tool_message_count} 条"
+            f"实际发送 {len(selected_history)} 条上下文"
+            f"|聊天消息 {normal_message_count} 条|tool {tool_message_count} 条"
             f"{stability_text}{overflow_text}"
         )
         return (

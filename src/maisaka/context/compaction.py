@@ -127,20 +127,6 @@ def message_text_for_compaction(message: LLMContextMessage) -> str:
     )
 
 
-def measure_history_chars(history: Sequence[LLMContextMessage]) -> int:
-    """预算覆盖工具参数和结果；图片采用已有文字描述，不用 base64 体积估算 token。"""
-
-    return sum(measure_message_chars(message) for message in history)
-
-
-def measure_message_chars(message: LLMContextMessage) -> int:
-    """实际发送的推理也占预算；增量不另行复写推理，快照前缀保持原样。"""
-
-    if isinstance(message, ModelOutputContextMessage) and message.role == "reasoning":
-        return len(message.processed_plain_text)
-    return len(message_text_for_compaction(message))
-
-
 @dataclass(frozen=True, slots=True)
 class PlannerRequestSnapshot:
     """实际成功的 Planner 请求及其已覆盖的历史对象，仅驻留内存。"""

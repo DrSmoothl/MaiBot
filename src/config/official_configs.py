@@ -878,21 +878,6 @@ class ChatConfig(ConfigBase):
     )
     """私聊回复时参考的最近消息数量。"""
 
-    context_compaction_max_chars: int = Field(
-        default=48000,
-        ge=16000,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "上下文文本预算",
-                "en_US": "Context text budget",
-                "ja_JP": "文脈テキスト上限",
-            },
-            "x-widget": "input",
-            "advanced": True,
-        },
-    )
-    """历史文字、工具参数与结果的字符预算；超过预算或近期消息数的两倍时生成滚动状态摘要。"""
-
     context_compaction_summary_max_chars: int = Field(
         default=6000,
         ge=1000,

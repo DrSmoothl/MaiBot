@@ -8,7 +8,9 @@ import json
 
 import pytest
 
+from src.chat.message_receive.message import SessionMessage
 from src.common.data_models.llm_service_data_models import LLMResponseResult
+from src.common.data_models.mai_message_data_model import MessageInfo, UserInfo
 from src.config.model_configs import ModelInfo
 from src.llm_models.model_client.base_client import ResponseRequest
 from src.llm_models.payload_content.tool_option import ToolCall, ToolOption
@@ -19,6 +21,7 @@ from src.llm_models.payload_content.context_item import (
     RoleType,
     ContextToolCall,
     FunctionCallItem,
+    ReasoningItem,
     get_item_text,
 )
 from src.maisaka.chat_loop_service import MaisakaChatLoopService
@@ -28,6 +31,7 @@ from src.maisaka.context.messages import (
     InternalContextMessage,
     ModelOutputContextMessage,
     ReferenceMessage,
+    SessionBackedMessage,
     ToolResultMediaMessage,
     ToolResultMessage,
 )
@@ -39,6 +43,17 @@ NOW = datetime(2026, 10, 22, 12)
 
 def message(text: str) -> InternalContextMessage:
     return InternalContextMessage(raw_message=MessageSequence([TextComponent(text)]), visible_text=text, timestamp=NOW)
+
+
+def chat_message(index: int, text: str = "聊天消息") -> SessionBackedMessage:
+    source = "user" if index % 2 == 0 else "guided_reply"
+    original = SessionMessage(str(index), NOW, "test", received_at=NOW)
+    original.session_id = "test-compaction"
+    original.message_info = MessageInfo(UserInfo(source, source))
+    original.raw_message = MessageSequence([TextComponent(text)])
+    return SessionBackedMessage.from_session_message(
+        original, raw_message=original.raw_message, visible_text=text, source_kind=source,
+    )
 
 
 def state(**updates: List[str]) -> Dict[str, List[str]]:
@@ -91,37 +106,114 @@ def runtime(history):
 
 def test_summary_is_always_sent_without_consuming_recent_window():
     summary = ContextSummaryMessage(content="仍在等端口配置答案", timestamp=NOW, remaining_uses_value=None)
-    history = [summary, *[message(str(index)) for index in range(6)]]
+    history = [summary, *[chat_message(index) for index in range(6)]]
     selected, _ = MaisakaChatLoopService.select_llm_context_messages(history, max_context_size=1)
-    assert selected == [summary, *history[-2:]]
+    assert selected == [summary, *history[-5:]]
     assert all(summary.consume_once() for _ in range(4))
     assert summary not in MaisakaChatLoopService._filter_history_for_request_kind(history, request_kind="replyer")
 
 
-def test_character_budget_triggers_below_message_count_threshold():
-    history = [message(str(index) * 9000) for index in range(3)]
-    result = process_chat_history_after_cycle(history, max_context_size=100, max_context_chars=16000)
-    assert result.removed_messages == history[:2]
-    assert result.history == history[-1:]
-    assert history[0].visible_text == "0" * 9000
+def test_long_messages_do_not_trigger_below_message_count_threshold():
+    history = [chat_message(index, str(index) * 90000) for index in range(3)]
+    result = process_chat_history_after_cycle(history, max_context_size=100)
+    assert result.removed_messages == []
+    assert result.history == history
+
+
+@pytest.mark.parametrize("context_size, expected_count", [(40, 8), (60, 12), (2, 5)])
+def test_trim_retains_twenty_percent_of_configured_context_with_five_chat_message_minimum(context_size, expected_count):
+    history = [chat_message(index) for index in range(max(12, context_size * 2 + 1))]
+    result = process_chat_history_after_cycle(history, max_context_size=context_size)
+    assert result.history == history[-expected_count:]
+    assert result.removed_messages == history[:-expected_count]
+
+
+@pytest.mark.parametrize("context_size, threshold", [(40, 48), (60, 72), (7, 9)])
+def test_trim_triggers_exactly_at_one_hundred_twenty_percent(context_size, threshold):
+    history = [chat_message(index) for index in range(threshold)]
+    before = process_chat_history_after_cycle(history[:-1], max_context_size=context_size)
+    assert before.history == history[:-1]
+    assert before.removed_messages == []
+    reached = process_chat_history_after_cycle(history, max_context_size=context_size)
+    expected_count = max(5, int(context_size * 0.2))
+    assert reached.history == history[-expected_count:]
+    assert reached.removed_messages == history[:-expected_count]
+
+
+def test_internal_items_do_not_count_toward_trigger_or_retention_target():
+    chats = [chat_message(index) for index in range(48)]
+    history = list(chats[:-1])
+    for index in range(60):
+        call, output = tool_turn(f"turn-{index}", f"call-{index}")
+        reasoning = ModelOutputContextMessage(ReasoningItem(
+            meta=ContextItemMeta.create(), summary_parts=("内部思考",),
+        ))
+        media = ToolResultMediaMessage(
+            raw_message=MessageSequence([TextComponent("工具图片")]), visible_text="工具图片",
+            timestamp=NOW, tool_call_id=f"call-{index}",
+        )
+        history.extend([reasoning, call, output, media, message("内部资料")])
+    history.extend(ModelOutputContextMessage(item) for item in LLMResponseResult.from_portable_output(
+        response="尚未实际发送的模型正文",
+    ).output_items)
+    assert all(not item.count_in_context for item in history[len(chats) - 1:])
+    before = process_chat_history_after_cycle(history, max_context_size=40)
+    assert before.history == history
+    assert before.remaining_context_count == 47
+    reached = process_chat_history_after_cycle([*history, chats[-1]], max_context_size=40)
+    assert [item for item in reached.history if item.count_in_context] == chats[-8:]
+    assert reached.remaining_context_count == 8
+
+
+def test_context_selection_counts_only_real_messages():
+    chats = [chat_message(index) for index in range(7)]
+    history = []
+    for chat in chats:
+        history.extend([chat, message("内部资料")])
+    selected, _ = MaisakaChatLoopService.select_llm_context_messages(history, max_context_size=1)
+    assert [item for item in selected if item.count_in_context] == chats[-5:]
+    assert selected == history[-10:]
+
+
+@pytest.mark.parametrize("chat_count", [3, 8])
+def test_trim_preserves_recent_real_user_and_bot_messages_without_counting_tools(chat_count):
+    summary = ContextSummaryMessage(content="旧摘要", timestamp=NOW)
+    originals = [chat_message(index, "超长聊天" * 100) for index in range(chat_count)]
+    history = [summary, message("旧内部资料")]
+    for index, original in enumerate(originals):
+        call, output = tool_turn(f"turn-{index}", f"call-{index}")
+        history.extend([original, call, output, message("内部补充")])
+    result = process_chat_history_after_cycle(history, max_context_size=1)
+    retained_chats = [item for item in result.history if isinstance(item, SessionBackedMessage)]
+    assert retained_chats == originals[-5:]
+    assert {item.source_kind for item in retained_chats} == {"user", "guided_reply"}
+    assert result.history[0] is summary
+    for original in retained_chats:
+        index = int(original.message_id)
+        assert any(isinstance(item, ToolResultMessage) and item.tool_call_id == f"call-{index}" for item in result.history)
+    repeated = process_chat_history_after_cycle(result.history, max_context_size=1)
+    assert repeated.history == result.history
+    assert repeated.removed_messages == []
 
 
 def test_cut_keeps_complete_tool_turn_with_its_user_anchor():
     call, output = tool_turn()
-    history = [message("旧消息"), message("帮我配置"), call, output, message("还有个问题")]
+    history = [*[chat_message(index) for index in range(7)], call, output,
+               *[chat_message(index) for index in range(7, 12)]]
     result = process_chat_history_after_cycle(history, max_context_size=1)
-    assert result.removed_messages == history[:-1]
-    assert result.history == history[-1:]
+    assert result.removed_messages == history[:-5]
+    assert result.history == history[-5:]
 
 
 def test_pending_tool_turn_and_latest_message_are_never_cut():
     call, _ = tool_turn()
-    anchor = message("等待配置")
-    latest = message("请继续")
-    history = [message("旧消息"), anchor, call, latest]
+    anchor = chat_message(6, "等待配置")
+    latest = [chat_message(index) for index in range(7, 12)]
+    history = [*[chat_message(index) for index in range(6)], anchor, call, *latest]
     result = process_chat_history_after_cycle(history, max_context_size=1, pending_call_ids={"call"})
-    assert result.removed_messages == history[:1]
-    assert result.history == [anchor, call, latest]
+    assert result.removed_messages == history[:6]
+    assert result.history == [anchor, call, *latest]
+    assert result.remaining_context_count == 6
 
 
 def test_tool_media_is_compacted_with_the_call_and_result():
@@ -130,10 +222,11 @@ def test_tool_media_is_compacted_with_the_call_and_result():
         raw_message=MessageSequence([TextComponent("工具图片")]),
         visible_text="工具图片", timestamp=NOW, tool_call_id="call",
     )
-    history = [message("旧消息"), message("帮我配置"), call, output, media, message("新问题")]
+    history = [*[chat_message(index) for index in range(7)], call, output, media,
+               *[chat_message(index) for index in range(7, 12)]]
     result = process_chat_history_after_cycle(history, max_context_size=2)
-    assert result.removed_messages == history[:-1]
-    assert result.history == history[-1:]
+    assert result.removed_messages == history[:-5]
+    assert result.history == history[-5:]
 
 
 def test_pre_request_compaction_does_not_consume_new_one_shot_references():
@@ -212,7 +305,7 @@ async def test_compaction_rejects_forbidden_tool_calls(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_no_snapshot_defers_cut_and_learning(monkeypatch):
-    original = [message(str(index)) for index in range(6)]
+    original = [chat_message(index) for index in range(6)]
     active = runtime(original)
     active._chat_loop_service.planner_request_snapshot = None
     builder = AsyncMock()
@@ -252,7 +345,7 @@ async def test_invalid_or_oversized_summary_is_rejected(monkeypatch, response):
 @pytest.mark.parametrize("error", [ValueError("摘要无效"), TimeoutError("硬超时"), RuntimeError("服务商重试耗尽")])
 @pytest.mark.parametrize("keep_previous", [False, True])
 async def test_failed_compaction_discards_batch_and_does_not_retry(monkeypatch, error, keep_previous):
-    original = [message(str(index)) for index in range(6)]
+    original = [chat_message(index) for index in range(6)]
     previous = ContextSummaryMessage(content="上一份有效摘要", timestamp=NOW)
     active = runtime([*([previous] if keep_previous else []), *original])
     engine = MaisakaReasoningEngine(active)
@@ -260,9 +353,9 @@ async def test_failed_compaction_discards_batch_and_does_not_retry(monkeypatch, 
     monkeypatch.setattr("src.maisaka.reasoning_engine.build_context_summary", builder)
     monkeypatch.setattr("src.maisaka.reasoning_engine.emit_flow_step", AsyncMock())
     await engine._post_process_chat_history_after_cycle(SimpleNamespace(time_records={}, cycle_id=1))
-    assert active._chat_history == [*([previous] if keep_previous else []), *original[-2:]]
+    assert active._chat_history == [*([previous] if keep_previous else []), *original[-5:]]
     assert active._chat_loop_service.planner_request_snapshot is None
-    assert active._trigger_trimmed_history_learning.await_args.args[0] == original[:-2]
+    assert active._trigger_trimmed_history_learning.await_args.args[0] == original[:-5]
     await engine._post_process_chat_history_after_cycle(SimpleNamespace(time_records={}, cycle_id=2))
     builder.assert_awaited_once()
     active._trigger_trimmed_history_learning.assert_awaited_once()
@@ -271,7 +364,7 @@ async def test_failed_compaction_discards_batch_and_does_not_retry(monkeypatch, 
 @pytest.mark.asyncio
 async def test_success_replaces_single_summary_and_learns_only_originals(monkeypatch):
     previous = ContextSummaryMessage(content="旧问题", timestamp=NOW, remaining_uses_value=None)
-    originals = [message(str(index)) for index in range(6)]
+    originals = [chat_message(index) for index in range(6)]
     active = runtime([previous, *originals])
     summary = ContextSummaryMessage(content="仍未解答的旧问题", timestamp=NOW, remaining_uses_value=None)
     builder = AsyncMock(return_value=summary)
@@ -280,16 +373,16 @@ async def test_success_replaces_single_summary_and_learns_only_originals(monkeyp
     await MaisakaReasoningEngine(active)._post_process_chat_history_after_cycle(
         SimpleNamespace(time_records={}, cycle_id=1)
     )
-    assert active._chat_history == [summary, *originals[-2:]]
+    assert active._chat_history == [summary, *originals[-5:]]
     assert active._chat_loop_service.planner_request_snapshot is None
     assert builder.await_args.kwargs["previous_summary"] is previous
-    assert active._trigger_trimmed_history_learning.await_args.args[0] == originals[:-2]
+    assert active._trigger_trimmed_history_learning.await_args.args[0] == originals[:-5]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail", [False, True])
 async def test_clear_during_compression_does_not_resurrect_old_history(monkeypatch, fail):
-    active = runtime([message(str(index)) for index in range(6)])
+    active = runtime([chat_message(index) for index in range(6)])
 
     async def build(*args, **kwargs):
         active._chat_history.clear()

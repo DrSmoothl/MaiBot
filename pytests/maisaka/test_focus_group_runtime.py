@@ -116,6 +116,13 @@ def _incoming(sid: str, message_id: str, *, at: bool = False) -> SessionMessage:
     return message
 
 
+def _chat_history(text: str, sid: str = "A", source: str = "user") -> SessionBackedMessage:
+    original = _incoming(sid, text)
+    return SessionBackedMessage.from_session_message(
+        original, raw_message=original.raw_message, visible_text=text, source_kind=source,
+    )
+
+
 def _response(text: str = "结束本轮思考", calls: List[ToolCall] | None = None) -> ChatResponse:
     result = LLMResponseResult.from_portable_output(response=text, tool_calls=calls or [])
     return ChatResponse(
@@ -471,7 +478,10 @@ async def test_compaction_keeps_source_progress_and_recent_complete_tool_turn(se
     clients = Mock(return_value=SummaryClient())
     monkeypatch.setattr(compaction_module, "LLMServiceClient", clients)
     monkeypatch.setattr(compaction_module, "save_compaction_prompt_preview", Mock())
-    group.entries = [FocusContextEntry([_history(str(i))], {"A" if i % 2 else "B"}, i) for i in range(1, 11)]
+    group.entries = [
+        FocusContextEntry([_chat_history(str(i), "A" if i % 2 else "B")], {"A" if i % 2 else "B"}, i)
+        for i in range(1, 11)
+    ]
     response = _response(calls=[ToolCall("recent", "echo", {"session_id": "B", "text": "recent"})])
     turn_id = next(message.output_item.meta.logical_turn_id for message in response.raw_messages if message.tool_calls)
     recent = FocusContextEntry(
@@ -511,14 +521,14 @@ async def test_failed_summary_discards_old_entries_and_preserves_progress(setup_
     previous = ContextSummaryMessage(content="上一份有效摘要", timestamp=datetime.now())
     group.entries = [
         *([FocusContextEntry([previous], {"A"})] if keep_previous else []),
-        *[FocusContextEntry([_history(str(i))], {"A"}, i, inputs={"A": [(i, f"message-{i}")]}) for i in range(1, 6)],
+        *[FocusContextEntry([_chat_history(str(i))], {"A"}, i, inputs={"A": [(i, f"message-{i}")]}) for i in range(1, 7)],
     ]
     original = list(group.entries)
     _seed_planner_snapshot(group)
     await group._compact()
-    assert group.entries[1:] == original[-2:]
+    assert group.entries[1:] == original[-5:]
     assert group.entries[0].messages == ([previous] if keep_previous else [])
-    assert group.entries[0].progress == {"A": 3}
+    assert group.entries[0].progress == {"A": 1}
     assert group.entries[0].inputs == {}
     assert group._service.planner_request_snapshot is None
     assert not group._failed
@@ -532,16 +542,16 @@ async def test_failed_compaction_continues_to_planner_in_same_turn(setup_group, 
     monkeypatch.setattr(global_config.chat, "max_context_size", 2)
     builder = AsyncMock(side_effect=TimeoutError("服务商重试耗尽"))
     monkeypatch.setattr(group_module, "build_context_summary", builder)
-    group.entries = [FocusContextEntry([_history(str(i))], {"A"}, i) for i in range(1, 6)]
+    group.entries = [FocusContextEntry([_chat_history(str(i))], {"A"}, i) for i in range(1, 7)]
     _seed_planner_snapshot(group)
     planner = AsyncMock(return_value=_response())
     monkeypatch.setattr(group._service, "chat_loop_step", planner)
     monkeypatch.setattr(group, "_build_references", AsyncMock(return_value=[]))
     await group._run_turn()
     planner.assert_awaited_once()
-    assert [message.processed_plain_text for message in planner.await_args.args[0]] == ["4", "5"]
+    assert [message.processed_plain_text for message in planner.await_args.args[0]] == ["2", "3", "4", "5", "6"]
     assert not group._failed
-    assert group._considered == {"A": 5}
+    assert group._considered == {"A": 6}
 
 
 def test_state_summary_survives_focus_checkpoint_round_trip():
@@ -558,21 +568,69 @@ def test_state_summary_survives_focus_checkpoint_round_trip():
 
 
 @pytest.mark.asyncio
-async def test_focus_compaction_obeys_character_budget_and_keeps_latest_original(setup_group, monkeypatch):
+@pytest.mark.parametrize("restored", [False, True])
+async def test_focus_compaction_preserves_five_real_user_and_bot_messages(setup_group, monkeypatch, restored):
     group, _, _ = setup_group
-    monkeypatch.setattr(global_config.chat, "max_context_size", 100)
-    monkeypatch.setattr(global_config.chat, "context_compaction_max_chars", 16000)
-    group.entries = [FocusContextEntry([_history(str(i) * 9000)], {"A"}) for i in range(3)]
-    latest = group.entries[-1]
-    summary = ContextSummaryMessage(content="A 还有待解决的问题", timestamp=datetime.now(), remaining_uses_value=None)
+    monkeypatch.setattr(global_config.chat, "max_context_size", 2)
+    originals = []
+    for index in range(12):
+        sid = "A" if index % 2 == 0 else "B"
+        original = _incoming(sid, str(index))
+        message = SessionBackedMessage.from_session_message(
+            original, raw_message=original.raw_message, visible_text=str(index),
+            source_kind="user" if index % 2 == 0 else "guided_reply",
+        )
+        if restored:
+            message = context_module.deserialize_message(context_module.serialize_message(message))
+        originals.append(FocusContextEntry([message], {sid}, index))
+    group.entries = list(originals)
+    summary = ContextSummaryMessage(content="共享摘要", timestamp=datetime.now(), remaining_uses_value=None)
     builder = AsyncMock(return_value=summary)
     monkeypatch.setattr(group_module, "build_context_summary", builder)
     _seed_planner_snapshot(group)
     await group._compact()
-    assert group.entries[-1] is latest
+    assert group.entries[1:] == originals[-5:]
     assert group.entries[0].messages == [summary]
-    assert builder.await_args.kwargs["recent_messages"] == latest.messages
-    assert "session_ids=['A']" in builder.await_args.kwargs["source_context"]
+    builder.assert_awaited_once()
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("source", ["user", "guided_reply"])
+def test_checkpoint_counts_only_real_chat_messages(legacy, source):
+    history = [_chat_history("真实消息", source=source), _history("内部资料"), *_response().raw_messages]
+    records = [context_module.serialize_message(message) for message in history]
+    if legacy:
+        records[0]["kind"] = "content"
+        # 旧检查点把内部资料也标成 counted，恢复时不能继续沿用这个计数。
+        for record in records:
+            if record["kind"] == "internal":
+                record["kind"] = "content"
+            record["counted"] = True
+    restored = [context_module.deserialize_message(record) for record in records]
+    assert [message.count_in_context for message in restored] == [True, *[False] * (len(restored) - 1)]
+    assert context_module.serialize_message(restored[0])["kind"] == "chat"
+
+
+def test_checkpoint_internal_user_source_does_not_count_as_real_chat():
+    internal = _history("以 user 角色发送的内部上下文")
+    internal.source_kind = "user"
+    record = context_module.serialize_message(internal)
+    assert record["kind"] == "internal"
+    assert not context_module.deserialize_message(record).count_in_context
+
+
+@pytest.mark.asyncio
+async def test_focus_long_messages_do_not_trigger_compaction_below_count_threshold(setup_group, monkeypatch):
+    group, _, _ = setup_group
+    monkeypatch.setattr(global_config.chat, "max_context_size", 100)
+    group.entries = [FocusContextEntry([_chat_history(str(i) * 90000)], {"A"}) for i in range(3)]
+    original = list(group.entries)
+    builder = AsyncMock()
+    monkeypatch.setattr(group_module, "build_context_summary", builder)
+    _seed_planner_snapshot(group)
+    await group._compact()
+    assert group.entries == original
+    builder.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -580,7 +638,7 @@ async def test_focus_compaction_obeys_character_budget_and_keeps_latest_original
 async def test_focus_clear_during_compaction_does_not_restore_removed_sources(setup_group, monkeypatch, fail):
     group, _, _ = setup_group
     monkeypatch.setattr(global_config.chat, "max_context_size", 2)
-    group.entries = [FocusContextEntry([_history(str(i))], {"A"}) for i in range(5)]
+    group.entries = [FocusContextEntry([_chat_history(str(i))], {"A"}) for i in range(6)]
 
     async def build(*args, **kwargs):
         group.entries.clear()
@@ -900,7 +958,7 @@ async def test_background_result_is_saved_while_entire_group_is_waiting(setup_gr
 async def test_focus_no_snapshot_keeps_originals_until_planner_runs(setup_group, monkeypatch):
     group, _, _ = setup_group
     monkeypatch.setattr(global_config.chat, "max_context_size", 2)
-    group.entries = [FocusContextEntry([_history(str(i))], {"A"}) for i in range(5)]
+    group.entries = [FocusContextEntry([_chat_history(str(i))], {"A"}) for i in range(6)]
     original = list(group.entries)
     builder = AsyncMock()
     monkeypatch.setattr(group_module, "build_context_summary", builder)

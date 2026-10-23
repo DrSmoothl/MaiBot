@@ -798,7 +798,7 @@ class FocusGroupRuntime:
         history = self.history
         plan = process_chat_history_after_cycle(
             history, max_context_size=self.max_context_size,
-            max_context_chars=global_config.chat.context_compaction_max_chars, consume_references=False,
+            consume_references=False,
         )
         if not plan.removed_messages:
             return
