@@ -1,7 +1,22 @@
+[text_learning_expression]
+display_name = "文章からの表現学習"
+advanced = true
+description = "貼り付けた文章を根拠に表現候補を抽出し、ユーザーが選択して取り込みます。"
+
+[text_learning_jargon]
+display_name = "文章からの隠語学習"
+advanced = true
+description = "貼り付けた文章から隠語と意味を抽出し、ユーザーが選択して取り込みます。"
+
 [a_memorix_chat_summary]
 display_name = "長期記憶のチャット要約"
 advanced = false
 description = "現在のチャットから長期記憶に保存する追加情報と重要な知識を抽出します。"
+
+[maisaka_chat_passive]
+display_name = "Planner（受動型 replyer）"
+advanced = true
+description = "実験的な受動型 replyer の有効時に使用。Planner の最終本文を返信の指針とし、操作にはツールを使う。"
 
 [maisaka_chat]
 display_name = "Planner"
@@ -12,11 +27,6 @@ description = "Maisaka のメイン計画テンプレート。身份、時刻、
 display_name = "Planner（タイミング統合）"
 advanced = false
 description = "独立したタイミング判断を使わない場合の Maisaka メイン計画テンプレート。発話タイミングの判断を Planner に統合する。"
-
-[maisaka_chat_passive]
-display_name = "Planner（受動型 replyer）"
-advanced = true
-description = "実験的な受動型 replyer の有効時に使用。Planner の最終本文を返信の指針とし、操作にはツールを使う。"
 
 [maisaka_replyer]
 display_name = "Replyer"

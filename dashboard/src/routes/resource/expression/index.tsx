@@ -17,13 +17,13 @@ import { type ReactNode, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { ChatScopeFilterPanel } from '@/components/chat-scope-filter-panel'
+import { LearningCreateDialog } from '@/components/learning-create-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DataBrowserHeader,
   DataBrowserLayout,
   DataToolbar,
   MetricStrip,
-  StatusIndicator,
 } from '@/components/ui/data-browser'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -48,6 +48,7 @@ import {
   deleteExpression,
   getChatList,
   getExpressionDetail,
+  getExpressionChatTargets,
   getExpressionGroups,
   getExpressionList,
   getExpressionStats,
@@ -68,6 +69,7 @@ import {
 import { ExpressionClusterBrowser } from './ExpressionClusterBrowser'
 import { ExpressionList } from './ExpressionList'
 import { ExpressionReviewLogPanel } from './ExpressionReviewLogPanel'
+import { ExpressionScopeStatus } from './ExpressionScopeStatus'
 
 import type { ChatInfo, Expression, ExpressionGroupInfo } from '@/types/expression'
 import type { StatsData } from './types'
@@ -75,12 +77,6 @@ import type { StatsData } from './types'
 type IndicatorStatus = 'on' | 'off' | 'mixed'
 type ExpressionReviewFilter = 'all' | 'user_checked' | 'unchecked'
 type BrowseMode = 'chat' | 'group' | 'all'
-
-interface ExpressionLearningScopeStatus {
-  label: string
-  useExpression: IndicatorStatus
-  enableLearning: IndicatorStatus
-}
 
 /** useDataList 的筛选袋：浏览维度 + 旧格式开关 + 审核筛选 */
 interface ExpressionFilters {
@@ -118,6 +114,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   const [selectedExpression, setSelectedExpression] = useState<Expression | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isCreateChoiceOpen, setIsCreateChoiceOpen] = useState(false)
   const [isLegacyImportOpen, setIsLegacyImportOpen] = useState(false)
   const [deleteConfirmExpression, setDeleteConfirmExpression] = useState<Expression | null>(null)
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
@@ -185,6 +182,11 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
     queryFn: () => getChatList({ include_legacy: showLegacyExpressions }),
   })
   const chatList: ChatInfo[] = chatListQuery.data ?? []
+  const chatTargetsQuery = useQuery({
+    queryKey: ['expression', 'chat-targets'],
+    queryFn: () => getExpressionChatTargets(),
+    enabled: isCreateDialogOpen,
+  })
   const chatNameMap = new Map<string, string>()
   chatList.forEach((chat) => chatNameMap.set(chat.chat_id, chat.chat_name))
 
@@ -350,45 +352,6 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
     return 'mixed'
   }
 
-  const getScopeStatus = (): ExpressionLearningScopeStatus | null => {
-    if (browseMode === 'chat' && selectedChatId) {
-      const selectedChat = chatList.find((chat) => chat.chat_id === selectedChatId)
-      if (!selectedChat) {
-        return null
-      }
-      return {
-        label: formatChatDisplayName(selectedChat.chat_name, selectedChat.account_id),
-        useExpression: selectedChat.use_expression ? 'on' : 'off',
-        enableLearning: selectedChat.enable_learning ? 'on' : 'off',
-      }
-    }
-
-    if (browseMode === 'group' && selectedGroupIndex !== null) {
-      const selectedGroup = groups.find((group) => group.index === selectedGroupIndex)
-      if (!selectedGroup || selectedGroup.members.length === 0) {
-        return null
-      }
-      return {
-        label: selectedGroup.name,
-        useExpression: summarizeStatus(
-          selectedGroup.members.map((member) => member.use_expression)
-        ),
-        enableLearning: summarizeStatus(
-          selectedGroup.members.map((member) => member.enable_learning)
-        ),
-      }
-    }
-
-    return null
-  }
-
-  const scopeStatus = getScopeStatus()
-  const renderStatusIndicator = (label: string, status: IndicatorStatus) => (
-    <StatusIndicator status={status} title={scopeStatus?.label}>
-      {status === 'on' ? `${label}中` : status === 'mixed' ? `部分${label}` : `${label}关闭`}
-    </StatusIndicator>
-  )
-
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden p-3 pb-4 sm:p-4">
       {activeView !== 'list' && (
@@ -437,12 +400,6 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                   },
                 ]}
               />
-              {scopeStatus && (
-                <>
-                  {renderStatusIndicator('学习', scopeStatus.enableLearning)}
-                  {renderStatusIndicator('使用', scopeStatus.useExpression)}
-                </>
-              )}
             </>
           }
         />
@@ -474,6 +431,12 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                       descriptionTitle: formatChatAccountLabel(chat.account_id),
                       meta: chat.expression_count?.toLocaleString(),
                       title: formatChatDisplayName(chat.chat_name, chat.account_id),
+                      trailing: (
+                        <ExpressionScopeStatus
+                          enableLearning={chat.enable_learning ? 'on' : 'off'}
+                          useExpression={chat.use_expression ? 'on' : 'off'}
+                        />
+                      ),
                     }))
                   : browseMode === 'group'
                     ? groups.map((group) => {
@@ -488,6 +451,16 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                           description: memberNames || '暂无已解析聊天',
                           descriptionTitle: memberNames,
                           title: memberNames,
+                          trailing: group.members.length > 0 ? (
+                            <ExpressionScopeStatus
+                              enableLearning={summarizeStatus(
+                                group.members.map((member) => member.enable_learning)
+                              )}
+                              useExpression={summarizeStatus(
+                                group.members.map((member) => member.use_expression)
+                              )}
+                            />
+                          ) : undefined,
                         }
                       })
                     : []
@@ -561,8 +534,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                     </Button>
                     <Button
                       size="sm"
-                      onClick={() => setIsCreateDialogOpen(true)}
-                      disabled={!scopeStatus}
+                      onClick={() => setIsCreateChoiceOpen(true)}
                     >
                       <Plus className="h-4 w-4" />
                       新增
@@ -746,10 +718,18 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
       )}
 
       {/* 创建对话框 */}
+      <LearningCreateDialog
+        open={isCreateChoiceOpen}
+        onOpenChange={setIsCreateChoiceOpen}
+        kind="expression"
+        initialTargetIds={currentChat ? [currentChat.chat_id] : []}
+        onManual={() => setIsCreateDialogOpen(true)}
+        onSuccess={refreshAll}
+      />
       <ExpressionCreateDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
-        chatList={chatList}
+        chatList={chatTargetsQuery.data ?? []}
         onSuccess={() => {
           refreshAll()
           setIsCreateDialogOpen(false)

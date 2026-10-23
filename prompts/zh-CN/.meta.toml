@@ -1,7 +1,22 @@
+[text_learning_expression]
+display_name = "长文学习表达"
+advanced = true
+description = "从用户粘贴的文段中提取有原文依据的表达候选，供用户选择导入。"
+
+[text_learning_jargon]
+display_name = "长文学习黑话"
+advanced = true
+description = "从用户粘贴的文段中提取黑话与含义，供用户选择导入。"
+
 [a_memorix_chat_summary]
 display_name = "长期记忆聊天总结"
 advanced = false
 description = "从当前聊天窗口提取可写入长期记忆的增量信息与重要知识。"
+
+[maisaka_chat_passive]
+display_name = "规划器（被动式 replyer）"
+advanced = true
+description = "开启实验性被动式 replyer 时使用；Planner 最终正文作为回复指导，工具调用仍用于操作。"
 
 [maisaka_chat]
 display_name = "规划器"
@@ -12,11 +27,6 @@ description = "Maisaka 主规划模板，负责整合身份、时间、工具说
 display_name = "规划器（合并时机）"
 advanced = false
 description = "独立时间感知关闭时使用的 Maisaka 主规划模板，将节奏控制判断合并到 Planner。"
-
-[maisaka_chat_passive]
-display_name = "规划器（被动式 replyer）"
-advanced = true
-description = "开启实验性被动式 replyer 时使用；Planner 最终正文作为回复指导，工具调用仍用于操作。"
 
 [maisaka_replyer]
 display_name = "回复"

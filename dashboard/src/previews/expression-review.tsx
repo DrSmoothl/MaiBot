@@ -9,9 +9,9 @@ import {
   DataBrowserLayout,
   DataToolbar,
   MetricStrip,
-  StatusIndicator,
 } from '@/components/ui/data-browser'
 import { ExpressionList } from '@/routes/resource/expression/ExpressionList'
+import { ExpressionScopeStatus } from '@/routes/resource/expression/ExpressionScopeStatus'
 import type { Expression } from '@/types/expression'
 
 import { LearningReviewTabs } from './learning-review-tabs'
@@ -86,8 +86,6 @@ export function ExpressionReview() {
                 { label: '近7天新增', value: '+5,579', positive: true },
               ]}
             />
-            <StatusIndicator status="on">学习中</StatusIndicator>
-            <StatusIndicator status="on">使用中</StatusIndicator>
           </>
         }
       />
@@ -111,6 +109,7 @@ export function ExpressionReview() {
               label: name,
               description: '账号 2814567…',
               meta: (1204 - index * 121).toLocaleString(),
+              trailing: <ExpressionScopeStatus enableLearning="on" useExpression="on" />,
             }))}
             footer={
               <label className="flex items-center justify-between gap-2 text-xs">

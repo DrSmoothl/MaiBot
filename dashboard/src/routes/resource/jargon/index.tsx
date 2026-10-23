@@ -3,6 +3,7 @@ import { Check, ChevronDown, Download, MoreHorizontal, Plus, Trash2, Upload, X }
 import { type ReactNode, useState } from 'react'
 
 import { ChatScopeFilterPanel } from '@/components/chat-scope-filter-panel'
+import { LearningCreateDialog } from '@/components/learning-create-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DataBrowserHeader,
@@ -67,6 +68,7 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
   const [selectedJargon, setSelectedJargon] = useState<Jargon | null>(null)
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isCreateChoiceOpen, setIsCreateChoiceOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
   const [exportScope, setExportScope] = useState<JargonExportScope>('all')
@@ -437,7 +439,7 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
           >
             <Download className="h-4 w-4" />
           </Button>
-          <Button size="sm" onClick={() => setIsCreateDialogOpen(true)} aria-label="新增黑话">
+          <Button size="sm" onClick={() => setIsCreateChoiceOpen(true)} aria-label="新增黑话">
             <Plus className="h-4 w-4" />
             新增
           </Button>
@@ -625,6 +627,14 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
       />
 
       {/* 创建对话框 */}
+      <LearningCreateDialog
+        open={isCreateChoiceOpen}
+        onOpenChange={setIsCreateChoiceOpen}
+        kind="jargon"
+        initialTargetIds={browseMode === 'chat' && filterChatId !== 'all' ? [filterChatId] : []}
+        onManual={() => setIsCreateDialogOpen(true)}
+        onSuccess={invalidateJargon}
+      />
       <JargonCreateDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}

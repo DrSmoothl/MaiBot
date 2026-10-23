@@ -34,6 +34,7 @@ from src.webui.routers.search import router as search_router
 from src.webui.routers.self_update import router as self_update_router
 from src.webui.routers.statistics import router as statistics_router
 from src.webui.routers.system import router as system_router
+from src.webui.routers.text_learning import router as text_learning_router
 from src.webui.routers.user_emoji import router as user_emoji_router
 from src.webui.routers.websocket.auth import router as ws_auth_router
 from src.webui.routers.websocket.unified import router as unified_ws_router
@@ -58,6 +59,7 @@ router.include_router(person_router)
 router.include_router(expression_router)
 # 注册黑话管理路由
 router.include_router(jargon_router)
+router.include_router(text_learning_router)
 # 注册表情包管理路由
 router.include_router(bot_accounts_router)
 router.include_router(emoji_router)
