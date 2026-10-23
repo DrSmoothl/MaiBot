@@ -79,6 +79,48 @@ def test_filter_refresh_and_unsupported_ranking(catalog, monkeypatch):
         service.MarketSearch(limit=51)
 
 
+@pytest.mark.parametrize("information", ["official", "github", "cnb"])
+@pytest.mark.parametrize("download,prefix", [
+    ("cnb", "https://cnb.cool/Mai-with-u/plugin-repo/-/git/raw/"),
+    ("github", "https://raw.githubusercontent.com/Mai-with-u/plugin-repo/"),
+    ("custom", "https://download.example/Mai-with-u/plugin-repo/"),
+])
+@pytest.mark.parametrize("icon,resource", [
+    ("icons/a/icon_64.png", "main/icons/a/icon_64.png"),
+    ("https://raw.githubusercontent.com/Mai-with-u/plugin-repo/" + "a" * 40 + "/icons/a/icon_64.png",
+     "a" * 40 + "/icons/a/icon_64.png"),
+    ("https://cnb.cool/Mai-with-u/plugin-repo/-/git/raw/main/icons/a/icon_64.png",
+     "main/icons/a/icon_64.png"),
+])
+def test_market_icons_follow_download_source(catalog, information, download, prefix, icon, resource):
+    sources.SETTINGS_FILE.write_text(json.dumps({
+        "information_source": information, "download_source": download,
+        "custom_download_prefix": "https://download.example",
+    }), encoding="utf-8")
+    record = {**catalog["plugins"][0], "icon_url": icon, "assets": {"icon_64": icon}}
+    plugins = service._catalog([record], information)
+    assert plugins[0]["assets"]["icon_64"] == prefix + resource
+
+
+def test_download_source_change_rewrites_icons_from_cached_catalog(catalog, monkeypatch):
+    calls = []
+    catalog["plugins"][0]["icon_url"] = (
+        "https://raw.githubusercontent.com/Mai-with-u/plugin-repo/main/icons/a/icon_64.png"
+    )
+    catalog["plugins"][1]["icon_url"] = "https://images.example/plugin.png"
+    monkeypatch.setattr(sources.GitSource, "read_json", lambda *args: calls.append(args[0]) or deepcopy(catalog))
+    first = asyncio.run(service.get_catalog())
+    assert first["plugins"][0]["assets"]["icon_64"] == (
+        "https://cnb.cool/Mai-with-u/plugin-repo/-/git/raw/main/icons/a/icon_64.png"
+    )
+    sources.SETTINGS_FILE.write_text('{"download_source":"github"}', encoding="utf-8")
+    second = asyncio.run(service.get_catalog())
+    assert second["cache"]["hit"] and len(calls) == 1
+    assert second["plugins"][0]["assets"]["icon_64"] == catalog["plugins"][0]["icon_url"]
+    assert second["plugins"][1]["assets"]["icon_64"] == "https://images.example/plugin.png"
+    assert second["plugins"][2]["assets"] is None
+
+
 def test_source_change_uses_selected_source_and_exposes_unavailable_stats(catalog, monkeypatch):
     asyncio.run(service.search(service.MarketSearch()))
     sources.SETTINGS_FILE.write_text('{"information_source":"cnb"}', encoding="utf-8")
