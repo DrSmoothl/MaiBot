@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import { cn } from '@/lib/utils'
+import { PromptWarningDot } from '@/components/ui/prompt-warning-dot'
 
 import type { MenuItem } from './types'
 
@@ -29,6 +30,7 @@ function measureFlyout(link: Element) {
 interface NavItemProps {
   item: MenuItem
   sidebarOpen: boolean
+  promptWarning?: boolean
   expandOnHover?: boolean
   groupFlyoutWidth?: number
   groupFlyoutId?: string
@@ -39,6 +41,7 @@ interface NavItemProps {
 export function NavItem({
   item,
   sidebarOpen,
+  promptWarning = false,
   expandOnHover = false,
   groupFlyoutWidth,
   groupFlyoutId,
@@ -135,11 +138,14 @@ export function NavItem({
         sidebarOpen || expanded ? 'gap-3' : 'gap-3 lg:gap-0',
         expanded && 'shrink-0'
       )}>
-        <Icon
-          data-dashboard-nav-icon="true"
-          className={cn('h-5 w-5 flex-shrink-0', isActive && 'text-primary')}
-          size={20}
-        />
+        <span className="relative flex shrink-0">
+          <Icon
+            data-dashboard-nav-icon="true"
+            className={cn('h-5 w-5 flex-shrink-0', isActive && 'text-primary')}
+            size={20}
+          />
+          {promptWarning && <PromptWarningDot className="absolute -top-1 -right-1" />}
+        </span>
         <motion.span
           data-dashboard-nav-label="true"
           initial={expanded ? { opacity: 0 } : false}
@@ -175,7 +181,7 @@ export function NavItem({
     'data-tour': item.tourId,
     'data-dashboard-nav-item': 'true',
     'data-active': isActive ? 'true' : 'false',
-    'aria-label': label,
+    'aria-label': promptWarning ? `${label}：Prompt 模板不兼容或缺少变量，请检查` : label,
     style: {
       height: 'var(--layout-sidebar-nav-item-height)',
       minHeight: 'var(--layout-sidebar-nav-item-height)',

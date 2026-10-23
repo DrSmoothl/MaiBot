@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { PromptWarningDot } from '@/components/ui/prompt-warning-dot'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
@@ -52,7 +53,6 @@ import {
   activatePromptVersion,
   deletePromptVersion,
   getDefaultPromptFile,
-  getPromptCatalog,
   getPromptFile,
   getPromptVersionFile,
   resetPromptFile,
@@ -63,6 +63,8 @@ import {
   type PromptVersionInfo,
 } from '@/lib/prompt-api'
 import { cn } from '@/lib/utils'
+import { promptCatalogQueryOptions } from '@/lib/prompt-query'
+import { queryClient } from '@/lib/query'
 
 const DEFAULT_VERSION_ID = '__default__'
 const DIFF_ADDED_CLASS = 'cm-prompt-diff-added'
@@ -356,7 +358,10 @@ export function PromptManagementPage() {
   const loadCatalog = useCallback(async () => {
     try {
       setLoadingCatalog(true)
-      const result = await getPromptCatalog()
+      const result = await queryClient.fetchQuery({
+        ...promptCatalogQueryOptions,
+        staleTime: 0,
+      })
       setCatalog(result)
       const nextLanguage =
         language && result.languages.includes(language)
@@ -675,7 +680,12 @@ export function PromptManagementPage() {
             <SelectContent>
               {(catalog?.languages ?? []).map((item) => (
                 <SelectItem key={item} value={item}>
-                  {item}
+                  <span className="inline-flex items-center gap-2">
+                    {item}
+                    {catalog?.files[item]?.some((file) => file.validation?.valid === false) && (
+                      <PromptWarningDot />
+                    )}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -701,6 +711,9 @@ export function PromptManagementPage() {
             <span className="hidden sm:inline">
               {showAdvancedPrompts ? '隐藏高级' : '显示高级'}
             </span>
+            {promptFiles.some((file) => file.advanced && file.validation?.valid === false) && (
+              <PromptWarningDot message="高级 Prompt 中有模板不兼容或缺少变量" />
+            )}
           </Button>
           <Button
             size="sm"
@@ -774,6 +787,9 @@ export function PromptManagementPage() {
                       <div className="truncate font-medium" title={file.display_name || file.name}>
                         {file.display_name || file.name}
                       </div>
+                      {file.validation?.valid === false && (
+                        <PromptWarningDot message={file.validation.message} />
+                      )}
                       {file.advanced && (
                         <Badge variant="outline" className="shrink-0 text-[10px]">
                           高级
@@ -820,6 +836,9 @@ export function PromptManagementPage() {
                   <span className="truncate">
                     {selectedFile?.display_name || filename || '未选择文件'}
                   </span>
+                  {!loadingFile && validation?.valid === false && (
+                    <PromptWarningDot message={validation.message} />
+                  )}
                   {selectedFile?.advanced && (
                     <Badge variant="outline" className="shrink-0">
                       高级

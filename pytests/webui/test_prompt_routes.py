@@ -49,6 +49,39 @@ def test_update_prompt_file_saves_custom_version(client: TestClient) -> None:
     assert file_info["custom_version_count"] == 1
 
 
+@pytest.mark.parametrize("custom_content", ["Hi", "Hi {name} {other}", "Hi {name"])
+def test_prompt_catalog_reports_invalid_active_template(client: TestClient, custom_content: str) -> None:
+    custom_dir = config_router_module.CUSTOM_PROMPTS_DIR / "zh-CN"
+    custom_dir.mkdir(parents=True)
+    (custom_dir / "replyer.prompt").write_text(custom_content, encoding="utf-8")
+
+    response = client.get("/api/webui/config/prompts")
+    assert response.status_code == 200
+    [file_info] = response.json()["files"]["zh-CN"]
+    detail = client.get("/api/webui/config/prompts/zh-CN/replyer.prompt").json()
+    assert file_info["validation"] == detail["validation"]
+    assert file_info["validation"]["valid"] is False
+    assert file_info["validation"]["message"]
+
+    client.delete("/api/webui/config/prompts/zh-CN/replyer.prompt")
+    [reset_info] = client.get("/api/webui/config/prompts").json()["files"]["zh-CN"]
+    assert reset_info["validation"]["valid"] is True
+
+
+def test_prompt_catalog_detects_default_template_upgrade(client: TestClient) -> None:
+    client.put(
+        "/api/webui/config/prompts/zh-CN/replyer.prompt",
+        json={"content": "Hi {name}", "create_version": True},
+    )
+    (config_router_module.PROMPTS_DIR / "zh-CN" / "replyer.prompt").write_text(
+        "Hello {name} {context}", encoding="utf-8"
+    )
+
+    [file_info] = client.get("/api/webui/config/prompts").json()["files"]["zh-CN"]
+    assert file_info["validation"]["missing_placeholders"] == ["context"]
+    assert file_info["validation"]["valid"] is False
+
+
 def test_prompt_catalog_lists_emoji_content_analysis_metadata(client: TestClient) -> None:
     prompt_dir = config_router_module.PROMPTS_DIR / "zh-CN"
     (prompt_dir / "emoji_content_analysis.prompt").write_text(
