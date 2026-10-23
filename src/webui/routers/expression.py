@@ -901,6 +901,8 @@ class ChatInfo(BaseModel):
     account_id: Optional[str] = None
     target_id: Optional[str] = None
     is_group: bool = False
+    is_legacy: bool = False
+    is_other_account: bool = False
     use_expression: bool = True
     enable_learning: bool = True
     expression_count: Optional[int] = None
@@ -916,6 +918,8 @@ def build_chat_info(
     """根据聊天流 ID 构建 WebUI 展示用的聊天信息。"""
 
     use_expression, enable_learning = ExpressionConfigUtils.get_expression_config_for_chat(chat_id)
+    # 旧记录缺少归属信息；归属完整但不在当前账号范围内的记录单独标记。
+    is_legacy = not chat_session or not chat_session.platform.strip() or not (chat_session.account_id or "").strip()
     return ChatInfo(
         chat_id=chat_id,
         chat_name=get_chat_name(chat_id, db_session),
@@ -923,6 +927,8 @@ def build_chat_info(
         account_id=chat_session.account_id if chat_session else None,
         target_id=(chat_session.group_id or chat_session.user_id) if chat_session else None,
         is_group=bool(chat_session and chat_session.group_id),
+        is_legacy=is_legacy,
+        is_other_account=not is_legacy and not is_current_account_session(chat_session),
         use_expression=use_expression,
         enable_learning=enable_learning,
         expression_count=expression_count,

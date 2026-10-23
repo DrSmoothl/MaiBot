@@ -25,7 +25,6 @@ import {
   DataToolbar,
   MetricStrip,
 } from '@/components/ui/data-browser'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,7 +36,6 @@ import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
 import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
@@ -79,12 +77,11 @@ type IndicatorStatus = 'on' | 'off' | 'mixed'
 type ExpressionReviewFilter = 'all' | 'user_checked' | 'unchecked'
 type BrowseMode = 'chat' | 'group' | 'all'
 
-/** useDataList 的筛选袋：浏览维度 + 旧格式开关 + 审核筛选 */
+/** useDataList 的筛选袋：浏览维度 + 审核筛选 */
 interface ExpressionFilters {
   browseMode: BrowseMode
   selectedChatId: string
   selectedGroupIndex: number | null
-  showLegacyExpressions: boolean
   sortBy: 'time' | 'time_asc' | 'created' | 'created_asc'
   reviewFilter: ExpressionReviewFilter
 }
@@ -93,7 +90,6 @@ const INITIAL_FILTERS: ExpressionFilters = {
   browseMode: 'chat',
   selectedChatId: '',
   selectedGroupIndex: null,
-  showLegacyExpressions: false,
   reviewFilter: 'all',
   sortBy: 'time',
 }
@@ -154,7 +150,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
         search: search || undefined,
         chat_id: filters.browseMode === 'chat' ? filters.selectedChatId || undefined : undefined,
         chat_ids: selectedGroup && !selectedGroup.is_global ? selectedGroup.chat_ids : undefined,
-        include_legacy: filters.showLegacyExpressions,
+        include_legacy: true,
         review_filter: filters.reviewFilter,
         sort_by: filters.sortBy,
       })
@@ -163,13 +159,12 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   })
 
   const filters = list.filters
-  const { browseMode, selectedChatId, selectedGroupIndex, showLegacyExpressions, reviewFilter } =
-    filters
+  const { browseMode, selectedChatId, selectedGroupIndex, reviewFilter } = filters
 
   // 统计：失败时保持占位数值，不打断页面；与列表同领域，list.invalidate() 会一并失效
   const statsQuery = useQuery({
-    queryKey: ['expression', 'stats', { include_legacy: showLegacyExpressions }],
-    queryFn: () => getExpressionStats({ include_legacy: showLegacyExpressions }),
+    queryKey: ['expression', 'stats', { include_legacy: true }],
+    queryFn: () => getExpressionStats({ include_legacy: true }),
   })
   const stats: StatsData = statsQuery.data ?? DEFAULT_STATS
 
@@ -180,10 +175,10 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   })
   const uncheckedCount = reviewStatsQuery.data?.unchecked ?? 0
 
-  // 聊天流列表（随「显示旧格式」开关刷新，保持原页面 loadChatList 的 include_legacy 行为）
+  // 聊天流列表包含历史及非当前账号的数据，由条目标签区分。
   const chatListQuery = useQuery({
-    queryKey: ['expression', 'chats', { include_legacy: showLegacyExpressions }],
-    queryFn: () => getChatList({ include_legacy: showLegacyExpressions }),
+    queryKey: ['expression', 'chats', { include_legacy: true }],
+    queryFn: () => getChatList({ include_legacy: true }),
   })
   const chatList: ChatInfo[] = chatListQuery.data ?? []
   const chatTargetsQuery = useQuery({
@@ -194,10 +189,10 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   const chatNameMap = new Map<string, string>()
   chatList.forEach((chat) => chatNameMap.set(chat.chat_id, chat.chat_name))
 
-  // 表达共享组（随「显示旧格式」开关刷新）
+  // 表达共享组与聊天列表保持相同的完整数据范围。
   const groupsQuery = useQuery({
-    queryKey: ['expression', 'groups', { include_legacy: showLegacyExpressions }],
-    queryFn: () => getExpressionGroups({ include_legacy: showLegacyExpressions }),
+    queryKey: ['expression', 'groups', { include_legacy: true }],
+    queryFn: () => getExpressionGroups({ include_legacy: true }),
   })
   const groups: ExpressionGroupInfo[] = groupsQuery.data ?? []
 
@@ -340,12 +335,6 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
     list.setFilter('selectedGroupIndex', groupIndex)
   }
 
-  const handleLegacyExpressionsChange = (checked: boolean) => {
-    list.setFilter('showLegacyExpressions', checked)
-    list.setFilter('selectedChatId', '')
-    list.setFilter('selectedGroupIndex', null)
-  }
-
   const summarizeStatus = (values: boolean[]): IndicatorStatus => {
     if (values.every(Boolean)) {
       return 'on'
@@ -430,7 +419,16 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                 browseMode === 'chat'
                   ? chatList.map((chat) => ({
                       id: chat.chat_id,
-                      label: chat.chat_name,
+                      label: (
+                        <span className="flex min-w-0 items-center gap-1">
+                          <span className="truncate">{chat.chat_name}</span>
+                          {(chat.is_legacy || chat.is_other_account) && (
+                            <span className="shrink-0 rounded border px-1 text-[10px] font-normal">
+                              {chat.is_legacy ? '旧格式' : '其他账号'}
+                            </span>
+                          )}
+                        </span>
+                      ),
                       description: formatChatTargetLabel(chat),
                       descriptionTitle: formatChatTargetLabel(chat),
                       meta: chat.expression_count?.toLocaleString(),
@@ -483,22 +481,6 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
               onCollapsedChange={setBrowserPanelCollapsed}
               collapseLabel="折叠浏览列表"
               expandLabel="展开浏览列表"
-              footer={
-                <div
-                  className="flex w-full items-center justify-between gap-3"
-                  title="显示旧格式的表达方式（这些项目会在运行中被转换为新格式）"
-                >
-                  <Label htmlFor="show-legacy-expressions" className="cursor-pointer text-xs">
-                    显示旧格式
-                  </Label>
-                  <Checkbox
-                    id="show-legacy-expressions"
-                    size="sm"
-                    checked={showLegacyExpressions}
-                    onCheckedChange={(checked) => handleLegacyExpressionsChange(checked === true)}
-                  />
-                </div>
-              }
               listClassName="max-h-64 lg:max-h-none"
             />
           }
