@@ -4991,7 +4991,7 @@ class DebugConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。模型名称或标识包含 mai_replier（兼容 mai-replier），或为 v2p1-contract、v2p1-raw 时自动开启且不可关闭，全部移走后自动关闭；其他模型可手动开启。"""
+    """按旧版（0.12.x）的方式组织 replyer 提示词：全部回复指令集中在一份完整模板里，用块占位符填充，群聊/私聊/简短回复各用一套模板，并整段作为一条 user 消息发送。仅检查实际分配给 replyer 的模型：名称或标识包含 mai_replier（兼容 mai-replier），或为 v2p1-contract、v2p1-raw 时自动开启且不可关闭；解除这些模型的 replyer 分配后清除自动开关，未分配的模型不影响此设置。其他模型可手动开启。"""
 
     enable_console_input: bool = Field(
         default=True,

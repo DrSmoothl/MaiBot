@@ -308,11 +308,13 @@ class ConfigManager:
         self.retro_prompt_forced: bool = False
 
     def _sync_retro_reply_prompt(self, config: Config, models: ModelConfig) -> None:
-        """指定模型存在时强制开启，最后一个指定模型移走时清除自动开关。"""
+        """仅检查分配给 replyer 的模型，解除指定模型分配时清除自动开关。"""
         retro_models = {"v2p1-contract", "v2p1-raw"}
+        replyer_model_names = set(models.model_task_config.replyer.model_list)
         forced = any(
             model_name in retro_models or "mai-replier" in model_name
             for model in models.models
+            if model.name in replyer_model_names
             for value in (model.name, model.model_identifier)
             for model_name in (value.strip().lower().replace("_", "-"),)
         )

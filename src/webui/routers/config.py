@@ -1242,7 +1242,7 @@ def _apply_retro_prompt_schema_lock(schema: Dict[str, Any]) -> None:
 def _validate_retro_prompt_setting(config_data: Dict[str, Any]) -> None:
     """模型要求复古模板时，所有主配置写入入口均禁止手动关闭。"""
     if config_manager.retro_prompt_forced and config_data.get("debug", {}).get("replyer_retro_prompt") is False:
-        raise HTTPException(status_code=400, detail="当前模型需要复古回复提示词，移除对应模型后才能关闭")
+        raise HTTPException(status_code=400, detail="当前 replyer 模型需要复古回复提示词，解除对应模型的 replyer 分配后才能关闭")
 
 
 @router.get("/schema/bot")
