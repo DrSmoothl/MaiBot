@@ -4259,9 +4259,9 @@ class EmojiCacheCleanupConfig(ConfigBase):
 class EmojiConfig(ConfigBase):
     """表情包配置类"""
 
-    __ui_label__ = "表情"
-    __ui_advanced__ = True
-    __ui_order__ = 80
+    __ui_parent__ = "expression"
+    __ui_label__ = "表情包"
+    __ui_sub_label__ = "表情包"
 
     use_new_send_logic: bool = Field(
         default=False,
