@@ -548,6 +548,7 @@ export function usePluginList() {
     performTogglePlugin,
     // 市场版本 / 更新派生
     checkingUpdates,
+    marketPluginsById,
     getPluginUpdateState,
     getPluginRepositoryUrl,
     // 状态派生
