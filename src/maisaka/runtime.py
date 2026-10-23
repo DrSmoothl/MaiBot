@@ -1711,17 +1711,13 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
         logger.debug(f"{self.log_prefix} 连续 wait 计数已重置: 原计数={self._consecutive_wait_count} 原因={reason}")
         self._consecutive_wait_count = 0
 
-    def _try_enter_wait_state(
+    def _enter_counted_wait_state(
         self,
         seconds: Optional[float] = None,
         tool_call_id: Optional[str] = None,
         logical_turn_id: Optional[str] = None,
-    ) -> tuple[bool, int, int]:
-        """尝试进入 wait 状态，并返回是否成功、当前连续次数和上限。"""
-
-        max_count = max(1, int(global_config.chat.reply_timing.max_consecutive_wait_count))
-        if self._consecutive_wait_count >= max_count:
-            return False, self._consecutive_wait_count, max_count
+    ) -> int:
+        """进入 wait 状态并返回连续次数；多次等待由下一轮上下文提醒，不强制停止。"""
 
         self._consecutive_wait_count += 1
         self._enter_wait_state(
@@ -1729,7 +1725,7 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             tool_call_id=tool_call_id,
             logical_turn_id=logical_turn_id,
         )
-        return True, self._consecutive_wait_count, max_count
+        return self._consecutive_wait_count
 
     def _resume_from_wait_for_proactive_trigger(self) -> None:
         """主动触发到来时从 wait 状态恢复运行。"""

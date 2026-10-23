@@ -54,6 +54,7 @@ from src.maisaka.builtin_tool import (
     is_builtin_tool_in_action_stage,
 )
 from .chat_loop_service import ChatResponse
+from .mode_policy import build_consecutive_wait_reminders
 from .tool_result_condenser import condense_tool_result, should_condense_tool_result
 from src.maisaka.visual.chat_history_refresher import (
     has_pending_image_recognition,
@@ -596,6 +597,7 @@ class MaisakaReasoningEngine:
             )
             response = await self._run_interruptible_planner(
                 injected_user_messages=injected_user_messages or None,
+                tail_user_messages=build_consecutive_wait_reminders(self._runtime._consecutive_wait_count),
                 tool_definitions=action_tool_definitions,
             )
         finally:
@@ -691,8 +693,6 @@ class MaisakaReasoningEngine:
             return CycleEnd("planner_no_tool_end", "Planner 调用 stop，已结束本轮思考并等待新消息。")
         if pause_tool_name == "wait":
             return CycleEnd("tool_pause:wait", "Planner 调用 wait，本轮暂停并在等待结束后继续判断。")
-        if pause_tool_name == "wait_rest":
-            return CycleEnd("planner_wait_rest", "Planner 连续 wait 达到上限，本轮进入休息并等待新消息。")
         if pause_tool_name:
             return CycleEnd(f"tool_pause:{pause_tool_name}", f"工具 {pause_tool_name} 要求暂停当前思考循环。")
         return CycleEnd("tool_pause", "工具要求暂停当前思考循环。")
@@ -2144,12 +2144,6 @@ class MaisakaReasoningEngine:
 
             if result.success and result.stop_after_execution:
                 should_stop_after_execution = True
-
-            if bool(result.metadata.get("wait_rest", False)):
-                self._runtime._reset_consecutive_wait_count("wait_limit_rest")
-                self._runtime._enter_stop_state()
-                self._append_tool_post_history_messages(deferred_post_history_messages)
-                return True, "wait_rest", tool_result_summaries, tool_monitor_results
 
             if bool(result.metadata.get("pause_execution", False)):
                 self._append_tool_post_history_messages(deferred_post_history_messages)

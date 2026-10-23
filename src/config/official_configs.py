@@ -630,20 +630,6 @@ class ChatReplyTimingConfig(ConfigBase):
     )
     """开启后，被 @ 时会尽量回复。"""
 
-    max_consecutive_wait_count: int = Field(
-        default=3,
-        ge=1,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "连续 wait 上限",
-                "en_US": "Max consecutive wait",
-                "ja_JP": "連続 wait 上限",
-            },
-            "x-widget": "input",
-        },
-    )
-    """Planner 最多连续调用 wait 多少次；达到上限后 wait 工具会拒绝继续进入等待。"""
-
     no_action_backoff_base_seconds: float = Field(
         default=15,
         ge=0,
