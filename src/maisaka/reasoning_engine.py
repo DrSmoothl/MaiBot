@@ -1798,12 +1798,20 @@ class MaisakaReasoningEngine:
     def _append_tool_result_media_messages(self, tool_call: ToolCall, result: ToolExecutionResult) -> None:
         """将 tool result 中的媒体项拆分为紧跟其后的 user context message。"""
 
+        for message in self._build_tool_result_media_messages(tool_call, result):
+            self._schedule_tool_result_media_image_recognition(message.raw_message, message.message_id)
+            self._runtime._chat_history.append(message)
+
+    def _build_tool_result_media_messages(
+        self, tool_call: ToolCall, result: ToolExecutionResult,
+    ) -> List[ToolResultMediaMessage]:
+        """构造关联工具调用的媒体消息，主 Planner 和子 Agent 共用，调用方决定写入哪份历史。"""
+        messages: List[ToolResultMediaMessage] = []
         for item_index, item in self._iter_tool_result_media_items(result):
             media_sequence = self._build_tool_result_media_message_sequence(tool_call, item_index, item)
             visible_text = self._build_tool_result_media_visible_text(tool_call, item_index, item, media_sequence)
             media_index = self._build_tool_result_media_index(tool_call, item_index)
-            self._schedule_tool_result_media_image_recognition(media_sequence, media_index)
-            self._runtime._chat_history.append(
+            messages.append(
                 ToolResultMediaMessage(
                     tool_call_id=tool_call.call_id,
                     session_id=self._runtime.session_id,
@@ -1813,6 +1821,7 @@ class MaisakaReasoningEngine:
                     message_id=media_index,
                 )
             )
+        return messages
 
     def _schedule_tool_result_media_image_recognition(self, media_sequence: MessageSequence, media_index: str) -> None:
         """为 tool result 拆出的图片消息调度后台识图。"""

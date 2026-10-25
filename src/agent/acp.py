@@ -10,6 +10,13 @@ import os
 import shutil
 import subprocess
 
+from .config import AgentConfig
+
+
+def desktop_manifest(config: AgentConfig) -> Path:
+    return (Path(config.desktop_manifest).expanduser() if config.desktop_manifest
+            else Path.home() / ".dsh" / "maibot-desktop.json").absolute()
+
 
 class ACPConnection:
     def __init__(self, update: Callable[[Dict[str, Any]], Awaitable[None]]) -> None:
@@ -24,6 +31,43 @@ class ACPConnection:
         self._sequence = 0
         self._write_lock = asyncio.Lock()
         self.failure: Optional[Exception] = None
+
+    async def initialize(self, config: AgentConfig, cwd: Path, client_name: str) -> Dict[str, Any]:
+        """两种 ACP 使用方共用连接选择和握手，业务状态由各自保存。"""
+        if config.connection == "dsh_desktop":
+            await self.connect_desktop(desktop_manifest(config), config.acp_timeout)
+        else:
+            args = ["--profile", "acp"] if config.connection == "dsh" else config.acp_args
+            await self.start(config.acp_command, args, str(cwd), config.acp_env)
+        initialized = await self.request("initialize", {
+            "protocolVersion": 1, "clientInfo": {"name": client_name, "version": "1"},
+            "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
+        }, config.acp_timeout)
+        if initialized["protocolVersion"] != 1:
+            raise ValueError("外部 Agent 未协商 ACP v1")
+        capabilities = initialized["agentCapabilities"]
+        if not capabilities.get("mcpCapabilities", {}).get("http", False):
+            raise ValueError("外部 Agent 未声明 HTTP MCP 能力，无法挂载麦麦工具")
+        return capabilities
+
+    async def open_session(
+        self, cwd: Path, mount: Dict[str, Any], session_id: Optional[str], timeout: float,
+    ) -> Dict[str, Any]:
+        params = {"cwd": str(cwd), "mcpServers": [mount]}
+        if session_id:
+            params["sessionId"] = session_id
+        return await self.request("session/resume" if session_id else "session/new", params, timeout)
+
+    async def select_model(
+        self, config: AgentConfig, session: Dict[str, Any], session_id: str,
+    ) -> None:
+        if not config.acp_model:
+            return
+        if not any(option["id"] == "model" for option in session.get("configOptions", [])):
+            raise ValueError("外部 Agent 未提供 model 配置选项")
+        await self.request("session/set_config_option", {
+            "sessionId": session_id, "configId": "model", "value": config.acp_model,
+        }, config.acp_timeout)
 
     async def start(self, command: str, args: List[str], cwd: str, env: Dict[str, str]) -> None:
         executable = shutil.which(command)

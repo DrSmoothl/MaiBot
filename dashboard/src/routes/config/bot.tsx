@@ -350,7 +350,6 @@ function BotConfigPageContent() {
       ['agent.acp_env', AgentACPField, 'wrapper'],
       ['agent.acp_model', AgentACPField, 'wrapper'],
       ['agent.acp_timeout', AgentACPField, 'wrapper'],
-      ['agent.computer_tools', AgentACPField, 'wrapper'],
 
       ['bot.platform', HiddenFieldHook, 'hidden'],
       ['bot.alias_names', AliasNamesHook],

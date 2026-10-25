@@ -7,14 +7,18 @@ import type { MenuSection } from './types'
 
 interface MenuFeatureFlags {
   agent: boolean
+  computer: boolean
 }
 
 function resolveMenuFeatureFlags(config: Record<string, unknown> | null): MenuFeatureFlags {
   const agent = config?.agent
+  const computer = config?.computer
 
   return {
     agent: agent !== null && typeof agent === 'object'
       && (agent as Record<string, unknown>).enabled === true,
+    computer: computer !== null && typeof computer === 'object'
+      && (computer as Record<string, unknown>).enabled === true,
   }
 }
 
@@ -23,7 +27,7 @@ function filterMenuSections(flags: MenuFeatureFlags | null): MenuSection[] {
     .map((section) => ({
       ...section,
       items: section.items.filter((item) => {
-        if (item.featureFlag === 'agent') return flags?.agent === true
+        if (item.featureFlag) return flags?.[item.featureFlag] === true
         return true
       }),
     }))
@@ -45,7 +49,7 @@ export function useMenuSections(): MenuSection[] {
         })
         .catch(() => {
           if (!cancelled) {
-            setFeatureFlags({ agent: false })
+            setFeatureFlags({ agent: false, computer: false })
           }
         })
     }

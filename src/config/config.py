@@ -14,6 +14,7 @@ from src.common.i18n import t
 from src.common.logger import get_logger
 from src.common.version import read_project_version
 from src.agent.config import AgentConfig
+from src.computer.config import ComputerConfig
 from src.web_search.config import WebConfig, resolve_web_search_config
 
 from .config_base import AttributeData, ConfigBase, Field
@@ -72,7 +73,7 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.15.47"
+CONFIG_VERSION: str = "8.15.50"
 MODEL_CONFIG_VERSION: str = "1.17.24"
 
 logger = get_logger("config")
@@ -100,6 +101,9 @@ class Config(ConfigBase):
 
     agent: AgentConfig = Field(default_factory=AgentConfig)
     """统一独立 Agent 配置"""
+
+    computer: ComputerConfig = Field(default_factory=ComputerConfig)
+    """共享沙盒电脑配置"""
 
     bot: BotConfig = Field(default_factory=BotConfig)
     """机器人配置类"""
@@ -264,6 +268,17 @@ def _migrate_legacy_a_memorix_config(config_data: dict[str, Any]) -> tuple[dict[
 
 def _normalize_loaded_bot_config_dict(config_data: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(config_data)
+    # 电脑配置从 Agent 栏目迁出；新栏目显式值优先，保留旧部署实际生效的开关。
+    agent_config = normalized.get("agent")
+    if isinstance(agent_config, dict):
+        for old_name, new_name in (("computer_tools", "enabled"), ("networking", "networking"),
+                                   ("memory_mb", "memory_mb"), ("startup_timeout", "startup_timeout"),
+                                   ("request_timeout", "request_timeout"), ("screenshot_max_edge", "screenshot_max_edge")):
+            if old_name in agent_config:
+                value = agent_config.pop(old_name)
+                if old_name == "computer_tools":
+                    value = value and agent_config.get("enabled", False)
+                normalized.setdefault("computer", {}).setdefault(new_name, value)
     # 将已稳定的能力配置移入独立栏目，保留用户原有开关与阈值。
     experimental_config = normalized.get("experimental")
     if isinstance(experimental_config, dict):

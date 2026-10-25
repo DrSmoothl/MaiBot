@@ -1,14 +1,12 @@
 import { backendApi } from '@/lib/http'
 
-const root = '/api/webui/agent'
+const root = '/api/webui/computer'
 
 export interface ComputerStatus {
   enabled: boolean
-  desktop_enabled: boolean
   paused: boolean
   takeover: boolean
   sandbox_running: boolean
-  agent_state: string
   pending_request: string | null
   error: string
 }
@@ -27,7 +25,7 @@ export const getComputerStatus = (signal: AbortSignal) =>
 export const getComputerFrame = (signal: AbortSignal) =>
   backendApi.get<Blob>(`${root}/frame`, { signal, parse: 'blob', cache: 'no-store' })
 
-export const controlComputer = (operation: 'pause' | 'takeover' | 'resume' | 'stop', signal: AbortSignal) =>
+export const controlComputer = (operation: 'pause' | 'takeover' | 'resume' | 'stop' | 'restart', signal: AbortSignal) =>
   backendApi.post<ComputerStatus>(`${root}/control`, { body: { operation }, signal })
 
 export const inputComputer = (actions: Record<string, unknown>[], signal: AbortSignal) =>
