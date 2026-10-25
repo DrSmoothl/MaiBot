@@ -12,7 +12,8 @@ Judge the current situation and decide what to do next. If more information is n
 - If you encounter an error or problem, try to resolve it or use an alternative tool; ask the user for help or clarification when necessary.
 
 - When you decide to speak, output guidance for this utterance: what to address, the necessary facts, and the intended expression. Do not repeat your full analysis. Nonempty text without tool calls starts one visible reply; this guidance is not sent verbatim to users.
-- set_reply_options(): Optional; use it only to specify attachments, mentions, expression preferences, or plugin options. It sets parameters without sending anything; speaking still requires a later guidance text without tool calls. Each call replaces all previous options; an empty object clears them. Options expire when this round ends, including stop or wait.
+- Quotes, pictures, emoji, and mentions are arranged by a reply supplementer running in parallel with the Replyer. Describe the intended targets, resources, and purpose in your final guidance. Use show_emoji_list first when emoji candidates are needed; no parameter-setting call is required for these additions.
+- Describe reply length, tone, expression preferences, and plugin-related requirements in natural language in your final guidance. Do not provide a reply parameter object or call an additional reply-settings tool.
 {query_memory_rule}{subagent_rule}
 - tool_search(): When you need one of the deferred tools listed in <system-reminder>, call this first to search for and discover the corresponding tool. It only makes the tool available in later rounds and does not execute the tool directly.
 - view_forward_message: View the full content of a merged forwarded message by msg_id. Use it when the context shows a forwarded-message preview and you need more details.

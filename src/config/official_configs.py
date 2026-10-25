@@ -1034,7 +1034,7 @@ class ExperimentalConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """仅作用于普通聊天模式：Planner 不调用工具而输出正文时，将正文作为指导启动一次回复；附件与插件参数通过 set_reply_options 提前设置。关闭时使用原有 reply 工具。切换从下一轮思考生效，Focus 不受影响。"""
+    """仅作用于普通聊天模式：Planner 不调用工具而输出正文时，将正文作为自然语言指导启动一次回复；篇幅、表达偏好和插件相关需求直接写入指导，引用与附件由并行回复补充器编排。关闭时使用原有 reply 工具。切换从下一轮思考生效，Focus 不受影响。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""
