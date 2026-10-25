@@ -199,7 +199,7 @@ def test_identity_schema_migrates_from_27(identity_store):
     store.connect()
     observed = store.observe_person_identity(person_id="p1", platform="qq", user_id="1001", aliases=["甲"])
     assert observed["canonical_name"] == "甲"
-    assert store.get_schema_version() == 28
+    assert store.get_schema_version() == 29
 
 
 def test_missing_sender_id_is_an_error(identity_store):

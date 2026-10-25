@@ -11,6 +11,14 @@ from src.A_memorix.core.utils.profile_text import parse_profile_sections
 
 class FakeMetadataStore:
     @staticmethod
+    def get_paragraphs_by_relation_hashes(relation_hashes):
+        return {}
+
+    @staticmethod
+    def project_fact_paragraph(paragraph):
+        return paragraph
+
+    @staticmethod
     def get_person_identity(person_id: str):
         return None
 

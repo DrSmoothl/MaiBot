@@ -575,6 +575,7 @@ async def store_person_memory_from_answer(
             participants=[participant_name] if participant_name else [],
             tags=["person_fact"],
             metadata={
+                "platform": session_platform,
                 "person_id": person_id,
                 "person_name": participant_name,
                 "writeback_source": "memory_flow_service",

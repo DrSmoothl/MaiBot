@@ -236,6 +236,10 @@ async def test_text_to_stream_triggers_real_chat_summary_writeback(
         }
 
     async def _fake_generate(request: Any) -> Any:
+        if request.request_type == "A_Memorix.FactDeduplication":
+            return SimpleNamespace(success=True, completion=SimpleNamespace(response=json.dumps({
+                "decisions": [{"fact_id": "f1", "action": "keep"}], "relation_support": {"0": ["f1"]},
+            })))
         captured_prompts.append(str(getattr(request, "prompt", "") or ""))
         return SimpleNamespace(
             success=True,

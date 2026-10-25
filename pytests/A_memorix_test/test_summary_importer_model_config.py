@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
@@ -19,6 +20,9 @@ from src.services import llm_service as llm_api
 
 class _SummaryCheckpoints:
     """测试替身实现空摘要进度接口，避免测试依赖私有连接。"""
+
+    def get_db_path(self) -> Path:
+        return Path(f"summary-test-{id(self)}.db")
 
     def get_summary_checkpoint(self, external_id: str) -> Optional[Dict[str, Any]]:
         return self.__dict__.setdefault("checkpoints", {}).get(external_id)
