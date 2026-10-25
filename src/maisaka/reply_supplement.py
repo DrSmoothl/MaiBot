@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 import asyncio
 import json
 
+from src.agent.planner import ACPPlannerSnapshot, generate_planner_response
 from src.chat.message_receive.message import SessionMessage
 from src.common.data_models.message_component_data_model import (
     AtComponent, BaseMessageComponentModel, ImageComponent, MessageSequence, TextComponent,
@@ -195,7 +196,7 @@ async def generate_reply_supplement(
     """保留 Planner 的模型、工具及消息前缀，只在末尾追加编排任务。"""
     resources = SupplementResources.capture(snapshot, session_id, is_group)
 
-    def build_request() -> ResponseRequest:
+    def build_request() -> Union[ResponseRequest, ACPPlannerSnapshot]:
         request = snapshot.request.detached_snapshot()
         instruction = load_prompt(
             "reply_supplement", guidance=guidance,
@@ -208,8 +209,13 @@ async def generate_reply_supplement(
         return request
 
     request = await asyncio.to_thread(build_request)
-    client = LLMServiceClient(task_name="planner", request_type="maisaka.reply_supplement", session_id=session_id)
-    result = await client.generate_response_from_snapshot(request)
+    if isinstance(request, ACPPlannerSnapshot):
+        result = await generate_planner_response(
+            request.config, session_id, request.context_items, [], history_item_ids=request.history_item_ids,
+        )
+    else:
+        client = LLMServiceClient(task_name="planner", request_type="maisaka.reply_supplement", session_id=session_id)
+        result = await client.generate_response_from_snapshot(request)
     metadata = {
         "model_name": result.model_name, "prompt_tokens": result.prompt_tokens,
         "completion_tokens": result.completion_tokens, "total_tokens": result.total_tokens,
@@ -222,7 +228,8 @@ async def generate_reply_supplement(
             PromptCLIVisualizer.build_prompt_preview_access, list(request.context_items),
             category="reply_supplement", chat_id=session_id, request_kind="reply_supplement",
             selection_reason="与 Replyer 并行的富文本编排（Planner 请求快照）",
-            tool_definitions=serialize_tool_options_snapshot(request.tool_options),
+            tool_definitions=serialize_tool_options_snapshot(request.tool_options)
+            if not isinstance(request, ACPPlannerSnapshot) else [],
             output_items=list(result.output_items), metadata=metadata, generation_attempts=result.generation_attempts,
         )
     logger.info(f"回复补充器缓存: session={session_id} {metadata}")

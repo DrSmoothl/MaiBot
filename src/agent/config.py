@@ -12,6 +12,20 @@ class AgentConfig(ConfigBase):
     enabled: bool = Field(default=False, json_schema_extra={"label": {"zh_CN": "启用 Agent连接"}})
     """启用与普通聊天并行的外接 Agent 接口，通过 ACP 连接 dsh 等外部程序。"""
 
+    planner_enabled: bool = Field(default=False, json_schema_extra={
+        "label": {"zh_CN": "启用外接 Planner（实验）"}, "x-widget": "switch",
+    })
+    """实验性外接 Planner 总开关，默认关闭。开启后仅对下方名单中的聊天流生效，无需启用独立 Agent 连接；关闭时保留名单。"""
+
+    planner_sessions: List[str] = Field(default_factory=list, json_schema_extra={
+        "label": {"zh_CN": "实验：外接 Planner 聊天流"}, "advanced": True,
+    })
+    """填写真实聊天流 session_id，开启外接 Planner 总开关后，仅这些聊天的主 Planner 使用 ACP；空列表不启用任何聊天流。
+    复用下方连接配置，每个聊天流使用持久会话并增量同步上下文；重启恢复，清空聊天后重置。
+    工具由原聊天运行时执行。无需启用独立 Agent 队列。
+    连接失败直接报错，不回退本体 Planner；外部 Agent 自带工具仍受其自身配置控制。
+    """
+
     connection: Literal["dsh", "dsh_desktop", "custom"] = Field(default="dsh", json_schema_extra={
         "label": {"zh_CN": "连接方式"}, "x-widget": "select",
         "options": ["dsh", "dsh_desktop", "custom"], "x-option-labels": {"dsh": "dsh CLI", "dsh_desktop": "dsh Desktop", "custom": "自定义 ACP"},
