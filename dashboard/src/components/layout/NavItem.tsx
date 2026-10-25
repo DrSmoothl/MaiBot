@@ -300,7 +300,13 @@ export function NavItem({
                 ref={setFlyoutRef}
                 data-dashboard-sidebar-group={groupFlyoutId}
                 className="fixed z-[60] p-[6px] max-lg:hidden"
-                style={{ left: flyoutRect.left - 6, top: flyoutRect.top - 6, clipPath: flyoutRect.clipPath }}
+                style={{
+                  left: flyoutRect.left - 6,
+                  top: flyoutRect.top - 6,
+                  // 裁剪容器同步使用整组展开宽度，确保文字区域也在浮层的命中范围内。
+                  width: groupFlyoutWidth === undefined ? undefined : groupFlyoutWidth + 12,
+                  clipPath: flyoutRect.clipPath,
+                }}
                 // 外层只定位并保留键帽阴影，收回时等待内部按钮的宽度动画结束。
                 exit={{}}
               >
