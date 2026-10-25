@@ -236,8 +236,8 @@ async def test_empty_incremental_summary_is_successful_noop(monkeypatch) -> None
             return None
 
         @staticmethod
-        def get_live_paragraphs_by_source(source: str):
-            assert source == "chat_summary:stream-1"
+        def get_chat_summary_history(source: str):
+            assert source == "stream-1"
             return [{"content": "用户喜欢绿茶。", "created_at": 1.0, "metadata": {}}]
 
     importer = SummaryImporter(
@@ -295,8 +295,8 @@ async def test_history_only_followup_windows_do_not_write_repeated_paragraphs(mo
         def get_external_memory_ref(self, external_id: str):
             return self.refs.get(external_id)
 
-        def get_live_paragraphs_by_source(self, source: str):
-            assert source == "chat_summary:stream-1"
+        def get_chat_summary_history(self, source: str):
+            assert source == "stream-1"
             return list(self.paragraphs)
 
         def upsert_external_memory_ref(self, *, external_id: str, paragraph_hash: str, **kwargs):
@@ -466,8 +466,8 @@ def test_summary_external_id_cannot_be_reused_across_streams() -> None:
 def test_summary_review_uses_explicit_supersession_instead_of_keywords() -> None:
     class SummaryStore:
         @staticmethod
-        def get_live_paragraphs_by_source(source: str):
-            assert source == "chat_summary:stream-1"
+        def get_chat_summary_history(source: str):
+            assert source == "stream-1"
             return [
                 {
                     "content": "此前的错误值已经失效。",

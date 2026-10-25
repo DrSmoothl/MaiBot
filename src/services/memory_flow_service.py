@@ -635,15 +635,25 @@ class ChatSummaryWritebackService:
             if metadata_store is None:
                 return 0
 
-            checkpoint_count = metadata_store.get_summary_checkpoint_count(session_id)
-            paragraphs = metadata_store.get_paragraphs_by_source(f"chat_summary:{session_id}")
+            checkpoint_count, paragraphs = await asyncio.to_thread(
+                lambda: (
+                    metadata_store.get_summary_checkpoint_count(session_id),
+                    metadata_store.get_paragraphs_by_source(f"chat_summary:{session_id}"),
+                )
+            )
             if not paragraphs:
                 return min(total_message_count, checkpoint_count)
 
-            latest_paragraph = max(paragraphs, key=self._paragraph_created_at)
-            metadata = self._paragraph_metadata(latest_paragraph)
-            trigger_message_count = self._coerce_positive_int(metadata.get("trigger_message_count"))
-            if trigger_message_count > 0:
+            # 正文去重会复用较早的段落，created_at 不能代表最后完成的窗口。
+            trigger_message_count = max(
+                (
+                    self._coerce_positive_int(metadata.get("trigger_message_count"))
+                    for paragraph in paragraphs
+                    if (metadata := self._paragraph_metadata(paragraph)).get("chat_id", session_id) == session_id
+                ),
+                default=0,
+            )
+            if max(trigger_message_count, checkpoint_count) > 0:
                 return min(total_message_count, max(trigger_message_count, checkpoint_count))
 
             # 兼容旧摘要数据：没有触发计数时，只能退化为对齐当前计数，

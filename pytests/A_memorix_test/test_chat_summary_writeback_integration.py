@@ -374,7 +374,41 @@ async def test_text_to_stream_triggers_real_chat_summary_writeback(
         assert stored_summary["metadata"]["identity_bindings"]["测试用户"]["user_id"] == "target-user"
         assert kernel.metadata_store.get_person_identity(target_person_id)["canonical_name"] == "测试用户"
         assert any(int((item.get("metadata") or {}).get("trigger_message_count", 0) or 0) == 2 for item in paragraphs)
-        assert service.chat_summary_writeback._states["test-session"].last_trigger_message_count == 2
+        await _wait_until(
+            lambda: service.chat_summary_writeback._states["test-session"].last_trigger_message_count == 2,
+            description="等待摘要任务完成并更新服务游标",
+        )
+        await _wait_until(
+            lambda: kernel.metadata_store.get_summary_checkpoint_count("test-session") == 2,
+            description="等待非空摘要窗口完成记录",
+        )
+
+        # 另一聊天流产生完全相同的正文，段落可复用，但窗口归属和游标必须独立。
+        second_message = _build_incoming_message(
+            session_id="second-session", user_id="target-user",
+            text="我最近买了一条绿色围巾。",
+            timestamp=datetime.fromtimestamp(fixed_send_timestamp) - timedelta(seconds=1),
+        )
+        second_message.message_id = "second-incoming-message-id"
+        with database_module.get_db_session() as session:
+            session.add(second_message.to_db_instance())
+
+        async def summarize_second():
+            return await memory_service_module.memory_service.ingest_summary(
+                external_id="second-window", chat_id="second-session", text="",
+                metadata={"generate_from_chat": True, "trigger_message_count": 1},
+                respect_filter=False,
+            )
+
+        second_results = await asyncio.gather(summarize_second(), summarize_second())
+        assert all(result.success for result in second_results)
+        assert len(captured_prompts) == 2
+        assert kernel.metadata_store.get_external_memory_ref("second-window")["paragraph_hash"] == stored_summary["hash"]
+        assert kernel.metadata_store.get_summary_checkpoint_count("second-session") == 1
+        assert "绿色围巾" in kernel.summary_importer._build_previous_summary_context("second-session", limit=2)
+        fresh_service = memory_flow_service_module.ChatSummaryWritebackService()
+        assert await fresh_service._load_last_trigger_message_count(session_id="test-session", total_message_count=2) == 2
+        assert await fresh_service._load_last_trigger_message_count(session_id="second-session", total_message_count=1) == 1
     finally:
         await service.shutdown()
         await kernel.shutdown()
