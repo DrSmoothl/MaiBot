@@ -80,6 +80,7 @@ import type {
   InstalledPlugin,
   ConfigFieldSchema,
   ConfigSectionSchema,
+  ConfigTabSchema,
   ItemFieldDefinition,
   PluginRuntimeComponent,
   PluginRuntimeComponentType,
@@ -382,6 +383,7 @@ interface SectionRendererProps {
   section: ConfigSectionSchema
   config: Record<string, unknown>
   onChange: (sectionName: string, fieldName: string, value: unknown) => void
+  initiallyExpanded?: boolean
 }
 
 function getFieldGridClassName(field: ConfigFieldSchema): string {
@@ -392,8 +394,8 @@ function getFieldGridClassName(field: ConfigFieldSchema): string {
   return 'min-w-0'
 }
 
-function SectionRenderer({ sectionName, section, config, onChange }: SectionRendererProps) {
-  const [isOpen, setIsOpen] = useState(!section.collapsed)
+function SectionRenderer({ sectionName, section, config, onChange, initiallyExpanded = false }: SectionRendererProps) {
+  const [isOpen, setIsOpen] = useState(initiallyExpanded || !section.collapsed)
   const { i18n } = useTranslation()
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
   const resolvedSectionName = section.name || sectionName
@@ -1163,6 +1165,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
   const [documentPanelOpen, setDocumentPanelOpen] = useState(false)
   const [hostPolicyToolbar, setHostPolicyToolbar] = useState<HTMLDivElement | null>(null)
+  const [configTabToolbar, setConfigTabToolbar] = useState<HTMLDivElement | null>(null)
 
   const {
     editMode,
@@ -1220,9 +1223,22 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
     ([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0)
   )
   const schemaTabs = schema?.layout.type === 'tabs' ? schema.layout.tabs : []
-  const selectedConfigTab = schemaTabs.some((tab) => tab.id === activeConfigTab)
+  // 优先使用插件声明的标签页；未分组的多节配置按现有顺序生成标签页。
+  const configTabs: ConfigTabSchema[] = schemaTabs.length > 0
+    ? schemaTabs
+    : sortedSections.length > 1
+      ? sortedSections.map(([sectionName, section]) => ({
+          id: sectionName,
+          title: section.title,
+          i18n: section.i18n,
+          sections: [sectionName],
+          order: section.order,
+        }))
+      : []
+  const selectedConfigTab = configTabs.some((tab) => tab.id === activeConfigTab)
     ? activeConfigTab
-    : schemaTabs[0]?.id
+    : configTabs[0]?.id
+  const showConfigTabs = pluginPageTab === 'settings' && editMode === 'visual' && configTabs.length > 0
 
   // 获取当前启用状态
   const isEnabled = !configError && (config.plugin as Record<string, unknown>)?.enabled !== false
@@ -1354,15 +1370,26 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
       <Tabs
         value={pluginPageTab}
         onValueChange={(value) => setPluginPageTab(value as 'settings' | 'host-policy' | 'details')}
+        className="min-w-0"
       >
-        <div className="flex flex-wrap items-center gap-3">
-          <TabsList>
-            <TabsTrigger value="settings">设置</TabsTrigger>
-            {showHostPolicy && <TabsTrigger value="host-policy">黑白名单规则</TabsTrigger>}
-            <TabsTrigger value="details">详情</TabsTrigger>
-          </TabsList>
+        <div className={cn('flex min-w-0 items-center gap-3', pluginPageTab === 'host-policy' && 'flex-wrap')}>
+          {/* 两组标签共用横向滚动容器，保持独立切换，不产生纵向滚动条。 */}
+          <div className="min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain">
+            <div className="flex w-max items-center gap-3 px-1 py-1">
+              <TabsList aria-label="插件页面" className="h-auto w-max shrink-0">
+                <TabsTrigger value="settings">设置</TabsTrigger>
+                {showHostPolicy && <TabsTrigger value="host-policy">黑白名单规则</TabsTrigger>}
+                <TabsTrigger value="details">详情</TabsTrigger>
+              </TabsList>
+              {showConfigTabs && (
+                <div ref={setConfigTabToolbar} className="shrink-0 border-l pl-3" />
+              )}
+            </div>
+          </div>
           {/* 黑白名单页的账号、分组操作与保存工具栏渲染到页签同一行，节省纵向空间 */}
-          {showHostPolicy && <div ref={setHostPolicyToolbar} className="min-w-0 flex-1" />}
+          {showHostPolicy && pluginPageTab === 'host-policy' && (
+            <div ref={setHostPolicyToolbar} className="min-w-0 flex-1" />
+          )}
         </div>
         <TabsContent value="settings" className="mt-4">
           {configError && (
@@ -1405,23 +1432,27 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
           {editMode === 'visual' && schema && (
             <>
               {/* 配置区域 */}
-              {schema.layout.type === 'tabs' && schemaTabs.length > 0 ? (
+              {configTabs.length > 0 ? (
                 // 标签页布局
                 <Tabs value={selectedConfigTab} onValueChange={handleConfigTabChange}>
-                  <TabsList>
-                    {schemaTabs.map((tab) => (
-                      <TabsTrigger key={tab.id} value={tab.id}>
-                        {resolveLocalizedText(tab.title, language, tab.id, tab.i18n, 'title')}
-                        {tab.badge && (
-                          <Badge variant="secondary" className="ml-2 text-xs">
-                            {tab.badge}
-                          </Badge>
-                        )}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                  {schemaTabs.map((tab) => (
-                    <TabsContent key={tab.id} value={tab.id} className="mt-4 space-y-4">
+                  {/* Portal 保留配置 Tabs 上下文，与左侧页面 Tabs 独立，并排显示。 */}
+                  {configTabToolbar && createPortal(
+                    <TabsList aria-label="配置分组" className="h-auto w-max justify-start">
+                      {configTabs.map((tab) => (
+                        <TabsTrigger key={tab.id} value={tab.id} className="shrink-0">
+                          {resolveLocalizedText(tab.title, language, tab.id, tab.i18n, 'title')}
+                          {tab.badge && (
+                            <Badge variant="secondary" className="ml-2 text-xs">
+                              {tab.badge}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>,
+                    configTabToolbar,
+                  )}
+                  {configTabs.map((tab) => (
+                    <TabsContent key={tab.id} value={tab.id} className="mt-0 space-y-4">
                       {tab.sections.map((sectionName) => {
                         const section = schema.sections[sectionName]
                         if (!section) return null
@@ -1432,6 +1463,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
                             section={section}
                             config={config}
                             onChange={handleFieldChange}
+                            initiallyExpanded={schemaTabs.length === 0}
                           />
                         )
                       })}
