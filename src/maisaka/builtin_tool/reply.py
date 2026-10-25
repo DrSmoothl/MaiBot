@@ -212,7 +212,7 @@ def get_tool_spec(context: Optional[ToolAvailabilityContext] = None) -> ToolSpec
             "minimum": 0,
             "description": "可选。从 show_emoji_list 的拼图选择一个表情包，填写图片序号，在文字后发送；0 或不填表示不发送表情包。",
         }
-    if config_module.global_config.chat.enable_reply_at:
+    if config_module.global_config.chat.enable_reply_at and context is not None and context.is_group_chat:
         properties["attach_at"] = {
             "type": "array",
             "description": "可选。随本次回复 at 一个或多个目标消息的发送者，填写目标 msg_id。",

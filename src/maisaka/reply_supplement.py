@@ -101,7 +101,7 @@ class SupplementResources:
             global_config.chat.reply_style.group_quote_frequency if is_group
             else global_config.chat.reply_style.private_quote_frequency
         )
-        return cls(messages, pictures, emojis, global_config.chat.enable_reply_at,
+        return cls(messages, pictures, emojis, is_group and global_config.chat.enable_reply_at,
                    global_config.emoji.use_new_send_logic, frequency != "never")
 
     @staticmethod
@@ -198,10 +198,17 @@ async def generate_reply_supplement(
 
     def build_request() -> Union[ResponseRequest, ACPPlannerSnapshot]:
         request = snapshot.request.detached_snapshot()
+        schema = ReplySupplementPlan.model_json_schema()
+        if not resources.allow_at:
+            # 在请求声明中移除不可用的 @ 节点，私聊不向模型提供该选项。
+            node_schema = schema["properties"]["parts"]["items"]
+            at_ref = node_schema["discriminator"]["mapping"].pop("at")
+            node_schema["oneOf"] = [node for node in node_schema["oneOf"] if node["$ref"] != at_ref]
+            del schema["$defs"]["AtNode"]
         instruction = load_prompt(
             "reply_supplement", guidance=guidance,
             resources=json.dumps(resources.inventory(), ensure_ascii=False),
-            schema=json.dumps(ReplySupplementPlan.model_json_schema(), ensure_ascii=False),
+            schema=json.dumps(schema, ensure_ascii=False),
         )
         request.context_items.append(
             ContextItemBuilder().set_role(RoleType.User).add_text_content(instruction).build()
