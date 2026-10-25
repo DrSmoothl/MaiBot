@@ -10,6 +10,10 @@ from src.A_memorix.core.utils.profile_text import parse_profile_sections
 
 
 class FakeMetadataStore:
+    @staticmethod
+    def get_person_identity(person_id: str):
+        return None
+
     def __init__(self) -> None:
         self.snapshots: list[dict] = []
         self.refresh_count = 0

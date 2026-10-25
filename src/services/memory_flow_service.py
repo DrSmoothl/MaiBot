@@ -1007,13 +1007,29 @@ class MemoryAutomationService:
     async def on_incoming_message(self, message: Any) -> None:
         if not self._started:
             await self.start()
+        await self._observe_sender_identity(message)
         await self.image_writeback.enqueue(message)
 
     async def on_message_sent(self, message: Any) -> None:
         if not self._started:
             await self.start()
+        await self._observe_sender_identity(message)
         await self.fact_writeback.enqueue(message)
         await self.chat_summary_writeback.enqueue(message)
+
+    @staticmethod
+    async def _observe_sender_identity(message: Any) -> None:
+        """在昵称被后续消息覆盖前，按真实发送者 ID 保存本次观察到的称呼。"""
+        if not global_config.a_memorix.plugin.enabled:
+            return
+        user = message.message_info.user_info
+        group = message.message_info.group_info
+        result = await memory_service.profile_admin(
+            action="observe_identity", platform=message.platform, user_id=user.user_id,
+            aliases=[user.user_nickname, user.user_cardname or ""], group_id=group.group_id if group else "",
+        )
+        if not result.get("success"):
+            raise RuntimeError(f"登记发送者身份失败: {result.get('error', '')}")
 
 
 memory_automation_service = MemoryAutomationService()

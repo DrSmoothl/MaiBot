@@ -198,6 +198,7 @@ def test_summary_prompt_requires_incremental_output_from_current_window() -> Non
     prompt = SUMMARY_PROMPT_TEMPLATE.format(
         bot_name="测试机器人",
         personality_context="",
+        identity_catalog="[]",
         previous_summary_context="\n历史净化摘要回顾：\n- 用户喜欢绿茶。\n",
         chat_history="用户：今天天气不错。",
         image_evidence_catalog="无",
@@ -215,6 +216,7 @@ def test_summary_prompt_locales_share_image_evidence_contract(locale: str) -> No
         locale=locale,
         bot_name="Mai",
         personality_context="",
+        identity_catalog="[]",
         previous_summary_context="",
         chat_history="message",
         image_evidence_catalog="message_id=m1, component_path=0",
@@ -264,8 +266,8 @@ async def test_empty_incremental_summary_is_successful_noop(monkeypatch) -> None
         lambda **kwargs: [SimpleNamespace(timestamp=2.0)],
     )
     monkeypatch.setattr(
-        "src.A_memorix.core.utils.summary_importer.message_api.build_readable_messages",
-        lambda messages: "用户：今天天气不错。",
+        "src.A_memorix.core.utils.summary_importer.SummaryIdentityContext",
+        lambda store, messages: SimpleNamespace(render=lambda: ("用户：今天天气不错。", "[]")),
     )
     monkeypatch.setattr(llm_api, "get_available_models", _fake_available_models)
     monkeypatch.setattr(llm_api, "generate", fake_generate)
@@ -355,8 +357,12 @@ async def test_history_only_followup_windows_do_not_write_repeated_paragraphs(mo
         lambda **kwargs: [SimpleNamespace(timestamp=2.0)],
     )
     monkeypatch.setattr(
-        "src.A_memorix.core.utils.summary_importer.message_api.build_readable_messages",
-        lambda messages: "用户：继续聊刚才的话题。",
+        "src.A_memorix.core.utils.summary_importer.SummaryIdentityContext",
+        lambda store, messages: SimpleNamespace(
+            render=lambda: ("用户：继续聊刚才的话题。", "[]"),
+            metadata=lambda texts: {"person_ids": [], "identity_bindings": {}},
+            restore_text=lambda text: text,
+        ),
     )
     monkeypatch.setattr(llm_api, "get_available_models", _fake_available_models)
     monkeypatch.setattr(llm_api, "generate", fake_generate)

@@ -20,6 +20,7 @@ try:
     from src.A_memorix.core.runtime import sdk_memory_kernel as kernel_module
     from src.A_memorix.core.runtime.sdk_memory_kernel import SDKMemoryKernel
     from src.A_memorix.core.utils import summary_importer as summary_importer_module
+    from src.A_memorix.host_service import AMemorixHostService
     from src.chat.message_receive.chat_manager import BotChatSession
     from src.chat.message_receive.message import SessionMessage
     from src.common.data_models.mai_message_data_model import MessageInfo, UserInfo
@@ -79,22 +80,13 @@ class _FakeEmbeddingManager:
         return _encode_one(text).astype(np.float32)
 
 
-class _KernelBackedRuntimeManager:
+class _KernelBackedRuntimeManager(AMemorixHostService):
     def __init__(self, kernel: SDKMemoryKernel) -> None:
-        self.kernel = kernel
-
-    async def invoke(
-        self,
-        component_name: str,
-        args: Dict[str, Any] | None,
-        *,
-        timeout_ms: int | None = None,
-    ) -> Any:
-        del timeout_ms
-        payload = args or {}
-        handler = getattr(self.kernel, component_name)
-        result = handler(**payload)
-        return await result if inspect.isawaitable(result) else result
+        super().__init__()
+        # 保留真实宿主参数校验和分发，防止测试绕过新动作的允许列表。
+        self._kernel = kernel
+        self._runtime_state = "ready"
+        self._config_cache = {"plugin": {"enabled": True}}
 
 
 class _NoopRuntimeManager:
@@ -112,7 +104,7 @@ class _FakePlatformIOManager:
 
     def build_route_key_from_message(self, message: Any) -> Any:
         del message
-        return SimpleNamespace(platform="qq")
+        return SimpleNamespace(platform="qq", account_id="bot-qq")
 
     async def send_message(self, message: Any, route_key: Any, metadata: Dict[str, Any]) -> Any:
         del message, metadata
@@ -250,9 +242,10 @@ async def test_text_to_stream_triggers_real_chat_summary_writeback(
             completion=SimpleNamespace(
                 response=json.dumps(
                     {
-                        "summary": "这段对话记录了用户提到自己买了绿色围巾，机器人表示会记住这件事。",
-                        "entities": ["绿色围巾"],
-                        "relations": [],
+                        "summary": "[U1]最近买了一条绿色围巾。",
+                        "entities": ["[U1]", "绿色围巾"],
+                        "relations": [{"subject": "[U1]", "predicate": "购买", "object": "绿色围巾"}],
+                        "facts": [{"fact_id": "f1", "text": "[U1]最近买了一条绿色围巾。", "image_evidence": []}],
                     },
                     ensure_ascii=False,
                 )
@@ -372,6 +365,14 @@ async def test_text_to_stream_triggers_real_chat_summary_writeback(
         assert "我最近买了一条绿色围巾。" in captured_prompts[-1]
         assert "好的，我会记住你最近买了绿色围巾。" in captured_prompts[-1]
         assert any("绿色围巾" in str(item.get("content", "") or "") for item in paragraphs)
+        from src.person_info.person_info import get_person_id
+
+        target_person_id = get_person_id("qq", "target-user")
+        stored_summary = next(item for item in paragraphs if "绿色围巾" in item["content"])
+        assert stored_summary["content"] == "测试用户最近买了一条绿色围巾。"
+        assert stored_summary["metadata"]["person_ids"] == [target_person_id]
+        assert stored_summary["metadata"]["identity_bindings"]["测试用户"]["user_id"] == "target-user"
+        assert kernel.metadata_store.get_person_identity(target_person_id)["canonical_name"] == "测试用户"
         assert any(int((item.get("metadata") or {}).get("trigger_message_count", 0) or 0) == 2 for item in paragraphs)
         assert service.chat_summary_writeback._states["test-session"].last_trigger_message_count == 2
     finally:
