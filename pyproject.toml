@@ -29,7 +29,7 @@ dependencies = [
     "json-repair>=0.60.1,<0.61",
     "jsonschema>=4.26.0,<5",
     "maim-message==0.6.8",
-    "maibot-dashboard==1.9.9",
+    "maibot-dashboard==1.9.9.dev20261025554",
     "maibot-plugin-sdk>=2.16.0",
     "mcp>=1.28.1,<2",
     "msgpack>=1.2.1",
