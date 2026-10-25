@@ -135,7 +135,7 @@ async def websocket_logs(websocket: WebSocket, token: Optional[str] = Query(None
         cookie_token = websocket.cookies.get("maibot_session")
         if cookie_token:
             token_manager = get_token_manager()
-            if token_manager.verify_token(cookie_token):
+            if token_manager.verify_cookie_token(cookie_token):
                 is_authenticated = True
                 logger.debug("WebSocket 使用 Cookie 认证成功")
 

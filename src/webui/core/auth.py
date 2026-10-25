@@ -61,7 +61,7 @@ def is_token_valid(maibot_session: Optional[str]) -> bool:
         return False
 
     token_manager = get_token_manager()
-    return token_manager.verify_token(maibot_session)
+    return token_manager.verify_cookie_token(maibot_session)
 
 
 def set_auth_cookie(response: Response, token: str, request: Optional[Request] = None) -> None:
@@ -98,7 +98,7 @@ def set_auth_cookie(response: Response, token: str, request: Optional[Request] =
     # 设置 Cookie
     response.set_cookie(
         key=COOKIE_NAME,
-        value=token,
+        value=get_token_manager().encode_cookie_token(token),
         max_age=COOKIE_MAX_AGE,
         httponly=True,  # 防止 JS 读取，阻止 XSS 窃取
         samesite="lax",  # 使用 lax 以兼容更多场景（开发和生产）

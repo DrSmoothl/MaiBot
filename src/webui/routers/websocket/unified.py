@@ -87,7 +87,7 @@ async def authenticate_websocket_connection(websocket: WebSocket, token: Optiona
     cookie_token = websocket.cookies.get("maibot_session")
     if cookie_token:
         token_manager = get_token_manager()
-        if token_manager.verify_token(cookie_token):
+        if token_manager.verify_cookie_token(cookie_token):
             logger.debug("统一 WebSocket 使用 Cookie 认证成功")
             return True
 
