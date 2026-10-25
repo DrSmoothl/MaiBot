@@ -55,6 +55,7 @@ from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistr
 from src.plugin_runtime.protocol.envelope import InspectPluginConfigResultPayload
 from src.plugin_runtime.runner.manifest_validator import ManifestValidator, is_reserved_plugin_directory
 from src.plugin_runtime.runner.plugin_enabled import is_plugin_disabled
+from src.plugin_runtime.usage_tracker import PluginUsageTracker
 
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
@@ -148,6 +149,10 @@ class PluginRuntimeManager(
         self._pending_plugin_source_change = False
         self._plugin_change_task: Optional[asyncio.Task[None]] = None
         self._applied_plugin_configs: Dict[str, Dict[str, Any]] = {}
+        self._plugin_usage_tracker: Optional[PluginUsageTracker] = None
+        self._plugin_usage_task: Optional[asyncio.Task[None]] = None
+        self._plugin_usage_tracking = False
+        self._plugin_usage_error: Optional[str] = None
 
     async def run_plugin_file_update(self, operation: Callable[[], Awaitable[None]]) -> None:
         """在主循环串行执行文件替换及运行时恢复，避免源码监听中途重启 Supervisor。"""
@@ -160,8 +165,69 @@ class PluginRuntimeManager(
         return lambda: self._status_listeners.discard(callback)
 
     def _notify_status_changed(self) -> None:
+        self._reconcile_plugin_usage()
         for callback in tuple(self._status_listeners):
             callback()
+
+    def _reconcile_plugin_usage(self) -> None:
+        tracker = self._plugin_usage_tracker
+        if tracker is None:
+            return
+        active: Set[str] = set()
+        if self._plugin_usage_tracking:
+            for supervisor in self.supervisors:
+                active.update(supervisor.get_usage_active_plugin_ids())
+            active.difference_update(self._blocked_plugin_reasons, self._offline_adapter_plugin_ids)
+        tracker.reconcile(active)
+
+    def get_plugin_usage_seconds(self) -> Dict[str, float]:
+        """主循环中的纯内存读取；不通过浏览器访问或墙上时间推进计时。"""
+        if self._plugin_usage_error is not None:
+            raise RuntimeError(f"插件使用时长计时不可用: {self._plugin_usage_error}")
+        self._reconcile_plugin_usage()
+        return self._plugin_usage_tracker.snapshot() if self._plugin_usage_tracker is not None else {}
+
+    async def _start_plugin_usage_tracking(self) -> None:
+        tracker = PluginUsageTracker(get_instance_root() / "data" / "plugin_runtime" / "plugin_usage.json")
+        self._plugin_usage_tracker = None
+        self._plugin_usage_tracking = False
+        self._plugin_usage_error = None
+        try:
+            await tracker.load()
+        except Exception as exc:
+            self._plugin_usage_error = str(exc)
+            raise
+        self._plugin_usage_tracker = tracker
+        self._plugin_usage_tracking = True
+        self._reconcile_plugin_usage()
+        self._plugin_usage_task = asyncio.create_task(self._checkpoint_plugin_usage(), name="PluginRuntime.usage")
+
+    async def _checkpoint_plugin_usage(self) -> None:
+        while True:
+            await asyncio.sleep(60)
+            self._reconcile_plugin_usage()
+            if self._plugin_usage_tracker is not None:
+                try:
+                    await self._plugin_usage_tracker.save()
+                except Exception:
+                    logger.exception("保存插件累计使用时长失败")
+
+    async def _stop_plugin_usage_tracking(self) -> None:
+        self._plugin_usage_tracking = False
+        self._reconcile_plugin_usage()
+        task = self._plugin_usage_task
+        self._plugin_usage_task = None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        if self._plugin_usage_tracker is not None:
+            try:
+                await self._plugin_usage_tracker.save()
+            except Exception:
+                logger.exception("停止插件运行时保存累计使用时长失败")
 
     async def get_plugin_state_snapshot(self) -> Dict[str, Any]:
         """在主循环读取一致的运行状态，目录扫描在线程池执行。"""
@@ -185,7 +251,8 @@ class PluginRuntimeManager(
         statuses.update(self._plugin_transitions)
         reasons = self.get_plugin_load_failure_reasons()
         return {"statuses": statuses, "failure_reasons": reasons,
-                "circuit_statuses": self.get_plugin_circuit_statuses(), "running": self._started}
+                "circuit_statuses": self.get_plugin_circuit_statuses(), "running": self._started,
+                "usage_seconds": self.get_plugin_usage_seconds()}
 
     async def apply_plugin_config(
         self, plugin_id: str, write_config: Optional[Callable[[], Awaitable[None]]] = None,
@@ -824,6 +891,7 @@ class PluginRuntimeManager(
 
         started_supervisors: List["PluginSupervisor"] = []
         try:
+            await self._start_plugin_usage_tracking()
             platform_io_manager.set_inbound_dispatcher(self._dispatch_platform_inbound)
             with diagnostic_stage("plugin_runtime.prepare_send_pipeline"):
                 await platform_io_manager.ensure_send_pipeline_ready()
@@ -844,7 +912,11 @@ class PluginRuntimeManager(
             logger.info(
                 f"已启动 {len(started_supervisors)} 个独立插件运行时：{'；'.join(runtime_descriptions)}"
             )
+        except asyncio.CancelledError:
+            await self._stop_plugin_usage_tracking()
+            raise
         except Exception as e:
+            await self._stop_plugin_usage_tracking()
             logger.error(f"插件运行时启动失败: {e}", exc_info=True)
             await self._stop_plugin_file_watcher()
             if self._config_reload_callback_registered:
@@ -867,6 +939,8 @@ class PluginRuntimeManager(
         if not self._started:
             return
 
+        # 进入关停即结算；后续 watcher / 插件清理异常也不会遗留周期保存任务。
+        await self._stop_plugin_usage_tracking()
         platform_io_manager = get_platform_io_manager()
         await self._stop_plugin_file_watcher()
         if self._config_reload_callback_registered:

@@ -20,7 +20,7 @@ export interface MenuItem {
   external?: boolean
   searchDescription?: string
   tourId?: string
-  featureFlag?: 'agent'
+  featureFlag?: 'agent' | 'computer'
 }
 
 export interface MenuSection {

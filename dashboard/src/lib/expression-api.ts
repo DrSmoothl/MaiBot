@@ -115,7 +115,7 @@ export async function getExpressionList(params: {
   chat_ids?: string[]
   include_legacy?: boolean
   review_filter?: 'all' | 'user_checked' | 'unchecked'
-  sort_by?: 'time'
+  sort_by?: 'time' | 'time_asc' | 'created' | 'created_asc'
 }): Promise<ExpressionListResponse> {
   const data = await backendApi.get<ExpressionListResponse>(`${API_BASE}/list`, {
     query: {
@@ -150,7 +150,8 @@ export async function exportExpressions(params: {
  * 将表达方式 JSON 导入到指定聊天。
  */
 export async function importExpressions(params: {
-  chat_id: string
+  chat_id?: string
+  is_global?: boolean
   expressions: ExpressionExportItem[]
 }): Promise<ExpressionImportResponse> {
   return backendApi.post<ExpressionImportResponse>(`${API_BASE}/import`, {

@@ -97,6 +97,32 @@ def test_installed_plugins_only_scan_plugins_dir_and_exclude_a_memorix(client: T
     assert all("/src/plugins/built_in/" not in plugin["path"] for plugin in payload["plugins"])
 
 
+def test_installed_plugins_expose_actual_usage_seconds(client: TestClient, monkeypatch) -> None:
+    async def snapshot():
+        return {"statuses": {"test.demo": "success"}, "failure_reasons": {},
+                "circuit_statuses": {}, "running": True, "usage_seconds": {"test.demo": 259_200.5}}
+
+    monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "get_plugin_state_snapshot", snapshot)
+    response = client.get("/api/webui/plugins/installed")
+
+    assert response.status_code == 200
+    assert response.json()["plugins"][0]["usage_seconds"] == 259_200.5
+
+
+def test_plugin_usage_reads_runtime_without_scanning_directories(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr(
+        integration_module.get_plugin_runtime_manager(), "get_plugin_usage_seconds", lambda: {"test.demo": 123.5}
+    )
+    scan = Mock(side_effect=AssertionError("usage endpoint must not scan plugin directories"))
+    monkeypatch.setattr(management_module, "iter_plugin_directories", scan)
+
+    response = client.get("/api/webui/plugins/usage")
+
+    assert response.status_code == 200
+    assert response.json() == {"usage_seconds": {"test.demo": 123.5}}
+    scan.assert_not_called()
+
+
 def test_installed_plugins_expose_duplicate_id_failure_reason(client: TestClient, monkeypatch) -> None:
     plugins_dir = support_module.get_plugins_dir()
     (plugins_dir / "demo_plugin" / "config.toml").write_text("[plugin]\nenabled = true\n", encoding="utf-8")
@@ -110,7 +136,7 @@ def test_installed_plugins_expose_duplicate_id_failure_reason(client: TestClient
     )
     async def snapshot():
         return {"statuses": {"test.demo": "failed"}, "failure_reasons": {"test.demo": failure_reason},
-                "circuit_statuses": {}, "running": True}
+                "circuit_statuses": {}, "running": True, "usage_seconds": {}}
     monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "get_plugin_state_snapshot", snapshot)
     response = client.get("/api/webui/plugins/installed")
 
@@ -134,7 +160,7 @@ def test_disabled_plugin_ignores_scan_failures_but_preserves_live_state(
     async def snapshot():
         return {"statuses": {"test.demo": runtime_status},
                 "failure_reasons": {"test.demo": "Host 版本不兼容"},
-                "circuit_statuses": {}, "running": True}
+                "circuit_statuses": {}, "running": True, "usage_seconds": {}}
 
     monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "get_plugin_state_snapshot", snapshot)
     response = client.get("/api/webui/plugins/installed")
@@ -147,7 +173,8 @@ def test_disabled_plugin_ignores_scan_failures_but_preserves_live_state(
 
 def test_installed_plugins_expose_offline_adapter_status(client: TestClient, monkeypatch) -> None:
     async def snapshot():
-        return {"statuses": {"test.demo": "offline"}, "failure_reasons": {}, "circuit_statuses": {}, "running": True}
+        return {"statuses": {"test.demo": "offline"}, "failure_reasons": {},
+                "circuit_statuses": {}, "running": True, "usage_seconds": {}}
     monkeypatch.setattr(integration_module.get_plugin_runtime_manager(), "get_plugin_state_snapshot", snapshot)
 
     response = client.get("/api/webui/plugins/installed")

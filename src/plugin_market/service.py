@@ -4,6 +4,7 @@ from packaging.version import Version
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.error import HTTPError
+from urllib.parse import unquote, urlsplit
 import asyncio
 import json
 
@@ -23,7 +24,7 @@ from .releases import (
     parse_release_index,
     release_compatibility,
 )
-from .sources import fetch_information_file, load_source_settings, request_market, request_market_detail
+from .sources import download_source, fetch_information_file, load_source_settings, request_market, request_market_detail
 
 MarketSort = Literal[
     "name", "downloads", "likes", "rating", "downloads_growth_7d", "likes_growth_7d",
@@ -55,10 +56,32 @@ def _release_description(entry: PluginReleaseEntry, manifest: Dict[str, Any]) ->
     return description
 
 
+def _icon_url(icon: str, target: GitSource) -> str:
+    """市场仓库图标跟随下载源，保留完整 URL 中指定的分支或提交。"""
+    parsed = urlsplit(icon)
+    if not parsed.scheme and not parsed.netloc:
+        return target.raw_url("Mai-with-u", "plugin-repo", "main", icon)
+
+    # 官方接口可能直接返回固定提交的 GitHub URL；CNB 索引也可能包含完整镜像地址。
+    prefixes = {
+        "raw.githubusercontent.com": "/Mai-with-u/plugin-repo/",
+        "cnb.cool": "/Mai-with-u/plugin-repo/-/git/raw/",
+    }
+    prefix = prefixes.get(parsed.hostname)
+    if prefix is None or not parsed.path.lower().startswith(prefix.lower()):
+        return icon
+    ref, separator, path = parsed.path[len(prefix):].partition("/")
+    if not ref or not separator or not path:
+        raise ValueError(f"插件市场图标 URL 缺少版本或文件路径：{icon}")
+    resolved = target.raw_url("Mai-with-u", "plugin-repo", unquote(ref), unquote(path))
+    return urlsplit(resolved)._replace(query=parsed.query, fragment=parsed.fragment).geturl()
+
+
 def _catalog(
     items: List[Dict[str, Any]], source: str, index: Optional[PluginReleaseIndex] = None,
 ) -> List[Dict[str, Any]]:
     """所有消费者共用清单合并、ID、图标和版本兼容性处理。"""
+    icon_source = download_source()
     records = {item["id"]: item for item in items} if source != "official" else {}
     entries = {entry.id: entry for entry in index.plugins} if index is not None else {}
     # Tag 中的有效清单也必须保留，不能因分支清单失效而丢失发布版本入口。
@@ -102,11 +125,7 @@ def _catalog(
         plugin["releases"] = _release_description(entry, plugin["manifest"])
         assets = item.get("assets") or {}
         icon = item.get("icon_url") if source == "official" else assets.get("icon_64")
-        if icon and not icon.startswith(("https://", "http://")):
-            icon = GitSource.select("github" if source == "official" else source).raw_url(
-                "Mai-with-u", "plugin-repo", "main", icon,
-            )
-        plugin["assets"] = {"icon_64": icon} if icon else None
+        plugin["assets"] = {"icon_64": _icon_url(icon, icon_source)} if icon else None
         for field in ("changelog", "published_at", "updated_at"):
             plugin[field] = item.get(field)
         plugins.append(plugin)

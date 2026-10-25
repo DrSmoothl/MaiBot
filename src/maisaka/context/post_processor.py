@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import ceil
 from typing import Dict, List, Optional, Set, Tuple
 
-from .compaction import ContextSummaryMessage, measure_history_chars, measure_message_chars
+from .compaction import ContextSummaryMessage
 from .history import collect_tool_turn_anchor_indices, drop_leading_orphan_tool_results, normalize_tool_call_result_pairs
 from .messages import (
     LLMContextMessage,
@@ -13,8 +13,10 @@ from .messages import (
     ToolResultMessage,
 )
 
-TRIM_TARGET_RATIO = 1.0
-TRIM_THRESHOLD_RATIO = 2.0
+# 触发阈值和保留目标均以配置的上下文条数为基准。
+TRIM_TARGET_RATIO = 0.2
+TRIM_THRESHOLD_RATIO = 1.2
+MIN_RETAINED_CHAT_MESSAGES = 5
 
 
 @dataclass(slots=True)
@@ -33,7 +35,6 @@ def process_chat_history_after_cycle(
     *,
     max_context_size: int,
     pending_call_ids: set[str] | None = None,
-    max_context_chars: int = 48000,
     consume_references: bool = True,
 ) -> HistoryPostProcessResult:
     """在每轮结束后统一执行历史裁切与清理。"""
@@ -54,12 +55,11 @@ def process_chat_history_after_cycle(
     compact_removed_count = 0
     removed_messages: list[LLMContextMessage] = []
     trim_threshold = ceil(max_context_size * TRIM_THRESHOLD_RATIO)
-    if remaining_context_count > trim_threshold or measure_history_chars(processed_history) > max_context_chars:
-        target_context_count = max(1, int(max_context_size * TRIM_TARGET_RATIO))
+    if remaining_context_count >= trim_threshold:
+        target_context_count = max(MIN_RETAINED_CHAT_MESSAGES, int(max_context_size * TRIM_TARGET_RATIO))
         removed_messages = _trim_history_to_context_target(
             processed_history,
             target_context_count=target_context_count,
-            target_context_chars=max_context_chars // 2,
             pending_call_ids=pending_call_ids,
         )
         processed_history, removed_after_trim_count, moved_after_trim_count = _normalize_history_structure(
@@ -110,10 +110,13 @@ def _trim_history_to_context_target(
     chat_history: list[LLMContextMessage],
     *,
     target_context_count: int,
-    target_context_chars: int,
     pending_call_ids: Optional[Set[str]] = None,
 ) -> list[LLMContextMessage]:
-    """选择连续历史前缀，保留最近用户回合和未完成的工具调用。"""
+    """选择连续历史前缀，保留最近五条真实聊天消息、最近用户回合和未完成的工具调用。"""
+
+    remaining_count = sum(message.count_in_context for message in chat_history)
+    if remaining_count <= target_context_count:
+        return []
 
     turn_indexes: Dict[str, List[int]] = {}
     tool_turn_ids = _collect_tool_turn_ids(chat_history)
@@ -124,8 +127,10 @@ def _trim_history_to_context_target(
         for call in message.tool_calls
     }
     protected_start = max(0, len(chat_history) - 1)
+    chat_message_indices: List[int] = []
     for index, message in enumerate(chat_history):
-        if message.role == "user" and message.count_in_context and not isinstance(message, ToolResultMediaMessage):
+        if message.count_in_context:
+            chat_message_indices.append(index)
             protected_start = index
         turn_id = (
             media_turn_ids.get(message.tool_call_id)
@@ -133,6 +138,11 @@ def _trim_history_to_context_target(
         )
         if turn_id in tool_turn_ids:
             turn_indexes.setdefault(turn_id, []).append(index)
+    # 用户与麦麦实际收发的消息合计至少保留五条，工具结果和内部思考不占这个最低数量。
+    # 不足五条时全部保留，裁切不能越过这条保护边界。
+    if chat_message_indices:
+        oldest_retained_index = chat_message_indices[max(0, len(chat_message_indices) - MIN_RETAINED_CHAT_MESSAGES)]
+        protected_start = min(protected_start, oldest_retained_index)
     anchors = collect_tool_turn_anchor_indices(chat_history, tool_turn_ids)
     spans: List[Tuple[int, int]] = []
     for turn_id, indexes in turn_indexes.items():
@@ -147,18 +157,15 @@ def _trim_history_to_context_target(
             turn_id = _get_logical_turn_id(message)
             protected_start = min(protected_start, anchors.get(turn_id, index))
 
-    remaining_count = sum(message.count_in_context for message in chat_history)
-    remaining_chars = measure_history_chars(chat_history)
     boundary = 0
     for candidate in range(1, protected_start + 1):
         message = chat_history[candidate - 1]
         if not isinstance(message, ContextSummaryMessage):
             remaining_count -= message.count_in_context
-            remaining_chars -= measure_message_chars(message)
         if any(start < candidate < end for start, end in spans):
             continue
         boundary = candidate
-        if remaining_count <= target_context_count and remaining_chars <= target_context_chars:
+        if remaining_count <= target_context_count:
             break
 
     removed_messages = [message for message in chat_history[:boundary] if not isinstance(message, ContextSummaryMessage)]

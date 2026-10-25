@@ -1,7 +1,22 @@
+[text_learning_expression]
+display_name = "Expressions from passages"
+advanced = true
+description = "Extracts expressions grounded in pasted passages for the user to select and import."
+
+[text_learning_jargon]
+display_name = "Jargon from passages"
+advanced = true
+description = "Extracts jargon and meanings from pasted passages for the user to select and import."
+
 [a_memorix_chat_summary]
 display_name = "Long-term Memory Chat Summary"
 advanced = false
 description = "Extracts incremental information and important knowledge from the current chat window for long-term memory."
+
+[maisaka_chat_passive]
+display_name = "Planner (Passive replyer)"
+advanced = true
+description = "Used when experimental passive replyer is enabled; final planner text guides a reply, while tool calls perform actions."
 
 [maisaka_chat]
 display_name = "Planner"

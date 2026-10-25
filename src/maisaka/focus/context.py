@@ -175,8 +175,10 @@ def serialize_message(message: LLMContextMessage) -> Dict[str, Any]:
         record["content"] = message.content
         record["prefix"] = message.display_prefix
         record["reference_type"] = message.reference_type.value
+    elif message.count_in_context:
+        record["kind"] = "chat"
     else:
-        record["kind"] = "content"
+        record["kind"] = "internal"
     return record
 
 
@@ -229,7 +231,11 @@ def deserialize_message(record: Dict[str, Any]) -> LLMContextMessage:
             timestamp=item.meta.timestamp,
             context_item_id=item.meta.item_id,
         )
-    return RestoredContextMessage(item, record["text"], record["source"], record["counted"], record["role"])
+    # 新检查点显式标记真实聊天消息；旧版 content 同时包含聊天和内部资料，按原有收发来源区分。
+    is_chat_message = record["kind"] == "chat" or (
+        record["kind"] == "content" and record["source"] in {"user", "guided_reply"}
+    )
+    return RestoredContextMessage(item, record["text"], record["source"], is_chat_message, record["role"])
 
 
 class FocusCheckpointStore:

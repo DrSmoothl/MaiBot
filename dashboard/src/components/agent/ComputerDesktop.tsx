@@ -34,7 +34,7 @@ export function ComputerDesktop() {
       try {
         const current = await getComputerStatus(abort.signal)
         setStatus(current)
-        if (current.enabled && current.desktop_enabled && current.sandbox_running) {
+        if (current.enabled && current.sandbox_running) {
           const image = await getComputerFrame(abort.signal)
           if (!abort.signal.aborted) setFrame(URL.createObjectURL(image))
         } else {
@@ -100,7 +100,7 @@ export function ComputerDesktop() {
   }
 
   const state = !status ? 'connecting' : !status.enabled ? 'disabled' : !status.sandbox_running ? 'stopped'
-    : status.takeover ? 'manual' : status.paused ? 'paused' : status.agent_state === 'idle' ? 'resting' : 'autonomous'
+    : status.takeover ? 'manual' : status.paused ? 'paused' : !status.pending_request ? 'resting' : 'autonomous'
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 md:p-6">
@@ -108,7 +108,7 @@ export function ComputerDesktop() {
         <span className="mr-auto text-sm text-muted-foreground" role="status">
           {t(`chat.computer.${state}`)}{status?.pending_request ? ` · ${t('chat.computer.running')}` : ''}
         </span>
-        {(['pause', 'takeover', 'resume', 'stop'] as const).map(operation => (
+        {(['pause', 'takeover', 'resume', 'stop', 'restart'] as const).map(operation => (
           <Button key={operation} size="sm" variant="outline" disabled={busy || !status?.enabled}
             onClick={() => void run(async signal => { setStatus(await controlComputer(operation, signal)) })}>
             {t(`chat.computer.${operation}`)}

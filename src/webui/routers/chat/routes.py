@@ -26,6 +26,7 @@ from src.common.database.database_model import (
     ToolRecord,
 )
 from src.common.logger import get_logger
+from src.common.runtime_loop import run_on_main_loop
 from src.common.utils.utils_config import (
     ChatConfigUtils,
     ExpressionConfigUtils,
@@ -1762,7 +1763,7 @@ async def delete_chat_session_prompt(session_id: str, index: int) -> Dict[str, o
 
 
 @router.delete("/history")
-def clear_chat_history(
+async def clear_chat_history(
     user_id: Optional[str] = Query(default=None),
     group_id: Optional[str] = Query(default=None),
 ) -> Dict[str, object]:
@@ -1770,11 +1771,11 @@ def clear_chat_history(
 
     优先按 ``group_id`` 清理虚拟群聊历史；未提供时使用规范化后的 ``user_id`` 清理 WebUI 私聊历史。
     """
-    if group_id:
-        deleted = chat_history.clear_history(group_id=group_id)
-    else:
-        normalized_user_id = normalize_webui_user_id(user_id)
-        deleted = chat_history.clear_history(user_id=normalized_user_id)
+    target = {"group_id": group_id} if group_id else {"user_id": normalize_webui_user_id(user_id)}
+    session_ids = await asyncio.to_thread(chat_history._resolve_session_ids, **target)
+    for session_id in session_ids:
+        await run_on_main_loop(heartflow_manager.clear_chat_history_context(session_id))
+    deleted = await asyncio.to_thread(chat_history.clear_history, **target)
     return {"success": True, "message": f"已清空 {deleted} 条聊天记录"}
 
 

@@ -229,7 +229,6 @@ function ModelConfigPageContent() {
     models,
     providers,
     apiProviders,
-    modelNames,
     taskConfig,
     taskConfigSchema,
     // 加载 / 保存
@@ -376,7 +375,7 @@ function ModelConfigPageContent() {
       ? models
           .filter((model) => model.model_type === 'embedding' || model.model_type === 'image_embedding')
           .map((model) => model.name)
-      : modelNames
+      : models.filter((model) => model.model_type === 'llm').map((model) => model.name)
 
   if (selectedTaskField && selectedTaskField.name !== selectedTaskName) {
     setSelectedTaskName(selectedTaskField.name)

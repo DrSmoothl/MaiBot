@@ -200,6 +200,12 @@ const plannerMonitorRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/monitor/index.tsx'), 'PlannerMonitorPage'),
 })
 
+const computerRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/computer',
+  component: lazyRouteComponent(() => import('./routes/computer'), 'ComputerPage'),
+})
+
 const agentRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/agent',
@@ -409,6 +415,7 @@ const routeTree = rootRoute.addChildren([
     reasoningProcessRoute,
     plannerMonitorRoute,
     agentRoute,
+    computerRoute,
     chatManagementRoute,
     chatRoute,
     manageRoute,

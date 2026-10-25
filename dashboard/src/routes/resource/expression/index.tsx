@@ -17,15 +17,14 @@ import { type ReactNode, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { ChatScopeFilterPanel } from '@/components/chat-scope-filter-panel'
+import { LearningCreateDialog } from '@/components/learning-create-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DataBrowserHeader,
   DataBrowserLayout,
   DataToolbar,
   MetricStrip,
-  StatusIndicator,
 } from '@/components/ui/data-browser'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,10 +36,10 @@ import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
 import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
-import { formatChatAccountLabel, formatChatDisplayName } from '@/lib/chat-display'
+import { formatChatDisplayName, formatChatTargetLabel } from '@/lib/chat-display'
 import { cn } from '@/lib/utils'
 
 import {
@@ -48,6 +47,7 @@ import {
   deleteExpression,
   getChatList,
   getExpressionDetail,
+  getExpressionChatTargets,
   getExpressionGroups,
   getExpressionList,
   getExpressionStats,
@@ -68,6 +68,7 @@ import {
 import { ExpressionClusterBrowser } from './ExpressionClusterBrowser'
 import { ExpressionList } from './ExpressionList'
 import { ExpressionReviewLogPanel } from './ExpressionReviewLogPanel'
+import { ExpressionScopeStatus } from './ExpressionScopeStatus'
 
 import type { ChatInfo, Expression, ExpressionGroupInfo } from '@/types/expression'
 import type { StatsData } from './types'
@@ -76,18 +77,12 @@ type IndicatorStatus = 'on' | 'off' | 'mixed'
 type ExpressionReviewFilter = 'all' | 'user_checked' | 'unchecked'
 type BrowseMode = 'chat' | 'group' | 'all'
 
-interface ExpressionLearningScopeStatus {
-  label: string
-  useExpression: IndicatorStatus
-  enableLearning: IndicatorStatus
-}
-
-/** useDataList 的筛选袋：浏览维度 + 旧格式开关 + 审核筛选 */
+/** useDataList 的筛选袋：浏览维度 + 审核筛选 */
 interface ExpressionFilters {
   browseMode: BrowseMode
   selectedChatId: string
   selectedGroupIndex: number | null
-  showLegacyExpressions: boolean
+  sortBy: 'time' | 'time_asc' | 'created' | 'created_asc'
   reviewFilter: ExpressionReviewFilter
 }
 
@@ -95,8 +90,8 @@ const INITIAL_FILTERS: ExpressionFilters = {
   browseMode: 'chat',
   selectedChatId: '',
   selectedGroupIndex: null,
-  showLegacyExpressions: false,
   reviewFilter: 'all',
+  sortBy: 'time',
 }
 
 const DEFAULT_STATS: StatsData = {
@@ -118,6 +113,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   const [selectedExpression, setSelectedExpression] = useState<Expression | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isCreateChoiceOpen, setIsCreateChoiceOpen] = useState(false)
   const [isLegacyImportOpen, setIsLegacyImportOpen] = useState(false)
   const [deleteConfirmExpression, setDeleteConfirmExpression] = useState<Expression | null>(null)
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
@@ -154,21 +150,21 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
         search: search || undefined,
         chat_id: filters.browseMode === 'chat' ? filters.selectedChatId || undefined : undefined,
         chat_ids: selectedGroup && !selectedGroup.is_global ? selectedGroup.chat_ids : undefined,
-        include_legacy: filters.showLegacyExpressions,
+        include_legacy: true,
         review_filter: filters.reviewFilter,
+        sort_by: filters.sortBy,
       })
       return { items: response.data, total: response.total }
     },
   })
 
   const filters = list.filters
-  const { browseMode, selectedChatId, selectedGroupIndex, showLegacyExpressions, reviewFilter } =
-    filters
+  const { browseMode, selectedChatId, selectedGroupIndex, reviewFilter } = filters
 
   // 统计：失败时保持占位数值，不打断页面；与列表同领域，list.invalidate() 会一并失效
   const statsQuery = useQuery({
-    queryKey: ['expression', 'stats', { include_legacy: showLegacyExpressions }],
-    queryFn: () => getExpressionStats({ include_legacy: showLegacyExpressions }),
+    queryKey: ['expression', 'stats', { include_legacy: true }],
+    queryFn: () => getExpressionStats({ include_legacy: true }),
   })
   const stats: StatsData = statsQuery.data ?? DEFAULT_STATS
 
@@ -179,19 +175,24 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
   })
   const uncheckedCount = reviewStatsQuery.data?.unchecked ?? 0
 
-  // 聊天流列表（随「显示旧格式」开关刷新，保持原页面 loadChatList 的 include_legacy 行为）
+  // 聊天流列表包含历史及非当前账号的数据，由条目标签区分。
   const chatListQuery = useQuery({
-    queryKey: ['expression', 'chats', { include_legacy: showLegacyExpressions }],
-    queryFn: () => getChatList({ include_legacy: showLegacyExpressions }),
+    queryKey: ['expression', 'chats', { include_legacy: true }],
+    queryFn: () => getChatList({ include_legacy: true }),
   })
   const chatList: ChatInfo[] = chatListQuery.data ?? []
+  const chatTargetsQuery = useQuery({
+    queryKey: ['expression', 'chat-targets'],
+    queryFn: () => getExpressionChatTargets(),
+    enabled: isCreateDialogOpen,
+  })
   const chatNameMap = new Map<string, string>()
   chatList.forEach((chat) => chatNameMap.set(chat.chat_id, chat.chat_name))
 
-  // 表达共享组（随「显示旧格式」开关刷新）
+  // 表达共享组与聊天列表保持相同的完整数据范围。
   const groupsQuery = useQuery({
-    queryKey: ['expression', 'groups', { include_legacy: showLegacyExpressions }],
-    queryFn: () => getExpressionGroups({ include_legacy: showLegacyExpressions }),
+    queryKey: ['expression', 'groups', { include_legacy: true }],
+    queryFn: () => getExpressionGroups({ include_legacy: true }),
   })
   const groups: ExpressionGroupInfo[] = groupsQuery.data ?? []
 
@@ -334,12 +335,6 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
     list.setFilter('selectedGroupIndex', groupIndex)
   }
 
-  const handleLegacyExpressionsChange = (checked: boolean) => {
-    list.setFilter('showLegacyExpressions', checked)
-    list.setFilter('selectedChatId', '')
-    list.setFilter('selectedGroupIndex', null)
-  }
-
   const summarizeStatus = (values: boolean[]): IndicatorStatus => {
     if (values.every(Boolean)) {
       return 'on'
@@ -349,45 +344,6 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
     }
     return 'mixed'
   }
-
-  const getScopeStatus = (): ExpressionLearningScopeStatus | null => {
-    if (browseMode === 'chat' && selectedChatId) {
-      const selectedChat = chatList.find((chat) => chat.chat_id === selectedChatId)
-      if (!selectedChat) {
-        return null
-      }
-      return {
-        label: formatChatDisplayName(selectedChat.chat_name, selectedChat.account_id),
-        useExpression: selectedChat.use_expression ? 'on' : 'off',
-        enableLearning: selectedChat.enable_learning ? 'on' : 'off',
-      }
-    }
-
-    if (browseMode === 'group' && selectedGroupIndex !== null) {
-      const selectedGroup = groups.find((group) => group.index === selectedGroupIndex)
-      if (!selectedGroup || selectedGroup.members.length === 0) {
-        return null
-      }
-      return {
-        label: selectedGroup.name,
-        useExpression: summarizeStatus(
-          selectedGroup.members.map((member) => member.use_expression)
-        ),
-        enableLearning: summarizeStatus(
-          selectedGroup.members.map((member) => member.enable_learning)
-        ),
-      }
-    }
-
-    return null
-  }
-
-  const scopeStatus = getScopeStatus()
-  const renderStatusIndicator = (label: string, status: IndicatorStatus) => (
-    <StatusIndicator status={status} title={scopeStatus?.label}>
-      {status === 'on' ? `${label}中` : status === 'mixed' ? `部分${label}` : `${label}关闭`}
-    </StatusIndicator>
-  )
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden p-3 pb-4 sm:p-4">
@@ -437,12 +393,6 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                   },
                 ]}
               />
-              {scopeStatus && (
-                <>
-                  {renderStatusIndicator('学习', scopeStatus.enableLearning)}
-                  {renderStatusIndicator('使用', scopeStatus.useExpression)}
-                </>
-              )}
             </>
           }
         />
@@ -469,11 +419,26 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                 browseMode === 'chat'
                   ? chatList.map((chat) => ({
                       id: chat.chat_id,
-                      label: chat.chat_name,
-                      description: formatChatAccountLabel(chat.account_id),
-                      descriptionTitle: formatChatAccountLabel(chat.account_id),
+                      label: (
+                        <span className="flex min-w-0 items-center gap-1">
+                          <span className="truncate">{chat.chat_name}</span>
+                          {(chat.is_legacy || chat.is_other_account) && (
+                            <span className="shrink-0 rounded border px-1 text-[10px] font-normal">
+                              {chat.is_legacy ? '旧格式' : '其他账号'}
+                            </span>
+                          )}
+                        </span>
+                      ),
+                      description: formatChatTargetLabel(chat),
+                      descriptionTitle: formatChatTargetLabel(chat),
                       meta: chat.expression_count?.toLocaleString(),
                       title: formatChatDisplayName(chat.chat_name, chat.account_id),
+                      trailing: (
+                        <ExpressionScopeStatus
+                          enableLearning={chat.enable_learning ? 'on' : 'off'}
+                          useExpression={chat.use_expression ? 'on' : 'off'}
+                        />
+                      ),
                     }))
                   : browseMode === 'group'
                     ? groups.map((group) => {
@@ -488,6 +453,16 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                           description: memberNames || '暂无已解析聊天',
                           descriptionTitle: memberNames,
                           title: memberNames,
+                          trailing: group.members.length > 0 ? (
+                            <ExpressionScopeStatus
+                              enableLearning={summarizeStatus(
+                                group.members.map((member) => member.enable_learning)
+                              )}
+                              useExpression={summarizeStatus(
+                                group.members.map((member) => member.use_expression)
+                              )}
+                            />
+                          ) : undefined,
                         }
                       })
                     : []
@@ -506,22 +481,6 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
               onCollapsedChange={setBrowserPanelCollapsed}
               collapseLabel="折叠浏览列表"
               expandLabel="展开浏览列表"
-              footer={
-                <div
-                  className="flex w-full items-center justify-between gap-3"
-                  title="显示旧格式的表达方式（这些项目会在运行中被转换为新格式）"
-                >
-                  <Label htmlFor="show-legacy-expressions" className="cursor-pointer text-xs">
-                    显示旧格式
-                  </Label>
-                  <Checkbox
-                    id="show-legacy-expressions"
-                    size="sm"
-                    checked={showLegacyExpressions}
-                    onCheckedChange={(checked) => handleLegacyExpressionsChange(checked === true)}
-                  />
-                </div>
-              }
               listClassName="max-h-64 lg:max-h-none"
             />
           }
@@ -535,6 +494,20 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                 placeholder="搜索情境、风格或上下文..."
                 actions={
                   <>
+                    <Select
+                      value={filters.sortBy}
+                      onValueChange={(value: ExpressionFilters['sortBy']) => list.setFilter('sortBy', value)}
+                    >
+                      <SelectTrigger className="h-8 w-[130px]" aria-label="表达方式排序">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="time">最近活跃</SelectItem>
+                        <SelectItem value="time_asc">最早活跃</SelectItem>
+                        <SelectItem value="created">最新创建</SelectItem>
+                        <SelectItem value="created_asc">最早创建</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button
                       variant="outline"
                       size="sm"
@@ -561,8 +534,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                     </Button>
                     <Button
                       size="sm"
-                      onClick={() => setIsCreateDialogOpen(true)}
-                      disabled={!scopeStatus}
+                      onClick={() => setIsCreateChoiceOpen(true)}
                     >
                       <Plus className="h-4 w-4" />
                       新增
@@ -746,11 +718,23 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
       )}
 
       {/* 创建对话框 */}
+      <LearningCreateDialog
+        open={isCreateChoiceOpen}
+        onOpenChange={setIsCreateChoiceOpen}
+        kind="expression"
+        initialTargetIds={currentChat ? [currentChat.chat_id] : []}
+        onManual={() => setIsCreateDialogOpen(true)}
+        onSuccess={(isGlobal) => {
+          if (isGlobal) handleBrowseModeChange('all')
+          refreshAll()
+        }}
+      />
       <ExpressionCreateDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
-        chatList={chatList}
-        onSuccess={() => {
+        chatList={chatTargetsQuery.data ?? []}
+        onSuccess={(isGlobal) => {
+          if (isGlobal) handleBrowseModeChange('all')
           refreshAll()
           setIsCreateDialogOpen(false)
         }}

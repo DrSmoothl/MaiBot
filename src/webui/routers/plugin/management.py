@@ -793,6 +793,18 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None)) ->
     return await asyncio.to_thread(_collect_installed_plugins, snapshot)
 
 
+@router.get("/usage")
+async def get_plugin_usage(maibot_session: Optional[str] = Cookie(None)) -> Dict[str, Dict[str, float]]:
+    """只读取主循环内的累计时长，供列表刷新提醒；不扫描插件目录。"""
+    require_plugin_token(maibot_session)
+    from src.plugin_runtime.integration import get_plugin_runtime_manager
+
+    async def read_usage() -> Dict[str, float]:
+        return get_plugin_runtime_manager().get_plugin_usage_seconds()
+
+    return {"usage_seconds": await run_on_main_loop(read_usage())}
+
+
 def _collect_installed_plugins(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """在线程池读取磁盘元数据；运行状态只使用管理器提供的同一份快照。"""
     logger.info("收到获取已安装插件列表请求")
@@ -801,6 +813,7 @@ def _collect_installed_plugins(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         installed_plugins: List[Dict[str, Any]] = []
         runtime_statuses = snapshot["statuses"]
         runtime_failure_reasons = snapshot["failure_reasons"]
+        usage_seconds = snapshot["usage_seconds"]
         circuit_statuses = snapshot["circuit_statuses"]
         for plugin_path in iter_plugin_directories():
             folder_name = plugin_path.name
@@ -852,6 +865,7 @@ def _collect_installed_plugins(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                         "disabled": enabled is False,
                         "loaded": effective_load_status == "success",
                         "load_status": effective_load_status,
+                        "usage_seconds": usage_seconds.get(plugin_id, 0.0),
                         "load_error": load_error if effective_load_status == "failed" else "",
                         "circuit_status": circuit_status,
                         "changelog": changelog,

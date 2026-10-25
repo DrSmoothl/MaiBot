@@ -32,6 +32,7 @@ from src.maisaka.context.messages import (
 from src.maisaka.context.emoji_candidates import EmojiCandidateMessage
 from src.maisaka.context.compaction import ContextSummaryMessage, build_context_summary
 from src.maisaka.context.post_processor import process_chat_history_after_cycle
+from src.maisaka.mode_policy import build_consecutive_wait_reminders
 from src.maisaka.monitor.events import emit_flow_step, emit_planner_snapshot
 from src.maisaka.tool_result_condenser import condense_tool_result, should_condense_tool_result
 
@@ -417,23 +418,19 @@ class FocusGroupRuntime:
             if type(seconds) is not int or seconds < 0:
                 return ToolExecutionResult(tool_name=name, success=False, error_message="seconds 必须是非负整数。")
             self._consecutive_waits += 1
-            if self._consecutive_waits <= max(1, global_config.chat.reply_timing.max_consecutive_wait_count):
-                self._wait_until = time.time() + seconds
-                self._wait_session_id = session_id
-                self._wait_token = uuid.uuid4().hex
-                content = f"已为整个 Focus 共享组登记等待 {seconds} 秒；@ 可以提前唤醒。"
-                if any(
-                    isinstance(message, SessionBackedMessage) and message.original_message.is_at
-                    for batch in self._pending.values()
-                    for entry in batch
-                    for message in entry.messages
-                ):
-                    self._finish_wait("等待登记前已有尚未提交的 @ 消息")
-                    self._ready.update(self._pending)
-                    content = "已登记整组等待，但已有尚未提交的 @ 消息，立即继续下一次思考。"
-            else:
-                self._consecutive_waits = 0
-                content = "连续等待已达上限，结束本轮思考，等待新的输入。"
+            self._wait_until = time.time() + seconds
+            self._wait_session_id = session_id
+            self._wait_token = uuid.uuid4().hex
+            content = f"已为整个 Focus 共享组登记等待 {seconds} 秒；@ 可以提前唤醒。"
+            if any(
+                isinstance(message, SessionBackedMessage) and message.original_message.is_at
+                for batch in self._pending.values()
+                for entry in batch
+                for message in entry.messages
+            ):
+                self._finish_wait("等待登记前已有尚未提交的 @ 消息")
+                self._ready.update(self._pending)
+                content = "已登记整组等待，但已有尚未提交的 @ 消息，立即继续下一次思考。"
         else:
             self._consecutive_waits = 0
             content = "已结束整个 Focus 共享组的本轮思考。"
@@ -520,6 +517,7 @@ class FocusGroupRuntime:
                 history,
                 tool_definitions=self.tools.definitions(),
                 injected_user_messages=[self._roster(), self.tools.deferred_notice(), *references],
+                tail_user_messages=build_consecutive_wait_reminders(self._consecutive_waits),
                 max_context_size=max(self.max_context_size, sum(message.count_in_context for message in history) + 1),
                 logical_turn_id=logical_turn_id,
             )
@@ -798,7 +796,7 @@ class FocusGroupRuntime:
         history = self.history
         plan = process_chat_history_after_cycle(
             history, max_context_size=self.max_context_size,
-            max_context_chars=global_config.chat.context_compaction_max_chars, consume_references=False,
+            consume_references=False,
         )
         if not plan.removed_messages:
             return

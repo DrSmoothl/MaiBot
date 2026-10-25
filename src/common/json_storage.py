@@ -1,4 +1,4 @@
-"""电脑状态的 JSON 原子提交与 Windows 文件共享语义。"""
+"""运行状态的 JSON 原子提交与 Windows 文件共享语义。"""
 
 from pathlib import Path
 from typing import Any, Dict

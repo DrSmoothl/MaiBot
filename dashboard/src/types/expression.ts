@@ -21,10 +21,15 @@ export interface Expression {
  * 聊天信息
  */
 export interface ChatInfo {
+  /** 缺少聊天流或账号归属信息的历史记录。 */
+  is_legacy?: boolean
+  /** 归属信息完整，但不属于当前实例有效账号。 */
+  is_other_account?: boolean
   chat_id: string
   chat_name: string
   platform: string | null
   account_id?: string | null
+  target_id?: string | null
   is_group: boolean
   use_expression: boolean
   enable_learning: boolean
@@ -185,7 +190,8 @@ export interface ExpressionDetailResponse {
 export interface ExpressionCreateRequest {
   situation: string
   style: string
-  chat_id: string
+  chat_id?: string
+  is_global?: boolean
 }
 
 /**

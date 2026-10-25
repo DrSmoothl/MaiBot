@@ -194,7 +194,8 @@ class ExpressionCreateRequest(BaseModel):
 
     situation: str
     style: str
-    chat_id: str
+    chat_id: Optional[str] = None
+    is_global: bool = False
 
 
 class ExpressionUpdateRequest(BaseModel):
@@ -269,7 +270,8 @@ class ExpressionExportResponse(BaseModel):
 class ExpressionImportRequest(BaseModel):
     """表达方式导入请求。"""
 
-    chat_id: str
+    chat_id: Optional[str] = None
+    is_global: bool = False
     expressions: List[ExpressionExportItem]
 
 
@@ -487,7 +489,7 @@ def expression_to_response(expression: Expression, db_session: Optional[Any] = N
         style=expression.style,
         last_active_time=last_active_time,
         chat_id=chat_id,
-        chat_name=get_chat_name(chat_id, db_session) if chat_id else None,
+        chat_name=get_chat_name(chat_id, db_session) if chat_id else "全局（所有聊天）",
         create_date=create_date,
         checked=expression.checked,
         modified_by=expression.modified_by.value.lower() if expression.modified_by else None,
@@ -897,7 +899,10 @@ class ChatInfo(BaseModel):
     chat_name: str
     platform: Optional[str] = None
     account_id: Optional[str] = None
+    target_id: Optional[str] = None
     is_group: bool = False
+    is_legacy: bool = False
+    is_other_account: bool = False
     use_expression: bool = True
     enable_learning: bool = True
     expression_count: Optional[int] = None
@@ -913,12 +918,17 @@ def build_chat_info(
     """根据聊天流 ID 构建 WebUI 展示用的聊天信息。"""
 
     use_expression, enable_learning = ExpressionConfigUtils.get_expression_config_for_chat(chat_id)
+    # 旧记录缺少归属信息；归属完整但不在当前账号范围内的记录单独标记。
+    is_legacy = not chat_session or not chat_session.platform.strip() or not (chat_session.account_id or "").strip()
     return ChatInfo(
         chat_id=chat_id,
         chat_name=get_chat_name(chat_id, db_session),
         platform=chat_session.platform if chat_session else None,
         account_id=chat_session.account_id if chat_session else None,
+        target_id=(chat_session.group_id or chat_session.user_id) if chat_session else None,
         is_group=bool(chat_session and chat_session.group_id),
+        is_legacy=is_legacy,
+        is_other_account=not is_legacy and not is_current_account_session(chat_session),
         use_expression=use_expression,
         enable_learning=enable_learning,
         expression_count=expression_count,
@@ -1286,7 +1296,7 @@ def get_expression_list(
     chat_id: Optional[str] = Query(None, description="聊天ID筛选"),
     chat_ids: Optional[List[str]] = EXPRESSION_CHAT_IDS_QUERY,
     review_filter: str = Query("all", description="表达方式筛选: all/user_checked/unchecked"),
-    sort_by: str = Query("time", description="表达方式排序: time"),
+    sort_by: str = Query("time", description="表达方式排序: time/time_asc/created/created_asc"),
     include_legacy: bool = Query(False, description="是否显示旧格式/非当前账号的表达方式"),
 ) -> ExpressionListResponse:
     """获取表达方式列表。
@@ -1302,7 +1312,7 @@ def get_expression_list(
     """
     try:
         # 构建查询
-        if sort_by != "time":
+        if sort_by not in {"time", "time_asc", "created", "created_asc"}:
             raise HTTPException(status_code=400, detail=f"不支持的表达方式排序: {sort_by}")
 
         visible_chat_ids: set[str] = set()
@@ -1320,8 +1330,6 @@ def get_expression_list(
                 chat_ids = [item for item in chat_ids if item in visible_chat_ids]
                 if not chat_ids:
                     return ExpressionListResponse(success=True, total=0, page=page, page_size=page_size, data=[])
-            elif not visible_chat_ids:
-                return ExpressionListResponse(success=True, total=0, page=page, page_size=page_size, data=[])
 
         statement = select(Expression)
 
@@ -1337,16 +1345,19 @@ def get_expression_list(
         elif chat_ids:
             statement = statement.where(col(Expression.session_id).in_(chat_ids))
         elif not include_legacy:
-            statement = statement.where(col(Expression.session_id).in_(visible_chat_ids))
+            statement = apply_valid_expression_session_scope(statement, visible_chat_ids)
         else:
             statement = apply_valid_expression_session_scope(statement, valid_expression_chat_ids)
 
         statement = apply_expression_list_review_filter(statement, review_filter)
 
-        # 排序：最后活跃时间倒序（NULL 值放在最后）
+        # 在分页前按所选时间排序，空时间统一放在最后，并用 ID 保证分页稳定。
+        sort_column = col(Expression.create_time) if sort_by.startswith("created") else col(Expression.last_active_time)
+        ascending = sort_by.endswith("_asc")
         statement = statement.order_by(
-            case((col(Expression.last_active_time).is_(None), 1), else_=0),
-            col(Expression.last_active_time).desc(),
+            case((sort_column.is_(None), 1), else_=0),
+            sort_column.asc() if ascending else sort_column.desc(),
+            col(Expression.id).asc() if ascending else col(Expression.id).desc(),
         )
 
         offset = (page - 1) * page_size
@@ -1365,7 +1376,7 @@ def get_expression_list(
             elif chat_ids:
                 count_statement = count_statement.where(col(Expression.session_id).in_(chat_ids))
             elif not include_legacy:
-                count_statement = count_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+                count_statement = apply_valid_expression_session_scope(count_statement, visible_chat_ids)
             else:
                 count_statement = apply_valid_expression_session_scope(count_statement, valid_expression_chat_ids)
             count_statement = apply_expression_list_review_filter(count_statement, review_filter)
@@ -1422,10 +1433,12 @@ def export_expressions(request: ExpressionExportRequest) -> ExpressionExportResp
 
 @router.post("/import", response_model=ExpressionImportResponse)
 def import_expressions(request: ExpressionImportRequest) -> ExpressionImportResponse:
-    """将表达方式 JSON 导入到指定聊天流。"""
+    """将表达方式 JSON 导入到指定聊天流或全局，仅保存一份全局记录。"""
 
     try:
-        chat_id = require_existing_chat_id(request.chat_id)
+        if request.is_global and request.chat_id:
+            raise HTTPException(status_code=400, detail="全局导入不能同时指定聊天")
+        chat_id = None if request.is_global else require_existing_chat_id(request.chat_id)
         if not request.expressions:
             raise HTTPException(status_code=400, detail="导入文件中没有表达方式")
 
@@ -1700,7 +1713,9 @@ def create_expression(
     """
     try:
         current_time = datetime.now()
-        chat_id = require_existing_chat_id(request.chat_id)
+        if request.is_global and request.chat_id:
+            raise HTTPException(status_code=400, detail="全局新增不能同时指定聊天")
+        chat_id = None if request.is_global else require_existing_chat_id(request.chat_id)
 
         # 创建表达方式
         with get_db_session() as session:
@@ -1712,6 +1727,9 @@ def create_expression(
                 last_active_time=current_time,
                 create_time=current_time,
                 session_id=chat_id,
+                # 手动填写的全局表达由用户确认，可供「仅使用精选」模式召回。
+                checked=request.is_global,
+                modified_by=ModifiedBy.USER if request.is_global else None,
             )
             session.add(expression)
             session.flush()
@@ -1908,7 +1926,7 @@ def get_expression_stats(
             visible_chat_ids = get_visible_expression_chat_ids(session, include_legacy)
             total_statement = select(Expression.id)
             if not include_legacy:
-                total_statement = total_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+                total_statement = apply_valid_expression_session_scope(total_statement, visible_chat_ids)
             else:
                 total_statement = apply_valid_expression_session_scope(total_statement, visible_chat_ids)
             total = count_expressions(session, total_statement)
@@ -1928,7 +1946,7 @@ def get_expression_stats(
                 .where(col(Expression.create_time).is_not(None), col(Expression.create_time) >= seven_days_ago)
             )
             if not include_legacy:
-                recent_statement = recent_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+                recent_statement = apply_valid_expression_session_scope(recent_statement, visible_chat_ids)
             else:
                 recent_statement = apply_valid_expression_session_scope(recent_statement, visible_chat_ids)
             recent = session.exec(recent_statement).one()

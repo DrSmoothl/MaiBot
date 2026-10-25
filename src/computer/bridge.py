@@ -1,7 +1,7 @@
 """沙盒生命周期和文件协议；不执行宿主机上的模型命令。"""
 
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 from uuid import uuid4
 from xml.etree.ElementTree import Element, SubElement, tostring
 import asyncio
@@ -13,13 +13,13 @@ import subprocess
 import time
 
 from src.common.async_work import run_sync_work
+from src.common.json_storage import read_json, write_json
 
-from src.agent.config import AgentConfig
 from .actions import validate_actions
-from src.agent.persistence import read_json, write_json
+from .config import ComputerConfig
 
 
-def sandbox_xml(bootstrap: Path, exchange: Path, workspace: Path, config: AgentConfig) -> str:
+def sandbox_xml(bootstrap: Path, exchange: Path, workspace: Path, config: ComputerConfig) -> str:
     root = Element("Configuration")
     for name, value in {
         "Networking": "Enable" if config.networking else "Disable", "ClipboardRedirection": "Disable",
@@ -43,7 +43,7 @@ def sandbox_xml(bootstrap: Path, exchange: Path, workspace: Path, config: AgentC
 
 
 class SandboxBridge:
-    def __init__(self, runtime_dir: Path, workspace: Path, config: AgentConfig) -> None:
+    def __init__(self, runtime_dir: Path, workspace: Path, config: ComputerConfig) -> None:
         self.runtime_dir = runtime_dir
         self.workspace = workspace
         self.config = config
@@ -241,12 +241,19 @@ class SandboxBridge:
                 await self._close()
             raise
 
-    async def perform(self, actions: List[Dict[str, Any]], timeout: Optional[float] = None) -> Dict[str, Any]:
+    async def perform(
+        self, actions: List[Dict[str, Any]], timeout: Optional[float] = None,
+        *, before_submit: Optional[Callable[[], None]] = None,
+    ) -> Dict[str, Any]:
         if not actions:
             raise ValueError("actions 不能为空；观察桌面请使用 computer_observe，查询操作请使用 computer_poll。")
         validate_actions(actions)
         async with self._lock:
+            if before_submit is not None:
+                before_submit()
             await self._start()
+            if before_submit is not None:
+                before_submit()
             if self.exchange is None:
                 raise ConnectionError("沙盒交换目录未初始化")
             if self.pending is not None:

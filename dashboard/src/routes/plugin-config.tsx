@@ -61,6 +61,7 @@ import {
   BookOpen,
   FileText,
   GripHorizontal,
+  Star,
   Trash2,
   Wrench,
   Terminal,
@@ -94,6 +95,7 @@ import { getNestedRecord, getPluginMarketplaceRoutePath, isAdapterManagementPath
 import { usePluginList } from './plugin-config/hooks/usePluginList'
 import { usePluginLifecycle } from './plugin-config/hooks/usePluginLifecycle'
 import { usePluginConfigEditor } from './plugin-config/hooks/usePluginConfigEditor'
+import { usePluginReviewPrompts } from './plugin-config/hooks/usePluginReviewPrompts'
 import { MCPExtensionList, MCPSettingsPage } from './mcp-settings'
 
 // 字段渲染组件
@@ -1582,6 +1584,7 @@ function PluginConfigPageContent() {
     setActingPluginId,
     performTogglePlugin,
     checkingUpdates,
+    marketPluginsById,
     getPluginUpdateState,
     getPluginRepositoryUrl,
     isPluginDisabled,
@@ -1602,6 +1605,13 @@ function PluginConfigPageContent() {
     modernLoadSummaryLabel,
     futureRetroPluginSummaryLabel,
   } = usePluginList()
+
+  const { reviewPrompts, markReviewed } = usePluginReviewPrompts(plugins, marketPluginsById)
+  const [reviewingPlugin, setReviewingPlugin] = useState<{
+    id: string
+    name: string
+    storageKey: string
+  } | null>(null)
 
   const {
     deleteDialogOpen,
@@ -1876,6 +1886,7 @@ function PluginConfigPageContent() {
               const pluginActing = actingPluginId === plugin.id
               const pluginDisabled = plugin.enabled === false
               const updateState = getPluginUpdateState(plugin)
+              const reviewPrompt = reviewPrompts[plugin.id]
               const pluginLoadFailed = isPluginLoadFailed(plugin)
               const pluginVersionIncompatible = isPluginVersionIncompatible(plugin)
               const {
@@ -2005,7 +2016,29 @@ function PluginConfigPageContent() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center justify-end gap-2 border-t pt-2 sm:flex-shrink-0 sm:border-t-0 sm:pt-0">
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-2 sm:flex-shrink-0 sm:border-t-0 sm:pt-0">
+                    {reviewPrompt && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mr-auto gap-1.5 text-primary sm:mr-2"
+                        disabled={pluginActing}
+                        title={`评价 ${plugin.manifest.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setReviewingPlugin({
+                            id: reviewPrompt.marketPluginId,
+                            name: plugin.manifest.name,
+                            storageKey: reviewPrompt.storageKey,
+                          })
+                        }}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        <Star className="h-4 w-4" />
+                        {reviewPrompt.label}
+                      </Button>
+                    )}
                     <div
                       className="flex h-9 min-w-11 items-center justify-center"
                       title={pluginDisabled ? '启动插件' : '关闭插件'}
@@ -2071,6 +2104,16 @@ function PluginConfigPageContent() {
 
         <PluginWebUIManagerPanel />
         </>
+        )}
+
+        {reviewingPlugin && (
+          <PluginStats
+            pluginId={reviewingPlugin.id}
+            pluginName={reviewingPlugin.name}
+            ratingOnly
+            onRatingDialogClose={() => setReviewingPlugin((current) => current === reviewingPlugin ? null : current)}
+            onRated={() => markReviewed(reviewingPlugin.storageKey)}
+          />
         )}
 
         <Dialog

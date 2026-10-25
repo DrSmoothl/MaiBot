@@ -6,7 +6,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, cast, func, not_, or_, String as SQLString
+from sqlalchemy import and_, case, cast, func, not_, or_, String as SQLString
 from sqlmodel import Session, col, delete, select
 
 from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
@@ -20,6 +20,7 @@ from src.webui.dependencies import require_auth
 logger = get_logger("webui.jargon")
 
 router = APIRouter(prefix="/jargon", tags=["Jargon"], dependencies=[Depends(require_auth)])
+JARGON_SESSION_IDS_QUERY = Query(None, description="按共享组内任一聊天流ID筛选")
 
 
 # ==================== 辅助函数 ====================
@@ -257,6 +258,7 @@ class ChatInfoResponse(BaseModel):
     chat_name: str
     platform: Optional[str] = None
     account_id: Optional[str] = None
+    target_id: Optional[str] = None
     is_group: bool = False
     jargon_count: int = 0
 
@@ -329,7 +331,8 @@ class JargonExportResponse(BaseModel):
 class JargonImportRequest(BaseModel):
     """黑话导入请求。"""
 
-    target_session_ids: List[str] = Field(..., description="导入目标聊天流 ID 列表")
+    target_session_ids: List[str] = Field(default_factory=list, description="导入目标聊天流 ID 列表")
+    is_global: bool = False
     jargons: List[JargonExportItem]
     conflict_strategy: Literal["skip", "overwrite"] = "skip"
 
@@ -776,7 +779,7 @@ def get_jargon_list(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     session_id: Optional[str] = Query(None, description="按聊天流ID筛选"),
-    session_ids: Optional[List[str]] = Query(None, description="按共享组内任一聊天流ID筛选"),
+    session_ids: Optional[List[str]] = JARGON_SESSION_IDS_QUERY,
     jargon_status: Optional[Literal["confirmed_jargon", "confirmed_not_jargon", "manual_jargon", "pending"]] = Query(
         None,
         description="按黑话判定状态筛选",
@@ -784,6 +787,7 @@ def get_jargon_list(
     is_jargon: Optional[bool] = Query(None, description="按是否是黑话筛选"),
     is_complete: Optional[bool] = Query(None, description="按是否推断完成筛选"),
     is_global: Optional[bool] = Query(None, description="按是否全局筛选"),
+    sort_by: str = Query("time", description="黑话排序: time/time_asc/created/created_asc"),
 ) -> JargonListResponse:
     """获取黑话列表。
 
@@ -797,11 +801,15 @@ def get_jargon_list(
         is_jargon: 是否为黑话的筛选条件。
         is_complete: 是否推断完成的筛选条件。
         is_global: 是否为全局黑话的筛选条件。
+        sort_by: 按更新时间（活跃时间）或创建时间正反序排列。
 
     Returns:
         JargonListResponse: 分页后的黑话列表。
     """
     try:
+        if sort_by not in {"time", "time_asc", "created", "created_asc"}:
+            raise HTTPException(status_code=400, detail=f"不支持的黑话排序: {sort_by}")
+
         statement = apply_jargon_list_filters(
             build_jargon_list_select(),
             search=search,
@@ -810,7 +818,15 @@ def get_jargon_list(
             is_jargon=is_jargon,
             is_complete=is_complete,
             is_global=is_global,
-        ).order_by(col(Jargon.count).desc(), col(Jargon.id).desc())
+        )
+        # 黑话以更新时间表示最近活跃；排序在分页前完成，空时间放最后，ID 保证分页稳定。
+        sort_column = col(Jargon.created_timestamp) if sort_by.startswith("created") else col(Jargon.updated_timestamp)
+        ascending = sort_by.endswith("_asc")
+        statement = statement.order_by(
+            case((sort_column.is_(None), 1), else_=0),
+            sort_column.asc() if ascending else sort_column.desc(),
+            col(Jargon.id).asc() if ascending else col(Jargon.id).desc(),
+        )
 
         count_statement = apply_jargon_list_filters(
             select(Jargon.id),
@@ -897,6 +913,7 @@ def get_chat_list(include_empty: bool = Query(False, description="是否包含�
                     chat_name=display_name_cache[chat_session.session_id],
                     platform=chat_session.platform,
                     account_id=chat_session.account_id,
+                    target_id=chat_session.group_id or chat_session.user_id,
                     is_group=bool(chat_session.group_id),
                     jargon_count=jargon_counts.get(chat_session.session_id, 0),
                 )
@@ -1064,10 +1081,12 @@ def export_jargons(request: JargonExportRequest) -> JargonExportResponse:
 
 @router.post("/import", response_model=JargonImportResponse)
 def import_jargons(request: JargonImportRequest) -> JargonImportResponse:
-    """将黑话 JSON 导入到用户选择的一个或多个真实聊天流。"""
+    """将黑话 JSON 导入到用户选择的真实聊天流或全局。"""
 
     try:
-        target_session_ids = require_existing_session_ids(request.target_session_ids)
+        if request.is_global and request.target_session_ids:
+            raise HTTPException(status_code=400, detail="全局导入不能同时指定聊天")
+        target_session_ids = [] if request.is_global else require_existing_session_ids(request.target_session_ids)
         if not request.jargons:
             raise HTTPException(status_code=400, detail="导入文件中没有黑话")
 
@@ -1088,7 +1107,8 @@ def import_jargons(request: JargonImportRequest) -> JargonImportResponse:
                 overlapping_jargons = [
                     jargon
                     for jargon in same_content_jargons
-                    if scopes_overlap(jargon, target_session_id_set, False)
+                    # 全局导入只与已有全局记录判重，局部同名记录不能阻止创建全局词条。
+                    if (jargon.is_global if request.is_global else scopes_overlap(jargon, target_session_id_set, False))
                 ]
 
                 if overlapping_jargons and request.conflict_strategy == "skip":
@@ -1112,7 +1132,7 @@ def import_jargons(request: JargonImportRequest) -> JargonImportResponse:
                     count=max(item.count, 0),
                     is_jargon=item.is_jargon and bool(meaning),
                     is_complete=item.is_complete,
-                    is_global=False,
+                    is_global=request.is_global,
                     created_by=JargonCreatedBy.MANUAL,
                     updated_timestamp=datetime.now(),
                 )
@@ -1181,8 +1201,11 @@ def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
             raise HTTPException(status_code=400, detail="黑话内容不能为空")
         meaning = (request.meaning or "").strip()
 
-        raw_session_ids = request.session_ids if request.session_ids is not None else [request.session_id]
-        session_ids = require_existing_session_ids(raw_session_ids)
+        raw_session_ids = request.session_ids if request.session_ids is not None else (
+            [request.session_id] if request.session_id else []
+        )
+        # 全局黑话不要求来源聊天；兼容已有调用方提供的真实来源聊天。
+        session_ids = require_existing_session_ids(raw_session_ids) if raw_session_ids or not request.is_global else []
         target_session_ids = set(session_ids)
         with get_db_session() as session:
             same_content_jargons = session.exec(select(Jargon).where(col(Jargon.content) == content)).all()
@@ -1191,7 +1214,7 @@ def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
                     jargon
                     for jargon in same_content_jargons
                     if normalize_jargon_created_by(jargon.created_by, jargon.id) == JargonCreatedBy.MANUAL
-                    and scopes_overlap(jargon, target_session_ids, request.is_global)
+                    and (jargon.is_global if request.is_global else scopes_overlap(jargon, target_session_ids, False))
                 ),
                 None,
             )
@@ -1202,7 +1225,10 @@ def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
             for existing_jargon in same_content_jargons:
                 if normalize_jargon_created_by(existing_jargon.created_by, existing_jargon.id) != JargonCreatedBy.AI:
                     continue
-                if not scopes_overlap(existing_jargon, target_session_ids, request.is_global):
+                if not (
+                    existing_jargon.is_global if request.is_global
+                    else scopes_overlap(existing_jargon, target_session_ids, False)
+                ):
                     continue
                 session.delete(existing_jargon)
                 replaced_ai_count += 1

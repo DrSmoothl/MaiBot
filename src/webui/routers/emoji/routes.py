@@ -686,7 +686,7 @@ def get_emoji_thumbnail(
         token_manager = get_token_manager()
         is_valid = False
 
-        if maibot_session and token_manager.verify_token(maibot_session):
+        if maibot_session and token_manager.verify_cookie_token(maibot_session):
             is_valid = True
         elif token and token_manager.verify_token(token):
             is_valid = True

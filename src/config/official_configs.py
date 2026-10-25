@@ -630,20 +630,6 @@ class ChatReplyTimingConfig(ConfigBase):
     )
     """开启后，被 @ 时会尽量回复。"""
 
-    max_consecutive_wait_count: int = Field(
-        default=3,
-        ge=1,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "连续 wait 上限",
-                "en_US": "Max consecutive wait",
-                "ja_JP": "連続 wait 上限",
-            },
-            "x-widget": "input",
-        },
-    )
-    """Planner 最多连续调用 wait 多少次；达到上限后 wait 工具会拒绝继续进入等待。"""
-
     no_action_backoff_base_seconds: float = Field(
         default=15,
         ge=0,
@@ -878,21 +864,6 @@ class ChatConfig(ConfigBase):
     )
     """私聊回复时参考的最近消息数量。"""
 
-    context_compaction_max_chars: int = Field(
-        default=48000,
-        ge=16000,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "上下文文本预算",
-                "en_US": "Context text budget",
-                "ja_JP": "文脈テキスト上限",
-            },
-            "x-widget": "input",
-            "advanced": True,
-        },
-    )
-    """历史文字、工具参数与结果的字符预算；超过预算或近期消息数的两倍时生成滚动状态摘要。"""
-
     context_compaction_summary_max_chars: int = Field(
         default=6000,
         ge=1000,
@@ -1051,6 +1022,19 @@ class ExperimentalConfig(ConfigBase):
     __ui_label__ = "实验性功能"
     __ui_advanced__ = True
     __ui_order__ = 140
+
+    passive_replyer: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "被动式 replyer",
+                "en_US": "Passive replyer",
+                "ja_JP": "受動型 replyer",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """仅作用于普通聊天模式：Planner 不调用工具而输出正文时，将正文作为自然语言指导启动一次回复；篇幅、表达偏好和插件相关需求直接写入指导，引用与附件由并行回复补充器编排。关闭时使用原有 reply 工具。切换从下一轮思考生效，Focus 不受影响。"""
 
     attention_drift: AttentionDriftConfig = Field(default_factory=AttentionDriftConfig)
     """注意力漂移实验模式；让麦麦在群聊/私聊中表现出更活跃的联想和轻微话题漂移。"""
@@ -4043,19 +4027,24 @@ class ExpressionConfig(ConfigBase):
     """写入表达方式前先让 AI 检查，减少学到奇怪内容。"""
 
     use_vector_expression: bool = Field(
-        default=True,
+        default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "使用向量表达",
-                "en_US": "Use vector expressions",
-                "ja_JP": "ベクトル表現を使用",
+                "zh_CN": "表达选择",
+                "en_US": "Expression selection",
+                "ja_JP": "表現の選択",
             },
-            "x-widget": "switch",
-            "x-row": "expression-learning-switches",
+            "x-widget": "discrete-slider",
+            "options": ["false", "true"],
+            "x-option-labels": {"false": "快速", "true": "精细"},
+            "x-option-descriptions": {
+                "false": "默认档位。加权随机抽取表达，直接供回复参考，不额外调用选择模型。",
+                "true": "使用向量召回，再由 LLM 按语境筛选，需要配置嵌入模型。",
+            },
             "advanced": False,
         },
     )
-    """开启后使用表达意图与嵌入召回，需要配置嵌入模型；关闭时使用随手候选。"""
+    """表达选择档位：false 为快速，加权随机抽样后直接注入，不额外调用选择 LLM；true 为精细，使用表达意图与嵌入召回，再由 LLM 筛选，需要配置嵌入模型。复古回复不使用表达选择。"""
 
     expression_vector_index_path: str = Field(
         default="data/expression_selection/expression_vector_index.json",
@@ -4256,9 +4245,9 @@ class EmojiCacheCleanupConfig(ConfigBase):
 class EmojiConfig(ConfigBase):
     """表情包配置类"""
 
-    __ui_label__ = "表情"
-    __ui_advanced__ = True
-    __ui_order__ = 80
+    __ui_parent__ = "expression"
+    __ui_label__ = "表情包"
+    __ui_sub_label__ = "表情包"
 
     use_new_send_logic: bool = Field(
         default=False,

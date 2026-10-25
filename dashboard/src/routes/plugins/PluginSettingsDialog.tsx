@@ -92,7 +92,7 @@ export function PluginSettingsDialog({ onClose, onSaved }: PluginSettingsDialogP
               <Card className="p-6 space-y-4">
                 <div className="space-y-1">
                   <Label htmlFor="plugin-download-source" className="text-base font-semibold">插件下载源</Label>
-                  <p className="text-sm text-muted-foreground">安装和更新插件只使用一个下载源，失败时不自动切换。</p>
+                  <p className="text-sm text-muted-foreground">安装、更新插件和加载市场仓库图标使用所选下载源，失败时不自动切换。</p>
                 </div>
                 <Select value={draft.download_source} disabled={disabled}
                   onValueChange={(value: SourceSettings['download_source']) => setDraft({ ...draft, download_source: value })}>

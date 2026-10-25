@@ -1,4 +1,4 @@
-"""统一 Agent 工具：普通聊天只传话/查状态，桌面能力只交给当前后端。"""
+"""外接 Agent 传话与状态工具；电脑工具由独立 Provider 提供。"""
 
 from typing import Any, Dict, List, Optional
 
@@ -6,14 +6,12 @@ import asyncio
 import json
 import traceback
 
-from src.computer.actions import action_schemas
 from src.core.tooling import ToolAvailabilityContext, ToolContentItem, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 
 from . import messaging
 from .service import AgentService, agent_service
 
 CHAT_TOOLS = {"agent_talk", "agent_status"}
-DESKTOP_TOOLS = {"computer_desktop", "computer_observe", "computer_poll", "computer_cancel"}
 
 
 def tool_specs() -> List[ToolSpec]:
@@ -29,25 +27,6 @@ def tool_specs() -> List[ToolSpec]:
         ("agent_recent", "读取真实聊天流历史，limit 默认 20，0 为全部。", {
             "target": {"type": "string"}, "limit": {"type": "integer", "minimum": 0, "default": 20},
         }, ["target"]),
-        ("computer_desktop", "在 Windows Sandbox 内批量操作并返回截图。先 observe，坐标按最新截图。观察用 computer_observe，查询操作用 computer_poll。"
-         "动作：observe；move/click/double_click(x,y,button)；drag(x,y,end_x,end_y,seconds,button)；mouse_down/mouse_up(button)；scroll(delta)；"
-         "keys/key_down/key_up(keys 数组，Windows 键名，keys 可加 seconds 持续按住)；type(text)；open(path,arguments 数组，任意沙盒程序或 URL)；"
-         "shell(command，沙盒内任意 PowerShell，返回 stdout/stderr/exit_code，工作目录 C:\\MaiWorkspace)；wait(seconds)。"
-         "inspect(depth,limit) 读取 UIA；uia(runtime_id,operation,value) 操作控件；browser(method,target,params) 调用沙盒 CDP；"
-         "wait_window(title,seconds)、wait_process(pid,seconds) 等待具体条件。"
-         "没有探索步数、时长或应用名单限制。timeout 默认60秒，0一直等待；超时返回 running，用 computer_poll 查询，不重复输入。", {
-            "actions": {"type": "array", "items": {"oneOf": action_schemas()}, "minItems": 1},
-            "timeout": {"type": "number", "minimum": 0},
-        }, ["actions"]),
-        ("computer_observe", "独立获取当前桌面，长命令执行期间也可观察；返回截图编号、时间、活动窗口及尺寸。", {
-            "timeout": {"type": "number", "minimum": 0},
-        }, []),
-        ("computer_poll", "查询原操作，不重复执行。running 是正常等待，completed/failed/cancelled 是最终结果。", {
-            "operation_id": {"type": "string"}, "timeout": {"type": "number", "minimum": 0},
-        }, ["operation_id"]),
-        ("computer_cancel", "取消指定操作并释放按键，不关闭桌面；已完成的动作不会回滚。running 表示尚未确认取消。", {
-            "operation_id": {"type": "string"},
-        }, ["operation_id"]),
     ]
     return [ToolSpec(name=name, description=description, provider_name="agent", provider_type="builtin",
                      parameters_schema={"type": "object", "properties": properties, "required": required,
@@ -70,8 +49,6 @@ class AgentToolProvider:
         for spec in tool_specs():
             if not trusted and spec.name not in CHAT_TOOLS:
                 continue
-            if spec.name in DESKTOP_TOOLS and not self.service.desktop_enabled:
-                continue
             if trusted:
                 spec.metadata["visibility"] = "visible"
             tools.append(spec)
@@ -85,29 +62,17 @@ class AgentToolProvider:
             name, args = invocation.tool_name, invocation.arguments
             if name not in CHAT_TOOLS:
                 self.service.require_owner(context.session_id)
-            if name in DESKTOP_TOOLS:
-                self.service.require_desktop()
             result: Dict[str, Any]
             if name == "agent_talk":
                 result = await messaging.tell(self.service, context.session_id, args["text"], args.get("target", ""), args.get("images", []))
             elif name == "agent_status":
                 result = self.service.status()
-                if args.get("include_image", False) and self.service.desktop_enabled and self.service.bridge.last_frame is not None:
-                    result = {**result, **self.service.bridge.last_frame}
+                if args.get("include_image", False) and self.service.computer.config.enabled and self.service.computer.bridge.last_frame is not None:
+                    result = {**result, **self.service.computer.bridge.last_frame}
             elif name == "agent_chats":
                 result = {"chats": messaging.chats()}
             elif name == "agent_recent":
                 result = await messaging.recent(args["target"], args.get("limit", 20))
-            elif name == "computer_desktop":
-                self.service.activity = {"reason": context.reasoning, "actions": args["actions"]}
-                await self.service.persist()
-                result = await self.service.desktop(args["actions"], args.get("timeout"))
-            elif name == "computer_observe":
-                result = await self.service.observe(args.get("timeout"))
-            elif name == "computer_poll":
-                result = await self.service.bridge.poll(args["operation_id"], args.get("timeout"))
-            elif name == "computer_cancel":
-                result = await self.service.bridge.cancel(args["operation_id"])
             else:
                 raise ValueError(f"未知 Agent 工具：{name}")
             media = [ToolContentItem(content_type="image", data=result["image"], mime_type=result["mime_type"])] if "image" in result else []

@@ -20,17 +20,16 @@ export interface AgentEvent {
   }>
 }
 
-export function createAgentApi(root: string) {
-  return {
-    events: (after: number, signal: AbortSignal) => backendApi.get<{
-      events: AgentEvent[]; queued: AgentEvent[]; state: string; error: string; pending: boolean; backend: string; desktop_enabled: boolean;
-    }>(`${root}/events`, { query: { after }, signal }),
-    message: (text: string) => backendApi.post<{ id: string; backend: string }>(`${root}/message`, { body: { text } }),
-    resume: (signal: AbortSignal) => backendApi.post<{ agent_state: string; error: string }>(`${root}/control`, {
-      body: { operation: 'resume' }, signal,
-    }),
-  }
+const root = '/api/webui/agent'
+
+export const agentApi = {
+  events: (after: number, signal: AbortSignal) => backendApi.get<{
+    events: AgentEvent[]; queued: AgentEvent[]; state: string; error: string; pending: boolean; backend: string; desktop_enabled: boolean;
+  }>(`${root}/events`, { query: { after }, signal }),
+  message: (text: string) => backendApi.post<{ id: string; backend: string }>(`${root}/message`, { body: { text } }),
+  resume: (signal: AbortSignal) => backendApi.post<{ agent_state: string; error: string }>(`${root}/control`, {
+    body: { operation: 'resume' }, signal,
+  }),
 }
 
-export type AgentApi = ReturnType<typeof createAgentApi>
-export const agentApi = createAgentApi('/api/webui/agent')
+export type AgentApi = typeof agentApi
