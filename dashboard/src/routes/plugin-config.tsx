@@ -22,6 +22,7 @@ import { MultiSelect } from '@/components/ui/multi-select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { CodeEditor } from '@/components/CodeEditor'
 import { useTheme } from '@/components/use-theme'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import {
   Select,
   SelectContent,
@@ -1162,6 +1163,7 @@ interface PluginConfigEditorProps {
 
 function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorProps) {
   const { i18n } = useTranslation()
+  const isMobile = useMediaQuery('(max-width: 639px)')
   const language = i18n.resolvedLanguage || i18n.language || 'zh'
   const [documentPanelOpen, setDocumentPanelOpen] = useState(false)
   const [hostPolicyToolbar, setHostPolicyToolbar] = useState<HTMLDivElement | null>(null)
@@ -1223,10 +1225,10 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
     ([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0)
   )
   const schemaTabs = schema?.layout.type === 'tabs' ? schema.layout.tabs : []
-  // 优先使用插件声明的标签页；未分组的多节配置按现有顺序生成标签页。
+  // 保留插件声明的布局；仅移动端为未分组的多节配置生成横向切换标签。
   const configTabs: ConfigTabSchema[] = schemaTabs.length > 0
     ? schemaTabs
-    : sortedSections.length > 1
+    : isMobile && sortedSections.length > 1
       ? sortedSections.map(([sectionName, section]) => ({
           id: sectionName,
           title: section.title,
@@ -1239,6 +1241,20 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
     ? activeConfigTab
     : configTabs[0]?.id
   const showConfigTabs = pluginPageTab === 'settings' && editMode === 'visual' && configTabs.length > 0
+  const configTabList = (
+    <TabsList aria-label="配置分组" className={cn(isMobile && 'h-auto w-max justify-start')}>
+      {configTabs.map((tab) => (
+        <TabsTrigger key={tab.id} value={tab.id} className={cn(isMobile && 'shrink-0')}>
+          {resolveLocalizedText(tab.title, language, tab.id, tab.i18n, 'title')}
+          {tab.badge && (
+            <Badge variant="secondary" className="ml-2 text-xs">
+              {tab.badge}
+            </Badge>
+          )}
+        </TabsTrigger>
+      ))}
+    </TabsList>
+  )
 
   // 获取当前启用状态
   const isEnabled = !configError && (config.plugin as Record<string, unknown>)?.enabled !== false
@@ -1372,16 +1388,16 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
         onValueChange={(value) => setPluginPageTab(value as 'settings' | 'host-policy' | 'details')}
         className="min-w-0"
       >
-        <div className={cn('flex min-w-0 items-center gap-3', pluginPageTab === 'host-policy' && 'flex-wrap')}>
-          {/* 两组标签共用横向滚动容器，保持独立切换，不产生纵向滚动条。 */}
-          <div className="min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain">
-            <div className="flex w-max items-center gap-3 px-1 py-1">
-              <TabsList aria-label="插件页面" className="h-auto w-max shrink-0">
+        <div className={cn('flex min-w-0 items-center gap-3 sm:flex-wrap', pluginPageTab === 'host-policy' && 'flex-wrap')}>
+          {/* 仅移动端让两组标签共用横向滚动区域；桌面端按插件原始布局展示配置。 */}
+          <div className="min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain sm:contents">
+            <div className="flex w-max items-center gap-3 px-1 py-1 sm:contents">
+              <TabsList aria-label="插件页面" className={cn(isMobile && 'h-auto w-max shrink-0')}>
                 <TabsTrigger value="settings">设置</TabsTrigger>
                 {showHostPolicy && <TabsTrigger value="host-policy">黑白名单规则</TabsTrigger>}
                 <TabsTrigger value="details">详情</TabsTrigger>
               </TabsList>
-              {showConfigTabs && (
+              {isMobile && showConfigTabs && (
                 <div ref={setConfigTabToolbar} className="shrink-0 border-l pl-3" />
               )}
             </div>
@@ -1435,24 +1451,12 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
               {configTabs.length > 0 ? (
                 // 标签页布局
                 <Tabs value={selectedConfigTab} onValueChange={handleConfigTabChange}>
-                  {/* Portal 保留配置 Tabs 上下文，与左侧页面 Tabs 独立，并排显示。 */}
-                  {configTabToolbar && createPortal(
-                    <TabsList aria-label="配置分组" className="h-auto w-max justify-start">
-                      {configTabs.map((tab) => (
-                        <TabsTrigger key={tab.id} value={tab.id} className="shrink-0">
-                          {resolveLocalizedText(tab.title, language, tab.id, tab.i18n, 'title')}
-                          {tab.badge && (
-                            <Badge variant="secondary" className="ml-2 text-xs">
-                              {tab.badge}
-                            </Badge>
-                          )}
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>,
-                    configTabToolbar,
-                  )}
+                  {/* 移动端通过 Portal 并排显示，保留独立的配置 Tabs 上下文。 */}
+                  {isMobile
+                    ? configTabToolbar && createPortal(configTabList, configTabToolbar)
+                    : configTabList}
                   {configTabs.map((tab) => (
-                    <TabsContent key={tab.id} value={tab.id} className="mt-0 space-y-4">
+                    <TabsContent key={tab.id} value={tab.id} className="mt-0 space-y-4 sm:mt-4">
                       {tab.sections.map((sectionName) => {
                         const section = schema.sections[sectionName]
                         if (!section) return null
@@ -1463,7 +1467,7 @@ function PluginConfigEditor({ plugin, onBack, initialTab }: PluginConfigEditorPr
                             section={section}
                             config={config}
                             onChange={handleFieldChange}
-                            initiallyExpanded={schemaTabs.length === 0}
+                            initiallyExpanded={isMobile && schemaTabs.length === 0}
                           />
                         )
                       })}
