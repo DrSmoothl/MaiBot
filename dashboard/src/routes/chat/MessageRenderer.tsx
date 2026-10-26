@@ -7,6 +7,7 @@ import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
 import { useChatScroll } from './ChatScrollContext'
+import { FileAttachment } from './FileAttachment'
 import type {
   AtSegmentData,
   ChatMessage,
@@ -132,11 +133,7 @@ export function RenderMessageSegment({ segment }: { segment: MessageSegment }) {
       return <span className="text-muted-foreground">{t('chat.media.music')}</span>
 
     case 'file':
-      return (
-        <span className="text-muted-foreground">
-          {t('chat.media.file', { data: String(segment.data) })}
-        </span>
-      )
+      return <FileAttachment data={segment.data} />
 
     case 'reply': {
       const replyData = normalizeReplySegment(segment)

@@ -14,10 +14,12 @@ import {
 import { MOBILE_GLASS_CLASS } from '@/components/layout/mobile-glass'
 import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useFeatureFlags } from '@/hooks/use-feature-flags'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
 import { uploadWebuiUserAvatar } from '@/lib/avatar-url'
 import { chatWsClient } from '@/lib/chat-ws-client'
+import { uploadFile, type StoredFile } from '@/lib/files-api'
 import { getAllChatStreams } from '@/lib/chat-management-api'
 import {
   maisakaMonitorClient,
@@ -404,6 +406,10 @@ export function ChatPage() {
   // 通用状态
   const [inputValue, setInputValue] = useState('')
   const [selectedImages, setSelectedImages] = useState<ChatImageAttachment[]>([])
+  const { flags: featureFlags } = useFeatureFlags()
+  const filesEnabled = featureFlags?.files === true
+  const [filesByTab, setFilesByTab] = useState<Record<string, StoredFile[]>>({})
+  const [uploadingFiles, setUploadingFiles] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [userName, setUserName] = useState(getStoredUserName())
   const [userAvatarVersion, setUserAvatarVersion] = useState(getStoredUserAvatarVersion)
@@ -537,12 +543,12 @@ export function ChatPage() {
             type: 'user',
             content: data.content || '',
             message_type:
-              (data.images && data.images.length > 0) || (data.emojis && data.emojis.length > 0)
+              (data.images && data.images.length > 0) || (data.emojis && data.emojis.length > 0) || (data.files && data.files.length > 0)
                 ? 'rich'
                 : 'text',
             segments:
-              (data.images && data.images.length > 0) || (data.emojis && data.emojis.length > 0)
-                ? buildMessageSegments(data.raw_content || '', data.images || [], data.emojis || [])
+              (data.images && data.images.length > 0) || (data.emojis && data.emojis.length > 0) || (data.files && data.files.length > 0)
+                ? [...buildMessageSegments(data.raw_content || '', data.images || [], data.emojis || []), ...(data.files || []).map(file => ({ type: 'file' as const, data: file }))]
                 : undefined,
             timestamp: data.timestamp || Date.now() / 1000,
             sender: data.sender,
@@ -904,7 +910,8 @@ export function ChatPage() {
 
   // 发送消息到当前活动标签页
   const sendMessage = useCallback(async () => {
-    if ((!inputValue.trim() && selectedImages.length === 0) || !activeTab?.isConnected) {
+    const filesToSend = filesEnabled ? filesByTab[activeTabId] || [] : []
+    if (uploadingFiles || (!inputValue.trim() && selectedImages.length === 0 && filesToSend.length === 0) || !activeTab?.isConnected) {
       return
     }
 
@@ -931,9 +938,9 @@ export function ChatPage() {
       id: generateMessageId('user'),
       type: 'user',
       content: messageContent,
-      message_type: imagesToSend.length > 0 ? 'rich' : 'text',
+      message_type: imagesToSend.length > 0 || filesToSend.length > 0 ? 'rich' : 'text',
       segments:
-        imagesToSend.length > 0 ? buildMessageSegments(messageContent, imagesToSend) : undefined,
+        [...buildMessageSegments(messageContent, imagesToSend), ...filesToSend.map(file => ({ type: 'file' as const, data: file }))],
       timestamp: currentTimestamp,
       sender: {
         name: displayName,
@@ -944,10 +951,12 @@ export function ChatPage() {
 
     setInputValue('')
     setSelectedImages([])
+    setFilesByTab(previous => ({ ...previous, [activeTabId]: [] }))
 
     try {
       if (setupTrial && activeTabId === 'webui-default') trialMessagePending.current = true
       await chatWsClient.sendMessage(activeTabId, messageContent, displayName, {
+        files: filesToSend.map(file => ({ file_ref: file.file_ref, name: file.name })),
         images: imagesToSend.map((image) => ({
           name: image.name,
           mime_type: image.mime_type,
@@ -973,7 +982,23 @@ export function ChatPage() {
         variant: 'destructive',
       })
     }
-  }, [activeTab, activeTabId, addMessageToTab, inputValue, selectedImages, setupTrial, t, toast, userName])
+  }, [activeTab, activeTabId, addMessageToTab, inputValue, selectedImages, filesByTab, filesEnabled, uploadingFiles, setupTrial, t, toast, userName])
+
+  const handleAddFiles = async (files: FileList) => {
+    if (!filesEnabled) return
+    const sessionId = activeTab?.sessionInfo.session_id
+    if (!sessionId || uploadingFiles) return
+    const tabId = activeTabId
+    setUploadingFiles(true)
+    try {
+      for (const file of Array.from(files).slice(0, Math.max(0, 6 - (filesByTab[tabId]?.length || 0)))) {
+        const stored = await uploadFile(file, sessionId, true)
+        setFilesByTab(previous => ({ ...previous, [tabId]: [...(previous[tabId] || []), stored] }))
+      }
+    } catch (e) {
+      toast({ title: t('files.uploadFailed'), description: String(e), variant: 'destructive' })
+    } finally { setUploadingFiles(false) }
+  }
 
   const sendUserEmoji = useCallback(
     async (item: UserEmojiItem) => {
@@ -1350,13 +1375,16 @@ export function ChatPage() {
             />
 
             <ChatComposer
+              files={filesEnabled ? filesByTab[activeTabId] || [] : []}
+              onAddFiles={filesEnabled ? handleAddFiles : undefined}
+              onRemoveFile={ref => setFilesByTab(previous => ({ ...previous, [activeTabId]: (previous[activeTabId] || []).filter(file => file.file_ref !== ref) }))}
               value={inputValue}
               onChange={setInputValue}
               onAddImages={handleAddImages}
               onRemoveImage={handleRemoveImage}
               onSendEmoji={sendUserEmoji}
               onSend={() => void sendMessage()}
-              disabled={!activeTab?.isConnected}
+              disabled={!activeTab?.isConnected || uploadingFiles}
               images={selectedImages}
               isConnected={!!activeTab?.isConnected}
               userId={userId}

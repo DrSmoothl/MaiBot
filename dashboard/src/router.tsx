@@ -206,6 +206,14 @@ const computerRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/computer'), 'ComputerPage'),
 })
 
+const filesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/files',
+  beforeLoad: () => {
+    throw redirect({ to: '/data-transfer', search: { tab: 'files' }, replace: true })
+  },
+})
+
 const agentRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/agent',
@@ -327,10 +335,13 @@ const mcpSettingsRoute = createRoute({
   },
 })
 
-// 数据迁移与备份路由
+// 数据管理：迁移备份与文件管理共用入口。
 const dataTransferRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/data-transfer',
+  validateSearch: (search: Record<string, unknown>): { tab?: 'transfer' | 'files' } => ({
+    tab: search.tab === 'files' ? 'files' : undefined,
+  }),
   component: lazyRouteComponent(() => import('./routes/data-transfer'), 'DataTransferPage'),
 })
 
@@ -416,6 +427,7 @@ const routeTree = rootRoute.addChildren([
     plannerMonitorRoute,
     agentRoute,
     computerRoute,
+    filesRoute,
     chatManagementRoute,
     chatRoute,
     manageRoute,

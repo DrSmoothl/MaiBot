@@ -167,6 +167,7 @@ export interface WsMessage {
   }
   images?: ChatIncomingImage[]
   emojis?: ChatIncomingImage[]
+  files?: Array<{ file_ref: string; name: string; size: number }>
   // 历史消息列表（用于 type: 'history'）
   messages?: Array<{
     id?: string

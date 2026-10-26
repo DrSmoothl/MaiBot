@@ -1722,5 +1722,49 @@
     "mobileTextEmpty": "未入力",
     "mobileTextCancel": "キャンセル",
     "mobileTextDone": "完了"
+  },
+  "dataManagement": {
+    "transfer": "バックアップとキャッシュ"
+  },
+  "files": {
+    "disabled": "ファイル機能は無効です。「機能」設定で有効にしてください。",
+    "openSettings": "機能設定を開く",
+    "title": "ファイル",
+    "description": "ファイルはチャットに紐づけ、必要時にダウンロードします。テキストを閲覧でき、アップロード・生成した原本は手動削除まで保持します。",
+    "storage": "使用量",
+    "reserved": "予約済み",
+    "maximum": "ファイル上限",
+    "chat": "チャット",
+    "allChats": "すべてのチャット",
+    "refresh": "更新",
+    "upload": "ファイルをアップロード",
+    "chooseChat": "アップロード先のチャットを選択してください。",
+    "download": "ダウンロード",
+    "read": "テキストを読む",
+    "sendTo": "チャットに送信…",
+    "confirmSend": "「{{name}}」にファイルを送信しますか？",
+    "clearCache": "キャッシュ削除",
+    "delete": "削除",
+    "confirmDelete": "「{{name}}」を削除しますか？ローカルの原本は復元できません。",
+    "empty": "添付ファイルはありません",
+    "previous": "前へ",
+    "next": "次へ",
+    "encoding": "文字コード",
+    "close": "閉じる",
+    "remote": "プラットフォームキャッシュ",
+    "original": "ローカル原本",
+    "removeAttachment": "送信待ちから除く（原本は保持）",
+    "uploadFailed": "アップロード失敗",
+    "state": {
+      "remote": "未ダウンロード",
+      "ready": "準備完了",
+      "failed": "失敗",
+      "uploading": "アップロード中",
+      "downloading": "ダウンロード中"
+    },
+    "delivery": {
+      "sent": "送信済み",
+      "unknown": "配信結果が不明です。再送前にチャットを確認してください。"
+    }
   }
 }
