@@ -35,6 +35,7 @@ import { checkAuthStatus, getSetupStatus } from '@/lib/auth'
 import { authApi } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { APP_FULL_NAME } from '@/lib/version'
+import { readMarketInstall } from '@/lib/plugin-market-navigation'
 
 function createGearPath(teeth: number, outerRadius: number, rootRadius: number) {
   const toothAngle = (Math.PI * 2) / teeth
@@ -78,8 +79,9 @@ function AuthRetroGears() {
   )
 }
 
-function resolvePostAuthTarget(): '/' | '/chat/embed' {
+function resolvePostAuthTarget(): '/' | '/chat/embed' | '/plugins' {
   if (typeof window === 'undefined') return '/'
+  if (readMarketInstall()) return '/plugins'
   return new URLSearchParams(window.location.search).get('redirect') === '/chat/embed'
     ? '/chat/embed'
     : '/'

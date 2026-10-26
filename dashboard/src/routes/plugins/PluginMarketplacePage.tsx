@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { ThinkingIllustration } from '@/components/ui/thinking-illustration'
-import { AlertCircle, AlertTriangle, ArrowUpDown, Filter, Info, Loader2, Search, Wrench } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowUpDown, ExternalLink, Filter, Info, Loader2, Search, Wrench } from 'lucide-react'
 
 import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
@@ -36,7 +36,7 @@ import {
   type PluginVoteState,
 } from '@/lib/plugin-stats'
 import { mergeInstalledPluginInfo } from '@/lib/plugin-info'
-import { PLUGIN_MARKET_VIEW_STATE_KEY } from '@/lib/plugin-market-navigation'
+import { clearMarketInstall, publicMarketUrl, readMarketInstall, PLUGIN_MARKET_VIEW_STATE_KEY } from '@/lib/plugin-market-navigation'
 
 import { PluginInstallDialog, type PluginInstallDialogHandle } from './PluginInstallDialog'
 import { MarketplaceTab } from './MarketplaceTab'
@@ -264,6 +264,43 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
   const handleDetail = useCallback((plugin: PluginInfo) => setDetailPluginId(plugin.id), [setDetailPluginId])
 
   const { toast } = useToast()
+  useEffect(() => {
+    if (loading || error || !maimaiVersion || !gitStatus) return
+    const intent = readMarketInstall()
+    if (!intent) return
+    clearMarketInstall()
+    // 外部链接只打开现有确认流程；插件与版本必须来自本机获取的市场目录。
+    const target = plugins.find(plugin => plugin.id === intent.pluginId || plugin.manifest?.id === intent.pluginId)
+    void navigate({ to: '/plugins', search: { pluginId: target?.id }, replace: true })
+    if (!target) {
+      toast({ title: '未找到插件', description: '当前市场目录中没有该插件，请关闭兼容筛选后查看或刷新目录。', variant: 'destructive' })
+      return
+    }
+    if (target.installed) {
+      setDetailPluginId(target.id)
+      toast({ title: '插件已安装', description: '可在详情中查看版本、更新或管理插件。' })
+      return
+    }
+    if (!gitStatus.installed) {
+      toast({ title: '无法安装', description: '请先在 MaiBot 运行环境安装 Git。', variant: 'destructive' })
+      return
+    }
+    if (target.releases?.mode !== 'releases' && (
+      (Number(target.manifest.manifest_version ?? 1) <= 1 && maimaiVersion.version_major >= 1) ||
+      (target.manifest.host_application && !isPluginCompatible(target.manifest.host_application.min_version, target.manifest.host_application.max_version, maimaiVersion))
+    )) {
+      toast({ title: '插件不兼容', description: '该插件清单与当前 MaiBot 版本不兼容。', variant: 'destructive' })
+      return
+    }
+    const release = target.releases?.versions.find(version => version.version === intent.version && version.compatible && !version.yanked)
+    if (intent.version && !release) {
+      toast({ title: '所选版本不可安装', description: '版本未收录、已撤回或与此 MaiBot 不兼容，请重新选择。', variant: 'destructive' })
+      return
+    }
+    installDialogRef.current?.open(release && target.releases ? {
+      ...target, releases: { ...target.releases, recommended_version: release.version },
+    } : target)
+  }, [loading, error, maimaiVersion, gitStatus, plugins, navigate, toast, setDetailPluginId, routeDetailPluginId])
   const isFetchingMarketplace = marketplaceProgress?.stage === 'loading'
     && marketplaceProgress.operation === 'fetch'
 
@@ -979,6 +1016,11 @@ function PluginMarketplacePageContent({ embedded }: Required<PluginMarketplacePa
 
             {/* 兼容筛选和设置组成横向控制区，开关与文字垂直居中。 */}
             <div data-plugin-market-controls="true" className="flex shrink-0 items-center justify-end gap-4 max-sm:border-t max-sm:pt-3 sm:ml-auto sm:border-l sm:pl-5">
+              <Button variant="outline" asChild>
+                <a href={publicMarketUrl(window.location.origin)} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-4 w-4" />前往站点
+                </a>
+              </Button>
               <div data-plugin-market-compat="true" className="flex items-center gap-3">
                 <label
                   htmlFor="compatible-only-plugins"

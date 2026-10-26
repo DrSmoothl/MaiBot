@@ -11,6 +11,7 @@ import { Layout } from './components/layout'
 import { RoutePendingFallback } from './components/route-pending-fallback'
 import { checkAuth } from './hooks/use-auth'
 import { RouteErrorBoundary } from './components/error-boundary'
+import { rememberMarketInstall } from './lib/plugin-market-navigation'
 
 // Root 路由
 const rootRoute = createRootRoute({
@@ -269,8 +270,11 @@ const pluginsEmbedRoute = createRoute({
 const pluginsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/plugins',
-  validateSearch: (search: Record<string, unknown>): { pluginId?: string } => ({
+  beforeLoad: ({ search }) => { rememberMarketInstall(search) },
+  validateSearch: (search: Record<string, unknown>): { pluginId?: string; installPluginId?: string; installVersion?: string } => ({
     pluginId: typeof search.pluginId === 'string' ? search.pluginId.trim() || undefined : undefined,
+    installPluginId: typeof search.installPluginId === 'string' && /^[\p{L}\p{N}_.-]{1,256}$/u.test(search.installPluginId) ? search.installPluginId : undefined,
+    installVersion: typeof search.installVersion === 'string' && /^[\w.+-]{1,80}$/.test(search.installVersion) ? search.installVersion : undefined,
   }),
   component: lazyRouteComponent(
     () => import('./routes/plugins/PluginMarketplacePage'),
