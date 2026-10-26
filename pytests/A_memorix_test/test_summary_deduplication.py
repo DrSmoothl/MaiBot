@@ -23,8 +23,11 @@ def store(tmp_path):
 
 def importer_for(store):
     return SummaryImporter(
-        vector_store=None, graph_store=None, metadata_store=store,
-        embedding_manager=None, plugin_config={},
+        vector_store=None,
+        graph_store=None,
+        metadata_store=store,
+        embedding_manager=None,
+        plugin_config={},
     )
 
 
@@ -43,10 +46,9 @@ async def test_different_window_ids_still_serialize_same_stream(external_ids):
         active -= 1
 
     importer._import_from_stream_unlocked = generate
-    await asyncio.gather(*[
-        importer.import_from_stream("chat-a", metadata={"external_id": value})
-        for value in external_ids
-    ])
+    await asyncio.gather(
+        *[importer.import_from_stream("chat-a", metadata={"external_id": value}) for value in external_ids]
+    )
     assert maximum == 1
 
 
@@ -55,12 +57,15 @@ def test_shared_content_keeps_window_origin_on_retry_and_review(store):
     repeated = store.add_paragraph(content="项目统一在周五验收。", source="chat_summary:chat-b")
     assert paragraph == repeated
     store.upsert_external_memory_ref(
-        external_id="window-b", paragraph_hash=paragraph, source_type="chat_summary",
+        external_id="window-b",
+        paragraph_hash=paragraph,
+        source_type="chat_summary",
         metadata={"chat_id": "chat-b"},
     )
     importer = importer_for(store)
     result = importer._existing_summary_result(
-        stream_id="chat-b", metadata={"external_id": "window-b", "trigger_message_count": 40},
+        stream_id="chat-b",
+        metadata={"external_id": "window-b", "trigger_message_count": 40},
     )
     assert result.success and result.paragraph_hash == paragraph
     assert store.get_summary_checkpoint_count("chat-b") == 40
@@ -73,12 +78,15 @@ def test_shared_content_keeps_window_origin_on_retry_and_review(store):
 def test_checkpoint_for_nonempty_window_keeps_paragraph_on_retry(store):
     paragraph = store.add_paragraph(content="验收已经完成。", source="chat_summary:chat-a")
     store.upsert_external_memory_ref(
-        external_id="window-a", paragraph_hash=paragraph, source_type="chat_summary",
+        external_id="window-a",
+        paragraph_hash=paragraph,
+        source_type="chat_summary",
         metadata={"chat_id": "chat-a"},
     )
     store.record_summary_checkpoint(external_id="window-a", chat_id="chat-a", trigger_message_count=60)
     result = importer_for(store)._existing_summary_result(
-        stream_id="chat-a", metadata={"external_id": "window-a"},
+        stream_id="chat-a",
+        metadata={"external_id": "window-a"},
     )
     assert result.paragraph_hash == paragraph
     assert not result.skipped
@@ -87,19 +95,33 @@ def test_checkpoint_for_nonempty_window_keeps_paragraph_on_retry(store):
 @pytest.mark.asyncio
 async def test_restart_uses_highest_cursor_even_if_old_content_reappears(store, monkeypatch):
     first = store.add_paragraph(
-        content="部署安排在周五。", source="chat_summary:chat-a", metadata={"trigger_message_count": 10},
+        content="部署安排在周五。",
+        source="chat_summary:chat-a",
+        metadata={"trigger_message_count": 10},
     )
     store.add_paragraph(
-        content="测试已经通过。", source="chat_summary:chat-a", metadata={"trigger_message_count": 20},
+        content="测试已经通过。",
+        source="chat_summary:chat-a",
+        metadata={"trigger_message_count": 20},
     )
-    assert store.add_paragraph(
-        content="部署安排在周五。", source="chat_summary:chat-a", metadata={"trigger_message_count": 30},
-    ) == first
-    monkeypatch.setattr(memory_service, "a_memorix_host_service", SimpleNamespace(
-        _ensure_kernel=AsyncMock(return_value=SimpleNamespace(metadata_store=store)),
-    ))
+    assert (
+        store.add_paragraph(
+            content="部署安排在周五。",
+            source="chat_summary:chat-a",
+            metadata={"trigger_message_count": 30},
+        )
+        == first
+    )
+    monkeypatch.setattr(
+        memory_service,
+        "a_memorix_host_service",
+        SimpleNamespace(
+            _ensure_kernel=AsyncMock(return_value=SimpleNamespace(metadata_store=store)),
+        ),
+    )
     restored = await ChatSummaryWritebackService()._load_last_trigger_message_count(
-        session_id="chat-a", total_message_count=35,
+        session_id="chat-a",
+        total_message_count=35,
     )
     assert restored == 30
 
@@ -113,28 +135,36 @@ def test_old_fact_outside_review_window_is_not_available_for_semantic_dedup(stor
     assert "青轴键盘" not in review
     assert "游泳课" in review and "航班" in review
     assert store.add_paragraph(content="甲一直在用青轴的键盘。", source="chat_summary:chat-a") != store.add_paragraph(
-        content="甲长期使用青轴键盘。", source="chat_summary:chat-a",
+        content="甲长期使用青轴键盘。",
+        source="chat_summary:chat-a",
     )
 
 
 @pytest.mark.asyncio
 async def test_shared_paragraph_does_not_replace_another_chats_cursor(store, monkeypatch):
     store.add_paragraph(
-        content="项目已完成。", source="chat_summary:chat-a",
+        content="项目已完成。",
+        source="chat_summary:chat-a",
         metadata={"chat_id": "chat-a", "trigger_message_count": 10},
     )
     store.record_summary_checkpoint(external_id="a-10", chat_id="chat-a", trigger_message_count=10)
     store.add_paragraph(
-        content="项目已完成。", source="chat_summary:chat-b",
+        content="项目已完成。",
+        source="chat_summary:chat-b",
         metadata={"chat_id": "chat-b", "trigger_message_count": 30},
     )
     # 重新打开数据库并新建服务，验证进度来自各窗口的持久记录。
     store.close()
     store.connect()
-    monkeypatch.setattr(memory_service, "a_memorix_host_service", SimpleNamespace(
-        _ensure_kernel=AsyncMock(return_value=SimpleNamespace(metadata_store=store)),
-    ))
+    monkeypatch.setattr(
+        memory_service,
+        "a_memorix_host_service",
+        SimpleNamespace(
+            _ensure_kernel=AsyncMock(return_value=SimpleNamespace(metadata_store=store)),
+        ),
+    )
     restored = await ChatSummaryWritebackService()._load_last_trigger_message_count(
-        session_id="chat-a", total_message_count=35,
+        session_id="chat-a",
+        total_message_count=35,
     )
     assert restored == 10

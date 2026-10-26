@@ -237,9 +237,17 @@ async def test_text_to_stream_triggers_real_chat_summary_writeback(
 
     async def _fake_generate(request: Any) -> Any:
         if request.request_type == "A_Memorix.FactDeduplication":
-            return SimpleNamespace(success=True, completion=SimpleNamespace(response=json.dumps({
-                "decisions": [{"fact_id": "f1", "action": "keep"}], "relation_support": {"0": ["f1"]},
-            })))
+            return SimpleNamespace(
+                success=True,
+                completion=SimpleNamespace(
+                    response=json.dumps(
+                        {
+                            "decisions": [{"fact_id": "f1", "action": "keep"}],
+                            "relation_support": {"0": ["f1"]},
+                        }
+                    )
+                ),
+            )
         captured_prompts.append(str(getattr(request, "prompt", "") or ""))
         return SimpleNamespace(
             success=True,
@@ -389,7 +397,8 @@ async def test_text_to_stream_triggers_real_chat_summary_writeback(
 
         # 另一聊天流产生完全相同的正文，段落可复用，但窗口归属和游标必须独立。
         second_message = _build_incoming_message(
-            session_id="second-session", user_id="target-user",
+            session_id="second-session",
+            user_id="target-user",
             text="我最近买了一条绿色围巾。",
             timestamp=datetime.fromtimestamp(fixed_send_timestamp) - timedelta(seconds=1),
         )
@@ -399,7 +408,9 @@ async def test_text_to_stream_triggers_real_chat_summary_writeback(
 
         async def summarize_second():
             return await memory_service_module.memory_service.ingest_summary(
-                external_id="second-window", chat_id="second-session", text="",
+                external_id="second-window",
+                chat_id="second-session",
+                text="",
                 metadata={"generate_from_chat": True, "trigger_message_count": 1},
                 respect_filter=False,
             )
@@ -407,12 +418,19 @@ async def test_text_to_stream_triggers_real_chat_summary_writeback(
         second_results = await asyncio.gather(summarize_second(), summarize_second())
         assert all(result.success for result in second_results)
         assert len(captured_prompts) == 2
-        assert kernel.metadata_store.get_external_memory_ref("second-window")["paragraph_hash"] == stored_summary["hash"]
+        assert (
+            kernel.metadata_store.get_external_memory_ref("second-window")["paragraph_hash"] == stored_summary["hash"]
+        )
         assert kernel.metadata_store.get_summary_checkpoint_count("second-session") == 1
         assert "绿色围巾" in kernel.summary_importer._build_previous_summary_context("second-session", limit=2)
         fresh_service = memory_flow_service_module.ChatSummaryWritebackService()
-        assert await fresh_service._load_last_trigger_message_count(session_id="test-session", total_message_count=2) == 2
-        assert await fresh_service._load_last_trigger_message_count(session_id="second-session", total_message_count=1) == 1
+        assert (
+            await fresh_service._load_last_trigger_message_count(session_id="test-session", total_message_count=2) == 2
+        )
+        assert (
+            await fresh_service._load_last_trigger_message_count(session_id="second-session", total_message_count=1)
+            == 1
+        )
     finally:
         await service.shutdown()
         await kernel.shutdown()

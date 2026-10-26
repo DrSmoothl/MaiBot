@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Dict, List, Optional
 
 import asyncio
 import json
@@ -1017,15 +1017,29 @@ class MemoryAutomationService:
     async def on_incoming_message(self, message: Any) -> None:
         if not self._started:
             await self.start()
-        await self._observe_sender_identity(message)
-        await self.image_writeback.enqueue(message)
+        await self._run_message_tasks(self._observe_sender_identity(message), self.image_writeback.enqueue(message))
 
     async def on_message_sent(self, message: Any) -> None:
         if not self._started:
             await self.start()
-        await self._observe_sender_identity(message)
-        await self.fact_writeback.enqueue(message)
-        await self.chat_summary_writeback.enqueue(message)
+        await self._run_message_tasks(
+            self._observe_sender_identity(message),
+            self.fact_writeback.enqueue(message),
+            self.chat_summary_writeback.enqueue(message),
+        )
+
+    @staticmethod
+    async def _run_message_tasks(*tasks: Awaitable[None]) -> None:
+        """独立完成身份登记和各队列入队，再向调用方完整报告失败。"""
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        failures: List[Exception] = []
+        for result in results:
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            if isinstance(result, Exception):
+                failures.append(result)
+        if failures:
+            raise ExceptionGroup("记忆身份登记或写回入队失败", failures)
 
     @staticmethod
     async def _observe_sender_identity(message: Any) -> None:
@@ -1034,12 +1048,28 @@ class MemoryAutomationService:
             return
         user = message.message_info.user_info
         group = message.message_info.group_info
-        result = await memory_service.profile_admin(
-            action="observe_identity", platform=message.platform, user_id=user.user_id,
-            aliases=[user.user_nickname, user.user_cardname or ""], group_id=group.group_id if group else "",
-        )
-        if not result.get("success"):
-            raise RuntimeError(f"登记发送者身份失败: {result.get('error', '')}")
+        if not message.platform.strip() or not user.user_id.strip():
+            raise ValueError("消息缺少真实的发送者 platform/user_id")
+        identity = {
+            "platform": message.platform,
+            "user_id": user.user_id,
+            "aliases": [user.user_nickname, user.user_cardname or ""],
+            "group_id": group.group_id if group else "",
+        }
+        # 短暂的内核初始化或存储故障可以重试；原始 ID 和本次昵称始终来自同一条消息。
+        for attempt in range(3):
+            try:
+                result = await memory_service.profile_admin(action="observe_identity", **identity)
+                if not result.get("success"):
+                    detail = result.get("error") or result.get("message") or result.get("reason")
+                    raise RuntimeError(f"登记发送者身份失败: {detail}")
+                return
+            except Exception:
+                if attempt == 2:
+                    raise
+                delay = 0.1 * (attempt + 1)
+                logger.warning(f"登记发送者身份失败，{delay:.1f} 秒后重试", exc_info=True)
+                await asyncio.sleep(delay)
 
 
 memory_automation_service = MemoryAutomationService()

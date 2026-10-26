@@ -106,7 +106,8 @@ async def _resolve_person_id(
     clean_person_name = str(person_name or "").strip()
     if clean_person_name:
         result = await memory_service.profile_admin(
-            action="resolve_identity", identifier=clean_person_name,
+            action="resolve_identity",
+            identifier=clean_person_name,
         )
         if not result.get("success"):
             raise RuntimeError(f"人物身份解析失败: {result.get('error', '')}")
@@ -231,7 +232,8 @@ async def handle_tool(
         return tool_ctx.build_failure_result(invocation.tool_name, str(exc))
     if person_name and not person_id:
         return tool_ctx.build_failure_result(
-            invocation.tool_name, f"无法唯一确认人物 {person_name}，请使用明确的人物 ID 或不重名的称呼。",
+            invocation.tool_name,
+            f"无法唯一确认人物 {person_name}，请使用明确的人物 ID 或不重名的称呼。",
         )
     respect_filter = bool(invocation.arguments.get("respect_filter", True))
     fallback_applied = False

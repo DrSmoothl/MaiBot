@@ -11,13 +11,17 @@ from sqlmodel import Session, SQLModel, create_engine
 import pytest
 
 from src.A_memorix.core.storage.metadata_store import MetadataStore
-from src.A_memorix.core.utils import summary_identity as identity_module
 from src.A_memorix.core.utils.summary_identity import SummaryIdentityContext
 from src.A_memorix.core.utils.person_profile_service import PersonProfileService
 from src.chat.message_receive.message import MsgIDMapping, SessionMessage
 from src.common import message_repository
 from src.common.data_models.mai_message_data_model import GroupInfo, MessageInfo, UserInfo
-from src.common.data_models.message_component_data_model import AtComponent, MessageSequence, ReplyComponent, TextComponent
+from src.common.data_models.message_component_data_model import (
+    AtComponent,
+    MessageSequence,
+    ReplyComponent,
+    TextComponent,
+)
 from src.common.database.database_model import PersonInfo
 from src.person_info import person_info
 
@@ -35,7 +39,7 @@ def identity_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             if auto_commit:
                 session.commit()
 
-    monkeypatch.setattr(identity_module, "get_db_session", session_scope)
+    monkeypatch.setattr("src.common.database.database.get_db_session", session_scope)
     monkeypatch.setattr(message_repository, "get_db_session", session_scope)
     monkeypatch.setattr(person_info, "get_db_session", session_scope)
     monkeypatch.setattr("src.chat.message_receive.message.get_db_session", session_scope)
@@ -50,7 +54,9 @@ def identity_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def message(user_id, name, text, *, message_id="m1", timestamp=None, components=None, platform="qq"):
-    item = SessionMessage(message_id=message_id, timestamp=timestamp or datetime(2026, 10, 22, 19, 0), platform=platform)
+    item = SessionMessage(
+        message_id=message_id, timestamp=timestamp or datetime(2026, 10, 22, 19, 0), platform=platform
+    )
     item.session_id = "existing-real-session"
     item.message_info = MessageInfo(user_info=UserInfo(user_id, name, name), group_info=GroupInfo("g1", "测试群"))
     item.raw_message = MessageSequence(components if components is not None else [TextComponent(text)])
@@ -76,7 +82,9 @@ def test_changed_names_keep_id_and_canonical_name_across_reopen(identity_store):
 
 def test_same_name_different_ids_never_merge(identity_store):
     store, _ = identity_store
-    context = SummaryIdentityContext(store, [message("1001", "小明", "我住杭州"), message("1002", "小明", "我住成都", message_id="m2")])
+    context = SummaryIdentityContext(
+        store, [message("1001", "小明", "我住杭州"), message("1002", "小明", "我住成都", message_id="m2")]
+    )
     body, catalog = context.render()
     people = json.loads(catalog)
     assert "[U1]" in body and "[U2]" in body
@@ -87,17 +95,22 @@ def test_same_name_different_ids_never_merge(identity_store):
 
 def test_same_raw_user_id_on_different_platforms_is_separate(identity_store):
     store, _ = identity_store
-    context = SummaryIdentityContext(store, [message("1001", "甲", "杭州"), message("1001", "甲", "成都", platform="telegram")])
+    context = SummaryIdentityContext(
+        store, [message("1001", "甲", "杭州"), message("1001", "甲", "成都", platform="telegram")]
+    )
     context.render()
     assert len(context.references) == 2
 
 
 def test_adapter_platform_prefix_matches_existing_person_id_semantics(identity_store):
     store, _ = identity_store
-    context = SummaryIdentityContext(store, [
-        message("1001", "旧昵称", "杭州", platform="adapter-qq"),
-        message("1001", "新昵称", "成都", platform="qq", message_id="m2"),
-    ])
+    context = SummaryIdentityContext(
+        store,
+        [
+            message("1001", "旧昵称", "杭州", platform="adapter-qq"),
+            message("1001", "新昵称", "成都", platform="qq", message_id="m2"),
+        ],
+    )
     context.render()
     assert len(context.references) == 1
     assert context.identities["[U1]"]["platform"] == "qq"
@@ -105,11 +118,14 @@ def test_adapter_platform_prefix_matches_existing_person_id_semantics(identity_s
 
 def test_dates_are_grouped_and_midnight_is_preserved(identity_store):
     store, _ = identity_store
-    context = SummaryIdentityContext(store, [
-        message("1001", "甲", "一", timestamp=datetime(2026, 10, 22, 23, 58)),
-        message("1001", "甲", "二", timestamp=datetime(2026, 10, 22, 23, 59), message_id="m2"),
-        message("1001", "甲", "三", timestamp=datetime(2026, 10, 23, 0, 1), message_id="m3"),
-    ])
+    context = SummaryIdentityContext(
+        store,
+        [
+            message("1001", "甲", "一", timestamp=datetime(2026, 10, 22, 23, 58)),
+            message("1001", "甲", "二", timestamp=datetime(2026, 10, 22, 23, 59), message_id="m2"),
+            message("1001", "甲", "三", timestamp=datetime(2026, 10, 23, 0, 1), message_id="m3"),
+        ],
+    )
     body, _ = context.render()
     assert body.count("日期：2026-10-22") == 1
     assert body.count("日期：2026-10-23") == 1
@@ -121,7 +137,12 @@ def test_reply_outside_window_is_bound_to_original_author(identity_store):
     original = message("1001", "张三", "我住杭州", message_id="original")
     with sessions() as session:
         session.add(original.to_db_instance())
-    response = message("1002", "李四", "我住杭州 @张三 收到", components=[ReplyComponent("original"), TextComponent("收到，我已经买好去深圳的车票。")])
+    response = message(
+        "1002",
+        "李四",
+        "我住杭州 @张三 收到",
+        components=[ReplyComponent("original"), TextComponent("收到，我已经买好去深圳的车票。")],
+    )
     context = SummaryIdentityContext(store, [response])
     body, _ = context.render()
     assert '[U1]："收到，我已经买好去深圳的车票。"' in body
@@ -185,7 +206,9 @@ async def test_reply_format_is_stable_after_reprocessing():
 
 def test_real_id_takes_precedence_over_conflicting_name(monkeypatch):
     monkeypatch.setattr(person_info, "get_person_id_by_person_name", lambda name: "wrong-person")
-    assert person_info.resolve_person_id_for_memory(platform="qq", user_id="1001", person_name="同名") == person_info.get_person_id("qq", "1001")
+    assert person_info.resolve_person_id_for_memory(
+        platform="qq", user_id="1001", person_name="同名"
+    ) == person_info.get_person_id("qq", "1001")
 
 
 def test_identity_schema_migrates_from_27(identity_store):
@@ -212,14 +235,22 @@ def test_alias_resolver_does_not_pick_first_same_name_or_match_substrings(identi
     store, sessions = identity_store
     with sessions() as session:
         for user_id in ["1001", "1002"]:
-            session.add(PersonInfo(
-                person_id=person_info.get_person_id("qq", user_id), platform="qq", user_id=user_id,
-                person_name="同名", user_nickname="同名", group_cardname='[{"group_id":"g1","group_cardname":"完整群名片"}]',
-            ))
+            session.add(
+                PersonInfo(
+                    person_id=person_info.get_person_id("qq", user_id),
+                    platform="qq",
+                    user_id=user_id,
+                    person_name="同名",
+                    user_nickname="同名",
+                    group_cardname='[{"group_id":"g1","group_cardname":"完整群名片"}]',
+                )
+            )
     assert PersonProfileService.resolve_person_id("同名", metadata_store=store) == ""
     assert PersonProfileService.resolve_person_id("群名片", metadata_store=store) == ""
     SummaryIdentityContext(store, [message("1001", "曾用名", "杭州")]).render()
-    assert PersonProfileService.resolve_person_id("曾用名", metadata_store=store) == person_info.get_person_id("qq", "1001")
+    assert PersonProfileService.resolve_person_id("曾用名", metadata_store=store) == person_info.get_person_id(
+        "qq", "1001"
+    )
     SummaryIdentityContext(store, [message("1002", "曾用名", "成都")]).render()
     assert PersonProfileService.resolve_person_id("曾用名", metadata_store=store) == ""
 
@@ -238,8 +269,13 @@ def test_alias_history_stays_outside_prompt_unless_mentioned(identity_store):
 def test_quote_on_previous_day_keeps_original_date(identity_store):
     store, _ = identity_store
     original = message("1001", "甲", "明天去杭州", timestamp=datetime(2026, 10, 21, 23, 30), message_id="old")
-    response = message("1002", "乙", "收到", timestamp=datetime(2026, 10, 22, 0, 30),
-                       components=[TextComponent("收到"), ReplyComponent("old")])
+    response = message(
+        "1002",
+        "乙",
+        "收到",
+        timestamp=datetime(2026, 10, 22, 0, 30),
+        components=[TextComponent("收到"), ReplyComponent("old")],
+    )
     body, _ = SummaryIdentityContext(store, [original, response]).render()
     assert '引用 [U1] [原消息日期：2026-10-21]："明天去杭州"' in body
 
@@ -247,12 +283,15 @@ def test_quote_on_previous_day_keeps_original_date(identity_store):
 def test_cached_quote_survives_database_round_trip(identity_store):
     store, sessions = identity_store
     reply = ReplyComponent(
-        "unavailable-original", target_message_content="你确认下个月去深圳参加机器人展吗？",
-        target_message_sender_id="1002", target_message_sender_nickname="张三",
+        "unavailable-original",
+        target_message_content="你确认下个月去深圳参加机器人展吗？",
+        target_message_sender_id="1002",
+        target_message_sender_nickname="张三",
         target_message_sender_cardname="张老师",
     )
-    response = message("1001", "李四", "是的，我已经买好票了。",
-                       components=[reply, TextComponent("是的，我已经买好票了。")])
+    response = message(
+        "1001", "李四", "是的，我已经买好票了。", components=[reply, TextComponent("是的，我已经买好票了。")]
+    )
     with sessions() as session:
         stored = response.to_db_instance()
         session.add(stored)
@@ -276,8 +315,10 @@ def test_legacy_quote_without_cached_fields_still_loads(identity_store):
 
 def test_bot_identity_uses_configured_account_id(identity_store, monkeypatch):
     store, _ = identity_store
-    monkeypatch.setattr(identity_module, "is_bot_self", lambda platform, user_id: user_id == "bot-id")
-    _, catalog = SummaryIdentityContext(store, [message("bot-id", "同名", "我住杭州"), message("1001", "同名", "我住成都")]).render()
+    monkeypatch.setattr("src.chat.utils.utils.is_bot_self", lambda platform, user_id: user_id == "bot-id")
+    _, catalog = SummaryIdentityContext(
+        store, [message("bot-id", "同名", "我住杭州"), message("1001", "同名", "我住成都")]
+    ).render()
     assert [person["is_bot"] for person in json.loads(catalog)] == [True, False]
 
 
@@ -301,12 +342,18 @@ async def test_sender_identity_registration_uses_sender_id_not_group_session(mon
 
     register = AsyncMock(return_value={"success": True})
     monkeypatch.setattr(flow.memory_service, "profile_admin", register)
-    monkeypatch.setattr(flow, "global_config", SimpleNamespace(a_memorix=SimpleNamespace(plugin=SimpleNamespace(enabled=True))))
+    monkeypatch.setattr(
+        flow, "global_config", SimpleNamespace(a_memorix=SimpleNamespace(plugin=SimpleNamespace(enabled=True)))
+    )
     item = message("1001", "当前名", "我住杭州")
     item.session = SimpleNamespace(user_id=None, group_id="g1")
     await flow.MemoryAutomationService._observe_sender_identity(item)
     register.assert_awaited_once_with(
-        action="observe_identity", platform="qq", user_id="1001", aliases=["当前名", "当前名"], group_id="g1",
+        action="observe_identity",
+        platform="qq",
+        user_id="1001",
+        aliases=["当前名", "当前名"],
+        group_id="g1",
     )
 
 
@@ -337,30 +384,53 @@ async def test_host_resolves_historical_alias_and_rejects_ambiguous_name(identit
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy_template", [False, True])
-async def test_importer_rejects_invalid_identity_contract_before_any_paragraph_write(identity_store, monkeypatch, legacy_template):
+async def test_importer_rejects_invalid_identity_contract_before_any_paragraph_write(
+    identity_store, monkeypatch, legacy_template
+):
     from src.A_memorix.core.utils import summary_importer as importer_module
     from src.config.model_configs import TaskConfig
 
     store, _ = identity_store
     importer = importer_module.SummaryImporter(
-        vector_store=None, graph_store=None, metadata_store=store, embedding_manager=None,
+        vector_store=None,
+        graph_store=None,
+        metadata_store=store,
+        embedding_manager=None,
         plugin_config={"summarization": {"model_name": ["memory"]}},
     )
     importer._ensure_runtime_self_check = AsyncMock(return_value=(True, ""))
     importer._execute_import = AsyncMock()
-    monkeypatch.setattr(importer_module.message_api, "get_messages_by_time_in_chat",
-                        lambda **kwargs: [message("1001", "甲", "我住杭州")])
-    monkeypatch.setattr(importer_module.llm_api, "get_available_models",
-                        lambda: {"memory": TaskConfig(model_list=["fake"])})
-    monkeypatch.setattr(importer_module.llm_api, "generate", AsyncMock(return_value=SimpleNamespace(
-        success=True, completion=SimpleNamespace(response=json.dumps({
-            "summary": "[U99]住杭州", "entities": ["[U99]"], "relations": [],
-            "facts": [{"fact_id": "f1", "text": "[U99]住杭州", "image_evidence": []}],
-        })),
-    )))
+    monkeypatch.setattr(
+        importer_module.message_api,
+        "get_messages_by_time_in_chat",
+        lambda **kwargs: [message("1001", "甲", "我住杭州")],
+    )
+    monkeypatch.setattr(
+        importer_module.llm_api, "get_available_models", lambda: {"memory": TaskConfig(model_list=["fake"])}
+    )
+    monkeypatch.setattr(
+        importer_module.llm_api,
+        "generate",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                success=True,
+                completion=SimpleNamespace(
+                    response=json.dumps(
+                        {
+                            "summary": "[U99]住杭州",
+                            "entities": ["[U99]"],
+                            "relations": [],
+                            "facts": [{"fact_id": "f1", "text": "[U99]住杭州", "image_evidence": []}],
+                        }
+                    )
+                ),
+            )
+        ),
+    )
     if legacy_template:
-        monkeypatch.setattr(importer_module, "load_prompt_template",
-                            lambda name: SimpleNamespace(template="旧模板仅有 {chat_history}"))
+        monkeypatch.setattr(
+            importer_module, "load_prompt_template", lambda name: SimpleNamespace(template="旧模板仅有 {chat_history}")
+        )
     result = await importer.import_from_stream("existing-real-session", metadata={"summary_review_count": 0})
     assert not result.success
     assert ("identity_catalog" if legacy_template else "未登记") in result.detail
