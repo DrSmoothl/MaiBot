@@ -169,6 +169,8 @@ class FileComponent(BaseMessageComponentModel):
         file_id: str = "",
         mime_type: str = "",
         base64_data: str = "",
+        file_ref: str = "",
+        busid: int = 0,
     ) -> None:
         self.name = str(name or "").strip()
         """文件名"""
@@ -182,6 +184,9 @@ class FileComponent(BaseMessageComponentModel):
         """文件 MIME 类型"""
         self.base64_data = str(base64_data or "").strip()
         """文件内容 Base64，通常仅 WebUI 本地消息携带。"""
+        self.file_ref = file_ref
+        """主程序签发的附件引用，权限按聊天流检查。"""
+        self.busid = busid
 
     async def to_seg(self) -> Seg:
         return Seg(type="file", data=self.to_payload())
@@ -190,6 +195,10 @@ class FileComponent(BaseMessageComponentModel):
         """转换为稳定的文件消息负载。"""
 
         payload: Dict[str, Any] = {}
+        if self.file_ref:
+            payload["file_ref"] = self.file_ref
+        if self.busid:
+            payload["busid"] = self.busid
         if self.name:
             payload["name"] = self.name
         if self.size:
@@ -215,6 +224,8 @@ class FileComponent(BaseMessageComponentModel):
             file_id=payload.get("file_id") or payload.get("id") or "",
             mime_type=payload.get("mime_type") or payload.get("mimeType") or "",
             base64_data=payload.get("base64") or "",
+            file_ref=payload.get("file_ref") or "",
+            busid=int(payload.get("busid") or 0),
         )
 
     def to_plain_text(self) -> str:
@@ -227,10 +238,8 @@ class FileComponent(BaseMessageComponentModel):
             text_parts.append(f"大小: {self.size}")
         if self.mime_type:
             text_parts.append(f"类型: {self.mime_type}")
-        if self.url:
-            text_parts.append(f"链接: {self.url}")
-        if self.file_id:
-            text_parts.append(f"文件ID: {self.file_id}")
+        if self.file_ref:
+            text_parts.append(f"file_ref: {self.file_ref}")
         return "[文件]" if not text_parts else f"[文件] {'，'.join(text_parts)}"
 
 

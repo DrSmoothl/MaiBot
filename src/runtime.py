@@ -270,10 +270,10 @@ async def graceful_shutdown(main_system: MainSystem | None = None) -> bool:
             and success
         )
 
-        # 关闭 WebUI 服务器
-        if main_system is not None and main_system.webui_server is not None:
+        # 关闭公共 HTTP 服务器（包含文件传输和可选 WebUI）
+        if main_system is not None and main_system.http_server is not None:
             success = (
-                await _await_shutdown_step(main_system.webui_server.shutdown(), timeout=5.0, step_name="关闭 WebUI")
+                await _await_shutdown_step(main_system.http_server.shutdown(), timeout=5.0, step_name="关闭 HTTP 服务")
                 and success
             )
 

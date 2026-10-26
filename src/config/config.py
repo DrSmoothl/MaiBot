@@ -12,9 +12,11 @@ import tomlkit
 from src.common.paths import get_instance_root
 from src.common.i18n import t
 from src.common.logger import get_logger
+from src.common.http_service.config import HTTPConfig
 from src.common.version import read_project_version
 from src.agent.config import AgentConfig
 from src.computer.config import ComputerConfig
+from src.files.config import FilesConfig
 from src.web_search.config import WebConfig, resolve_web_search_config
 
 from .config_base import AttributeData, ConfigBase, Field
@@ -73,7 +75,7 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = read_project_version(PROJECT_ROOT)
-CONFIG_VERSION: str = "8.15.51"
+CONFIG_VERSION: str = "8.15.54"
 MODEL_CONFIG_VERSION: str = "1.17.24"
 
 logger = get_logger("config")
@@ -104,6 +106,12 @@ class Config(ConfigBase):
 
     computer: ComputerConfig = Field(default_factory=ComputerConfig)
     """共享沙盒电脑配置"""
+
+    http: HTTPConfig = Field(default_factory=HTTPConfig)
+    """共享后端 HTTP 监听配置"""
+
+    files: FilesConfig = Field(default_factory=FilesConfig)
+    """文件存储、传输和清理配置"""
 
     bot: BotConfig = Field(default_factory=BotConfig)
     """机器人配置类"""
@@ -268,6 +276,15 @@ def _migrate_legacy_a_memorix_config(config_data: dict[str, Any]) -> tuple[dict[
 
 def _normalize_loaded_bot_config_dict(config_data: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(config_data)
+    # 监听配置下沉到公共 HTTP 服务；兼容旧配置，但不覆盖显式的新字段。
+    webui_config = normalized.get("webui")
+    if isinstance(webui_config, dict):
+        for key in ("host", "port"):
+            if key in webui_config:
+                value = webui_config.pop(key)
+                if key == "host" and isinstance(value, str):
+                    value = [value]
+                normalized.setdefault("http", {}).setdefault(key, value)
     # 电脑配置从 Agent 栏目迁出；新栏目显式值优先，保留旧部署实际生效的开关。
     agent_config = normalized.get("agent")
     if isinstance(agent_config, dict):

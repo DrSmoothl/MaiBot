@@ -375,6 +375,22 @@ class PluginRuntimeManager(
             raise ValueError("Platform IO 入站封装缺少可用的 SessionMessage 或 payload")
         session_message.received_at = received_at
 
+        # 文件来源由已登记的入站驱动签注，不接受消息负载伪造的适配器身份。
+        from src.platform_io import get_platform_io_manager
+        from src.common.data_models.message_component_data_model import FileComponent
+
+        descriptor = get_platform_io_manager().driver_registry.get(envelope.driver_id).descriptor
+        group = session_message.message_info.group_info
+        session_message.file_source = {
+            "driver_id": envelope.driver_id, "plugin_id": descriptor.plugin_id or "",
+            "account_id": descriptor.account_id or "", "scope": descriptor.scope or "",
+            "platform": descriptor.platform,
+            "group_id": group.group_id if group else "",
+            "user_id": session_message.message_info.user_info.user_id,
+            "files": {(component.file_id, component.busid) for component in session_message.raw_message.components
+                      if isinstance(component, FileComponent)},
+        }
+
         from src.chat.message_receive.bot import chat_bot
 
         await chat_bot.receive_message(session_message)

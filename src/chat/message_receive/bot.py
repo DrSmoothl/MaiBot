@@ -264,6 +264,7 @@ class ChatBot:
                 logger.warning(f"Hook {hook_name} 返回的 message 无法反序列化，已忽略: {exc}")
         # Hook 可以修改消息内容，但主程序的接收时刻始终沿用入口记录。
         mutated_message.received_at = received_at
+        mutated_message.file_source = message.file_source
         return hook_result, mutated_message
 
     async def _process_commands(self, message: SessionMessage) -> tuple[bool, Optional[str], bool]:
@@ -862,6 +863,10 @@ class ChatBot:
                 account_id=account_id,
                 scope=scope,
             )  # 确保会话存在
+
+            from src.files.service import get_file_service
+
+            await get_file_service().ingest(message)
 
             # message.update_chat_stream(chat)
 

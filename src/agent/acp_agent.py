@@ -17,6 +17,7 @@ from src.common.data_models.message_component_data_model import ImageComponent
 from src.common.json_storage import read_json, write_json
 from src.config.config import global_config
 from src.computer.provider import ComputerToolProvider
+from src.files.provider import FileToolProvider
 
 from src.llm_models.payload_content.context_item import (
     AssistantMessageItem, ContextImagePart, ContextItem, ContextItemBuilder, ContextItemMeta, ContextTextPart,
@@ -116,7 +117,7 @@ class AcpAgent:
         from .provider import AgentToolProvider
 
         self.mcp = ToolMCPServer(
-            [AgentToolProvider(self.service), ComputerToolProvider(self.service.computer, visible=True)],
+            [AgentToolProvider(self.service), ComputerToolProvider(self.service.computer, visible=True), FileToolProvider()],
             self.service.agent_id, self.config.acp_timeout,
         )
         self.connection = ACPConnection(self._update)

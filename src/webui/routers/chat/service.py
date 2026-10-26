@@ -957,24 +957,33 @@ def normalize_chat_images(raw_images: Any) -> List[Dict[str, str]]:
 
 
 def normalize_chat_files(raw_files: Any) -> List[Dict[str, Any]]:
-    if not isinstance(raw_files, list):
+    if raw_files is None:
         return []
+    if not isinstance(raw_files, list):
+        raise ValueError("附件必须是列表")
+    if len(raw_files) > 6:
+        raise ValueError("每条消息最多包含 6 个附件")
 
     files: List[Dict[str, Any]] = []
     for raw_file in raw_files[:6]:
         if not isinstance(raw_file, dict):
             continue
 
+        if raw_file.get("file_ref"):
+            files.append({"file_ref": str(raw_file["file_ref"]), "name": str(raw_file.get("name", ""))})
+            continue
+
         name = str(raw_file.get("name") or raw_file.get("file_name") or raw_file.get("filename") or "").strip()
         raw_base64 = str(raw_file.get("base64") or "").strip()
+        if len(raw_base64) > 4 * ((global_config.files.max_file_mib * 1024 ** 2 + 2) // 3):
+            raise ValueError("文件超过单文件上限，请使用文件上传入口")
         if not name or not raw_base64:
-            continue
+            raise ValueError("附件缺少文件名或内容")
 
         try:
             base64.b64decode(raw_base64, validate=True)
-        except (binascii.Error, ValueError):
-            logger.warning("WebUI chat file ignored: invalid base64 payload")
-            continue
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("附件 Base64 内容无效") from exc
 
         files.append(
             {
@@ -1148,6 +1157,7 @@ def create_message_data(
                     "mime_type": file.get("mime_type", ""),
                     "size": file.get("size", 0),
                     "base64": file.get("base64", ""),
+                    "file_ref": file.get("file_ref", ""),
                 },
             }
         )
@@ -1165,6 +1175,23 @@ def create_message_data(
         "raw_message": display_content,
         "processed_plain_text": display_content,
     }
+
+
+async def ensure_file_session(user_id: str, user_name: str, virtual_config: Optional[VirtualIdentityConfig]):
+    """上传前走正式聊天流创建链路，归属与下一条 WebUI 消息完全一致。"""
+    data = create_message_data(content="", user_id=user_id, user_name=user_name, message_id=uuid.uuid4().hex,
+                               is_at_bot=False, virtual_config=virtual_config)
+    info = data["message_info"]
+    group = info.get("group_info")
+    session = await core_chat_manager.get_or_create_session(
+        info["platform"], info["user_info"]["user_id"], group["group_id"] if group else None,
+        account_id=data["account_id"], scope=data["scope"],
+    )
+    if group:
+        session.group_name = group["group_name"]
+    else:
+        session.user_nickname = info["user_info"]["user_nickname"]
+    return session
 
 
 async def handle_chat_message(
@@ -1189,7 +1216,22 @@ async def handle_chat_message(
     content = str(data.get("content", "")).strip()
     images = normalize_chat_images(data.get("images"))
     emojis = normalize_chat_images(data.get("emojis"))
-    files = normalize_chat_files(data.get("files"))
+    files = await asyncio.to_thread(normalize_chat_files, data.get("files"))
+    if files:
+        from src.files.service import disk_call, get_file_service
+
+        file_service = get_file_service()
+        file_service.require_enabled()
+        file_session = await ensure_file_session(normalized_user_id, current_user_name, current_virtual_config)
+        normalized_files = []
+        for file in files:
+            if file.get("file_ref"):
+                asset = await disk_call(file_service.store.get, file["file_ref"], file_session.session_id)
+            else:
+                content_bytes = await disk_call(base64.b64decode, file["base64"], validate=True)
+                asset = await file_service.create(file_session.session_id, file["name"], content_bytes, file["mime_type"])
+            normalized_files.append(file_service.store.public(asset))
+        files = normalized_files
     voices = normalize_chat_voices(data.get("voices"))
     if not content and not images and not emojis and not files and not voices:
         return current_user_name

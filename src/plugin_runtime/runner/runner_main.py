@@ -10,6 +10,7 @@
 """
 
 from collections.abc import Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -82,6 +83,7 @@ from src.plugin_runtime.runner.rpc_client import RPCClient
 from src.plugin_runtime.webui_schema import load_webui_extension
 
 logger = get_logger("plugin_runtime.runner.main")
+_file_scope: ContextVar[str] = ContextVar("file_scope", default="")
 
 _PLUGIN_ALLOWED_RAW_HOST_METHODS = frozenset(
     {
@@ -802,6 +804,8 @@ class PluginRunner:
                     f"插件 {bound_plugin_id} 不允许直接调用 Host 原始 RPC 方法: {normalized_method or '<empty>'}"
                 )
             request_payload = dict(payload or {})
+            if normalized_method == "cap.call" and str(request_payload.get("capability", "")).startswith("files."):
+                request_payload["args"] = {**request_payload.get("args", {}), "file_scope": _file_scope.get()}
             if timeout_ms is None and normalized_method == "cap.call":
                 capability_name = str(request_payload.get("capability") or "").strip()
                 cap_args = request_payload.get("args")
@@ -2148,6 +2152,7 @@ class PluginRunner:
         component_name = invoke.component_name
         handler_method = self._resolve_component_handler(meta, component_name)
         inflight = self._start_inflight_rpc(envelope, component_name)
+        file_scope_token = _file_scope.set(str(invoke.args.pop("_file_scope", "")))
 
         try:
             # 回退: 旧版 LegacyPluginAdapter 通过 invoke_component 统一桥接
@@ -2180,6 +2185,7 @@ class PluginRunner:
                 resp_payload = InvokeResultPayload(success=False, result=str(e))
                 return envelope.make_response(payload=resp_payload.model_dump())
         finally:
+            _file_scope.reset(file_scope_token)
             self._finish_inflight_rpc(inflight)
 
     async def _handle_llm_provider_invoke(self, envelope: Envelope) -> Envelope:

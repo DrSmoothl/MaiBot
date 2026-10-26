@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 from src.common.logger import get_logger
+from src.files.capability import file_capability
 from src.plugin_runtime.host.capability_service import CapabilityImpl
 from src.plugin_runtime.upload_store import claim_upload
 
@@ -17,6 +18,8 @@ def register_capability_impls(manager: "PluginRuntimeManager", supervisor: "Plug
     """向指定 Supervisor 注册主程序提供的能力实现。"""
     cap_service = supervisor.capability_service
     cap_service.register_capability("webui.claim_upload", claim_upload)
+    for name in ("files.list", "files.read_text", "files.download", "files.upload", "files.send"):
+        cap_service.register_capability(name, file_capability)
 
     def _register(name: str, impl: CapabilityImpl) -> None:
         """注册单个能力实现。

@@ -961,6 +961,19 @@ class CapabilitiesConfig(ConfigBase):
     __ui_label__ = "能力"
     __ui_order__ = 30
 
+    files: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "文件功能",
+                "en_US": "File capabilities",
+                "ja_JP": "ファイル機能",
+            },
+            "x-widget": "switch",
+        },
+    )
+    """启用聊天附件登记、文件工具、插件 SDK 和 WebUI 文件入口；默认关闭，不依赖 WebUI 或沙盒开关。关闭后拒绝新的文件操作，不删除已有原件。"""
+
     tool_result_condense: bool = Field(
         default=False,
         json_schema_extra={
@@ -5284,34 +5297,7 @@ class WebUIConfig(ConfigBase):
             "x-widget": "switch",
         },
     )
-    """是否启动 WebUI 管理界面。"""
-
-    host: list[str] = Field(
-        default=["127.0.0.1", "::1"],
-        json_schema_extra={
-            "label": {
-                "zh_CN": "WebUI 主机",
-                "en_US": "WebUI host",
-                "ja_JP": "WebUI ホスト",
-            },
-            "x-widget": "tags",
-            "x-placeholder": "127.0.0.1",
-        },
-    )
-    """WebUI 监听地址列表；可同时绑定 IPv4 和 IPv6，例如 ["0.0.0.0", "::"]。"""
-
-    port: int = Field(
-        default=8001,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "WebUI 端口",
-                "en_US": "WebUI port",
-                "ja_JP": "WebUI ポート",
-            },
-            "x-widget": "input",
-        },
-    )
-    """WebUI 访问端口。"""
+    """是否加载 WebUI 管理界面和管理接口；关闭后公共 HTTP 文件传输仍然可用。"""
 
     mode: Literal["development", "production"] = Field(
         default="production",

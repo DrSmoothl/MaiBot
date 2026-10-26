@@ -668,6 +668,21 @@ async def _prepare_message_for_platform_io(
 
     if set_reply or not message.processed_plain_text:
         message.processed_plain_text = _build_processed_plain_text(message)
+    from src.files.service import disk_call, get_file_service
+
+    # 所有出站驱动共用归属检查，包括 WebUI、本地驱动和转发节点。
+    pending = list(message.raw_message.components)
+    while pending:
+        component = pending.pop()
+        if isinstance(component, ForwardNodeComponent):
+            for node in component.forward_components:
+                pending.extend(node.content)
+        elif isinstance(component, FileComponent) and component.file_ref:
+            file_service = get_file_service()
+            file_service.require_enabled()
+            asset = await disk_call(file_service.store.get, component.file_ref, message.session_id)
+            component.name, component.size, component.mime_type = asset.name, str(asset.size), asset.mime_type
+            component.url, component.base64_data = "", ""
     if typing:
         # 纯图片分段与表情包一样使用固定等待，避免按图片描述长度模拟打字。
         components = message.raw_message.components
