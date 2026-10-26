@@ -1653,12 +1653,19 @@ class MaisakaHeartFlowChatting(MaisakaRuntimeDisplayMixin):
             except TimeoutError:
                 pass
 
+    def _get_message_debounce_mode(self) -> Literal["off", "fast", "natural", "steady"]:
+        """按真实聊天流类型读取档位，使群聊和私聊的配置及热重载互不影响。"""
+        timing = global_config.chat.reply_timing
+        if self.chat_stream.is_group_session:
+            return timing.message_debounce_mode
+        return timing.private_message_debounce_mode
+
     def _is_message_debounce_enabled(self) -> bool:
-        return global_config.chat.reply_timing.message_debounce_mode != "off"
+        return self._get_message_debounce_mode() != "off"
 
     def _observe_message_debounce(self, message: SessionMessage, received_at: float) -> None:
         """在触发调度之前更新截止时间；开关热重载时清除旧批次。"""
-        mode = global_config.chat.reply_timing.message_debounce_mode
+        mode = self._get_message_debounce_mode()
         enabled = mode != "off"
         if enabled != self._message_debounce_was_enabled:
             self._fixed_message_debouncer.consume()
