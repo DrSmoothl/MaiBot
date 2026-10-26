@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Deque, Dict, List, Optional
 from unittest.mock import AsyncMock
 
 import asyncio
+import os
 
 import pytest
 
@@ -33,6 +35,19 @@ from src.plugin_runtime.protocol.errors import ErrorCode, RPCError
 _QQ = "gateway.qq"
 _IRC = "gateway.irc"
 _EXTENSION = "feature.demo"
+
+
+@pytest.mark.asyncio
+async def test_runner_respawn_keeps_host_identity(monkeypatch):
+    monkeypatch.setenv("MAIBOT_HOST_PID", "1")
+    spawn = AsyncMock(return_value=SimpleNamespace(pid=4242, returncode=None, stderr=None))
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = PluginRunnerSupervisor(plugin_dirs=[])
+    await supervisor._spawn_runner()
+    supervisor._runner_process = None
+    await supervisor._spawn_runner()
+    assert spawn.await_count == 2
+    assert all(call.kwargs["env"]["MAIBOT_HOST_PID"] == str(os.getpid()) for call in spawn.await_args_list)
 
 
 def _request(method: str, payload: Dict[str, Any]) -> Envelope:

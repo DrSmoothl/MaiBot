@@ -1593,18 +1593,22 @@ class PluginRunner:
             logger.error(f"插件 {meta.plugin_id} on_load 失败: {exc}", exc_info=True)
             return False
 
-    async def _invoke_plugin_on_unload(self, meta: PluginMeta) -> None:
+    async def _invoke_plugin_on_unload(self, meta: PluginMeta, *, for_reload: bool = False) -> None:
         """执行插件的 ``on_unload`` 生命周期。
 
         Args:
             meta: 待卸载的插件元数据。
+            for_reload: 是否仅为重载暂时卸载；旧插件仍按无参数调用。
         """
         instance = meta.instance
         if meta.config_error or not hasattr(instance, "on_unload"):
             return
 
         try:
-            await self._invoke_plugin_callable(instance.on_unload)
+            if "for_reload" in inspect.signature(instance.on_unload).parameters:
+                await self._invoke_plugin_callable(instance.on_unload, for_reload=for_reload)
+            else:
+                await self._invoke_plugin_callable(instance.on_unload)
         except Exception as exc:
             logger.error(f"插件 {meta.plugin_id} on_unload 失败: {exc}", exc_info=True)
 
@@ -1672,20 +1676,34 @@ class PluginRunner:
         self._loader.set_loaded_plugin(meta)
         return PluginActivationStatus.LOADED
 
-    async def _unload_plugin(self, meta: PluginMeta, reason: str, *, purge_modules: bool = True) -> None:
+    async def _unload_plugin(
+        self, meta: PluginMeta, reason: str, *, purge_modules: bool = True, for_reload: bool = False
+    ) -> None:
         """卸载单个插件并清理 Host/Runner 两侧状态。
 
         Args:
             meta: 待卸载的插件元数据。
             reason: 卸载原因。
             purge_modules: 是否在卸载完成后清理插件模块缓存。
+            for_reload: 是否向支持该参数的插件声明临时卸载。
         """
-        await self._invoke_plugin_on_unload(meta)
+        await self._invoke_plugin_on_unload(meta, for_reload=for_reload)
         await self._unregister_plugin(meta.plugin_id, reason)
         await self._deactivate_plugin(meta)
         self._loader.remove_loaded_plugin(meta.plugin_id)
         if purge_modules:
             self._loader.purge_plugin_modules(meta.plugin_id, meta.plugin_dir)
+
+    async def _release_unrestored_reload_resources(self, previous: Dict[str, PluginMeta]) -> None:
+        """重载后被禁用或恢复失败的插件必须最终释放暂存资源。"""
+        for plugin_id, meta in previous.items():
+            if self._loader.get_plugin(plugin_id) is not None:
+                continue
+            # 只通知显式支持重载保留的插件；旧接口不能重复调用 on_unload。
+            if not hasattr(meta.instance, "on_unload"):
+                continue
+            if "for_reload" in inspect.signature(meta.instance.on_unload).parameters:
+                await self._invoke_plugin_on_unload(meta)
 
     def _collect_reverse_dependents(self, plugin_id: str) -> Set[str]:
         """收集依赖指定插件的所有已加载插件。
@@ -1935,7 +1953,7 @@ class PluginRunner:
             if meta is None:
                 continue
             rollback_metas[unload_plugin_id] = meta
-            await self._unload_plugin(meta, reason=reason, purge_modules=False)
+            await self._unload_plugin(meta, reason=reason, purge_modules=False, for_reload=True)
             self._loader.purge_plugin_modules(unload_plugin_id, meta.plugin_dir)
             unloaded_plugins.append(unload_plugin_id)
 
@@ -2056,6 +2074,7 @@ class PluginRunner:
                         reloaded_meta,
                         reason=f"{reason}_rollback_cleanup",
                         purge_modules=False,
+                        for_reload=True,
                     )
                 except Exception as exc:
                     rollback_failures[reloaded_plugin_id] = f"清理失败: {exc}"
@@ -2078,6 +2097,7 @@ class PluginRunner:
                 if restored != PluginActivationStatus.LOADED:
                     rollback_failures[rollback_plugin_id] = "无法重新激活旧版本"
 
+            await self._release_unrestored_reload_resources(rollback_metas)
             return ReloadPluginsResultPayload(
                 success=False,
                 requested_plugin_ids=normalized_plugin_ids,
@@ -2088,6 +2108,7 @@ class PluginRunner:
                 failed_plugins=self._finalize_failed_reload_messages(failed_plugins, rollback_failures),
             )
 
+        await self._release_unrestored_reload_resources(rollback_metas)
         requested_plugin_success = all(
             plugin_id in reloaded_plugins or plugin_id in inactive_plugins for plugin_id in reload_root_ids
         )
