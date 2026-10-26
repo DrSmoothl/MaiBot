@@ -4,7 +4,7 @@ from src.common.logger import get_logger
 from src.plugin_runtime.host.capability_service import CapabilityImpl
 from src.plugin_runtime.upload_store import claim_upload
 
-from . import market
+from . import market, web
 
 if TYPE_CHECKING:
     from src.plugin_runtime.host.supervisor import PluginSupervisor
@@ -111,6 +111,8 @@ def register_capability_impls(manager: "PluginRuntimeManager", supervisor: "Plug
     _register("market.search", market.search)
     _register("market.get_detail", market.get_detail)
     _register("market.get_readme", market.get_readme)
+    _register("web.search", web.call)
+    _register("web.fetch", web.call)
     _register("statistics.local.models", manager._cap_statistics_local_models)
     _register("statistics.local.model_trend", manager._cap_statistics_local_model_trend)
     _register("statistics.local.token_trend", manager._cap_statistics_local_token_trend)
