@@ -406,7 +406,7 @@ export function JargonManagementPage({ browserHeader }: { browserHeader?: ReactN
             value={list.filters.sortBy}
             onValueChange={(value: JargonFilters['sortBy']) => list.setFilter('sortBy', value)}
           >
-            <SelectTrigger className="h-8 w-[130px]" aria-label="黑话排序">
+            <SelectTrigger controlSize="sm" className="w-[130px]" aria-label="黑话排序">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

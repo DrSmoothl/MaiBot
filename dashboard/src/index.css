@@ -1368,7 +1368,8 @@
 
 :root[data-dashboard-style='future-retro'] [data-dashboard-input='true'],
 :root[data-dashboard-style='future-retro'] textarea:not([data-textarea-variant="composer"]),
-:root[data-dashboard-style='future-retro'] [data-dashboard-select-trigger='true'] {
+:root[data-dashboard-style='future-retro'] [data-dashboard-select-trigger='true'],
+:root[data-dashboard-style='future-retro'] [data-dashboard-switch-field='true'] {
   border: var(--retro-stroke) solid var(--retro-line) !important;
   border-radius: 2px !important;
   background: var(--retro-recessed) !important;

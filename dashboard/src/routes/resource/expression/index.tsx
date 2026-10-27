@@ -37,6 +37,7 @@ import { MobileHeaderActions } from '@/components/layout/MobileHeaderActions'
 import { useHideMobileTabBar } from '@/components/layout/mobile-nav-context'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SwitchField } from '@/components/ui/switch'
 import { useDataList } from '@/hooks/useDataList'
 import { useToast } from '@/hooks/use-toast'
 import { formatChatDisplayName, formatChatTargetLabel } from '@/lib/chat-display'
@@ -498,7 +499,7 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                       value={filters.sortBy}
                       onValueChange={(value: ExpressionFilters['sortBy']) => list.setFilter('sortBy', value)}
                     >
-                      <SelectTrigger className="h-8 w-[130px]" aria-label="表达方式排序">
+                      <SelectTrigger controlSize="sm" className="w-[130px]" aria-label="表达方式排序">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -508,20 +509,14 @@ export function ExpressionManagementPage({ browserHeader }: { browserHeader?: Re
                         <SelectItem value="created_asc">最早创建</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-pressed={reviewFilter === 'user_checked'}
-                      onClick={() =>
-                        list.setFilter(
-                          'reviewFilter',
-                          reviewFilter === 'user_checked' ? 'all' : 'user_checked'
-                        )
+                    <SwitchField
+                      controlSize="sm"
+                      label="仅精选"
+                      checked={reviewFilter === 'user_checked'}
+                      onCheckedChange={(checked) =>
+                        list.setFilter('reviewFilter', checked ? 'user_checked' : 'all')
                       }
-                    >
-                      <Star className="h-4 w-4" />
-                      仅精选
-                    </Button>
+                    />
                     <Button
                       variant="outline"
                       size="icon-sm"

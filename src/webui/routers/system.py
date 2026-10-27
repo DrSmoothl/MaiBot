@@ -416,8 +416,10 @@ def _get_path_summary(path: Path) -> tuple[int, int, float]:
     if path.is_file():
         try:
             file_stat = path.stat()
-        except OSError:
-            logger.warning(f"读取文件信息失败: {path}")
+        except FileNotFoundError:
+            return 0, 0, 0.0
+        except OSError as exc:
+            logger.warning(f"读取文件信息失败: {path}, error={exc}")
             return 0, 0, 0.0
         return 1, file_stat.st_size, file_stat.st_mtime
 
@@ -427,8 +429,11 @@ def _get_path_summary(path: Path) -> tuple[int, int, float]:
     for file_path in _iter_files(path):
         try:
             file_stat = file_path.stat()
-        except OSError:
-            logger.warning(f"读取目录文件信息失败: {file_path}")
+        except FileNotFoundError:
+            # 目录扫描后文件可能被缓存清理任务删除，正常跳过。
+            continue
+        except OSError as exc:
+            logger.warning(f"读取目录文件信息失败: {file_path}, error={exc}")
             continue
         file_count += 1
         total_size += file_stat.st_size
@@ -610,6 +615,8 @@ def _build_cache_image_items(target: CacheImageTarget) -> list[LocalCacheImageIt
             file_stat = file_path.stat()
             resolved_path = file_path.resolve()
             relative_path = resolved_path.relative_to(root_path).as_posix()
+        except FileNotFoundError:
+            continue
         except (OSError, RuntimeError, ValueError) as exc:
             logger.warning(f"读取缓存图片信息失败: {file_path}, error={exc}")
             continue
@@ -686,8 +693,10 @@ def _get_files_stats(files: list[Path]) -> tuple[int, int, float]:
     for file_path in files:
         try:
             file_stat = file_path.stat()
-        except OSError:
-            logger.warning(f"读取缓存文件信息失败: {file_path}")
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            logger.warning(f"读取缓存文件信息失败: {file_path}, error={exc}")
             continue
 
         file_count += 1
@@ -803,8 +812,10 @@ def _get_database_files() -> list[DatabaseFileStats]:
         if exists:
             try:
                 size = db_path.stat().st_size
-            except OSError:
-                logger.warning(f"读取数据库文件大小失败: {db_path}")
+            except FileNotFoundError:
+                exists = False
+            except OSError as exc:
+                logger.warning(f"读取数据库文件大小失败: {db_path}, error={exc}")
         result.append(DatabaseFileStats(path=str(db_path), exists=exists, size=size))
     return result
 
