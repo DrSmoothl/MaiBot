@@ -145,7 +145,7 @@ def test_adapter_policy_missing_file_defaults_to_allow(tmp_path: Path) -> None:
     assert result.reason == "default_allow"
 
 
-@pytest.mark.parametrize("platform", ["webui", "bot_console", "maisaka_cli"])
+@pytest.mark.parametrize("platform", ["internal", "webui", "bot_console", "maisaka_cli"])
 @pytest.mark.parametrize("chat_type", ["group", "private"])
 def test_internal_platform_ignores_adapter_policy(tmp_path: Path, platform: str, chat_type: str) -> None:
     policy_path = tmp_path / "adapter_policy.toml"

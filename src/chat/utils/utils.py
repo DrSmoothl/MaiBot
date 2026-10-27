@@ -96,7 +96,7 @@ def get_configured_bot_accounts() -> dict[str, str]:
     platform_accounts = parse_platform_accounts(platforms_list)
 
     for platform_name, account in platform_accounts.items():
-        if platform_name in {"qq", "webui"}:
+        if platform_name in {"qq", "webui", "internal"}:
             continue
         bot_accounts[platform_name] = account
 

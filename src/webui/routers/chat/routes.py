@@ -45,10 +45,10 @@ from src.webui.dependencies import require_auth
 from src.webui.utils.toml_utils import save_toml_with_format
 
 from .service import (
-    WEBUI_CHAT_PLATFORM,
+    INTERNAL_CHAT_USER_ID,
+    INTERNAL_CHAT_PLATFORM,
     chat_history,
     chat_manager,
-    normalize_webui_user_id,
 )
 
 logger = get_logger("webui.chat")
@@ -1306,18 +1306,16 @@ def _delete_chat_session_scope(session_id: str) -> Dict[str, Any]:
 @router.get("/history")
 def get_chat_history(
     limit: int = Query(default=50, ge=1, le=200),
-    user_id: Optional[str] = Query(default=None),
     group_id: Optional[str] = Query(default=None),
 ) -> Dict[str, object]:
     """获取聊天历史记录。
 
-    优先按 ``group_id`` 加载虚拟群聊历史；未提供时使用规范化后的 ``user_id`` 加载 WebUI 私聊历史。
+    优先按 ``group_id`` 加载虚拟群聊历史；未提供时加载内部统一聊天的历史。
     """
     if group_id:
         history = chat_history.get_history(limit, group_id=group_id)
     else:
-        normalized_user_id = normalize_webui_user_id(user_id)
-        history = chat_history.get_history(limit, user_id=normalized_user_id)
+        history = chat_history.get_history(limit, user_id=INTERNAL_CHAT_USER_ID)
     return {"success": True, "messages": history, "total": len(history)}
 
 
@@ -1764,14 +1762,13 @@ async def delete_chat_session_prompt(session_id: str, index: int) -> Dict[str, o
 
 @router.delete("/history")
 async def clear_chat_history(
-    user_id: Optional[str] = Query(default=None),
     group_id: Optional[str] = Query(default=None),
 ) -> Dict[str, object]:
     """清空聊天历史记录。
 
-    优先按 ``group_id`` 清理虚拟群聊历史；未提供时使用规范化后的 ``user_id`` 清理 WebUI 私聊历史。
+    优先按 ``group_id`` 清理虚拟群聊历史；未提供时清理内部统一聊天的历史。
     """
-    target = {"group_id": group_id} if group_id else {"user_id": normalize_webui_user_id(user_id)}
+    target = {"group_id": group_id} if group_id else {"user_id": INTERNAL_CHAT_USER_ID}
     session_ids = await asyncio.to_thread(chat_history._resolve_session_ids, **target)
     for session_id in session_ids:
         await run_on_main_loop(heartflow_manager.clear_chat_history_context(session_id))
@@ -1784,6 +1781,6 @@ def get_chat_info() -> Dict[str, object]:
     """获取聊天室信息。"""
     return {
         "bot_name": global_config.bot.nickname,
-        "platform": WEBUI_CHAT_PLATFORM,
+        "platform": INTERNAL_CHAT_PLATFORM,
         "active_sessions": len(chat_manager.active_connections),
     }

@@ -151,7 +151,7 @@ class HeartflowManager:
     async def _is_session_allowed(self, session: BotChatSession) -> bool:
         """在运行实例的创建和注销入口检查适配器名单。"""
         # 本地控制台和 WebUI 聊天室不属于外部适配器名单。
-        if session.platform in LOCAL_PLATFORM_BOT_IDS or session.platform == "webui":
+        if session.platform in LOCAL_PLATFORM_BOT_IDS or session.platform in {"internal", "webui"}:
             return True
         manager = get_platform_io_manager()
         await manager.ensure_send_pipeline_ready()

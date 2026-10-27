@@ -20,16 +20,17 @@ from src.common.database.database_model import Messages, PersonInfo
 from src.common.logger import get_logger
 from src.common.message_repository import find_messages
 from src.config.config import global_config
-from src.services.bot_account_service import WEBUI_BOT_USER_ID
+from src.core.internal_chat import INTERNAL_CHAT_BOT_ID, INTERNAL_CHAT_PLATFORM, INTERNAL_CHAT_USER_ID
+from src.core.local_operator import PLUGIN_RELAY_CONFIG_KEY
+from src.services.internal_chat_profile import get_internal_chat_user_name, set_internal_chat_user_name
 
 from .serializers import serialize_message_sequence
 
 logger = get_logger("webui.chat")
 
-WEBUI_CHAT_GROUP_ID = "webui_local_chat"
+# 虚拟群聊的默认平台；普通聊天室独立使用 internal，不关联旧 webui 私聊。
 WEBUI_CHAT_PLATFORM = "webui"
 VIRTUAL_GROUP_ID_PREFIX = "webui_virtual_group_"
-WEBUI_USER_ID_PREFIX = "webui_user_"
 
 AsyncMessageSender = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -196,7 +197,7 @@ class ChatHistoryManager:
     ) -> Set[str]:
         """根据会话标识解析已存在的内部聊天会话 ID。
 
-        优先按虚拟群聊解析；否则按 WebUI 私聊解析。
+        优先按虚拟群聊解析；否则按 internal 主人私聊解析。
 
         Args:
             group_id: 群组标识（虚拟群聊模式）。
@@ -209,7 +210,7 @@ class ChatHistoryManager:
         if not target_id:
             return set()
         return core_chat_manager.resolve_session_ids_by_target(
-            platform=WEBUI_CHAT_PLATFORM,
+            platform=WEBUI_CHAT_PLATFORM if group_id else INTERNAL_CHAT_PLATFORM,
             target_id=target_id,
             chat_type="group" if group_id else "private",
         )
@@ -590,22 +591,6 @@ def compute_channel_key(virtual_config: Optional[VirtualIdentityConfig], user_id
     return f"private:{user_id}"
 
 
-def normalize_webui_user_id(user_id: Optional[str]) -> str:
-    """标准化 WebUI 用户 ID。
-
-    Args:
-        user_id: 原始用户 ID。
-
-    Returns:
-        str: 带统一前缀的用户 ID。
-    """
-    if not user_id:
-        return f"{WEBUI_USER_ID_PREFIX}{uuid.uuid4().hex[:16]}"
-    if user_id.startswith(WEBUI_USER_ID_PREFIX):
-        return user_id
-    return f"{WEBUI_USER_ID_PREFIX}{user_id}"
-
-
 def _normalize_client_text(value: Any, fallback: str, max_length: int = 64) -> str:
     text = str(value or fallback).strip()
     if not text:
@@ -755,7 +740,7 @@ def build_session_info_message(
         "platform": (
             virtual_config.platform
             if is_virtual_mode_enabled(virtual_config) and virtual_config
-            else WEBUI_CHAT_PLATFORM
+            else INTERNAL_CHAT_PLATFORM
         ),
         "client_mode": normalized_client_info["type"],
         "client": normalized_client_info,
@@ -1088,7 +1073,7 @@ def create_message_data(
         actual_user_id = virtual_config.user_id or user_id
         actual_user_nickname = virtual_config.user_nickname or user_name
     else:
-        platform = WEBUI_CHAT_PLATFORM
+        platform = INTERNAL_CHAT_PLATFORM
         group_id = None
         group_name = None
         actual_user_id = user_id
@@ -1165,7 +1150,7 @@ def create_message_data(
     display_content = build_display_content(content, normalized_images, normalized_emojis, normalized_files, normalized_voices)
 
     return {
-        "account_id": WEBUI_BOT_USER_ID if platform == WEBUI_CHAT_PLATFORM else None,
+        "account_id": INTERNAL_CHAT_BOT_ID if platform in {INTERNAL_CHAT_PLATFORM, WEBUI_CHAT_PLATFORM} else None,
         "scope": None,
         "message_info": message_info,
         "message_segment": {
@@ -1213,6 +1198,9 @@ async def handle_chat_message(
     Returns:
         str: 处理后的最新昵称。
     """
+    # 普通聊天的称呼由主程序统一管理，旧标签页或插件不能在发送时覆盖它。
+    if not is_virtual_mode_enabled(current_virtual_config):
+        current_user_name = await asyncio.to_thread(get_internal_chat_user_name)
     content = str(data.get("content", "")).strip()
     images = normalize_chat_images(data.get("images"))
     emojis = normalize_chat_images(data.get("emojis"))
@@ -1237,7 +1225,10 @@ async def handle_chat_message(
         return current_user_name
     display_content = build_display_content(content, images, emojis, files, voices)
 
-    next_user_name = str(data.get("user_name", current_user_name))
+    next_user_name = (
+        str(data.get("user_name", current_user_name))
+        if is_virtual_mode_enabled(current_virtual_config) else current_user_name
+    )
     message_id = str(uuid.uuid4())
     timestamp = time.time()
     sender_name, sender_user_id = resolve_sender_identity(
@@ -1266,6 +1257,8 @@ async def handle_chat_message(
                 "is_bot": False,
             },
             "virtual_mode": is_virtual_mode_enabled(current_virtual_config),
+            # 同一身份可能有多个网页和插件界面同时在线，发送方凭 origin 识别自己的回显。
+            "origin": session_id,
         },
         user_id=normalized_user_id,
     )
@@ -1303,6 +1296,54 @@ async def handle_chat_message(
     return next_user_name
 
 
+async def relay_plugin_chat_message(plugin_id: str, content: str) -> str:
+    """把插件界面（如桌宠）里主人说的话投递到内部统一聊天，并同步给在线的网页聊天室。
+
+    消息记录插件来源，不具备任何受保护命令权限。
+
+    Args:
+        plugin_id: 代为投递的插件 ID。
+        content: 文本内容。
+
+    Returns:
+        str: 新消息 ID。
+    """
+    user_name = await asyncio.to_thread(get_internal_chat_user_name)
+    message_id = str(uuid.uuid4())
+    await chat_manager.broadcast_to_group(
+        None,
+        {
+            "type": "user_message",
+            "content": content,
+            "raw_content": content,
+            "images": [],
+            "emojis": [],
+            "files": [],
+            "voices": [],
+            "group_id": None,
+            "message_id": message_id,
+            "timestamp": time.time(),
+            "sender": {
+                "name": user_name,
+                "user_id": INTERNAL_CHAT_USER_ID,
+                "is_bot": False,
+            },
+            "virtual_mode": False,
+            "origin": f"plugin:{plugin_id}",
+        },
+        user_id=INTERNAL_CHAT_USER_ID,
+    )
+    message_data = create_message_data(
+        content=content,
+        user_id=INTERNAL_CHAT_USER_ID,
+        user_name=user_name,
+        message_id=message_id,
+    )
+    message_data["message_info"]["additional_config"][PLUGIN_RELAY_CONFIG_KEY] = plugin_id
+    await chat_bot.message_process(message_data)
+    return message_id
+
+
 async def handle_chat_ping(session_id: str) -> None:
     """处理聊天心跳。
 
@@ -1326,6 +1367,18 @@ async def handle_nickname_update(session_id: str, data: Dict[str, Any], current_
     new_name = str(data.get("user_name", "")).strip()
     if not new_name:
         return current_user_name
+
+    connection = chat_manager.get_session(session_id)
+    if connection is not None and not is_virtual_mode_enabled(connection.virtual_config):
+        new_name = await asyncio.to_thread(set_internal_chat_user_name, new_name)
+        for other in chat_manager.active_connections.values():
+            if other.user_id == INTERNAL_CHAT_USER_ID and not is_virtual_mode_enabled(other.virtual_config):
+                other.user_name = new_name
+        await chat_manager.broadcast_to_group(
+            None, {"type": "nickname_updated", "user_name": new_name, "timestamp": time.time()},
+            user_id=INTERNAL_CHAT_USER_ID,
+        )
+        return new_name
 
     await chat_manager.send_message(
         session_id,

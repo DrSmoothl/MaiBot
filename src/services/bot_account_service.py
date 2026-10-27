@@ -57,7 +57,7 @@ def get_online_bot_accounts(platform: str) -> Set[str]:
     from src.platform_io import DriverKind, get_platform_io_manager
 
     normalized_platform = normalize_platform(platform)
-    if normalized_platform == "webui":
+    if normalized_platform in {"internal", "webui"}:
         return {WEBUI_BOT_USER_ID}
     if normalized_platform in LOCAL_PLATFORM_BOT_IDS:
         return {LOCAL_PLATFORM_BOT_IDS[normalized_platform]}
@@ -125,7 +125,7 @@ class BotAccountService:
         normalized_platform = normalize_platform(platform)
         if not normalized_platform:
             return set()
-        if normalized_platform == "webui":
+        if normalized_platform in {"internal", "webui"}:
             return {WEBUI_BOT_USER_ID}
         if normalized_platform in LOCAL_PLATFORM_BOT_IDS:
             return {LOCAL_PLATFORM_BOT_IDS[normalized_platform]}
@@ -148,7 +148,7 @@ class BotAccountService:
             platforms.update(self._volatile_accounts)
         platforms.update(self._configured_accounts())
         platforms.update(LOCAL_PLATFORM_BOT_IDS)
-        platforms.add("webui")
+        platforms.update({"internal", "webui"})
         return {
             (platform, account_id)
             for platform in platforms

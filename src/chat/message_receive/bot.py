@@ -16,7 +16,12 @@ from src.common.utils.utils_message import MessageUtils
 from src.common.utils.utils_session import SessionUtils
 from src.config.config import global_config
 from src.core.announcement_manager import global_announcement_manager
-from src.core.local_operator import has_command_permission, has_plugin_management_permission, is_local_operator
+from src.core.local_operator import (
+    has_command_permission,
+    has_plugin_management_permission,
+    is_local_operator,
+    is_plugin_relayed,
+)
 from src.platform_io.route_key_factory import RouteKeyFactory
 from src.plugin_runtime.component_query import component_query_service
 from src.plugin_runtime.hook_payloads import deserialize_session_message, serialize_session_message
@@ -308,6 +313,7 @@ class ChatBot:
                         message.platform,
                         message.message_info.additional_config,
                     ),
+                    relayed_by_plugin=is_plugin_relayed(message.message_info.additional_config),
                 ):
                     self._mark_command_message(message, intercept_message_level=1)
                     await self._store_intercepted_command_message(message)
@@ -447,6 +453,7 @@ class ChatBot:
             global_config.plugin.permission,
             global_config.plugin.command_permissions,
             local_operator=message_is_local_operator,
+            relayed_by_plugin=is_plugin_relayed(message.message_info.additional_config),
         ):
             self._mark_command_message(message, intercept_message_level=1)
             await self._store_intercepted_command_message(message)
@@ -541,6 +548,7 @@ class ChatBot:
             message.message_info.user_info.user_id,
             global_config.plugin.permission,
             local_operator=message_is_local_operator,
+            relayed_by_plugin=is_plugin_relayed(message.message_info.additional_config),
         ):
             self._mark_command_message(message, intercept_message_level=1)
             await self._store_intercepted_command_message(message)
