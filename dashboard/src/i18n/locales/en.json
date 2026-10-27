@@ -138,6 +138,7 @@
     },
     "sections": {
       "breakdowns": "Breakdowns",
+      "embeddings": "Embedding statistics",
       "distributions": "Distributions"
     },
     "breakdowns": {
@@ -179,8 +180,7 @@
       "cacheMissTokens": "Cache miss tokens",
       "cacheHitRate": "Cache hit rate",
       "cost": "Total cost",
-      "avgTime": "Average time",
-      "stdTime": "Time deviation",
+      "time": "Time",
       "callsPerReply": "Calls per reply",
       "tokensPerReply": "Tokens per reply",
       "tokensPerCall": "Tokens per call",

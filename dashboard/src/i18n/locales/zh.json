@@ -138,6 +138,7 @@
     },
     "sections": {
       "breakdowns": "分类统计",
+      "embeddings": "嵌入统计",
       "distributions": "数据分布图表"
     },
     "breakdowns": {
@@ -179,8 +180,7 @@
       "cacheMissTokens": "缓存未命中Token",
       "cacheHitRate": "缓存命中率",
       "cost": "累计花费",
-      "avgTime": "平均耗时",
-      "stdTime": "耗时标准差",
+      "time": "耗时",
       "callsPerReply": "每次回复平均调用次数",
       "tokensPerReply": "每次回复平均Token",
       "tokensPerCall": "每次调用平均Token",

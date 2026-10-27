@@ -89,6 +89,7 @@ class DetailedStatisticsBreakdown(BaseModel):
     """模型、任务组、模块或请求类型维度的详细统计行。"""
 
     name: str
+    is_embedding: bool = False
     request_count: int = 0
     input_tokens: int = 0
     output_tokens: int = 0

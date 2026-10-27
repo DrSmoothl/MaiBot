@@ -818,8 +818,12 @@ class StatisticsMessageRow(NamedTuple):
         return self.received_at if self.received_at is not None else self.timestamp
 
 
-def fetch_messages_since(query_start_time: datetime) -> list[StatisticsMessageRow]:
-    """获取指定时间之后的消息记录，仅投影统计所需字段以避免整实体加载的内存峰值。"""
+def iter_messages_since(
+    query_start_time: datetime, batch_size: int = 1000,
+) -> Iterator[StatisticsMessageRow]:
+    """单次查询、分批读取统计所需字段，不物化全部消息明细。"""
+    if batch_size <= 0:
+        raise ValueError("batch_size 必须大于 0")
     with get_db_session(auto_commit=False) as session:
         statement = select(
             col(Messages.timestamp),
@@ -830,7 +834,9 @@ def fetch_messages_since(query_start_time: datetime) -> list[StatisticsMessageRo
             col(Messages.user_nickname),
             col(Messages.received_at),
         ).where(message_time_expression("statistics_time") >= query_start_time)
-        return [StatisticsMessageRow(*row) for row in session.exec(statement).all()]
+        for batch in session.exec(statement.execution_options(yield_per=batch_size)).partitions(batch_size):
+            for row in batch:
+                yield StatisticsMessageRow(*row)
 
 
 def fetch_tool_records_since(query_start_time: datetime) -> list[ToolRecord]:

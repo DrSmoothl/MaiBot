@@ -115,7 +115,7 @@
       "last_15_minutes": "최근 15분"
     },
     "tabs": { "trends": "데이터 차트", "metrics": "지표 추이" },
-    "sections": { "breakdowns": "분류 통계", "distributions": "데이터 분포" },
+    "sections": { "breakdowns": "분류 통계", "embeddings": "임베딩 통계", "distributions": "데이터 분포" },
     "breakdowns": {
       "taskGroups": "작업 그룹별",
       "models": "모델별",
@@ -152,8 +152,7 @@
       "cacheMissTokens": "캐시 미적중 Token",
       "cacheHitRate": "캐시 적중률",
       "cost": "누적 비용",
-      "avgTime": "평균 시간",
-      "stdTime": "시간 표준편차",
+      "time": "소요 시간",
       "callsPerReply": "답변당 호출 수",
       "tokensPerReply": "답변당 Token",
       "tokensPerCall": "호출당 Token",

@@ -122,7 +122,7 @@
       "last_hour": "過去1時間", "last_15_minutes": "過去15分"
     },
     "tabs": { "trends": "データグラフ", "metrics": "指標トレンド" },
-    "sections": { "breakdowns": "分類統計", "distributions": "データ分布" },
+    "sections": { "breakdowns": "分類統計", "embeddings": "埋め込み統計", "distributions": "データ分布" },
     "breakdowns": {
       "taskGroups": "タスクグループ別",
       "models": "モデル別",
@@ -141,7 +141,7 @@
     "table": {
       "name": "名前", "requests": "呼び出し回数", "inputTokens": "入力Token", "outputTokens": "出力Token",
       "totalTokens": "総Token", "cacheHitTokens": "キャッシュヒットToken", "cacheMissTokens": "キャッシュミスToken",
-      "cacheHitRate": "キャッシュヒット率", "cost": "累計費用", "avgTime": "平均時間", "stdTime": "時間標準偏差",
+      "cacheHitRate": "キャッシュヒット率", "cost": "累計費用", "time": "所要時間",
       "callsPerReply": "返信あたりの呼び出し", "tokensPerReply": "返信あたりのToken", "tokensPerCall": "呼び出しあたりのToken",
       "chat": "連絡先/グループ", "messages": "メッセージ数"
     },

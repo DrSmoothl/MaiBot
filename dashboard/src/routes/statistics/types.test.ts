@@ -41,6 +41,7 @@ function makeBreakdown(
 ): DetailedStatisticsBreakdown {
   return {
     name: 'unknown',
+    is_embedding: false,
     request_count: 0,
     input_tokens: 0,
     output_tokens: 0,
