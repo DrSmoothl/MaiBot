@@ -17,7 +17,7 @@ MaiBot 当前最合适的 TLS/SSL 方案是让反向代理终止 HTTPS，然后�
 
 当前仓库里，WebUI 的前后端是同源部署思路：
 
-1. 后端是独立的 FastAPI WebUI 服务，直接部署默认监听 127.0.0.1:8001；Docker Compose 会通过 WEBUI_HOST=0.0.0.0 让容器内 WebUI 可被宿主机端口映射访问
+1. 后端是独立的 FastAPI WebUI 服务，直接部署默认监听 127.0.0.1:8001；Docker Compose 会通过 HTTP_HOST=0.0.0.0 让容器内 WebUI 可被宿主机端口映射访问
 2. 前端构建产物由这个 FastAPI 服务直接托管
 3. 浏览器生产模式下默认按同源访问 API
 4. 页面如果通过 HTTPS 打开，前端会自动把 WebSocket 协议切到 WSS
@@ -58,7 +58,6 @@ allowed_ips = "127.0.0.1"
 trusted_proxies = "127.0.0.1"
 trust_xff = true
 secure_cookie = true
-enable_paragraph_content = false
 ```
 
 各项的意义：

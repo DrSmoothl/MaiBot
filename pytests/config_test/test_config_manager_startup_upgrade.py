@@ -41,7 +41,7 @@ def test_load_repairs_removed_vector_mode_after_legacy_migration_completed(
     loaded_config, updated = load_config_from_file(Config, config_path, "8.14.58")
 
     assert updated is True
-    assert loaded_config.expression.use_vector_expression is True
+    assert loaded_config.expression.use_vector_expression is False
     assert loaded_config.expression.expression_checked_only is False
     assert loaded_config.a_memorix.web.import_config.max_files_per_task == 321
     assert reported_changes == [([], [])]
@@ -49,7 +49,7 @@ def test_load_repairs_removed_vector_mode_after_legacy_migration_completed(
         repaired_document = tomlkit.load(config_file)
     assert repaired_document["inner"]["version"] == "8.14.58"
     assert "expression_selection_mode" not in repaired_document["expression"]
-    assert repaired_document["expression"]["use_vector_expression"] is True
+    assert repaired_document["expression"]["use_vector_expression"] is False
     assert repaired_document["expression"]["expression_checked_only"] is False
     assert repaired_document["a_memorix"]["web"]["import"]["max_files_per_task"] == 321
     assert "import_config" not in repaired_document["a_memorix"]["web"]

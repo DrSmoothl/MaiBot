@@ -581,24 +581,6 @@ class ChatReplyTimingConfig(ConfigBase):
     )
     """群聊里麦麦主动说话的频率；越小越安静。"""
 
-    private_talk_value: float = Field(
-        default=1,
-        ge=0,
-        le=1,
-        deprecated=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "私聊频率",
-                "en_US": "Private talk frequency",
-                "ja_JP": "個別チャット発言頻度",
-            },
-            "x-widget": "slider",
-            "x-row": "talk-values",
-            "step": 0.001,
-        },
-    )
-    """旧版私聊频率，仅保留配置兼容，不再生效；请使用 private_reply_paused。"""
-
     private_reply_paused: bool = Field(
         default=False,
         json_schema_extra={
@@ -1135,17 +1117,6 @@ class MessageReceiveConfig(ConfigBase):
     __ui_label__ = "消息接收"
     __ui_advanced__ = True
     __ui_order__ = 70
-
-    image_parse_threshold: int = Field(
-        default=5,
-        json_schema_extra={
-            "x-widget": "input",
-            "advanced": True,
-        },
-    )
-    """
-    单条消息图片数不超过这个值时才识图，避免图片太多拖慢处理。
-    """
 
     ban_words: set[str] = Field(
         default_factory=lambda: set(),
@@ -5434,42 +5405,6 @@ class WebUIConfig(ConfigBase):
     )
     """限制 WebUI 访问外部 URL，降低访问内网地址的风险。"""
 
-    enable_paragraph_content: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "加载段落全文",
-                "en_US": "Load full paragraph content",
-                "ja_JP": "段落全文を読み込む",
-            },
-            "x-widget": "switch",
-        },
-    )
-    """知识图谱里是否加载段落全文；更完整但更占内存。"""
-
-
-class DatabaseConfig(ConfigBase):
-    """数据库配置类"""
-
-    __ui_parent__ = "debug"
-
-    save_binary_data: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "保存二进制原文件",
-                "en_US": "Save binary source files",
-                "ja_JP": "バイナリ原本を保存",
-            },
-            "x-widget": "switch",
-            "advanced": True,
-        },
-    )
-    """
-    是否保存语音等二进制原文件；更占空间，但方便以后重新识别。
-    """
-
-
 class MCPAuthorizationConfig(ConfigBase):
     """MCP HTTP 认证配置。"""
 
@@ -5582,16 +5517,6 @@ class MCPSamplingConfig(ConfigBase):
         },
     )
     """MCP Sampling 调用模型时使用的任务名。"""
-
-    include_context_support: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {"zh_CN": "携带上下文（暂未支持）"},
-            "x-widget": "switch",
-            "advanced": True,
-        },
-    )
-    """是否允许 Sampling 请求带上下文。"""
 
     tool_support: bool = Field(
         default=False,

@@ -6,17 +6,17 @@ from src.config.legacy_migration import migrate_legacy_bind_env_to_bot_config_di
 from src.config.startup_bindings import (
     BindAddress,
     get_startup_main_bind_address,
-    get_startup_webui_bind_address,
+    get_startup_http_bind_address,
     resolve_main_bind_address,
-    resolve_webui_bind_address,
+    resolve_http_bind_address,
 )
 
 
 def test_startup_bindings_use_defaults_when_config_file_missing(tmp_path: Path):
     missing_path = tmp_path / "missing_bot_config.toml"
 
-    assert get_startup_main_bind_address(missing_path) == BindAddress(host="127.0.0.1", port=8080)
-    assert get_startup_webui_bind_address(missing_path) == BindAddress(host="127.0.0.1", port=8001)
+    assert get_startup_main_bind_address(missing_path) == BindAddress(hosts=["127.0.0.1"], port=8080)
+    assert get_startup_http_bind_address(missing_path) == BindAddress(hosts=["127.0.0.1", "::1"], port=8001)
 
 
 def test_startup_bindings_can_read_addresses_from_bot_config(tmp_path: Path):
@@ -30,29 +30,29 @@ version = "8.3.1"
 ws_server_host = "0.0.0.0"
 ws_server_port = 22345
 
-[webui]
-host = "192.168.1.9"
+[http]
+host = ["192.168.1.9"]
 port = 18001
 """.strip(),
         encoding="utf-8",
     )
 
-    assert get_startup_main_bind_address(config_path) == BindAddress(host="0.0.0.0", port=22345)
-    assert get_startup_webui_bind_address(config_path) == BindAddress(host="192.168.1.9", port=18001)
+    assert get_startup_main_bind_address(config_path) == BindAddress(hosts=["0.0.0.0"], port=22345)
+    assert get_startup_http_bind_address(config_path) == BindAddress(hosts=["192.168.1.9"], port=18001)
 
 
 def test_resolve_bindings_prefer_initialized_global_config(monkeypatch):
     fake_config_module = SimpleNamespace(
         global_config=SimpleNamespace(
             maim_message=SimpleNamespace(ws_server_host="10.0.0.2", ws_server_port=32000),
-            webui=SimpleNamespace(host="10.0.0.3", port=32001),
+            http=SimpleNamespace(host=["10.0.0.3"], port=32001),
         )
     )
 
     monkeypatch.setitem(sys.modules, "src.config.config", fake_config_module)
 
-    assert resolve_main_bind_address() == BindAddress(host="10.0.0.2", port=32000)
-    assert resolve_webui_bind_address() == BindAddress(host="10.0.0.3", port=32001)
+    assert resolve_main_bind_address() == BindAddress(hosts=["10.0.0.2"], port=32000)
+    assert resolve_http_bind_address() == BindAddress(hosts=["10.0.0.3"], port=32001)
 
 
 def test_legacy_env_bindings_are_migrated_when_fields_missing_or_default(monkeypatch):
@@ -64,7 +64,7 @@ def test_legacy_env_bindings_are_migrated_when_fields_missing_or_default(monkeyp
     payload = {
         "maim_message": {
             "ws_server_host": "127.0.0.1",
-            "ws_server_port": 8080,
+            "ws_server_port": 8000,
         },
         "webui": {},
     }

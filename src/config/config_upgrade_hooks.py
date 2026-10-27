@@ -256,25 +256,6 @@ def _upgrade_expression_learning_defaults(data: dict[str, Any]) -> list[str]:
     return reasons
 
 
-def _normalize_webui_host_to_list(data: dict[str, Any]) -> list[str]:
-    """
-    8.14.13: 将 WebUI host 从 str 转换为 list[str]。
-    旧配置中 host 为单地址字符串（如 "127.0.0.1"），新配置为列表。
-    """
-    webui = _as_dict(data.get("webui"))
-    if webui is None:
-        return []
-
-    host = webui.get("host")
-    if isinstance(host, list):
-        return []
-    if isinstance(host, str):
-        webui["host"] = [host]
-        return ["webui.host"]
-
-    return []
-
-
 def _move_chat_config_key(chat: dict[str, Any], section_name: str, key: str) -> bool:
     if key not in chat:
         return False
@@ -302,7 +283,6 @@ def _split_chat_config_sections(data: dict[str, Any]) -> list[str]:
     moved_paths: list[str] = []
     timing_keys = (
         "talk_value",
-        "private_talk_value",
         "mentioned_bot_reply",
         "inevitable_at_reply",
         "max_consecutive_wait_count",
@@ -580,11 +560,6 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.12.1",
         config_names=("bot_config.toml",),
         migrate=_upgrade_expression_learning_defaults,
-    ),
-    ConfigUpgradeHook(
-        target_version="8.14.13",
-        config_names=("bot_config.toml",),
-        migrate=_normalize_webui_host_to_list,
     ),
     ConfigUpgradeHook(
         target_version="8.14.19",

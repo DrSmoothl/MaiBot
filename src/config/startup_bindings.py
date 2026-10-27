@@ -99,14 +99,11 @@ def _collapse_hosts_covered_by_wildcards(hosts: list[str]) -> list[str]:
 
 
 def _apply_http_host_env(address: BindAddress) -> BindAddress:
-    # 新环境变量优先；保留旧部署的 WEBUI_HOST 合并监听行为。
-    env_value = os.getenv("HTTP_HOST")
-    if env_value is None:
-        env_value = os.getenv("WEBUI_HOST")
-    webui_host_env = _parse_host_env(env_value)
-    if webui_host_env is None:
+    # HTTP_HOST 可追加容器或其他部署所需的监听地址。
+    http_host_env = _parse_host_env(os.getenv("HTTP_HOST"))
+    if http_host_env is None:
         return address
-    return BindAddress(hosts=_merge_host(address.hosts, webui_host_env), port=address.port)
+    return BindAddress(hosts=_merge_host(address.hosts, http_host_env), port=address.port)
 
 
 def _finalize_http_bind_address(address: BindAddress) -> BindAddress:
@@ -167,16 +164,13 @@ def get_startup_main_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAd
 
 
 def get_startup_http_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddress:
-    """读取公共 HTTP 绑定地址，兼容升级前的 webui.host/port。"""
+    """读取公共 HTTP 配置的绑定地址。"""
 
     config_data = _load_bootstrap_config_dict(config_path)
-    webui_config = _as_mapping(config_data.get("webui")) or {}
     http_config = _as_mapping(config_data.get("http")) or {}
-    # 配置系统初始化前也使用相同优先级，避免端口预检与实际启动不一致。
-    listener_config = {key: http_config[key] if key in http_config else webui_config[key]
-                       for key in ("host", "port") if key in http_config or key in webui_config}
+    # 启动预检与配置加载统一读取 http 配置节。
     address = _resolve_bind_address_from_section(
-        listener_config,
+        http_config,
         host_key="host",
         port_key="port",
         default_address=_DEFAULT_HTTP_BIND_ADDRESS,
@@ -207,16 +201,6 @@ def resolve_http_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddres
         )
         return _finalize_http_bind_address(address)
     return get_startup_http_bind_address(config_path)
-
-
-def get_startup_webui_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddress:
-    """兼容旧启动脚本；WebUI 共享公共 HTTP 监听地址。"""
-    return get_startup_http_bind_address(config_path)
-
-
-def resolve_webui_bind_address(config_path: Path = BOT_CONFIG_PATH) -> BindAddress:
-    """兼容旧调用方，统一解析公共 HTTP 配置。"""
-    return resolve_http_bind_address(config_path)
 
 
 def get_local_http_base_url() -> str:
